@@ -2,13 +2,13 @@
 //! tests keep it honest: every fixture must be paired with an expected-diagnostic file,
 //! and every code named there must exist in the registry.
 //!
-//! SM-P0 validates the *shape* of the suite. SM-P1 adds the decoding half - feeding each
-//! fixture to the reader and asserting the exact diagnostic set comes back.
+//! SM-P0 validated the *shape* of the suite. SM-P1 adds the decoding half: every fixture
+//! is fed to the reader and the exact diagnostic set is asserted.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use smysl::{Code, Severity};
+use smysl::{from_cbor, Code, Record, Severity};
 
 fn codec_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/conformance/codec")
@@ -142,4 +142,61 @@ fn every_defective_fixture_expects_at_least_one_error() {
             "{name} expects only warnings; a non-deterministic encoding must be rejected"
         );
     }
+}
+
+/// What the reader actually reports for a fixture, expressed as diagnostic codes.
+///
+/// A clean decode is the empty set. An unknown record type is `SMY-W014` - a warning,
+/// because the record survives - and everything else is the error the reader raised.
+fn observed_codes(bytes: &[u8]) -> BTreeSet<Code> {
+    match from_cbor(bytes) {
+        Ok((Record::Unknown { .. }, _)) => BTreeSet::from([Code::W014]),
+        Ok(_) => BTreeSet::new(),
+        Err(e) => BTreeSet::from([e.code()]),
+    }
+}
+
+/// The SM-P1 gate: every non-conforming fixture is rejected with exactly the expected
+/// code set - no more, no fewer.
+#[test]
+fn every_codec_fixture_produces_its_expected_diagnostics() {
+    for f in fixtures(&codec_dir(), "cbor") {
+        let bytes = std::fs::read(&f).unwrap();
+        let name = f.file_stem().unwrap().to_string_lossy().into_owned();
+        assert_eq!(
+            observed_codes(&bytes),
+            expected_codes(&f),
+            "fixture `{name}` did not produce its expected diagnostics"
+        );
+    }
+}
+
+/// The controls must decode *and* re-encode to the same bytes. Without that half, a
+/// reader could pass by accepting the control and silently rewriting it.
+#[test]
+fn clean_fixtures_re_encode_to_the_same_bytes() {
+    for f in fixtures(&codec_dir(), "cbor") {
+        if !expected_codes(&f).is_empty() {
+            continue;
+        }
+        let bytes = std::fs::read(&f).unwrap();
+        let (record, n) = from_cbor(&bytes).unwrap();
+        assert_eq!(n, bytes.len(), "{}: trailing bytes", f.display());
+        assert_eq!(
+            smysl::to_cbor(&record),
+            bytes,
+            "{}: re-encoding changed the bytes",
+            f.display()
+        );
+    }
+}
+
+/// The unknown-type fixture is the one that must survive rather than fail, and its
+/// payload must come back byte-identical.
+#[test]
+fn the_unknown_type_fixture_survives_verbatim() {
+    let bytes = std::fs::read(codec_dir().join("unknown-envelope-code.cbor")).unwrap();
+    let (record, _) = from_cbor(&bytes).unwrap();
+    assert!(record.is_unknown());
+    assert_eq!(smysl::to_cbor(&record), bytes);
 }

@@ -5,22 +5,37 @@
 //! (rule B). The only wall-clock read in the pure crates is `Hlc::now`, at record
 //! creation time (rule D).
 //!
-//! SM-P0 delivers the diagnostic registry, the error vocabulary, and the version
-//! constants. The codec, kernel types, and surface syntax land in SM-P1 and SM-P2.
+//! SM-P1 delivers the kernel types, the deterministic codec, and identity. The surface
+//! syntax lands in SM-P2.
 
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
+pub mod cbor;
 pub mod diag;
 pub mod error;
+pub mod hash;
 pub mod ids;
+pub mod types;
 
+pub use cbor::envelope::unit_core_bytes;
+pub use cbor::{from_cbor, from_cbor_seq, to_cbor, to_cbor_seq};
 pub use diag::{Code, Diagnostic, Group, Report, Severity, Span, Subject};
 pub use error::{
-    CodecError, Error, ExitCode, IntegrityError, MergeError, NonDetReason, PackError, ParseError,
-    ProviderError, RenderError, ShapeError,
+    CodecError, Error, ExitCode, IdError, IntegrityError, MergeError, NonDetReason, PackError,
+    ParseError, ProviderError, RenderError, ShapeError,
 };
-pub use ids::Uid;
+pub use hash::{canonical_uid, hash_bytes, verify};
+pub use ids::{
+    AgentId, AgentKind, ContentionId, KernelType, Label, LangTag, SchemaId, ThreadId, Uid,
+    UidPrefix, ViewId,
+};
+pub use types::{
+    quantise, Admission, Attestation, Contention, ContentionStatus, Date, Detected, DetectionKind,
+    DropReason, Extra, Fidelity, GranularityProfile, Hlc, Lod, Op, Optimality, PackInfo, PackMode,
+    Record, RelKind, Relation, Role, Rung, SchemaDecl, SourceKind, SourceRef, Status, Step, Thread,
+    ThreadSchema, Unit, UnitCore, UnitCoreBuilder, View,
+};
 
 /// Format versions this implementation accepts in a `@doc` header (§11).
 pub const FORMAT_VERSIONS_SUPPORTED: &[&str] = &["smysl/0.1"];

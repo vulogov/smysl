@@ -22,16 +22,17 @@ Implements **RFC SMYSL-1 (Combined)** — format `smysl/0.1`, kernel `smysl.kern
 
 ## Status
 
-**SM-P0 — scaffold.** The workspace, the feature graph, the diagnostic registry, the
-error and exit-code vocabulary, and the purity and determinism gates are in place. The
-codec lands next (SM-P1); every uid in every store depends on it, and changing its hash
-input later is a major format break.
+**SM-P1 — deterministic codec.** The kernel type system, the hand-rolled deterministic
+CBOR codec, and content-addressed identity are in place. The codec rejects rather than
+normalises, so a uid corresponds to exactly one byte sequence; unknown record types and
+unknown map keys survive a round trip verbatim, so a store written by a later minor
+version stays verifiable rather than reading as corrupt.
 
 | Phase | Delivers | State |
 |---|---|---|
 | SM-P0 | scaffold, diagnostics, gates | **done** |
-| SM-P1 | deterministic CBOR codec | next |
-| SM-P2 | surface syntax, `fmt` | |
+| SM-P1 | deterministic CBOR codec, kernel types, identity | **done** |
+| SM-P2 | surface syntax, `fmt` | next |
 | SM-P3 | store, index, adjacency | |
 | SM-P4–P5 | check pipeline, rules M and T | |
 | SM-P6–P8 | merge, lineage, salience | |

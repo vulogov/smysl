@@ -80,6 +80,26 @@ impl fmt::Display for ExitCode {
 }
 
 // ---------------------------------------------------------------------------
+// Identifier errors
+// ---------------------------------------------------------------------------
+
+/// Malformed identifier text. Every id newtype validates on construction and is
+/// infallible thereafter, which is what lets the encoder be infallible.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdError {
+    pub kind: &'static str,
+    pub found: String,
+}
+
+impl fmt::Display for IdError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "malformed {}: `{}`", self.kind, self.found)
+    }
+}
+
+impl std::error::Error for IdError {}
+
+// ---------------------------------------------------------------------------
 // Shape errors - the validating constructor of §15.1
 // ---------------------------------------------------------------------------
 
@@ -190,6 +210,9 @@ pub enum CodecError {
     NonDeterministic { at: usize, reason: NonDetReason },
     /// `SMY-E081`
     Float { at: usize },
+    /// `SMY-E071` - a byte string where a uid belongs is not 32 bytes wide. A display
+    /// abbreviation in a canonical record is not a shorter identity.
+    TruncatedUid { at: usize, len: usize },
     /// Input ended mid-item.
     Truncated { at: usize },
 }
@@ -226,6 +249,7 @@ impl CodecError {
             CodecError::MalformedEnvelope { .. } | CodecError::Truncated { .. } => Code::E004,
             CodecError::NonDeterministic { .. } => Code::E080,
             CodecError::Float { .. } => Code::E081,
+            CodecError::TruncatedUid { .. } => Code::E071,
         }
     }
 }
@@ -247,6 +271,11 @@ impl fmt::Display for CodecError {
             CodecError::Truncated { at } => {
                 write!(f, "{}: input ends mid-item at byte {at}", self.code())
             }
+            CodecError::TruncatedUid { at, len } => write!(
+                f,
+                "{}: {len}-byte uid at byte {at}, expected 32",
+                self.code()
+            ),
         }
     }
 }
@@ -511,6 +540,7 @@ impl std::error::Error for ProviderError {}
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
+    Id(IdError),
     Parse(ParseError),
     Codec(CodecError),
     Shape(ShapeError),
@@ -546,6 +576,7 @@ impl Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Error::Id(e) => write!(f, "{e}"),
             Error::Parse(e) => write!(f, "{e}"),
             Error::Codec(e) => write!(f, "{e}"),
             Error::Shape(e) => write!(f, "{e}"),
@@ -568,6 +599,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Error::Id(e) => Some(e),
             Error::Parse(e) => Some(e),
             Error::Codec(e) => Some(e),
             Error::Shape(e) => Some(e),
@@ -591,6 +623,7 @@ macro_rules! from_impl {
 }
 
 from_impl! {
+    IdError => Id,
     ParseError => Parse,
     CodecError => Codec,
     ShapeError => Shape,

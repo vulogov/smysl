@@ -24,17 +24,24 @@
 //!
 //! # Build status
 //!
-//! This is SM-P0 (scaffold). The public surface below grows phase by phase toward the
-//! full contract of §12.2; each phase stabilises its library API before the matching CLI
-//! subcommand is wired to it.
+//! This is SM-P1 (deterministic codec). The public surface below grows phase by phase
+//! toward the full contract of §12.2; each phase stabilises its library API before the
+//! matching CLI subcommand is wired to it.
 
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
-// ---- core -----------------------------------------------------------------
+// ---- core: identifiers, kernel types, codec, identity ----------------------
 pub use smysl_core::{
-    format_version_supported, kernel_major, Code, Diagnostic, Error, ExitCode, Group, Report,
-    Severity, Span, Subject, Uid, FORMAT_VERSIONS_SUPPORTED, KERNEL_MAJOR, KERNEL_SCHEMA,
+    canonical_uid, format_version_supported, from_cbor, from_cbor_seq, hash_bytes, kernel_major,
+    quantise, to_cbor, to_cbor_seq, unit_core_bytes, verify, Admission, AgentId, AgentKind,
+    Attestation, Code, CodecError, Contention, ContentionId, ContentionStatus, Date, Detected,
+    DetectionKind, Diagnostic, DropReason, Error, ExitCode, Extra, Fidelity, GranularityProfile,
+    Group, Hlc, IdError, IntegrityError, KernelType, Label, LangTag, Lod, NonDetReason, Op,
+    Optimality, PackInfo, PackMode, ParseError, Record, RelKind, Relation, Report, Role, Rung,
+    SchemaDecl, SchemaId, Severity, ShapeError, SourceKind, SourceRef, Span, Status, Step, Subject,
+    Thread, ThreadId, ThreadSchema, Uid, UidPrefix, Unit, UnitCore, UnitCoreBuilder, View, ViewId,
+    FORMAT_VERSIONS_SUPPORTED, KERNEL_MAJOR, KERNEL_SCHEMA,
 };
 
 // ---- check ----------------------------------------------------------------
@@ -42,9 +49,6 @@ pub use smysl_check::ConformanceClass;
 
 // ---- pack -----------------------------------------------------------------
 pub use smysl_pack::PackError;
-
-// ---- thread ---------------------------------------------------------------
-pub use smysl_thread::ThreadSchema;
 
 // ---- render ---------------------------------------------------------------
 pub use smysl_render::{RenderError, Target};
@@ -87,5 +91,24 @@ mod tests {
     #[test]
     fn crate_and_format_versions_are_independent_axes() {
         assert_ne!(VERSION, FORMAT_VERSIONS_SUPPORTED[0]);
+    }
+
+    /// The canonical consumer shape of §12.2, as far as SM-P1 reaches: build a core,
+    /// hash it, encode it, read it back.
+    #[test]
+    fn a_unit_round_trips_through_the_facade_alone() {
+        let core = UnitCoreBuilder::new(
+            KernelType::Claim,
+            "p95 auth latency tripled",
+            Status::Speculative,
+        )
+        .build()
+        .unwrap();
+        let uid = canonical_uid(&core);
+        let bytes = to_cbor(&Record::Unit(core.clone()));
+        let (decoded, n) = from_cbor(&bytes).unwrap();
+        assert_eq!(n, bytes.len());
+        assert_eq!(decoded.as_unit(), Some(&core));
+        assert!(verify(decoded.as_unit().unwrap(), &uid).is_ok());
     }
 }
