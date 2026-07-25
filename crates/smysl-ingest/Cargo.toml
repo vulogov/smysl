@@ -1,0 +1,15 @@
+[package]
+name        = "smysl-ingest"
+description = "smysl ingest boundary: staging, repair, trust ceiling, recipes"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[dependencies]
+smysl-core     = { workspace = true }
+smysl-check    = { workspace = true }
+smysl-graph    = { workspace = true }
+smysl-provider = { workspace = true }

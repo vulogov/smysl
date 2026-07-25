@@ -1,0 +1,12 @@
+[package]
+name        = "smysl-graph"
+description = "smysl append-only store, derived index, adjacency, merge, salience"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[dependencies]
+smysl-core = { workspace = true }

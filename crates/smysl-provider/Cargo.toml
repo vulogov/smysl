@@ -1,0 +1,28 @@
+[package]
+name        = "smysl-provider"
+description = "smysl provider layer: the only crate that links a runtime or an HTTP client"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[features]
+default = []
+# One feature per mapper (§21.2). Ollama is the CI conformance reference: it is the only
+# provider exercisable without keys, cost, or egress.
+ollama    = []
+anthropic = []
+openai    = []
+gemini    = []
+deepseek  = []
+# D-3: rustls with the ring provider by default; `tls-pure` selects rustls-rustcrypto.
+tls-pure  = []
+
+[dependencies]
+smysl-core = { workspace = true }
+tokio      = { workspace = true }
+ureq       = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }

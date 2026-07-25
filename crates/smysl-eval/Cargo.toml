@@ -1,0 +1,13 @@
+[package]
+name        = "smysl-eval"
+description = "smysl evaluation harness (E1-E9). Not published."
+publish     = false
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[dependencies]
+smysl-core = { workspace = true }

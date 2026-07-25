@@ -1,0 +1,90 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-features --all-targets -- -D warnings
+
+  # Feature combinations, because the interesting bugs live in the seams between them.
+  test-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - "--no-default-features"
+          - ""
+          - "--all-features"
+          - "--no-default-features --features local"
+          - "--no-default-features --features remote"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace ${{ matrix.features }}
+
+  # Rules A and B: the library must stay synchronous and network-free.
+  purity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo xtask check-purity
+
+  # Rule D: every pure operation is bit-reproducible across locale, timezone, and hash
+  # seed.
+  determinism:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install the ru_RU.UTF-8 locale used by the permutation matrix
+        run: |
+          sudo locale-gen ru_RU.UTF-8
+          sudo update-locale
+      - run: cargo xtask determinism
+
+  # G7 stated as a build failure rather than an intention: if a pure crate ever acquires
+  # a network dependency, this job fails instead of the property quietly lapsing.
+  no-network:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Vendor dependencies while the network is still available
+        run: cargo fetch --locked || cargo fetch
+      - name: Build and test the pure crates with networking denied
+        run: |
+          unshare --map-root-user --net -- \
+            cargo test --offline --no-default-features \
+              -p smysl-core -p smysl-graph -p smysl-check \
+              -p smysl-pack -p smysl-thread -p smysl-render
+
+  # The conformance suite runs against the built binary, not the library, so a second
+  # implementation can be substituted for it.
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --test conformance_fixtures --no-default-features

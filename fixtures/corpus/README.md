@@ -1,0 +1,19 @@
+# Corpus F1–F8 (§27.2)
+
+Each fixture ships as surface text (`.smy`), canonical CBOR (`.cbor`), and an expected
+diagnostic set (`.expected`).
+
+| ID | Fixture | Exercises | Lands |
+|---|---|---|---|
+| F1 | Incident report, `default` granularity | the baseline path; rules M, R, V1 | SM-P2 |
+| F2 | Research trace, `fine` granularity | deep grounds chains; rule M cascades; corroboration | SM-P2 |
+| F3 | Narrative text, `coarse` granularity | the design's most likely falsifier (GE-2) | SM-P2 |
+| F4 | Q&A session | `answers` relations; the `qa` thread schema | SM-P11 |
+| F5 | Dataset analysis with tables | `data`, `artifact-ref`, extension payloads | SM-P2 |
+| F6 | Adversarial store | laundering attempts, cycles, forged `measured`, contention floods | SM-P5 |
+| F7 | Mixed-granularity merge | D-5; merging the F1 and F2 stores | SM-P6 |
+| F8 | Multi-agent contention | concurrent supersession, rebuttal forks, label collisions | SM-P6 |
+
+F3 and F6 carry more weight than their size suggests. F3 is where GE-2 is decided — a
+claim-graph substrate carrying narrative without damaging it is an assertion, not a
+result. F6 is where rules M and T are attacked on purpose rather than merely satisfied.

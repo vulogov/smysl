@@ -1,0 +1,21 @@
+[package]
+name        = "smysl-render"
+description = "smysl render IR, profiles, and deterministic backends"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[features]
+default = []
+# Typst backend, and the slides target built on it (SM-P12).
+typst = []
+# HTML backend (SM-P12).
+html  = []
+
+[dependencies]
+smysl-core   = { workspace = true }
+smysl-graph  = { workspace = true }
+smysl-thread = { workspace = true }

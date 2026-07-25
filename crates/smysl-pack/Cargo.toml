@@ -1,0 +1,18 @@
+[package]
+name        = "smysl-pack"
+description = "smysl budget-bounded, closure-complete packing"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[features]
+default = []
+# Exact packing via branch-and-bound over a fractional relaxation bound (SM-P10).
+branch-and-bound = []
+
+[dependencies]
+smysl-core  = { workspace = true }
+smysl-graph = { workspace = true }
