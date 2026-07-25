@@ -22,18 +22,18 @@ Implements **RFC SMYSL-1 (Combined)** — format `smysl/0.1`, kernel `smysl.kern
 
 ## Status
 
-**SM-P1 — deterministic codec.** The kernel type system, the hand-rolled deterministic
-CBOR codec, and content-addressed identity are in place. The codec rejects rather than
-normalises, so a uid corresponds to exactly one byte sequence; unknown record types and
-unknown map keys survive a round trip verbatim, so a store written by a later minor
-version stays verifiable rather than reading as corrupt.
+**SM-P2 — surface syntax.** The format now reads and writes as text. `smysl fmt`
+canonicalises a document and verifies that the round trip does not move a uid. The parser
+recovers rather than fails: one malformed record costs one record, and every diagnostic
+carries a byte span, which is what lets the ingest repair loop resend only the offending
+region.
 
 | Phase | Delivers | State |
 |---|---|---|
 | SM-P0 | scaffold, diagnostics, gates | **done** |
 | SM-P1 | deterministic CBOR codec, kernel types, identity | **done** |
-| SM-P2 | surface syntax, `fmt` | next |
-| SM-P3 | store, index, adjacency | |
+| SM-P2 | surface syntax, `fmt` | **done** |
+| SM-P3 | store, index, adjacency | next |
 | SM-P4–P5 | check pipeline, rules M and T | |
 | SM-P6–P8 | merge, lineage, salience | |
 | SM-P9–P10 | packing | |
@@ -73,6 +73,14 @@ lapse silently rather than loudly:
 ```bash
 cargo xtask check-purity   # rules A and B: the library stays synchronous and offline
 cargo xtask determinism    # rule D: pure operations are bit-reproducible
+```
+
+Guarantee A1 - no panics on untrusted input - is checked two ways: a deterministic
+mutation sweep that runs in ordinary CI, and `cargo fuzz` targets under `fuzz/` for the
+surface parser and the CBOR reader.
+
+```bash
+cargo +nightly fuzz run surface
 ```
 
 ## Embedding

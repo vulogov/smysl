@@ -32,6 +32,8 @@
 #![deny(rust_2018_idioms)]
 
 // ---- core: identifiers, kernel types, codec, identity ----------------------
+pub use smysl_core::surface;
+pub use smysl_core::surface::{parse_surface, write_surface, ParseOutcome, WriteContext};
 pub use smysl_core::{
     canonical_uid, format_version_supported, from_cbor, from_cbor_seq, hash_bytes, kernel_major,
     quantise, to_cbor, to_cbor_seq, unit_core_bytes, verify, Admission, AgentId, AgentKind,

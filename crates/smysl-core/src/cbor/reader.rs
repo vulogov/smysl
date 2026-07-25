@@ -34,6 +34,16 @@ impl<'a> Dec<'a> {
         self.pos = pos;
     }
 
+    /// The next byte, without consuming it.
+    pub fn peek_byte(&self) -> Res<u8> {
+        self.peek()
+    }
+
+    /// Consume `n` bytes that a caller has already inspected.
+    pub fn advance(&mut self, n: usize) {
+        self.pos = (self.pos + n).min(self.buf.len());
+    }
+
     /// The major type of the next item, without consuming it.
     pub fn peek_major(&self) -> Res<u8> {
         Ok(self.peek()? >> 5)

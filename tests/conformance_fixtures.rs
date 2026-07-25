@@ -200,3 +200,114 @@ fn the_unknown_type_fixture_survives_verbatim() {
     assert!(record.is_unknown());
     assert_eq!(smysl::to_cbor(&record), bytes);
 }
+
+// ---------------------------------------------------------------------------
+// The corpus (§27.2)
+// ---------------------------------------------------------------------------
+
+fn corpus_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/corpus")
+}
+
+/// Diagnostics a corpus fixture produces when parsed.
+fn parse_codes(src: &str) -> BTreeSet<Code> {
+    match smysl::parse_surface(src) {
+        Ok(o) => o.diagnostics.iter().map(|d| d.code).collect(),
+        Err(e) => BTreeSet::from([e.code()]),
+    }
+}
+
+#[test]
+fn every_corpus_fixture_has_an_expected_set() {
+    let files = fixtures(&corpus_dir(), "smy");
+    assert!(!files.is_empty(), "the corpus is empty");
+    for f in &files {
+        assert!(
+            f.with_extension("expected").is_file(),
+            "{} has no .expected sibling",
+            f.display()
+        );
+    }
+}
+
+#[test]
+fn every_corpus_fixture_produces_its_expected_diagnostics() {
+    for f in fixtures(&corpus_dir(), "smy") {
+        let src = std::fs::read_to_string(&f).unwrap();
+        assert_eq!(
+            parse_codes(&src),
+            expected_codes(&f),
+            "{} did not produce its expected diagnostics",
+            f.display()
+        );
+    }
+}
+
+/// The corpus is what every later phase is measured against, so it has to survive the
+/// full surface -> records -> surface -> records loop unchanged.
+#[test]
+fn every_corpus_fixture_round_trips() {
+    use smysl::{parse_surface, write_surface, WriteContext};
+    for f in fixtures(&corpus_dir(), "smy") {
+        if !expected_codes(&f).is_empty() {
+            continue;
+        }
+        let src = std::fs::read_to_string(&f).unwrap();
+        let a = parse_surface(&src).unwrap();
+        let ctx = WriteContext::from_labels(&a.labels).with_salience(a.salience.clone());
+        let text = write_surface(a.view.as_ref(), &a.records, &ctx);
+        let b = parse_surface(&text).unwrap();
+        assert_eq!(b.records, a.records, "{} lost content", f.display());
+        assert_eq!(b.labels, a.labels, "{} moved a uid", f.display());
+
+        let bytes = smysl::to_cbor_seq(&a.records);
+        let (back, _) = smysl::from_cbor_seq(&bytes).unwrap();
+        assert_eq!(back, a.records, "{} lost content over CBOR", f.display());
+    }
+}
+
+/// F1 exercises the shapes rules M and R are about: a grounds chain deep enough for the
+/// monotonicity check to bind, and a rebuttal for rule R to pin.
+#[test]
+fn f1_carries_a_rebuttal_and_a_grounds_chain() {
+    let src = std::fs::read_to_string(corpus_dir().join("F1-incident.smy")).unwrap();
+    let out = smysl::parse_surface(&src).unwrap();
+    assert!(out
+        .records
+        .iter()
+        .any(|r| matches!(r, Record::Relation(rel) if rel.kind == smysl::RelKind::Rebuts)));
+    assert!(out
+        .records
+        .iter()
+        .any(|r| matches!(r, Record::Relation(rel) if rel.kind == smysl::RelKind::Warrant)));
+    let grounded = out
+        .records
+        .iter()
+        .filter_map(Record::as_unit)
+        .filter(|u| !u.grounds.is_empty())
+        .count();
+    assert!(grounded >= 4, "only {grounded} units carry grounds");
+}
+
+/// F3 is the design's most likely falsifier (GE-2): narrative carried on a claim graph.
+/// Until that experiment runs, the least it must do is survive the format intact.
+#[test]
+fn f3_is_coarse_and_ordered() {
+    let src = std::fs::read_to_string(corpus_dir().join("F3-narrative.smy")).unwrap();
+    let out = smysl::parse_surface(&src).unwrap();
+    let v = out.view.as_ref().unwrap();
+    assert_eq!(v.granularity.profile, "coarse");
+    assert_eq!(v.granularity.admission, smysl::Admission::Topical);
+
+    let thread = out
+        .records
+        .iter()
+        .find_map(|r| match r {
+            Record::Thread(t) => Some(t),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(thread.schema, smysl::ThreadSchema::Narrative);
+    assert_eq!(thread.steps.len(), 5);
+    assert!(thread.foreign_roles().is_empty());
+}

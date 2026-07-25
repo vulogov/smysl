@@ -16,6 +16,7 @@ pub mod diag;
 pub mod error;
 pub mod hash;
 pub mod ids;
+pub mod surface;
 pub mod types;
 
 pub use cbor::envelope::unit_core_bytes;

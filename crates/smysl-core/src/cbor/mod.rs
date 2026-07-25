@@ -25,7 +25,7 @@ pub use reader::Dec;
 pub use writer::Enc;
 
 /// CBOR major types, named so the codec never uses a bare number.
-pub(crate) mod major {
+pub mod major {
     pub const UINT: u8 = 0;
     pub const NEGINT: u8 = 1;
     pub const BYTES: u8 = 2;
@@ -39,8 +39,8 @@ pub(crate) mod major {
 /// The `null` simple value. Its presence in an optional field is `SMY-E080`: an absent
 /// optional is *omitted*, and admitting both spellings would make two encodings of the
 /// same core.
-pub(crate) const NULL: u8 = 0xF6;
+pub const NULL: u8 = 0xF6;
 /// Additional-information value marking an indefinite-length item.
 pub(crate) const INDEFINITE: u8 = 31;
 /// Additional-information value introducing a `binary32` float.
-pub(crate) const F32_HEAD: u8 = 0xFA;
+pub const F32_HEAD: u8 = 0xFA;

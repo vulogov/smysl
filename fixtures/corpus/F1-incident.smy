@@ -1,0 +1,49 @@
+@doc smysl/0.1 {
+  id: v/f1
+  intent: incident-brief
+  lang: en
+  requires: ["smysl.kernel/0.1"]
+  granularity: { profile: default }
+  roots: [f/root-cause]
+}
+
+@evidence e/trace { status: measured, source: { kind: metric, ref: "grafana://board/12/panel/4", captured: 2026-07-09 } }
+~ Seven days of auth request traces, all shards, 2026-07-02..09.
+
+@evidence e/pool-wait { status: measured, source: { kind: metric, ref: "pool.wait_ms{shard=eu-west}", captured: 2026-07-09 } }
+~ Pool acquisition wait rose from 2 ms to 310 ms over the same window.
+
+@evidence e/canary { status: measured, source: { kind: metric, ref: "canary.p95", captured: 2026-07-09 } }
+~ The 4.2 canary ran the same pool configuration without the regression.
+
+@definition d/p95 { status: cited, source: { kind: doc, ref: "sre-handbook#latency" } }
+~ The 95th percentile of request latency over a one-minute window.
+
+@claim c/regression { status: derived, grounds: [e/trace], deps: [d/p95] }
+~ p95 auth latency tripled after the 4.2 rollout.
+
+Between 2026-07-02 and 2026-07-09, p95 on `POST /auth` rose from 180 ms to
+540 ms, confined to the eu-west shard.
+
+--
+Per-shard breakdown at hourly resolution, with the pool-saturation hypothesis
+and the pool metrics supporting it.
+
+@claim c/pool-saturation { status: inferred, grounds: [e/pool-wait] }
+~ The eu-west connection pool is saturated.
+
+@claim c/canary-clean { status: derived, grounds: [e/canary] }
+~ The canary rules out a pure configuration cause.
+
+@finding f/root-cause { status: inferred, grounds: [c/pool-saturation, c/regression] }
+~ Pool saturation is the leading cause but is not consistent with the canary.
+
+@rel c/pool-saturation --causes--> c/regression
+@rel c/canary-clean --rebuts--> c/pool-saturation { weight: 0.6 }
+@rel d/p95 --warrant--> c/regression
+
+@thread t/brief { schema: brief, owner: "human:vladimir" }
+~ Auth p95 tripled in eu-west; pool saturation is leading but contested.
+  bottom-line → f/root-cause
+  support → c/pool-saturation
+  risk → c/canary-clean

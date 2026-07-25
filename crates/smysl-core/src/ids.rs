@@ -468,7 +468,13 @@ impl fmt::Display for KernelType {
 /// structure in `payload` and MUST NOT alter kernel field semantics.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SchemaId {
+    /// A kernel unit type: `claim`, `evidence`, and the rest of §2.1.
     Kernel(KernelType),
+    /// The kernel schema itself, `smysl.kernel/MAJOR[.MINOR]`, as it appears in a view's
+    /// `requires`. Not a unit type - §12.2 types `requires` as a `SchemaId` set, and the
+    /// RFC's own example puts the kernel schema in it alongside extensions.
+    KernelSchema(String),
+    /// An extension type or schema, `x.<domain>/<segment>`.
     Extension(String),
 }
 
@@ -481,6 +487,13 @@ impl SchemaId {
             kind: "schema id",
             found: s.to_string(),
         };
+        if let Some(v) = s.strip_prefix("smysl.kernel/") {
+            return if is_ext_segment(v) {
+                Ok(SchemaId::KernelSchema(s.to_string()))
+            } else {
+                Err(err())
+            };
+        }
         let rest = s.strip_prefix("x.").ok_or_else(err)?;
         let (domain, ty) = rest.split_once('/').ok_or_else(err)?;
         if is_ident(domain) && is_ext_segment(ty) {
@@ -493,18 +506,32 @@ impl SchemaId {
     pub fn as_str(&self) -> &str {
         match self {
             SchemaId::Kernel(k) => k.as_str(),
-            SchemaId::Extension(s) => s,
+            SchemaId::KernelSchema(s) | SchemaId::Extension(s) => s,
         }
     }
 
+    /// Whether this names a kernel *unit type*.
     pub const fn is_kernel(&self) -> bool {
         matches!(self, SchemaId::Kernel(_))
+    }
+
+    /// Whether this names the kernel schema itself.
+    pub const fn is_kernel_schema(&self) -> bool {
+        matches!(self, SchemaId::KernelSchema(_))
+    }
+
+    /// The kernel major this id requires, if it is a kernel schema id.
+    pub fn kernel_major(&self) -> Option<u32> {
+        match self {
+            SchemaId::KernelSchema(s) => crate::kernel_major(s),
+            _ => None,
+        }
     }
 
     pub const fn kernel(&self) -> Option<KernelType> {
         match self {
             SchemaId::Kernel(k) => Some(*k),
-            SchemaId::Extension(_) => None,
+            _ => None,
         }
     }
 }
@@ -855,6 +882,25 @@ mod tests {
         for s in ["nonsense", "x.sre", "x./t", "x.sre/", "sre/incident", ""] {
             assert!(SchemaId::parse(s).is_err(), "`{s}` must be rejected");
         }
+    }
+
+    /// A view's `requires` names the kernel schema alongside extensions, so a schema id
+    /// has three shapes, not two.
+    #[test]
+    fn the_kernel_schema_is_a_schema_id_but_not_a_unit_type() {
+        let s = SchemaId::parse("smysl.kernel/0.1").unwrap();
+        assert!(s.is_kernel_schema());
+        assert!(!s.is_kernel(), "the kernel schema is not a unit type");
+        assert_eq!(s.kernel(), None);
+        assert_eq!(s.kernel_major(), Some(0));
+        assert_eq!(s.as_str(), "smysl.kernel/0.1");
+
+        assert_eq!(
+            SchemaId::parse("smysl.kernel/9").unwrap().kernel_major(),
+            Some(9)
+        );
+        assert!(SchemaId::parse("smysl.kernel/").is_err());
+        assert_eq!(SchemaId::parse("claim").unwrap().kernel_major(), None);
     }
 
     #[test]

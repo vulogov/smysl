@@ -178,6 +178,18 @@ impl ParseError {
     }
 }
 
+impl ParseError {
+    /// The exit code this error reports (Appendix E). A version mismatch is 8; anything
+    /// else a parse can hard-fail on is a check error.
+    pub const fn into_exit_code(&self) -> ExitCode {
+        match self {
+            ParseError::UnsupportedKernelMajor { .. }
+            | ParseError::UnsupportedFormatVersion { .. } => ExitCode::UnsupportedVersion,
+            ParseError::Syntax { .. } => ExitCode::CheckErrors,
+        }
+    }
+}
+
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

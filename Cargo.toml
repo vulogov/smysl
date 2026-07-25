@@ -1,5 +1,6 @@
 [workspace]
-members = ["crates/*", "xtask"]
+members  = ["crates/*", "xtask"]
+exclude  = ["fuzz"]
 resolver = "2"
 
 [workspace.package]

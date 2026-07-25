@@ -7,10 +7,12 @@
 //! SM-P0 declares the full command surface of §23 and reports, per command, the phase
 //! that wires it up. Commands are wired only once their library API has stabilised.
 
+use std::io::{Read, Write};
 use std::process::ExitCode as ProcExitCode;
 
-use clap::{Arg, ArgAction, Command};
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use smysl::ExitCode;
+use smysl::{parse_surface, write_surface, WriteContext};
 
 /// Purity classification of a command (§23). `Pure` commands are bit-reproducible
 /// functions of their inputs (rule D); `Model` commands are the only egress points.
@@ -141,25 +143,140 @@ fn cli() -> Command {
         .args(globals);
 
     for c in COMMANDS {
-        cmd = cmd.subcommand(
-            Command::new(c.name)
-                .about(c.about)
-                .after_help(format!("Purity: {}", c.purity.tag()))
+        let mut sub = Command::new(c.name)
+            .about(c.about)
+            .after_help(format!("Purity: {}", c.purity.tag()));
+        sub = match c.name {
+            "fmt" => sub
                 .arg(
-                    Arg::new("args")
+                    Arg::new("check")
+                        .long("check")
+                        .help("Exit 3 if reformatting would change bytes")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("write")
+                        .long("write")
+                        .help("Rewrite files in place")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("files")
                         .num_args(0..)
-                        .trailing_var_arg(true)
-                        .allow_hyphen_values(true)
-                        .hide(true),
+                        .value_name("FILE")
+                        .help("Files to format; `-` or none reads stdin (rule P)"),
                 ),
-        );
+            _ => sub.arg(
+                Arg::new("args")
+                    .num_args(0..)
+                    .trailing_var_arg(true)
+                    .allow_hyphen_values(true)
+                    .hide(true),
+            ),
+        };
+        cmd = cmd.subcommand(sub);
     }
     cmd
 }
 
+/// `smysl fmt` - canonicalise surface text (§23.1).
+///
+/// Also verifies the `surface -> CBOR -> surface` round trip, because that is the property
+/// that makes reformatting safe: hashes are computed over CBOR only, so canonicalising
+/// must never move a uid. Identity drift exits 9, not 3 - it is a different kind of wrong.
+fn cmd_fmt(m: &ArgMatches) -> ExitCode {
+    let check = m.get_flag("check");
+    let write = m.get_flag("write");
+    let files: Vec<String> = m
+        .get_many::<String>("files")
+        .map(|v| v.cloned().collect())
+        .unwrap_or_default();
+
+    let inputs: Vec<String> = if files.is_empty() {
+        vec!["-".to_string()]
+    } else {
+        files
+    };
+
+    let mut worst = ExitCode::Success;
+    for path in inputs {
+        let src = match read_input(&path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("smysl fmt: {path}: {e}");
+                return ExitCode::Failure;
+            }
+        };
+
+        let out = match parse_surface(&src) {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("smysl fmt: {path}: {e}");
+                return e.into_exit_code();
+            }
+        };
+        for d in &out.diagnostics {
+            eprintln!("{path}: {d}");
+        }
+        if out.has_errors() {
+            worst = worse(worst, ExitCode::CheckErrors);
+            continue;
+        }
+
+        let ctx = WriteContext::from_labels(&out.labels).with_salience(out.salience.clone());
+        let formatted = write_surface(out.view.as_ref(), &out.records, &ctx);
+
+        // The round trip must not move a uid.
+        match parse_surface(&formatted) {
+            Ok(again) if again.labels == out.labels && again.records == out.records => {}
+            _ => {
+                eprintln!("{path}: canonical form does not reproduce the same records");
+                worst = worse(worst, ExitCode::HashVerification);
+                continue;
+            }
+        }
+
+        if check {
+            if formatted != src {
+                eprintln!("{path}: not canonically formatted");
+                worst = worse(worst, ExitCode::CheckErrors);
+            }
+        } else if write && path != "-" {
+            if let Err(e) = std::fs::write(&path, &formatted) {
+                eprintln!("smysl fmt: {path}: {e}");
+                return ExitCode::Failure;
+            }
+        } else {
+            let mut stdout = std::io::stdout().lock();
+            if stdout.write_all(formatted.as_bytes()).is_err() {
+                return ExitCode::Failure;
+            }
+        }
+    }
+    worst
+}
+
+fn read_input(path: &str) -> std::io::Result<String> {
+    if path == "-" {
+        let mut s = String::new();
+        std::io::stdin().read_to_string(&mut s)?;
+        Ok(s)
+    } else {
+        std::fs::read_to_string(path)
+    }
+}
+
+fn worse(a: ExitCode, b: ExitCode) -> ExitCode {
+    if b.as_i32() > a.as_i32() {
+        b
+    } else {
+        a
+    }
+}
+
 fn main() -> ProcExitCode {
     let matches = cli().get_matches();
-    let Some((name, _sub)) = matches.subcommand() else {
+    let Some((name, sub)) = matches.subcommand() else {
         return ProcExitCode::from(ExitCode::Usage.as_i32() as u8);
     };
 
@@ -168,11 +285,17 @@ fn main() -> ProcExitCode {
         return ProcExitCode::from(ExitCode::Usage.as_i32() as u8);
     };
 
-    eprintln!(
-        "smysl {}: not wired in this build; lands in {} (see RFC SMYSL-1 \u{00a7}26)",
-        cmd.name, cmd.phase
-    );
-    ProcExitCode::from(ExitCode::Failure.as_i32() as u8)
+    let code = match name {
+        "fmt" => cmd_fmt(sub),
+        _ => {
+            eprintln!(
+                "smysl {}: not wired in this build; lands in {} (see RFC SMYSL-1 \u{00a7}26)",
+                cmd.name, cmd.phase
+            );
+            ExitCode::Failure
+        }
+    };
+    ProcExitCode::from(code.as_i32() as u8)
 }
 
 #[cfg(test)]

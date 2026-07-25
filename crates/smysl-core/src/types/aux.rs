@@ -342,7 +342,10 @@ impl SchemaDecl {
     /// A declaration that redefines a kernel type or kernel relation kind is `SMY-E012`:
     /// an extension may add, never redefine.
     pub fn redefines_kernel(&self) -> bool {
-        self.types.iter().any(|t| t.is_kernel()) || self.relations.iter().any(|r| r.is_kernel())
+        self.types
+            .iter()
+            .any(|t| t.is_kernel() || t.is_kernel_schema())
+            || self.relations.iter().any(|r| r.is_kernel())
     }
 }
 
