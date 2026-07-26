@@ -1,0 +1,4 @@
+@doc smysl/0.1 { id: v/oversized, granularity: { profile: default } }
+
+@claim c/long { status: speculative }
+~ The ninety-fifth percentile of authentication request latency measured across every shard in the eu-west region rose substantially over the seven day window following the promotion of release four point two to production, and the rise was not observed anywhere else.

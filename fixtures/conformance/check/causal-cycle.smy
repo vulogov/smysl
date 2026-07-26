@@ -1,0 +1,10 @@
+@doc smysl/0.1 { id: v/cycle }
+
+@claim c/a { status: speculative }
+~ Saturation caused the latency rise.
+
+@claim c/b { status: speculative }
+~ The latency rise caused saturation.
+
+@rel c/a --causes--> c/b
+@rel c/b --causes--> c/a

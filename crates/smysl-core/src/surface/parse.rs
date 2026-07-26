@@ -921,7 +921,7 @@ impl<'a> Parser<'a> {
                 .iter()
                 .filter_map(|r| lookup(&r.value, &mut self.out, r.span))
                 .collect();
-            self.out.view = Some(View {
+            let view = View {
                 id: v.id.clone(),
                 roots,
                 threads: v.threads.clone(),
@@ -930,7 +930,11 @@ impl<'a> Parser<'a> {
                 intent: v.intent.clone(),
                 lang: v.lang.clone(),
                 extra: Default::default(),
-            });
+            };
+            // The view is a record like any other, so a store built from a parse knows
+            // the granularity its units were produced under.
+            self.out.records.push(Record::View(view.clone()));
+            self.out.view = Some(view);
         }
 
         self.out.labels = labels;

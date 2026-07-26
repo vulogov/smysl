@@ -1,0 +1,4 @@
+@doc smysl/0.1 { id: v/nosource }
+
+@evidence e/bare { status: measured }
+~ A measurement with nothing behind it.

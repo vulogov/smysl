@@ -1,0 +1,12 @@
+@doc smysl/0.1 { id: v/clean, granularity: { profile: default } }
+
+@evidence e/traces { status: measured, source: { kind: metric, ref: "auth.p95" } }
+~ Seven days of auth request traces across all shards.
+
+@claim c/regression { status: derived, grounds: [e/traces] }
+~ p95 auth latency tripled after the 4.2 rollout.
+
+The p95 on POST /auth rose from 180 ms to 540 ms between the second and the
+ninth of July, and the rise is confined to the eu-west shard, where release 4.2
+landed a full day before it reached anywhere else in the fleet. No other shard
+shows movement outside its usual daily band over the same seven day window.

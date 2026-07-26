@@ -19,8 +19,11 @@ pub use smysl_core::error::PackError;
 pub const DEFAULT_ESTIMATOR: &str = "smysl/utf8-div4";
 
 /// `cost(t) = ceil(utf8_len(t)/4) + 2` (D-2).
+///
+/// The token count itself lives in `smysl-core`, because granularity bounds are expressed
+/// in the same unit; the `+ 2` here is the per-item framing overhead a pack pays.
 pub fn cost(text: &str) -> u32 {
-    (text.len() as u32).div_ceil(4) + 2
+    smysl_core::tokens(text) + 2
 }
 
 #[cfg(test)]

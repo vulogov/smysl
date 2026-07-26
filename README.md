@@ -22,13 +22,11 @@ Implements **RFC SMYSL-1 (Combined)** — format `smysl/0.1`, kernel `smysl.kern
 
 ## Status
 
-**SM-P3 — store and index.** Documents now live in an append-only log with a derived
-index beside it. The log is the only authority: a stale or corrupt sidecar is rebuilt
-rather than trusted, a truncated tail yields everything up to the last complete record,
-and an index rebuilt from the log alone is byte-identical to the one maintained while
-appending. Traversal runs over a purpose-built adjacency store whose dense ids follow
-ascending uid order, so iteration is canonical by construction rather than by a sort at
-each step.
+**SM-P4 — structural checks.** `smysl check` runs the first four passes of the pipeline:
+reference integrity, shape, rule L closure, and granularity. Passes never short-circuit,
+so one run reports every defect rather than the first — which is what the ingest repair
+loop needs, since it resends spans. `check` verifies consistency, never correctness: it
+can tell you a body reaches for a unit it never declared, not whether the claim is true.
 
 | Phase | Delivers | State |
 |---|---|---|
@@ -36,7 +34,8 @@ each step.
 | SM-P1 | deterministic CBOR codec, kernel types, identity | **done** |
 | SM-P2 | surface syntax, `fmt` | **done** |
 | SM-P3 | store, index, adjacency, `reindex` | **done** |
-| SM-P4–P5 | check pipeline, rules M and T | next |
+| SM-P4 | structural check passes, `check` | **done** |
+| SM-P5 | rules M and T, conformance classes | next |
 | SM-P6–P8 | merge, lineage, salience | |
 | SM-P9–P10 | packing | |
 | SM-P11–P12 | threads, rendering | |

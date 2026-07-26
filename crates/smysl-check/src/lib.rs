@@ -1,15 +1,213 @@
-//! `smysl-check` - the ten-pass check pipeline (§17).
+//! `smysl-check` - the check pipeline (§17).
 //!
-//! Passes run in dependency order and MUST NOT short-circuit: a full diagnostic set is
-//! more useful than a first error, and the ingest repair loop (§22.3) needs all of them
-//! at once.
+//! Passes run in dependency order and **MUST NOT short-circuit**. A full diagnostic set is
+//! more useful than a first error, and the ingest repair loop (§22.3) needs all of them at
+//! once: it resends the offending spans, so one pass reporting and the rest staying silent
+//! would turn a one-round repair into several.
 //!
-//! Filled by SM-P4 (structural passes 2-5), SM-P5 (rule M, rule T, conformance classes).
+//! `check` verifies consistency, never correctness (N13). It can tell you a claim's status
+//! exceeds its weakest ground; it cannot tell you whether the claim is true.
+//!
+//! SM-P4 delivers passes 2-5. Rule M, rule T, retraction integrity, extension conformance,
+//! and hash verification land in SM-P5 and SM-P6.
 
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
-pub use smysl_core::diag::{Code, Diagnostic, Report, Severity, Span, Subject};
+pub mod passes;
+
+use std::collections::BTreeMap;
+
+use smysl_core::{Error, GranularityProfile, Label, Severity, Uid};
+use smysl_graph::Store;
+
+pub use smysl_core::diag::{Code, Diagnostic, Report, Span, Subject};
+
+/// The ten passes of §17. A pass that has not landed yet reports itself as unavailable
+/// rather than silently doing nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum Pass {
+    /// 1 - envelope and codec. Runs at read time, not here.
+    Codec,
+    /// 2 - reference integrity.
+    Integrity,
+    /// 3 - shape.
+    Shape,
+    /// 4 - rule L closure.
+    Closure,
+    /// 5 - granularity.
+    Granularity,
+    /// 6 - rule M epistemics.
+    Epistemics,
+    /// 7 - rule T trust ceiling.
+    Trust,
+    /// 8 - retraction integrity.
+    Retraction,
+    /// 9 - extension and conformance.
+    Extension,
+    /// 10 - hash verification.
+    Hashes,
+}
+
+impl Pass {
+    pub const ALL: &'static [Pass] = &[
+        Pass::Codec,
+        Pass::Integrity,
+        Pass::Shape,
+        Pass::Closure,
+        Pass::Granularity,
+        Pass::Epistemics,
+        Pass::Trust,
+        Pass::Retraction,
+        Pass::Extension,
+        Pass::Hashes,
+    ];
+
+    /// The passes this build actually runs.
+    pub const IMPLEMENTED: &'static [Pass] = &[
+        Pass::Integrity,
+        Pass::Shape,
+        Pass::Closure,
+        Pass::Granularity,
+    ];
+
+    pub const fn number(self) -> u8 {
+        match self {
+            Pass::Codec => 1,
+            Pass::Integrity => 2,
+            Pass::Shape => 3,
+            Pass::Closure => 4,
+            Pass::Granularity => 5,
+            Pass::Epistemics => 6,
+            Pass::Trust => 7,
+            Pass::Retraction => 8,
+            Pass::Extension => 9,
+            Pass::Hashes => 10,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Pass::Codec => "codec",
+            Pass::Integrity => "integrity",
+            Pass::Shape => "shape",
+            Pass::Closure => "closure",
+            Pass::Granularity => "granularity",
+            Pass::Epistemics => "epistemics",
+            Pass::Trust => "trust",
+            Pass::Retraction => "retraction",
+            Pass::Extension => "extension",
+            Pass::Hashes => "hashes",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Pass> {
+        Pass::ALL.iter().copied().find(|p| p.as_str() == s)
+    }
+
+    pub fn is_implemented(self) -> bool {
+        Pass::IMPLEMENTED.contains(&self)
+    }
+}
+
+impl core::fmt::Display for Pass {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}: {}", self.number(), self.as_str())
+    }
+}
+
+/// What to check, and against what.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct CheckOptions {
+    /// The granularity the units were produced under. Taken from the store's view when
+    /// absent; granularity constrains production, not the store, so a caller may override
+    /// it (D-5).
+    pub granularity: Option<GranularityProfile>,
+    /// Label bindings, so a body that references a unit by name can be closure-checked.
+    /// Labels have no wire record, so only a caller that parsed the surface text has them.
+    pub labels: BTreeMap<Label, Uid>,
+    /// Restrict to these passes. Empty means every implemented pass.
+    pub only: Vec<Pass>,
+}
+
+impl CheckOptions {
+    /// Everything this build can check.
+    pub fn strict() -> CheckOptions {
+        CheckOptions::default()
+    }
+
+    pub fn with_granularity(mut self, g: GranularityProfile) -> CheckOptions {
+        self.granularity = Some(g);
+        self
+    }
+
+    pub fn with_labels(mut self, labels: BTreeMap<Label, Uid>) -> CheckOptions {
+        self.labels = labels;
+        self
+    }
+
+    pub fn only(mut self, passes: impl IntoIterator<Item = Pass>) -> CheckOptions {
+        self.only = passes.into_iter().collect();
+        self
+    }
+
+    fn runs(&self, p: Pass) -> bool {
+        p.is_implemented() && (self.only.is_empty() || self.only.contains(&p))
+    }
+}
+
+/// Run the pipeline.
+///
+/// Never short-circuits: every requested pass runs, whatever the earlier ones found.
+pub fn check(store: &Store, opts: CheckOptions) -> Report {
+    let granularity = opts
+        .granularity
+        .clone()
+        .or_else(|| store.views().next().map(|v| v.granularity.clone()))
+        .unwrap_or_default();
+
+    let mut report = Report::new();
+    if opts.runs(Pass::Integrity) {
+        passes::integrity::run(store, &mut report);
+    }
+    if opts.runs(Pass::Shape) {
+        passes::shape::run(store, &granularity, &mut report);
+    }
+    if opts.runs(Pass::Closure) {
+        passes::closure::run(store, &opts.labels, &mut report);
+    }
+    if opts.runs(Pass::Granularity) {
+        passes::granularity::run(store, &granularity, &mut report);
+    }
+    report.sort();
+    report
+}
+
+/// `check` plus the failure decision, for callers that want one call.
+pub fn check_and_fail_on(
+    store: &Store,
+    opts: CheckOptions,
+    severity: Severity,
+) -> Result<Report, Error> {
+    let r = check(store, opts);
+    r.fail_on(severity)?;
+    Ok(r)
+}
+
+/// The granularity distribution of a store.
+///
+/// Mixed granularity in a merged store is legal, not an error (D-5). `check --granularity`
+/// reports the distribution so a reader can see what they are looking at rather than being
+/// told off for it.
+pub fn granularity_distribution(store: &Store) -> BTreeMap<String, usize> {
+    let mut out = BTreeMap::new();
+    for v in store.views() {
+        *out.entry(v.granularity.profile.clone()).or_insert(0) += 1;
+    }
+    out
+}
 
 /// The conformance classes of §11. A minimal downstream agent needs `Consume`; the
 /// reference implementation targets `Full`.
@@ -42,6 +240,13 @@ impl ConformanceClass {
         }
     }
 
+    pub fn parse(s: &str) -> Option<ConformanceClass> {
+        ConformanceClass::ALL
+            .iter()
+            .copied()
+            .find(|c| c.as_str().eq_ignore_ascii_case(s))
+    }
+
     /// Every class builds on C-Read (§11).
     pub const fn requires_read(self) -> bool {
         true
@@ -57,6 +262,15 @@ impl core::fmt::Display for ConformanceClass {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smysl_core::{KernelType, Record, Status, UnitCoreBuilder, View, ViewId};
+
+    fn claim(gist: &str) -> Record {
+        Record::Unit(
+            UnitCoreBuilder::new(KernelType::Claim, gist, Status::Speculative)
+                .build()
+                .unwrap(),
+        )
+    }
 
     #[test]
     fn five_conformance_classes_with_stable_names() {
@@ -66,6 +280,162 @@ mod tests {
         for c in ConformanceClass::ALL {
             assert!(c.as_str().starts_with("C-"));
             assert!(c.requires_read());
+            assert_eq!(ConformanceClass::parse(c.as_str()), Some(*c));
         }
+        assert_eq!(
+            ConformanceClass::parse("c-full"),
+            Some(ConformanceClass::Full)
+        );
+        assert_eq!(ConformanceClass::parse("C-Nonsense"), None);
+    }
+
+    #[test]
+    fn ten_passes_numbered_as_in_section_17() {
+        assert_eq!(Pass::ALL.len(), 10);
+        for (i, p) in Pass::ALL.iter().enumerate() {
+            assert_eq!(p.number() as usize, i + 1);
+            assert_eq!(Pass::parse(p.as_str()), Some(*p));
+        }
+    }
+
+    /// A pass that has not landed reports itself unavailable rather than passing
+    /// silently, which is the difference between "checked and clean" and "not checked".
+    #[test]
+    fn only_the_landed_passes_are_implemented() {
+        let implemented: Vec<&str> = Pass::ALL
+            .iter()
+            .filter(|p| p.is_implemented())
+            .map(|p| p.as_str())
+            .collect();
+        assert_eq!(
+            implemented,
+            ["integrity", "shape", "closure", "granularity"]
+        );
+        assert!(!Pass::Epistemics.is_implemented());
+        assert!(!Pass::Hashes.is_implemented());
+    }
+
+    #[test]
+    fn a_clean_store_produces_an_empty_report() {
+        let store = Store::from_records(vec![claim("p95 auth latency tripled")]);
+        let r = check(&store, CheckOptions::default());
+        assert!(r.is_empty(), "{r}");
+        assert!(r.fail_on(Severity::Warn).is_ok());
+    }
+
+    /// The pipeline must not short-circuit: a store with defects in several passes
+    /// reports all of them in one run.
+    #[test]
+    fn every_pass_runs_whatever_the_earlier_ones_found() {
+        let dangling =
+            UnitCoreBuilder::new(KernelType::Claim, "x".repeat(200), Status::Speculative)
+                .deps([Uid::from_bytes([9; 32])])
+                .body("- one\n- two")
+                .build()
+                .unwrap();
+        let store = Store::from_records(vec![Record::Unit(dangling)]);
+        let r = check(&store, CheckOptions::default());
+
+        assert_eq!(r.count(Code::E060), 1, "pass 2 ran");
+        assert_eq!(r.count(Code::E022), 1, "pass 3 ran");
+        assert_eq!(r.count(Code::E040), 1, "pass 5 ran");
+        assert_eq!(r.count(Code::W041), 1, "pass 5 ran twice");
+    }
+
+    #[test]
+    fn passes_can_be_selected_individually() {
+        let bad = UnitCoreBuilder::new(KernelType::Claim, "x".repeat(200), Status::Speculative)
+            .deps([Uid::from_bytes([9; 32])])
+            .build()
+            .unwrap();
+        let store = Store::from_records(vec![Record::Unit(bad)]);
+
+        let only_shape = check(&store, CheckOptions::default().only([Pass::Shape]));
+        assert_eq!(only_shape.count(Code::E022), 1);
+        assert_eq!(only_shape.count(Code::E060), 0);
+
+        let only_integrity = check(&store, CheckOptions::default().only([Pass::Integrity]));
+        assert_eq!(only_integrity.count(Code::E060), 1);
+        assert_eq!(only_integrity.count(Code::E022), 0);
+    }
+
+    /// Selecting a pass that has not landed must not silently report clean.
+    #[test]
+    fn selecting_an_unimplemented_pass_runs_nothing() {
+        let store = Store::from_records(vec![claim("a claim")]);
+        let r = check(&store, CheckOptions::default().only([Pass::Epistemics]));
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn the_granularity_comes_from_the_view_when_not_given() {
+        let body = "x".repeat(400); // 100 tokens: inside `default`, outside `fine`
+        let core = UnitCoreBuilder::new(KernelType::Claim, "a claim", Status::Speculative)
+            .body(body)
+            .build()
+            .unwrap();
+        let view = View::new(ViewId::new("v/x").unwrap(), "i")
+            .with_granularity(GranularityProfile::fine());
+        let store = Store::from_records(vec![Record::Unit(core), Record::View(view)]);
+
+        assert_eq!(
+            check(&store, CheckOptions::default()).count(Code::W041),
+            1,
+            "the view's profile should apply"
+        );
+        assert_eq!(
+            check(
+                &store,
+                CheckOptions::default().with_granularity(GranularityProfile::standard())
+            )
+            .count(Code::W041),
+            0,
+            "an explicit profile should override the view"
+        );
+    }
+
+    #[test]
+    fn the_report_is_sorted_and_therefore_reproducible() {
+        let bad = UnitCoreBuilder::new(KernelType::Claim, "x".repeat(200), Status::Speculative)
+            .deps([Uid::from_bytes([9; 32])])
+            .build()
+            .unwrap();
+        let store = Store::from_records(vec![Record::Unit(bad)]);
+        let a = check(&store, CheckOptions::default());
+        let b = check(&store, CheckOptions::default());
+        assert_eq!(a.diagnostics, b.diagnostics);
+    }
+
+    #[test]
+    fn fail_on_projects_the_report_into_a_result() {
+        let bad = UnitCoreBuilder::new(KernelType::Claim, "a claim", Status::Speculative)
+            .deps([Uid::from_bytes([9; 32])])
+            .build()
+            .unwrap();
+        let store = Store::from_records(vec![Record::Unit(bad)]);
+        assert!(check_and_fail_on(&store, CheckOptions::default(), Severity::Error).is_err());
+
+        let clean = Store::from_records(vec![claim("a claim")]);
+        assert!(check_and_fail_on(&clean, CheckOptions::default(), Severity::Warn).is_ok());
+    }
+
+    /// Mixed granularity is legal (D-5), so it is reported as a distribution rather than
+    /// as a defect.
+    #[test]
+    fn the_granularity_distribution_is_reported_not_rejected() {
+        let store = Store::from_records(vec![
+            Record::View(
+                View::new(ViewId::new("v/a").unwrap(), "a")
+                    .with_granularity(GranularityProfile::fine()),
+            ),
+            Record::View(
+                View::new(ViewId::new("v/b").unwrap(), "b")
+                    .with_granularity(GranularityProfile::coarse()),
+            ),
+        ]);
+        let d = granularity_distribution(&store);
+        assert_eq!(d.get("fine"), Some(&1));
+        assert_eq!(d.get("coarse"), Some(&1));
+        assert!(check(&store, CheckOptions::default()).is_empty());
     }
 }

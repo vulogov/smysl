@@ -1,0 +1,12 @@
+@doc smysl/0.1 { id: v/multi, granularity: { profile: default } }
+
+@claim c/two { status: speculative }
+~ Two separate things went wrong in the eu-west shard last week.
+
+The connection pool saturated under the new concurrency limit introduced by the
+4.2 rollout, which pushed acquisition wait from two milliseconds to well over
+three hundred.
+
+The credential cache was also evicting far more aggressively than intended after
+the same rollout, which added a second independent source of latency on the same
+request path.

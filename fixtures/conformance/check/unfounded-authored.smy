@@ -1,0 +1,4 @@
+@doc smysl/0.1 { id: v/unfounded }
+
+@claim c/nope { status: unfounded }
+~ Unfounded is reachable only by retraction.

@@ -12,14 +12,24 @@
 The 4.2 rollout began at 09:14 on a Thursday and reached the eu-west shard
 forty minutes later. Nothing in the release notes touched the connection pool,
 and the canary had been clean for six hours, so the on-call engineer approved
-the promotion without waiting for the extended soak.
+the promotion without waiting for the extended soak. That decision was entirely
+routine: the extended soak had not caught anything in eleven weeks, the change
+was a dependency bump and two log lines, and the queue of waiting releases was
+long enough that everyone had quietly agreed to stop treating the soak as
+mandatory. Nobody wrote that agreement down anywhere, which is the part that
+mattered later.
 
 @prose p/complication { status: cited, grounds: [p/setup], source: { kind: doc, ref: "postmortem-2026-07-09" } }
 ~ Latency alarms fired ninety minutes later, and nobody believed them.
 
 The first p95 alarm arrived at 11:02. It was dismissed as a metrics artifact,
 because the canary was still green and the error rate had not moved. Two more
-alarms followed. By 11:40 the support queue had noticed before the graphs did.
+alarms followed over the next twenty minutes and were dismissed for the same
+reason, each dismissal a little faster than the one before it. By 11:40 the
+support queue had noticed before the graphs did, which is the ordering that
+tells you the alarm was working and the interpretation was not. The engineer
+who finally looked did so because a customer had described the symptom in
+words that did not match any of the theories on offer.
 
 @prose p/turn { status: cited, grounds: [p/complication], source: { kind: doc, ref: "postmortem-2026-07-09" } }
 ~ The pool wait metric had been visible the whole time, on a dashboard nobody opened.

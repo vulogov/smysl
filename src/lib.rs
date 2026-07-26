@@ -47,7 +47,9 @@ pub use smysl_core::{
 };
 
 // ---- check ----------------------------------------------------------------
-pub use smysl_check::ConformanceClass;
+pub use smysl_check::{
+    check, check_and_fail_on, granularity_distribution, CheckOptions, ConformanceClass, Pass,
+};
 
 // ---- pack -----------------------------------------------------------------
 pub use smysl_pack::PackError;

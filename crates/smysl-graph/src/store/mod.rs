@@ -17,7 +17,8 @@ use std::path::{Path, PathBuf};
 use smysl_core::diag::{Code, Diagnostic, Report, Subject};
 use smysl_core::{
     canonical_uid, from_cbor_seq, hash_bytes, to_cbor, AgentId, Attestation, Contention, Error,
-    Record, RelKind, Relation, Thread, ThreadId, Uid, Unit, View, ViewId,
+    IntegrityError, Record, RelKind, Relation, Thread, ThreadId, Uid, UidPrefix, Unit, View,
+    ViewId,
 };
 
 use crate::adjacency::{Adjacency, EdgeKind};
@@ -569,6 +570,30 @@ impl Store {
         }
         let relations: Vec<Relation> = self.relations.values().cloned().collect();
         self.adjacency = Adjacency::build(&self.units, &relations);
+    }
+
+    /// Units whose uid begins with `prefix`, in ascending uid order.
+    pub fn matching_prefix(&self, prefix: &UidPrefix) -> Vec<Uid> {
+        self.units
+            .keys()
+            .filter(|u| prefix.matches(u))
+            .copied()
+            .collect()
+    }
+
+    /// Resolve an abbreviated uid.
+    ///
+    /// A prefix is never an identity (§1.2): resolution MUST report ambiguity rather than
+    /// pick a winner, so two candidates are `SMY-E072` and not a coin flip.
+    pub fn resolve_prefix(&self, prefix: &UidPrefix) -> Result<Uid, IntegrityError> {
+        let mut matches = self.matching_prefix(prefix);
+        match matches.len() {
+            1 => Ok(matches.remove(0)),
+            _ => Err(IntegrityError::AmbiguousPrefix {
+                prefix: format!("{} bits", prefix.bits()),
+                candidates: matches,
+            }),
+        }
     }
 
     /// Units that rebut `uid`, which is what rule R pins into a pack.

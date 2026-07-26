@@ -1,0 +1,4 @@
+@doc smysl/0.1 { id: v/dangling }
+
+@claim c/orphan { status: inferred, grounds: [b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa] }
+~ A claim grounded on a unit that is not here.

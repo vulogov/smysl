@@ -1,0 +1,8 @@
+@doc smysl/0.1 { id: v/anaphor, granularity: { profile: default } }
+
+@claim c/anaphor { status: speculative }
+~ This is what caused the regression in the eu-west shard.
+
+The connection pool saturated under the new concurrency limit introduced by the
+4.2 rollout, pushing acquisition wait from two milliseconds to three hundred and
+ten over the same seven day window.

@@ -23,7 +23,9 @@
 ~ p95 auth latency tripled after the 4.2 rollout.
 
 Between 2026-07-02 and 2026-07-09, p95 on `POST /auth` rose from 180 ms to
-540 ms, confined to the eu-west shard.
+540 ms, and the rise is confined to the eu-west shard, where release 4.2 landed
+a full day before it reached anywhere else in the fleet. No other shard moved
+outside its usual daily band over the same seven day window.
 
 --
 Per-shard breakdown at hourly resolution, with the pool-saturation hypothesis

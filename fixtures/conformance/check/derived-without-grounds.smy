@@ -1,0 +1,4 @@
+@doc smysl/0.1 { id: v/nogrounds }
+
+@claim c/bare { status: derived }
+~ A derivation with nothing to derive from.

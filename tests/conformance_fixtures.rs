@@ -406,3 +406,112 @@ fn f3_orders_deterministically_over_its_sequence_edges() {
         assert!(at(earlier) < at(later), "{earlier} must precede {later}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Structural checks (§17 passes 2-5)
+// ---------------------------------------------------------------------------
+
+fn check_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/conformance/check")
+}
+
+/// Every code a fixture produces, from parsing and checking together.
+///
+/// Which layer catches a defect is an implementation detail - a unit that violates a
+/// shape rule never reaches a store, so the constructor catches it at parse time. What
+/// the fixture pins is the code set, not the layer.
+fn all_codes(src: &str) -> BTreeSet<Code> {
+    use smysl::{check, CheckOptions, Store};
+    let out = match smysl::parse_surface(src) {
+        Ok(o) => o,
+        Err(e) => return BTreeSet::from([e.code()]),
+    };
+    let mut codes: BTreeSet<Code> = out.diagnostics.iter().map(|d| d.code).collect();
+
+    let store = Store::from_records(out.records.clone());
+    let opts = CheckOptions::default().with_labels(out.labels.clone());
+    codes.extend(check(&store, opts).iter().map(|d| d.code));
+    codes
+}
+
+#[test]
+fn every_check_fixture_has_an_expected_set() {
+    let files = fixtures(&check_dir(), "smy");
+    assert!(!files.is_empty(), "the check conformance tree is empty");
+    for f in &files {
+        assert!(
+            f.with_extension("expected").is_file(),
+            "{} has no .expected sibling",
+            f.display()
+        );
+    }
+}
+
+/// The SM-P4 gate: exactly the expected codes, no more and no fewer.
+#[test]
+fn every_check_fixture_produces_exactly_its_expected_codes() {
+    for f in fixtures(&check_dir(), "smy") {
+        let src = std::fs::read_to_string(&f).unwrap();
+        let observed = all_codes(&src);
+        let expected = expected_codes(&f);
+        assert_eq!(
+            observed,
+            expected,
+            "{}: observed {observed:?}, expected {expected:?}",
+            f.file_name().unwrap().to_string_lossy()
+        );
+    }
+}
+
+/// A control that produces nothing distinguishes "the checker works" from "the checker
+/// complains about everything".
+#[test]
+fn the_check_tree_contains_a_clean_control() {
+    let src = std::fs::read_to_string(check_dir().join("clean-control.smy")).unwrap();
+    assert!(all_codes(&src).is_empty());
+}
+
+#[test]
+fn the_check_tree_covers_every_pass_the_build_implements() {
+    use smysl::Pass;
+    let mut seen: BTreeSet<Code> = BTreeSet::new();
+    for f in fixtures(&check_dir(), "smy") {
+        seen.extend(expected_codes(&f));
+    }
+    // Pass 2 integrity, pass 3 shape, pass 4 closure, pass 5 granularity.
+    for required in [
+        Code::E060, // integrity
+        Code::W062, // integrity
+        Code::E022, // shape
+        Code::W024, // closure
+        Code::E040, // granularity
+        Code::W041, // granularity
+    ] {
+        assert!(seen.contains(&required), "no fixture exercises {required}");
+    }
+    assert_eq!(Pass::IMPLEMENTED.len(), 4);
+}
+
+/// The corpus is what later phases are measured against, so it has to survive the checks
+/// that exist today.
+#[test]
+fn every_corpus_fixture_passes_the_structural_checks() {
+    use smysl::{check, CheckOptions, Store};
+    for f in fixtures(&corpus_dir(), "smy") {
+        if !expected_codes(&f).is_empty() {
+            continue;
+        }
+        let src = std::fs::read_to_string(&f).unwrap();
+        let out = smysl::parse_surface(&src).unwrap();
+        let store = Store::from_records(out.records.clone());
+        let report = check(
+            &store,
+            CheckOptions::default().with_labels(out.labels.clone()),
+        );
+        assert!(
+            report.is_empty(),
+            "the baseline corpus should be free of warnings too - {}: {report}",
+            f.file_name().unwrap().to_string_lossy()
+        );
+    }
+}

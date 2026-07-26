@@ -12,7 +12,10 @@ use std::process::ExitCode as ProcExitCode;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use smysl::ExitCode;
-use smysl::{parse_surface, write_surface, Store, StoreOptions, WriteContext};
+use smysl::{
+    check, granularity_distribution, parse_surface, write_surface, CheckOptions, Pass, Severity,
+    Store, StoreOptions, WriteContext,
+};
 
 /// Purity classification of a command (§23). `Pure` commands are bit-reproducible
 /// functions of their inputs (rule D); `Model` commands are the only egress points.
@@ -166,6 +169,26 @@ fn cli() -> Command {
                         .value_name("FILE")
                         .help("Files to format; `-` or none reads stdin (rule P)"),
                 ),
+            "check" => sub
+                .arg(
+                    Arg::new("granularity")
+                        .long("granularity")
+                        .help("Report the granularity distribution of the store")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("pass")
+                        .long("pass")
+                        .value_name("NAME")
+                        .action(ArgAction::Append)
+                        .help("Run only these passes"),
+                )
+                .arg(
+                    Arg::new("files")
+                        .num_args(0..)
+                        .value_name("FILE")
+                        .help("Stores to check; `-` or none reads stdin (rule P)"),
+                ),
             "reindex" => sub
                 .arg(
                     Arg::new("verify")
@@ -268,6 +291,93 @@ fn cmd_fmt(m: &ArgMatches) -> ExitCode {
     worst
 }
 
+/// `smysl check` - run the check pipeline (§23.1).
+///
+/// Exits 3 on any error-severity diagnostic, and `--strict` promotes warnings to that
+/// threshold. `check` verifies consistency, never correctness (N13): it can tell you a
+/// body reaches for a unit it never declared, not whether the claim is true.
+fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let strict = global.get_flag("strict");
+    let json = global.get_flag("json");
+    let passes: Vec<Pass> = m
+        .get_many::<String>("pass")
+        .map(|v| v.filter_map(|s| Pass::parse(s)).collect())
+        .unwrap_or_default();
+
+    let files: Vec<String> = m
+        .get_many::<String>("files")
+        .map(|v| v.cloned().collect())
+        .unwrap_or_else(|| {
+            global
+                .get_one::<String>("store")
+                .map(|s| vec![s.clone()])
+                .unwrap_or_else(|| vec!["-".to_string()])
+        });
+
+    let mut worst = ExitCode::Success;
+    for path in files {
+        let src = match read_input(&path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("smysl check: {path}: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        let out = match parse_surface(&src) {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("smysl check: {path}: {e}");
+                return e.into_exit_code();
+            }
+        };
+
+        let store = Store::from_records(out.records.clone());
+        let mut opts = CheckOptions::default().with_labels(out.labels.clone());
+        if !passes.is_empty() {
+            opts = opts.only(passes.clone());
+        }
+        let mut report = check(&store, opts);
+        for d in &out.diagnostics {
+            report.push(d.clone());
+        }
+        report.sort();
+
+        if m.get_flag("granularity") {
+            for (profile, n) in granularity_distribution(&store) {
+                println!("{path}: {n} view(s) at granularity {profile}");
+            }
+        }
+
+        for d in report.iter() {
+            if json {
+                println!(
+                    "{{\"code\":\"{}\",\"severity\":\"{}\",\"message\":{:?}}}",
+                    d.code, d.severity, d.message
+                );
+            } else {
+                eprintln!("{path}: {d}");
+            }
+        }
+
+        let threshold = if strict {
+            Severity::Warn
+        } else {
+            Severity::Error
+        };
+        if report.fail_on(threshold).is_err() {
+            worst = worse(worst, ExitCode::CheckErrors);
+        } else if !json {
+            println!(
+                "{path}: {} records, {} units, {} diagnostic(s)",
+                store.len(),
+                store.units().count(),
+                report.len()
+            );
+        }
+    }
+    worst
+}
+
 /// `smysl reindex` - rebuild the derived index from the log alone (§23.1).
 ///
 /// The index is never authoritative, so this can always be run and never loses anything.
@@ -360,6 +470,7 @@ fn main() -> ProcExitCode {
 
     let code = match name {
         "fmt" => cmd_fmt(sub),
+        "check" => cmd_check(sub, &matches),
         "reindex" => cmd_reindex(sub, &matches),
         _ => {
             eprintln!(

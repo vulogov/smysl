@@ -1,0 +1,6 @@
+@doc smysl/0.1 { id: v/short, granularity: { profile: default } }
+
+@claim c/terse { status: speculative }
+~ The eu-west connection pool saturated after the rollout.
+
+It did.

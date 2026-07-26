@@ -21,6 +21,19 @@ pub use thread::{Role, Step, Thread, ThreadSchema};
 pub use unit::{Extra, Unit, UnitCore, UnitCoreBuilder};
 pub use view::{Admission, Fidelity, GranularityProfile, View};
 
+/// The bundled deterministic token estimator (D-2).
+///
+/// `tokens(t) = ceil(utf8_len(t) / 4)`. Packing must be pure (rule D), and provider
+/// tokenisers are neither available offline nor stable, so budgets are approximate
+/// against any specific model **by design** - and say so, via the estimator id recorded
+/// in every `packinfo`.
+///
+/// Granularity bounds are expressed in tokens too, so this is the single place the two
+/// meanings of "token" agree.
+pub fn tokens(text: &str) -> u32 {
+    (text.len() as u32).div_ceil(4)
+}
+
 /// Quantise to 1/1024 and round-trip through `binary32` (§7.1 constraint 4).
 ///
 /// Doing this once, at the boundary, is what makes hash stability independent of the
@@ -39,6 +52,29 @@ pub fn is_quantised(v: f32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_estimator_is_the_documented_formula() {
+        assert_eq!(tokens(""), 0);
+        assert_eq!(tokens("a"), 1);
+        assert_eq!(tokens("abcd"), 1);
+        assert_eq!(tokens("abcde"), 2);
+        // utf8_len, not char count.
+        assert_eq!(tokens("\u{e9}"), 1);
+        assert_eq!(tokens("\u{4f60}\u{597d}"), 2);
+    }
+
+    #[test]
+    fn the_estimator_is_monotone() {
+        let mut s = String::new();
+        let mut prev = tokens(&s);
+        for _ in 0..64 {
+            s.push('x');
+            let t = tokens(&s);
+            assert!(t >= prev);
+            prev = t;
+        }
+    }
 
     #[test]
     fn quantisation_snaps_to_1_1024() {
