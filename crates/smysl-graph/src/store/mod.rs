@@ -333,6 +333,41 @@ impl Store {
         out
     }
 
+    /// What to put in a bundle.
+    ///
+    /// The default drops retracted units - but only where nothing surviving still points
+    /// at them. A bundle with a dangling reference is worse than a bundle carrying a unit
+    /// somebody stopped believing, and the `retracts` edge always travels, so a consumer
+    /// can see the withdrawal for itself.
+    pub fn bundle_with(&self, view: &View, include_retracted: bool) -> Vec<u8> {
+        let g = &self.adjacency;
+        let roots: Vec<_> = view.roots.iter().filter_map(|u| g.id(u)).collect();
+        let reachable = traverse::closure(g, &roots, &crate::adjacency::EdgeSet::all());
+        let mut keep: std::collections::BTreeSet<Uid> = reachable
+            .iter()
+            .filter_map(|&n| g.uid(n))
+            .copied()
+            .collect();
+
+        if !include_retracted {
+            let eff = crate::merge::effective_status(self, crate::merge::RetractionPolicy::Strict);
+            let retracted: Vec<Uid> = eff.retracted().copied().collect();
+            for r in retracted {
+                let still_needed = keep.iter().any(|u| {
+                    *u != r
+                        && self
+                            .get(u)
+                            .is_some_and(|unit| unit.core.references().any(|x| *x == r))
+                });
+                if !still_needed {
+                    keep.remove(&r);
+                }
+            }
+        }
+
+        self.emit(view, &keep)
+    }
+
     /// The reachable closure of a view, as a self-contained CBOR sequence.
     ///
     /// A view references rather than owns, so this is the only way to make one portable.
@@ -345,7 +380,10 @@ impl Store {
             .filter_map(|&n| g.uid(n))
             .copied()
             .collect();
+        self.emit(view, &keep)
+    }
 
+    fn emit(&self, view: &View, keep: &std::collections::BTreeSet<Uid>) -> Vec<u8> {
         let mut out = Vec::new();
         for r in &self.records {
             let included = match r {

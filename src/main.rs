@@ -16,7 +16,8 @@ use smysl::{
     check, conformance, effective_status, fidelity, granularity_distribution, merge, parse_surface,
     plan_retraction, write_surface, AgentId, CheckOptions, ConformanceClass, ConsumerProfile, Hlc,
     MergeOptions, Pass, Record, RelKind, Relation, RetractionAuthority, RetractionPolicy, SchemaId,
-    Severity, Store, StoreOptions, SupersessionPolicy, Uid, UidPrefix, WriteContext,
+    Severity, Store, StoreOptions, SupersessionPolicy, TraceKind, Uid, UidPrefix, View, ViewId,
+    WriteContext,
 };
 
 /// Purity classification of a command (§23). `Pure` commands are bit-reproducible
@@ -204,6 +205,106 @@ fn cli() -> Command {
                         .value_name("FILE")
                         .help("Stores to check; `-` or none reads stdin (rule P)"),
                 ),
+            "diff" => sub
+                .arg(
+                    Arg::new("hop")
+                        .long("hop")
+                        .value_name("A..B")
+                        .help("Partition units across a hop range instead of comparing stores"),
+                )
+                .arg(
+                    Arg::new("by-agent")
+                        .long("by-agent")
+                        .help("Attribute each change to the agents responsible")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("recipe")
+                        .long("recipe")
+                        .help("Flag whether the prompt changed or the content did (D-8)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("inputs")
+                        .num_args(1..)
+                        .required(true)
+                        .value_name("STORE")
+                        .help("One store for --hop, two to compare"),
+                ),
+            "trace" => sub
+                .arg(Arg::new("uid").required(true).value_name("UID"))
+                .arg(
+                    Arg::new("depth")
+                        .long("depth")
+                        .value_name("N")
+                        .help("How far back to walk"),
+                )
+                .arg(
+                    Arg::new("parents")
+                        .long("parents")
+                        .help("Causal: attestation parents and supersession")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("grounds")
+                        .long("grounds")
+                        .help("Evidential: grounds and deps")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("both")
+                        .long("both")
+                        .help("Both walks at once")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("agents")
+                        .long("agents")
+                        .help("Name the agents behind each step")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(Arg::new("store").value_name("PATH")),
+            "view" => sub
+                .arg(
+                    Arg::new("roots")
+                        .long("roots")
+                        .value_name("UID")
+                        .action(ArgAction::Append)
+                        .help("Roots of the view"),
+                )
+                .arg(
+                    Arg::new("id")
+                        .long("id")
+                        .value_name("NAME")
+                        .help("View identifier"),
+                )
+                .arg(
+                    Arg::new("threads")
+                        .long("threads")
+                        .value_name("ID")
+                        .action(ArgAction::Append),
+                )
+                .arg(
+                    Arg::new("requires")
+                        .long("requires")
+                        .value_name("SCHEMA")
+                        .action(ArgAction::Append),
+                )
+                .arg(Arg::new("store").value_name("PATH")),
+            "bundle" => sub
+                .arg(
+                    Arg::new("view")
+                        .long("view")
+                        .value_name("ID")
+                        .help("Which view to bundle; the first if omitted"),
+                )
+                .arg(
+                    Arg::new("include-retracted")
+                        .long("include-retracted")
+                        .help("Keep units that have been retracted")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(Arg::new("store").value_name("PATH")),
             "merge" => sub
                 .arg(
                     Arg::new("policy")
@@ -534,6 +635,272 @@ fn load_store(
     }
 }
 
+/// Resolve a uid argument against a store, accepting the display form.
+fn resolve(store: &Store, raw: &str) -> Result<Uid, String> {
+    let prefix = UidPrefix::parse(raw).map_err(|_| format!("`{raw}` is not a uid"))?;
+    store.resolve_prefix(&prefix).map_err(|e| e.to_string())
+}
+
+/// The store argument, from the subcommand or the global flag.
+fn store_arg(m: &ArgMatches, global: &ArgMatches) -> Option<String> {
+    m.get_one::<String>("store")
+        .or_else(|| global.get_one::<String>("store"))
+        .cloned()
+}
+
+/// `smysl diff` - what changed, and who changed it (§23.1).
+fn cmd_diff(m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    let inputs: Vec<String> = m
+        .get_many::<String>("inputs")
+        .map(|v| v.cloned().collect())
+        .unwrap_or_default();
+
+    if let Some(range) = m.get_one::<String>("hop") {
+        let Some((a, b)) = range.split_once("..") else {
+            eprintln!("smysl diff: --hop takes A..B");
+            return ExitCode::Usage;
+        };
+        let (Ok(from), Ok(to)) = (a.parse::<u32>(), b.parse::<u32>()) else {
+            eprintln!("smysl diff: --hop takes two hop numbers");
+            return ExitCode::Usage;
+        };
+        let path = &inputs[0];
+        let (store, _) = match load_store(path) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("smysl diff: {e}");
+                return ExitCode::Failure;
+            }
+        };
+
+        let d = smysl::hop_diff(&store, from, to, m.get_flag("recipe"));
+        if d.total() == 0 && store.units().count() > 0 {
+            // Silence here would read as "nothing changed" when it means "nothing could be
+            // placed in time".
+            eprintln!(
+                "{path}: {} unit(s), none attested - a store with no provenance cannot be \
+                 asked what changed when",
+                store.units().count()
+            );
+            return ExitCode::Success;
+        }
+        println!(
+            "{path}: hop {from}..{to}: {} survived, {} superseded, {} retracted, {} added",
+            d.survived.len(),
+            d.superseded.len(),
+            d.retracted.len(),
+            d.added.len()
+        );
+        println!("{path}: survival rate {:.3}", d.survival_rate());
+        for (old, new) in &d.superseded {
+            println!("{path}:   {old} superseded by {new}");
+        }
+        for u in &d.retracted {
+            println!("{path}:   {u} retracted");
+        }
+        if m.get_flag("by-agent") {
+            for (agent, act) in &d.by_agent {
+                println!(
+                    "{path}:   {agent}: +{} ~{} -{}",
+                    act.added, act.superseded, act.retracted
+                );
+            }
+        }
+        for c in &d.recipe_changes {
+            println!("{path}:   {} {}", c.uid, c.kind.as_str());
+        }
+        return ExitCode::Success;
+    }
+
+    if inputs.len() != 2 {
+        eprintln!("smysl diff: two stores, or one with --hop");
+        return ExitCode::Usage;
+    }
+    let mut stores = Vec::new();
+    for p in &inputs {
+        match load_store(p) {
+            Ok((s, _)) => stores.push(s),
+            Err(e) => {
+                eprintln!("smysl diff: {e}");
+                return ExitCode::Failure;
+            }
+        }
+    }
+    let d = smysl::diff(&stores[0], &stores[1]);
+    println!(
+        "{} only, {} only, {} common",
+        d.only_in_a.len(),
+        d.only_in_b.len(),
+        d.common.len()
+    );
+    for u in &d.only_in_a {
+        println!("- {u}");
+    }
+    for u in &d.only_in_b {
+        println!("+ {u}");
+    }
+    ExitCode::Success
+}
+
+/// `smysl trace` - walk a unit's ancestry (§23.1). The direct answer to F3.
+fn cmd_trace(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let Some(path) = store_arg(m, global) else {
+        eprintln!("smysl trace: no store given");
+        return ExitCode::Usage;
+    };
+    let (store, _) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl trace: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let target = match resolve(&store, m.get_one::<String>("uid").expect("required")) {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("smysl trace: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let kind = if m.get_flag("both") {
+        TraceKind::Both
+    } else if m.get_flag("parents") {
+        TraceKind::Parents
+    } else {
+        TraceKind::Grounds
+    };
+    let depth = m.get_one::<String>("depth").and_then(|s| s.parse().ok());
+
+    let l = smysl::trace(&store, target, kind, depth);
+    for n in &l.nodes {
+        let indent = "  ".repeat(n.depth as usize);
+        let hop = n.hop.map(|h| format!(" @hop{h}")).unwrap_or_default();
+        let agents = if m.get_flag("agents") && !n.agents.is_empty() {
+            let names: Vec<String> = n.agents.iter().map(ToString::to_string).collect();
+            format!("  [{}]", names.join(", "))
+        } else {
+            String::new()
+        };
+        println!("{indent}{} ({}){hop}{agents}", n.uid, n.via.as_str());
+    }
+    println!("{path}: {} unit(s) over {} step(s)", l.len(), l.max_depth());
+    ExitCode::Success
+}
+
+/// `smysl view` - define or print a view (§23.1).
+///
+/// A view is a name plus roots plus threads. It is never a container: membership is
+/// computed from the roots, so nothing is copied and nothing is owned.
+fn cmd_view(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let Some(path) = store_arg(m, global) else {
+        eprintln!("smysl view: no store given");
+        return ExitCode::Usage;
+    };
+    let (store, _) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl view: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let roots: Vec<Uid> = match m.get_many::<String>("roots") {
+        Some(v) => {
+            let mut out = Vec::new();
+            for raw in v {
+                match resolve(&store, raw) {
+                    Ok(u) => out.push(u),
+                    Err(e) => {
+                        eprintln!("smysl view: {e}");
+                        return ExitCode::Failure;
+                    }
+                }
+            }
+            out
+        }
+        None => Vec::new(),
+    };
+
+    let view = if roots.is_empty() {
+        match store.views().next() {
+            Some(v) => v.clone(),
+            None => {
+                eprintln!("smysl view: no roots given and the store declares no view");
+                return ExitCode::Usage;
+            }
+        }
+    } else {
+        let id = m
+            .get_one::<String>("id")
+            .and_then(|s| ViewId::new(s).ok())
+            .unwrap_or_else(|| ViewId::new("v/ad-hoc").expect("literal"));
+        let mut v = View::new(id, "ad-hoc").with_roots(roots);
+        if let Some(t) = m.get_many::<String>("threads") {
+            v = v.with_threads(t.filter_map(|s| smysl::ThreadId::new(s).ok()));
+        }
+        if let Some(r) = m.get_many::<String>("requires") {
+            v = v.requiring(r.filter_map(|s| SchemaId::parse(s).ok()));
+        }
+        v
+    };
+
+    let members = smysl::membership(&store, &view.roots);
+    println!(
+        "{}: {} root(s), {} thread(s), {} unit(s) reachable",
+        view.id,
+        view.roots.len(),
+        view.threads.len(),
+        members.len()
+    );
+    for u in &members {
+        println!("  {u}");
+    }
+    ExitCode::Success
+}
+
+/// `smysl bundle` - the reachable closure, as a portable store (§23.1).
+fn cmd_bundle(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let Some(path) = store_arg(m, global) else {
+        eprintln!("smysl bundle: no store given");
+        return ExitCode::Usage;
+    };
+    let (store, _) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl bundle: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let wanted = m.get_one::<String>("view");
+    let view = match wanted {
+        Some(id) => store.views().find(|v| v.id.as_str() == id).cloned(),
+        None => store.views().next().cloned(),
+    };
+    let Some(view) = view else {
+        eprintln!("smysl bundle: no such view");
+        return ExitCode::Usage;
+    };
+
+    let bytes = store.bundle_with(&view, m.get_flag("include-retracted"));
+    match global.get_one::<String>("output") {
+        Some(p) => {
+            if let Err(e) = std::fs::write(p, &bytes) {
+                eprintln!("smysl bundle: {p}: {e}");
+                return ExitCode::Failure;
+            }
+        }
+        None => {
+            let mut stdout = std::io::stdout().lock();
+            if stdout.write_all(&bytes).is_err() {
+                return ExitCode::Failure;
+            }
+        }
+    }
+    ExitCode::Success
+}
+
 /// `smysl merge` - join-semilattice union, materialising disagreement (§23.1).
 ///
 /// Merge never adjudicates. Where two agents disagree the disagreement becomes an object
@@ -800,6 +1167,10 @@ fn main() -> ProcExitCode {
         "fmt" => cmd_fmt(sub),
         "check" => cmd_check(sub, &matches),
         "merge" => cmd_merge(sub, &matches),
+        "diff" => cmd_diff(sub, &matches),
+        "trace" => cmd_trace(sub, &matches),
+        "view" => cmd_view(sub, &matches),
+        "bundle" => cmd_bundle(sub, &matches),
         "retract" => cmd_retract(sub, &matches),
         "reindex" => cmd_reindex(sub, &matches),
         _ => {

@@ -22,12 +22,12 @@ Implements **RFC SMYSL-1 (Combined)** — format `smysl/0.1`, kernel `smysl.kern
 
 ## Status
 
-**SM-P6 — convergence without consensus.** `merge` is a join-semilattice union:
-commutative, associative, idempotent, verified by property tests over generated stores.
-Delivery may be out of order, duplicated, or partial and the result is the same, so a mesh
-needs no coordination. Where two agents disagree, merge materialises the disagreement as a
-contention and refuses to pick a winner. `retract --dry-run` reports a retraction's blast
-radius before anything is applied.
+**SM-P7 — lineage.** `trace` walks a unit's ancestry causally or evidentially and names
+every agent along the way; `diff --hop A..B` partitions units into survived, superseded,
+retracted and added, attributed by agent. `--recipe` separates *the output changed because
+the prompt changed* from *the output changed because the content changed* — a distinction
+that is invisible in the output and legible only in the attestation. This is F3, provenance
+evaporation, answered.
 
 | Phase | Delivers | State |
 |---|---|---|
@@ -38,7 +38,8 @@ radius before anything is applied.
 | SM-P4 | structural check passes, `check` | **done** |
 | SM-P5 | rules M and T, conformance classes, `--as` | **done** |
 | SM-P6 | merge, contentions, retraction, `merge` / `retract` | **done** |
-| SM-P7–P8 | lineage, salience | next |
+| SM-P7 | lineage: `diff`, `trace`, `view`, `bundle` | **done** |
+| SM-P8 | salience | next |
 | SM-P9–P10 | packing | |
 | SM-P11–P12 | threads, rendering | |
 | SM-P13–P14 | providers, ingest | |

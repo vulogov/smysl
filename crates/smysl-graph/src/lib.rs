@@ -12,11 +12,16 @@
 #![deny(rust_2018_idioms)]
 
 pub mod adjacency;
+pub mod lineage;
 pub mod merge;
 pub mod store;
 pub mod traverse;
 
 pub use adjacency::{Adjacency, Edge, EdgeKind, EdgeSet, NodeId};
+pub use lineage::{
+    dependents, diff, hop_diff, membership, trace, AgentActivity, HopDiff, Lineage, LineageNode,
+    RecipeChange, RecipeChangeKind, StoreDiff, TraceKind, Via,
+};
 pub use merge::{
     effective_status, merge, plan_retraction, DetectionContext, EffectiveStatus, MergeOptions,
     MergeReport, RetractionAuthority, RetractionPlan, RetractionPolicy, SupersessionPolicy,

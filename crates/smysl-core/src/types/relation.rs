@@ -221,6 +221,31 @@ impl Relation {
         (&self.kind, &self.from, &self.to)
     }
 
+    /// The content address of this edge (§3.1).
+    ///
+    /// Relations are immutable and content-addressed like units, so "agent B asserted that
+    /// C rebuts D" is attributable: the assertion has an identity of its own that an
+    /// attestation can name.
+    pub fn uid(&self) -> Uid {
+        let mut bytes = Vec::with_capacity(72);
+        bytes.push(0x03); // the Relation envelope code, so an edge cannot collide with a unit
+        bytes.extend_from_slice(self.kind.as_str().as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(self.from.as_bytes());
+        bytes.extend_from_slice(self.to.as_bytes());
+        Uid::from_bytes(crate::hash::hash_bytes(&bytes))
+    }
+
+    /// The earliest hop any agent attested this edge at.
+    ///
+    /// An edge nobody attested cannot be placed in time. That matters most for
+    /// `retracts`: a retraction with no attestation is treated as having always been
+    /// there, which is the conservative reading - an undated withdrawal is still a
+    /// withdrawal.
+    pub fn hop(&self) -> Option<u32> {
+        self.attestations.iter().map(|a| a.hop).min()
+    }
+
     /// Whether this edge is a rebuttal of `uid`, which is what rule R pins.
     pub fn rebuts(&self, uid: &Uid) -> bool {
         self.kind == RelKind::Rebuts && &self.to == uid
@@ -379,6 +404,31 @@ mod tests {
 
         let c = Relation::new(RelKind::Causes, uid(1), uid(2));
         assert!(!c.rebuts(&uid(2)));
+    }
+
+    /// An edge's identity is its own, distinct from either endpoint - otherwise an
+    /// attestation could not say *which* assertion it was vouching for.
+    #[test]
+    fn a_relation_has_a_content_address_of_its_own() {
+        let a = Relation::new(RelKind::Rebuts, uid(1), uid(2));
+        let b = Relation::new(RelKind::Rebuts, uid(1), uid(2)).with_weight(0.6);
+        assert_eq!(a.uid(), b.uid(), "weight is not identity");
+
+        assert_ne!(
+            a.uid(),
+            Relation::new(RelKind::Causes, uid(1), uid(2)).uid()
+        );
+        assert_ne!(
+            a.uid(),
+            Relation::new(RelKind::Rebuts, uid(2), uid(1)).uid()
+        );
+        assert_ne!(a.uid(), uid(1));
+        assert_ne!(a.uid(), uid(2));
+    }
+
+    #[test]
+    fn an_unattested_relation_has_no_hop() {
+        assert_eq!(Relation::new(RelKind::Rebuts, uid(1), uid(2)).hop(), None);
     }
 
     #[test]
