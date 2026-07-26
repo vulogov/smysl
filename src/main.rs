@@ -13,8 +13,9 @@ use std::process::ExitCode as ProcExitCode;
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use smysl::ExitCode;
 use smysl::{
-    check, granularity_distribution, parse_surface, write_surface, CheckOptions, Pass, Severity,
-    Store, StoreOptions, WriteContext,
+    check, conformance, fidelity, granularity_distribution, parse_surface, write_surface,
+    CheckOptions, ConformanceClass, ConsumerProfile, Pass, SchemaId, Severity, Store, StoreOptions,
+    WriteContext,
 };
 
 /// Purity classification of a command (§23). `Pure` commands are bit-reproducible
@@ -171,6 +172,19 @@ fn cli() -> Command {
                 ),
             "check" => sub
                 .arg(
+                    Arg::new("conformance")
+                        .long("conformance")
+                        .value_name("CLASS")
+                        .help("Assert the store is consumable at a conformance class"),
+                )
+                .arg(
+                    Arg::new("as")
+                        .long("as")
+                        .value_name("SCHEMA")
+                        .action(ArgAction::Append)
+                        .help("Report fidelity for a consumer implementing these schemas"),
+                )
+                .arg(
                     Arg::new("granularity")
                         .long("granularity")
                         .help("Report the granularity distribution of the store")
@@ -314,6 +328,32 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 .unwrap_or_else(|| vec!["-".to_string()])
         });
 
+    // `--as` names the schemas a consumer implements; the kernel is always implied.
+    let consumer: Option<ConsumerProfile> = m.get_many::<String>("as").map(|v| {
+        let schemas: Vec<SchemaId> = v.filter_map(|s| SchemaId::parse(s).ok()).collect();
+        let name = if schemas.is_empty() {
+            "kernel-only".to_string()
+        } else {
+            schemas
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join("+")
+        };
+        ConsumerProfile::new(name).implementing(schemas)
+    });
+
+    let class: Option<ConformanceClass> = m
+        .get_one::<String>("conformance")
+        .and_then(|s| ConformanceClass::parse(s));
+    if m.contains_id("conformance")
+        && class.is_none()
+        && m.get_one::<String>("conformance").is_some()
+    {
+        eprintln!("smysl check: unknown conformance class");
+        return ExitCode::Usage;
+    }
+
     let mut worst = ExitCode::Success;
     for path in files {
         let src = match read_input(&path) {
@@ -336,6 +376,9 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         if !passes.is_empty() {
             opts = opts.only(passes.clone());
         }
+        if let Some(f) = &consumer {
+            opts = opts.as_consumer(f.clone());
+        }
         let mut report = check(&store, opts);
         for d in &out.diagnostics {
             report.push(d.clone());
@@ -348,6 +391,14 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             }
         }
 
+        if let Some(f) = &consumer {
+            let report = fidelity(&store, f);
+            println!("{path}: as `{}`: {:?}", f.name, report.overall);
+            for (uid, schema) in &report.degraded {
+                println!("{path}:   {uid} degraded: {schema} not implemented");
+            }
+        }
+
         for d in report.iter() {
             if json {
                 println!(
@@ -356,6 +407,14 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 );
             } else {
                 eprintln!("{path}: {d}");
+            }
+        }
+
+        if let Some(c) = class {
+            let verdict = conformance(&report, c);
+            println!("{path}: {verdict}");
+            if !verdict.passed {
+                worst = worse(worst, ExitCode::CheckErrors);
             }
         }
 

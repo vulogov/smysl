@@ -48,7 +48,8 @@ pub use smysl_core::{
 
 // ---- check ----------------------------------------------------------------
 pub use smysl_check::{
-    check, check_and_fail_on, granularity_distribution, CheckOptions, ConformanceClass, Pass,
+    check, check_and_fail_on, conformance, fidelity, granularity_distribution, CheckOptions,
+    ConformanceClass, ConformanceVerdict, ConsumerProfile, FidelityReport, Pass,
 };
 
 // ---- pack -----------------------------------------------------------------

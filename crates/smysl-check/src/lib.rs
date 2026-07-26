@@ -8,8 +8,8 @@
 //! `check` verifies consistency, never correctness (N13). It can tell you a claim's status
 //! exceeds its weakest ground; it cannot tell you whether the claim is true.
 //!
-//! SM-P4 delivers passes 2-5. Rule M, rule T, retraction integrity, extension conformance,
-//! and hash verification land in SM-P5 and SM-P6.
+//! SM-P5 adds rules M and T and the extension pass. Retraction integrity lands with merge
+//! in SM-P6; hash verification is the store's, and runs through `Store::verify_against`.
 
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use smysl_core::{Error, GranularityProfile, Label, Severity, Uid};
 use smysl_graph::Store;
 
+pub use passes::extension::{fidelity, ConsumerProfile, FidelityReport};
 pub use smysl_core::diag::{Code, Diagnostic, Report, Span, Subject};
 
 /// The ten passes of §17. A pass that has not landed yet reports itself as unavailable
@@ -70,6 +71,9 @@ impl Pass {
         Pass::Shape,
         Pass::Closure,
         Pass::Granularity,
+        Pass::Epistemics,
+        Pass::Trust,
+        Pass::Extension,
     ];
 
     pub const fn number(self) -> u8 {
@@ -130,6 +134,9 @@ pub struct CheckOptions {
     pub labels: BTreeMap<Label, Uid>,
     /// Restrict to these passes. Empty means every implemented pass.
     pub only: Vec<Pass>,
+    /// What the consumer implements, for the `--as` degradation report. Absent means no
+    /// `SMY-W010` is emitted: nobody asked what a particular consumer would lose.
+    pub consumer: Option<ConsumerProfile>,
 }
 
 impl CheckOptions {
@@ -150,6 +157,11 @@ impl CheckOptions {
 
     pub fn only(mut self, passes: impl IntoIterator<Item = Pass>) -> CheckOptions {
         self.only = passes.into_iter().collect();
+        self
+    }
+
+    pub fn as_consumer(mut self, p: ConsumerProfile) -> CheckOptions {
+        self.consumer = Some(p);
         self
     }
 
@@ -181,8 +193,58 @@ pub fn check(store: &Store, opts: CheckOptions) -> Report {
     if opts.runs(Pass::Granularity) {
         passes::granularity::run(store, &granularity, &mut report);
     }
+    if opts.runs(Pass::Epistemics) {
+        passes::epistemics::run(store, &mut report);
+    }
+    if opts.runs(Pass::Trust) {
+        passes::trust::run(store, &mut report);
+    }
+    if opts.runs(Pass::Extension) {
+        passes::extension::run(store, opts.consumer.as_ref(), &mut report);
+    }
     report.sort();
     report
+}
+
+/// Whether a store is consumable at a conformance class, and why not if it is not.
+///
+/// The classes of §11 are about implementations, but a *store* can put a conforming
+/// implementation in an impossible position: a consumer at C-Consume must enforce rules M
+/// and R, so a store that violates rule M cannot be consumed at that class however
+/// correct the consumer is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConformanceVerdict {
+    pub class: ConformanceClass,
+    pub passed: bool,
+    /// Codes present in the store that this class forbids.
+    pub blocking: Vec<Code>,
+}
+
+impl core::fmt::Display for ConformanceVerdict {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if self.passed {
+            write!(f, "{}: pass", self.class)
+        } else {
+            let codes: Vec<String> = self.blocking.iter().map(ToString::to_string).collect();
+            write!(f, "{}: fail ({})", self.class, codes.join(", "))
+        }
+    }
+}
+
+/// Assess a report against a conformance class.
+pub fn conformance(report: &Report, class: ConformanceClass) -> ConformanceVerdict {
+    let mut blocking: Vec<Code> = report
+        .iter()
+        .filter(|d| d.is_error() && class.forbids(d.code))
+        .map(|d| d.code)
+        .collect();
+    blocking.sort();
+    blocking.dedup();
+    ConformanceVerdict {
+        class,
+        passed: blocking.is_empty(),
+        blocking,
+    }
 }
 
 /// `check` plus the failure decision, for callers that want one call.
@@ -251,6 +313,50 @@ impl ConformanceClass {
     pub const fn requires_read(self) -> bool {
         true
     }
+
+    /// Whether a store carrying this code is unusable at this class.
+    ///
+    /// C-Read only has to parse and verify hashes, so a rule M violation does not stop it
+    /// reading. C-Consume must enforce rules M and R when packing, so the same violation
+    /// makes the store unconsumable - the constraint is on what the class *promises*, not
+    /// on how careful the reader is.
+    pub fn forbids(self, code: Code) -> bool {
+        let structural = matches!(
+            code,
+            Code::E001
+                | Code::E002
+                | Code::E003
+                | Code::E004
+                | Code::E080
+                | Code::E081
+                | Code::E070
+                | Code::E071
+                | Code::E060
+                | Code::E061
+                | Code::E011
+        );
+        let epistemic = matches!(code, Code::E030 | Code::E033 | Code::E034 | Code::E012);
+        let shape = matches!(
+            code,
+            Code::E020
+                | Code::E021
+                | Code::E022
+                | Code::E023
+                | Code::E031
+                | Code::E032
+                | Code::E040
+        );
+        let lifecycle = matches!(code, Code::E050 | Code::E051);
+        let render = matches!(code, Code::E210);
+
+        match self {
+            ConformanceClass::Read => structural,
+            ConformanceClass::Consume => structural || epistemic,
+            ConformanceClass::Produce => structural || epistemic || shape,
+            ConformanceClass::Merge => structural || epistemic || lifecycle,
+            ConformanceClass::Full => structural || epistemic || shape || lifecycle || render,
+        }
+    }
 }
 
 impl core::fmt::Display for ConformanceClass {
@@ -309,10 +415,24 @@ mod tests {
             .collect();
         assert_eq!(
             implemented,
-            ["integrity", "shape", "closure", "granularity"]
+            [
+                "integrity",
+                "shape",
+                "closure",
+                "granularity",
+                "epistemics",
+                "trust",
+                "extension"
+            ]
         );
-        assert!(!Pass::Epistemics.is_implemented());
-        assert!(!Pass::Hashes.is_implemented());
+        assert!(
+            !Pass::Retraction.is_implemented(),
+            "lands with merge in SM-P6"
+        );
+        assert!(
+            !Pass::Hashes.is_implemented(),
+            "hash verification belongs to the store, via Store::verify_against"
+        );
     }
 
     #[test]
@@ -417,6 +537,116 @@ mod tests {
 
         let clean = Store::from_records(vec![claim("a claim")]);
         assert!(check_and_fail_on(&clean, CheckOptions::default(), Severity::Warn).is_ok());
+    }
+
+    /// The two halves of the anti-laundering guarantee run in the same pass list, and a
+    /// store can violate both at once.
+    #[test]
+    fn rules_m_and_t_both_run() {
+        use smysl_core::{
+            canonical_uid, AgentId, Attestation, Hlc, Op, Rung, SourceKind, SourceRef, Status,
+        };
+        let guess = UnitCoreBuilder::new(KernelType::Hypothesis, "a guess", Status::Speculative)
+            .build()
+            .unwrap();
+        let ug = canonical_uid(&guess);
+        let promoted = UnitCoreBuilder::new(KernelType::Claim, "promoted", Status::Derived)
+            .grounds([ug])
+            .build()
+            .unwrap();
+        let up = canonical_uid(&promoted);
+        let ag = AgentId::new("model:openai/gpt").unwrap();
+
+        let store = Store::from_records(vec![
+            Record::Unit(guess),
+            Record::Unit(promoted),
+            Record::Attestation(Attestation::new(
+                up,
+                ag.clone(),
+                Op::Authored,
+                Rung::Model,
+                Hlc::zero(ag),
+            )),
+        ]);
+        let r = check(&store, CheckOptions::default());
+        assert_eq!(r.count(Code::E030), 1, "rule M: derived on speculative");
+        assert_eq!(
+            r.count(Code::E033),
+            1,
+            "rule T: a model cannot claim derived"
+        );
+        let _ = SourceRef::new(SourceKind::Doc, "x");
+    }
+
+    #[test]
+    fn conformance_verdicts_differ_by_class() {
+        use smysl_core::{canonical_uid, Status};
+        let guess = UnitCoreBuilder::new(KernelType::Hypothesis, "a guess", Status::Speculative)
+            .build()
+            .unwrap();
+        let ug = canonical_uid(&guess);
+        let promoted = UnitCoreBuilder::new(KernelType::Claim, "promoted", Status::Derived)
+            .grounds([ug])
+            .build()
+            .unwrap();
+        let store = Store::from_records(vec![Record::Unit(guess), Record::Unit(promoted)]);
+        let report = check(&store, CheckOptions::default());
+
+        // A rule M violation does not stop a reader parsing, but it does stop a consumer
+        // promising rules M and R.
+        assert!(conformance(&report, ConformanceClass::Read).passed);
+        let consume = conformance(&report, ConformanceClass::Consume);
+        assert!(!consume.passed);
+        assert_eq!(consume.blocking, vec![Code::E030]);
+        assert!(!conformance(&report, ConformanceClass::Full).passed);
+    }
+
+    #[test]
+    fn a_clean_store_conforms_at_every_class() {
+        let store = Store::from_records(vec![claim("a claim")]);
+        let report = check(&store, CheckOptions::default());
+        for c in ConformanceClass::ALL {
+            let v = conformance(&report, *c);
+            assert!(v.passed, "{v}");
+            assert_eq!(v.to_string(), format!("{c}: pass"));
+        }
+    }
+
+    /// A dangling reference blocks every class, because nothing can be done with a store
+    /// whose references do not resolve.
+    #[test]
+    fn a_structural_defect_blocks_every_class() {
+        let bad = UnitCoreBuilder::new(KernelType::Claim, "a claim", Status::Speculative)
+            .deps([Uid::from_bytes([9; 32])])
+            .build()
+            .unwrap();
+        let store = Store::from_records(vec![Record::Unit(bad)]);
+        let report = check(&store, CheckOptions::default());
+        for c in ConformanceClass::ALL {
+            assert!(!conformance(&report, *c).passed, "{c}");
+        }
+    }
+
+    /// Warnings never block: degraded fidelity is a fact about a consumer, not a defect
+    /// in the store.
+    #[test]
+    fn warnings_do_not_block_conformance() {
+        use smysl_core::SchemaId;
+        let store = Store::from_records(vec![Record::Unit(
+            UnitCoreBuilder::new(
+                SchemaId::parse("x.sre/incident").unwrap(),
+                "an incident",
+                Status::Speculative,
+            )
+            .build()
+            .unwrap(),
+        )]);
+        let report = check(
+            &store,
+            CheckOptions::default().as_consumer(ConsumerProfile::default()),
+        );
+        assert_eq!(report.count(Code::W010), 1);
+        assert!(conformance(&report, ConformanceClass::Full).passed);
     }
 
     /// Mixed granularity is legal (D-5), so it is reported as a distribution rather than

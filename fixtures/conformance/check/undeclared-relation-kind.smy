@@ -1,0 +1,9 @@
+@doc smysl/0.1 { id: v/undeclared, granularity: { profile: default } }
+
+@claim c/a { status: speculative }
+~ The rollout introduced a new concurrency limit.
+
+@claim c/b { status: speculative }
+~ The pool was resized in the same change.
+
+@rel c/b --x.sre/mitigates--> c/a

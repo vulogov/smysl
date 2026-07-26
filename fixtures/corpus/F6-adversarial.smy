@@ -1,0 +1,34 @@
+@doc smysl/0.1 {
+  id: v/f6
+  intent: adversarial-corpus
+  lang: en
+  granularity: { profile: default }
+  roots: [f/laundered]
+}
+
+@hypothesis h/guess { status: speculative }
+~ The connection pool is probably the cause, on general principle.
+
+@observation o/rumour { status: speculative }
+~ Someone mentioned that the eu-west shard has been slow lately.
+
+@claim c/laundered-once { status: derived, grounds: [h/guess] }
+~ Pool saturation caused the latency regression in eu-west last Thursday.
+
+The pool acquisition wait metric rose sharply during the same window as the
+latency regression, and the two curves track each other closely enough that the
+causal direction is not seriously in doubt among the people who looked at it.
+
+@claim c/laundered-twice { status: inferred, grounds: [o/rumour] }
+~ The eu-west shard has a systemic capacity problem across all services.
+
+Reports of slowness in that region have accumulated over several weeks now, and
+the pattern is consistent enough to point at capacity rather than at any one of
+the individual services that happen to run there.
+
+@finding f/laundered { status: derived, grounds: [c/laundered-once, c/laundered-twice] }
+~ The eu-west capacity shortfall is the root cause of the auth regression.
+
+Both the pool saturation and the broader capacity pattern point in the same
+direction, and together they are enough to close the incident with capacity as
+the identified root cause, plus a follow-up ticket for the region as a whole.

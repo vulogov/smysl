@@ -209,14 +209,6 @@ fn corpus_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/corpus")
 }
 
-/// Diagnostics a corpus fixture produces when parsed.
-fn parse_codes(src: &str) -> BTreeSet<Code> {
-    match smysl::parse_surface(src) {
-        Ok(o) => o.diagnostics.iter().map(|d| d.code).collect(),
-        Err(e) => BTreeSet::from([e.code()]),
-    }
-}
-
 #[test]
 fn every_corpus_fixture_has_an_expected_set() {
     let files = fixtures(&corpus_dir(), "smy");
@@ -235,7 +227,7 @@ fn every_corpus_fixture_produces_its_expected_diagnostics() {
     for f in fixtures(&corpus_dir(), "smy") {
         let src = std::fs::read_to_string(&f).unwrap();
         assert_eq!(
-            parse_codes(&src),
+            all_codes(&src),
             expected_codes(&f),
             "{} did not produce its expected diagnostics",
             f.display()
@@ -478,18 +470,69 @@ fn the_check_tree_covers_every_pass_the_build_implements() {
     for f in fixtures(&check_dir(), "smy") {
         seen.extend(expected_codes(&f));
     }
-    // Pass 2 integrity, pass 3 shape, pass 4 closure, pass 5 granularity.
-    for required in [
-        Code::E060, // integrity
-        Code::W062, // integrity
-        Code::E022, // shape
-        Code::W024, // closure
-        Code::E040, // granularity
-        Code::W041, // granularity
+    for (required, pass) in [
+        (Code::E060, Pass::Integrity),
+        (Code::W062, Pass::Integrity),
+        (Code::E022, Pass::Shape),
+        (Code::W024, Pass::Closure),
+        (Code::E040, Pass::Granularity),
+        (Code::W041, Pass::Granularity),
+        (Code::E030, Pass::Epistemics),
+        (Code::W013, Pass::Extension),
     ] {
-        assert!(seen.contains(&required), "no fixture exercises {required}");
+        assert!(
+            seen.contains(&required),
+            "no fixture exercises {required} ({pass})"
+        );
     }
-    assert_eq!(Pass::IMPLEMENTED.len(), 4);
+    // Rule T has no surface syntax to exercise it: attestations are not in Appendix A's
+    // grammar, so provenance can only be authored programmatically until `ingest` lands.
+    assert!(Pass::Trust.is_implemented());
+    assert!(!seen.contains(&Code::E033));
+}
+
+/// F6 exists to be caught. A run that reports nothing means rule M has stopped binding,
+/// which is the failure mode the whole design is built to prevent.
+#[test]
+fn f6_is_caught_by_rule_m_at_every_hop() {
+    use smysl::{check, CheckOptions, Store};
+    let src = std::fs::read_to_string(corpus_dir().join("F6-adversarial.smy")).unwrap();
+    let out = smysl::parse_surface(&src).unwrap();
+    assert!(
+        out.diagnostics.is_empty(),
+        "F6 must parse cleanly - it launders epistemics, it is not malformed"
+    );
+
+    let store = Store::from_records(out.records.clone());
+    let report = check(&store, CheckOptions::default());
+    assert_eq!(
+        report.count(smysl::Code::E030),
+        3,
+        "each promotion in the chain must be caught: {report}"
+    );
+
+    // Every diagnostic names the ground responsible, which is the actionable part.
+    for d in report.iter().filter(|d| d.code == smysl::Code::E030) {
+        assert!(d.suggestion.is_some(), "{d}");
+        assert!(d.message.contains("weakest ground"), "{d}");
+    }
+}
+
+/// A laundering store parses and reads, but cannot be consumed - a consumer at C-Consume
+/// promises rules M and R, and this store makes that promise unkeepable.
+#[test]
+fn f6_reads_but_does_not_conform_at_c_consume() {
+    use smysl::{check, conformance, CheckOptions, ConformanceClass, Store};
+    let src = std::fs::read_to_string(corpus_dir().join("F6-adversarial.smy")).unwrap();
+    let out = smysl::parse_surface(&src).unwrap();
+    let store = Store::from_records(out.records.clone());
+    let report = check(&store, CheckOptions::default());
+
+    assert!(conformance(&report, ConformanceClass::Read).passed);
+    let consume = conformance(&report, ConformanceClass::Consume);
+    assert!(!consume.passed);
+    assert_eq!(consume.blocking, vec![smysl::Code::E030]);
+    assert!(!conformance(&report, ConformanceClass::Full).passed);
 }
 
 /// The corpus is what later phases are measured against, so it has to survive the checks

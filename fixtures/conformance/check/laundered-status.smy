@@ -1,0 +1,7 @@
+@doc smysl/0.1 { id: v/laundered, granularity: { profile: default } }
+
+@hypothesis h/guess { status: speculative }
+~ The connection pool is probably the cause.
+
+@claim c/promoted { status: derived, grounds: [h/guess] }
+~ Pool saturation caused the latency regression in eu-west.

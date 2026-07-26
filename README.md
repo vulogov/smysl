@@ -22,11 +22,11 @@ Implements **RFC SMYSL-1 (Combined)** — format `smysl/0.1`, kernel `smysl.kern
 
 ## Status
 
-**SM-P4 — structural checks.** `smysl check` runs the first four passes of the pipeline:
-reference integrity, shape, rule L closure, and granularity. Passes never short-circuit,
-so one run reports every defect rather than the first — which is what the ingest repair
-loop needs, since it resends spans. `check` verifies consistency, never correctness: it
-can tell you a body reaches for a unit it never declared, not whether the claim is true.
+**SM-P5 — the anti-laundering guarantee binds.** Rule M caps a claim at the status of its
+weakest ground and names that ground in the diagnostic; rule T caps what may enter at all,
+so a model asserting from its own priors tops out at `inferred` however confidently it
+phrases the claim. `check --conformance` says whether a store is consumable at a class,
+and `--as` reports what a consumer that implements fewer schemas would lose.
 
 | Phase | Delivers | State |
 |---|---|---|
@@ -35,8 +35,8 @@ can tell you a body reaches for a unit it never declared, not whether the claim 
 | SM-P2 | surface syntax, `fmt` | **done** |
 | SM-P3 | store, index, adjacency, `reindex` | **done** |
 | SM-P4 | structural check passes, `check` | **done** |
-| SM-P5 | rules M and T, conformance classes | next |
-| SM-P6–P8 | merge, lineage, salience | |
+| SM-P5 | rules M and T, conformance classes, `--as` | **done** |
+| SM-P6–P8 | merge, lineage, salience | next |
 | SM-P9–P10 | packing | |
 | SM-P11–P12 | threads, rendering | |
 | SM-P13–P14 | providers, ingest | |

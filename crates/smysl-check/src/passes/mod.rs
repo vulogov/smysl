@@ -4,6 +4,9 @@
 //! result, because none of them may stop the pipeline.
 
 pub mod closure;
+pub mod epistemics;
+pub mod extension;
 pub mod granularity;
 pub mod integrity;
 pub mod shape;
+pub mod trust;
