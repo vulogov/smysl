@@ -56,7 +56,11 @@ pub use smysl_pack::PackError;
 pub use smysl_render::{RenderError, Target};
 
 // ---- graph ----------------------------------------------------------------
-pub use smysl_graph::MergeError;
+pub use smysl_graph::{
+    closure, cycles, rebuttals_of, reverse_closure, topo, Adjacency, AppendReport, Cached, Edge,
+    EdgeKind, EdgeSet, Entry, Index, IndexError, MergeError, NodeId, OpenReport, Scratch, Store,
+    StoreOptions, TopoOrder,
+};
 
 // ---- ingest / providers (feature-gated) -----------------------------------
 #[cfg(feature = "ingest")]

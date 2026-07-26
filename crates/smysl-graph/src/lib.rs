@@ -11,17 +11,12 @@
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
-pub use smysl_core::error::MergeError;
+pub mod adjacency;
+pub mod store;
+pub mod traverse;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_is_pure_and_synchronous() {
-        // Placeholder until SM-P3. The real guarantee is enforced by `xtask
-        // check-purity`, which greps this crate for network and runtime symbols.
-        assert_eq!(
-            super::MergeError::ContentionsPresent { count: 0 }.code(),
-            None
-        );
-    }
-}
+pub use adjacency::{Adjacency, Edge, EdgeKind, EdgeSet, NodeId};
+pub use smysl_core::error::MergeError;
+pub use store::index::{Cached, Entry, Index, IndexError};
+pub use store::{AppendReport, OpenReport, Store, StoreOptions};
+pub use traverse::{closure, cycles, rebuttals_of, reverse_closure, topo, Scratch, TopoOrder};

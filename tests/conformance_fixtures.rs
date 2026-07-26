@@ -311,3 +311,98 @@ fn f3_is_coarse_and_ordered() {
     assert_eq!(thread.steps.len(), 5);
     assert!(thread.foreign_roles().is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// The corpus, loaded into a store
+// ---------------------------------------------------------------------------
+
+/// Parsing and storing are separate phases, so this is the first place they meet: every
+/// fixture must load into a store with nothing dangling.
+#[test]
+fn every_corpus_fixture_loads_into_a_store_with_no_dangling_references() {
+    use smysl::Store;
+    for f in fixtures(&corpus_dir(), "smy") {
+        if !expected_codes(&f).is_empty() {
+            continue;
+        }
+        let src = std::fs::read_to_string(&f).unwrap();
+        let out = smysl::parse_surface(&src).unwrap();
+        let store = Store::from_records(out.records.clone());
+
+        let mut report = smysl::Report::new();
+        store.report_dangling(&mut report);
+        assert!(report.is_empty(), "{}: {report}", f.display());
+        assert_eq!(store.units().count(), out.units().count());
+    }
+}
+
+/// A view is a root set, not a container: membership is computed. F1's root reaches its
+/// grounds without anything having been copied.
+#[test]
+fn f1_reaches_its_evidence_from_the_view_root() {
+    use smysl::{EdgeSet, Store};
+    let src = std::fs::read_to_string(corpus_dir().join("F1-incident.smy")).unwrap();
+    let out = smysl::parse_surface(&src).unwrap();
+    let store = Store::from_records(out.records.clone());
+
+    let view = out.view.as_ref().unwrap();
+    let g = store.adjacency();
+    let roots: Vec<_> = view.roots.iter().filter_map(|u| g.id(u)).collect();
+    assert_eq!(roots.len(), 1);
+
+    let reachable = smysl::closure(g, &roots, &EdgeSet::support());
+    let trace = out.uid_of(&smysl::Label::new("e/trace").unwrap()).unwrap();
+    assert!(
+        reachable.contains(&g.id(&trace).unwrap()),
+        "the root does not reach its evidence"
+    );
+}
+
+/// Rule R pins rebuttals into any pack touching the claim, so the store has to be able to
+/// find them by uid before packing can enforce anything.
+#[test]
+fn f1_rebuttals_are_reachable_from_the_store() {
+    use smysl::Store;
+    let src = std::fs::read_to_string(corpus_dir().join("F1-incident.smy")).unwrap();
+    let out = smysl::parse_surface(&src).unwrap();
+    let store = Store::from_records(out.records.clone());
+
+    let pool = out
+        .uid_of(&smysl::Label::new("c/pool-saturation").unwrap())
+        .unwrap();
+    let canary = out
+        .uid_of(&smysl::Label::new("c/canary-clean").unwrap())
+        .unwrap();
+    assert_eq!(store.rebuttals_of(&pool), vec![canary]);
+}
+
+/// F3's narrative is ordered by `sequences`, so a topological walk over the ordering
+/// edges must reproduce the story rather than shuffle it.
+#[test]
+fn f3_orders_deterministically_over_its_sequence_edges() {
+    use smysl::{EdgeSet, Store};
+    let src = std::fs::read_to_string(corpus_dir().join("F3-narrative.smy")).unwrap();
+    let out = smysl::parse_surface(&src).unwrap();
+    let store = Store::from_records(out.records.clone());
+
+    let t = smysl::topo(store.adjacency(), &EdgeSet::ordering());
+    assert!(t.is_acyclic(), "the narrative must not loop");
+    assert_eq!(t.order.len(), store.adjacency().len());
+
+    let g = store.adjacency();
+    let at = |l: &str| {
+        let uid = out.uid_of(&smysl::Label::new(l).unwrap()).unwrap();
+        t.order
+            .iter()
+            .position(|&n| n == g.id(&uid).unwrap())
+            .unwrap()
+    };
+    for (earlier, later) in [
+        ("p/setup", "p/complication"),
+        ("p/complication", "p/turn"),
+        ("p/turn", "p/resolution"),
+        ("p/resolution", "p/coda"),
+    ] {
+        assert!(at(earlier) < at(later), "{earlier} must precede {later}");
+    }
+}

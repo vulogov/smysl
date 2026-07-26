@@ -22,19 +22,21 @@ Implements **RFC SMYSL-1 (Combined)** — format `smysl/0.1`, kernel `smysl.kern
 
 ## Status
 
-**SM-P2 — surface syntax.** The format now reads and writes as text. `smysl fmt`
-canonicalises a document and verifies that the round trip does not move a uid. The parser
-recovers rather than fails: one malformed record costs one record, and every diagnostic
-carries a byte span, which is what lets the ingest repair loop resend only the offending
-region.
+**SM-P3 — store and index.** Documents now live in an append-only log with a derived
+index beside it. The log is the only authority: a stale or corrupt sidecar is rebuilt
+rather than trusted, a truncated tail yields everything up to the last complete record,
+and an index rebuilt from the log alone is byte-identical to the one maintained while
+appending. Traversal runs over a purpose-built adjacency store whose dense ids follow
+ascending uid order, so iteration is canonical by construction rather than by a sort at
+each step.
 
 | Phase | Delivers | State |
 |---|---|---|
 | SM-P0 | scaffold, diagnostics, gates | **done** |
 | SM-P1 | deterministic CBOR codec, kernel types, identity | **done** |
 | SM-P2 | surface syntax, `fmt` | **done** |
-| SM-P3 | store, index, adjacency | next |
-| SM-P4–P5 | check pipeline, rules M and T | |
+| SM-P3 | store, index, adjacency, `reindex` | **done** |
+| SM-P4–P5 | check pipeline, rules M and T | next |
 | SM-P6–P8 | merge, lineage, salience | |
 | SM-P9–P10 | packing | |
 | SM-P11–P12 | threads, rendering | |

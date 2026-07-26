@@ -12,7 +12,7 @@ use std::process::ExitCode as ProcExitCode;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use smysl::ExitCode;
-use smysl::{parse_surface, write_surface, WriteContext};
+use smysl::{parse_surface, write_surface, Store, StoreOptions, WriteContext};
 
 /// Purity classification of a command (§23). `Pure` commands are bit-reproducible
 /// functions of their inputs (rule D); `Model` commands are the only egress points.
@@ -166,6 +166,18 @@ fn cli() -> Command {
                         .value_name("FILE")
                         .help("Files to format; `-` or none reads stdin (rule P)"),
                 ),
+            "reindex" => sub
+                .arg(
+                    Arg::new("verify")
+                        .long("verify")
+                        .help("Compare the rebuilt index against the sidecar instead of writing it")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("store")
+                        .value_name("PATH")
+                        .help("Store to reindex"),
+                ),
             _ => sub.arg(
                 Arg::new("args")
                     .num_args(0..)
@@ -256,6 +268,67 @@ fn cmd_fmt(m: &ArgMatches) -> ExitCode {
     worst
 }
 
+/// `smysl reindex` - rebuild the derived index from the log alone (§23.1).
+///
+/// The index is never authoritative, so this can always be run and never loses anything.
+/// `--verify` is the interesting mode: it asserts that a rebuild reproduces the sidecar
+/// byte for byte, which is how the two index paths are kept from drifting apart.
+fn cmd_reindex(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let path = match m
+        .get_one::<String>("store")
+        .or_else(|| global.get_one::<String>("store"))
+    {
+        Some(p) => p.clone(),
+        None => {
+            eprintln!("smysl reindex: no store given");
+            return ExitCode::Usage;
+        }
+    };
+
+    let (mut store, open) = match Store::open_with(&path, StoreOptions::default()) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl reindex: {path}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    for d in open.report.iter() {
+        eprintln!("{path}: {d}");
+    }
+
+    let rebuilt = store.reindex().to_bytes();
+
+    if m.get_flag("verify") {
+        let existing = std::fs::read(Store::index_path(std::path::Path::new(&path)));
+        return match existing {
+            Ok(bytes) if bytes == rebuilt => {
+                println!("{path}: index matches a rebuild ({} bytes)", rebuilt.len());
+                ExitCode::Success
+            }
+            Ok(_) => {
+                eprintln!("{path}: the sidecar does not match a rebuild from the log");
+                ExitCode::HashVerification
+            }
+            Err(e) => {
+                eprintln!("{path}: no index to verify: {e}");
+                ExitCode::Failure
+            }
+        };
+    }
+
+    if let Err(e) = store.write_index() {
+        eprintln!("smysl reindex: {path}: {e}");
+        return ExitCode::Failure;
+    }
+    println!(
+        "{path}: {} records, {} units, index {} bytes",
+        store.len(),
+        store.units().count(),
+        rebuilt.len()
+    );
+    ExitCode::Success
+}
+
 fn read_input(path: &str) -> std::io::Result<String> {
     if path == "-" {
         let mut s = String::new();
@@ -287,6 +360,7 @@ fn main() -> ProcExitCode {
 
     let code = match name {
         "fmt" => cmd_fmt(sub),
+        "reindex" => cmd_reindex(sub, &matches),
         _ => {
             eprintln!(
                 "smysl {}: not wired in this build; lands in {} (see RFC SMYSL-1 \u{00a7}26)",
