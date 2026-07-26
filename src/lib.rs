@@ -60,9 +60,11 @@ pub use smysl_render::{RenderError, Target};
 
 // ---- graph ----------------------------------------------------------------
 pub use smysl_graph::{
-    closure, cycles, rebuttals_of, reverse_closure, topo, Adjacency, AppendReport, Cached, Edge,
-    EdgeKind, EdgeSet, Entry, Index, IndexError, MergeError, NodeId, OpenReport, Scratch, Store,
-    StoreOptions, TopoOrder,
+    closure, cycles, effective_status, merge, plan_retraction, rebuttals_of, reverse_closure, topo,
+    Adjacency, AppendReport, Cached, DetectionContext, Edge, EdgeKind, EdgeSet, EffectiveStatus,
+    Entry, Index, IndexError, MergeError, MergeOptions, MergeReport, NodeId, OpenReport,
+    RetractionAuthority, RetractionPlan, RetractionPolicy, Scratch, Store, StoreOptions,
+    SupersessionPolicy, TopoOrder,
 };
 
 // ---- ingest / providers (feature-gated) -----------------------------------

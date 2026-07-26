@@ -12,10 +12,15 @@
 #![deny(rust_2018_idioms)]
 
 pub mod adjacency;
+pub mod merge;
 pub mod store;
 pub mod traverse;
 
 pub use adjacency::{Adjacency, Edge, EdgeKind, EdgeSet, NodeId};
+pub use merge::{
+    effective_status, merge, plan_retraction, DetectionContext, EffectiveStatus, MergeOptions,
+    MergeReport, RetractionAuthority, RetractionPlan, RetractionPolicy, SupersessionPolicy,
+};
 pub use smysl_core::error::MergeError;
 pub use store::index::{Cached, Entry, Index, IndexError};
 pub use store::{AppendReport, OpenReport, Store, StoreOptions};

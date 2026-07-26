@@ -53,7 +53,24 @@ pub struct Op {
 
 /// Operations registered so far. Rule D names five; each is added by the phase that
 /// implements it, so an unregistered entry here is a phase that has not landed yet.
-const OPS: &[Op] = &[];
+const OPS: &[Op] = &[Op {
+    name: "merge",
+    // Two corpus stores with an overlapping unit and a rebuttal between them. Merge
+    // supplies its own clock rather than reading one, so the only thing that could vary
+    // between runs is the implementation.
+    argv: &[
+        "cargo",
+        "run",
+        "--quiet",
+        "--no-default-features",
+        "--features",
+        "cli",
+        "--",
+        "merge",
+        "fixtures/corpus/F1-incident.smy",
+        "fixtures/corpus/F6-adversarial.smy",
+    ],
+}];
 
 pub fn run(root: &Path) -> Result<(), String> {
     let envs = matrix();
@@ -61,11 +78,16 @@ pub fn run(root: &Path) -> Result<(), String> {
 
     if OPS.is_empty() {
         println!(
-            "  no operations registered yet - pack, merge, derive_thread, salience, and \
-             render register at SM-P9, P6, P11, P8, and P12"
+            "  no operations registered yet - pack, derive_thread, salience, and render \
+             register at SM-P9, P11, P8, and P12"
         );
         return Ok(());
     }
+    println!(
+        "  {} of 5 operations registered; pack, derive_thread, salience, and render \
+         follow at SM-P9, P11, P8, and P12",
+        OPS.len()
+    );
 
     let mut failures = Vec::new();
     for op in OPS {

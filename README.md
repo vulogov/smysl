@@ -22,11 +22,12 @@ Implements **RFC SMYSL-1 (Combined)** — format `smysl/0.1`, kernel `smysl.kern
 
 ## Status
 
-**SM-P5 — the anti-laundering guarantee binds.** Rule M caps a claim at the status of its
-weakest ground and names that ground in the diagnostic; rule T caps what may enter at all,
-so a model asserting from its own priors tops out at `inferred` however confidently it
-phrases the claim. `check --conformance` says whether a store is consumable at a class,
-and `--as` reports what a consumer that implements fewer schemas would lose.
+**SM-P6 — convergence without consensus.** `merge` is a join-semilattice union:
+commutative, associative, idempotent, verified by property tests over generated stores.
+Delivery may be out of order, duplicated, or partial and the result is the same, so a mesh
+needs no coordination. Where two agents disagree, merge materialises the disagreement as a
+contention and refuses to pick a winner. `retract --dry-run` reports a retraction's blast
+radius before anything is applied.
 
 | Phase | Delivers | State |
 |---|---|---|
@@ -36,7 +37,8 @@ and `--as` reports what a consumer that implements fewer schemas would lose.
 | SM-P3 | store, index, adjacency, `reindex` | **done** |
 | SM-P4 | structural check passes, `check` | **done** |
 | SM-P5 | rules M and T, conformance classes, `--as` | **done** |
-| SM-P6–P8 | merge, lineage, salience | next |
+| SM-P6 | merge, contentions, retraction, `merge` / `retract` | **done** |
+| SM-P7–P8 | lineage, salience | next |
 | SM-P9–P10 | packing | |
 | SM-P11–P12 | threads, rendering | |
 | SM-P13–P14 | providers, ingest | |

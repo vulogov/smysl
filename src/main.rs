@@ -13,9 +13,10 @@ use std::process::ExitCode as ProcExitCode;
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use smysl::ExitCode;
 use smysl::{
-    check, conformance, fidelity, granularity_distribution, parse_surface, write_surface,
-    CheckOptions, ConformanceClass, ConsumerProfile, Pass, SchemaId, Severity, Store, StoreOptions,
-    WriteContext,
+    check, conformance, effective_status, fidelity, granularity_distribution, merge, parse_surface,
+    plan_retraction, write_surface, AgentId, CheckOptions, ConformanceClass, ConsumerProfile, Hlc,
+    MergeOptions, Pass, Record, RelKind, Relation, RetractionAuthority, RetractionPolicy, SchemaId,
+    Severity, Store, StoreOptions, SupersessionPolicy, Uid, UidPrefix, WriteContext,
 };
 
 /// Purity classification of a command (§23). `Pure` commands are bit-reproducible
@@ -202,6 +203,77 @@ fn cli() -> Command {
                         .num_args(0..)
                         .value_name("FILE")
                         .help("Stores to check; `-` or none reads stdin (rule P)"),
+                ),
+            "merge" => sub
+                .arg(
+                    Arg::new("policy")
+                        .long("policy")
+                        .value_name("P")
+                        .value_parser(["latest", "all", "contend"])
+                        .help("Supersession policy"),
+                )
+                .arg(
+                    Arg::new("retraction")
+                        .long("retraction")
+                        .value_name("P")
+                        .value_parser(["strict", "advisory", "ignore"])
+                        .help("Retraction policy"),
+                )
+                .arg(
+                    Arg::new("fail-on-contention")
+                        .long("fail-on-contention")
+                        .help("Exit 5 when the merged store carries a contention")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("max-contentions-per-agent")
+                        .long("max-contentions-per-agent")
+                        .value_name("N")
+                        .help("Warn when one merge raises more than N contentions"),
+                )
+                .arg(
+                    Arg::new("inputs")
+                        .num_args(1..)
+                        .required(true)
+                        .value_name("STORE")
+                        .help("Stores to merge; `-` reads stdin (rule P)"),
+                ),
+            "retract" => sub
+                .arg(
+                    Arg::new("uid")
+                        .required(true)
+                        .value_name("UID")
+                        .help("The unit to retract; the display form is resolved as a prefix"),
+                )
+                .arg(
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .help("Report the blast radius without applying anything")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("as")
+                        .long("as")
+                        .value_name("AGENT")
+                        .action(ArgAction::Append)
+                        .help("The agent(s) issuing the retraction"),
+                )
+                .arg(
+                    Arg::new("reason")
+                        .long("reason")
+                        .value_name("TEXT")
+                        .help("Why"),
+                )
+                .arg(
+                    Arg::new("authority")
+                        .long("authority")
+                        .value_name("A")
+                        .help("origin | any | quorum:N"),
+                )
+                .arg(
+                    Arg::new("store")
+                        .value_name("PATH")
+                        .help("Store to retract from"),
                 ),
             "reindex" => sub
                 .arg(
@@ -437,6 +509,203 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     worst
 }
 
+/// Read a store from surface text or a CBOR log, whichever it turns out to be.
+fn load_store(
+    path: &str,
+) -> Result<(Store, std::collections::BTreeMap<smysl::Label, Uid>), String> {
+    let bytes = if path == "-" {
+        let mut b = Vec::new();
+        std::io::stdin()
+            .read_to_end(&mut b)
+            .map_err(|e| e.to_string())?;
+        b
+    } else {
+        std::fs::read(path).map_err(|e| format!("{path}: {e}"))?
+    };
+
+    // Surface text always starts with a sigil; a CBOR sequence starts with an array head.
+    if bytes.first() == Some(&b'@') || bytes.is_empty() {
+        let src = String::from_utf8(bytes).map_err(|e| e.to_string())?;
+        let out = parse_surface(&src).map_err(|e| e.to_string())?;
+        Ok((Store::from_records(out.records.clone()), out.labels))
+    } else {
+        let (records, _) = smysl::from_cbor_seq(&bytes).map_err(|e| e.to_string())?;
+        Ok((Store::from_records(records), Default::default()))
+    }
+}
+
+/// `smysl merge` - join-semilattice union, materialising disagreement (§23.1).
+///
+/// Merge never adjudicates. Where two agents disagree the disagreement becomes an object
+/// in the report rather than a winner in the store.
+fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let inputs: Vec<String> = m
+        .get_many::<String>("inputs")
+        .map(|v| v.cloned().collect())
+        .unwrap_or_default();
+
+    let mut opts = MergeOptions::default();
+    if let Some(p) = m
+        .get_one::<String>("policy")
+        .and_then(|s| SupersessionPolicy::parse(s))
+    {
+        opts.supersession = p;
+    }
+    if let Some(p) = m
+        .get_one::<String>("retraction")
+        .and_then(|s| RetractionPolicy::parse(s))
+    {
+        opts.retraction = p;
+    }
+    opts.fail_on_contention = m.get_flag("fail-on-contention");
+    opts.max_contentions_per_agent = m
+        .get_one::<String>("max-contentions-per-agent")
+        .and_then(|s| s.parse().ok());
+    // A supplied clock keeps merge bit-reproducible; `smysl merge A B` twice is the same
+    // bytes twice, which is what the determinism gate asserts.
+    opts.now = Some(Hlc::new(
+        0,
+        0,
+        AgentId::new("tool:smysl-merge").expect("literal"),
+    ));
+
+    let mut store = Store::new();
+    let mut labels = Vec::new();
+    for path in &inputs {
+        let (s, l) = match load_store(path) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("smysl merge: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        labels.push(l);
+        opts.labels = labels.clone();
+        match merge(&mut store, &s, opts.clone()) {
+            Ok(r) => {
+                for d in r.report.iter() {
+                    eprintln!("{path}: {d}");
+                }
+                for c in &r.new_contentions {
+                    eprintln!(
+                        "{path}: contention {} over {} ({} positions, {})",
+                        c.id,
+                        c.over,
+                        c.positions.len(),
+                        c.detected.kind
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!("smysl merge: {e}");
+                let code: ExitCode = e.exit_code();
+                return code;
+            }
+        }
+    }
+
+    let out = global.get_one::<String>("output");
+    let bytes = store.log_bytes();
+    match out {
+        Some(p) => {
+            if let Err(e) = std::fs::write(p, &bytes) {
+                eprintln!("smysl merge: {p}: {e}");
+                return ExitCode::Failure;
+            }
+        }
+        None => {
+            let mut stdout = std::io::stdout().lock();
+            if stdout.write_all(&bytes).is_err() {
+                return ExitCode::Failure;
+            }
+        }
+    }
+    ExitCode::Success
+}
+
+/// `smysl retract` - withdraw belief in a unit, blast radius first (§23.1).
+///
+/// `--dry-run` reports exactly what applying it would reach. Nobody should discover what a
+/// retraction touches by performing it.
+fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let path = match m
+        .get_one::<String>("store")
+        .or_else(|| global.get_one::<String>("store"))
+    {
+        Some(p) => p.clone(),
+        None => {
+            eprintln!("smysl retract: no store given");
+            return ExitCode::Usage;
+        }
+    };
+    let (mut store, _) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl retract: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let raw = m.get_one::<String>("uid").expect("required");
+    let target = match UidPrefix::parse(raw).ok().map(|p| store.resolve_prefix(&p)) {
+        Some(Ok(u)) => u,
+        Some(Err(e)) => {
+            eprintln!("smysl retract: {e}");
+            return ExitCode::Failure;
+        }
+        None => {
+            eprintln!("smysl retract: `{raw}` is not a uid");
+            return ExitCode::Usage;
+        }
+    };
+
+    let agents: Vec<AgentId> = m
+        .get_many::<String>("as")
+        .map(|v| v.filter_map(|s| AgentId::new(s).ok()).collect())
+        .unwrap_or_default();
+    let authority = m
+        .get_one::<String>("authority")
+        .and_then(|s| RetractionAuthority::parse(s))
+        .unwrap_or_default();
+    let policy = RetractionPolicy::default();
+
+    let plan = plan_retraction(&store, target, &agents, policy, authority);
+    println!(
+        "{path}: retracting {target} would reach {} unit(s), orphaning {}",
+        plan.blast_radius.len(),
+        plan.orphaned.len()
+    );
+    for u in &plan.orphaned {
+        println!("{path}:   {u} would lose all of its grounds");
+    }
+
+    if m.get_flag("dry-run") {
+        return ExitCode::Success;
+    }
+    if !plan.authorised {
+        eprintln!(
+            "smysl retract: {}",
+            plan.refusal.unwrap_or_else(|| "refused".into())
+        );
+        return ExitCode::Failure;
+    }
+
+    if let Err(e) = store.append(&[Record::Relation(Relation::new(
+        RelKind::Retracts,
+        target,
+        target,
+    ))]) {
+        eprintln!("smysl retract: {e}");
+        return ExitCode::Failure;
+    }
+    let eff = effective_status(&store, policy);
+    println!(
+        "{path}: {} unit(s) now read as unfounded",
+        eff.blast_radius().len()
+    );
+    ExitCode::Success
+}
+
 /// `smysl reindex` - rebuild the derived index from the log alone (§23.1).
 ///
 /// The index is never authoritative, so this can always be run and never loses anything.
@@ -530,6 +799,8 @@ fn main() -> ProcExitCode {
     let code = match name {
         "fmt" => cmd_fmt(sub),
         "check" => cmd_check(sub, &matches),
+        "merge" => cmd_merge(sub, &matches),
+        "retract" => cmd_retract(sub, &matches),
         "reindex" => cmd_reindex(sub, &matches),
         _ => {
             eprintln!(

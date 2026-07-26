@@ -523,8 +523,20 @@ impl Store {
                     let key = (t.id.clone(), t.owner.clone());
                     // Last writer wins *within* the key; across owners there is no
                     // conflict to resolve (§5.2).
+                    //
+                    // A tie on the HLC is broken by encoded bytes, which makes the
+                    // register a maximum over a *total* order. Without that, two peers
+                    // merging the same pair of simultaneous writes in opposite orders
+                    // would keep different threads, and merge would not be commutative.
                     let replace = match self.threads.get(&key) {
-                        Some(existing) => existing.ts < t.ts,
+                        Some(existing) => match existing.ts.cmp(&t.ts) {
+                            std::cmp::Ordering::Less => true,
+                            std::cmp::Ordering::Greater => false,
+                            std::cmp::Ordering::Equal => {
+                                to_cbor(&Record::Thread(t.clone()))
+                                    > to_cbor(&Record::Thread(existing.clone()))
+                            }
+                        },
                         None => true,
                     };
                     if replace {
@@ -570,6 +582,60 @@ impl Store {
         }
         let relations: Vec<Relation> = self.relations.values().cloned().collect();
         self.adjacency = Adjacency::build(&self.units, &relations);
+    }
+
+    /// Whether this exact edge exists.
+    pub fn has_relation(&self, kind: &RelKind, from: &Uid, to: &Uid) -> bool {
+        self.relations
+            .contains_key(&(kind.as_str().to_string(), *from, *to))
+    }
+
+    /// A digest of everything merge is required to converge on (rule U).
+    ///
+    /// Deliberately *not* over the log: two peers that received the same records in
+    /// different orders have different logs and the same store. What must agree is the
+    /// derived state - cores, attestations, relations, thread registers, contentions -
+    /// which is exactly what §5.1 says the union is component-wise over.
+    pub fn state_hash(&self) -> [u8; 32] {
+        let mut bytes = Vec::new();
+
+        for (uid, unit) in &self.units {
+            bytes.extend_from_slice(uid.as_bytes());
+            for a in &unit.attestations {
+                bytes.extend_from_slice(&to_cbor(&Record::Attestation(a.clone())));
+            }
+            if let Some(s) = unit.salience {
+                bytes.extend_from_slice(&s.to_be_bytes());
+            }
+            for l in &unit.labels {
+                bytes.extend_from_slice(l.as_str().as_bytes());
+            }
+        }
+        for r in self.relations.values() {
+            bytes.extend_from_slice(&to_cbor(&Record::Relation(r.clone())));
+            for a in &r.attestations {
+                bytes.extend_from_slice(&to_cbor(&Record::Attestation(a.clone())));
+            }
+        }
+        for t in self.threads.values() {
+            bytes.extend_from_slice(&to_cbor(&Record::Thread(t.clone())));
+        }
+        for v in self.views.values() {
+            bytes.extend_from_slice(&to_cbor(&Record::View(v.clone())));
+        }
+        // Contentions are keyed by a derived id, so sorting by it is canonical.
+        let mut contentions: Vec<&Contention> = self.contentions.iter().collect();
+        contentions.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
+        for c in contentions {
+            bytes.extend_from_slice(&to_cbor(&Record::Contention(c.clone())));
+        }
+
+        hash_bytes(&bytes)
+    }
+
+    /// Whether two stores carry the same graph, whatever order they were assembled in.
+    pub fn converged_with(&self, other: &Store) -> bool {
+        self.state_hash() == other.state_hash()
     }
 
     /// Units whose uid begins with `prefix`, in ascending uid order.
