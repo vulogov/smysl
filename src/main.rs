@@ -15,9 +15,9 @@ use smysl::ExitCode;
 use smysl::{
     check, conformance, effective_status, fidelity, granularity_distribution, merge, parse_surface,
     plan_retraction, write_surface, AgentId, CheckOptions, ConformanceClass, ConsumerProfile, Hlc,
-    MergeOptions, Pass, Record, RelKind, Relation, RetractionAuthority, RetractionPolicy, SchemaId,
-    Severity, Store, StoreOptions, SupersessionPolicy, TraceKind, Uid, UidPrefix, View, ViewId,
-    WriteContext,
+    MergeOptions, Pass, Record, RelKind, Relation, RetractionAuthority, RetractionPolicy,
+    SalienceRequest, SalienceWeights, SchemaId, Severity, Store, StoreOptions, SupersessionPolicy,
+    TraceKind, Uid, UidPrefix, View, ViewId, WriteContext,
 };
 
 /// Purity classification of a command (§23). `Pure` commands are bit-reproducible
@@ -376,6 +376,33 @@ fn cli() -> Command {
                         .value_name("PATH")
                         .help("Store to retract from"),
                 ),
+            "salience" => sub
+                .arg(
+                    Arg::new("top")
+                        .long("top")
+                        .value_name("N")
+                        .help("Show only the N highest-scoring units"),
+                )
+                .arg(
+                    Arg::new("explain")
+                        .long("explain")
+                        .value_name("UID")
+                        .help("Break one unit's score into its three terms"),
+                )
+                .arg(
+                    Arg::new("weights")
+                        .long("weights")
+                        .value_name("C,R,T")
+                        .help("Override the centrality, corroboration and role weights"),
+                )
+                .arg(
+                    Arg::new("seed")
+                        .long("seed")
+                        .value_name("UID")
+                        .action(ArgAction::Append)
+                        .help("Personalise against these units; the view roots by default"),
+                )
+                .arg(Arg::new("store").value_name("PATH")),
             "reindex" => sub
                 .arg(
                     Arg::new("verify")
@@ -1073,6 +1100,105 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     ExitCode::Success
 }
 
+/// `smysl salience` - what the graph says matters, and why (§23.1).
+///
+/// Pure: no model call, which is what makes packing precomputation rather than another
+/// round of inference.
+fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let Some(path) = store_arg(m, global) else {
+        eprintln!("smysl salience: no store given");
+        return ExitCode::Usage;
+    };
+    let (store, _) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl salience: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let mut req = SalienceRequest::default();
+    if let Some(raw) = m.get_one::<String>("weights") {
+        let parts: Vec<f32> = raw
+            .split(',')
+            .filter_map(|p| p.trim().parse().ok())
+            .collect();
+        if parts.len() != 3 {
+            eprintln!("smysl salience: --weights takes three numbers, c,r,t");
+            return ExitCode::Usage;
+        }
+        req = req.with_weights(SalienceWeights {
+            centrality: parts[0],
+            corroboration: parts[1],
+            role: parts[2],
+        });
+    }
+    match m.get_many::<String>("seed") {
+        Some(v) => {
+            let mut seed = Vec::new();
+            for raw in v {
+                match resolve(&store, raw) {
+                    Ok(u) => seed.push(u),
+                    Err(e) => {
+                        eprintln!("smysl salience: {e}");
+                        return ExitCode::Failure;
+                    }
+                }
+            }
+            req = req.seeded(seed);
+        }
+        None => req = req.seeded(smysl::view_roots(&store)),
+    }
+
+    let report = smysl::salience(&store, &req);
+
+    if let Some(raw) = m.get_one::<String>("explain") {
+        let uid = match resolve(&store, raw) {
+            Ok(u) => u,
+            Err(e) => {
+                eprintln!("smysl salience: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        let Some(t) = report.explain(&uid) else {
+            eprintln!("smysl salience: no such unit");
+            return ExitCode::Failure;
+        };
+        println!("{uid}: {:.4}", report.get(&uid));
+        println!(
+            "  centrality      {:.4} x {:.2}",
+            t.centrality, req.weights.centrality
+        );
+        println!(
+            "  corroboration   {:.4} x {:.2}  ({} independent group(s))",
+            t.corroboration,
+            req.weights.corroboration,
+            t.groups.len()
+        );
+        for g in &t.groups {
+            println!("      counted: {g}");
+        }
+        for g in &t.dependent_groups {
+            println!("      shared ancestry, not counted: {g}");
+        }
+        println!("  role            {:.4} x {:.2}", t.role, req.weights.role);
+        println!("  raw             {:.4}", t.raw);
+        if t.authored {
+            println!("  authored override in force; the derived value is not used");
+        }
+        return ExitCode::Success;
+    }
+
+    let n = m
+        .get_one::<String>("top")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(usize::MAX);
+    for (uid, score) in report.top(n) {
+        println!("{score:.4}  {uid}");
+    }
+    ExitCode::Success
+}
+
 /// `smysl reindex` - rebuild the derived index from the log alone (§23.1).
 ///
 /// The index is never authoritative, so this can always be run and never loses anything.
@@ -1171,6 +1297,7 @@ fn main() -> ProcExitCode {
         "trace" => cmd_trace(sub, &matches),
         "view" => cmd_view(sub, &matches),
         "bundle" => cmd_bundle(sub, &matches),
+        "salience" => cmd_salience(sub, &matches),
         "retract" => cmd_retract(sub, &matches),
         "reindex" => cmd_reindex(sub, &matches),
         _ => {

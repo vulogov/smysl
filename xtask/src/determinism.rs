@@ -53,39 +53,55 @@ pub struct Op {
 
 /// Operations registered so far. Rule D names five; each is added by the phase that
 /// implements it, so an unregistered entry here is a phase that has not landed yet.
-const OPS: &[Op] = &[Op {
-    name: "merge",
-    // Two corpus stores with an overlapping unit and a rebuttal between them. Merge
-    // supplies its own clock rather than reading one, so the only thing that could vary
-    // between runs is the implementation.
-    argv: &[
-        "cargo",
-        "run",
-        "--quiet",
-        "--no-default-features",
-        "--features",
-        "cli",
-        "--",
-        "merge",
-        "fixtures/corpus/F1-incident.smy",
-        "fixtures/corpus/F6-adversarial.smy",
-    ],
-}];
+const OPS: &[Op] = &[
+    Op {
+        name: "salience",
+        // Personalised PageRank accumulates in f64 over a fixed number of iterations in
+        // dense-id order, then quantises once. Locale, timezone and hash seed must not
+        // reach any of that.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "salience",
+            "fixtures/corpus/F1-incident.smy",
+        ],
+    },
+    Op {
+        name: "merge",
+        // Two corpus stores with an overlapping unit and a rebuttal between them. Merge
+        // supplies its own clock rather than reading one, so the only thing that could vary
+        // between runs is the implementation.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "merge",
+            "fixtures/corpus/F1-incident.smy",
+            "fixtures/corpus/F6-adversarial.smy",
+        ],
+    },
+];
 
 pub fn run(root: &Path) -> Result<(), String> {
     let envs = matrix();
     println!("  matrix: {} permutations", envs.len());
 
     if OPS.is_empty() {
-        println!(
-            "  no operations registered yet - pack, derive_thread, salience, and render \
-             register at SM-P9, P11, P8, and P12"
-        );
+        println!("  no operations registered yet");
         return Ok(());
     }
     println!(
-        "  {} of 5 operations registered; pack, derive_thread, salience, and render \
-         follow at SM-P9, P11, P8, and P12",
+        "  {} of 5 operations registered; pack, derive_thread and render follow at \
+         SM-P9, P11 and P12",
         OPS.len()
     );
 

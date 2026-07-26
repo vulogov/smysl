@@ -55,18 +55,23 @@ pub use smysl_check::{
 // ---- pack -----------------------------------------------------------------
 pub use smysl_pack::PackError;
 
+// ---- thread ---------------------------------------------------------------
+// `Role` and `ThreadSchema` are wire format and come from the kernel above.
+pub use smysl_thread::{role_weight, role_weights, salience_seed};
+
 // ---- render ---------------------------------------------------------------
 pub use smysl_render::{RenderError, Target};
 
 // ---- graph ----------------------------------------------------------------
 pub use smysl_graph::{
     closure, cycles, dependents, diff, effective_status, hop_diff, membership, merge,
-    plan_retraction, rebuttals_of, reverse_closure, topo, trace, Adjacency, AgentActivity,
-    AppendReport, Cached, DetectionContext, Edge, EdgeKind, EdgeSet, EffectiveStatus, Entry,
-    HopDiff, Index, IndexError, Lineage, LineageNode, MergeError, MergeOptions, MergeReport,
-    NodeId, OpenReport, RecipeChange, RecipeChangeKind, RetractionAuthority, RetractionPlan,
-    RetractionPolicy, Scratch, Store, StoreDiff, StoreOptions, SupersessionPolicy, TopoOrder,
-    TraceKind, Via,
+    plan_retraction, rebuttals_of, reverse_closure, salience, topo, trace, view_roots, Adjacency,
+    AgentActivity, AppendReport, Cached, DetectionContext, Edge, EdgeKind, EdgeSet,
+    EffectiveStatus, Entry, HopDiff, Index, IndexError, Lineage, LineageNode, MergeError,
+    MergeOptions, MergeReport, NodeId, OpenReport, RecipeChange, RecipeChangeKind,
+    RetractionAuthority, RetractionPlan, RetractionPolicy, SalienceReport, SalienceRequest,
+    SalienceTerms, SalienceWeights, Scratch, Store, StoreDiff, StoreOptions, SupersessionPolicy,
+    TopoOrder, TraceKind, Via,
 };
 
 // ---- ingest / providers (feature-gated) -----------------------------------

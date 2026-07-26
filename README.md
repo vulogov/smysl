@@ -22,12 +22,11 @@ Implements **RFC SMYSL-1 (Combined)** — format `smysl/0.1`, kernel `smysl.kern
 
 ## Status
 
-**SM-P7 — lineage.** `trace` walks a unit's ancestry causally or evidentially and names
-every agent along the way; `diff --hop A..B` partitions units into survived, superseded,
-retracted and added, attributed by agent. `--recipe` separates *the output changed because
-the prompt changed* from *the output changed because the content changed* — a distinction
-that is invisible in the output and legible only in the attestation. This is F3, provenance
-evaporation, answered.
+**SM-P8 — salience.** Personalised PageRank over the support graph, plus corroboration
+counted by independent attestation group and role weight from the active thread. Rank flows
+from dependent to dependency, so evidence many conclusions rest on outranks the conclusions
+— which is what a budget needs. No model call is involved anywhere, which is what makes
+packing precomputation rather than another round of inference.
 
 | Phase | Delivers | State |
 |---|---|---|
@@ -39,8 +38,8 @@ evaporation, answered.
 | SM-P5 | rules M and T, conformance classes, `--as` | **done** |
 | SM-P6 | merge, contentions, retraction, `merge` / `retract` | **done** |
 | SM-P7 | lineage: `diff`, `trace`, `view`, `bundle` | **done** |
-| SM-P8 | salience | next |
-| SM-P9–P10 | packing | |
+| SM-P8 | salience, `salience --explain` | **done** |
+| SM-P9–P10 | packing | next |
 | SM-P11–P12 | threads, rendering | |
 | SM-P13–P14 | providers, ingest | |
 | SM-P15 | TUI, evaluation | |

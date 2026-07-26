@@ -14,6 +14,7 @@
 pub mod adjacency;
 pub mod lineage;
 pub mod merge;
+pub mod salience;
 pub mod store;
 pub mod traverse;
 
@@ -25,6 +26,9 @@ pub use lineage::{
 pub use merge::{
     effective_status, merge, plan_retraction, DetectionContext, EffectiveStatus, MergeOptions,
     MergeReport, RetractionAuthority, RetractionPlan, RetractionPolicy, SupersessionPolicy,
+};
+pub use salience::{
+    salience, view_roots, SalienceReport, SalienceRequest, SalienceTerms, SalienceWeights,
 };
 pub use smysl_core::error::MergeError;
 pub use store::index::{Cached, Entry, Index, IndexError};

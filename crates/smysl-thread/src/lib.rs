@@ -66,3 +66,143 @@ mod tests {
         }
     }
 }
+
+/// The per-unit role weights a thread implies, for the `w_t` term of salience (§1.5).
+///
+/// Salience lives below threads in the crate graph, so it takes this map rather than
+/// deriving it. A unit appearing in several steps takes its highest weight: being both the
+/// bottom line and a supporting point should not average out to less than either.
+pub fn role_weights(thread: &Thread) -> std::collections::BTreeMap<smysl_core::Uid, f32> {
+    let mut out: std::collections::BTreeMap<smysl_core::Uid, f32> =
+        std::collections::BTreeMap::new();
+    for step in &thread.steps {
+        let w = role_weight(thread.schema, step.role);
+        let slot = out.entry(step.unit).or_insert(0.0);
+        if w > *slot {
+            *slot = w;
+        }
+    }
+    out
+}
+
+/// The personalisation vector a thread implies (§16.4).
+///
+/// The `question` and `finding` units of the thread: what the reader is here to resolve.
+/// A thread with neither falls back to every unit it names, because personalising against
+/// nothing is the same as not personalising at all.
+pub fn salience_seed(thread: &Thread) -> std::collections::BTreeSet<smysl_core::Uid> {
+    let focal: std::collections::BTreeSet<smysl_core::Uid> = thread
+        .steps
+        .iter()
+        .filter(|s| matches!(s.role, Role::Question | Role::Finding | Role::BottomLine))
+        .map(|s| s.unit)
+        .collect();
+    if focal.is_empty() {
+        thread.units().copied().collect()
+    } else {
+        focal
+    }
+}
+
+#[cfg(test)]
+mod salience_tests {
+    use super::*;
+    use smysl_core::{AgentId, Hlc, Step, ThreadId, Uid};
+
+    fn uid(n: u8) -> Uid {
+        Uid::from_bytes([n; 32])
+    }
+
+    fn thread(schema: ThreadSchema, steps: Vec<Step>) -> Thread {
+        let a = AgentId::new("human:v").unwrap();
+        Thread::new(
+            ThreadId::new("t/x").unwrap(),
+            schema,
+            a.clone(),
+            "g",
+            Hlc::zero(a),
+        )
+        .with_steps(steps)
+    }
+
+    #[test]
+    fn role_weights_follow_the_schema_order() {
+        let t = thread(
+            ThreadSchema::Brief,
+            vec![
+                Step::new(Role::BottomLine, uid(1)),
+                Step::new(Role::Ask, uid(2)),
+            ],
+        );
+        let w = role_weights(&t);
+        assert!(w[&uid(1)] > w[&uid(2)], "the bottom line outweighs the ask");
+    }
+
+    /// A unit that is both the bottom line and a supporting point should not average out
+    /// to less than either.
+    #[test]
+    fn a_unit_in_two_roles_takes_the_higher_weight() {
+        let t = thread(
+            ThreadSchema::Brief,
+            vec![
+                Step::new(Role::Risk, uid(1)),
+                Step::new(Role::BottomLine, uid(1)),
+            ],
+        );
+        let w = role_weights(&t);
+        let bottom = role_weight(ThreadSchema::Brief, Role::BottomLine);
+        assert_eq!(w[&uid(1)], bottom);
+    }
+
+    #[test]
+    fn a_unit_outside_the_thread_has_no_role_weight() {
+        let t = thread(ThreadSchema::Brief, vec![Step::new(Role::Ask, uid(1))]);
+        assert!(!role_weights(&t).contains_key(&uid(9)));
+    }
+
+    #[test]
+    fn the_seed_is_what_the_reader_came_to_resolve() {
+        let t = thread(
+            ThreadSchema::Qa,
+            vec![
+                Step::new(Role::Question, uid(1)),
+                Step::new(Role::Evidence, uid(2)),
+                Step::new(Role::Answer, uid(3)),
+            ],
+        );
+        assert_eq!(salience_seed(&t), [uid(1)].into_iter().collect());
+    }
+
+    #[test]
+    fn a_brief_seeds_on_its_bottom_line() {
+        let t = thread(
+            ThreadSchema::Brief,
+            vec![
+                Step::new(Role::BottomLine, uid(1)),
+                Step::new(Role::Support, uid(2)),
+            ],
+        );
+        assert_eq!(salience_seed(&t), [uid(1)].into_iter().collect());
+    }
+
+    /// Personalising against nothing is the same as not personalising, so a thread with
+    /// no focal role seeds on everything it names rather than on the empty set.
+    #[test]
+    fn a_thread_with_no_focal_role_seeds_on_everything_it_names() {
+        let t = thread(
+            ThreadSchema::Narrative,
+            vec![
+                Step::new(Role::Setup, uid(1)),
+                Step::new(Role::Coda, uid(2)),
+            ],
+        );
+        assert_eq!(salience_seed(&t), [uid(1), uid(2)].into_iter().collect());
+    }
+
+    #[test]
+    fn an_empty_thread_seeds_on_nothing() {
+        let t = thread(ThreadSchema::Brief, vec![]);
+        assert!(salience_seed(&t).is_empty());
+        assert!(role_weights(&t).is_empty());
+    }
+}
