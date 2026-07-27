@@ -74,6 +74,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Vendor dependencies while the network is still available
         run: cargo fetch --locked || cargo fetch
+      # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, so
+      # `unshare --map-root-user` fails with "write failed /proc/self/uid_map". Lifting
+      # that restriction is what keeps this job asserting the real property - a sandbox
+      # that silently stopped sandboxing would be worse than no job at all.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
       - name: Build and test the pure crates with networking denied
         run: |
           unshare --map-root-user --net -- \

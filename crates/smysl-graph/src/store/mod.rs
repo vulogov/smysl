@@ -407,7 +407,7 @@ impl Store {
     /// Recompute every unit's uid and compare it against the sidecar (`SMY-E070`), and
     /// report references that point at nothing (`SMY-E060`).
     pub fn verify_against(&self, ix: &Index, report: &mut Report) {
-        for (uid, _) in self.units.iter() {
+        for uid in self.units.keys() {
             if !ix.entries.contains_key(uid) {
                 report.push(Diagnostic::on(Code::E070, *uid).with_message(
                     "the index has no entry for this unit; the log does not match the index",
@@ -584,10 +584,10 @@ impl Store {
                 Record::View(v) => {
                     self.views.insert(v.id.clone(), v.clone());
                 }
-                Record::Contention(c) => {
-                    if !self.contentions.iter().any(|e| e.id == c.id) {
-                        self.contentions.push(c.clone());
-                    }
+                // Idempotent by id: a contention already recorded is not recorded twice,
+                // which is what makes replaying a log a no-op rather than a duplication.
+                Record::Contention(c) if !self.contentions.iter().any(|e| e.id == c.id) => {
+                    self.contentions.push(c.clone());
                 }
                 _ => {}
             }
