@@ -15,9 +15,10 @@ use smysl::ExitCode;
 use smysl::{
     check, conformance, effective_status, fidelity, granularity_distribution, merge, parse_surface,
     plan_retraction, write_surface, AgentId, CheckOptions, ConformanceClass, ConsumerProfile,
-    Estimator, Hlc, Lod, MergeOptions, PackRequest, Pass, Record, RelKind, Relation,
-    RetractionAuthority, RetractionPolicy, SalienceRequest, SalienceWeights, SchemaId, Severity,
-    Store, StoreOptions, SupersessionPolicy, TraceKind, Uid, UidPrefix, View, ViewId, WriteContext,
+    DeriveOptions, Estimator, Hlc, Lod, MergeOptions, PackRequest, Pass, Record, RelKind, Relation,
+    RetractionAuthority, RetractionPolicy, Role, SalienceRequest, SalienceWeights, SchemaId,
+    Severity, Store, StoreOptions, SupersessionPolicy, TraceKind, Uid, UidPrefix, View, ViewId,
+    WriteContext,
 };
 
 /// Purity classification of a command (§23). `Pure` commands are bit-reproducible
@@ -443,6 +444,59 @@ fn cli() -> Command {
                         .value_name("M")
                         .value_parser(["greedy", "exact"])
                         .help("`exact` proves optimality by branch and bound; needs the exact-pack feature"),
+                )
+                .arg(Arg::new("store").value_name("PATH")),
+            "thread" => sub
+                .arg(
+                    Arg::new("derive")
+                        .long("derive")
+                        .value_name("SCHEMA")
+                        .value_parser(["analysis", "narrative", "brief", "qa", "plan"])
+                        .help("Derive a thread of this schema from the graph"),
+                )
+                .arg(
+                    Arg::new("list")
+                        .long("list")
+                        .help("List the threads the store already holds")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("show")
+                        .long("show")
+                        .value_name("ID")
+                        .help("Print one thread, step by step"),
+                )
+                .arg(
+                    Arg::new("id")
+                        .long("id")
+                        .value_name("T")
+                        .help("Thread id for the derived thread"),
+                )
+                .arg(
+                    Arg::new("as")
+                        .long("as")
+                        .value_name("AGENT")
+                        .help("Owner of the derived thread"),
+                )
+                .arg(
+                    Arg::new("scope")
+                        .long("scope")
+                        .value_name("UID")
+                        .action(ArgAction::Append)
+                        .help("Derive over these units only"),
+                )
+                .arg(
+                    Arg::new("arity")
+                        .long("arity")
+                        .value_name("ROLE=N")
+                        .action(ArgAction::Append)
+                        .help("Override how many units a role may hold"),
+                )
+                .arg(
+                    Arg::new("explain")
+                        .long("explain")
+                        .help("Say which role each unit took and what repair added")
+                        .action(ArgAction::SetTrue),
                 )
                 .arg(Arg::new("store").value_name("PATH")),
             "reindex" => sub
@@ -1434,6 +1488,158 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     ExitCode::Success
 }
 
+/// `smysl thread` - derive, list, or show a thread (§19, §23.1).
+///
+/// Derivation is pure: no model is consulted, so the same store yields the same thread on
+/// any machine. `--refine`, which does consult one, is what makes the command *mixed* - and
+/// it arrives with the provider layer, because there is nothing to refine with until then.
+fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let Some(path) = store_arg(m, global) else {
+        eprintln!("smysl thread: no store given");
+        return ExitCode::Usage;
+    };
+    let (store, labels) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl thread: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    if m.get_flag("list") {
+        let mut any = false;
+        for t in store.threads() {
+            any = true;
+            println!(
+                "{}  {}  {} step(s)  {}",
+                t.id,
+                t.schema,
+                t.steps.len(),
+                t.gist
+            );
+        }
+        if !any {
+            println!("{path}: no threads");
+        }
+        return ExitCode::Success;
+    }
+
+    if let Some(want) = m.get_one::<String>("show") {
+        let Some(t) = store.threads().find(|t| t.id.as_str() == want) else {
+            eprintln!("smysl thread: no thread `{want}` in {path}");
+            return ExitCode::Failure;
+        };
+        return show_thread(&store, t);
+    }
+
+    let Some(raw) = m.get_one::<String>("derive") else {
+        eprintln!("smysl thread: one of --derive, --list or --show is required");
+        return ExitCode::Usage;
+    };
+    let Some(schema) = smysl::ThreadSchema::parse(raw) else {
+        eprintln!("smysl thread: `{raw}` is not a schema");
+        return ExitCode::Usage;
+    };
+
+    let id = match m.get_one::<String>("id") {
+        Some(s) => match smysl::ThreadId::new(s) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("smysl thread: `{s}` is not a thread id: {e}");
+                return ExitCode::Usage;
+            }
+        },
+        None => smysl::ThreadId::new(format!("t/{schema}")).expect("a schema name is a valid id"),
+    };
+    let owner = match m.get_one::<String>("as") {
+        Some(s) => match AgentId::new(s) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("smysl thread: `{s}` is not an agent id: {e}");
+                return ExitCode::Usage;
+            }
+        },
+        None => AgentId::new("tool:smysl").expect("a valid literal"),
+    };
+
+    let mut opts = DeriveOptions::new(id, owner.clone());
+    if let Some(v) = m.get_many::<String>("scope") {
+        let mut scope = Vec::new();
+        for raw in v {
+            match resolve(&store, raw) {
+                Ok(u) => scope.push(u),
+                Err(e) => {
+                    eprintln!("smysl thread: {e}");
+                    return ExitCode::Failure;
+                }
+            }
+        }
+        opts = opts.scoped(scope);
+    }
+    for raw in m.get_many::<String>("arity").into_iter().flatten() {
+        let Some((role, n)) = raw.split_once('=') else {
+            eprintln!("smysl thread: --arity takes ROLE=N, not `{raw}`");
+            return ExitCode::Usage;
+        };
+        let (Some(role), Ok(n)) = (Role::parse(role.trim()), n.trim().parse::<usize>()) else {
+            eprintln!("smysl thread: `{raw}` is not a role and a count");
+            return ExitCode::Usage;
+        };
+        if !schema.allows(role) {
+            eprintln!("smysl thread: {schema} has no {role} role");
+            return ExitCode::Usage;
+        }
+        opts = opts.with_arity(role, n);
+    }
+    // A supplied clock, as merge does: `smysl thread --derive` is a rule D operation, and
+    // an operation whose output carries the wall clock is not bit-reproducible. The
+    // timestamp on a derived thread says which derivation it was, not when it happened -
+    // and the derivation is the same one whenever it is run.
+    opts = opts.with_ts(Hlc::new(0, 0, owner));
+
+    let (thread, report) = smysl::derive_thread(&store, schema, &opts);
+
+    if m.get_flag("explain") {
+        for role in smysl::schema_definition(schema).roles {
+            let n = thread.steps.iter().filter(|s| s.role == *role).count();
+            let a = smysl::schema_definition(schema).arity_of(*role);
+            eprintln!("{path}: {role:<12} {n} of {}..{}", a.start(), a.end());
+        }
+        for role in &report.unfilled {
+            eprintln!("{path}: {role} is required by {schema} and nothing could fill it");
+        }
+        for (added, needed_by) in &report.repaired {
+            eprintln!("{path}: {added} added by repair; {needed_by} depends on it");
+        }
+        eprintln!("{path}: {} unit(s) not selected", report.unselected);
+    }
+
+    let ctx = WriteContext::from_labels(&labels);
+    print!("{}", write_surface(None, &[Record::Thread(thread)], &ctx));
+    ExitCode::Success
+}
+
+fn show_thread(store: &Store, t: &smysl::Thread) -> ExitCode {
+    println!("{}  {}", t.id, t.schema);
+    println!("~ {}", t.gist);
+    for (i, step) in t.steps.iter().enumerate() {
+        let gist = store
+            .get(&step.unit)
+            .map(|u| u.core.gist.as_str())
+            .unwrap_or("(not in this store)");
+        println!("{:>3}. {:<12} {}  {}", i + 1, step.role, step.unit, gist);
+    }
+    let broken = smysl::satisfies_rule_l(store, t);
+    for (unit, dep) in &broken {
+        eprintln!("  rule L: {unit} references {dep}, which the thread does not name");
+    }
+    if broken.is_empty() {
+        ExitCode::Success
+    } else {
+        ExitCode::Failure
+    }
+}
+
 /// `smysl reindex` - rebuild the derived index from the log alone (§23.1).
 ///
 /// The index is never authoritative, so this can always be run and never loses anything.
@@ -1535,6 +1741,7 @@ fn main() -> ProcExitCode {
         "salience" => cmd_salience(sub, &matches),
         "pack" => cmd_pack(sub, &matches),
         "retract" => cmd_retract(sub, &matches),
+        "thread" => cmd_thread(sub, &matches),
         "reindex" => cmd_reindex(sub, &matches),
         _ => {
             eprintln!(

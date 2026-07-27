@@ -109,6 +109,25 @@ const OPS: &[Op] = &[
             "fixtures/corpus/F6-adversarial.smy",
         ],
     },
+    Op {
+        name: "derive_thread",
+        // Role assignment, salience-ranked selection, Kahn ordering and coherence repair.
+        // The narrative schema is the interesting one: its table is positional, so the
+        // result depends on a topological order that a hash-seed change could perturb.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "thread",
+            "--derive",
+            "narrative",
+            "fixtures/corpus/F3-narrative.smy",
+        ],
+    },
 ];
 
 pub fn run(root: &Path) -> Result<(), String> {
@@ -120,8 +139,7 @@ pub fn run(root: &Path) -> Result<(), String> {
         return Ok(());
     }
     println!(
-        "  {} of 5 operations registered; derive_thread and render follow at SM-P11 \
-         and P12",
+        "  {} of 5 operations registered; render follows at SM-P12",
         OPS.len()
     );
 

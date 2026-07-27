@@ -47,6 +47,31 @@ $ smysl pack --budget 90 --mode exact --explain incident.smy
 … 5 of 8 unit(s), 90 of 90 tokens, exact mode, gap 0.000 (proven optimal)
 ```
 
+**SM-P11 — threads.** `smysl thread --derive` turns a graph into an ordered reading of it
+under one of five schemas: role assignment from a rule table, salience-ranked selection
+inside each role's arity, Kahn ordering over the sequencing edges, then **coherence
+repair** — a step whose deps are missing pulls them in, immediately before itself. That
+last stage is the phase gate, and it is asserted as a property over generated graphs
+rather than by example: the repaired thread satisfies rule L always, or repair is not a
+repair.
+
+```bash
+$ smysl thread --derive narrative story.smy
+@thread t/narrative { schema: narrative, owner: tool:smysl, ts: [0, 0] }
+~ The pool wait metric had been visible the whole time, on a dashboard nobody opened.; …
+  setup → p/setup
+  complication → p/complication
+  turn → p/turn
+  resolution → p/resolution
+  coda → p/coda
+$ smysl thread --derive qa --explain incident.smy
+incident.smy: question is required by qa and nothing could fill it
+```
+
+Derivation is pure — no model is consulted — so `derive_thread` joins `pack`, `salience`
+and `merge` as a rule D operation in the determinism matrix. `--refine`, which does consult
+a model, arrives with the provider layer.
+
 | Phase | Delivers | State |
 |---|---|---|
 | SM-P0 | scaffold, diagnostics, gates | **done** |
@@ -60,7 +85,8 @@ $ smysl pack --budget 90 --mode exact --explain incident.smy
 | SM-P8 | salience, `salience --explain` | **done** |
 | SM-P9 | packing, `pack --explain` | **done** |
 | SM-P10 | exact packing, provable optimality gap | **done** |
-| SM-P11–P12 | threads, rendering | |
+| SM-P11 | thread schemas, derivation, `thread --derive` | **done** |
+| SM-P12 | rendering | |
 | SM-P13–P14 | providers, ingest | |
 | SM-P15 | TUI, evaluation | |
 

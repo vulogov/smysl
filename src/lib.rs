@@ -60,7 +60,11 @@ pub use smysl_pack::{
 
 // ---- thread ---------------------------------------------------------------
 // `Role` and `ThreadSchema` are wire format and come from the kernel above.
-pub use smysl_thread::{role_weight, role_weights, salience_seed};
+pub use smysl_thread::definition as schema_definition;
+pub use smysl_thread::{
+    derive_thread, role_weight, role_weights, salience_seed, satisfies_rule_l, DeriveOptions,
+    DeriveReport, Matcher, SchemaDef,
+};
 
 // ---- render ---------------------------------------------------------------
 pub use smysl_render::{RenderError, Target};

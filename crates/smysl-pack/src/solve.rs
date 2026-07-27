@@ -169,6 +169,9 @@ pub fn pack(
             raise(&mut selection, u, l);
         }
     }
+    // Only the exact path needs the floor kept separately, so without that feature this
+    // clone would be dead code rather than merely unused.
+    #[cfg(feature = "branch-and-bound")]
     let floor_selection = selection.clone();
     let floor_cost = cost_of(store, &selection, &req.estimator);
     if floor_cost > req.budget {
@@ -266,6 +269,8 @@ pub fn pack(
 
     // --- 4. exact refinement (feature `branch-and-bound`) -------------------
     let mut report = Report::new();
+    // Nothing reassigns this unless the exact search runs.
+    #[cfg_attr(not(feature = "branch-and-bound"), allow(unused_mut))]
     let mut proven = false;
     if req.mode == PackMode::Exact {
         if scope.len() > req.exact_threshold {
