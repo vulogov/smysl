@@ -36,7 +36,7 @@ pub use smysl_core::surface;
 pub use smysl_core::surface::{parse_surface, write_surface, ParseOutcome, WriteContext};
 pub use smysl_core::{
     canonical_uid, format_version_supported, from_cbor, from_cbor_seq, hash_bytes, kernel_major,
-    quantise, to_cbor, to_cbor_seq, unit_core_bytes, verify, Admission, AgentId, AgentKind,
+    quantise, to_cbor, to_cbor_seq, tokens, unit_core_bytes, verify, Admission, AgentId, AgentKind,
     Attestation, Code, CodecError, Contention, ContentionId, ContentionStatus, Date, Detected,
     DetectionKind, Diagnostic, DropReason, Error, ExitCode, Extra, Fidelity, GranularityProfile,
     Group, Hlc, IdError, IntegrityError, KernelType, Label, LangTag, Lod, NonDetReason, Op,
@@ -87,7 +87,16 @@ pub use smysl_graph::{
 
 // ---- ingest / providers (feature-gated) -----------------------------------
 #[cfg(feature = "ingest")]
-pub use smysl_ingest::{IngestPath, DEFAULT_REPAIR_ATTEMPTS};
+pub use smysl_ingest::ceiling::ceiling;
+#[cfg(feature = "ingest")]
+pub use smysl_ingest::path::choose as choose_ingest_path;
+#[cfg(feature = "ingest")]
+pub use smysl_ingest::recipe::short as recipe_short;
+#[cfg(feature = "ingest")]
+pub use smysl_ingest::{
+    attest, stage, AttestOptions, AttestReport, IngestOptions, IngestPath, IngestReport, Ingestor,
+    Judgement, Staged, What, DEFAULT_REPAIR_ATTEMPTS,
+};
 #[cfg(feature = "providers")]
 pub use smysl_provider::usage::{GroupBy, Totals};
 #[cfg(feature = "providers")]

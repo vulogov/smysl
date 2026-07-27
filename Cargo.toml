@@ -62,13 +62,17 @@ cli       = ["dep:clap"]
 tui       = ["dep:smysl-tui", "cli"]
 providers = ["dep:smysl-provider"]
 ingest    = ["dep:smysl-ingest", "providers"]
-local     = ["ingest", "smysl-provider/ollama"]
+local     = ["ingest", "smysl-provider/ollama", "smysl-ingest/ollama"]
 remote    = [
     "ingest",
     "smysl-provider/anthropic",
     "smysl-provider/openai",
     "smysl-provider/gemini",
     "smysl-provider/deepseek",
+    "smysl-ingest/anthropic",
+    "smysl-ingest/openai",
+    "smysl-ingest/gemini",
+    "smysl-ingest/deepseek",
 ]
 render-typst = ["smysl-render/typst"]
 render-html  = ["smysl-render/html"]

@@ -9,8 +9,31 @@
 //! RFC's implementation note requires. They change without notice; the mapper contract does
 //! not.
 
+pub mod auth;
+
+#[cfg(feature = "anthropic")]
+pub mod anthropic;
+#[cfg(feature = "deepseek")]
+pub mod deepseek;
+#[cfg(feature = "gemini")]
+pub mod gemini;
 #[cfg(feature = "ollama")]
 pub mod ollama;
+#[cfg(feature = "openai")]
+pub mod openai;
+#[cfg(any(feature = "openai", feature = "deepseek"))]
+pub mod openai_compat;
+
+/// Full jitter needs a random number and the pure crates have none. The nanosecond of the
+/// wall clock is a poor random source and a perfectly good jitter source: it only has to
+/// decorrelate clients, not resist anyone.
+#[cfg(feature = "http-client")]
+pub(crate) fn jitter() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| (d.subsec_nanos() % 1000) as f64 / 1000.0)
+        .unwrap_or(0.5)
+}
 
 use smysl_core::error::ProviderError;
 
@@ -26,6 +49,14 @@ pub fn build(cfg: &ProviderConfig) -> Result<Box<dyn Provider>, ProviderError> {
     match cfg.kind.as_str() {
         #[cfg(feature = "ollama")]
         "ollama" => Ok(Box::new(ollama::Ollama::new(cfg.clone()))),
+        #[cfg(feature = "deepseek")]
+        "deepseek" => Ok(Box::new(deepseek::DeepSeek::new(cfg.clone()))),
+        #[cfg(feature = "anthropic")]
+        "anthropic" => Ok(Box::new(anthropic::Anthropic::new(cfg.clone()))),
+        #[cfg(feature = "openai")]
+        "openai" => Ok(Box::new(openai::OpenAi::new(cfg.clone()))),
+        #[cfg(feature = "gemini")]
+        "gemini" => Ok(Box::new(gemini::Gemini::new(cfg.clone()))),
         other => Err(ProviderError::Malformed(format!(
             "provider kind `{other}` is not compiled into this build (have: {})",
             match crate::compiled_mappers().as_slice() {

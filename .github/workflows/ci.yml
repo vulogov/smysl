@@ -102,6 +102,9 @@ jobs:
       # `required` turns the skip into a failure: a live test that quietly skips in CI is
       # a live test nobody runs.
       - run: SMYSL_OLLAMA=required cargo test -p smysl-provider --features ollama
+      # The SM-P14 gate's first clause, as far as a keyless runner can take it: the same
+      # fixture through the whole ingest boundary against a real model.
+      - run: SMYSL_OLLAMA=required cargo test -p smysl-ingest --features ollama
 
   # The conformance suite runs against the built binary, not the library, so a second
   # implementation can be substituted for it.

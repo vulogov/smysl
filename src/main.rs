@@ -331,6 +331,12 @@ fn cli() -> Command {
                         .help("Retraction policy"),
                 )
                 .arg(
+                    Arg::new("staged")
+                        .long("staged")
+                        .help("Commit `.smysl/staged.smy` into the store")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
                     Arg::new("fail-on-contention")
                         .long("fail-on-contention")
                         .help("Exit 5 when the merged store carries a contention")
@@ -569,6 +575,65 @@ fn cli() -> Command {
                         .action(ArgAction::SetTrue),
                 )
                 .arg(Arg::new("store").value_name("PATH")),
+            "ingest" => sub
+                .arg(
+                    Arg::new("file")
+                        .value_name("FILE")
+                        .help("Document to ingest; `-` reads stdin"),
+                )
+                .arg(
+                    Arg::new("rung")
+                        .long("rung")
+                        .value_name("R")
+                        .value_parser(["computed", "document", "web", "model"])
+                        .help("Trust rung of the source; caps what units may claim (rule T)"),
+                )
+                .arg(
+                    Arg::new("granularity")
+                        .long("granularity")
+                        .value_name("P")
+                        .help("Granularity profile the units are produced under"),
+                )
+                .arg(
+                    Arg::new("path")
+                        .long("path")
+                        .value_name("P")
+                        .value_parser(["auto", "surface", "json-ast"])
+                        .help("Override the path D-9 would choose"),
+                )
+                .arg(
+                    Arg::new("repair")
+                        .long("repair")
+                        .value_name("N")
+                        .help("Repair attempts before a span degrades to opaque prose"),
+                )
+                .arg(
+                    Arg::new("yes")
+                        .long("yes")
+                        .help("Commit the staged batch instead of exiting 10")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .help("Report what would be sent and to whom; make no call")
+                        .action(ArgAction::SetTrue),
+                ),
+            "attest" => sub
+                .arg(
+                    Arg::new("what")
+                        .long("what")
+                        .value_name("W")
+                        .value_parser(["gist-coverage", "warrant-plausibility", "granularity"])
+                        .help("Which semantic question to ask"),
+                )
+                .arg(
+                    Arg::new("sample")
+                        .long("sample")
+                        .value_name("N")
+                        .help("How many units to ask about; `all` for the whole store"),
+                )
+                .arg(Arg::new("store").value_name("PATH")),
             "providers" => sub
                 .arg(
                     Arg::new("probe")
@@ -785,20 +850,14 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     for path in files {
         bar.set_label(format!("checking {path}"));
         bar.tick();
-        let src = match read_input(&path) {
-            Ok(s) => s,
-            Err(e) => {
-                bar.abandon();
-                eprintln!("smysl check: {path}: {e}");
-                return ExitCode::Failure;
-            }
-        };
-        let out = match parse_surface(&src) {
+        // A store is surface text or a CBOR log, and `merge -o` writes the latter - so
+        // `merge … | check` would be a documented pipeline that did not work if this only
+        // read one of them.
+        let out = match read_store(&path) {
             Ok(o) => o,
-            Err(e) => {
+            Err(code) => {
                 bar.abandon();
-                eprintln!("smysl check: {path}: {e}");
-                return e.into_exit_code();
+                return code;
             }
         };
 
@@ -870,6 +929,58 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     }
     finish_over(bar, checked, "checked");
     worst
+}
+
+/// Read a store for `check`, keeping the parse diagnostics and labels a surface file
+/// carries.
+///
+/// A CBOR log has neither: its records were validated when they were decoded, and labels
+/// have no wire record. So the CBOR path returns an outcome with an empty diagnostic set,
+/// which is the truth rather than a convenience.
+fn read_store(path: &str) -> Result<smysl::ParseOutcome, ExitCode> {
+    let bytes = match read_bytes(path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("smysl check: {path}: {e}");
+            return Err(ExitCode::Failure);
+        }
+    };
+
+    if bytes.first() == Some(&b'@') || bytes.is_empty() {
+        let src = match String::from_utf8(bytes) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("smysl check: {path}: {e}");
+                return Err(ExitCode::Failure);
+            }
+        };
+        return parse_surface(&src).map_err(|e| {
+            eprintln!("smysl check: {path}: {e}");
+            e.into_exit_code()
+        });
+    }
+
+    match smysl::from_cbor_seq(&bytes) {
+        Ok((records, _)) => Ok(smysl::ParseOutcome {
+            records,
+            ..Default::default()
+        }),
+        Err(e) => {
+            eprintln!("smysl check: {path}: {e}");
+            Err(ExitCode::Failure)
+        }
+    }
+}
+
+fn read_bytes(path: &str) -> Result<Vec<u8>, String> {
+    if path == "-" {
+        let mut b = Vec::new();
+        std::io::stdin()
+            .read_to_end(&mut b)
+            .map_err(|e| e.to_string())?;
+        return Ok(b);
+    }
+    std::fs::read(path).map_err(|e| e.to_string())
 }
 
 /// Read a store from surface text or a CBOR log, whichever it turns out to be.
@@ -1173,6 +1284,30 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .map(|v| v.cloned().collect())
         .unwrap_or_default();
 
+    // Rule S's other half: `--staged` is the confirmation `ingest` exits 10 waiting for.
+    // It is a merge like any other, because a staged batch is just records - which is
+    // exactly why staging can be reviewed with `cat` and reverted with `rm`.
+    #[cfg(feature = "ingest")]
+    let staged_records = if m.get_flag("staged") {
+        match smysl::stage::read(project_root(global)) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("smysl merge: {e}");
+                return ExitCode::Failure;
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    #[cfg(not(feature = "ingest"))]
+    let staged_records: Vec<Record> = {
+        if m.get_flag("staged") {
+            eprintln!("smysl merge: this build has no ingest layer (build with --features local)");
+            return ExitCode::Usage;
+        }
+        Vec::new()
+    };
+
     let mut opts = MergeOptions::default();
     if let Some(p) = m
         .get_one::<String>("policy")
@@ -1240,6 +1375,23 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     }
     finish_over(bar, merged, "merged");
+
+    if !staged_records.is_empty() {
+        let n = staged_records.len();
+        let staged = Store::from_records(staged_records);
+        match merge(&mut store, &staged, opts.clone()) {
+            Ok(r) => {
+                for d in r.report.iter() {
+                    eprintln!("staged: {d}");
+                }
+                eprintln!("smysl merge: committed {n} staged record(s)");
+            }
+            Err(e) => {
+                eprintln!("smysl merge: {e}");
+                return e.exit_code();
+            }
+        }
+    }
 
     let out = global.get_one::<String>("output");
     let bytes = store.log_bytes();
@@ -2028,6 +2180,262 @@ fn load_registry(global: &ArgMatches) -> Result<smysl::Registry, String> {
     Ok(r.with_fallback(cfg.fallback))
 }
 
+/// `smysl ingest` - prose or data to staged units (§23.1). **Model-dependent.**
+///
+/// Exits 10 unless `--yes`: rule S says model output is staged and confirmed, and an exit
+/// code is how a pipeline learns that a decision is waiting for it.
+#[cfg(feature = "ingest")]
+fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let style = progress_style(global);
+    let registry = match load_registry(global) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl ingest: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let source = m
+        .get_one::<String>("file")
+        .cloned()
+        .unwrap_or_else(|| "-".to_string());
+    let input = match read_input(&source) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("smysl ingest: {source}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let store = match store_arg(m, global) {
+        Some(path) => match load_store(&path) {
+            Ok((s, _)) => s,
+            Err(e) => {
+                eprintln!("smysl ingest: {e}");
+                return ExitCode::Failure;
+            }
+        },
+        None => Store::new(),
+    };
+
+    let rung = m
+        .get_one::<String>("rung")
+        .and_then(|s| smysl::Rung::parse(s))
+        .unwrap_or(smysl::Rung::Document);
+
+    let mut opts = smysl::IngestOptions::at_rung(rung);
+    if let Some(g) = m.get_one::<String>("granularity") {
+        opts = opts.with_granularity(g);
+    }
+    if let Some(p) = m.get_one::<String>("path") {
+        if let Some(p) = smysl::IngestPath::parse(p) {
+            opts = opts.with_path(p);
+        }
+    }
+    if let Some(n) = m.get_one::<String>("repair").and_then(|s| s.parse().ok()) {
+        opts = opts.with_repair_attempts(n);
+    }
+
+    // `--dry-run` answers the question a caller most wants answered *before* egress: what
+    // would be sent, and to whom. It makes no call, which is the whole point.
+    if m.get_flag("dry-run") {
+        let provider = match registry.for_task(smysl::Task::ContentIngest) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("smysl ingest: {e}");
+                return e.exit_code();
+            }
+        };
+        let caps = provider.caps();
+        let choice =
+            smysl::choose_ingest_path(&caps, smysl::Task::ContentIngest, input.len(), opts.path);
+        println!("provider     {}", provider.id());
+        println!(
+            "egress       {}",
+            if caps.offline {
+                "no - local"
+            } else {
+                "YES - leaves the machine"
+            }
+        );
+        println!("path         {} ({})", choice.path, choice.reason.as_str());
+        println!("rung         {rung} (ceiling {})", smysl::ceiling(rung));
+        println!(
+            "input        {} bytes, {} token(s)",
+            input.len(),
+            smysl::tokens(&input)
+        );
+        return ExitCode::Success;
+    }
+
+    // One model call per chunk at least, so the wait is real and worth reporting.
+    let spin = Spinner::new(style, format!("ingesting {source}"));
+    let outcome = smysl::Ingestor::new(&registry, opts).ingest(&store, &input);
+    spin.finish("");
+
+    let (staged, report) = match outcome {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl ingest: {e}");
+            return e.exit_code();
+        }
+    };
+
+    for d in &report.diagnostics {
+        eprintln!("smysl ingest: {d}");
+    }
+    for (unit, d) in &staged.rejected {
+        eprintln!("smysl ingest: rejected `{}`: {d}", unit.gist);
+    }
+    eprintln!(
+        "smysl ingest: {} chunk(s), {} call(s), {} unit(s), {} degraded, {} token(s)",
+        report.chunks,
+        report.calls,
+        staged.len(),
+        report.degraded,
+        report.usage.total()
+    );
+
+    // The ledger records counts, models, task and recipe - never content (§29).
+    if let Some(provider) = &report.provider {
+        let mut ledger = smysl::Ledger::open(project_file(global, smysl::Ledger::PATH));
+        let entry = smysl::LedgerEntry::new(
+            now_millis(),
+            provider.clone(),
+            "",
+            smysl::Task::ContentIngest,
+            report.usage,
+        );
+        let entry = match report.recipe {
+            Some(r) => entry.with_recipe(smysl::recipe_short(&r)),
+            None => entry,
+        };
+        if let Err(e) = ledger.record(entry) {
+            eprintln!("smysl ingest: the ledger could not be written: {e}");
+        }
+    }
+
+    let root = project_root(global);
+    if let Err(e) = smysl::stage::write(&root, &staged) {
+        eprintln!("smysl ingest: {e}");
+        return ExitCode::Failure;
+    }
+
+    if m.get_flag("yes") {
+        println!("{} unit(s) staged and confirmed", staged.len());
+        return ExitCode::Success;
+    }
+    println!(
+        "{} unit(s) staged in {}; review, then `smysl merge --staged`",
+        staged.len(),
+        root.join(smysl::stage::PATH).display()
+    );
+    // Rule S: staged output awaits confirmation, and exit 10 is how a pipeline is told.
+    ExitCode::Staged
+}
+
+/// `smysl attest` - semantic checks that require a model (§23.1). **Model-dependent.**
+///
+/// Never mutates cores: a judgement is a separate record, so it can be wrong, disputed, or
+/// superseded without changing the uid of the claim it is about.
+#[cfg(feature = "ingest")]
+fn cmd_attest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let Some(path) = store_arg(m, global) else {
+        eprintln!("smysl attest: no store given");
+        return ExitCode::Usage;
+    };
+    let (store, _) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl attest: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let registry = match load_registry(global) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl attest: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let what = m
+        .get_one::<String>("what")
+        .and_then(|s| smysl::What::parse(s))
+        .unwrap_or(smysl::What::GistCoverage);
+    let sample = match m.get_one::<String>("sample").map(String::as_str) {
+        Some("all") => None,
+        Some(n) => n.parse().ok().or(Some(10)),
+        None => Some(10),
+    };
+
+    let opts = smysl::AttestOptions::new(what).with_sample(sample);
+    let spin = Spinner::new(progress_style(global), format!("attesting {what}"));
+    let outcome = smysl::attest(&store, &registry, &opts);
+    spin.finish("");
+
+    let report = match outcome {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl attest: {e}");
+            return e.exit_code();
+        }
+    };
+
+    for j in &report.judgements {
+        let verdict = match j.holds {
+            Some(true) => "yes",
+            Some(false) => "NO ",
+            // Recording an unreadable answer as a failure would manufacture evidence.
+            None => "?  ",
+        };
+        println!("{verdict} {} {}", j.uid.short(), j.reason);
+    }
+    println!(
+        "{path}: {} judged, {} failed, {} unreadable, {} token(s)",
+        report.judgements.len(),
+        report.failed().len(),
+        report.unreadable,
+        report.usage.total()
+    );
+    ExitCode::Success
+}
+
+#[cfg(not(feature = "ingest"))]
+fn cmd_ingest(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl ingest: this build has no ingest layer (build with --features local)");
+    ExitCode::Usage
+}
+
+#[cfg(not(feature = "ingest"))]
+fn cmd_attest(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl attest: this build has no ingest layer (build with --features local)");
+    ExitCode::Usage
+}
+
+/// Milliseconds since the epoch, for the usage ledger.
+///
+/// The one place the CLI reads a clock. Everything else takes its timestamp as an argument
+/// so it stays reproducible; the ledger is a record of when things happened, so it does not.
+#[cfg(feature = "providers")]
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// The project root: the directory holding `.smysl/`.
+#[cfg(feature = "providers")]
+fn project_root(global: &ArgMatches) -> std::path::PathBuf {
+    global
+        .get_one::<String>("store")
+        .map(std::path::PathBuf::from)
+        .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
 /// `smysl providers` - what is configured, what is reachable, and what would egress
 /// (§23.1, §29). **No content egress.**
 #[cfg(feature = "providers")]
@@ -2320,6 +2728,8 @@ fn main() -> ProcExitCode {
         "retract" => cmd_retract(sub, &matches),
         "thread" => cmd_thread(sub, &matches),
         "render" => cmd_render(sub, &matches),
+        "ingest" => cmd_ingest(sub, &matches),
+        "attest" => cmd_attest(sub, &matches),
         "providers" => cmd_providers(sub, &matches),
         "usage" => cmd_usage(sub, &matches),
         "reindex" => cmd_reindex(sub, &matches),

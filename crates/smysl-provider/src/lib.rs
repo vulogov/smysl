@@ -288,6 +288,9 @@ impl Request {
 }
 
 /// What came back.
+///
+/// Built through [`Completion::new`]: the `Provider` trait is public, so an implementor
+/// outside this crate has to be able to return one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Completion {
@@ -300,6 +303,10 @@ pub struct Completion {
 }
 
 /// Token counts for one call.
+///
+/// `#[non_exhaustive]`, so it is built through [`Usage::new`] rather than a literal - the
+/// `Provider` trait is public and an implementor outside this crate has to be able to
+/// return one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub struct Usage {
@@ -313,8 +320,55 @@ pub struct Usage {
 }
 
 impl Usage {
+    /// Counts the provider reported.
+    pub const fn reported(input_tokens: u64, output_tokens: u64) -> Usage {
+        Usage {
+            input_tokens,
+            output_tokens,
+            estimated: false,
+            retries: 0,
+        }
+    }
+
+    /// Counts the bundled estimator produced, which says so (D-2, `SMY-W305`).
+    pub const fn estimated(input_tokens: u64, output_tokens: u64) -> Usage {
+        Usage {
+            input_tokens,
+            output_tokens,
+            estimated: true,
+            retries: 0,
+        }
+    }
+
+    pub const fn after_retries(mut self, retries: u32) -> Usage {
+        self.retries = retries;
+        self
+    }
+
     pub const fn total(&self) -> u64 {
         self.input_tokens + self.output_tokens
+    }
+}
+
+impl Completion {
+    /// A completion whose structure the provider did *not* enforce.
+    ///
+    /// The unenforced form is the constructor without a suffix, so claiming enforcement is
+    /// something a mapper has to do on purpose.
+    pub fn new(text: impl Into<String>, model: impl Into<String>, usage: Usage) -> Completion {
+        Completion {
+            text: text.into(),
+            model: model.into(),
+            usage,
+            structured: false,
+        }
+    }
+
+    /// Mark the structure as provider-enforced. Only a mapper whose mechanism actually
+    /// guarantees the shape may call this - see `StructuredMode::is_enforced`.
+    pub fn enforced(mut self) -> Completion {
+        self.structured = true;
+        self
     }
 }
 
@@ -352,6 +406,16 @@ pub struct Probe {
 }
 
 impl Probe {
+    /// A provider that answered.
+    pub fn reachable(models: Vec<String>, caps: Capabilities, detail: impl Into<String>) -> Probe {
+        Probe {
+            reachable: true,
+            models,
+            caps: Some(caps),
+            detail: detail.into(),
+        }
+    }
+
     pub fn unreachable(detail: impl Into<String>) -> Probe {
         Probe {
             reachable: false,

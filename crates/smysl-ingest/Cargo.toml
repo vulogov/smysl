@@ -8,6 +8,16 @@ license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
 
+[features]
+default = []
+# Mirrors of the provider crate's mapper features, so the live gate test can name the
+# providers this build can actually drive.
+ollama    = ["smysl-provider/ollama"]
+anthropic = ["smysl-provider/anthropic"]
+openai    = ["smysl-provider/openai"]
+gemini    = ["smysl-provider/gemini"]
+deepseek  = ["smysl-provider/deepseek"]
+
 [dependencies]
 smysl-core     = { workspace = true }
 smysl-check    = { workspace = true }

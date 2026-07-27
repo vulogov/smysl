@@ -28,8 +28,15 @@ pub fn check_unit(
 ) {
     let Some(body) = &core.body else { return };
 
+    // `prose` is the kernel type for opaque unstructured text, so requiring it to be a
+    // single assertion is requiring it not to be prose. Rule I depends on this: an
+    // unrepairable span degrades to a `prose` unit carrying the raw span verbatim, and a
+    // raw span is very often several paragraphs. Without the exemption the two rules
+    // contradict each other and ingest cannot both make progress and stay conformant.
+    let opaque = core.schema.kernel() == Some(smysl_core::KernelType::Prose);
+
     // `SMY-E040` - structurally more than one assertion.
-    if granularity.admission == Admission::SingleAssertion {
+    if granularity.admission == Admission::SingleAssertion && !opaque {
         if let Some(reason) = multi_assertion(body) {
             report.push(
                 Diagnostic::on(Code::E040, *uid)
@@ -85,7 +92,7 @@ fn list_items(body: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smysl_core::{KernelType, Record, Status, UnitCoreBuilder};
+    use smysl_core::{canonical_uid, KernelType, Record, Status, UnitCoreBuilder};
 
     fn check(body: &str, g: &GranularityProfile) -> Report {
         let core = UnitCoreBuilder::new(KernelType::Claim, "a claim", Status::Speculative)
@@ -101,6 +108,57 @@ mod tests {
     /// 240 bytes -> 60 tokens, inside the default 40..120 range.
     fn in_range() -> String {
         "word ".repeat(48)
+    }
+
+    /// Rule I degrades an unrepairable span to a `prose` unit carrying the span verbatim,
+    /// which is very often several paragraphs. Without this exemption rule I and
+    /// single-assertion granularity contradict each other.
+    #[test]
+    fn a_prose_unit_is_exempt_from_single_assertion_admission() {
+        let opaque = UnitCoreBuilder::new(KernelType::Prose, "an opaque span", Status::Speculative)
+            .body("First paragraph.\n\nSecond paragraph.\n\nThird.")
+            .build()
+            .unwrap();
+
+        let mut report = Report::new();
+        check_unit(
+            &canonical_uid(&opaque),
+            &opaque,
+            &GranularityProfile::standard(),
+            &mut report,
+        );
+        assert!(
+            !report.iter().any(|d| d.code == Code::E040),
+            "prose must be allowed to be prose"
+        );
+    }
+
+    /// ...and the exemption is only for `prose`: every other type still has to be one
+    /// assertion, or the escape hatch would be the whole format's undoing.
+    #[test]
+    fn no_other_type_is_exempt() {
+        for t in KernelType::ALL {
+            if *t == KernelType::Prose {
+                continue;
+            }
+            let Ok(core) = UnitCoreBuilder::new(*t, "a gist", Status::Speculative)
+                .body("First paragraph.\n\nSecond paragraph.")
+                .build()
+            else {
+                continue;
+            };
+            let mut report = Report::new();
+            check_unit(
+                &canonical_uid(&core),
+                &core,
+                &GranularityProfile::standard(),
+                &mut report,
+            );
+            assert!(
+                report.iter().any(|d| d.code == Code::E040),
+                "{t} slipped past single-assertion admission"
+            );
+        }
     }
 
     #[test]

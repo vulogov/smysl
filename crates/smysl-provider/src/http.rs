@@ -156,11 +156,24 @@ mod client {
     /// GET, for probes. Probes never retry: `providers --probe` reports what it found, and
     /// a probe that waited three seconds to say "unreachable" would be worse at its job.
     pub fn get(url: &str, timeout: Duration) -> Result<HttpResponse, ProviderError> {
+        get_with(url, &[], timeout)
+    }
+
+    /// GET with headers, for a probe that needs a credential to be told anything.
+    pub fn get_with(
+        url: &str,
+        headers: &[(&str, String)],
+        timeout: Duration,
+    ) -> Result<HttpResponse, ProviderError> {
         let agent = ureq::AgentBuilder::new()
             .timeout(timeout)
             .user_agent(concat!("smysl/", env!("CARGO_PKG_VERSION")))
             .build();
-        match agent.get(url).call() {
+        let mut req = agent.get(url);
+        for (k, v) in headers {
+            req = req.set(k, v);
+        }
+        match req.call() {
             Ok(resp) => {
                 let status = resp.status();
                 let body = resp
@@ -183,7 +196,7 @@ mod client {
 }
 
 #[cfg(feature = "http-client")]
-pub use client::{get, post_json};
+pub use client::{get, get_with, post_json};
 
 #[cfg(test)]
 mod tests {

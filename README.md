@@ -132,6 +132,37 @@ Long-running commands report progress on **stderr**, never stdout, and only when
 a terminal: `--noprogress`, `--quiet` and `--json` each turn it off, and a pipeline never
 finds a spinner in the middle of a CBOR sequence.
 
+**SM-P14 — hosted providers and ingest.** Four more mappers and the boundary a model's
+output has to cross. Three rules meet there, and they are one idea from three directions: a
+model's output is a proposal, its failures are recoverable, and its confidence is not
+evidence.
+
+**Rule T** caps what a model may claim. A `model`-rung answer claiming `measured` is
+downgraded and told so — and if the shape cannot carry the ceiling either (`inferred` needs
+grounds), it walks down to what the unit can actually support.
+
+**Rule I** guarantees progress. A span that survives its repair budget becomes an opaque
+`prose` unit carrying the raw text verbatim, and the run exits 10 rather than failing: a
+corpus with some opaque units is usable, a failed ingest is not.
+
+**Rule S** stages. Model output never enters the store; it lands in `.smysl/staged.smy` as
+readable surface text, and `merge --staged` is the confirmation.
+
+```bash
+$ smysl ingest --dry-run report.md
+provider     ollama
+egress       no - local
+path         json-ast (default for small enforced ingest)
+rung         document (ceiling cited)
+$ smysl ingest report.md
+smysl ingest: warning: SMY-W304: span degraded to opaque prose after 3 attempt(s)
+7 unit(s) staged in ./.smysl/staged.smy; review, then `smysl merge --staged`   # exit 10
+```
+
+Recipes (D-8) make a model call's *conditions* auditable even though the call itself is
+not reproducible — and `recipe_family`, which drops the provider and the model, is what lets
+E9 compare the same logical ingest across vendors.
+
 | Phase | Delivers | State |
 |---|---|---|
 | SM-P0 | scaffold, diagnostics, gates | **done** |
@@ -148,7 +179,7 @@ finds a spinner in the middle of a CBOR sequence.
 | SM-P11 | thread schemas, derivation, `thread --derive` | **done** |
 | SM-P12 | Render IR, profiles, six backends, `render` | **done** |
 | SM-P13 | provider layer, Ollama, registry, ledger, `providers` / `usage` | **done** |
-| SM-P14 | hosted providers, ingest | |
+| SM-P14 | hosted providers, chunking, repair loop, `ingest` / `attest` | **done** |
 | SM-P15 | TUI, evaluation | |
 
 ## Layout

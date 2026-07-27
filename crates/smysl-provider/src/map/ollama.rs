@@ -276,22 +276,7 @@ impl Provider for Ollama {
         // The runtime owns the call (D-12), so nothing outside this crate touches a thread
         // or a socket.
         let resp = crate::runtime::run(move || {
-            http::post_json(
-                &url,
-                &[],
-                &body,
-                timeout,
-                std::thread::sleep,
-                // Full jitter needs a random number and the pure crates have none. The
-                // nanosecond of the wall clock is a poor random source and a perfectly good
-                // jitter source: it only has to decorrelate clients, not resist anyone.
-                || {
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| (d.subsec_nanos() % 1000) as f64 / 1000.0)
-                        .unwrap_or(0.5)
-                },
-            )
+            http::post_json(&url, &[], &body, timeout, std::thread::sleep, super::jitter)
         })?;
 
         if resp.status >= 400 {

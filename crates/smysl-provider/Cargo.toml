@@ -13,13 +13,16 @@ default = []
 # Linked only when a mapper needs it, so the trait, the registry and the ledger build and
 # test without an HTTP client in the tree.
 http-client = ["dep:ureq"]
+# TLS, needed only by hosted providers. Ollama is loopback HTTP, so a local-only build
+# links no TLS stack at all.
+tls = ["http-client", "ureq/tls"]
 # One feature per mapper (§21.2). Ollama is the CI conformance reference: it is the only
 # provider exercisable without keys, cost, or egress.
 ollama    = ["http-client"]
-anthropic = ["http-client"]
-openai    = ["http-client"]
-gemini    = ["http-client"]
-deepseek  = ["http-client"]
+anthropic = ["tls"]
+openai    = ["tls"]
+gemini    = ["tls"]
+deepseek  = ["tls"]
 # D-3: rustls with the ring provider by default; `tls-pure` selects rustls-rustcrypto.
 tls-pure  = []
 
