@@ -89,7 +89,13 @@ pub use smysl_graph::{
 #[cfg(feature = "ingest")]
 pub use smysl_ingest::{IngestPath, DEFAULT_REPAIR_ATTEMPTS};
 #[cfg(feature = "providers")]
-pub use smysl_provider::{ProviderError, StructuredMode};
+pub use smysl_provider::usage::{GroupBy, Totals};
+#[cfg(feature = "providers")]
+pub use smysl_provider::{
+    config::ProviderConfig, map::build as build_provider, Capabilities, Completion, Ledger,
+    LedgerEntry, Message, Probe, Provider, ProviderConfigFile, ProviderError, ProviderId, Registry,
+    Request, StreamMsg, StructuredMode, Task, TokenCount, Usage,
+};
 
 /// The crate version, as a convenience for embedders recording provenance.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

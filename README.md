@@ -102,6 +102,36 @@ Connectives are template selection keyed by relation kind and seeded by `uid[0]`
 model inference — so inserting a block earlier does not reword every transition after it.
 `render` is the fifth and last rule D operation in the determinism matrix.
 
+**SM-P13 — the provider layer.** The first phase that leaves the machine, and most of it
+is about not doing so. `--offline` is decided from configuration before any I/O: a hosted
+provider fails with exit 7 without a socket being opened, and `providers --tasks` says
+exactly which tasks would egress under current routing.
+
+```bash
+$ smysl providers --probe
+ollama         up    ctx 131072   out 2048   json-schema  local   4 model(s); llama3.2 installed
+$ smysl --offline providers --tasks
+task                 provider       egress     command
+content-ingest       ollama         local      ingest
+attest               hosted         LEAVES     attest
+--offline: any task marked LEAVES will exit 7 rather than run
+```
+
+Fallback fires on `Unreachable` and on nothing else — falling back on `Unauthorized` or
+`ContextExceeded` would hide a configuration error behind a different model, and the caller
+would get an answer from somewhere they did not choose. Ollama is the conformance reference
+because it is the only provider exercisable without keys, cost, or egress; its mapper is
+asserted against a running server in CI rather than against a remembered API.
+
+Keys are never stored: only `api_key_env` or `api_key_cmd`, so `.smysl/config.hjson` is
+safe to commit. `ProviderConfig` has no field a key could be written into, and a config
+naming one is refused at load. The usage ledger records counts, models, task, and recipe —
+never prompt or completion text.
+
+Long-running commands report progress on **stderr**, never stdout, and only when stderr is
+a terminal: `--noprogress`, `--quiet` and `--json` each turn it off, and a pipeline never
+finds a spinner in the middle of a CBOR sequence.
+
 | Phase | Delivers | State |
 |---|---|---|
 | SM-P0 | scaffold, diagnostics, gates | **done** |
@@ -117,7 +147,8 @@ model inference — so inserting a block earlier does not reword every transitio
 | SM-P10 | exact packing, provable optimality gap | **done** |
 | SM-P11 | thread schemas, derivation, `thread --derive` | **done** |
 | SM-P12 | Render IR, profiles, six backends, `render` | **done** |
-| SM-P13–P14 | providers, ingest | |
+| SM-P13 | provider layer, Ollama, registry, ledger, `providers` / `usage` | **done** |
+| SM-P14 | hosted providers, ingest | |
 | SM-P15 | TUI, evaluation | |
 
 ## Layout

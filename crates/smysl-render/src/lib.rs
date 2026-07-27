@@ -75,7 +75,7 @@ impl Target {
 
 impl core::fmt::Display for Target {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(self.as_str())
+        f.pad(self.as_str())
     }
 }
 

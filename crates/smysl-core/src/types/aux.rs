@@ -65,7 +65,7 @@ impl DetectionKind {
 
 impl fmt::Display for DetectionKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        f.pad(self.as_str())
     }
 }
 
@@ -115,7 +115,7 @@ impl ContentionStatus {
 
 impl fmt::Display for ContentionStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        f.pad(self.as_str())
     }
 }
 
@@ -210,7 +210,7 @@ impl DropReason {
 
 impl fmt::Display for DropReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        f.pad(self.as_str())
     }
 }
 
@@ -247,7 +247,7 @@ impl PackMode {
 
 impl fmt::Display for PackMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        f.pad(self.as_str())
     }
 }
 

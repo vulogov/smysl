@@ -528,6 +528,17 @@ impl ProviderError {
     pub const fn is_fallback_eligible(&self) -> bool {
         matches!(self, ProviderError::Unreachable)
     }
+
+    /// Appendix E: an offline violation is 7 and everything else a provider can do is 6.
+    ///
+    /// The distinction is the one a pipeline branches on: exit 7 means "you asked me not
+    /// to send this and I did not", which is a policy outcome rather than a failure.
+    pub const fn exit_code(&self) -> ExitCode {
+        match self {
+            ProviderError::OfflineViolation => ExitCode::Offline,
+            _ => ExitCode::Provider,
+        }
+    }
 }
 
 impl fmt::Display for ProviderError {

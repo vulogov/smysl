@@ -7,10 +7,14 @@
 //! SM-P0 declares the full command surface of §23 and reports, per command, the phase
 //! that wires it up. Commands are wired only once their library API has stabilised.
 
+mod progress;
+
 use std::io::{Read, Write};
 use std::process::ExitCode as ProcExitCode;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
+
+use progress::{Bar, Spinner, Style};
 use smysl::ExitCode;
 use smysl::{
     check, conformance, effective_status, fidelity, granularity_distribution, merge, parse_surface,
@@ -111,6 +115,11 @@ fn cli() -> Command {
             .long("no-color")
             .global(true)
             .help("Disable colour")
+            .action(ArgAction::SetTrue),
+        Arg::new("noprogress")
+            .long("noprogress")
+            .global(true)
+            .help("Disable progress bars, whatever the terminal is")
             .action(ArgAction::SetTrue),
         Arg::new("json")
             .long("json")
@@ -560,6 +569,45 @@ fn cli() -> Command {
                         .action(ArgAction::SetTrue),
                 )
                 .arg(Arg::new("store").value_name("PATH")),
+            "providers" => sub
+                .arg(
+                    Arg::new("probe")
+                        .long("probe")
+                        .help("Contact each provider and report what it actually is")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("models")
+                        .long("models")
+                        .help("List each provider's installed models")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("tasks")
+                        .long("tasks")
+                        .help("Report which tasks would send content off the machine")
+                        .action(ArgAction::SetTrue),
+                ),
+            "usage" => sub
+                .arg(
+                    Arg::new("by")
+                        .long("by")
+                        .value_name("K")
+                        .value_parser(["provider", "task", "run", "model"])
+                        .help("How to group the ledger"),
+                )
+                .arg(
+                    Arg::new("since")
+                        .long("since")
+                        .value_name("MS")
+                        .help("Only calls at or after this epoch-millisecond timestamp"),
+                )
+                .arg(
+                    Arg::new("reset")
+                        .long("reset")
+                        .help("Discard the ledger")
+                        .action(ArgAction::SetTrue),
+                ),
             "reindex" => sub
                 .arg(
                     Arg::new("verify")
@@ -590,7 +638,7 @@ fn cli() -> Command {
 /// Also verifies the `surface -> CBOR -> surface` round trip, because that is the property
 /// that makes reformatting safe: hashes are computed over CBOR only, so canonicalising
 /// must never move a uid. Identity drift exits 9, not 3 - it is a different kind of wrong.
-fn cmd_fmt(m: &ArgMatches) -> ExitCode {
+fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let check = m.get_flag("check");
     let write = m.get_flag("write");
     let files: Vec<String> = m
@@ -604,11 +652,16 @@ fn cmd_fmt(m: &ArgMatches) -> ExitCode {
         files
     };
 
+    let n = inputs.len();
+    let mut bar = Bar::new(progress_style(global), "formatting", n);
     let mut worst = ExitCode::Success;
     for path in inputs {
+        bar.set_label(format!("formatting {path}"));
+        bar.tick();
         let src = match read_input(&path) {
             Ok(s) => s,
             Err(e) => {
+                bar.abandon();
                 eprintln!("smysl fmt: {path}: {e}");
                 return ExitCode::Failure;
             }
@@ -621,6 +674,7 @@ fn cmd_fmt(m: &ArgMatches) -> ExitCode {
                 return e.into_exit_code();
             }
         };
+        bar.suspend();
         for d in &out.diagnostics {
             eprintln!("{path}: {d}");
         }
@@ -659,7 +713,19 @@ fn cmd_fmt(m: &ArgMatches) -> ExitCode {
             }
         }
     }
+    finish_over(bar, n, "formatted");
     worst
+}
+
+/// End a bar over `n` inputs: a summary when there were several, silence when there was
+/// one. A "processed 1 file" line is noise, and noise is what teaches people to stop
+/// reading output.
+fn finish_over(bar: Bar, n: usize, verb: &str) {
+    if n > 1 {
+        bar.finish(&format!("{verb} {n} file(s)"));
+    } else {
+        bar.abandon();
+    }
 }
 
 /// `smysl check` - run the check pipeline (§23.1).
@@ -711,11 +777,18 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Usage;
     }
 
+    // Ten passes over a large store is real work, and a caller checking a directory of
+    // them wants to know which file it is on when one of them is slow.
+    let checked = files.len();
+    let mut bar = Bar::new(progress_style(global), "checking", checked);
     let mut worst = ExitCode::Success;
     for path in files {
+        bar.set_label(format!("checking {path}"));
+        bar.tick();
         let src = match read_input(&path) {
             Ok(s) => s,
             Err(e) => {
+                bar.abandon();
                 eprintln!("smysl check: {path}: {e}");
                 return ExitCode::Failure;
             }
@@ -723,6 +796,7 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         let out = match parse_surface(&src) {
             Ok(o) => o,
             Err(e) => {
+                bar.abandon();
                 eprintln!("smysl check: {path}: {e}");
                 return e.into_exit_code();
             }
@@ -741,6 +815,9 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             report.push(d.clone());
         }
         report.sort();
+
+        // Everything below prints; the bar comes back on the next iteration.
+        bar.suspend();
 
         if m.get_flag("granularity") {
             for (profile, n) in granularity_distribution(&store) {
@@ -791,6 +868,7 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             );
         }
     }
+    finish_over(bar, checked, "checked");
     worst
 }
 
@@ -1120,9 +1198,14 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         AgentId::new("tool:smysl-merge").expect("literal"),
     ));
 
+    // Merge is a fold over stores, and the interesting case is many of them.
+    let merged = inputs.len();
+    let mut bar = Bar::new(progress_style(global), "merging", merged);
     let mut store = Store::new();
     let mut labels = Vec::new();
     for path in &inputs {
+        bar.set_label(format!("merging {path}"));
+        bar.tick();
         let (s, l) = match load_store(path) {
             Ok(v) => v,
             Err(e) => {
@@ -1132,7 +1215,9 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         };
         labels.push(l);
         opts.labels = labels.clone();
-        match merge(&mut store, &s, opts.clone()) {
+        let outcome = merge(&mut store, &s, opts.clone());
+        bar.suspend();
+        match outcome {
             Ok(r) => {
                 for d in r.report.iter() {
                     eprintln!("{path}: {d}");
@@ -1154,6 +1239,7 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             }
         }
     }
+    finish_over(bar, merged, "merged");
 
     let out = global.get_one::<String>("output");
     let bytes = store.log_bytes();
@@ -1314,11 +1400,26 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     }
 
+    // Branch and bound over a large scope has no countable steps - a bar would have to
+    // invent a denominator, and a bar that lies about how far along it is is worse than a
+    // spinner that only says how long it has been going.
+    let exact = req.mode == smysl::PackMode::Exact;
+    let mut spin = Spinner::new(progress_style(global), "packing");
+
     let sal = smysl::salience(
         &store,
         &SalienceRequest::default().seeded(smysl::view_roots(&store)),
     );
-    let packed = match smysl::pack(&store, &sal, &req) {
+    spin.set_label(if exact {
+        "searching for the optimum"
+    } else {
+        "packing"
+    });
+
+    let outcome = smysl::pack(&store, &sal, &req);
+    spin.finish("");
+
+    let packed = match outcome {
         Ok(p) => p,
         Err(e) => {
             // Rule R: a budget too small to hold a claim and its rebuttals fails rather
@@ -1886,6 +1987,236 @@ fn cmd_render(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     ExitCode::Success
 }
 
+/// Where a project's `.smysl/` directory lives: beside the store, or under the cwd.
+#[cfg(feature = "providers")]
+fn project_file(global: &ArgMatches, name: &str) -> std::path::PathBuf {
+    let base = global
+        .get_one::<String>("store")
+        .map(std::path::PathBuf::from)
+        .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    base.join(name)
+}
+
+/// Load the provider configuration, falling back to the all-local default.
+#[cfg(feature = "providers")]
+fn load_registry(global: &ArgMatches) -> Result<smysl::Registry, String> {
+    let path = project_file(global, smysl::ProviderConfigFile::PATH);
+    let cfg = match std::fs::read_to_string(&path) {
+        Ok(src) => {
+            smysl::ProviderConfigFile::load(&src).map_err(|e| format!("{}: {e}", path.display()))?
+        }
+        // A default that reached a hosted provider would mean a first run egressing
+        // content nobody asked to send, so the default is entirely local.
+        Err(_) => smysl::ProviderConfigFile::local_default(),
+    };
+
+    let mut r = smysl::Registry::new().offline(global.get_flag("offline"));
+    for p in cfg.providers.values() {
+        match smysl::build_provider(p) {
+            Ok(built) => r = r.with_provider(built),
+            // A provider this build cannot drive is reported and skipped rather than
+            // fatal: the other providers still work, and `providers` is the command a
+            // caller runs precisely to find out what is wrong.
+            Err(e) => eprintln!("smysl providers: {}: {e}", p.id),
+        }
+    }
+    for (task, id) in &cfg.routing {
+        r = r.route(*task, id.clone());
+    }
+    Ok(r.with_fallback(cfg.fallback))
+}
+
+/// `smysl providers` - what is configured, what is reachable, and what would egress
+/// (§23.1, §29). **No content egress.**
+#[cfg(feature = "providers")]
+fn cmd_providers(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let style = progress_style(global);
+    let registry = match load_registry(global) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl providers: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let ids = registry.ids();
+    if ids.is_empty() {
+        println!(
+            "no providers configured; see {}",
+            smysl::ProviderConfigFile::PATH
+        );
+        return ExitCode::Success;
+    }
+
+    // --tasks: what would leave the machine. Reported without contacting anything, so it
+    // is safe to run when the answer is the reason you are asking.
+    if m.get_flag("tasks") {
+        println!("{:<20} {:<14} {:<10} command", "task", "provider", "egress");
+        for row in registry.egress_report() {
+            println!(
+                "{:<20} {:<14} {:<10} {}",
+                row.task,
+                row.provider
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| "-".into()),
+                match (row.routed, row.leaves_machine) {
+                    (false, _) => "unrouted",
+                    (true, true) => "LEAVES",
+                    (true, false) => "local",
+                },
+                row.task.command()
+            );
+        }
+        if registry.is_offline() {
+            println!("--offline: any task marked LEAVES will exit 7 rather than run");
+        }
+        return ExitCode::Success;
+    }
+
+    if !m.get_flag("probe") && !m.get_flag("models") {
+        for id in &ids {
+            let Some(p) = registry.get(id) else { continue };
+            let c = p.caps();
+            println!(
+                "{id:<14} ctx {:<8} out {:<6} {:<12} {}",
+                c.context_window,
+                c.max_output,
+                c.structured,
+                if c.offline { "local" } else { "hosted" }
+            );
+        }
+        println!("(--probe contacts them; --tasks reports what would egress)");
+        return ExitCode::Success;
+    }
+
+    // Probing is one round trip per provider, so it gets a bar: a caller with six
+    // providers and a slow network should be able to see which one it is waiting on. With
+    // progress off, one line up front replaces it - a caller still wants to know that a
+    // silent thirty seconds is a network wait rather than a hang.
+    if !style.is_enabled() && ids.len() > 1 {
+        eprintln!("smysl providers: probing {} provider(s)", ids.len());
+    }
+    let mut bar = Bar::new(style, "probing", ids.len());
+    let mut rows: Vec<(smysl::ProviderId, String)> = Vec::new();
+    let mut worst = ExitCode::Success;
+
+    for id in &ids {
+        bar.set_label(format!("probing {id}"));
+        let Some(p) = registry.get(id) else { continue };
+
+        let line = if registry.is_offline() && !p.caps().offline {
+            // Probing a forbidden provider would be the network call --offline exists to
+            // prevent, however harmless the payload.
+            worst = worse(worst, ExitCode::Offline);
+            format!("{id:<14} refused: --offline and this provider is hosted")
+        } else {
+            match p.probe() {
+                Ok(probe) if probe.reachable => {
+                    let c = probe.caps.unwrap_or_else(|| p.caps());
+                    let models = if m.get_flag("models") {
+                        format!("\n{:<14} models: {}", "", probe.models.join(", "))
+                    } else {
+                        String::new()
+                    };
+                    format!(
+                        "{id:<14} up    ctx {:<8} out {:<6} {:<12} {:<7} {}{models}",
+                        c.context_window,
+                        c.max_output,
+                        c.structured,
+                        if c.offline { "local" } else { "hosted" },
+                        probe.detail
+                    )
+                }
+                Ok(probe) => {
+                    worst = worse(worst, ExitCode::Provider);
+                    format!("{id:<14} down  {}", probe.detail)
+                }
+                Err(e) => {
+                    worst = worse(worst, e.exit_code());
+                    format!("{id:<14} error {e}")
+                }
+            }
+        };
+        rows.push((id.clone(), line));
+        bar.tick();
+    }
+    bar.finish(&format!("probed {} provider(s)", ids.len()));
+
+    for (_, line) in rows {
+        println!("{line}");
+    }
+    worst
+}
+
+/// `smysl usage` - the token ledger (§23.1). Informational; caps never block.
+#[cfg(feature = "providers")]
+fn cmd_usage(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let path = project_file(global, smysl::Ledger::PATH);
+    let mut ledger = smysl::Ledger::open(&path);
+
+    if m.get_flag("reset") {
+        let n = ledger.entries().len();
+        if let Err(e) = ledger.reset() {
+            eprintln!("smysl usage: {e}");
+            return ExitCode::Failure;
+        }
+        println!("{}: discarded {n} entr(ies)", path.display());
+        return ExitCode::Success;
+    }
+
+    if ledger.is_empty() {
+        println!("{}: no model calls recorded", path.display());
+        return ExitCode::Success;
+    }
+
+    let by = m
+        .get_one::<String>("by")
+        .and_then(|s| smysl::GroupBy::parse(s))
+        .unwrap_or_default();
+    let since = m
+        .get_one::<String>("since")
+        .and_then(|s| s.parse::<u64>().ok());
+
+    let rows = ledger.totals(by, since);
+    for row in &rows {
+        println!("{row}");
+    }
+    let total: u64 = rows.iter().map(|r| r.total()).sum();
+    let calls: u64 = rows.iter().map(|r| r.calls).sum();
+    println!("{:-<24} {calls:>6} call(s)  {total:>9} tokens", "");
+    ExitCode::Success
+}
+
+#[cfg(not(feature = "providers"))]
+fn cmd_providers(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl providers: this build has no provider layer (build with --features local)");
+    ExitCode::Usage
+}
+
+#[cfg(not(feature = "providers"))]
+fn cmd_usage(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl usage: this build has no provider layer (build with --features local)");
+    ExitCode::Usage
+}
+
+/// How progress should be reported for this invocation.
+///
+/// One place, so a command cannot draw in one branch and stay silent in another.
+fn progress_style(global: &ArgMatches) -> Style {
+    // `--noprogress` is absolute: it does not depend on whether stderr is a terminal, so a
+    // caller can turn drawing off without also having to redirect anything.
+    if global.get_flag("noprogress") {
+        return Style::silent();
+    }
+    Style::detect(
+        global.get_flag("quiet"),
+        global.get_flag("json"),
+        global.get_flag("no-color"),
+    )
+}
+
 /// `smysl reindex` - rebuild the derived index from the log alone (§23.1).
 ///
 /// The index is never authoritative, so this can always be run and never loses anything.
@@ -1977,7 +2308,7 @@ fn main() -> ProcExitCode {
     };
 
     let code = match name {
-        "fmt" => cmd_fmt(sub),
+        "fmt" => cmd_fmt(sub, &matches),
         "check" => cmd_check(sub, &matches),
         "merge" => cmd_merge(sub, &matches),
         "diff" => cmd_diff(sub, &matches),
@@ -1989,6 +2320,8 @@ fn main() -> ProcExitCode {
         "retract" => cmd_retract(sub, &matches),
         "thread" => cmd_thread(sub, &matches),
         "render" => cmd_render(sub, &matches),
+        "providers" => cmd_providers(sub, &matches),
+        "usage" => cmd_usage(sub, &matches),
         "reindex" => cmd_reindex(sub, &matches),
         _ => {
             eprintln!(

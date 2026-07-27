@@ -10,19 +10,22 @@ repository.workspace   = true
 
 [features]
 default = []
+# Linked only when a mapper needs it, so the trait, the registry and the ledger build and
+# test without an HTTP client in the tree.
+http-client = ["dep:ureq"]
 # One feature per mapper (§21.2). Ollama is the CI conformance reference: it is the only
 # provider exercisable without keys, cost, or egress.
-ollama    = []
-anthropic = []
-openai    = []
-gemini    = []
-deepseek  = []
+ollama    = ["http-client"]
+anthropic = ["http-client"]
+openai    = ["http-client"]
+gemini    = ["http-client"]
+deepseek  = ["http-client"]
 # D-3: rustls with the ring provider by default; `tls-pure` selects rustls-rustcrypto.
 tls-pure  = []
 
 [dependencies]
 smysl-core = { workspace = true }
 tokio      = { workspace = true }
-ureq       = { workspace = true }
+ureq       = { workspace = true, optional = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }

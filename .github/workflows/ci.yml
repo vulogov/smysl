@@ -81,6 +81,28 @@ jobs:
               -p smysl-core -p smysl-graph -p smysl-check \
               -p smysl-pack -p smysl-thread -p smysl-render
 
+  # The SM-P13 gate's live half. Ollama is the conformance reference because it is the
+  # only provider exercisable without keys, cost, or egress - so this job asserts the
+  # mapper against a real server rather than against a remembered API.
+  ollama:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Ollama and pull the reference model
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:11434/api/tags > /dev/null && break
+            sleep 1
+          done
+          ollama pull llama3.2
+      # `required` turns the skip into a failure: a live test that quietly skips in CI is
+      # a live test nobody runs.
+      - run: SMYSL_OLLAMA=required cargo test -p smysl-provider --features ollama
+
   # The conformance suite runs against the built binary, not the library, so a second
   # implementation can be substituted for it.
   conformance:
