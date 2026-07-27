@@ -1,3 +1,5 @@
+<img src="smysl_logo.png" alt="smysl — meaning, in transit" width="160" align="right">
+
 # smysl
 
 An AI↔AI↔Human data interchange format, library, and CLI.
