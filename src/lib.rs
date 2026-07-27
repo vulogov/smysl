@@ -53,7 +53,10 @@ pub use smysl_check::{
 };
 
 // ---- pack -----------------------------------------------------------------
-pub use smysl_pack::PackError;
+pub use smysl_pack::{
+    pack, verify as verify_pack, Constraints, Estimator, Pack, PackError, PackRequest, Reason,
+    Selection, Violation,
+};
 
 // ---- thread ---------------------------------------------------------------
 // `Role` and `ThreadSchema` are wire format and come from the kernel above.

@@ -22,11 +22,18 @@ Implements **RFC SMYSL-1 (Combined)** — format `smysl/0.1`, kernel `smysl.kern
 
 ## Status
 
-**SM-P8 — salience.** Personalised PageRank over the support graph, plus corroboration
-counted by independent attestation group and role weight from the active thread. Rank flows
-from dependent to dependency, so evidence many conclusions rest on outranks the conclusions
-— which is what a budget needs. No model call is involved anywhere, which is what makes
-packing precomputation rather than another round of inference.
+**SM-P9 — packing.** `smysl pack` is what a consuming agent calls instead of asking a
+model to summarise: same graph, same budget, same thread yields identical bytes, and no
+inference happens anywhere. Seven constraints hold on every pack. The one that matters is
+C3 — a selected claim's rebuttals come with it, always — and when the budget cannot hold
+both, packing **fails** with the minimum feasible budget rather than emitting the claim
+alone.
+
+```bash
+$ smysl --format surface pack --budget 8k --focus c/pool-saturation incident.smy
+$ smysl pack --budget 5 --focus c/pool-saturation incident.smy
+smysl pack: SMY-E200: budget 5 but the mandatory floor needs 46     # exit 4
+```
 
 | Phase | Delivers | State |
 |---|---|---|
@@ -39,7 +46,8 @@ packing precomputation rather than another round of inference.
 | SM-P6 | merge, contentions, retraction, `merge` / `retract` | **done** |
 | SM-P7 | lineage: `diff`, `trace`, `view`, `bundle` | **done** |
 | SM-P8 | salience, `salience --explain` | **done** |
-| SM-P9–P10 | packing | next |
+| SM-P9 | packing, `pack --explain` | **done** |
+| SM-P10 | exact packing (branch and bound) | next |
 | SM-P11–P12 | threads, rendering | |
 | SM-P13–P14 | providers, ingest | |
 | SM-P15 | TUI, evaluation | |

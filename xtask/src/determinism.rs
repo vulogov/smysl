@@ -55,6 +55,26 @@ pub struct Op {
 /// implements it, so an unregistered entry here is a phase that has not landed yet.
 const OPS: &[Op] = &[
     Op {
+        name: "pack",
+        // The whole pipeline in one call: salience, closure expansion, greedy selection
+        // and local improvement, all of which must be bit-reproducible.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "--format",
+            "surface",
+            "pack",
+            "--budget",
+            "120",
+            "fixtures/corpus/F1-incident.smy",
+        ],
+    },
+    Op {
         name: "salience",
         // Personalised PageRank accumulates in f64 over a fixed number of iterations in
         // dense-id order, then quantises once. Locale, timezone and hash seed must not
@@ -100,8 +120,8 @@ pub fn run(root: &Path) -> Result<(), String> {
         return Ok(());
     }
     println!(
-        "  {} of 5 operations registered; pack, derive_thread and render follow at \
-         SM-P9, P11 and P12",
+        "  {} of 5 operations registered; derive_thread and render follow at SM-P11 \
+         and P12",
         OPS.len()
     );
 

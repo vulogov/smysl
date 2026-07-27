@@ -14,10 +14,10 @@ use clap::{Arg, ArgAction, ArgMatches, Command};
 use smysl::ExitCode;
 use smysl::{
     check, conformance, effective_status, fidelity, granularity_distribution, merge, parse_surface,
-    plan_retraction, write_surface, AgentId, CheckOptions, ConformanceClass, ConsumerProfile, Hlc,
-    MergeOptions, Pass, Record, RelKind, Relation, RetractionAuthority, RetractionPolicy,
-    SalienceRequest, SalienceWeights, SchemaId, Severity, Store, StoreOptions, SupersessionPolicy,
-    TraceKind, Uid, UidPrefix, View, ViewId, WriteContext,
+    plan_retraction, write_surface, AgentId, CheckOptions, ConformanceClass, ConsumerProfile,
+    Estimator, Hlc, Lod, MergeOptions, PackRequest, Pass, Record, RelKind, Relation,
+    RetractionAuthority, RetractionPolicy, SalienceRequest, SalienceWeights, SchemaId, Severity,
+    Store, StoreOptions, SupersessionPolicy, TraceKind, Uid, UidPrefix, View, ViewId, WriteContext,
 };
 
 /// Purity classification of a command (§23). `Pure` commands are bit-reproducible
@@ -401,6 +401,41 @@ fn cli() -> Command {
                         .value_name("UID")
                         .action(ArgAction::Append)
                         .help("Personalise against these units; the view roots by default"),
+                )
+                .arg(Arg::new("store").value_name("PATH")),
+            "pack" => sub
+                .arg(
+                    Arg::new("budget")
+                        .long("budget")
+                        .value_name("N")
+                        .required(true)
+                        .help("Token budget, counted with the recorded estimator"),
+                )
+                .arg(
+                    Arg::new("focus")
+                        .long("focus")
+                        .value_name("UID")
+                        .action(ArgAction::Append)
+                        .help("Units that must reach L1; packing fails if they cannot"),
+                )
+                .arg(
+                    Arg::new("lod")
+                        .long("lod")
+                        .value_name("L")
+                        .value_parser(["auto", "L0", "L1", "L2"])
+                        .help("Cap every unit at this level"),
+                )
+                .arg(
+                    Arg::new("explain")
+                        .long("explain")
+                        .help("Say which constraint put each unit in")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("tokenizer")
+                        .long("tokenizer")
+                        .value_name("ID")
+                        .help("Cost model; recorded in the packinfo either way (D-2)"),
                 )
                 .arg(Arg::new("store").value_name("PATH")),
             "reindex" => sub
@@ -1100,6 +1135,186 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     ExitCode::Success
 }
 
+/// `smysl pack` - budget-bounded, closure-complete selection (§23.1).
+///
+/// What a consuming agent calls instead of asking a model to summarise. Surface output is
+/// truncated to the selected level - that is the thing you put in a prompt. CBOR output
+/// carries the full records, because a CBOR pack is a portable sub-store and truncating a
+/// unit would change its uid.
+fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let Some(path) = store_arg(m, global) else {
+        eprintln!("smysl pack: no store given");
+        return ExitCode::Usage;
+    };
+    let (store, labels) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl pack: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let Some(budget) = m.get_one::<String>("budget").and_then(|s| parse_budget(s)) else {
+        eprintln!("smysl pack: --budget takes a number, optionally with a `k` suffix");
+        return ExitCode::Usage;
+    };
+
+    let mut req = PackRequest::budget(budget);
+    if let Some(v) = m.get_many::<String>("focus") {
+        let mut focus = Vec::new();
+        for raw in v {
+            match resolve(&store, raw) {
+                Ok(u) => focus.push(u),
+                Err(e) => {
+                    eprintln!("smysl pack: {e}");
+                    return ExitCode::Failure;
+                }
+            }
+        }
+        req = req.focusing(focus);
+    }
+    match m.get_one::<String>("lod").map(String::as_str) {
+        Some("L0") => req = req.capped(Lod::L0),
+        Some("L1") => req = req.capped(Lod::L1),
+        Some("L2") => req = req.capped(Lod::L2),
+        _ => {}
+    }
+    if let Some(id) = m.get_one::<String>("tokenizer") {
+        match Estimator::parse(id) {
+            Some(e) => req.estimator = e,
+            None => {
+                eprintln!("smysl pack: unknown tokenizer `{id}`");
+                return ExitCode::Usage;
+            }
+        }
+    }
+
+    let sal = smysl::salience(
+        &store,
+        &SalienceRequest::default().seeded(smysl::view_roots(&store)),
+    );
+    let packed = match smysl::pack(&store, &sal, &req) {
+        Ok(p) => p,
+        Err(e) => {
+            // Rule R: a budget too small to hold a claim and its rebuttals fails rather
+            // than emitting the claim alone.
+            eprintln!("smysl pack: {e}");
+            return e.code_exit();
+        }
+    };
+
+    if m.get_flag("explain") {
+        for (uid, level) in &packed.selection {
+            let why = packed
+                .why
+                .get(uid)
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "earned on density".into());
+            let c = packed.why.get(uid).map(|r| r.constraint()).unwrap_or("-");
+            eprintln!("{uid} @{level}  {c}  {why}");
+        }
+        for (uid, reason) in &packed.info.dropped {
+            eprintln!("{uid} dropped: {reason}");
+        }
+        eprintln!(
+            "{path}: {} of {} unit(s), {} of {} tokens, gap {:.3}",
+            packed.len(),
+            store.units().count(),
+            packed.used(),
+            packed.info.budget,
+            packed.info.optimality.gap
+        );
+    }
+
+    let surface = global
+        .get_one::<String>("format")
+        .map(|f| f == "surface")
+        .unwrap_or(false);
+
+    if surface {
+        let text = emit_pack_surface(&store, &packed, &labels);
+        let mut stdout = std::io::stdout().lock();
+        if stdout.write_all(text.as_bytes()).is_err() {
+            return ExitCode::Failure;
+        }
+    } else {
+        let records: Vec<Record> = packed
+            .selection
+            .keys()
+            .filter_map(|u| store.get(u).map(|unit| Record::Unit(unit.core.clone())))
+            .collect();
+        let mut bytes = smysl::to_cbor_seq(&records);
+        bytes.extend_from_slice(&smysl::to_cbor(&Record::PackInfo(packed.info.clone())));
+        let mut stdout = std::io::stdout().lock();
+        if stdout.write_all(&bytes).is_err() {
+            return ExitCode::Failure;
+        }
+    }
+    ExitCode::Success
+}
+
+/// `8000` or `8k`.
+fn parse_budget(s: &str) -> Option<u64> {
+    match s.strip_suffix(['k', 'K']) {
+        Some(n) => n.parse::<u64>().ok().map(|v| v * 1000),
+        None => s.parse().ok(),
+    }
+}
+
+/// Emit a pack as surface text, truncated to each unit's selected level.
+///
+/// The uid is carried as the label, so identity survives truncation even though the text
+/// does not - a consumer can always ask the origin store for the rest.
+fn emit_pack_surface(
+    store: &Store,
+    packed: &smysl::Pack,
+    labels: &std::collections::BTreeMap<smysl::Label, Uid>,
+) -> String {
+    let by_uid: std::collections::BTreeMap<Uid, &smysl::Label> =
+        labels.iter().map(|(l, u)| (*u, l)).collect();
+
+    let mut out = String::new();
+    out.push_str("@doc ");
+    out.push_str(smysl::FORMAT_VERSIONS_SUPPORTED[0]);
+    out.push_str(" { id: v/pack, intent: pack }\n\n");
+
+    for (uid, level) in &packed.selection {
+        let Some(unit) = store.get(uid) else { continue };
+        let name = by_uid
+            .get(uid)
+            .map(|l| l.as_str().to_string())
+            .unwrap_or_else(|| uid.canonical());
+        out.push_str(&format!(
+            "@{} {} {{ status: {} }}\n~ {}\n",
+            unit.core.schema, name, unit.core.status, unit.core.gist
+        ));
+        if *level >= Lod::L1 {
+            if let Some(b) = &unit.core.body {
+                out.push_str(&format!("\n{b}\n"));
+            }
+        }
+        if *level >= Lod::L2 {
+            if let Some(d) = &unit.core.detail {
+                out.push_str(&format!("\n--\n{d}\n"));
+            }
+        }
+        out.push('\n');
+    }
+
+    // Truncation is self-describing (§8).
+    if !packed.info.is_complete() {
+        out.push_str(&format!(
+            "@packinfo k/info {{ status: speculative }}\n~ {} of {} tokens used; {} unit(s) dropped, {} degraded; estimator {}\n\n",
+            packed.info.used,
+            packed.info.budget,
+            packed.info.dropped.len(),
+            packed.info.degraded.len(),
+            packed.info.estimator
+        ));
+    }
+    out
+}
+
 /// `smysl salience` - what the graph says matters, and why (§23.1).
 ///
 /// Pure: no model call, which is what makes packing precomputation rather than another
@@ -1298,6 +1513,7 @@ fn main() -> ProcExitCode {
         "view" => cmd_view(sub, &matches),
         "bundle" => cmd_bundle(sub, &matches),
         "salience" => cmd_salience(sub, &matches),
+        "pack" => cmd_pack(sub, &matches),
         "retract" => cmd_retract(sub, &matches),
         "reindex" => cmd_reindex(sub, &matches),
         _ => {

@@ -380,6 +380,17 @@ impl PackError {
     }
 }
 
+impl PackError {
+    /// The exit code this error reports (Appendix E). An infeasible floor is 4; a missing
+    /// focus unit is an ordinary failure.
+    pub const fn code_exit(&self) -> ExitCode {
+        match self {
+            PackError::Infeasible { .. } => ExitCode::PackInfeasible,
+            PackError::FocusAbsent { .. } => ExitCode::Failure,
+        }
+    }
+}
+
 impl fmt::Display for PackError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
