@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pool saturation is the leading cause; the clean canary is unexplained</title>
+<meta name="smysl-profile" content="analyst">
+<meta name="smysl-thread" content="t/brief">
+<meta name="smysl-contentions-suppressed" content="false">
+<meta name="smysl-open-contentions" content="k/pool-vs-canary">
+</head>
+<body>
+<h1>Pool saturation is the leading cause; the clean canary is unexplained</h1>
+<p class="meta">brief · profile analyst</p>
+<section class="block" data-role="bottom-line" data-status="derived" data-uid="b3:qq2fbg6tjizz625cqorddxhhftieoknfjz4lv67rkmitaxtjyfka" data-lod="L1">
+<h2>bottom-line</h2>
+<p><span class="status-marker">[derived]</span> Pool saturation is the leading cause
+
+Connection wait time tracks the latency curve within the noise floor.</p>
+<aside class="contention">k/pool-vs-canary: contested, 1 position(s) on record</aside>
+</section>
+<section class="block" data-role="support" data-status="measured" data-uid="b3:ukzwrh3ou5hyyf7ckp5yrjya5gyr5nebxbx6memibhetbnkz7zcq" data-lod="L2">
+<h2>support</h2>
+<p><span class="status-marker">[measured]</span> Consequently, p95 request latency rose from 180ms to 410ms after the 4.2 rollout
+
+Measured on the eu-west shard over one-minute windows, 14:00-16:00 UTC.
+
+Sampled at 10s resolution; the pre-rollout baseline is the trailing 7-day median.</p>
+<aside class="provenance">metric: p95_request_seconds</aside>
+<aside class="provenance">model:vendor/m (computed)</aside>
+</section>
+<section class="block" data-role="risk" data-status="speculative" data-uid="b3:chktjhx3padm6ehypfaduwukik6gajhrtxzlravqpx6oo75i4mkq" data-lod="L0">
+<h2>risk</h2>
+<p><span class="status-marker">[speculative]</span> The canary shard was clean throughout</p>
+<aside class="contention">k/pool-vs-canary: contested, 1 position(s) on record</aside>
+</section>
+<section class="block" data-role="ask" data-status="inferred" data-uid="b3:py2mbw2ojee3ehhhosiu6vairsj4afkb54eo57lnmrjqidl5surq" data-lod="L0">
+<h2>ask</h2>
+<p><span class="status-marker">[inferred]</span> Roll the eu-west shard back to 4.1 and re-measure</p>
+</section>
+<footer><strong>Open contentions:</strong> k/pool-vs-canary</footer>
+</body>
+</html>

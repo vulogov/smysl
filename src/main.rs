@@ -14,11 +14,11 @@ use clap::{Arg, ArgAction, ArgMatches, Command};
 use smysl::ExitCode;
 use smysl::{
     check, conformance, effective_status, fidelity, granularity_distribution, merge, parse_surface,
-    plan_retraction, write_surface, AgentId, CheckOptions, ConformanceClass, ConsumerProfile,
-    DeriveOptions, Estimator, Hlc, Lod, MergeOptions, PackRequest, Pass, Record, RelKind, Relation,
-    RetractionAuthority, RetractionPolicy, Role, SalienceRequest, SalienceWeights, SchemaId,
-    Severity, Store, StoreOptions, SupersessionPolicy, TraceKind, Uid, UidPrefix, View, ViewId,
-    WriteContext,
+    plan_retraction, write_surface, AgentId, BuildOptions, CheckOptions, Code, ConformanceClass,
+    ConsumerProfile, Contentions, DeriveOptions, Estimator, Hlc, Lod, MergeOptions, PackRequest,
+    Pass, Profile, Record, RelKind, Relation, RetractionAuthority, RetractionPolicy, Role,
+    SalienceRequest, SalienceWeights, SchemaId, Severity, Store, StoreOptions, SupersessionPolicy,
+    Target, TraceKind, Uid, UidPrefix, View, ViewId, WriteContext,
 };
 
 /// Purity classification of a command (§23). `Pure` commands are bit-reproducible
@@ -451,8 +451,22 @@ fn cli() -> Command {
                     Arg::new("derive")
                         .long("derive")
                         .value_name("SCHEMA")
+                        .num_args(0..=1)
                         .value_parser(["analysis", "narrative", "brief", "qa", "plan"])
-                        .help("Derive a thread of this schema from the graph"),
+                        .help("Derive a thread from the graph; the schema may follow here or in --schema"),
+                )
+                .arg(
+                    Arg::new("schema")
+                        .long("schema")
+                        .value_name("S")
+                        .value_parser(["analysis", "narrative", "brief", "qa", "plan"])
+                        .help("Schema to derive under (§23 spells it this way)"),
+                )
+                .arg(
+                    Arg::new("only")
+                        .long("only")
+                        .help("Emit the thread record alone rather than the store it belongs to")
+                        .action(ArgAction::SetTrue),
                 )
                 .arg(
                     Arg::new("list")
@@ -496,6 +510,53 @@ fn cli() -> Command {
                     Arg::new("explain")
                         .long("explain")
                         .help("Say which role each unit took and what repair added")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(Arg::new("store").value_name("PATH")),
+            "render" => sub
+                .arg(
+                    Arg::new("thread")
+                        .long("thread")
+                        .value_name("ID")
+                        .help("Thread to render; the store's only thread by default"),
+                )
+                .arg(
+                    Arg::new("profile")
+                        .long("profile")
+                        .value_name("NAME")
+                        .help("Built-in profile name, or a path to a profile file"),
+                )
+                .arg(
+                    Arg::new("target")
+                        .long("target")
+                        .value_name("T")
+                        .value_parser(["markdown", "md", "typst", "html", "slides", "json", "text"])
+                        .help("Output format"),
+                )
+                .arg(
+                    Arg::new("lod")
+                        .long("lod")
+                        .value_name("L")
+                        .value_parser(["L0", "L1", "L2"])
+                        .help("Cap every block at this level, whatever the profile says"),
+                )
+                .arg(
+                    Arg::new("contentions")
+                        .long("contentions")
+                        .value_name("M")
+                        .value_parser(["show", "suppress"])
+                        .help("Override the profile's rule V2 setting"),
+                )
+                .arg(
+                    Arg::new("as")
+                        .long("as")
+                        .value_name("AGENT")
+                        .help("Whose thread, when several agents hold one under that id"),
+                )
+                .arg(
+                    Arg::new("profiles")
+                        .long("profiles")
+                        .help("List the built-in profiles and exit")
                         .action(ArgAction::SetTrue),
                 )
                 .arg(Arg::new("store").value_name("PATH")),
@@ -1532,9 +1593,21 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return show_thread(&store, t);
     }
 
-    let Some(raw) = m.get_one::<String>("derive") else {
+    // §23 spells this `--derive --schema S`; `--derive S` is accepted as the shorter
+    // form of the same thing.
+    if !m.contains_id("derive") && m.get_one::<String>("schema").is_none() {
         eprintln!("smysl thread: one of --derive, --list or --show is required");
         return ExitCode::Usage;
+    }
+    let raw = match m
+        .get_one::<String>("derive")
+        .or_else(|| m.get_one::<String>("schema"))
+    {
+        Some(v) => v,
+        None => {
+            eprintln!("smysl thread: --derive needs a schema, here or in --schema");
+            return ExitCode::Usage;
+        }
     };
     let Some(schema) = smysl::ThreadSchema::parse(raw) else {
         eprintln!("smysl thread: `{raw}` is not a schema");
@@ -1549,7 +1622,11 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 return ExitCode::Usage;
             }
         },
-        None => smysl::ThreadId::new(format!("t/{schema}")).expect("a schema name is a valid id"),
+        // Threads are keyed by (id, owner), so an authored `t/brief` and a derived one
+        // would coexist under the same name and force every reader to disambiguate. The
+        // default id says which it is.
+        None => smysl::ThreadId::new(format!("t/derived-{schema}"))
+            .expect("a schema name is a valid id"),
     };
     let owner = match m.get_one::<String>("as") {
         Some(s) => match AgentId::new(s) {
@@ -1614,8 +1691,17 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eprintln!("{path}: {} unit(s) not selected", report.unselected);
     }
 
+    // The store travels with the thread, so `thread --derive | render` works: a thread
+    // record alone names uids the next stage would have no way to resolve. `--only` asks
+    // for the record by itself.
     let ctx = WriteContext::from_labels(&labels);
-    print!("{}", write_surface(None, &[Record::Thread(thread)], &ctx));
+    let mut records: Vec<Record> = if m.get_flag("only") {
+        Vec::new()
+    } else {
+        store.iter().cloned().collect()
+    };
+    records.push(Record::Thread(thread));
+    print!("{}", write_surface(None, &records, &ctx));
     ExitCode::Success
 }
 
@@ -1638,6 +1724,166 @@ fn show_thread(store: &Store, t: &smysl::Thread) -> ExitCode {
     } else {
         ExitCode::Failure
     }
+}
+
+/// `smysl render` - thread plus profile to artifact (§10, §20, §23.1).
+///
+/// Pure. Rule V1 is applied when the profile loads, so a profile that would flatten
+/// epistemic status exits before anything is rendered; rule V2 is applied when the IR is
+/// built, so a suppressed contention is recorded in the output whatever the target.
+fn cmd_render(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    if m.get_flag("profiles") {
+        for name in Profile::builtin_names() {
+            let p = Profile::builtin(name).expect("built-ins load");
+            println!(
+                "{name:<10} {} {} · lod {} · status {}",
+                match p.register {
+                    smysl::Register::Formal => "formal ",
+                    smysl::Register::Plain => "plain  ",
+                    _ => "neutral",
+                },
+                p.audience.as_deref().unwrap_or("-"),
+                p.lod.default,
+                match p.show.status {
+                    smysl::StatusDisplay::Word => "word",
+                    _ => "marker",
+                }
+            );
+        }
+        return ExitCode::Success;
+    }
+
+    let Some(path) = store_arg(m, global) else {
+        eprintln!("smysl render: no store given");
+        return ExitCode::Usage;
+    };
+    let (store, _) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl render: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    // Rule V1, before anything else: a profile that flattens must not get as far as
+    // producing bytes.
+    let profile = match m.get_one::<String>("profile") {
+        Some(name) => match Profile::builtin(name) {
+            Some(p) => p,
+            None => match std::fs::read_to_string(name) {
+                Ok(src) => match Profile::load(&src) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        eprintln!("smysl render: {name}: {e}");
+                        return ExitCode::CheckErrors;
+                    }
+                },
+                Err(e) => {
+                    eprintln!("smysl render: {name} is neither a built-in profile nor a file: {e}");
+                    return ExitCode::Usage;
+                }
+            },
+        },
+        None => Profile::builtin("plain").expect("the plain profile loads"),
+    };
+
+    // Threads are keyed by (id, owner), so a name may legitimately match more than one.
+    // Guessing between two agents' readings of the same graph is exactly the flattening
+    // this format exists to prevent, so it is an error rather than a coin toss.
+    let want = m.get_one::<String>("thread");
+    let owner = m.get_one::<String>("as");
+    let candidates: Vec<&smysl::Thread> = store
+        .threads()
+        .filter(|t| match want {
+            Some(w) => t.id.as_str() == w,
+            None => true,
+        })
+        .filter(|t| match owner {
+            Some(o) => t.owner.as_str() == o,
+            None => true,
+        })
+        .collect();
+    let thread = match candidates.as_slice() {
+        [only] => (*only).clone(),
+        [] => {
+            eprintln!(
+                "smysl render: {path} holds no thread matching {}",
+                want.map(String::as_str).unwrap_or("any id")
+            );
+            return ExitCode::Failure;
+        }
+        many => {
+            eprintln!(
+                "smysl render: {path} holds {} matching threads; narrow with --thread or --as",
+                many.len()
+            );
+            for t in many {
+                eprintln!("smysl render:   {} ({})", t.id, t.owner);
+            }
+            return ExitCode::Usage;
+        }
+    };
+
+    let target = match m.get_one::<String>("target") {
+        Some(t) => match Target::parse(t) {
+            Some(t) => t,
+            None => {
+                eprintln!("smysl render: `{t}` is not a target");
+                return ExitCode::Usage;
+            }
+        },
+        None => Target::Markdown,
+    };
+
+    let mut opts = BuildOptions::default();
+    if let Some(l) = m.get_one::<String>("lod") {
+        opts.lod_cap = match l.as_str() {
+            "L0" => Some(Lod::L0),
+            "L1" => Some(Lod::L1),
+            _ => Some(Lod::L2),
+        };
+    }
+    if let Some(c) = m.get_one::<String>("contentions") {
+        opts.contentions = Some(match c.as_str() {
+            "suppress" => Contentions::Suppress,
+            _ => Contentions::Always,
+        });
+    }
+
+    let ir = smysl::build_ir(&store, &thread, &profile, &opts);
+    let artifact = match smysl::emit_artifact(target, &ir, &profile) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl render: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    // Rule V2 is a warning, not a refusal: the artifact is emitted and the suppression is
+    // reported, because the caller asked for it and the metadata records it either way.
+    if ir.meta.contentions_suppressed {
+        eprintln!(
+            "smysl render: {}: {} open contention(s) suppressed by profile {}",
+            Code::W211,
+            ir.meta.open_contentions.len(),
+            profile.name
+        );
+    }
+
+    match global.get_one::<String>("output") {
+        Some(out) => {
+            if let Err(e) = std::fs::write(out, artifact.as_bytes()) {
+                eprintln!("smysl render: {out}: {e}");
+                return ExitCode::Failure;
+            }
+        }
+        None => print!("{}", artifact.text),
+    }
+
+    if global.get_flag("strict") && ir.meta.contentions_suppressed {
+        return ExitCode::CheckErrors;
+    }
+    ExitCode::Success
 }
 
 /// `smysl reindex` - rebuild the derived index from the log alone (§23.1).
@@ -1742,6 +1988,7 @@ fn main() -> ProcExitCode {
         "pack" => cmd_pack(sub, &matches),
         "retract" => cmd_retract(sub, &matches),
         "thread" => cmd_thread(sub, &matches),
+        "render" => cmd_render(sub, &matches),
         "reindex" => cmd_reindex(sub, &matches),
         _ => {
             eprintln!(

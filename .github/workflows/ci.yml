@@ -34,6 +34,7 @@ jobs:
           - "--no-default-features --features local"
           - "--no-default-features --features remote"
           - "--no-default-features --features exact-pack"
+          - "--no-default-features --features render-typst,render-html"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

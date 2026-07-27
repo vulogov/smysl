@@ -72,6 +72,36 @@ Derivation is pure — no model is consulted — so `derive_thread` joins `pack`
 and `merge` as a rule D operation in the determinism matrix. `--refine`, which does consult
 a model, arrives with the provider layer.
 
+**SM-P12 — rendering.** `smysl render` turns a thread plus a profile into an artifact.
+Two stages with the Render IR between them: everything needing the graph happens before it,
+everything needing a file format after it, so no two targets can disagree about what the
+document says.
+
+Rule V1 is enforced when the **profile loads**, not when it emits. A profile that renders
+`speculative` the way it renders `measured` never becomes a `Profile` value, so there is no
+path from a flattening profile to an artifact:
+
+```bash
+$ smysl render --profile flat.hjson --thread t/brief incident.smy
+smysl render: flat.hjson: SMY-E210: profile flat has no distinct rendering for unfounded   # exit 3
+```
+
+Rule V2 is enforced when the IR is built, so a suppressed contention is recorded in every
+target — and because merge *reports* detections rather than recording them (§5.4), the
+renderer detects live contentions rather than only surfacing written-down ones. Otherwise
+rule V2 would be vacuous in exactly the case it exists for.
+
+```bash
+$ smysl thread --derive --schema brief incident.smy \
+    | smysl render --thread t/derived-brief --profile exec --target markdown -
+$ smysl --strict render --profile plain --contentions suppress incident.smy
+smysl render: SMY-W211: 1 open contention(s) suppressed by profile plain                   # exit 3
+```
+
+Connectives are template selection keyed by relation kind and seeded by `uid[0]`, never
+model inference — so inserting a block earlier does not reword every transition after it.
+`render` is the fifth and last rule D operation in the determinism matrix.
+
 | Phase | Delivers | State |
 |---|---|---|
 | SM-P0 | scaffold, diagnostics, gates | **done** |
@@ -86,7 +116,7 @@ a model, arrives with the provider layer.
 | SM-P9 | packing, `pack --explain` | **done** |
 | SM-P10 | exact packing, provable optimality gap | **done** |
 | SM-P11 | thread schemas, derivation, `thread --derive` | **done** |
-| SM-P12 | rendering | |
+| SM-P12 | Render IR, profiles, six backends, `render` | **done** |
 | SM-P13–P14 | providers, ingest | |
 | SM-P15 | TUI, evaluation | |
 

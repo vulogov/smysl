@@ -34,6 +34,61 @@ pub fn tokens(text: &str) -> u32 {
     (text.len() as u32).div_ceil(4)
 }
 
+/// Escape a string as a JSON value, quotes included.
+///
+/// Rust's `{:?}` is close enough to JSON to be tempting and wrong: it emits `\u{1}` for a
+/// control character, which no JSON parser accepts. Machine-readable output that a machine
+/// cannot read is worse than none, so the escaping is spelled out here and shared by every
+/// caller that emits JSON.
+pub fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::json_escape;
+
+    #[test]
+    fn quotes_and_backslashes_are_escaped() {
+        assert_eq!(json_escape(r#"a"b\c"#), r#""a\"b\\c""#);
+    }
+
+    /// The reason this exists rather than `{:?}`: Rust emits `\u{1}`, which no JSON parser
+    /// accepts.
+    #[test]
+    fn control_characters_use_the_four_digit_form() {
+        assert_eq!(json_escape("\u{1}"), r#""\u0001""#);
+        assert_eq!(json_escape("\n\t\r"), r#""\n\t\r""#);
+        assert_eq!(json_escape("\u{8}\u{c}"), r#""\b\f""#);
+    }
+
+    #[test]
+    fn printable_unicode_passes_through() {
+        assert_eq!(json_escape("p99 \u{2192} 410ms"), "\"p99 \u{2192} 410ms\"");
+    }
+
+    #[test]
+    fn an_empty_string_is_a_pair_of_quotes() {
+        assert_eq!(json_escape(""), "\"\"");
+    }
+}
+
 /// Quantise to 1/1024 and round-trip through `binary32` (§7.1 constraint 4).
 ///
 /// Doing this once, at the boundary, is what makes hash stability independent of the

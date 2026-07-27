@@ -6,11 +6,20 @@
 //! Rule V1 is enforced at profile *load*, not at emit, so a profile that would flatten
 //! epistemic status cannot produce an artifact at all.
 //!
-//! Filled by SM-P12.
-
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
+pub mod backend;
+pub mod connective;
+pub mod ir;
+pub mod profile;
+
+pub use backend::{emit, Artifact, Backend};
+pub use ir::{build, Block, BuildOptions, Ir, Note, NoteKind, RenderMeta};
+pub use profile::{
+    Connectives, Contentions, LodPlan, Person, Profile, Provenance, Register, Show, StatusDisplay,
+    Verbosity,
+};
 pub use smysl_core::error::RenderError;
 
 /// Render targets (§10). Availability depends on compiled-in backends.

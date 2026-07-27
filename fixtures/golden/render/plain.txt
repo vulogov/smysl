@@ -1,0 +1,24 @@
+Pool saturation is the leading cause; the clean canary is unexplained
+=====================================================================
+
+bottom-line [b3:qq2fbg6tjizz625cqorddxhhft]
+  ⊢ Pool saturation is the leading cause
+
+  ⊢ Connection wait time tracks the latency curve within the noise floor.
+      - k/pool-vs-canary: contested, 1 position(s) on record
+
+support [b3:ukzwrh3ou5hyyf7ckp5yrjya5g]
+  ▪ Consequently, p95 request latency rose from 180ms to 410ms after the 4.2 rollout
+
+  ▪ Measured on the eu-west shard over one-minute windows, 14:00-16:00 UTC.
+      - metric: p95_request_seconds
+      - model:vendor/m (computed)
+
+risk [b3:chktjhx3padm6ehypfaduwukik]
+  ? The canary shard was clean throughout
+      - k/pool-vs-canary: contested, 1 position(s) on record
+
+ask [b3:py2mbw2ojee3ehhhosiu6vairs]
+  ≈ Roll the eu-west shard back to 4.1 and re-measure
+
+open contentions: k/pool-vs-canary

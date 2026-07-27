@@ -1,0 +1,53 @@
+{
+  "gist": "Pool saturation is the leading cause; the clean canary is unexplained",
+  "meta": {
+    "profile": "analyst",
+    "thread": "t/brief",
+    "schema": "brief",
+    "audience": "the person who has to check this",
+    "contentions_suppressed": false,
+    "open_contentions": ["k/pool-vs-canary"]
+  },
+  "blocks": [
+    {
+      "role": "bottom-line",
+      "uid": "b3:qq2fbg6tjizz625cqorddxhhftieoknfjz4lv67rkmitaxtjyfka",
+      "level": "L1",
+      "status": "derived",
+      "marker": "[derived]",
+      "connective": null,
+      "text": "Pool saturation is the leading cause\n\nConnection wait time tracks the latency curve within the noise floor.",
+      "notes": [{"kind": "contention", "text": "k/pool-vs-canary: contested, 1 position(s) on record"}]
+    },
+    {
+      "role": "support",
+      "uid": "b3:ukzwrh3ou5hyyf7ckp5yrjya5gyr5nebxbx6memibhetbnkz7zcq",
+      "level": "L2",
+      "status": "measured",
+      "marker": "[measured]",
+      "connective": "Consequently, ",
+      "text": "p95 request latency rose from 180ms to 410ms after the 4.2 rollout\n\nMeasured on the eu-west shard over one-minute windows, 14:00-16:00 UTC.\n\nSampled at 10s resolution; the pre-rollout baseline is the trailing 7-day median.",
+      "notes": [{"kind": "provenance", "text": "metric: p95_request_seconds"}, {"kind": "provenance", "text": "model:vendor/m (computed)"}]
+    },
+    {
+      "role": "risk",
+      "uid": "b3:chktjhx3padm6ehypfaduwukik6gajhrtxzlravqpx6oo75i4mkq",
+      "level": "L0",
+      "status": "speculative",
+      "marker": "[speculative]",
+      "connective": null,
+      "text": "The canary shard was clean throughout",
+      "notes": [{"kind": "contention", "text": "k/pool-vs-canary: contested, 1 position(s) on record"}]
+    },
+    {
+      "role": "ask",
+      "uid": "b3:py2mbw2ojee3ehhhosiu6vairsj4afkb54eo57lnmrjqidl5surq",
+      "level": "L0",
+      "status": "inferred",
+      "marker": "[inferred]",
+      "connective": null,
+      "text": "Roll the eu-west shard back to 4.1 and re-measure",
+      "notes": []
+    }
+  ]
+}

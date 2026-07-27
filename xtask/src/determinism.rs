@@ -130,6 +130,23 @@ const OPS: &[Op] = &[
     },
 ];
 
+/// Two-stage operations, run as a shell pipeline. `render` needs a thread, and the only
+/// deterministic way to obtain one is to derive it - so the determinism claim being tested
+/// is the composition, which is what a caller actually runs.
+const PIPELINES: &[Op] = &[Op {
+    name: "render",
+    // Derivation and rendering back to back: role assignment, salience, ordering, repair,
+    // IR construction, connective selection seeded by uid, and the markdown backend.
+    argv: &[
+        "sh",
+        "-c",
+        "cargo run --quiet --no-default-features --features cli -- \
+             thread --derive --schema brief fixtures/corpus/F1-incident.smy \
+         | cargo run --quiet --no-default-features --features cli -- \
+             render --thread t/derived-brief --profile exec --target markdown -",
+    ],
+}];
+
 pub fn run(root: &Path) -> Result<(), String> {
     let envs = matrix();
     println!("  matrix: {} permutations", envs.len());
@@ -139,12 +156,12 @@ pub fn run(root: &Path) -> Result<(), String> {
         return Ok(());
     }
     println!(
-        "  {} of 5 operations registered; render follows at SM-P12",
-        OPS.len()
+        "  {} of 5 operations registered",
+        OPS.len() + PIPELINES.len()
     );
 
     let mut failures = Vec::new();
-    for op in OPS {
+    for op in OPS.iter().chain(PIPELINES) {
         let mut baseline: Option<(Env, Vec<u8>)> = None;
         for env in &envs {
             for pass in 0..2 {

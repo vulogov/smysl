@@ -67,7 +67,11 @@ pub use smysl_thread::{
 };
 
 // ---- render ---------------------------------------------------------------
-pub use smysl_render::{RenderError, Target};
+pub use smysl_render::{
+    build as build_ir, emit as emit_artifact, Artifact, Backend, Block, BuildOptions, Connectives,
+    Contentions, Ir, LodPlan, Note, NoteKind, Person, Profile, Provenance, Register, RenderError,
+    RenderMeta, Show, StatusDisplay, Target, Verbosity,
+};
 
 // ---- graph ----------------------------------------------------------------
 pub use smysl_graph::{
