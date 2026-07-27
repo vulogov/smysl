@@ -1,18 +1,25 @@
 //! The OpenAI mapper (§21.2).
 //!
 //! `JsonSchema` — strict structured outputs. Strict mode rejects schemas using constructs
-//! it does not support, which is why the generated schema (Appendix C) is the intersection
-//! of what OpenAI strict and Gemini's dialect both accept: one schema serves every
-//! provider, and the alternative is five schemas that drift.
+//! it does not support, so Appendix C is written conservatively and each mapper translates
+//! what its own endpoint will not take (§21.2, responsibility 2). Appendix C is passed
+//! through here unchanged, which is **the untested half of this file**: strict mode also
+//! requires every key in `properties` to appear in `required`, and Appendix C's `required`
+//! lists three of eleven. Gemini's equivalent mismatch was found by a live call and is
+//! translated in [`gemini::dialect`]; this one is still a reading of the documentation.
+//!
+//! [`gemini::dialect`]: super::gemini::dialect
 //!
 //! | Path | Purpose |
 //! |---|---|
 //! | `GET /v1/models` | model list; also the reachability probe |
 //! | `POST /v1/chat/completions` | completion, streaming or not |
 //!
-//! **Not verified against a live endpoint.** No key was available when this was written, so
-//! the request and response shapes are asserted against recorded fixtures rather than
-//! against the API. The RFC's implementation note applies: verify before relying on it.
+//! **Implemented, but not tested.** No key has been available, so every shape here is
+//! asserted against recorded fixtures rather than against the API. The `required` mismatch
+//! above is the concrete thing to check first when a key exists; it is the same class of
+//! defect that a live Gemini call exposed. The RFC's implementation note applies: verify
+//! before relying on this.
 
 use std::time::Duration;
 
@@ -83,6 +90,12 @@ impl OpenAi {
             if let Some(e) = openai_compat::error_of(&v) {
                 return match status {
                     401 | 403 => ProviderError::Unauthorized,
+                    // The status decides backpressure, not the envelope: an overloaded
+                    // endpoint that explains itself must still arrive as something the
+                    // retry layer acts on.
+                    s if http::is_backpressure(s) => {
+                        ProviderError::RateLimited { retry_after: None }
+                    }
                     _ => e,
                 };
             }

@@ -6,6 +6,9 @@
 //! `RateLimited` retries with exponential backoff and full jitter, capped at three
 //! attempts. Retries are counted in [`Usage::retries`] and never appear in provenance: a
 //! retry is not a distinct model call for recipe purposes (§21.4).
+//!
+//! **Backpressure is a class, not a status code.** See [`is_backpressure`]: three numbers
+//! mean "the server said later", and telling them apart matters to nobody downstream.
 
 use std::time::Duration;
 
@@ -46,11 +49,28 @@ pub const fn is_retryable(e: &ProviderError) -> bool {
     matches!(e, ProviderError::RateLimited { .. })
 }
 
+/// The statuses that mean "the server said later", as opposed to "the request was wrong".
+///
+/// - **429** — too many requests, the classic form.
+/// - **503** — unavailable. Google returns it for "this model is currently experiencing
+///   high demand", which is backpressure wearing a server-error number, and it is what a
+///   free-tier Gemini key sees most often.
+/// - **529** — Anthropic's overloaded, which is 503 under a number of its own.
+///
+/// **500 is deliberately absent.** An internal server error is a bug on the far side, and
+/// waiting 250ms does not fix a bug; retrying it would turn one failure into three.
+///
+/// Retried rather than distinguished, because acting on backpressure means waiting, and
+/// waiting is the same wait whichever of the three arrived.
+pub const fn is_backpressure(status: u16) -> bool {
+    matches!(status, 429 | 503 | 529)
+}
+
 /// Map an HTTP status onto a [`ProviderError`].
 pub fn status_error(status: u16, body: &str, retry_after: Option<Duration>) -> ProviderError {
     match status {
         401 | 403 => ProviderError::Unauthorized,
-        429 => ProviderError::RateLimited { retry_after },
+        s if is_backpressure(s) => ProviderError::RateLimited { retry_after },
         // 413 and 422 are how the common endpoints say "too long"; the numbers the caller
         // needs are in the body and the mapper fills them in if it can parse them.
         413 => ProviderError::ContextExceeded {
@@ -132,9 +152,11 @@ mod client {
                         .header("retry-after")
                         .and_then(super::parse_retry_after);
                     let text = resp.into_string().unwrap_or_default();
-                    // Rate limiting is the one status this layer acts on, because acting on
-                    // it means waiting rather than deciding what it means.
-                    if status != 429 || attempt + 1 == MAX_ATTEMPTS {
+                    // Backpressure is the one class this layer acts on, because acting on it
+                    // means waiting rather than deciding what it means. The last attempt
+                    // returns the response instead of sleeping: a wait nobody is going to
+                    // use is just a slower failure.
+                    if !is_backpressure(status) || attempt + 1 == MAX_ATTEMPTS {
                         return Ok(HttpResponse {
                             status,
                             body: text,
@@ -221,6 +243,29 @@ mod tests {
         ] {
             assert!(!is_retryable(&e), "{e} should not be retried");
         }
+    }
+
+    /// Three numbers, one meaning. 503 is Google's "high demand" and 529 is Anthropic's
+    /// overloaded; both are the server saying later, not the request being wrong.
+    #[test]
+    fn backpressure_is_a_class_of_three_statuses() {
+        for s in [429, 503, 529] {
+            assert!(is_backpressure(s), "{s} is backpressure");
+            assert!(
+                is_retryable(&status_error(s, "", None)),
+                "{s} must reach the retry loop"
+            );
+        }
+    }
+
+    /// Waiting 250ms does not fix a bug on the far side, and retrying would turn one
+    /// failure into three.
+    #[test]
+    fn a_server_fault_is_not_backpressure() {
+        for s in [400, 404, 413, 500, 502, 504] {
+            assert!(!is_backpressure(s), "{s} must not be retried");
+        }
+        assert!(!is_retryable(&status_error(500, "boom", None)));
     }
 
     #[test]
@@ -314,5 +359,100 @@ mod tests {
     #[test]
     fn three_attempts_is_two_retries() {
         assert_eq!(MAX_ATTEMPTS, 3);
+    }
+
+    /// The retry loop against a real socket. `is_backpressure` is a predicate anyone can
+    /// assert; that `post_json` *acts* on it is the claim worth testing, and it needs a
+    /// server that answers.
+    #[cfg(feature = "http-client")]
+    mod loop_over_a_socket {
+        use super::*;
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        /// A server that answers each connection with the next status in the list, then
+        /// stops. Loopback and ephemeral: no fixture, no port to collide on.
+        fn serve(statuses: Vec<u16>) -> String {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            std::thread::spawn(move || {
+                for status in statuses {
+                    let Ok((mut sock, _)) = listener.accept() else {
+                        return;
+                    };
+                    // Drain the request far enough that the client is not writing into a
+                    // socket nobody read, which some platforms turn into a reset.
+                    let mut buf = [0u8; 4096];
+                    let _ = sock.read(&mut buf);
+                    let body = format!(r#"{{"status":{status}}}"#);
+                    let _ = sock.write_all(
+                        format!(
+                            "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n\
+                             Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    );
+                    let _ = sock.flush();
+                }
+            });
+            format!("http://{addr}/v1/x")
+        }
+
+        fn post(url: &str) -> HttpResponse {
+            let mut slept = Vec::new();
+            let r = post_json(
+                url,
+                &[],
+                "{}",
+                Duration::from_secs(5),
+                |d| slept.push(d),
+                || 0.0, // no real waiting: the policy is under test, not the clock
+            )
+            .unwrap();
+            assert_eq!(slept.len(), r.retries as usize, "one sleep per retry");
+            r
+        }
+
+        /// The change this test exists for: 503 is waited out rather than surfaced.
+        #[test]
+        fn a_503_is_retried_and_the_recovery_is_returned() {
+            let r = post(&serve(vec![503, 503, 200]));
+            assert_eq!(r.status, 200);
+            assert_eq!(r.retries, 2, "two 503s were waited out");
+        }
+
+        #[test]
+        fn a_429_is_retried_as_it_always_was() {
+            let r = post(&serve(vec![429, 200]));
+            assert_eq!(r.status, 200);
+            assert_eq!(r.retries, 1);
+        }
+
+        /// Anthropic's overloaded, which is 503 under a number of its own.
+        #[test]
+        fn a_529_is_retried() {
+            let r = post(&serve(vec![529, 200]));
+            assert_eq!(r.status, 200);
+            assert_eq!(r.retries, 1);
+        }
+
+        /// Backpressure that never lets up is reported, not retried forever - and the body
+        /// survives, because responsibility 5 needs it.
+        #[test]
+        fn backpressure_that_never_lets_up_is_returned_after_three_attempts() {
+            let r = post(&serve(vec![503, 503, 503]));
+            assert_eq!(r.status, 503);
+            assert_eq!(r.retries, 2, "three attempts is two retries");
+            assert!(r.body.contains("503"), "the body reaches the mapper");
+        }
+
+        /// A fault is not backpressure: one attempt, no wait.
+        #[test]
+        fn a_500_is_returned_on_the_first_attempt() {
+            let r = post(&serve(vec![500, 200]));
+            assert_eq!(r.status, 500);
+            assert_eq!(r.retries, 0);
+        }
     }
 }

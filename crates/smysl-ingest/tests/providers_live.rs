@@ -84,11 +84,14 @@ fn candidates() -> Vec<Candidate> {
             structured: StructuredMode::JsonSchema,
             context_window: 128_000,
         },
+        // `gemini-2.5-flash` is listed by the probe and refused by the endpoint - "no
+        // longer available to new users". A model list is a catalogue, not an entitlement,
+        // which is worth knowing before trusting `providers --probe` to mean can-call.
         Candidate {
             id: "gemini",
             kind: "gemini",
             endpoint: "https://generativelanguage.googleapis.com",
-            model: "gemini-2.5-flash",
+            model: "gemini-3.5-flash-lite",
             key_var: Some("GEMINI_API_KEY"),
             structured: StructuredMode::JsonSchema,
             context_window: 1_000_000,

@@ -13,9 +13,13 @@
 //! | `POST /v1/messages` | completion, streaming or not |
 //! | `GET /v1/models` | model list; also the reachability probe |
 //!
-//! **Not verified against a live endpoint.** No key was available when this was written, so
-//! the shapes are asserted against recorded fixtures. The RFC's implementation note applies:
-//! verify before relying on it.
+//! **Implemented, but not tested.** No key has been available, so every shape here is
+//! asserted against recorded fixtures rather than against the API - which means this file is
+//! a reading of the documentation, and a reading can be wrong in ways no fixture catches.
+//! The Gemini mapper was written the same way and had exactly that failure: its response
+//! schema was documented as a subset of draft 2020-12, is not one, and every structured call
+//! it made was refused until a live key proved it. The RFC's implementation note applies:
+//! verify before relying on this.
 
 use std::time::Duration;
 
@@ -202,6 +206,12 @@ impl Anthropic {
             if let Some(e) = error_of(&v) {
                 return match status {
                     401 | 403 => ProviderError::Unauthorized,
+                    // The status decides backpressure, not the envelope. Anthropic's 529 is
+                    // 503 under a number of its own, and an overloaded server is worth
+                    // waiting out rather than reporting as a fault.
+                    s if http::is_backpressure(s) => {
+                        ProviderError::RateLimited { retry_after: None }
+                    }
                     _ => e,
                 };
             }
@@ -238,7 +248,8 @@ fn error_of(v: &Value) -> Option<ProviderError> {
         .unwrap_or("unspecified provider error");
     Some(match kind {
         "authentication_error" | "permission_error" => ProviderError::Unauthorized,
-        "rate_limit_error" => ProviderError::RateLimited { retry_after: None },
+        // `overloaded_error` is the 529 envelope: capacity saying later, not a fault.
+        "rate_limit_error" | "overloaded_error" => ProviderError::RateLimited { retry_after: None },
         "invalid_request_error" if msg.to_ascii_lowercase().contains("max_tokens") => {
             ProviderError::ContextExceeded {
                 limit: 0,
@@ -457,6 +468,21 @@ mod tests {
             provider().status_error(429, raw),
             ProviderError::RateLimited { .. }
         ));
+    }
+
+    /// 529 is this endpoint's 503, and `overloaded_error` is its envelope. Both are
+    /// capacity saying later, so both reach the retry loop.
+    #[test]
+    fn overloaded_is_backpressure_by_status_and_by_envelope() {
+        let raw = r#"{"type":"error","error":{"type":"overloaded_error","message":"busy"}}"#;
+        for (status, body) in [(529, raw), (529, "not json"), (503, raw)] {
+            let e = provider().status_error(status, body);
+            assert!(
+                matches!(e, ProviderError::RateLimited { .. }),
+                "{status}: {e}"
+            );
+            assert!(http::is_retryable(&e), "{status}");
+        }
     }
 
     /// `x-api-key`, not `Authorization: Bearer` - this endpoint is the odd one out, and a

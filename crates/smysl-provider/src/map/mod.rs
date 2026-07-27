@@ -5,8 +5,22 @@
 //! [`ProviderError`]. **No vendor SDK** - five SDKs would be five dependency subtrees for
 //! what is, in each case, one POST with a JSON body.
 //!
-//! The endpoint paths and field names below were verified against a running server, as the
-//! RFC's implementation note requires. They change without notice; the mapper contract does
+//! **Verification status.** The RFC's implementation note asks that endpoint paths and field
+//! names be checked against a running server. Three have been; two have not, and say so here
+//! rather than letting a reader assume the table is uniform.
+//!
+//! | Mapper | Status | Verified against |
+//! |---|---|---|
+//! | `ollama` | verified | local server, `llama3.2` |
+//! | `deepseek` | verified | live endpoint, `deepseek-chat` |
+//! | `gemini` | verified | live endpoint, `gemini-3.5-flash-lite` / `-flash` (2026-07-27) |
+//! | `anthropic` | **implemented, but not tested** | recorded fixtures only |
+//! | `openai` | **implemented, but not tested** | recorded fixtures only |
+//!
+//! An untested mapper is a reading of the documentation, and this crate has already had one
+//! reading turn out wrong: Gemini's response schema was written as a subset of draft 2020-12
+//! and is not one, which no fixture could have caught. Treat the two above the same way -
+//! verify before relying on them. Endpoints change without notice; the mapper contract does
 //! not.
 
 pub mod auth;

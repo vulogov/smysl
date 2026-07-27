@@ -88,6 +88,12 @@ impl DeepSeek {
                 return match (status, e) {
                     // A 401 is unauthorized whatever the body chose to call it.
                     (401 | 403, _) => ProviderError::Unauthorized,
+                    // Likewise the status decides backpressure: DeepSeek answers an
+                    // overloaded server with 503 and a body explaining it, and the
+                    // explanation must not cost the response its retry.
+                    (s, _) if http::is_backpressure(s) => {
+                        ProviderError::RateLimited { retry_after: None }
+                    }
                     (_, mapped) => mapped,
                 };
             }
@@ -341,6 +347,15 @@ mod tests {
             provider().status_error(403, "not json at all"),
             ProviderError::Unauthorized
         );
+    }
+
+    /// This endpoint documents 503 as "server overloaded, retry after a moment", which is
+    /// backpressure however the body words it.
+    #[test]
+    fn a_503_is_backpressure_whatever_the_body_says() {
+        let e = provider().status_error(503, r#"{"error":{"message":"Server Overloaded"}}"#);
+        assert!(matches!(e, ProviderError::RateLimited { .. }), "{e}");
+        assert!(http::is_retryable(&e));
     }
 
     #[test]

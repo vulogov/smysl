@@ -4,10 +4,16 @@
 //! dependency, the schema is a constant, and a constant that a test compares against the
 //! kernel's own type tables cannot drift from them silently.
 //!
-//! **One schema serves every provider.** OpenAI strict mode and Gemini's dialect each accept
-//! a different subset of draft 2020-12, so this is the *intersection* of the two. Five
-//! schemas would be five things to keep in step, and the one that drifted would be the one
-//! nobody ran.
+//! **One schema, translated per provider.** This is draft 2020-12, written conservatively;
+//! a mapper whose endpoint speaks something narrower translates it on the way out (§21.2,
+//! responsibility 2). Five schemas would be five things to keep in step, and the one that
+//! drifted would be the one nobody ran.
+//!
+//! It was originally written as the *intersection* of what every provider accepts. That was
+//! wrong, and a live Gemini call proved it: Gemini's `responseSchema` is an OpenAPI 3.0
+//! `Schema` object, not a subset of draft 2020-12, and it has no `additionalProperties`
+//! field at all - while OpenAI strict mode *requires* `additionalProperties: false`. The
+//! intersection of those two is not a schema. See `smysl_provider::map::gemini::dialect`.
 //!
 //! The schema encodes the **structural** half of rules M and T. The ordering half of M and
 //! the ceiling half of T are not expressible in JSON Schema and are enforced by `check`
@@ -227,10 +233,11 @@ mod tests {
         assert!(unit_schema().contains("\"maxLength\": 240"));
     }
 
-    /// OpenAI strict mode and Gemini's dialect each accept a subset of draft 2020-12; this
-    /// is the intersection, so anything outside it is a schema only some providers take.
+    /// A conservative core, not an intersection - no provider dialect reached here takes
+    /// any of these, so a keyword from this list would be one every mapper had to translate
+    /// away. What a *particular* endpoint refuses is that mapper's problem to translate.
     #[test]
-    fn the_schema_stays_inside_the_provider_intersection() {
+    fn the_schema_stays_inside_the_conservative_core() {
         let s = unit_schema();
         for outside in [
             "$ref",
@@ -246,7 +253,7 @@ mod tests {
         ] {
             assert!(
                 !s.contains(outside),
-                "`{outside}` is outside the intersection"
+                "`{outside}` is outside the conservative core"
             );
         }
     }

@@ -133,7 +133,27 @@ a terminal: `--noprogress`, `--quiet` and `--json` each turn it off, and a pipel
 finds a spinner in the middle of a CBOR sequence.
 
 **SM-P14 — hosted providers and ingest.** Four more mappers and the boundary a model's
-output has to cross. Three rules meet there, and they are one idea from three directions: a
+output has to cross.
+
+Three of the five mappers have been driven against a real endpoint; two have not, and the
+difference is worth stating plainly, because an untested mapper is a reading of a vendor's
+documentation rather than a fact about their API:
+
+| Mapper | Structured mode | State |
+|---|---|---|
+| `ollama` | json-schema | verified — local server, `llama3.2` |
+| `deepseek` | json-mode | verified — live endpoint, `deepseek-chat` |
+| `gemini` | json-schema | verified — live endpoint, `gemini-3.5-flash-lite` / `-flash` |
+| `anthropic` | tool-force | **implemented, but not tested** |
+| `openai` | json-schema | **implemented, but not tested** |
+
+The distinction earns its keep: Gemini's mapper was written from the documentation, which
+describes its response schema as a subset of draft 2020-12. It is not one — it is an OpenAPI
+3.0 `Schema`, with no `additionalProperties` field and no `if`/`then` — so every structured
+call was refused until a live key proved it, and no recorded fixture could have caught it.
+The two untested mappers are exactly as trustworthy as that one was.
+
+Three rules meet at the boundary, and they are one idea from three directions: a
 model's output is a proposal, its failures are recoverable, and its confidence is not
 evidence.
 

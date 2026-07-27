@@ -159,6 +159,12 @@ impl Ollama {
     /// missing model is a configuration error, and the difference decides whether a caller
     /// goes and pulls the model or files a bug about the server.
     pub fn status_error(&self, status: u16, body: &str) -> ProviderError {
+        // The status decides backpressure before the body gets a say: a loaded Ollama
+        // answers 503 while a model loads, and `classify` would read the explanation as a
+        // fault that nothing retries.
+        if http::is_backpressure(status) {
+            return ProviderError::RateLimited { retry_after: None };
+        }
         if let Ok(v) = serde_json::from_str::<Value>(body) {
             if let Some(msg) = v.get("error").and_then(Value::as_str) {
                 return classify(msg);
@@ -599,6 +605,14 @@ mod tests {
         let e = provider().status_error(404, r#"{"error":"model 'nope' not found"}"#);
         assert!(matches!(e, ProviderError::Malformed(_)), "{e}");
         assert!(!e.is_fallback_eligible(), "a fallback would paper over it");
+    }
+
+    /// A loaded server answers 503 while a model loads. `classify` would read the
+    /// explanation as a fault, so the status decides before the body gets a say.
+    #[test]
+    fn a_503_is_backpressure_even_with_an_explanatory_body() {
+        let e = provider().status_error(503, r#"{"error":"server busy"}"#);
+        assert!(matches!(e, ProviderError::RateLimited { .. }), "{e}");
     }
 
     #[test]

@@ -22,6 +22,10 @@
 //! Rule M is *not* checked here. It is checked at staging against the store, because
 //! grounds may reference units the chunk did not contain - a claim resting on something
 //! ingested an hour ago is not a rule M violation, it is the normal case.
+//!
+//! Rule T *is* checked here, but its diagnostic does not buy a turn: the ceiling is applied
+//! unconditionally in [`convert`], so `SMY-E033` records what a model tried rather than work
+//! outstanding. See [`needs_repair`].
 
 use smysl_check::{check, CheckOptions, Pass};
 use smysl_core::surface::parse_surface;
@@ -101,8 +105,21 @@ pub fn convert(answer: &str, path: IngestPath, rung: Rung) -> (Vec<UnitCore>, Ve
 ///
 /// Only errors are. A warning means the answer is usable and something is worth saying;
 /// re-asking the model would spend a call to remove a remark.
+///
+/// **`SMY-E033` is the exception**, because rule T already fixed it. The ceiling is applied
+/// unconditionally in [`convert`] and the diagnostic records that a model tried, not that
+/// something is outstanding - so retrying asks the model to solve a problem that no longer
+/// exists, and a model confident enough to claim `measured` once claims it again. Observed
+/// live: three Gemini attempts, three identical `measured` claims, and a chunk of good
+/// capped units discarded to opaque prose by rule I on the way out.
+///
+/// If the cap were ever to fail, the units would reach `stage::prepare` still over the
+/// ceiling and its check would refuse them there. This shortens the loop; it does not widen
+/// the gate.
 pub fn needs_repair(diagnostics: &[Diagnostic]) -> bool {
-    diagnostics.iter().any(|d| d.severity == Severity::Error)
+    diagnostics
+        .iter()
+        .any(|d| d.severity == Severity::Error && d.code != Code::E033)
 }
 
 /// Render diagnostics for the repair turn.
@@ -283,6 +300,31 @@ mod tests {
         assert!(needs_repair(&[Diagnostic::new(Code::E001)]));
         assert!(!needs_repair(&[Diagnostic::new(Code::W304)]));
         assert!(!needs_repair(&[]));
+    }
+
+    /// Rule T's cap is the fix, so the diagnostic recording it is not work outstanding.
+    /// Retrying it asks the model to solve a problem that no longer exists - and a model
+    /// confident enough to claim `measured` once claims it again, so the budget is spent
+    /// and the chunk degrades with good capped units inside it.
+    #[test]
+    fn a_capped_ceiling_does_not_spend_the_repair_budget() {
+        let json = r#"{"units":[{"type":"evidence","gist":"p95 rose","status":"measured",
+                       "source":{"kind":"metric","ref":"m"}}]}"#;
+        let (units, d) = convert(json, IngestPath::JsonAst, Rung::Document);
+
+        assert!(d.iter().any(|x| x.code == Code::E033), "still reported");
+        assert!(!needs_repair(&d), "but not retried: {d:?}");
+        assert!(
+            units[0].status <= ceiling::ceiling(Rung::Document),
+            "capped"
+        );
+    }
+
+    /// The exemption is `E033` alone - a real error alongside it still buys a turn.
+    #[test]
+    fn a_capped_ceiling_does_not_mask_a_genuine_error() {
+        let d = [Diagnostic::new(Code::E033), Diagnostic::new(Code::E001)];
+        assert!(needs_repair(&d));
     }
 
     #[test]
