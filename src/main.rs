@@ -437,6 +437,13 @@ fn cli() -> Command {
                         .value_name("ID")
                         .help("Cost model; recorded in the packinfo either way (D-2)"),
                 )
+                .arg(
+                    Arg::new("mode")
+                        .long("mode")
+                        .value_name("M")
+                        .value_parser(["greedy", "exact"])
+                        .help("`exact` proves optimality by branch and bound; needs the exact-pack feature"),
+                )
                 .arg(Arg::new("store").value_name("PATH")),
             "reindex" => sub
                 .arg(
@@ -1179,6 +1186,9 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         Some("L2") => req = req.capped(Lod::L2),
         _ => {}
     }
+    if m.get_one::<String>("mode").map(String::as_str) == Some("exact") {
+        req = req.exact();
+    }
     if let Some(id) = m.get_one::<String>("tokenizer") {
         match Estimator::parse(id) {
             Some(e) => req.estimator = e,
@@ -1203,6 +1213,10 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
 
+    for d in packed.report.iter() {
+        eprintln!("{path}: {d}");
+    }
+
     if m.get_flag("explain") {
         for (uid, level) in &packed.selection {
             let why = packed
@@ -1217,12 +1231,18 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             eprintln!("{uid} dropped: {reason}");
         }
         eprintln!(
-            "{path}: {} of {} unit(s), {} of {} tokens, gap {:.3}",
+            "{path}: {} of {} unit(s), {} of {} tokens, {} mode, gap {:.3}{}",
             packed.len(),
             store.units().count(),
             packed.used(),
             packed.info.budget,
-            packed.info.optimality.gap
+            packed.info.optimality.mode,
+            packed.info.optimality.gap,
+            if packed.is_optimal() {
+                " (proven optimal)"
+            } else {
+                ""
+            }
         );
     }
 

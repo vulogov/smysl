@@ -35,6 +35,18 @@ $ smysl pack --budget 5 --focus c/pool-saturation incident.smy
 smysl pack: SMY-E200: budget 5 but the mandatory floor needs 46     # exit 4
 ```
 
+**SM-P10 — exact packing.** `--mode exact`, behind the `exact-pack` feature, replaces
+greedy's selection with a provably optimal one by branch and bound. Both modes now report
+an optimality gap derived from a fractional relaxation, so the figure is a ceiling that can
+be relied on rather than an estimate.
+
+```bash
+$ smysl pack --budget 90 --explain incident.smy
+… 5 of 8 unit(s), 80 of 90 tokens, greedy mode, gap 0.059
+$ smysl pack --budget 90 --mode exact --explain incident.smy
+… 5 of 8 unit(s), 90 of 90 tokens, exact mode, gap 0.000 (proven optimal)
+```
+
 | Phase | Delivers | State |
 |---|---|---|
 | SM-P0 | scaffold, diagnostics, gates | **done** |
@@ -47,7 +59,7 @@ smysl pack: SMY-E200: budget 5 but the mandatory floor needs 46     # exit 4
 | SM-P7 | lineage: `diff`, `trace`, `view`, `bundle` | **done** |
 | SM-P8 | salience, `salience --explain` | **done** |
 | SM-P9 | packing, `pack --explain` | **done** |
-| SM-P10 | exact packing (branch and bound) | next |
+| SM-P10 | exact packing, provable optimality gap | **done** |
 | SM-P11–P12 | threads, rendering | |
 | SM-P13–P14 | providers, ingest | |
 | SM-P15 | TUI, evaluation | |

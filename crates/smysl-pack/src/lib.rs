@@ -18,16 +18,19 @@
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
+pub mod bound;
 pub mod closure;
 pub mod constraints;
 pub mod cost;
+#[cfg(feature = "branch-and-bound")]
+pub mod exact;
 pub mod solve;
 
 pub use closure::Reason;
 pub use constraints::{violations, Constraints, Selection, Violation};
 pub use cost::{available_levels, value, Estimator};
 pub use smysl_core::error::PackError;
-pub use solve::{pack, verify, Pack, PackRequest, IMPROVEMENT_PASSES};
+pub use solve::{pack, verify, Pack, PackRequest, EXACT_THRESHOLD, IMPROVEMENT_PASSES};
 
 /// Identifier of the default cost model, as recorded in every `packinfo` (D-2).
 pub const DEFAULT_ESTIMATOR: &str = "smysl/utf8-div4";

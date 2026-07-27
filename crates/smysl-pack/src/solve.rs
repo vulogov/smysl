@@ -11,15 +11,19 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use smysl_core::diag::{Code, Diagnostic, Report};
 use smysl_core::{DropReason, Lod, Optimality, PackError, PackInfo, PackMode, ThreadId, Uid};
 use smysl_graph::{SalienceReport, Store};
 
+use crate::bound;
 use crate::closure;
 use crate::constraints::{violations, Constraints, Selection, Violation};
 use crate::cost::{available_levels, value, Estimator};
 
 /// Default local-improvement passes (§18.3).
 pub const IMPROVEMENT_PASSES: usize = 8;
+/// Default store size above which exact mode declines to run (§18.3 step 4).
+pub const EXACT_THRESHOLD: usize = 256;
 
 /// What to pack.
 #[derive(Debug, Clone)]
@@ -36,6 +40,10 @@ pub struct PackRequest {
     /// Restrict packing to these units; empty means the whole store.
     pub scope: BTreeSet<Uid>,
     pub improvement_passes: usize,
+    /// Above this many units, `PackMode::Exact` falls back to greedy and says so
+    /// (`SMY-W202`). The problem is NP-hard; an unbounded exact search on a large store
+    /// would hang rather than answer.
+    pub exact_threshold: usize,
 }
 
 impl Default for PackRequest {
@@ -49,6 +57,7 @@ impl Default for PackRequest {
             max_lod: None,
             scope: BTreeSet::new(),
             improvement_passes: IMPROVEMENT_PASSES,
+            exact_threshold: EXACT_THRESHOLD,
         }
     }
 }
@@ -75,6 +84,12 @@ impl PackRequest {
         self.max_lod = Some(l);
         self
     }
+
+    /// Ask for a provably optimal pack.
+    pub fn exact(mut self) -> PackRequest {
+        self.mode = PackMode::Exact;
+        self
+    }
 }
 
 /// A finished pack.
@@ -86,6 +101,9 @@ pub struct Pack {
     pub info: PackInfo,
     /// Why each unit is in (`--explain`).
     pub why: BTreeMap<Uid, closure::Reason>,
+    /// Anything the caller should know that is not a failure - `SMY-W202` when exact mode
+    /// declined to run.
+    pub report: Report,
 }
 
 impl Pack {
@@ -104,6 +122,11 @@ impl Pack {
     /// Units a constraint forced in rather than value earning.
     pub fn forced(&self) -> Vec<(&Uid, &closure::Reason)> {
         self.why.iter().filter(|(_, r)| r.is_forced()).collect()
+    }
+
+    /// Whether this pack is provably the best available within its budget.
+    pub fn is_optimal(&self) -> bool {
+        self.info.optimality.mode == PackMode::Exact && self.info.optimality.gap == 0.0
     }
 }
 
@@ -146,6 +169,7 @@ pub fn pack(
             raise(&mut selection, u, l);
         }
     }
+    let floor_selection = selection.clone();
     let floor_cost = cost_of(store, &selection, &req.estimator);
     if floor_cost > req.budget {
         // Rule R: the alternative is a one-sided pack, which is worse than no pack.
@@ -240,7 +264,48 @@ pub fn pack(
         }
     }
 
-    // --- 4. the manifest ---------------------------------------------------
+    // --- 4. exact refinement (feature `branch-and-bound`) -------------------
+    let mut report = Report::new();
+    let mut proven = false;
+    if req.mode == PackMode::Exact {
+        if scope.len() > req.exact_threshold {
+            report.push(Diagnostic::new(Code::W202).with_message(format!(
+                "{} units is above the exact threshold of {}; packed greedily",
+                scope.len(),
+                req.exact_threshold
+            )));
+        } else {
+            #[cfg(feature = "branch-and-bound")]
+            {
+                let floor = floor_selection.clone();
+                let found = crate::exact::solve(
+                    store,
+                    &scope,
+                    &local,
+                    &req.estimator,
+                    req.budget,
+                    &floor,
+                    selection.clone(),
+                    crate::exact::NODE_LIMIT,
+                    cap,
+                );
+                selection = found.selection;
+                used = found.used;
+                proven = found.proven;
+                if !found.proven {
+                    report.push(Diagnostic::new(Code::W202).with_message(
+                        "the exact search hit its node limit; the pack is valid but not proven optimal",
+                    ));
+                }
+            }
+            #[cfg(not(feature = "branch-and-bound"))]
+            report.push(Diagnostic::new(Code::W202).with_message(
+                "exact packing is not compiled in; rebuild with the `exact-pack` feature",
+            ));
+        }
+    }
+
+    // --- 5. the manifest ---------------------------------------------------
     let mut info = PackInfo::new(req.budget, used, req.estimator.id());
     info.thread = req.thread.clone();
     for uid in &scope {
@@ -256,16 +321,24 @@ pub fn pack(
             info.degraded.push((*uid, *level));
         }
     }
-    info.optimality = Optimality {
-        mode: req.mode,
-        gap: gap(
+    // A gap from the fractional relaxation is a *provable* ceiling, not an estimate. A
+    // proven-exhaustive exact search has nothing left to find, so its gap is zero.
+    let headroom = if proven {
+        0.0
+    } else {
+        bound::fractional(
             store,
             &selection,
-            &local,
             &scope,
+            &local,
             &req.estimator,
-            req.budget - used,
-        ),
+            req.budget.saturating_sub(used),
+            cap,
+        )
+    };
+    info.optimality = Optimality {
+        mode: req.mode,
+        gap: bound::gap(bound::achieved(&selection, &local), headroom),
     };
 
     let _ = in_scope;
@@ -278,6 +351,7 @@ pub fn pack(
         selection,
         info,
         why,
+        report,
     })
 }
 
@@ -461,43 +535,4 @@ fn drop_reason(
     } else {
         DropReason::Budget
     }
-}
-
-/// An upper bound on the value left on the table, as a fraction (§18.3).
-///
-/// The fractional relaxation: with `remaining` budget and the best remaining density, no
-/// solution can gain more than `remaining × density`. Reported so a caller knows how far
-/// from optimal a greedy pack might be rather than having to assume.
-fn gap(
-    store: &Store,
-    selection: &Selection,
-    salience: &BTreeMap<Uid, f32>,
-    scope: &[Uid],
-    e: &Estimator,
-    remaining: u64,
-) -> f32 {
-    let achieved: f64 = selection
-        .iter()
-        .map(|(u, l)| value(salience.get(u).copied().unwrap_or(0.0), *l))
-        .sum();
-    if achieved == 0.0 {
-        return 0.0;
-    }
-
-    let mut best = 0.0f64;
-    for uid in scope {
-        let Some(unit) = store.get(uid) else { continue };
-        for level in available_levels(&unit.core) {
-            if selection.get(uid).is_some_and(|l| *l >= level) {
-                continue;
-            }
-            let d = closure::delta(store, selection, *uid, level);
-            let (dc, dv) = weigh(store, selection, &d, salience, e);
-            if dc > 0 {
-                best = best.max(dv / dc as f64);
-            }
-        }
-    }
-    let bound = achieved + best * remaining as f64;
-    smysl_core::quantise(((bound - achieved) / bound) as f32)
 }

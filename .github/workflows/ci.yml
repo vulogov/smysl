@@ -33,6 +33,7 @@ jobs:
           - "--all-features"
           - "--no-default-features --features local"
           - "--no-default-features --features remote"
+          - "--no-default-features --features exact-pack"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
