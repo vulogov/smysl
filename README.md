@@ -2,207 +2,250 @@
 
 # smysl
 
-An AI↔AI↔Human data interchange format, library, and CLI.
+**One format that both AI systems and people can read, write, and trust.**
 
-Prose is a lossy serialisation of a structure the producing model already had. Every
-summarisation hop re-derives that structure from a progressively degraded signal, and
-along the way hedges disappear, provenance evaporates, and disagreement gets silently
-resolved by whoever summarised last. `smysl` transports the structure instead.
+[![ci](https://github.com/vulogov/smysl/actions/workflows/ci.yml/badge.svg)](https://github.com/vulogov/smysl/actions/workflows/ci.yml)
+![format](https://img.shields.io/badge/format-smysl%2F0.1-6aa84f)
+![rust](https://img.shields.io/badge/rust-1.79%2B-orange)
+![unsafe](https://img.shields.io/badge/unsafe-forbidden-success)
+[![licence](https://img.shields.io/badge/licence-MPL--2.0-blue)](LICENSE)
 
-Three properties follow, and they are what distinguish this from a document-passing
-pipeline:
+---
 
-1. **Summarisation is precomputed.** Fitting content to a token budget is a pure function
-   over the graph, requiring zero model calls.
-2. **Epistemic degradation is structurally impossible.** A trust ceiling at ingestion plus
-   a monotonicity rule inside the graph mean a speculation cannot become a finding across
-   hops.
-3. **Disagreement converges without being resolved.** Merge is a coordination-free
-   join-semilattice; semantic conflict is materialised, not adjudicated.
+## The problem
 
-Implements **RFC SMYSL-1 (Combined)** — format `smysl/0.1`, kernel `smysl.kernel/0.1`.
+When one AI hands work to another, it usually hands over **prose**.
 
-## Status
+Prose is a bad container. The model that wrote it *had* a structure in mind — this is
+solid, that is a guess, this rests on that, these two sources disagree — and then it
+flattened all of it into paragraphs. The next model has to guess that structure back from
+the text. Then it summarises again for the model after it.
 
-**SM-P9 — packing.** `smysl pack` is what a consuming agent calls instead of asking a
-model to summarise: same graph, same budget, same thread yields identical bytes, and no
-inference happens anywhere. Seven constraints hold on every pack. The one that matters is
-C3 — a selected claim's rebuttals come with it, always — and when the budget cannot hold
-both, packing **fails** with the minimum feasible budget rather than emitting the claim
-alone.
+Every hop loses something, and it is always the same things:
+
+- **Hedges vanish.** "The data suggests" becomes "the data shows" becomes "we found".
+- **Sources evaporate.** By hop three, nobody can say where the number came from.
+- **Disagreement disappears.** Two conflicting findings go in; whichever one the last
+  summariser preferred comes out. The conflict is not resolved, just dropped.
+
+The usual fix is a custom JSON schema between each pair of systems. That works for the
+machines and locks the humans out: nobody reviews a wire format, so the one place a person
+could have caught the drift is the place they cannot see.
+
+## The idea
+
+`smysl` is a single format that is **precise enough for machines and readable enough for
+people** — so the same artifact travels the whole chain without ever being translated.
+
+```
+   model ──▶ model ──▶ human reviews & edits ──▶ model ──▶ report
+     └──────────── the same smysl document throughout ───────────┘
+```
+
+No adapter at any hop. The AI writes it, another AI merges it, a person opens it in a text
+editor and fixes a line, and the next AI picks it up from there.
+
+## What it looks like
+
+This is a real, complete document. It is also the wire format — there is no separate
+"machine version".
+
+```
+@doc smysl/0.1 { id: v/f1, intent: incident-brief, roots: [f/root-cause] }
+
+@evidence e/pool-wait { status: measured, source: { kind: metric, ref: "pool.wait_ms{shard=eu-west}", captured: 2026-07-09 } }
+~ Pool acquisition wait rose from 2 ms to 310 ms over the same window.
+
+@evidence e/canary { status: measured, source: { kind: metric, ref: "canary.p95", captured: 2026-07-09 } }
+~ The 4.2 canary ran the same pool configuration without the regression.
+
+@claim c/pool-saturation { status: inferred, grounds: [e/pool-wait] }
+~ The eu-west connection pool is saturated.
+
+@claim c/canary-clean { status: derived, grounds: [e/canary] }
+~ The canary rules out a pure configuration cause.
+
+@finding f/root-cause { status: inferred, grounds: [c/pool-saturation, c/canary-clean] }
+~ Pool saturation is the leading cause but is not consistent with the canary.
+
+@rel c/canary-clean --rebuts--> c/pool-saturation { weight: 0.6 }
+```
+
+You can read that. So can a machine, exactly. Three things are being carried that prose
+would have dropped:
+
+- **How sure it is.** `measured` (an instrument recorded it) is a different thing from
+  `inferred` (a model reasoned it out). The scale runs `unfounded` → `speculative` →
+  `inferred` → `derived` → `cited` → `measured`.
+- **What it rests on.** `grounds: [e/pool-wait]` means this claim stands or falls with that
+  evidence. Retract the evidence and the tool tells you what else falls.
+- **What contradicts it.** The `rebuts` edge is part of the document. The disagreement is
+  recorded, not smoothed over.
+
+## Why one shared format is worth it
+
+**Nothing degrades in transit.** A guess cannot quietly become a fact. The rule is
+mechanical: a conclusion may never be more certain than the weakest thing it rests on, and
+it is checked, not hoped for. Confidence can only go down across hops, never up.
+
+**Summarising costs nothing.** Fitting a document to a token budget is ordinary
+computation over the graph, not another model call:
 
 ```bash
 $ smysl --format surface pack --budget 8k --focus c/pool-saturation incident.smy
-$ smysl pack --budget 5 --focus c/pool-saturation incident.smy
-smysl pack: SMY-E200: budget 5 but the mandatory floor needs 46     # exit 4
 ```
 
-**SM-P10 — exact packing.** `--mode exact`, behind the `exact-pack` feature, replaces
-greedy's selection with a provably optimal one by branch and bound. Both modes now report
-an optimality gap derived from a fractional relaxation, so the figure is a ceiling that can
-be relied on rather than an estimate.
+Same input, same budget, same bytes out — every time, on any machine, for free. If a claim
+is included, its rebuttals come with it; a budget too small to hold both **fails** rather
+than shipping the claim without the objection to it.
+
+**People stay in the loop without a special tool.** The review artifact *is* the document.
+No dashboard to build, no viewer to install — open it, read it, change a line, save it.
+A human correction is a first-class edit, not a bug report filed against a pipeline.
+
+**Many agents can work at once.** Merging two documents is a set union with no coordinator
+and no locking, and it does not matter what order they arrive in. Where two agents disagree,
+merge **records the contention** instead of picking a winner.
 
 ```bash
-$ smysl pack --budget 90 --explain incident.smy
-… 5 of 8 unit(s), 80 of 90 tokens, greedy mode, gap 0.059
-$ smysl pack --budget 90 --mode exact --explain incident.smy
-… 5 of 8 unit(s), 90 of 90 tokens, exact mode, gap 0.000 (proven optimal)
+$ smysl merge agent-a.smy agent-b.smy -o combined.cbor
+agent-b.smy: contention k/ccm3actwjjti65famnoe6mapo5d over b3:cvhirtgs2mpvli2ethhyeo32uf (2 positions, live-rebuttal)
 ```
 
-**SM-P11 — threads.** `smysl thread --derive` turns a graph into an ordered reading of it
-under one of five schemas: role assignment from a rule table, salience-ranked selection
-inside each role's arity, Kahn ordering over the sequencing edges, then **coherence
-repair** — a step whose deps are missing pulls them in, immediately before itself. That
-last stage is the phase gate, and it is asserted as a property over generated graphs
-rather than by example: the repaired thread satisfies rule L always, or repair is not a
-repair.
+This works because a unit's real identity is a hash of its content, not its position in a
+file. Two agents that independently record the same fact produce the same identifier and
+merge into one unit, with no registry and nobody assigning ids. Names like
+`c/pool-saturation` are local nicknames for reading and writing; `b3:…` is the identity
+that survives merging.
+
+**Every answer can be traced.** Ask where a conclusion came from and get the actual chain,
+because the chain was carried rather than reconstructed.
 
 ```bash
-$ smysl thread --derive narrative story.smy
-@thread t/narrative { schema: narrative, owner: tool:smysl, ts: [0, 0] }
-~ The pool wait metric had been visible the whole time, on a dashboard nobody opened.; …
-  setup → p/setup
-  complication → p/complication
-  turn → p/turn
-  resolution → p/resolution
-  coda → p/coda
-$ smysl thread --derive qa --explain incident.smy
-incident.smy: question is required by qa and nothing could fill it
+$ smysl trace b3:cvhirtgs2mpvli2ethhyeo32uf --grounds incident.smy
+b3:cvhirtgs2mpvli2ethhyeo32uf (root)
+  b3:izyuzlt42mqcvgdfb4nfpllxyq (grounds)
+incident.smy: 2 unit(s) over 1 step(s)
 ```
 
-Derivation is pure — no model is consulted — so `derive_thread` joins `pack`, `salience`
-and `merge` as a rule D operation in the determinism matrix. `--refine`, which does consult
-a model, arrives with the provider layer.
+## Getting content in
 
-**SM-P12 — rendering.** `smysl render` turns a thread plus a profile into an artifact.
-Two stages with the Render IR between them: everything needing the graph happens before it,
-everything needing a file format after it, so no two targets can disagree about what the
-document says.
-
-Rule V1 is enforced when the **profile loads**, not when it emits. A profile that renders
-`speculative` the way it renders `measured` never becomes a `Profile` value, so there is no
-path from a flattening profile to an artifact:
+Existing prose gets converted by a model — the one place a model is required:
 
 ```bash
-$ smysl render --profile flat.hjson --thread t/brief incident.smy
-smysl render: flat.hjson: SMY-E210: profile flat has no distinct rendering for unfounded   # exit 3
-```
-
-Rule V2 is enforced when the IR is built, so a suppressed contention is recorded in every
-target — and because merge *reports* detections rather than recording them (§5.4), the
-renderer detects live contentions rather than only surfacing written-down ones. Otherwise
-rule V2 would be vacuous in exactly the case it exists for.
-
-```bash
-$ smysl thread --derive --schema brief incident.smy \
-    | smysl render --thread t/derived-brief --profile exec --target markdown -
-$ smysl --strict render --profile plain --contentions suppress incident.smy
-smysl render: SMY-W211: 1 open contention(s) suppressed by profile plain                   # exit 3
-```
-
-Connectives are template selection keyed by relation kind and seeded by `uid[0]`, never
-model inference — so inserting a block earlier does not reword every transition after it.
-`render` is the fifth and last rule D operation in the determinism matrix.
-
-**SM-P13 — the provider layer.** The first phase that leaves the machine, and most of it
-is about not doing so. `--offline` is decided from configuration before any I/O: a hosted
-provider fails with exit 7 without a socket being opened, and `providers --tasks` says
-exactly which tasks would egress under current routing.
-
-```bash
-$ smysl providers --probe
-ollama         up    ctx 131072   out 2048   json-schema  local   4 model(s); llama3.2 installed
-$ smysl --offline providers --tasks
-task                 provider       egress     command
-content-ingest       ollama         local      ingest
-attest               hosted         LEAVES     attest
---offline: any task marked LEAVES will exit 7 rather than run
-```
-
-Fallback fires on `Unreachable` and on nothing else — falling back on `Unauthorized` or
-`ContextExceeded` would hide a configuration error behind a different model, and the caller
-would get an answer from somewhere they did not choose. Ollama is the conformance reference
-because it is the only provider exercisable without keys, cost, or egress; its mapper is
-asserted against a running server in CI rather than against a remembered API.
-
-Keys are never stored: only `api_key_env` or `api_key_cmd`, so `.smysl/config.hjson` is
-safe to commit. `ProviderConfig` has no field a key could be written into, and a config
-naming one is refused at load. The usage ledger records counts, models, task, and recipe —
-never prompt or completion text.
-
-Long-running commands report progress on **stderr**, never stdout, and only when stderr is
-a terminal: `--noprogress`, `--quiet` and `--json` each turn it off, and a pipeline never
-finds a spinner in the middle of a CBOR sequence.
-
-**SM-P14 — hosted providers and ingest.** Four more mappers and the boundary a model's
-output has to cross.
-
-Three of the five mappers have been driven against a real endpoint; two have not, and the
-difference is worth stating plainly, because an untested mapper is a reading of a vendor's
-documentation rather than a fact about their API:
-
-| Mapper | Structured mode | State |
-|---|---|---|
-| `ollama` | json-schema | verified — local server, `llama3.2` |
-| `deepseek` | json-mode | verified — live endpoint, `deepseek-chat` |
-| `gemini` | json-schema | verified — live endpoint, `gemini-3.5-flash-lite` / `-flash` |
-| `anthropic` | tool-force | **implemented, but not tested** |
-| `openai` | json-schema | **implemented, but not tested** |
-
-The distinction earns its keep: Gemini's mapper was written from the documentation, which
-describes its response schema as a subset of draft 2020-12. It is not one — it is an OpenAPI
-3.0 `Schema`, with no `additionalProperties` field and no `if`/`then` — so every structured
-call was refused until a live key proved it, and no recorded fixture could have caught it.
-The two untested mappers are exactly as trustworthy as that one was.
-
-Three rules meet at the boundary, and they are one idea from three directions: a
-model's output is a proposal, its failures are recoverable, and its confidence is not
-evidence.
-
-**Rule T** caps what a model may claim. A `model`-rung answer claiming `measured` is
-downgraded and told so — and if the shape cannot carry the ceiling either (`inferred` needs
-grounds), it walks down to what the unit can actually support.
-
-**Rule I** guarantees progress. A span that survives its repair budget becomes an opaque
-`prose` unit carrying the raw text verbatim, and the run exits 10 rather than failing: a
-corpus with some opaque units is usable, a failed ingest is not.
-
-**Rule S** stages. Model output never enters the store; it lands in `.smysl/staged.smy` as
-readable surface text, and `merge --staged` is the confirmation.
-
-```bash
-$ smysl ingest --dry-run report.md
-provider     ollama
-egress       no - local
-path         json-ast (default for small enforced ingest)
-rung         document (ceiling cited)
 $ smysl ingest report.md
-smysl ingest: warning: SMY-W304: span degraded to opaque prose after 3 attempt(s)
-7 unit(s) staged in ./.smysl/staged.smy; review, then `smysl merge --staged`   # exit 10
+7 unit(s) staged in ./.smysl/staged.smy; review, then `smysl merge --staged`
 ```
 
-Recipes (D-8) make a model call's *conditions* auditable even though the call itself is
-not reproducible — and `recipe_family`, which drops the provider and the model, is what lets
-E9 compare the same logical ingest across vendors.
+Three safeguards apply at that boundary, because a model's output is a proposal rather
+than a fact:
+
+- **It cannot overstate itself.** A model reading a document may claim at most "cited". If
+  it says `measured`, it is downgraded and told so.
+- **It cannot fail silently.** A passage the model mangles is kept verbatim as opaque text
+  and flagged, so a partial result is still usable.
+- **It cannot write straight into your data.** Output lands in a staging file for you to
+  read first. `merge --staged` is your confirmation.
+
+Model access is off unless you configure it. `--offline` refuses to open a socket at all,
+and `providers --tasks` tells you in advance which commands would leave the machine. API
+keys are never stored in config — only the name of an environment variable or a command
+that returns one.
+
+## Everything else is deterministic
+
+Only `ingest` and `attest` consult a model. Selecting, merging, ordering, ranking and
+rendering are pure functions — same input, same output, byte for byte, verified in CI:
+
+| Command | What it does |
+|---|---|
+| `check` | Validate a document and explain what is wrong |
+| `merge` | Combine documents; record disagreements |
+| `pack` | Fit to a token budget without calling a model |
+| `thread` | Order a graph into a readable narrative |
+| `render` | Emit Markdown, HTML, Typst and more |
+| `trace` / `diff` | Follow provenance; compare two versions |
+| `salience` | Rank what matters, with the arithmetic shown |
+| `retract` | Remove a claim and report the blast radius first |
+
+## Quick start
+
+```bash
+$ cargo build
+$ ./target/debug/smysl check fixtures/corpus/F1-incident.smy
+fixtures/corpus/F1-incident.smy: 13 records, 8 units, 0 diagnostic(s)
+
+$ ./target/debug/smysl --format surface pack --budget 200 --explain fixtures/corpus/F1-incident.smy
+b3:cvhirtgs2mpvli2ethhyeo32uf @L0  -  earned on density
+b3:phsoomklkmlq3sjvbe6cyuqy5v @L0  C3  rebuts b3:cvhirtgs2mpvli2ethhyeo32uf
+b3:xkys7j42mcuyiaxiyh73xddimr dropped: low-value
+fixtures/corpus/F1-incident.smy: 7 of 8 unit(s), 193 of 200 tokens, greedy mode, gap 0.011
+```
+
+Read the middle line: that unit was kept **because** it rebuts one that was kept. The
+selection cannot quietly drop an objection to something it is showing you.
+
+Two flags worth knowing. `--format surface` prints readable text; output defaults to CBOR,
+which is what you want in a pipeline and not in a terminal. `--explain` goes to stderr, so
+the reasoning never contaminates the data on stdout — above, the packed document itself is
+on stdout and elided here.
+
+Ingest needs a model. [Ollama](https://ollama.com) runs locally, costs nothing, and never
+leaves the machine:
+
+```bash
+$ ollama serve && ollama pull llama3.2
+$ smysl providers --probe
+$ smysl ingest notes.md
+```
+
+## Using it as a library
+
+The library is the product; the CLI is its first consumer. Nothing the CLI does is
+unreachable from the library.
+
+```toml
+[dependencies]
+smysl = { version = "0.1", default-features = false }
+```
+
+With default features off you get a fully synchronous library — no async runtime, no HTTP
+client, no argument parser anywhere in the dependency tree. That is verified in CI rather
+than merely intended. Determinism is part of the API: making `pack`, `merge`,
+`derive_thread`, `salience` or `render` non-reproducible is a breaking change whatever the
+signature says.
+
+## Status
+
+Implements **RFC SMYSL-1 (Combined)** — format `smysl/0.1`, kernel `smysl.kernel/0.1`.
+Version 0.1: usable and extensively tested, but the format may still shift before 1.0.
 
 | Phase | Delivers | State |
 |---|---|---|
-| SM-P0 | scaffold, diagnostics, gates | **done** |
-| SM-P1 | deterministic CBOR codec, kernel types, identity | **done** |
-| SM-P2 | surface syntax, `fmt` | **done** |
-| SM-P3 | store, index, adjacency, `reindex` | **done** |
-| SM-P4 | structural check passes, `check` | **done** |
-| SM-P5 | rules M and T, conformance classes, `--as` | **done** |
-| SM-P6 | merge, contentions, retraction, `merge` / `retract` | **done** |
-| SM-P7 | lineage: `diff`, `trace`, `view`, `bundle` | **done** |
-| SM-P8 | salience, `salience --explain` | **done** |
-| SM-P9 | packing, `pack --explain` | **done** |
-| SM-P10 | exact packing, provable optimality gap | **done** |
-| SM-P11 | thread schemas, derivation, `thread --derive` | **done** |
-| SM-P12 | Render IR, profiles, six backends, `render` | **done** |
-| SM-P13 | provider layer, Ollama, registry, ledger, `providers` / `usage` | **done** |
-| SM-P14 | hosted providers, chunking, repair loop, `ingest` / `attest` | **done** |
-| SM-P15 | TUI, evaluation | |
+| SM-P0 – P2 | scaffold, deterministic CBOR codec, surface syntax, `fmt` | **done** |
+| SM-P3 – P4 | store, index, adjacency, check passes, `check` | **done** |
+| SM-P5 – P6 | trust rules, merge, contentions, retraction | **done** |
+| SM-P7 – P8 | lineage (`diff`, `trace`, `view`, `bundle`), salience | **done** |
+| SM-P9 – P10 | budget packing, provably optimal mode | **done** |
+| SM-P11 – P12 | thread derivation, render IR, six backends | **done** |
+| SM-P13 – P14 | provider layer, ingest boundary, `attest` | **done** |
+| SM-P15 | TUI, evaluation harness | next — crates are stubs |
+
+Model providers, and how far each has actually been proven — an untested mapper is a
+reading of a vendor's documentation, not a fact about their API:
+
+| Provider | State |
+|---|---|
+| Ollama (local) | verified against a running server |
+| DeepSeek | verified against the live endpoint |
+| Gemini | verified against the live endpoint |
+| Anthropic | implemented, but not tested |
+| OpenAI | implemented, but not tested |
+
+That distinction has already earned its keep. Gemini's support was written from the
+documentation, which describes its response schema as a subset of JSON Schema draft
+2020-12. It is not one, so every structured call was refused until a live key proved it —
+and no recorded test fixture could have caught that.
 
 ## Layout
 
@@ -216,13 +259,13 @@ crates/smysl-thread    thread schemas and deterministic derivation
 crates/smysl-render    render IR, profiles, backends
 crates/smysl-provider  the model boundary - the only crate linking a runtime
 crates/smysl-ingest    staging, repair, trust ceiling, recipes
-crates/smysl-tui       seven-pane terminal UI
-crates/smysl-eval      evaluation harness (not published)
+crates/smysl-tui       seven-pane terminal UI (SM-P15, stub)
+crates/smysl-eval      evaluation harness (SM-P15, stub; not published)
 fixtures/              corpus, conformance suite, golden artifacts
 xtask/                 purity and determinism gates
 ```
 
-## Build
+## Building and testing
 
 ```bash
 cargo build                       # cli + tui + local (Ollama) + Typst rendering
@@ -234,32 +277,17 @@ Two gates run in CI and are worth running locally, because both check properties
 lapse silently rather than loudly:
 
 ```bash
-cargo xtask check-purity   # rules A and B: the library stays synchronous and offline
-cargo xtask determinism    # rule D: pure operations are bit-reproducible
+cargo xtask check-purity   # the library stays synchronous and offline
+cargo xtask determinism    # pure operations are bit-reproducible
 ```
 
-Guarantee A1 - no panics on untrusted input - is checked two ways: a deterministic
-mutation sweep that runs in ordinary CI, and `cargo fuzz` targets under `fuzz/` for the
-surface parser and the CBOR reader.
+No panics on untrusted input is checked two ways: a deterministic mutation sweep in
+ordinary CI, and `cargo fuzz` targets under `fuzz/` for the surface parser and the CBOR
+reader.
 
 ```bash
 cargo +nightly fuzz run surface
 ```
-
-## Embedding
-
-The library is the product; the CLI is its first consumer. No CLI capability is
-unreachable from the library, and `default-features = false` yields a fully synchronous
-library with no async runtime, no HTTP client, and no argument parser in its dependency
-tree — verified in CI, not merely intended.
-
-```toml
-[dependencies]
-smysl = { version = "0.1", default-features = false }
-```
-
-Determinism is part of the API surface: making `pack`, `merge`, `derive_thread`,
-`salience`, or `render` non-reproducible is a breaking change regardless of signature.
 
 ## Licence
 
