@@ -661,3 +661,66 @@ fn an_ingested_rebuttal_binds_rule_r_in_packing() {
         "the store sees no rebuttal, so rule R cannot bind"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Episodes: which handoff produced what
+// ---------------------------------------------------------------------------
+
+/// `Attestation.hop` was written and never read - it recorded which handoff produced a
+/// unit and nothing could ask. This closes the loop: ingest stamps it, the store answers
+/// with it, and salience measures recency against it.
+#[test]
+fn ingest_stamps_the_hop_and_the_store_reads_it_back() {
+    use smysl_graph::{salience, SalienceRequest, SalienceWeights};
+
+    let answer = |gist: &str| {
+        format!(r#"{{"units":[{{"type":"claim","gist":"{gist}","status":"speculative"}}]}}"#)
+    };
+
+    // Two handoffs of the same pipeline, into one store.
+    let mut store = Store::new();
+    for (hop, gist) in [
+        (0u32, "what the first step found"),
+        (4, "what the fourth added"),
+    ] {
+        let (r, _) = registry(Scripted::saying(&answer(gist)));
+        let (staged, _) = Ingestor::new(&r, opts(Rung::Document).at_hop(hop))
+            .ingest(&store, "one paragraph")
+            .unwrap();
+        store = Store::from_records(
+            store
+                .iter()
+                .cloned()
+                .chain(staged.records())
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    assert_eq!(
+        store.hops(),
+        [0, 4].into_iter().collect(),
+        "hops not recorded"
+    );
+    assert_eq!(store.latest_hop(), Some(4));
+    assert_eq!(
+        store.at_hop(4).count(),
+        1,
+        "cannot ask what the last step added"
+    );
+
+    // And the recency term reaches them. Off by default, so this is the opt-in setting.
+    let fresh = store.at_hop(4).map(|(u, _)| *u).next().unwrap();
+    let old = store.at_hop(0).map(|(u, _)| *u).next().unwrap();
+    let out = salience(
+        &store,
+        &SalienceRequest::default()
+            .with_weights(SalienceWeights::recent())
+            .at_hop(4),
+    );
+    assert!(
+        out.get(&fresh) > out.get(&old),
+        "the newer handoff did not outrank the older: {} vs {}",
+        out.get(&fresh),
+        out.get(&old)
+    );
+}

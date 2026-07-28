@@ -82,6 +82,12 @@ pub struct IngestOptions {
     pub agent: smysl_core::AgentId,
     /// Supplied, never read, so a replayed ingest produces the same attestations.
     pub now: Hlc,
+    /// Which handoff of a pipeline this is.
+    ///
+    /// Stamped onto every attestation, which is what makes `Store::at_hop` able to answer
+    /// "what did the last step add" and what the recency term in `salience` measures
+    /// against. Zero for a one-shot ingest; a pipeline increments it per step.
+    pub hop: u32,
     pub temperature: f32,
     pub max_output: usize,
     /// The model to ask for. Empty means the provider's configured default.
@@ -111,6 +117,12 @@ impl IngestOptions {
 
     pub fn with_model(mut self, m: impl Into<String>) -> IngestOptions {
         self.model = m.into();
+        self
+    }
+
+    /// Stamp this ingest as a given handoff of a pipeline.
+    pub fn at_hop(mut self, hop: u32) -> IngestOptions {
+        self.hop = hop;
         self
     }
 
@@ -147,6 +159,7 @@ impl Default for IngestOptions {
             path: None,
             granularity: "standard".into(),
             now: Hlc::zero(agent.clone()),
+            hop: 0,
             agent,
             temperature: 0.0,
             max_output: 2048,
@@ -244,6 +257,7 @@ impl<'a> Ingestor<'a> {
             self.opts.rung,
             self.opts.now.clone(),
         )
+        .at_hop(self.opts.hop)
         .with_recipe(conditions.recipe(), conditions.family());
 
         let labels: BTreeMap<Label, Uid> = BTreeMap::new();

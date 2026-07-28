@@ -35,12 +35,15 @@ pub const ITERATIONS: usize = 32;
 /// did not.
 pub const CORROBORATION_CAP: usize = 4;
 
-/// The three terms' weights (§1.5).
+/// The terms' weights (§1.5), plus recency.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SalienceWeights {
     pub centrality: f32,
     pub corroboration: f32,
     pub role: f32,
+    /// How much a unit's *hop distance* counts. Zero by default - see [`SalienceWeights`]'s
+    /// note on why turning it on is a decision rather than a default.
+    pub recency: f32,
 }
 
 impl Default for SalienceWeights {
@@ -49,6 +52,11 @@ impl Default for SalienceWeights {
             centrality: 0.5,
             corroboration: 0.2,
             role: 0.3,
+            // **Off by default, deliberately.** Salience feeds `pack`, so a non-zero
+            // default would change what every existing store carries forward - silently,
+            // and for stores whose owners never asked for recency. It is one field to turn
+            // on, and `recent()` is the ready-made setting.
+            recency: 0.0,
         }
     }
 }
@@ -65,8 +73,39 @@ impl SalienceWeights {
         }
     }
 
+    /// What a long-running pipeline uses.
+    ///
+    /// Structural salience alone is backwards for an agent that runs for weeks: a
+    /// well-connected claim from a month ago outranks a fresh critical one permanently,
+    /// because centrality only grows. Recency is what lets the graph forget.
+    pub fn recent() -> SalienceWeights {
+        SalienceWeights {
+            centrality: 0.4,
+            corroboration: 0.15,
+            role: 0.25,
+            recency: 0.2,
+        }
+    }
+
     pub fn sum(&self) -> f32 {
-        self.centrality + self.corroboration + self.role
+        self.centrality + self.corroboration + self.role + self.recency
+    }
+}
+
+/// How much a unit produced `distance` hops ago still counts: halving each hop.
+///
+/// **Measured in hops rather than wall-clock time**, which is what makes it usable here at
+/// all. A clock read inside `salience` would make it non-reproducible and break rule D; a
+/// hop count is already in the record, is already deterministic, and is what "how many
+/// handoffs ago" actually means in a pipeline. Wall-clock decay would be a different
+/// feature needing a timestamp passed in.
+pub fn recency_at(distance: u32) -> f32 {
+    // 1.0 at the current hop, 0.5 one back, 0.25 two back. Saturating, so a very old unit
+    // reaches zero rather than wrapping.
+    match distance {
+        0 => 1.0,
+        d if d >= 24 => 0.0,
+        d => 1.0 / (1u32 << d) as f32,
     }
 }
 
@@ -80,6 +119,13 @@ pub struct SalienceRequest {
     /// Per-unit role weight, supplied by whoever knows the active thread. Salience lives
     /// below threads in the crate graph, so it takes this rather than deriving it.
     pub role_weights: BTreeMap<Uid, f32>,
+    /// The hop to measure recency against - normally the step about to run.
+    ///
+    /// Supplied rather than read off the store, for the same reason every clock in this
+    /// codebase is supplied: a caller replaying a pipeline has to be able to ask what
+    /// salience looked like *at hop 4*, not what it looks like now. `None` leaves the
+    /// recency term at zero however it is weighted.
+    pub now_hop: Option<u32>,
 }
 
 impl SalienceRequest {
@@ -90,6 +136,12 @@ impl SalienceRequest {
 
     pub fn seeded(mut self, seed: impl IntoIterator<Item = Uid>) -> SalienceRequest {
         self.seed = seed.into_iter().collect();
+        self
+    }
+
+    /// Measure recency against this hop.
+    pub fn at_hop(mut self, hop: u32) -> SalienceRequest {
+        self.now_hop = Some(hop);
         self
     }
 
@@ -104,6 +156,9 @@ impl SalienceRequest {
 pub struct SalienceTerms {
     pub centrality: f32,
     pub corroboration: f32,
+    /// The recency factor applied, before weighting. Zero when the unit has no episode or
+    /// the request named no hop.
+    pub recency: f32,
     /// The corroboration groups counted, by key, in canonical order.
     pub groups: Vec<String>,
     /// Groups found but discarded for sharing ancestry with a group already counted.
@@ -185,9 +240,17 @@ pub fn salience(store: &Store, req: &SalienceRequest) -> SalienceReport {
         let (corr, groups, dependent) = corroboration(store, uid);
         let role = req.role_weights.get(uid).copied().unwrap_or(0.0);
 
+        // A unit with no attestation has no episode, so it has no recency either - it is
+        // not "old", it is unplaced, and inventing a distance for it would rank it.
+        let recency = match (req.now_hop, store.hop_of(uid)) {
+            (Some(now), Some(hop)) => recency_at(now.saturating_sub(hop)),
+            _ => 0.0,
+        };
+
         let raw = req.weights.centrality * c as f32
             + req.weights.corroboration * corr
-            + req.weights.role * role;
+            + req.weights.role * role
+            + req.weights.recency * recency;
 
         // An authored value is authoritative (§1.5).
         let (score, authored) = match unit.salience {
@@ -201,6 +264,7 @@ pub fn salience(store: &Store, req: &SalienceRequest) -> SalienceReport {
             SalienceTerms {
                 centrality: quantise(c as f32),
                 corroboration: quantise(corr),
+                recency: quantise(recency),
                 groups,
                 dependent_groups: dependent,
                 role: quantise(role),
@@ -889,5 +953,144 @@ mod tests {
             r.terms[&ua].centrality, 0.0,
             "disagreeing with something is not depending on it"
         );
+    }
+
+    // -- episodes and recency ----------------------------------------------
+
+    fn at_hop(gist: &str, hop: u32) -> (Record, Record, Uid) {
+        let core = smysl_core::UnitCoreBuilder::new(
+            smysl_core::KernelType::Claim,
+            gist,
+            smysl_core::Status::Speculative,
+        )
+        .build()
+        .unwrap();
+        let uid = smysl_core::canonical_uid(&core);
+        let agent = smysl_core::AgentId::new("tool:t").unwrap();
+        let att = smysl_core::Attestation::new(
+            uid,
+            agent.clone(),
+            smysl_core::Op::Authored,
+            smysl_core::Rung::Computed,
+            smysl_core::Hlc::zero(agent),
+        )
+        .at_hop(hop);
+        (Record::Unit(core), Record::Attestation(att), uid)
+    }
+
+    #[test]
+    fn a_units_hop_is_the_newest_one_attested() {
+        let (u, a, uid) = at_hop("carried forward", 3);
+        let store = Store::from_records(vec![u, a]);
+        assert_eq!(store.hop_of(&uid), Some(3));
+        assert_eq!(store.latest_hop(), Some(3));
+        assert_eq!(store.at_hop(3).count(), 1);
+        assert_eq!(store.at_hop(2).count(), 0);
+    }
+
+    #[test]
+    fn a_unit_with_no_attestation_has_no_episode() {
+        let core = smysl_core::UnitCoreBuilder::new(
+            smysl_core::KernelType::Claim,
+            "unplaced",
+            smysl_core::Status::Speculative,
+        )
+        .build()
+        .unwrap();
+        let uid = smysl_core::canonical_uid(&core);
+        let store = Store::from_records(vec![Record::Unit(core)]);
+        assert_eq!(store.hop_of(&uid), None);
+        assert!(store.hops().is_empty());
+    }
+
+    /// Halving per hop, and saturating rather than wrapping on a very old unit.
+    #[test]
+    fn recency_halves_each_hop_and_bottoms_out() {
+        assert_eq!(recency_at(0), 1.0);
+        assert_eq!(recency_at(1), 0.5);
+        assert_eq!(recency_at(2), 0.25);
+        assert_eq!(recency_at(64), 0.0, "no wraparound on an ancient unit");
+    }
+
+    /// **The point of the term.** Structural salience only grows, so a well-connected old
+    /// claim outranks a fresh one permanently. With recency weighted, the fresh one wins.
+    #[test]
+    fn a_fresh_unit_can_outrank_an_older_one() {
+        let (u_old, a_old, old) = at_hop("the old claim", 0);
+        let (u_new, a_new, new) = at_hop("the new claim", 5);
+        let store = Store::from_records(vec![u_old, a_old, u_new, a_new]);
+
+        // Off by default: the two are indistinguishable on structure alone.
+        let flat = salience(&store, &SalienceRequest::default().at_hop(5));
+        assert_eq!(
+            flat.get(&old),
+            flat.get(&new),
+            "recency leaked in while off"
+        );
+
+        let req = SalienceRequest::default()
+            .with_weights(SalienceWeights::recent())
+            .at_hop(5);
+        let out = salience(&store, &req);
+        assert!(
+            out.get(&new) > out.get(&old),
+            "the fresh unit did not outrank the old one: {} vs {}",
+            out.get(&new),
+            out.get(&old)
+        );
+    }
+
+    /// Supplied rather than read, so a replay can ask what salience looked like *then*.
+    #[test]
+    fn recency_is_measured_against_the_hop_the_caller_names() {
+        let (u, a, uid) = at_hop("a claim", 2);
+        let store = Store::from_records(vec![u, a]);
+        let w = SalienceWeights::recent();
+
+        let then = salience(
+            &store,
+            &SalienceRequest::default().with_weights(w).at_hop(2),
+        );
+        let later = salience(
+            &store,
+            &SalienceRequest::default().with_weights(w).at_hop(6),
+        );
+        assert!(
+            then.get(&uid) > later.get(&uid),
+            "the same unit did not decay as the pipeline moved on"
+        );
+    }
+
+    /// Rule D: no clock is read, so two runs of the same request agree exactly.
+    #[test]
+    fn recency_does_not_make_salience_non_reproducible() {
+        let (u, a, _) = at_hop("a claim", 1);
+        let store = Store::from_records(vec![u, a]);
+        let req = SalienceRequest::default()
+            .with_weights(SalienceWeights::recent())
+            .at_hop(4);
+        assert_eq!(salience(&store, &req).scores, salience(&store, &req).scores);
+    }
+
+    /// A unit with no episode must not be ranked as merely old: it is unplaced, and
+    /// inventing a distance for it would be inventing a fact about where it came from.
+    #[test]
+    fn an_unplaced_unit_gets_no_recency_rather_than_the_worst() {
+        let core = smysl_core::UnitCoreBuilder::new(
+            smysl_core::KernelType::Claim,
+            "unplaced",
+            smysl_core::Status::Speculative,
+        )
+        .build()
+        .unwrap();
+        let uid = smysl_core::canonical_uid(&core);
+        let store = Store::from_records(vec![Record::Unit(core)]);
+        let out = salience(
+            &store,
+            &SalienceRequest::default()
+                .with_weights(SalienceWeights::recent())
+                .at_hop(9),
+        );
+        assert_eq!(out.explain(&uid).map(|t| t.recency), Some(0.0));
     }
 }

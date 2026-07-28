@@ -395,6 +395,13 @@ fn cli() -> Command {
                 ),
             "salience" => sub
                 .arg(
+                    Arg::new("hop")
+                        .long("hop")
+                        .value_name("N")
+                        .help("Measure recency against this handoff (needs a recency weight)")
+                        .value_parser(clap::value_parser!(u32)),
+                )
+                .arg(
                     Arg::new("top")
                         .long("top")
                         .value_name("N")
@@ -581,6 +588,13 @@ fn cli() -> Command {
                     Arg::new("file")
                         .value_name("FILE")
                         .help("Document to ingest; `-` reads stdin"),
+                )
+                .arg(
+                    Arg::new("hop")
+                        .long("hop")
+                        .value_name("N")
+                        .help("Which handoff of a pipeline this is; stamped on every attestation")
+                        .value_parser(clap::value_parser!(u32)),
                 )
                 .arg(
                     Arg::new("rung")
@@ -1753,15 +1767,21 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             .split(',')
             .filter_map(|p| p.trim().parse().ok())
             .collect();
-        if parts.len() != 3 {
-            eprintln!("smysl salience: --weights takes three numbers, c,r,t");
+        // Three or four. The fourth is recency, and leaving it off keeps the term at zero -
+        // so every command line written before recency existed still means what it meant.
+        if parts.len() != 3 && parts.len() != 4 {
+            eprintln!("smysl salience: --weights takes three or four numbers, c,r,t[,recency]");
             return ExitCode::Usage;
         }
         req = req.with_weights(SalienceWeights {
             centrality: parts[0],
             corroboration: parts[1],
             role: parts[2],
+            recency: parts.get(3).copied().unwrap_or(0.0),
         });
+    }
+    if let Some(hop) = m.get_one::<u32>("hop") {
+        req = req.at_hop(*hop);
     }
     match m.get_many::<String>("seed") {
         Some(v) => {
@@ -2251,6 +2271,9 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .unwrap_or(smysl::Rung::Document);
 
     let mut opts = smysl::IngestOptions::at_rung(rung);
+    if let Some(hop) = m.get_one::<u32>("hop") {
+        opts = opts.at_hop(*hop);
+    }
     if let Some(g) = m.get_one::<String>("granularity") {
         opts = opts.with_granularity(g);
     }

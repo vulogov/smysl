@@ -11,7 +11,7 @@
 
 pub mod index;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use smysl_core::diag::{Code, Diagnostic, Report, Subject};
@@ -698,6 +698,38 @@ impl Store {
                 candidates: matches,
             }),
         }
+    }
+
+    // -- episodes ----------------------------------------------------------
+    //
+    // A hop is one handoff in a pipeline: the step that produced a unit. `Attestation.hop`
+    // has always carried it and nothing ever read it, so a store could not answer the
+    // question a long-running agent most needs to ask - *what did the last step add?* These
+    // three methods are that question, and the recency term in `salience` is built on them.
+
+    /// The hop a unit was produced at: the newest one any of its attestations records.
+    ///
+    /// Newest rather than oldest, because a unit re-attested at a later hop was carried
+    /// forward deliberately, and carrying something forward is a statement that it still
+    /// matters. A unit with no attestation has no episode and returns `None`.
+    pub fn hop_of(&self, uid: &Uid) -> Option<u32> {
+        self.get(uid)?.attestations.iter().map(|a| a.hop).max()
+    }
+
+    /// Every hop present in the store, in order.
+    pub fn hops(&self) -> BTreeSet<u32> {
+        self.units().filter_map(|(u, _)| self.hop_of(u)).collect()
+    }
+
+    /// The most recent hop anything was produced at.
+    pub fn latest_hop(&self) -> Option<u32> {
+        self.hops().last().copied()
+    }
+
+    /// The units a given hop produced - what one step of a pipeline contributed.
+    pub fn at_hop(&self, hop: u32) -> impl Iterator<Item = (&Uid, &Unit)> {
+        self.units()
+            .filter(move |(u, _)| self.hop_of(u) == Some(hop))
     }
 
     /// Units that rebut `uid`, which is what rule R pins into a pack.
