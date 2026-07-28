@@ -415,6 +415,113 @@ fn f5_carries_data_artifact_refs_and_extension_payloads() {
     );
 }
 
+/// **D-5, on the real thing.** F7 is what a merged store looks like, but the property is
+/// about merging, so this asserts it by merging the actual F1 and F2 stores rather than by
+/// reading a file that represents one. Mixed granularity must survive `check` with warnings
+/// and no errors: a merged store that failed would make merge unusable across teams, which
+/// is the whole of D-5.
+#[test]
+fn merging_two_granularities_is_legal_not_an_error() {
+    use smysl::{merge, MergeOptions, Severity, Store};
+
+    let f1 = smysl::parse_surface(
+        &std::fs::read_to_string(corpus_dir().join("F1-incident.smy")).unwrap(),
+    )
+    .unwrap();
+    let f2 = smysl::parse_surface(
+        &std::fs::read_to_string(corpus_dir().join("F2-research.smy")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(f1.view.as_ref().unwrap().granularity.profile, "default");
+    assert_eq!(f2.view.as_ref().unwrap().granularity.profile, "fine");
+
+    let mut store = Store::from_records(f1.records.clone());
+    merge(
+        &mut store,
+        &Store::from_records(f2.records.clone()),
+        MergeOptions::default(),
+    )
+    .expect("merging two granularities");
+
+    let report = smysl::check(&store, smysl::CheckOptions::default());
+    let errors: Vec<_> = report
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "a merged store must still check: {errors:?}"
+    );
+}
+
+/// F7 itself: the shape of that merged store, with the two body bands side by side. The
+/// expected set is `SMY-W041` and nothing else - a warning because a body outside the
+/// declared band is worth remarking on, not an error because the store is legal.
+#[test]
+fn f7_carries_two_body_bands_and_only_warns() {
+    let f = corpus_dir().join("F7-mixed-granularity.smy");
+    assert_eq!(expected_codes(&f), BTreeSet::from([Code::W041]));
+    assert!(
+        all_codes(&std::fs::read_to_string(&f).unwrap())
+            .iter()
+            .all(|c| c.severity() != Severity::Error),
+        "F7 must not error"
+    );
+}
+
+/// **F8: multi-agent contention.** Two agents triage the same incident, each store clean on
+/// its own, and merging them raises all three detections of §5.4 at once - the label both
+/// agents bound to their own conclusion, the fork alpha left by superseding one claim
+/// twice, and beta's rebuttal of a claim its own thread also presents.
+///
+/// Detections are *reported, not recorded* (§5.4), so this asserts the report rather than
+/// the store: a contention written into the log would be a stale finding the moment a third
+/// store supplied the edge that orders it.
+#[test]
+fn f8_merging_two_agents_raises_every_contention_kind() {
+    use smysl::{merge, DetectionKind, MergeOptions, Store};
+
+    let load = |name: &str| {
+        let src = std::fs::read_to_string(corpus_dir().join(name)).unwrap();
+        smysl::parse_surface(&src).unwrap()
+    };
+    let alpha = load("F8a-agent-alpha.smy");
+    let beta = load("F8b-agent-beta.smy");
+
+    // Each half is clean alone. The disagreement is created by putting them together,
+    // which is what makes this a merge fixture rather than a defective one.
+    for out in [&alpha, &beta] {
+        let store = Store::from_records(out.records.clone());
+        let report = smysl::check(&store, smysl::CheckOptions::default());
+        assert!(
+            report.fail_on(smysl::Severity::Error).is_ok(),
+            "an agent's own store must be clean"
+        );
+    }
+
+    let mut store = Store::from_records(alpha.records.clone());
+    let mut opts = MergeOptions::default();
+    opts.labels = vec![alpha.labels.clone(), beta.labels.clone()];
+    let report = merge(&mut store, &Store::from_records(beta.records.clone()), opts)
+        .expect("merging two agents");
+
+    let kinds: BTreeSet<DetectionKind> =
+        report.contentions.iter().map(|c| c.detected.kind).collect();
+    for required in [
+        DetectionKind::LabelCollision,
+        DetectionKind::SupersessionFork,
+        DetectionKind::LiveRebuttal,
+    ] {
+        assert!(kinds.contains(&required), "{required:?} was not detected");
+    }
+
+    // Reported, not recorded: the store must not have grown a contention record.
+    assert!(
+        store.contentions().is_empty(),
+        "a detection was written into the log"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The corpus, loaded into a store
 // ---------------------------------------------------------------------------

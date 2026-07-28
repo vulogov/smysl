@@ -1,0 +1,38 @@
+@doc smysl/0.1 {
+  id: v/f8b
+  intent: triage
+  lang: en
+  granularity: { profile: default }
+  roots: [c/cause]
+}
+
+@evidence e/beta-deploy { status: measured, source: { kind: file, ref: "deploy/gateway-7.1.manifest", captured: 2026-07-22 } }
+~ Gateway 7.1 reached us-east at 10:58, two minutes before the rise.
+
+Rolled region by region with us-east first, and the manifest records a change to
+the upstream client's default timeout that no other component in the request
+path touched in this release.
+
+@claim c/cause { status: inferred, grounds: [e/beta-deploy] }
+~ The us-east gateway regressed because 7.1 shortened the upstream timeout.
+
+A shortened timeout turns a slow upstream into a retried one, and retries are
+what fill the queue, so beta reads the same latency curve as a consequence of
+the release rather than of the pool being undersized.
+
+@evidence e/beta-retries { status: measured, source: { kind: metric, ref: "gateway.retries{region=us-east}", captured: 2026-07-22 } }
+~ Upstream retries rose eleven-fold over the same forty minutes.
+
+@claim c/beta-rollback { status: derived, grounds: [e/beta-deploy] }
+~ Rolling 7.1 back returns the timeout to its previous value.
+
+@claim c/timeout-not-culprit { status: derived, grounds: [e/beta-retries] }
+~ Retries were already elevated before 7.1 reached us-east.
+
+@rel e/beta-retries --backs--> c/cause
+@rel c/timeout-not-culprit --rebuts--> c/cause { weight: 0.6 }
+
+@thread t/beta-brief { schema: brief, owner: "model:beta" }
+~ 7.1 shortened the upstream timeout; the retry evidence is not unambiguous.
+  bottom-line → c/cause
+  risk → c/timeout-not-culprit

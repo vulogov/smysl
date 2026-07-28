@@ -1,0 +1,37 @@
+@doc smysl/0.1 {
+  id: v/f8a
+  intent: triage
+  lang: en
+  granularity: { profile: default }
+  roots: [c/cause]
+}
+
+@evidence e/alpha-trace { status: measured, source: { kind: metric, ref: "gateway.p99{region=us-east}", captured: 2026-07-22 } }
+~ Gateway p99 in us-east rose to 2.4 s between 11:00 and 11:40.
+
+Sampled at ten-second resolution from the edge collector, with the rise confined
+to us-east and every other region flat inside its usual band for the whole
+forty-minute window.
+
+@claim c/cause { status: inferred, grounds: [e/alpha-trace] }
+~ The us-east gateway is exhausting its upstream connection pool.
+
+Latency that climbs without a matching error rate points at queuing rather than
+failure, and the pool is the only queue on that path that alpha can see from
+the edge metrics alone.
+
+@evidence e/alpha-pool { status: measured, source: { kind: metric, ref: "gateway.pool_wait{region=us-east}", captured: 2026-07-22 } }
+~ Pool acquisition wait reached 1.9 s at the peak.
+
+@claim c/alpha-scope { status: derived, grounds: [e/alpha-trace] }
+~ No region other than us-east moved outside its band.
+
+@claim c/pool-size-32 { status: derived, grounds: [e/alpha-pool] }
+~ The pool was sized at 32 connections when the rise began.
+
+@claim c/pool-size-64 { status: derived, grounds: [e/alpha-pool] }
+~ The pool was sized at 64 connections when the rise began.
+
+@rel e/alpha-pool --backs--> c/cause
+@rel c/pool-size-32 --supersedes--> c/alpha-scope
+@rel c/pool-size-64 --supersedes--> c/alpha-scope

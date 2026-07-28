@@ -1,0 +1,52 @@
+@doc smysl/0.1 {
+  id: v/f7
+  intent: merged-review
+  lang: en
+  granularity: { profile: default }
+  roots: [f/verdict]
+}
+
+@evidence e/queue-depth { status: measured, source: { kind: metric, ref: "broker.queue_depth{topic=orders}", captured: 2026-07-18 } }
+~ Queue depth on the orders topic rose from 40 to 12 000 over six minutes.
+
+Sampled every fifteen seconds from the broker's own exporter, across all three
+partitions, with the rise beginning four minutes after the consumer group was
+restarted and continuing until the group was scaled out again.
+
+@evidence e/consumer-lag { status: measured, source: { kind: metric, ref: "consumer.lag{group=orders-v2}", captured: 2026-07-18 } }
+~ Consumer lag tracked queue depth exactly over the same window.
+
+Measured per partition; all three moved together, which rules out a single
+slow partition as the cause.
+
+@claim c/consumers-undersized { status: derived, grounds: [e/queue-depth, e/consumer-lag] }
+~ The consumer group could not keep up with the offered rate.
+
+Lag that tracks depth rather than lagging behind it is the signature of a group
+that is saturated rather than stalled, and the group had been sized for the
+pre-migration rate that the orders topic no longer runs at.
+
+@claim c/restart-was-trigger { status: inferred, grounds: [e/queue-depth] }
+~ The restart began the backlog rather than causing the shortfall.
+
+@evidence e/cpu-headroom { status: measured, source: { kind: metric, ref: "consumer.cpu{group=orders-v2}", captured: 2026-07-18 } }
+~ Consumer CPU sat at 94 per cent throughout.
+
+@claim c/not-io-bound { status: derived, grounds: [e/cpu-headroom] }
+~ The bottleneck is processing, not downstream I/O.
+
+CPU saturated while downstream call latency stayed flat, so the queue is not
+waiting on anything outside the consumer.
+
+@hypothesis h/broker-fault { status: speculative }
+~ A broker-side fault could produce the same depth curve.
+
+@claim c/brokers-healthy { status: derived, grounds: [e/cpu-headroom] }
+~ Broker health metrics were unremarkable for the whole window.
+
+@finding f/verdict { status: inferred, grounds: [c/consumers-undersized, c/not-io-bound] }
+~ The orders consumer group is undersized for its current offered rate.
+
+@rel c/brokers-healthy --rebuts--> h/broker-fault { weight: 0.7 }
+@rel c/restart-was-trigger --causes--> c/consumers-undersized
+@rel e/consumer-lag --backs--> c/consumers-undersized
