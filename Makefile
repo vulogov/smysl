@@ -40,7 +40,7 @@ MATRIX := \
 .DEFAULT_GOAL := help
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix gates purity update \
         determinism conformance eval live-ollama live-hosted doc fuzz clean sweep \
-        commit ci toolchain eval-live
+        commit ci toolchain eval-live docs
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -73,6 +73,24 @@ fix: fmt ## Format, then apply the clippy fixes that can be applied mechanically
 
 doc: ## Build API documentation, no dependencies
 	$(CARGO) doc --workspace --all-features --no-deps
+
+# The three books in Documentation/ are tracked as PDFs as well as sources, because they
+# are deliverables people are handed rather than artefacts people build. Tracking the
+# output of a build makes it drift, so this target is what keeps the two in step.
+DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE
+
+#
+# `SOURCE_DATE_EPOCH` is what makes that work. Typst stamps a creation time into every PDF,
+# so an unpinned rebuild changes all three files whether or not a word changed, and a
+# tracked PDF would show up dirty after any `make docs`. Pinned, the output is byte-identical
+# for identical sources - so a diff in a PDF means the document actually changed.
+docs: ## Rebuild the PDFs in Documentation/ from their typst sources
+	@command -v typst >/dev/null || { echo "typst is not installed: https://typst.app"; exit 1; }
+	@set -e; for d in $(DOCS); do \
+		echo "==> $$d"; \
+		SOURCE_DATE_EPOCH=0 typst compile Documentation/$$d.typ Documentation/$$d.pdf; \
+	done
+	@echo "docs: rebuilt $(words $(DOCS)) document(s), reproducibly"
 
 # ---------------------------------------------------------------------------
 # The CI jobs, individually
