@@ -62,3 +62,12 @@ mod tests {
         }
     }
 }
+
+pub mod app;
+pub use app::{Action, App, Sim};
+
+pub mod draw;
+pub use draw::render_to_string;
+
+pub mod run;
+pub use run::run;

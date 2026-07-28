@@ -673,6 +673,11 @@ fn cli() -> Command {
                         .help("Discard the ledger")
                         .action(ArgAction::SetTrue),
                 ),
+            "ui" => sub.arg(
+                Arg::new("path")
+                    .help("Store to browse; `-` reads stdin (rule P)")
+                    .value_name("PATH"),
+            ),
             "reindex" => sub
                 .arg(
                     Arg::new("verify")
@@ -2609,6 +2614,54 @@ fn cmd_usage(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
     ExitCode::Usage
 }
 
+/// `smysl ui` - the seven-pane browser (§26).
+///
+/// A terminal is required, and refusing early is the point: a full-screen program started
+/// on a pipe leaves escape sequences in whatever was collecting the output, and the person
+/// who finds them is rarely the person who ran it.
+#[cfg(feature = "tui")]
+fn cmd_ui(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use std::io::IsTerminal;
+
+    let path = match m
+        .get_one::<String>("path")
+        .or_else(|| global.get_one::<String>("store"))
+    {
+        Some(p) => p.clone(),
+        None => {
+            eprintln!("smysl ui: no store given");
+            return ExitCode::Usage;
+        }
+    };
+
+    if !std::io::stdout().is_terminal() {
+        eprintln!("smysl ui: stdout is not a terminal; the UI needs one");
+        return ExitCode::Usage;
+    }
+
+    let (store, labels) = match load_store(&path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("smysl ui: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    match smysl_tui::run(smysl_tui::App::new(store, labels)) {
+        Ok(()) => ExitCode::Success,
+        Err(e) => {
+            eprintln!("smysl ui: {e}");
+            ExitCode::Failure
+        }
+    }
+}
+
+#[cfg(not(feature = "tui"))]
+fn cmd_ui(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl ui: this build has no TUI (build with --features tui)");
+    ExitCode::Usage
+}
+
 /// How progress should be reported for this invocation.
 ///
 /// One place, so a command cannot draw in one branch and stay silent in another.
@@ -2733,6 +2786,7 @@ fn main() -> ProcExitCode {
         "providers" => cmd_providers(sub, &matches),
         "usage" => cmd_usage(sub, &matches),
         "reindex" => cmd_reindex(sub, &matches),
+        "ui" => cmd_ui(sub, &matches),
         _ => {
             eprintln!(
                 "smysl {}: not wired in this build; lands in {} (see RFC SMYSL-1 \u{00a7}26)",
