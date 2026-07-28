@@ -871,6 +871,7 @@ dependencies = [
  "smysl-core",
  "smysl-graph",
  "smysl-pack",
+ "smysl-provider",
 ]
 
 [[package]]
