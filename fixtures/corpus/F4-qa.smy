@@ -1,0 +1,60 @@
+@doc smysl/0.1 {
+  id: v/f4
+  intent: qa-session
+  lang: en
+  granularity: { profile: default }
+  roots: [f/answer]
+}
+
+@question q/checkout-latency { status: cited, source: { kind: doc, ref: "support-session/2026-06-14#q1" } }
+~ Why did checkout latency regress after the 4.3 deploy?
+
+The question as asked in the session, before anyone had looked at a trace.
+It presumes the deploy is responsible, which is the presumption the evidence
+below turns out to support only in part, and the answer has to say so rather
+than quietly answering a narrower question instead.
+
+@evidence e/deploy-window { status: measured, source: { kind: file, ref: "deploy/4.3.manifest", captured: 2026-06-12 } }
+~ Release 4.3 reached checkout at 14:02 on 2026-06-12.
+
+@evidence e/trace-sample { status: measured, source: { kind: metric, ref: "checkout.p95{route=/pay}", captured: 2026-06-14 } }
+~ Checkout p95 rose from 240 ms to 610 ms within the hour after 14:02.
+
+Sampled at one-minute resolution across the whole fleet, with the step change
+falling inside the deploy window rather than drifting up to it, which is what
+distinguishes a release effect from a load effect on this dashboard.
+
+@evidence e/query-count { status: measured, source: { kind: metric, ref: "db.queries_per_request{route=/pay}", captured: 2026-06-14 } }
+~ Queries per checkout request rose from 4 to 31 over the same window.
+
+@claim c/n-plus-one { status: derived, grounds: [e/query-count, e/trace-sample] }
+~ The cart serialiser began issuing one query per line item.
+
+A query count that scales with basket size and a latency curve that follows it
+are the signature of an n-plus-one, and the serialiser is the only component
+in that path whose behaviour changed in this release.
+
+@evidence e/black-friday { status: measured, source: { kind: metric, ref: "checkout.rps", captured: 2026-06-14 } }
+~ Request rate was 3.2 times the weekly median on the same afternoon.
+
+@claim c/load-contribution { status: inferred, grounds: [e/black-friday] }
+~ Unusual load amplified the regression without causing it.
+
+The same code path had been live for eighteen hours at ordinary traffic with
+no measurable change, so load is a multiplier on the defect rather than an
+independent explanation of the latency the question is about.
+
+@finding f/answer { status: inferred, grounds: [c/n-plus-one, c/load-contribution] }
+~ The 4.3 serialiser change introduced an n-plus-one, made visible by peak load.
+
+@claim c/not-only-deploy { status: derived, grounds: [e/black-friday] }
+~ Attributing the regression to the deploy alone would mispredict the recovery.
+
+Rolling 4.3 back returns query count to 4 but leaves the fleet running at more
+than three times median traffic, so anyone expecting p95 to return to 240 ms
+on the rollback alone will read the result as a failed fix.
+
+@rel f/answer --answers--> q/checkout-latency
+@rel c/not-only-deploy --rebuts--> f/answer { weight: 0.4 }
+@rel e/deploy-window --backs--> c/n-plus-one
+@rel c/n-plus-one --causes--> f/answer

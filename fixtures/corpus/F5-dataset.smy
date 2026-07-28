@@ -1,0 +1,57 @@
+@doc smysl/0.1 {
+  id: v/f5
+  intent: dataset-analysis
+  lang: en
+  granularity: { profile: default }
+  roots: [f/regional-skew]
+}
+
+@artifact-ref a/notebook { status: cited, source: { kind: file, ref: "analysis/2026-06-regional.ipynb" }, sha256: "9f2c1ab4", cells: 34 }
+~ The notebook that produced every table and figure below.
+
+@artifact-ref a/extract { status: cited, source: { kind: url, ref: "s3://warehouse/orders/2026-06/" }, rows: 4812993, format: "parquet" }
+~ The June order extract the analysis was run against.
+
+@data t/latency-by-region { status: measured, source: { kind: file, ref: "analysis/tables/latency_by_region.csv", captured: 2026-06-30 }, columns: ["region", "p50_ms", "p95_ms", "orders"], rows: 6, x.stats/method: "empirical-quantile" }
+~ Checkout latency by region, June 2026, six regions.
+
+Region-level p50 and p95 over 4.8 million orders, quantiles computed
+empirically rather than from a fitted distribution because the tail is the
+part under examination and a fit would smooth exactly the shape in question.
+
+@data t/orders-by-hour { status: measured, source: { kind: file, ref: "analysis/tables/orders_by_hour.csv", captured: 2026-06-30 }, columns: ["hour_utc", "orders", "eu_share"], rows: 24, x.stats/method: "count" }
+~ Order volume by hour of day with the European share of each hour.
+
+@evidence e/eu-west-tail { status: measured, source: { kind: file, ref: "analysis/tables/latency_by_region.csv", captured: 2026-06-30 } }
+~ eu-west p95 is 610 ms against a 250 ms median across the other five regions.
+
+@evidence e/eu-west-share { status: measured, source: { kind: file, ref: "analysis/tables/orders_by_hour.csv", captured: 2026-06-30 } }
+~ eu-west contributes 38 per cent of orders in its four busiest hours.
+
+@claim c/tail-is-regional { status: derived, grounds: [e/eu-west-tail], deps: [t/latency-by-region] }
+~ The latency tail is concentrated in one region rather than spread evenly.
+
+Five of six regions sit within forty milliseconds of each other at p95, and
+the sixth sits two hundred and fifty above the next worst, which is a gap no
+reasonable pooling of the six would produce by chance.
+
+@claim c/concentration-matters { status: derived, grounds: [e/eu-west-share], deps: [t/orders-by-hour] }
+~ The affected region carries enough volume for the tail to move the global figure.
+
+@hypothesis h/sampling-artefact { status: speculative }
+~ The gap could be an artefact of uneven instrumentation coverage.
+
+@evidence e/coverage { status: measured, source: { kind: metric, ref: "trace.coverage_by_region", captured: 2026-06-30 } }
+~ Trace coverage is between 97 and 99 per cent in all six regions.
+
+@claim c/coverage-even { status: derived, grounds: [e/coverage] }
+~ Instrumentation coverage is even enough to rule out a sampling artefact.
+
+@finding f/regional-skew { status: inferred, grounds: [c/tail-is-regional, c/concentration-matters, c/coverage-even] }
+~ The global p95 is dominated by one region, not by a fleet-wide regression.
+
+@rel c/coverage-even --rebuts--> h/sampling-artefact { weight: 0.9 }
+@rel a/notebook --backs--> t/latency-by-region
+@rel a/extract --backs--> t/orders-by-hour
+@rel t/latency-by-region --warrant--> c/tail-is-regional
+@rel c/tail-is-regional --causes--> f/regional-skew

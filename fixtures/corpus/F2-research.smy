@@ -1,0 +1,62 @@
+@doc smysl/0.1 {
+  id: v/f2
+  intent: research-trace
+  lang: en
+  granularity: { profile: fine }
+  roots: [f/dose-response]
+}
+
+@definition d/effect-size { status: cited, source: { kind: doc, ref: "methods-handbook#effect-size" } }
+~ Standardised mean difference between treatment and control arms.
+
+@evidence e/cohort-a { status: measured, source: { kind: file, ref: "cohort-a/2026-04", captured: 2026-05-02 } }
+~ Cohort A, 1 240 subjects: effect size 0.41, confidence interval 0.29 to 0.53.
+
+The pre-registered primary endpoint, analysed by the plan filed before
+enrolment opened and with no interim look at the data.
+
+@evidence e/cohort-b { status: measured, source: { kind: file, ref: "cohort-b/2026-04", captured: 2026-05-11 } }
+~ Cohort B, 980 subjects: effect size 0.38, confidence interval 0.24 to 0.52.
+
+An independent site running the same protocol, recruited from a different
+registry and analysed by a team blind to cohort A's result.
+
+@evidence e/dose-record { status: measured, source: { kind: file, ref: "pharmacy.dispense", captured: 2026-05-11 } }
+~ Dispensing logs recording administered dose per subject per week.
+
+@claim c/replicates { status: derived, grounds: [e/cohort-a, e/cohort-b], deps: [d/effect-size] }
+~ The effect replicates across two independently recruited cohorts.
+
+Two sites, two registries, overlapping confidence intervals and a combined
+estimate that moves very little from either arm taken alone.
+
+@claim c/dose-response { status: derived, grounds: [e/dose-record, e/cohort-a] }
+~ Response rises monotonically with administered dose.
+
+@claim c/mechanism { status: inferred, grounds: [c/replicates, c/dose-response] }
+~ A dose-dependent pharmacological mechanism is the most economical account.
+
+Replication rules out a site artefact and the dose gradient rules out a pure
+placebo response, which together leave the pharmacological reading.
+
+@hypothesis h/adherence { status: speculative }
+~ Differential adherence could produce the same dose gradient.
+
+Subjects who tolerate the drug take more of it and are also plausibly the
+subjects likelier to improve, which would bend the curve without any
+pharmacological effect at all.
+
+@evidence e/adherence-flat { status: measured, source: { kind: file, ref: "cohort-a/adherence", captured: 2026-05-02 } }
+~ Adherence was 94 per cent or better in every dose band.
+
+@claim c/adherence-ruled-out { status: derived, grounds: [e/adherence-flat] }
+~ Adherence does not vary enough across bands to explain the gradient.
+
+@finding f/dose-response { status: inferred, grounds: [c/mechanism, c/adherence-ruled-out] }
+~ The evidence supports a genuine dose-dependent effect of moderate size.
+
+@rel e/cohort-b --backs--> c/replicates
+@rel c/adherence-ruled-out --rebuts--> h/adherence { weight: 0.8 }
+@rel h/adherence --contrasts--> c/mechanism
+@rel d/effect-size --warrant--> c/replicates
+@rel c/dose-response --causes--> c/mechanism

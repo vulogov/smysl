@@ -304,6 +304,117 @@ fn f3_is_coarse_and_ordered() {
     assert!(thread.foreign_roles().is_empty());
 }
 
+/// F2 is where rule M has room to cascade: a ground chain deep enough that weakening the
+/// bottom would have to travel, and a `backs` edge for corroboration. A shallow fixture
+/// satisfies rule M by having nothing to violate, which is not the same as exercising it.
+#[test]
+fn f2_is_fine_grained_with_a_deep_chain_and_corroboration() {
+    use smysl::Store;
+    let src = std::fs::read_to_string(corpus_dir().join("F2-research.smy")).unwrap();
+    let out = smysl::parse_surface(&src).unwrap();
+    let v = out.view.as_ref().unwrap();
+    assert_eq!(v.granularity.profile, "fine");
+    assert_eq!(v.granularity.admission, smysl::Admission::SingleAssertion);
+
+    assert!(
+        out.records
+            .iter()
+            .any(|r| matches!(r, Record::Relation(rel) if rel.kind == smysl::RelKind::Backs)),
+        "corroboration is what F2 is for"
+    );
+
+    // Depth, walked rather than assumed: the longest grounds chain must reach three hops,
+    // which is the shortest chain on which a cascade is distinguishable from a local cap.
+    let store = Store::from_records(out.records.clone());
+    let by_uid: std::collections::BTreeMap<smysl::Uid, &smysl::UnitCore> =
+        store.units().map(|(u, unit)| (*u, &unit.core)).collect();
+    fn depth(
+        uid: &smysl::Uid,
+        by_uid: &std::collections::BTreeMap<smysl::Uid, &smysl::UnitCore>,
+        seen: &mut BTreeSet<smysl::Uid>,
+    ) -> usize {
+        if !seen.insert(*uid) {
+            return 0;
+        }
+        let d = by_uid
+            .get(uid)
+            .map(|u| {
+                u.grounds
+                    .iter()
+                    .map(|g| 1 + depth(g, by_uid, seen))
+                    .max()
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
+        seen.remove(uid);
+        d
+    }
+    let deepest = by_uid
+        .keys()
+        .map(|u| depth(u, &by_uid, &mut BTreeSet::new()))
+        .max()
+        .unwrap_or(0);
+    assert!(
+        deepest >= 3,
+        "deepest grounds chain is only {deepest} hop(s)"
+    );
+}
+
+/// F4 exists to drive the `qa` schema, so the assertion is that derivation actually fills
+/// its roles. A fixture that merely contains a question would pass a weaker test and teach
+/// nothing about whether `answers` reaches the answer slot.
+#[test]
+fn f4_derives_a_qa_thread_that_fills_every_role() {
+    use smysl::Store;
+    let src = std::fs::read_to_string(corpus_dir().join("F4-qa.smy")).unwrap();
+    let out = smysl::parse_surface(&src).unwrap();
+    assert!(
+        out.records
+            .iter()
+            .any(|r| matches!(r, Record::Relation(rel) if rel.kind == smysl::RelKind::Answers)),
+        "F4 without an `answers` edge is not a Q&A fixture"
+    );
+
+    let store = Store::from_records(out.records.clone());
+    let (thread, _) = smysl::derive_thread(
+        &store,
+        smysl::ThreadSchema::Qa,
+        &smysl::DeriveOptions::default(),
+    );
+    let roles: BTreeSet<_> = thread.steps.iter().map(|s| s.role).collect();
+    for required in [
+        smysl::Role::Question,
+        smysl::Role::Evidence,
+        smysl::Role::Answer,
+        smysl::Role::Caveat,
+    ] {
+        assert!(roles.contains(&required), "qa left {required} unfilled");
+    }
+}
+
+/// F5 carries the two types nothing else in the corpus does, and the unknown header keys
+/// rule X is about. The payload assertion is the load-bearing one: a fixture whose
+/// extension keys were silently dropped would still parse, check and round-trip.
+#[test]
+fn f5_carries_data_artifact_refs_and_extension_payloads() {
+    let src = std::fs::read_to_string(corpus_dir().join("F5-dataset.smy")).unwrap();
+    let out = smysl::parse_surface(&src).unwrap();
+
+    let types: BTreeSet<_> = out.units().map(|u| u.schema.clone()).collect();
+    for required in [smysl::KernelType::Data, smysl::KernelType::ArtifactRef] {
+        assert!(
+            types.contains(&smysl::SchemaId::Kernel(required)),
+            "{required} is absent"
+        );
+    }
+
+    let with_payload = out.units().filter(|u| u.payload.is_some()).count();
+    assert!(
+        with_payload >= 4,
+        "only {with_payload} unit(s) carry a payload"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The corpus, loaded into a store
 // ---------------------------------------------------------------------------
