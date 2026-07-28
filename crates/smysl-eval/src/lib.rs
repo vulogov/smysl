@@ -13,24 +13,39 @@
 //! The **smysl arm** and every metric a model-free run can support: E1-E7. The arm is a
 //! chain of packs, so the whole run is a pure function of the store and the budget.
 //!
-//! The **prose baseline is not landed, and is not simulated.** Each of its hops is a model
-//! reading prose and emitting prose; a baseline produced by guessing what a model would
-//! have dropped would be a measurement of the guess. E8 and E9 are likewise reported as
-//! [`Outcome::NotRun`] with the reason, rather than omitted or defaulted to zero - a
-//! metric that quietly vanishes from a report is the exact failure this crate exists to
-//! detect elsewhere.
+//! The **prose baseline**, in [`prose`]. Each of its hops is a model reading prose and
+//! writing prose, so it is never simulated: a baseline produced by guessing what a model
+//! would have dropped would measure the guess. [`prose::Summariser`] and [`prose::Judge`]
+//! are therefore *ports*, this crate links no HTTP client, and the arm runs only where a
+//! provider is wired in.
 //!
-//! So E1 and E2 currently describe what the smysl arm costs and keeps. They become a
-//! *comparison* only when the baseline runs.
+//! Two things make the baseline honest rather than merely present, and both were wrong in
+//! the first version:
+//!
+//! - **The baseline prose must carry its hedges in words.** A store keeps confidence in a
+//!   field; prose has no fields. A renderer that dropped the status would hand the baseline
+//!   a passage with no hedges at all, every one would be "lost" before the first hop, and
+//!   the experiment would measure that renderer rather than summarisation.
+//! - **The judge must be controlled.** The same judge reads the *unsummarised* prose first.
+//!   If it already reports certainties there, the post-chain figure is the instrument's
+//!   bias and not a finding, and the live test refuses to report it.
+//!
+//! E8 and E9 remain [`Outcome::NotRun`] with a reason rather than omitted or defaulted to
+//! zero - a metric that quietly vanishes from a report is the exact failure this crate
+//! exists to detect elsewhere.
 
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
 pub mod chain;
 pub mod measure;
+pub mod prose;
 
 pub use chain::{run_smysl_arm, Arm, Budget, ChainOptions, Hop, Run};
 pub use measure::{measure, Measurement, Outcome};
+pub use prose::{
+    claims_of, judge, run_prose_arm, Claim, EvalError, Judge, Judged, ProseRun, Summariser, Verdict,
+};
 
 /// The metrics of §28, with the hypothesis each is measured against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

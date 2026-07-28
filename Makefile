@@ -40,7 +40,7 @@ MATRIX := \
 .DEFAULT_GOAL := help
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix gates purity update \
         determinism conformance eval live-ollama live-hosted doc fuzz clean sweep \
-        commit ci toolchain
+        commit ci toolchain eval-live
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -104,7 +104,7 @@ gates: purity determinism ## Both xtask gates
 conformance: ## The conformance suite, as CI runs it
 	$(CARGO) test --test conformance_fixtures --no-default-features
 
-eval: ## The SM-P15 evaluation harness over the corpus
+eval: ## The SM-P15 evaluation harness over the corpus (smysl arm, no model)
 	$(CARGO) test -p smysl-eval
 
 # ---------------------------------------------------------------------------
@@ -117,6 +117,11 @@ eval: ## The SM-P15 evaluation harness over the corpus
 live-ollama: ## Live tests against a local Ollama (needs `ollama serve`)
 	SMYSL_OLLAMA=required $(CARGO) test -p smysl-provider --features ollama
 	SMYSL_OLLAMA=required $(CARGO) test -p smysl-ingest --features ollama
+
+eval-live: ## Both eval arms, prose baseline included (needs GEMINI_API_KEY)
+	@echo "Runs a model at every hop of the prose arm, and again to judge the result."
+	@echo "Skips without a key rather than inventing a baseline."
+	SMYSL_EVAL_LIVE=required $(CARGO) test -p smysl-eval --test prose_live -- --nocapture
 
 live-hosted: ## Live ingest gate against whichever hosted providers have keys set
 	@echo "Runs whichever of GEMINI_API_KEY / DEEPSEEK_API_KEY / OPENAI_API_KEY /"

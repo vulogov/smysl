@@ -102,9 +102,28 @@ than shipping the claim without the objection to it.
 Measured over the eight-fixture corpus at 60% of full detail, across five handoffs: tokens
 fall to **0.24–0.60** of the whole while **every unit survives on five of six** fixtures.
 The saving is bodies dropping to gist, not claims being discarded. `cargo test -p
-smysl-eval` reproduces it. One caveat stated plainly: that is the smysl arm alone. The
-prose baseline needs a model at every hop and has not been run, so these are costs rather
-than a comparison — a simulated baseline would measure the simulation.
+smysl-eval` reproduces it, without calling a model.
+
+**And measured against the alternative.** The same fixture through five prose handoffs, a
+real model summarising at each one, judged by a model that is shown a claim and a passage
+and asked what the *passage* supports:
+
+| Five hops over F1 | Tokens | Claims kept | Hedges lost |
+|---|---|---|---|
+| control — no summarisation | 1.00 | 8 / 8 | **0 of 8** |
+| prose baseline | 0.46 – 0.50 | 7–8 / 8 | **3–5 of 8** |
+| smysl | 0.56 | 8 / 8 | **0 of 8** |
+
+Three runs. Compression is a wash — both arms land near half. What differs is that three to
+five surviving claims came out the prose end reading as *measurements* when the original had
+called them inferred, cited or derived. A guess arriving as a finding is the failure the
+whole format exists to prevent, and here it is, happening.
+
+Read the numbers with their limits: one fixture, one model, three runs — a data point, not
+a benchmark. The control row is what makes it worth anything. The baseline prose states
+every hedge in words, and the same judge reads all eight back correctly *before* any
+summarisation, so the losses after five hops are the chain's rather than the instrument's.
+The live arm needs `GEMINI_API_KEY`; without one it skips rather than inventing a baseline.
 
 **People stay in the loop without a special tool.** The review artifact *is* the document.
 No dashboard to build, no viewer to install — open it, read it, change a line, save it.
@@ -247,7 +266,7 @@ Version 0.1: usable and extensively tested, but the format may still shift befor
 | SM-P9 – P10 | budget packing, provably optimal mode | **done** |
 | SM-P11 – P12 | thread derivation, render IR, six backends | **done** |
 | SM-P13 – P14 | provider layer, ingest boundary, `attest` | **done** |
-| SM-P15 | corpus F1–F8, evaluation harness, TUI, `ui` | **done**, bar the prose baseline |
+| SM-P15 | corpus F1–F8, evaluation harness (both arms), TUI, `ui` | **done** |
 
 Model providers, and how far each has actually been proven — an untested mapper is a
 reading of a vendor's documentation, not a fact about their API:
