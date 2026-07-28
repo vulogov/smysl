@@ -99,6 +99,13 @@ Same input, same budget, same bytes out — every time, on any machine, for free
 is included, its rebuttals come with it; a budget too small to hold both **fails** rather
 than shipping the claim without the objection to it.
 
+Measured over the eight-fixture corpus at 60% of full detail, across five handoffs: tokens
+fall to **0.24–0.60** of the whole while **every unit survives on five of six** fixtures.
+The saving is bodies dropping to gist, not claims being discarded. `cargo test -p
+smysl-eval` reproduces it. One caveat stated plainly: that is the smysl arm alone. The
+prose baseline needs a model at every hop and has not been run, so these are costs rather
+than a comparison — a simulated baseline would measure the simulation.
+
 **People stay in the loop without a special tool.** The review artifact *is* the document.
 No dashboard to build, no viewer to install — open it, read it, change a line, save it.
 A human correction is a first-class edit, not a bug report filed against a pipeline.
@@ -167,6 +174,17 @@ rendering are pure functions — same input, same output, byte for byte, verifie
 | `trace` / `diff` | Follow provenance; compare two versions |
 | `salience` | Rank what matters, with the arithmetic shown |
 | `retract` | Remove a claim and report the blast radius first |
+| `ui` | Browse a store; watch the budget bind, live |
+
+`smysl ui` is worth a minute if the packing rules seem abstract. Pin a claim with `f`,
+hold `-`, and watch which units survive and why — until the budget drops below the floor
+and packing refuses outright rather than shipping a claim without the rebuttal that
+answers it:
+
+```
+INFEASIBLE
+The mandatory floor needs 46 tokens; the budget is 0.
+```
 
 ## Quick start
 
@@ -229,7 +247,7 @@ Version 0.1: usable and extensively tested, but the format may still shift befor
 | SM-P9 – P10 | budget packing, provably optimal mode | **done** |
 | SM-P11 – P12 | thread derivation, render IR, six backends | **done** |
 | SM-P13 – P14 | provider layer, ingest boundary, `attest` | **done** |
-| SM-P15 | TUI, evaluation harness | next — crates are stubs |
+| SM-P15 | corpus F1–F8, evaluation harness, TUI, `ui` | **done**, bar the prose baseline |
 
 Model providers, and how far each has actually been proven — an untested mapper is a
 reading of a vendor's documentation, not a fact about their API:
@@ -259,8 +277,8 @@ crates/smysl-thread    thread schemas and deterministic derivation
 crates/smysl-render    render IR, profiles, backends
 crates/smysl-provider  the model boundary - the only crate linking a runtime
 crates/smysl-ingest    staging, repair, trust ceiling, recipes
-crates/smysl-tui       seven-pane terminal UI (SM-P15, stub)
-crates/smysl-eval      evaluation harness (SM-P15, stub; not published)
+crates/smysl-tui       seven-pane terminal UI, with a live pack simulator
+crates/smysl-eval      evaluation harness E1-E9 (not published)
 fixtures/              corpus, conformance suite, golden artifacts
 xtask/                 purity and determinism gates
 ```
