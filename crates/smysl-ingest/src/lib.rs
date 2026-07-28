@@ -15,6 +15,7 @@
 pub mod attest;
 pub mod ceiling;
 pub mod chunk;
+pub mod import;
 pub mod json_ast;
 pub mod monotone;
 pub mod path;

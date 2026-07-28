@@ -67,6 +67,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "salience",  about: "Report derived salience with per-term breakdown",     purity: Purity::Pure,  phase: "SM-P8"  },
     Cmd { name: "retract",   about: "Retract a unit; report the blast radius first",       purity: Purity::Pure,  phase: "SM-P6"  },
     Cmd { name: "render",    about: "Thread plus profile to artifact",                     purity: Purity::Pure,  phase: "SM-P12" },
+    Cmd { name: "import",    about: "Tabular readings to measured units, without a model",  purity: Purity::Pure,  phase: "SM-P15" },
     Cmd { name: "ingest",    about: "Prose or data to staged units",                       purity: Purity::Model, phase: "SM-P14" },
     Cmd { name: "attest",    about: "Semantic checks that require a model",                purity: Purity::Model, phase: "SM-P14" },
     Cmd { name: "providers", about: "List providers, capabilities, and what would egress", purity: Purity::Pure,  phase: "SM-P13" },
@@ -672,6 +673,27 @@ fn cli() -> Command {
                         .long("reset")
                         .help("Discard the ledger")
                         .action(ArgAction::SetTrue),
+                ),
+            "import" => sub
+                .arg(
+                    Arg::new("file")
+                        .help("Delimiter-separated file to import; `-` reads stdin")
+                        .value_name("PATH")
+                        .required(true),
+                )
+                .arg(
+                    Arg::new("key")
+                        .long("key")
+                        .help("Columns naming the reading rather than its value")
+                        .value_name("COL")
+                        .action(ArgAction::Append),
+                )
+                .arg(
+                    Arg::new("kind")
+                        .long("kind")
+                        .help("Source kind recorded on each unit")
+                        .value_parser(["file", "metric", "tool", "url", "doc"])
+                        .default_value("file"),
                 ),
             "ui" => sub.arg(
                 Arg::new("path")
@@ -2620,6 +2642,95 @@ fn cmd_usage(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
     ExitCode::Usage
 }
 
+/// `smysl import` - tabular readings to `measured` units.
+///
+/// The only command that produces `measured`, and the only producer of units that consults
+/// no model: it transcribes a file rather than interpreting one. That is what earns it the
+/// top of the status ladder, and why the attestation it writes is `op: Imported` at the
+/// `computed` rung - the licence, not a decoration.
+#[cfg(feature = "ingest")]
+fn cmd_import(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use smysl_ingest::import::{from_csv, ImportOptions};
+
+    let path = m.get_one::<String>("file").expect("required");
+    let text = if path == "-" {
+        let mut s = String::new();
+        if let Err(e) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut s) {
+            eprintln!("smysl import: {e}");
+            return ExitCode::Failure;
+        }
+        s
+    } else {
+        match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("smysl import: {path}: {e}");
+                return ExitCode::Failure;
+            }
+        }
+    };
+
+    let agent = match smysl::AgentId::new("tool:smysl-import") {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl import: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    // Advanced from zero rather than read raw: `Hlc::now` takes the previous stamp, so an
+    // import records a clock that is a function of this run and nothing earlier.
+    let now = smysl::Hlc::now(&smysl::Hlc::zero(agent.clone()), &agent);
+    let mut opts = ImportOptions::new(path.clone(), agent.clone(), now);
+    if let Some(kind) = m
+        .get_one::<String>("kind")
+        .and_then(|k| smysl::SourceKind::parse(k))
+    {
+        opts.kind = kind;
+    }
+    if let Some(keys) = m.get_many::<String>("key") {
+        opts.key = keys.cloned().collect();
+    }
+
+    let out = from_csv(&text, &opts);
+    for d in &out.diagnostics {
+        eprintln!("smysl import: {d}");
+    }
+    if out.is_empty() {
+        eprintln!("smysl import: nothing to import");
+        return ExitCode::Failure;
+    }
+
+    // Emitted as a store, the same way `merge` does: an import is records like any other,
+    // and a caller pipes it into `merge` or `check` without a second format to learn.
+    let store = Store::from_records(out.records());
+    let bytes = store.log_bytes();
+    match global.get_one::<String>("output") {
+        Some(p) => {
+            if let Err(e) = std::fs::write(p, &bytes) {
+                eprintln!("smysl import: {p}: {e}");
+                return ExitCode::Failure;
+            }
+        }
+        None => {
+            let mut stdout = std::io::stdout().lock();
+            if stdout.write_all(&bytes).is_err() {
+                return ExitCode::Failure;
+            }
+        }
+    }
+    eprintln!(
+        "smysl import: {} measured unit(s) from {path}",
+        out.units.len()
+    );
+    ExitCode::Success
+}
+
+#[cfg(not(feature = "ingest"))]
+fn cmd_import(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl import: this build has no ingest layer (build with --features local)");
+    ExitCode::Usage
+}
+
 /// `smysl ui` - the seven-pane browser (§26).
 ///
 /// A terminal is required, and refusing early is the point: a full-screen program started
@@ -2792,6 +2903,7 @@ fn main() -> ProcExitCode {
         "providers" => cmd_providers(sub, &matches),
         "usage" => cmd_usage(sub, &matches),
         "reindex" => cmd_reindex(sub, &matches),
+        "import" => cmd_import(sub, &matches),
         "ui" => cmd_ui(sub, &matches),
         _ => {
             eprintln!(
@@ -2813,9 +2925,15 @@ mod tests {
         cli().debug_assert();
     }
 
+    /// §23's table, plus one.
+    ///
+    /// **`import` is an addition.** §23 has no command that produces units without a model,
+    /// and without one the top of the status ladder was unreachable: `measured` requires an
+    /// `op: Imported` attestation at the `computed` rung, and nothing in the system wrote
+    /// one. A divergence to reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 18);
+        assert_eq!(COMMANDS.len(), 19);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -2832,6 +2950,7 @@ mod tests {
                 "salience",
                 "retract",
                 "render",
+                "import",
                 "ingest",
                 "attest",
                 "providers",
