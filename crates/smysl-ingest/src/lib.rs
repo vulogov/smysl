@@ -16,6 +16,7 @@ pub mod attest;
 pub mod ceiling;
 pub mod chunk;
 pub mod json_ast;
+pub mod monotone;
 pub mod path;
 pub mod prompt;
 pub mod recipe;

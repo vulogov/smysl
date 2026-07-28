@@ -509,10 +509,12 @@ fn offline_refuses_a_hosted_provider_before_ingest_begins() {
 // Rule M at staging
 // ---------------------------------------------------------------------------
 
-/// §9.1: a unit violating rule M yields a diagnostic, not a stored unit - and the honest
-/// units around it still stage.
+/// Rule M at the boundary: a unit claiming more than its grounds support is lowered to
+/// what they do support, and told. Rejecting it instead would cascade through everything
+/// resting on it and lose content a later merge could have justified; both outcomes
+/// satisfy rule M, and only one keeps the claim available to be strengthened.
 #[test]
-fn a_laundered_ground_is_rejected_at_staging_without_losing_its_neighbours() {
+fn a_laundered_ground_is_weakened_at_staging_rather_than_dropped() {
     let (r, _) = registry(Scripted::saying(
         r#"{"units":[
             {"type":"hypothesis","label":"h/guess","gist":"a guess","status":"speculative"},
@@ -523,12 +525,27 @@ fn a_laundered_ground_is_rejected_at_staging_without_losing_its_neighbours() {
         .ingest(&Store::new(), "one paragraph")
         .unwrap();
 
-    assert_eq!(staged.rejected.len(), 1, "the laundered unit was rejected");
-    assert_eq!(staged.rejected[0].1.code, Code::E030);
+    assert_eq!(staged.weakened.len(), 1, "the laundered unit was lowered");
+    assert_eq!(staged.weakened[0].to, Status::Speculative);
     assert!(
         staged.units.iter().any(|u| u.gist == "a guess"),
         "the honest unit still staged"
     );
+    assert!(
+        staged
+            .units
+            .iter()
+            .any(|u| u.gist == "a strong claim on a weak ground"),
+        "the overclaim was kept, at a status its grounds support"
+    );
+    // The batch is in rule M now, so it stages cleanly and the record of what happened is
+    // a warning to read rather than an error to fix.
+    assert!(
+        staged.report.fail_on(Severity::Error).is_ok(),
+        "{:?}",
+        staged.report
+    );
+    assert!(staged.report.iter().any(|d| d.code == Code::W036));
 }
 
 /// Grounds already in the store satisfy rule M: a claim resting on something ingested an
@@ -555,6 +572,6 @@ fn grounds_already_in_the_store_are_visible_at_staging() {
         .ingest(&store, "one paragraph")
         .unwrap();
 
-    assert!(staged.rejected.is_empty(), "{:?}", staged.rejected);
+    assert!(staged.weakened.is_empty(), "{:?}", staged.weakened);
     assert_eq!(staged.len(), 1);
 }

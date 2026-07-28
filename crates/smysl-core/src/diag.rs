@@ -204,6 +204,7 @@ registry! {
         E033 = "SMY-E033", Error, "Rule T violation - status exceeds the ceiling for the attestation's rung";
         E034 = "SMY-E034", Error, "unfounded authored";
         W035 = "SMY-W035", Warn,  "measured with op: Authored rather than Imported";
+        W036 = "SMY-W036", Warn,  "Rule M applied at ingest - status lowered to what its grounds support";
     }
 
     // --- Retraction, supersession, merge ------------------------------------
@@ -511,10 +512,15 @@ mod tests {
         assert_eq!(Code::parse(""), None);
     }
 
-    /// Appendix D, counted section by section: 7 + 7 + 7 + 6 + 6 + 5 + 4 + 7.
+    /// Appendix D, counted section by section: 7 + 7 + 7 + 7 + 6 + 5 + 4 + 7.
+    ///
+    /// **One more than Appendix D lists.** `SMY-W036` is an addition: rule M at the ingest
+    /// boundary lowers an over-claiming unit rather than rejecting it, and the lowering has
+    /// to be reportable. Appendix D has no code for it because §9.1 assumed rejection, so
+    /// this is a divergence to reconcile rather than a miscount.
     #[test]
     fn registry_matches_appendix_d_size() {
-        assert_eq!(Code::ALL.len(), 49);
+        assert_eq!(Code::ALL.len(), 50);
     }
 
     #[test]

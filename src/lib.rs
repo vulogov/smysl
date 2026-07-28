@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn facade_reexports_the_diagnostic_registry() {
-        assert_eq!(Code::ALL.len(), 49);
+        assert_eq!(Code::ALL.len(), 50);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

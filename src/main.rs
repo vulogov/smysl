@@ -2289,8 +2289,14 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     for d in &report.diagnostics {
         eprintln!("smysl ingest: {d}");
     }
-    for (unit, d) in &staged.rejected {
-        eprintln!("smysl ingest: rejected `{}`: {d}", unit.gist);
+    // Rule M lowered these rather than dropping them, so the line says what changed and
+    // not what is missing. A reviewer reads `staged.smy` next; this tells them where to
+    // look before they do.
+    for w in &staged.weakened {
+        eprintln!(
+            "smysl ingest: rule M lowered a unit from {} to {} - its grounds support no more",
+            w.from, w.to
+        );
     }
     eprintln!(
         "smysl ingest: {} chunk(s), {} call(s), {} unit(s), {} degraded, {} token(s)",

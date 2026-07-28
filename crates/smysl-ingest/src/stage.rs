@@ -4,11 +4,16 @@
 //! `.smysl/staged.smy`, where a human or a later command decides whether it becomes part of
 //! the graph. `smysl merge --staged` is that decision; `ingest` exits 10 without it.
 //!
-//! Rule M is checked **here**, against the store, rather than inside the repair loop:
+//! Rule M is applied **here**, against the store, rather than inside the repair loop:
 //! grounds may reference units the chunk did not contain, so a claim resting on something
-//! ingested an hour ago is only checkable once both are in view. A unit violating rule M
-//! yields a diagnostic, not a stored unit - §9.1 is explicit that the diagnostic is the
-//! outcome, not a downgrade.
+//! ingested an hour ago is only checkable once both are in view.
+//!
+//! A unit that overclaims its grounds is **weakened to what they support, and reported** -
+//! see [`crate::monotone`], which carries the reasoning. The same treatment rule T gives an
+//! over-claimed rung ceiling, so the boundary has one rule rather than two. Earlier this
+//! rejected the unit instead, on a reading of §9.1; rejection cascades through everything
+//! grounded on it and loses content that a later merge could have justified, and both
+//! outcomes satisfy rule M equally.
 //!
 //! The staged file is ordinary surface text. That is deliberate: the thing a human is asked
 //! to approve should be the thing they can read.
@@ -18,8 +23,7 @@ use std::path::{Path, PathBuf};
 use smysl_check::{check, CheckOptions};
 use smysl_core::surface::{write_surface, WriteContext};
 use smysl_core::{
-    canonical_uid, Attestation, Diagnostic, Hlc, Label, Op, Record, Report, Rung, Severity, Uid,
-    UnitCore,
+    canonical_uid, Attestation, Diagnostic, Hlc, Label, Op, Record, Report, Rung, Uid, UnitCore,
 };
 use smysl_graph::Store;
 
@@ -37,8 +41,9 @@ pub struct Staged {
     pub labels: BTreeMap<Label, Uid>,
     /// What checking the batch against the store found.
     pub report: Report,
-    /// Units rejected by rule M, with why. §9.1: a diagnostic, not a stored unit.
-    pub rejected: Vec<(UnitCore, Diagnostic)>,
+    /// Units whose status rule M lowered, and to what. Empty when the model claimed
+    /// nothing it could not support.
+    pub weakened: Vec<crate::monotone::Weakening>,
 }
 
 impl Staged {
@@ -51,8 +56,11 @@ impl Staged {
     }
 
     /// Whether anything blocks confirmation.
+    ///
+    /// A weakening does not: the unit was brought into rule M and the change is recorded,
+    /// which is a thing to read rather than a thing to fix.
     pub fn has_errors(&self) -> bool {
-        !self.report.is_clean() || !self.rejected.is_empty()
+        !self.report.is_clean()
     }
 
     /// The records a caller would commit.
@@ -80,34 +88,44 @@ pub fn prepare(
     labels: BTreeMap<Label, Uid>,
     attest: &Attest,
 ) -> Staged {
+    // Rule M first, and *before* the check: weakening moves identities, so a report
+    // computed over the model's original uids would describe a batch that no longer
+    // exists. This was the bug the SM-P14 gate kept hitting - the report was taken before
+    // the units were split, so it carried errors about units that were then removed.
+    let applied = crate::monotone::apply(store, units);
+
+    // Labels follow their units to the new identities, or a label would name a uid that
+    // the weakening replaced.
+    let labels: BTreeMap<Label, Uid> = labels
+        .into_iter()
+        .map(|(l, u)| (l, applied.remap.get(&u).copied().unwrap_or(u)))
+        .collect();
+
     // Rule M needs both the batch and the store in view, so the check runs over their
     // union. The staged units are still only the batch's.
     // A throwaway union, never written: staging must not touch the store, which is exactly
     // what rule S is about.
     let mut records: Vec<Record> = store.iter().cloned().collect();
-    records.extend(units.iter().cloned().map(Record::Unit));
+    records.extend(applied.units.iter().cloned().map(Record::Unit));
     let merged = Store::from_records(records);
 
     let opts = CheckOptions::default().with_labels(labels.clone());
-    let report = check(&merged, opts);
+    let mut report = check(&merged, opts);
 
-    // §9.1: a unit violating rule M yields a diagnostic, not a stored unit. Which unit a
-    // diagnostic is about is what makes that separable.
-    let mut rejected = Vec::new();
-    let mut kept = Vec::new();
-    for u in units {
-        let uid = canonical_uid(&u);
-        let fatal = report.iter().find(|d| {
-            d.severity == Severity::Error
-                && d.subject == smysl_core::Subject::Unit(uid)
-                && d.code == smysl_core::Code::E030
-        });
-        match fatal {
-            Some(d) => rejected.push((u, d.clone())),
-            None => kept.push(u),
-        }
+    // What the weakening did, said out loud. A warning: the unit is in rule M now, and the
+    // record exists so a reviewer can see the model overclaimed rather than discovering it
+    // by comparing statuses.
+    for w in &applied.weakened {
+        report.push(
+            Diagnostic::on(smysl_core::Code::W036, w.after).with_message(format!(
+                "rule M: {} lowered to {} by its weakest ground",
+                w.from, w.to
+            )),
+        );
     }
+    report.sort();
 
+    let kept = applied.units;
     let attestations = kept
         .iter()
         .map(|u| attest.for_unit(canonical_uid(u)))
@@ -118,7 +136,7 @@ pub fn prepare(
         attestations,
         labels,
         report,
-        rejected,
+        weakened: applied.weakened,
     }
 }
 
@@ -286,12 +304,17 @@ mod tests {
             &attest(),
         );
 
-        assert_eq!(out.len(), 1, "only the honest unit stages");
-        assert_eq!(out.units[0], weak);
-        assert_eq!(out.rejected.len(), 1);
-        assert_eq!(out.rejected[0].0, laundered);
-        assert_eq!(out.rejected[0].1.code, smysl_core::Code::E030);
-        assert!(out.has_errors());
+        // Both stage. The overclaim is lowered rather than dropped, and the lowering is
+        // recorded - a reviewer sees what the model tried, not a hole where it was.
+        assert_eq!(out.len(), 2, "nothing is lost to an overclaim");
+        assert!(out.units.iter().any(|u| u.gist == laundered.gist));
+        assert_eq!(out.weakened.len(), 1);
+        assert_eq!(out.weakened[0].from, Status::Derived);
+        assert_eq!(out.weakened[0].to, Status::Speculative);
+
+        // And the batch now satisfies rule M, so nothing blocks confirmation.
+        assert!(!out.has_errors(), "{:?}", out.report);
+        assert!(out.report.iter().any(|d| d.code == smysl_core::Code::W036));
     }
 
     /// Grounds may reference units the chunk did not contain, so rule M is checked against
@@ -309,7 +332,7 @@ mod tests {
             &attest(),
         );
         assert_eq!(out.len(), 1);
-        assert!(out.rejected.is_empty(), "{:?}", out.rejected);
+        assert!(out.weakened.is_empty(), "{:?}", out.weakened);
     }
 
     /// The thing a human is asked to approve should be the thing they can read.
