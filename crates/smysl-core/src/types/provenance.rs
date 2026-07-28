@@ -302,7 +302,26 @@ impl Attestation {
     }
 
     /// The status ceiling this attestation permits (rule T).
+    ///
+    /// **The op raises it, not just the rung.** No rung's ceiling reaches `measured` — the
+    /// highest is `computed`, at `derived` — so consulting the rung alone made `measured`
+    /// unreachable for anything that recorded where it came from: an importer with a
+    /// machine-checkable source got `SMY-E033` at *every* rung, while a unit carrying no
+    /// attestation at all passed clean, because the trust pass has no ceiling to check.
+    /// The only way to hold a `measured` unit was therefore to strip its provenance, which
+    /// is the exact inverse of what rule T is for.
+    ///
+    /// It takes **`Op::Imported` at the `computed` rung** — a deterministic tool or parser
+    /// transcribing a reading. Op alone is not enough, and this is the part worth being
+    /// careful about: `ingest` also records `op: Imported`, because it too transcribes
+    /// rather than authors. Unlocking on the op by itself would therefore let a model
+    /// assign `measured` to whatever it read in a document, which is precisely the
+    /// laundering rule T exists to stop. Ingest runs at the `document`, `web` or `model`
+    /// rung and stays capped there.
     pub const fn ceiling(&self) -> Status {
+        if self.op.may_assign_measured() && matches!(self.rung, Rung::Computed) {
+            return Status::Measured;
+        }
         self.rung.ceiling()
     }
 }

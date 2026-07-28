@@ -75,6 +75,13 @@ pub fn may_assign(op: Op, status: Status) -> bool {
 
 #[cfg(test)]
 mod tests {
+    // -- what may reach `measured` ----------------------------------------
+    //
+    // No rung's ceiling reaches `measured` on its own - the highest is `computed`, at
+    // `derived`. Until SM-P15 that made the top of the ladder reachable only by *omitting*
+    // provenance: an importer with a machine-checkable source got E033 at every rung, while
+    // a unit carrying no attestation passed clean, because there is no ceiling to check.
+
     use super::*;
     use smysl_core::{
         canonical_uid, AgentId, Attestation, Hlc, KernelType, Record, SourceKind, SourceRef,
@@ -255,5 +262,57 @@ mod tests {
         assert!(!permits(Rung::Model, Status::Derived));
         assert!(permits(Rung::Computed, Status::Derived));
         assert!(!permits(Rung::Computed, Status::Cited));
+    }
+
+    /// A deterministic tool transcribing a reading may record `measured`. This is the only
+    /// route to it, and it is what makes an instrument adapter possible at all.
+    #[test]
+    fn a_computed_rung_import_may_record_measured() {
+        let core = UnitCoreBuilder::new(KernelType::Evidence, "p95 was 410ms", Status::Measured)
+            .source(SourceRef::new(SourceKind::Metric, "checkout.p95"))
+            .build()
+            .unwrap();
+        let uid = canonical_uid(&core);
+        let agent = AgentId::new("tool:importer").unwrap();
+        let att = Attestation::new(
+            uid,
+            agent.clone(),
+            Op::Imported,
+            Rung::Computed,
+            Hlc::zero(agent),
+        );
+
+        let store = Store::from_records(vec![Record::Unit(core), Record::Attestation(att)]);
+        let mut report = smysl_core::Report::new();
+        run(&store, &mut report);
+        assert!(
+            report.iter().all(|d| d.code != smysl_core::Code::E033),
+            "a tool import was refused `measured`: {report}"
+        );
+    }
+
+    /// **Ingest also records `op: Imported`**, because it transcribes rather than authors.
+    /// If the op alone unlocked `measured`, a model could assign it to anything it read -
+    /// which is the laundering rule T exists to stop. The rung is what keeps them apart.
+    #[test]
+    fn an_ingest_rung_import_may_not_record_measured() {
+        for rung in [Rung::Document, Rung::Web, Rung::Model] {
+            let core =
+                UnitCoreBuilder::new(KernelType::Evidence, "p95 was 410ms", Status::Measured)
+                    .source(SourceRef::new(SourceKind::Doc, "report.md"))
+                    .build()
+                    .unwrap();
+            let uid = canonical_uid(&core);
+            let agent = AgentId::new("model:x").unwrap();
+            let att = Attestation::new(uid, agent.clone(), Op::Imported, rung, Hlc::zero(agent));
+
+            let store = Store::from_records(vec![Record::Unit(core), Record::Attestation(att)]);
+            let mut report = smysl_core::Report::new();
+            run(&store, &mut report);
+            assert!(
+                report.iter().any(|d| d.code == smysl_core::Code::E033),
+                "{rung} rung was allowed to claim measured"
+            );
+        }
     }
 }
