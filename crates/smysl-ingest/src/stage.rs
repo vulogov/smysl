@@ -23,7 +23,8 @@ use std::path::{Path, PathBuf};
 use smysl_check::{check, CheckOptions};
 use smysl_core::surface::{write_surface, WriteContext};
 use smysl_core::{
-    canonical_uid, Attestation, Diagnostic, Hlc, Label, Op, Record, Report, Rung, Uid, UnitCore,
+    canonical_uid, Attestation, Diagnostic, Hlc, Label, Op, Record, Relation, Report, Rung, Uid,
+    UnitCore,
 };
 use smysl_graph::Store;
 
@@ -37,6 +38,8 @@ pub const PATH: &str = ".smysl/staged.smy";
 #[non_exhaustive]
 pub struct Staged {
     pub units: Vec<UnitCore>,
+    /// The edges the batch declared, with endpoints following any weakening remap.
+    pub relations: Vec<Relation>,
     pub attestations: Vec<Attestation>,
     pub labels: BTreeMap<Label, Uid>,
     /// What checking the batch against the store found.
@@ -66,6 +69,7 @@ impl Staged {
     /// The records a caller would commit.
     pub fn records(&self) -> Vec<Record> {
         let mut out: Vec<Record> = self.units.iter().cloned().map(Record::Unit).collect();
+        out.extend(self.relations.iter().cloned().map(Record::Relation));
         out.extend(self.attestations.iter().cloned().map(Record::Attestation));
         out
     }
@@ -85,6 +89,7 @@ impl Staged {
 pub fn prepare(
     store: &Store,
     units: Vec<UnitCore>,
+    relations: Vec<Relation>,
     labels: BTreeMap<Label, Uid>,
     attest: &Attest,
 ) -> Staged {
@@ -93,6 +98,18 @@ pub fn prepare(
     // exists. This was the bug the SM-P14 gate kept hitting - the report was taken before
     // the units were split, so it carried errors about units that were then removed.
     let applied = crate::monotone::apply(store, units);
+
+    // Edges follow their endpoints. A weakening moves a unit's identity, so an edge left
+    // pointing at the old uid would dangle - and it is `rebuts` edges that rule R needs, so
+    // losing one silently is losing the constraint.
+    let relations: Vec<Relation> = relations
+        .into_iter()
+        .map(|mut r| {
+            r.from = applied.remap.get(&r.from).copied().unwrap_or(r.from);
+            r.to = applied.remap.get(&r.to).copied().unwrap_or(r.to);
+            r
+        })
+        .collect();
 
     // Labels follow their units to the new identities, or a label would name a uid that
     // the weakening replaced.
@@ -107,6 +124,7 @@ pub fn prepare(
     // what rule S is about.
     let mut records: Vec<Record> = store.iter().cloned().collect();
     records.extend(applied.units.iter().cloned().map(Record::Unit));
+    records.extend(relations.iter().cloned().map(Record::Relation));
     let merged = Store::from_records(records);
 
     let opts = CheckOptions::default().with_labels(labels.clone());
@@ -133,6 +151,7 @@ pub fn prepare(
 
     Staged {
         units: kept,
+        relations,
         attestations,
         labels,
         report,
@@ -260,7 +279,13 @@ mod tests {
     fn a_clean_batch_stages_with_an_attestation_each() {
         let a = cited("p95 rose to 410ms");
         let b = derived_on("the pool saturated", canonical_uid(&a));
-        let out = prepare(&Store::new(), vec![a, b], BTreeMap::new(), &attest());
+        let out = prepare(
+            &Store::new(),
+            vec![a, b],
+            Vec::new(),
+            BTreeMap::new(),
+            &attest(),
+        );
 
         assert_eq!(out.len(), 2);
         assert_eq!(out.attestations.len(), 2);
@@ -271,7 +296,13 @@ mod tests {
     /// the tool.
     #[test]
     fn attestations_are_imported_not_authored() {
-        let out = prepare(&Store::new(), vec![cited("g")], BTreeMap::new(), &attest());
+        let out = prepare(
+            &Store::new(),
+            vec![cited("g")],
+            Vec::new(),
+            BTreeMap::new(),
+            &attest(),
+        );
         assert_eq!(out.attestations[0].op, Op::Imported);
         assert_eq!(out.attestations[0].rung, Rung::Document);
     }
@@ -281,6 +312,7 @@ mod tests {
         let out = prepare(
             &Store::new(),
             vec![cited("g")],
+            Vec::new(),
             BTreeMap::new(),
             &attest().with_recipe([1; 32], [2; 32]),
         );
@@ -300,6 +332,7 @@ mod tests {
         let out = prepare(
             &Store::new(),
             vec![weak.clone(), laundered.clone()],
+            Vec::new(),
             BTreeMap::new(),
             &attest(),
         );
@@ -328,6 +361,7 @@ mod tests {
         let out = prepare(
             &store,
             vec![derived_on("rests on the earlier one", uid)],
+            Vec::new(),
             BTreeMap::new(),
             &attest(),
         );
@@ -341,6 +375,7 @@ mod tests {
         let out = prepare(
             &Store::new(),
             vec![cited("p95 rose to 410ms")],
+            Vec::new(),
             BTreeMap::new(),
             &attest(),
         );
@@ -355,6 +390,7 @@ mod tests {
         let out = prepare(
             &Store::new(),
             vec![cited("one"), cited("two")],
+            Vec::new(),
             BTreeMap::new(),
             &attest(),
         );
@@ -370,7 +406,13 @@ mod tests {
     #[test]
     fn discarding_is_idempotent() {
         let root = tmp("discard");
-        let out = prepare(&Store::new(), vec![cited("x")], BTreeMap::new(), &attest());
+        let out = prepare(
+            &Store::new(),
+            vec![cited("x")],
+            Vec::new(),
+            BTreeMap::new(),
+            &attest(),
+        );
         write(&root, &out).unwrap();
         assert!(root.join(PATH).exists());
         discard(&root).unwrap();
@@ -386,7 +428,13 @@ mod tests {
 
     #[test]
     fn an_empty_batch_stages_as_nothing() {
-        let out = prepare(&Store::new(), Vec::new(), BTreeMap::new(), &attest());
+        let out = prepare(
+            &Store::new(),
+            Vec::new(),
+            Vec::new(),
+            BTreeMap::new(),
+            &attest(),
+        );
         assert!(out.is_empty());
         assert!(!out.has_errors());
     }
@@ -395,8 +443,20 @@ mod tests {
     /// record every time somebody re-ran the same command.
     #[test]
     fn attestations_are_a_function_of_their_inputs() {
-        let first = prepare(&Store::new(), vec![cited("g")], BTreeMap::new(), &attest());
-        let second = prepare(&Store::new(), vec![cited("g")], BTreeMap::new(), &attest());
+        let first = prepare(
+            &Store::new(),
+            vec![cited("g")],
+            Vec::new(),
+            BTreeMap::new(),
+            &attest(),
+        );
+        let second = prepare(
+            &Store::new(),
+            vec![cited("g")],
+            Vec::new(),
+            BTreeMap::new(),
+            &attest(),
+        );
         assert_eq!(first.attestations, second.attestations);
     }
 

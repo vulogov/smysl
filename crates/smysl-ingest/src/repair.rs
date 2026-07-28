@@ -30,7 +30,8 @@
 use smysl_check::{check, CheckOptions, Pass};
 use smysl_core::surface::parse_surface;
 use smysl_core::{
-    Code, Diagnostic, KernelType, Record, Report, Rung, Severity, Status, UnitCore, UnitCoreBuilder,
+    Code, Diagnostic, KernelType, Record, Relation, Report, Rung, Severity, Status, UnitCore,
+    UnitCoreBuilder,
 };
 use smysl_graph::Store;
 
@@ -68,17 +69,33 @@ impl Attempted {
 /// Returns the units and any diagnostics. The caller decides whether to spend a repair
 /// attempt; this function has no opinion about retries, which keeps it testable without a
 /// provider.
-pub fn convert(answer: &str, path: IngestPath, rung: Rung) -> (Vec<UnitCore>, Vec<Diagnostic>) {
+pub fn convert(
+    answer: &str,
+    path: IngestPath,
+    rung: Rung,
+) -> (Vec<UnitCore>, Vec<Relation>, Vec<Diagnostic>) {
+    let mut relations = Vec::new();
     let (mut units, mut diagnostics) = match path {
         IngestPath::JsonAst => {
             let out = json_ast::convert(answer);
+            relations = out.relations;
             (out.units, out.diagnostics)
         }
         IngestPath::Surface => match parse_surface(answer) {
-            Ok(out) => (
-                out.units().cloned().collect::<Vec<_>>(),
-                out.diagnostics.clone(),
-            ),
+            Ok(out) => {
+                relations = out
+                    .records
+                    .iter()
+                    .filter_map(|r| match r {
+                        Record::Relation(rel) => Some(rel.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                (
+                    out.units().cloned().collect::<Vec<_>>(),
+                    out.diagnostics.clone(),
+                )
+            }
             // §15.3: parsing never hard-fails, but a caller of `parse_surface` can still
             // get an error for a malformed document header. That is a diagnostic here, not
             // a panic and not a lost span.
@@ -91,6 +108,7 @@ pub fn convert(answer: &str, path: IngestPath, rung: Rung) -> (Vec<UnitCore>, Ve
 
     // Rule T, applied unconditionally after parse (§22.4). A model claiming `measured` is
     // downgraded and told, whatever else was wrong with the answer.
+    let before: Vec<_> = units.iter().map(smysl_core::canonical_uid).collect();
     let mut capped = Vec::with_capacity(units.len());
     for u in units.drain(..) {
         let applied = ceiling::apply(&u, rung, None);
@@ -98,7 +116,12 @@ pub fn convert(answer: &str, path: IngestPath, rung: Rung) -> (Vec<UnitCore>, Ve
         capped.push(applied.core);
     }
 
-    (capped, diagnostics)
+    // The cap moves identities, so everything pointing at a capped unit has to follow it.
+    // Latent until relations existed: a `grounds` entry naming a unit rule T then lowered
+    // was already dangling, and only showed up as an `SMY-E060` at staging.
+    let (capped, relations, _) = crate::monotone::resettle(&before, capped, relations);
+
+    (capped, relations, diagnostics)
 }
 
 /// Whether a set of diagnostics is worth spending a repair attempt on.
@@ -249,14 +272,14 @@ mod tests {
 
     #[test]
     fn a_clean_surface_answer_converts_without_diagnostics() {
-        let (units, d) = convert(GOOD_SURFACE, IngestPath::Surface, Rung::Model);
+        let (units, _, d) = convert(GOOD_SURFACE, IngestPath::Surface, Rung::Model);
         assert_eq!(units.len(), 1);
         assert!(!needs_repair(&d), "{d:?}");
     }
 
     #[test]
     fn a_clean_json_answer_converts_without_diagnostics() {
-        let (units, d) = convert(
+        let (units, _, d) = convert(
             r#"{"units":[{"type":"claim","gist":"the pool saturated","status":"speculative"}]}"#,
             IngestPath::JsonAst,
             Rung::Model,
@@ -270,14 +293,14 @@ mod tests {
     fn the_ceiling_applies_on_both_paths() {
         let json = r#"{"units":[{"type":"evidence","gist":"p95 rose","status":"measured",
                        "source":{"kind":"metric","ref":"m"}}]}"#;
-        let (units, d) = convert(json, IngestPath::JsonAst, Rung::Model);
+        let (units, _, d) = convert(json, IngestPath::JsonAst, Rung::Model);
         assert_eq!(units.len(), 1);
         assert!(units[0].status < Status::Measured, "not capped");
         assert!(d.iter().any(|x| x.code == Code::E033), "not reported");
 
         let surface =
             "@evidence e/x { status: measured, source: { kind: metric, ref: m } }\n~ p95 rose\n";
-        let (units, d) = convert(surface, IngestPath::Surface, Rung::Model);
+        let (units, _, d) = convert(surface, IngestPath::Surface, Rung::Model);
         assert_eq!(units.len(), 1);
         assert!(units[0].status < Status::Measured);
         assert!(d.iter().any(|x| x.code == Code::E033));
@@ -288,7 +311,7 @@ mod tests {
         let json = r#"{"units":[{"type":"evidence","gist":"g","status":"measured",
                        "source":{"kind":"metric","ref":"m"},"grounds":[]}]}"#;
         for &r in Rung::ALL {
-            let (units, _) = convert(json, IngestPath::JsonAst, r);
+            let (units, _, _) = convert(json, IngestPath::JsonAst, r);
             assert!(units[0].status <= ceiling::ceiling(r), "{r}");
         }
     }
@@ -310,7 +333,7 @@ mod tests {
     fn a_capped_ceiling_does_not_spend_the_repair_budget() {
         let json = r#"{"units":[{"type":"evidence","gist":"p95 rose","status":"measured",
                        "source":{"kind":"metric","ref":"m"}}]}"#;
-        let (units, d) = convert(json, IngestPath::JsonAst, Rung::Document);
+        let (units, _, d) = convert(json, IngestPath::JsonAst, Rung::Document);
 
         assert!(d.iter().any(|x| x.code == Code::E033), "still reported");
         assert!(!needs_repair(&d), "but not retried: {d:?}");
@@ -500,7 +523,7 @@ mod tests {
             &"@".repeat(500),
         ] {
             for path in [IngestPath::Surface, IngestPath::JsonAst] {
-                let (_, d) = convert(answer, path, Rung::Model);
+                let (_, _, d) = convert(answer, path, Rung::Model);
                 // Whatever happened, the caller can act: either units or diagnostics.
                 let _ = needs_repair(&d);
             }

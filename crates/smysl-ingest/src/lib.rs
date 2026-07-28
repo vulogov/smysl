@@ -26,7 +26,7 @@ pub mod stage;
 
 use std::collections::BTreeMap;
 
-use smysl_core::{Diagnostic, Hlc, Label, Rung, Uid, UnitCore};
+use smysl_core::{Diagnostic, Hlc, Label, Relation, Rung, Uid, UnitCore};
 use smysl_graph::Store;
 use smysl_provider::{Provider, ProviderError, Registry, Request, Task, Usage};
 
@@ -223,12 +223,14 @@ impl<'a> Ingestor<'a> {
         };
 
         let mut units: Vec<UnitCore> = Vec::new();
+        let mut relations: Vec<Relation> = Vec::new();
         for piece in &chunks {
             let out = self.one_chunk(provider, choice.path, &piece.text, &mut report.usage);
             report.calls += out.calls;
             report.degraded += usize::from(out.degraded);
             report.diagnostics.extend(out.diagnostics);
             units.extend(out.units);
+            relations.extend(out.relations);
         }
 
         // Chunk-boundary duplication self-heals: two chunks that produced the same claim
@@ -244,7 +246,15 @@ impl<'a> Ingestor<'a> {
         .with_recipe(conditions.recipe(), conditions.family());
 
         let labels: BTreeMap<Label, Uid> = BTreeMap::new();
-        Ok((stage::prepare(store, units, labels, &attest), report))
+        // Edges duplicated across chunk boundaries collapse the same way units do: the
+        // endpoints are content-addressed, so the same edge twice is the same edge.
+        relations.sort_by_key(|r| (r.kind.as_str().to_string(), r.from, r.to));
+        relations.dedup_by(|a, b| a.kind == b.kind && a.from == b.from && a.to == b.to);
+
+        Ok((
+            stage::prepare(store, units, relations, labels, &attest),
+            report,
+        ))
     }
 
     /// One chunk, with its repair budget. Always produces units (rule I).
@@ -274,6 +284,7 @@ impl<'a> Ingestor<'a> {
                     let (core, d) = repair::degrade(text, self.opts.rung, &e.to_string());
                     return ChunkOutcome {
                         units: vec![core],
+                        relations: Vec::new(),
                         calls,
                         degraded: true,
                         diagnostics: vec![d],
@@ -286,7 +297,8 @@ impl<'a> Ingestor<'a> {
             usage.estimated |= completion.usage.estimated;
             usage.retries += completion.usage.retries;
 
-            let (units, mut diagnostics) = repair::convert(&completion.text, path, self.opts.rung);
+            let (units, relations, mut diagnostics) =
+                repair::convert(&completion.text, path, self.opts.rung);
             // §22.3: check what can be checked without the store, so the model still has a
             // turn in which to fix it. Discovering a granularity violation at staging would
             // mean discovering it after the calls were paid for.
@@ -295,6 +307,7 @@ impl<'a> Ingestor<'a> {
             if !repair::needs_repair(&diagnostics) && !units.is_empty() {
                 return ChunkOutcome {
                     units,
+                    relations,
                     calls,
                     degraded: false,
                     diagnostics,
@@ -328,6 +341,7 @@ impl<'a> Ingestor<'a> {
         last.push(d);
         ChunkOutcome {
             units: vec![core],
+            relations: Vec::new(),
             calls,
             degraded: true,
             diagnostics: last,
@@ -358,6 +372,7 @@ impl<'a> Ingestor<'a> {
 
 struct ChunkOutcome {
     units: Vec<UnitCore>,
+    relations: Vec<Relation>,
     calls: usize,
     degraded: bool,
     diagnostics: Vec<Diagnostic>,

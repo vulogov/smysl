@@ -137,7 +137,7 @@ fn every_ceiling_violation_is_downgraded_and_reported() {
                     {{"type":"evidence","gist":"p95 rose to 410ms","status":"{claimed}",
                       "source":{{"kind":"metric","ref":"p95"}},"grounds":["c/one"]}}]}}"#
             );
-            let (units, diagnostics) = repair::convert(&answer, IngestPath::JsonAst, rung);
+            let (units, _, diagnostics) = repair::convert(&answer, IngestPath::JsonAst, rung);
 
             let capped = units
                 .iter()
@@ -162,7 +162,7 @@ fn no_rung_can_ever_produce_a_measured_unit() {
     let answer = r#"{"units":[{"type":"evidence","gist":"an instrument said so",
                      "status":"measured","source":{"kind":"metric","ref":"m"}}]}"#;
     for &rung in Rung::ALL {
-        let (units, _) = repair::convert(answer, IngestPath::JsonAst, rung);
+        let (units, _, _) = repair::convert(answer, IngestPath::JsonAst, rung);
         for u in &units {
             assert_ne!(u.status, Status::Measured, "{rung}");
         }
@@ -574,4 +574,90 @@ fn grounds_already_in_the_store_are_visible_at_staging() {
 
     assert!(staged.weakened.is_empty(), "{:?}", staged.weakened);
     assert_eq!(staged.len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Relations: what the rest of the format operates on
+// ---------------------------------------------------------------------------
+
+/// **Ingest produced no edges at all until SM-P15.** Rule R keeps a rebuttal with its
+/// claim, merge detects a live rebuttal, a thread fills its caveat role, a renderer picks a
+/// connective - every one of those reads relations. A graph ingested without them exercises
+/// none of it, so this asserts the edges survive the whole boundary and land in the staged
+/// records rather than merely parsing.
+#[test]
+fn ingest_carries_relations_through_to_staging() {
+    let (r, _) = registry(Scripted::saying(
+        r#"{"units":[
+            {"type":"observation","label":"o/latency","gist":"p95 rose to 410ms",
+             "status":"speculative"},
+            {"type":"claim","label":"c/pool","gist":"the connection pool saturated",
+             "status":"speculative"},
+            {"type":"claim","label":"c/canary","gist":"the canary shard stayed clean",
+             "status":"speculative"}],
+          "relations":[
+            {"kind":"causes","from":"c/pool","to":"o/latency"},
+            {"kind":"rebuts","from":"c/canary","to":"c/pool","weight":0.6}]}"#,
+    ));
+    let (staged, _) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), "one paragraph")
+        .unwrap();
+
+    assert_eq!(staged.relations.len(), 2, "edges were lost at the boundary");
+    assert!(
+        staged.report.fail_on(Severity::Error).is_ok(),
+        "{:?}",
+        staged.report
+    );
+
+    // In the records a caller commits, not just in a side channel.
+    let edges = staged
+        .records()
+        .iter()
+        .filter(|r| matches!(r, Record::Relation(_)))
+        .count();
+    assert_eq!(edges, 2);
+
+    // And readable in the surface text a human is asked to approve.
+    let surface = staged.to_surface();
+    assert!(surface.contains("--rebuts-->"), "{surface}");
+
+    // The endpoints resolve inside the staged batch: an edge into nothing would be an
+    // integrity failure, and is exactly what a uid moved by rule T used to cause.
+    let staged_uids: std::collections::BTreeSet<_> =
+        staged.units.iter().map(smysl_core::canonical_uid).collect();
+    for rel in &staged.relations {
+        assert!(staged_uids.contains(&rel.from), "dangling `from`");
+        assert!(staged_uids.contains(&rel.to), "dangling `to`");
+    }
+}
+
+/// The consequence that matters: with edges, **rule R has something to bind on**. A pack
+/// that selects the rebutted claim must carry the rebuttal, and a budget too small for both
+/// must fail rather than ship the claim alone.
+#[test]
+fn an_ingested_rebuttal_binds_rule_r_in_packing() {
+    let (r, _) = registry(Scripted::saying(
+        r#"{"units":[
+            {"type":"claim","label":"c/pool","gist":"the connection pool saturated",
+             "status":"speculative"},
+            {"type":"claim","label":"c/canary","gist":"the canary shard stayed clean",
+             "status":"speculative"}],
+          "relations":[{"kind":"rebuts","from":"c/canary","to":"c/pool","weight":0.6}]}"#,
+    ));
+    let (staged, _) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), "one paragraph")
+        .unwrap();
+
+    let store = Store::from_records(staged.records());
+    let rebutted = staged
+        .units
+        .iter()
+        .find(|u| u.gist.contains("pool"))
+        .map(smysl_core::canonical_uid)
+        .unwrap();
+    assert!(
+        !store.rebuttals_of(&rebutted).is_empty(),
+        "the store sees no rebuttal, so rule R cannot bind"
+    );
 }

@@ -17,8 +17,8 @@ use std::collections::BTreeMap;
 
 use smysl_core::surface::hjson::{parse_object_prefix, HObject, HValue, Spanned};
 use smysl_core::{
-    canonical_uid, Code, Date, Diagnostic, KernelType, Label, SourceKind, SourceRef, Status, Uid,
-    UnitCore, UnitCoreBuilder,
+    canonical_uid, Code, Date, Diagnostic, KernelType, Label, RelKind, Relation, SourceKind,
+    SourceRef, Status, Uid, UnitCore, UnitCoreBuilder,
 };
 
 /// What one JSON-AST batch produced.
@@ -26,6 +26,9 @@ use smysl_core::{
 #[non_exhaustive]
 pub struct Converted {
     pub units: Vec<UnitCore>,
+    /// The edges between them. Most of the format's machinery - rule R, contention
+    /// detection, thread roles, connectives - operates on these rather than on units.
+    pub relations: Vec<Relation>,
     /// Label bindings the batch declared, for the caller to carry forward.
     pub labels: BTreeMap<Label, Uid>,
     pub diagnostics: Vec<Diagnostic>,
@@ -108,7 +111,102 @@ pub fn convert(raw: &str) -> Converted {
         }
     }
 
+    // Relations after units, in one pass: an edge may name any unit in the batch, so the
+    // label table has to be complete before any of them resolve. This is why they cannot
+    // be interleaved the way units are.
+    if let Some(HValue::Array(items)) = obj.get("relations").map(|v| &v.value) {
+        for (i, item) in items.iter().enumerate() {
+            let Some(o) = item.value.as_object() else {
+                out.diagnostics.push(
+                    Diagnostic::new(Code::E001)
+                        .with_message(format!("relation {i} is not an object")),
+                );
+                continue;
+            };
+            match relation(o, i, &out.labels) {
+                Ok(r) => out.relations.push(r),
+                Err(d) => out.diagnostics.extend(d),
+            }
+        }
+    }
+
     out
+}
+
+/// One relation from the batch.
+///
+/// An edge whose endpoints do not resolve is dropped with a diagnostic rather than carried
+/// with a dangling uid: a relation is only meaningful between two units, and an edge into
+/// nothing would fail integrity at staging anyway, after the call was paid for.
+fn relation(
+    o: &HObject,
+    index: usize,
+    labels: &BTreeMap<Label, Uid>,
+) -> Result<Relation, Vec<Diagnostic>> {
+    let mut errors = Vec::new();
+
+    let kind = match o.get("kind").and_then(|v| v.value.as_str()) {
+        Some(k) => match RelKind::parse(k) {
+            // Only the kinds a model may author. `supersedes` and `retracts` assert
+            // something about a graph's history that a model reading a document cannot know.
+            Ok(k) if !matches!(k, RelKind::Supersedes | RelKind::Retracts) => Some(k),
+            _ => {
+                errors.push(Diagnostic::new(Code::E001).with_message(format!(
+                    "relation {index}: `{k}` is not a relation kind a model may author"
+                )));
+                None
+            }
+        },
+        None => {
+            errors.push(
+                Diagnostic::new(Code::E001)
+                    .with_message(format!("relation {index}: `kind` is required")),
+            );
+            None
+        }
+    };
+
+    let mut endpoint = |key: &str| -> Option<Uid> {
+        match o.get(key).and_then(|v| v.value.as_str()) {
+            Some(name) => match resolve(name, labels) {
+                Some(u) => Some(u),
+                None => {
+                    errors.push(Diagnostic::new(Code::E060).with_message(format!(
+                        "relation {index}: `{key}` names `{name}`, which is not in this batch"
+                    )));
+                    None
+                }
+            },
+            None => {
+                errors.push(
+                    Diagnostic::new(Code::E001)
+                        .with_message(format!("relation {index}: `{key}` is required")),
+                );
+                None
+            }
+        }
+    };
+    let from = endpoint("from");
+    let to = endpoint("to");
+
+    let (Some(kind), Some(from), Some(to)) = (kind, from, to) else {
+        return Err(errors);
+    };
+    if from == to {
+        return Err(vec![Diagnostic::new(Code::E001).with_message(format!(
+            "relation {index}: an edge from a unit to itself"
+        ))]);
+    }
+
+    let mut rel = Relation::new(kind, from, to);
+    // Bounded, because a weight is the one number a model most readily invents. Out of
+    // range is dropped rather than clamped: a clamp would silently keep a fabrication.
+    if let Some(w) = o.get("weight").and_then(|v| v.value.as_f64()) {
+        if (0.0..=1.0).contains(&w) {
+            rel.weight = Some(w as f32);
+        }
+    }
+    Ok(rel)
 }
 
 /// Strip a ```json fence, which models add out of habit.
@@ -268,23 +366,31 @@ fn references(
             );
             continue;
         };
-        if let Ok(l) = Label::new(name) {
-            if let Some(uid) = labels.get(&l) {
-                out.push(*uid);
-                continue;
-            }
-        }
-        match Uid::parse(name) {
-            Ok(u) => out.push(u),
+        match resolve(name, labels) {
+            Some(u) => out.push(u),
             // A dangling reference is `E060`, the same code `check` uses, so a caller sees
             // one vocabulary whether the problem came from a model or from a file.
-            Err(_) => errors.push(
+            None => errors.push(
                 Diagnostic::new(Code::E060)
                     .with_message(format!("unit {index}: `{key}` names unknown `{name}`")),
             ),
         }
     }
     (out, errors)
+}
+
+/// A name to a uid: a label declared in this batch, or a uid written out in full.
+///
+/// Shared by units and relations so an edge resolves its endpoints by exactly the rule a
+/// `grounds` entry does. Two copies of this would drift, and the drift would show up as an
+/// edge that silently failed to attach.
+fn resolve(name: &str, labels: &BTreeMap<Label, Uid>) -> Option<Uid> {
+    if let Ok(l) = Label::new(name) {
+        if let Some(uid) = labels.get(&l) {
+            return Some(*uid);
+        }
+    }
+    Uid::parse(name).ok()
 }
 
 fn source_ref(o: &HObject, index: usize) -> Result<SourceRef, Diagnostic> {
@@ -308,6 +414,93 @@ fn source_ref(o: &HObject, index: usize) -> Result<SourceRef, Diagnostic> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -- relations ---------------------------------------------------------
+    //
+    // Ingest produced no edges at all until SM-P15. Everything the format does beyond
+    // "a list with provenance" - rule R keeping a rebuttal with its claim, merge finding a
+    // live rebuttal, a thread filling its caveat role, a renderer choosing a connective -
+    // reads relations, so a graph without them exercises none of it.
+
+    const WITH_EDGES: &str = r#"{"units":[
+        {"type":"observation","label":"o/latency","gist":"p95 rose","status":"speculative"},
+        {"type":"claim","label":"c/pool","gist":"the pool saturated","status":"speculative"},
+        {"type":"claim","label":"c/canary","gist":"the canary stayed clean","status":"speculative"}],
+      "relations":[
+        {"kind":"causes","from":"c/pool","to":"o/latency"},
+        {"kind":"rebuts","from":"c/canary","to":"c/pool","weight":0.6}]}"#;
+
+    #[test]
+    fn relations_resolve_their_endpoints_by_label() {
+        let out = one(WITH_EDGES);
+        assert_eq!(out.relations.len(), 2, "{:?}", out.diagnostics);
+
+        let by_kind = |k: RelKind| out.relations.iter().find(|r| r.kind == k).unwrap();
+        let causes = by_kind(RelKind::Causes);
+        assert_eq!(causes.from, out.labels[&Label::new("c/pool").unwrap()]);
+        assert_eq!(causes.to, out.labels[&Label::new("o/latency").unwrap()]);
+        assert_eq!(by_kind(RelKind::Rebuts).weight, Some(0.6));
+    }
+
+    /// An edge naming something that is not in the batch is dropped with `SMY-E060` rather
+    /// than carried with a dangling uid - integrity would refuse it at staging anyway,
+    /// after the call was paid for.
+    #[test]
+    fn an_edge_into_nothing_is_dropped_and_reported() {
+        let out = one(
+            r#"{"units":[{"type":"claim","label":"c/a","gist":"a","status":"speculative"}],
+            "relations":[{"kind":"causes","from":"c/a","to":"c/nowhere"}]}"#,
+        );
+        assert!(out.relations.is_empty());
+        assert!(out.diagnostics.iter().any(|d| d.code == Code::E060));
+    }
+
+    /// A model reading a document cannot know a graph's history, so it may not retract or
+    /// supersede anything. Either would let it delete evidence by mentioning it.
+    #[test]
+    fn lifecycle_edges_are_not_authorable() {
+        for kind in ["supersedes", "retracts"] {
+            let json = format!(
+                r#"{{"units":[
+                    {{"type":"claim","label":"c/a","gist":"a","status":"speculative"}},
+                    {{"type":"claim","label":"c/b","gist":"b","status":"speculative"}}],
+                  "relations":[{{"kind":"{kind}","from":"c/a","to":"c/b"}}]}}"#
+            );
+            let out = one(&json);
+            assert!(out.relations.is_empty(), "{kind} was accepted");
+            assert!(out.has_errors(), "{kind} was accepted silently");
+        }
+    }
+
+    #[test]
+    fn a_self_edge_is_refused() {
+        let out = one(
+            r#"{"units":[{"type":"claim","label":"c/a","gist":"a","status":"speculative"}],
+            "relations":[{"kind":"causes","from":"c/a","to":"c/a"}]}"#,
+        );
+        assert!(out.relations.is_empty());
+    }
+
+    /// A weight is the one number a model most readily invents, so it is bounded - and an
+    /// out-of-range value is dropped rather than clamped, because a clamp keeps the
+    /// fabrication and only hides its size.
+    #[test]
+    fn an_out_of_range_weight_is_dropped_rather_than_clamped() {
+        let out = one(r#"{"units":[
+            {"type":"claim","label":"c/a","gist":"a","status":"speculative"},
+            {"type":"claim","label":"c/b","gist":"b","status":"speculative"}],
+          "relations":[{"kind":"rebuts","from":"c/a","to":"c/b","weight":9.5}]}"#);
+        assert_eq!(out.relations.len(), 1);
+        assert_eq!(out.relations[0].weight, None);
+    }
+
+    /// A batch with no `relations` key is the common case and must stay clean.
+    #[test]
+    fn a_batch_without_relations_is_not_an_error() {
+        let out = one(r#"{"units":[{"type":"claim","gist":"a","status":"speculative"}]}"#);
+        assert!(out.relations.is_empty());
+        assert!(!out.has_errors(), "{:?}", out.diagnostics);
+    }
 
     fn one(json: &str) -> Converted {
         convert(json)

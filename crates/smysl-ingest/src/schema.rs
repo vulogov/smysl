@@ -20,7 +20,7 @@
 //! after conversion. `unfounded` is deliberately absent from the status enum - it is
 //! unauthorable, reachable only by retraction.
 
-use smysl_core::{KernelType, SourceKind, Status};
+use smysl_core::{KernelType, RelKind, SourceKind, Status};
 
 /// The unit schema (Appendix C).
 pub fn unit_schema() -> String {
@@ -66,7 +66,32 @@ pub fn unit_schema() -> String {
     )
 }
 
-/// A batch of units, which is what an ingest call actually asks for.
+/// The relation schema.
+///
+/// **Relations are what most of the format's machinery operates on**, and for a long time
+/// ingest could not produce any: rule R had no rebuttals to keep with a claim, merge had no
+/// live rebuttals to detect, threads could not fill a `caveat` role, and rendering had no
+/// kind to choose a connective by. A graph ingested without edges is a list with provenance.
+///
+/// `weight` is optional and bounded, because a rebuttal's strength is the one quantity a
+/// reader most wants and a model most readily invents.
+pub fn relation_schema() -> String {
+    format!(
+        r#"{{
+  "type": "object",
+  "required": ["kind", "from", "to"],
+  "properties": {{
+    "kind": {{ "enum": [{kinds}] }},
+    "from": {{ "type": "string" }},
+    "to": {{ "type": "string" }},
+    "weight": {{ "type": "number", "minimum": 0, "maximum": 1 }}
+  }}
+}}"#,
+        kinds = quoted(authorable_relations()),
+    )
+}
+
+/// A batch of units and the edges between them, which is what an ingest call asks for.
 pub fn batch_schema() -> String {
     format!(
         r#"{{
@@ -76,11 +101,26 @@ pub fn batch_schema() -> String {
   "required": ["units"],
   "additionalProperties": false,
   "properties": {{
-    "units": {{ "type": "array", "items": {unit} }}
+    "units": {{ "type": "array", "items": {unit} }},
+    "relations": {{ "type": "array", "items": {relation} }}
   }}
 }}"#,
-        unit = indent(&unit_schema())
+        unit = indent(&unit_schema()),
+        relation = indent(&relation_schema()),
     )
+}
+
+/// Relation kinds a model may author.
+///
+/// `supersedes` and `retracts` are excluded: both are *lifecycle* edges that assert
+/// something about the history of a graph the model is only reading. A model that could
+/// retract a unit by mentioning it would be a model that could delete evidence.
+pub fn authorable_relations() -> Vec<String> {
+    RelKind::KERNEL
+        .iter()
+        .filter(|k| !matches!(k, RelKind::Supersedes | RelKind::Retracts))
+        .map(|k| k.as_str().to_string())
+        .collect()
 }
 
 /// Appendix C's gist bound. Characters, not tokens: a JSON Schema cannot count tokens, and
