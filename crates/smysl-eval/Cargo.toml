@@ -10,4 +10,7 @@ authors.workspace      = true
 repository.workspace   = true
 
 [dependencies]
-smysl-core = { workspace = true }
+smysl-core  = { workspace = true }
+smysl-graph = { workspace = true }
+smysl-check = { workspace = true }
+smysl-pack  = { workspace = true }

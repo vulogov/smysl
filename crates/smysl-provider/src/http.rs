@@ -370,20 +370,58 @@ mod tests {
         use std::io::{Read, Write};
         use std::net::TcpListener;
 
-        /// A server that answers each connection with the next status in the list, then
-        /// stops. Loopback and ephemeral: no fixture, no port to collide on.
+        /// A server that answers each connection with the next status in the list, and goes
+        /// on answering with the last one. Loopback and ephemeral: no fixture, no port to
+        /// collide on.
+        ///
+        /// It keeps serving rather than stopping at the end of the list because a server
+        /// that closes its listener turns any further connection into `ECONNREFUSED`, which
+        /// arrives as `Unreachable` and fails the test for a reason that has nothing to do
+        /// with the retry policy. That made this suite flaky: the statuses under test were
+        /// always delivered, but a connection the client opened afterwards could land on a
+        /// closed port depending on scheduling.
         fn serve(statuses: Vec<u16>) -> String {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let addr = listener.local_addr().unwrap();
             std::thread::spawn(move || {
-                for status in statuses {
+                let last = *statuses.last().unwrap_or(&200);
+                let mut queue = statuses.into_iter();
+                loop {
+                    let status = queue.next().unwrap_or(last);
                     let Ok((mut sock, _)) = listener.accept() else {
                         return;
                     };
-                    // Drain the request far enough that the client is not writing into a
-                    // socket nobody read, which some platforms turn into a reset.
-                    let mut buf = [0u8; 4096];
-                    let _ = sock.read(&mut buf);
+                    // Read the *whole* request before answering. A single `read` can return
+                    // just the headers, leaving the client still writing its body into a
+                    // socket that is about to close - which arrives as a connection reset
+                    // and fails the test as `Unreachable`, for reasons having nothing to do
+                    // with the retry policy. That was this suite's flake: roughly one run in
+                    // ten, depending on how the request was segmented.
+                    let mut req = Vec::new();
+                    let mut buf = [0u8; 1024];
+                    let want = loop {
+                        let head_end = req.windows(4).position(|w| w == b"\r\n\r\n").map(|p| p + 4);
+                        if let Some(head_end) = head_end {
+                            let head = String::from_utf8_lossy(&req[..head_end]).to_lowercase();
+                            let len: usize = head
+                                .split("content-length:")
+                                .nth(1)
+                                .and_then(|t| t.split("\r\n").next())
+                                .and_then(|t| t.trim().parse().ok())
+                                .unwrap_or(0);
+                            if req.len() >= head_end + len {
+                                break true;
+                            }
+                        }
+                        match sock.read(&mut buf) {
+                            Ok(0) | Err(_) => break false,
+                            Ok(n) => req.extend_from_slice(&buf[..n]),
+                        }
+                    };
+                    if !want {
+                        continue;
+                    }
+
                     let body = format!(r#"{{"status":{status}}}"#);
                     let _ = sock.write_all(
                         format!(

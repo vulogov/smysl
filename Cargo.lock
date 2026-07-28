@@ -867,7 +867,10 @@ dependencies = [
 name = "smysl-eval"
 version = "0.1.0"
 dependencies = [
+ "smysl-check",
  "smysl-core",
+ "smysl-graph",
+ "smysl-pack",
 ]
 
 [[package]]

@@ -8,10 +8,29 @@
 //! outcomes. They are still measured: a guarantee that never binds indicates an
 //! unrepresentative corpus.
 //!
-//! Filled by SM-P15.
+//! # What is landed
+//!
+//! The **smysl arm** and every metric a model-free run can support: E1-E7. The arm is a
+//! chain of packs, so the whole run is a pure function of the store and the budget.
+//!
+//! The **prose baseline is not landed, and is not simulated.** Each of its hops is a model
+//! reading prose and emitting prose; a baseline produced by guessing what a model would
+//! have dropped would be a measurement of the guess. E8 and E9 are likewise reported as
+//! [`Outcome::NotRun`] with the reason, rather than omitted or defaulted to zero - a
+//! metric that quietly vanishes from a report is the exact failure this crate exists to
+//! detect elsewhere.
+//!
+//! So E1 and E2 currently describe what the smysl arm costs and keeps. They become a
+//! *comparison* only when the baseline runs.
 
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
+
+pub mod chain;
+pub mod measure;
+
+pub use chain::{run_smysl_arm, Arm, Budget, ChainOptions, Hop, Run};
+pub use measure::{measure, Measurement, Outcome};
 
 /// The metrics of §28, with the hypothesis each is measured against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
