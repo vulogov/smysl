@@ -1498,13 +1498,22 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         //
         // So the text form stays available and stops being silent about what it is: a
         // readable view of the store, not the store.
+        // The `@doc` header is a View, and `write_surface` emits one only when it is handed
+        // in as the `view` argument - a View sitting in `records` is skipped. Passing `None`
+        // therefore dropped the header and then counted it as "no surface form", which was
+        // wrong twice: it is expressible, and the warning blamed contentions for it.
+        let view = store.views().next().cloned();
+        let emitted = view.as_ref().map(|v| v.id.clone());
+
+        // Only the one view handed to `write_surface` becomes a `@doc` header; the surface
+        // grammar has room for at most one per file, so any further view in the store is
+        // genuinely dropped and worth counting.
         let dropped = records
             .iter()
-            .filter(|r| {
-                !matches!(
-                    r,
-                    Record::Unit(_) | Record::Relation(_) | Record::Thread(_)
-                )
+            .filter(|r| match r {
+                Record::Unit(_) | Record::Relation(_) | Record::Thread(_) => false,
+                Record::View(v) => Some(&v.id) != emitted.as_ref(),
+                _ => true,
             })
             .count();
         if dropped > 0 {
@@ -1513,7 +1522,7 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                  omitted (contentions, attestations); the default CBOR output preserves them"
             );
         }
-        write_surface(None, &records, &ctx).into_bytes()
+        write_surface(view.as_ref(), &records, &ctx).into_bytes()
     } else {
         store.log_bytes()
     };
