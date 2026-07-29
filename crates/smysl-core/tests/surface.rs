@@ -635,7 +635,19 @@ fn an_unlabelled_step_target_round_trips_through_surface() {
         "writer emitted what the parser rejects: {text}\n{:?}",
         b.diagnostics
     );
-    assert_eq!(a.records, b.records);
+    // Label bindings are excluded deliberately. This emission uses an *empty* label map to
+    // force the canonical-uid fallback on every step target, which also strips the unit's
+    // own label - so the re-parse has no binding to produce. What is under test is whether
+    // a uid-shaped step target survives, not whether labels do; `labels_survive_a_store_
+    // round_trip` covers that.
+    let semantic = |o: &smysl_core::surface::ParseOutcome| -> Vec<Record> {
+        o.records
+            .iter()
+            .filter(|r| !matches!(r, Record::LabelBinding(_)))
+            .cloned()
+            .collect()
+    };
+    assert_eq!(semantic(&a), semantic(&b));
 }
 
 // ── Comments (0.2.0) ────────────────────────────────────────────────────────
@@ -654,7 +666,9 @@ fn a_comment_between_records_is_not_stray_text() {
         );
         let out = parse_surface(&src).unwrap();
         assert!(!out.has_errors(), "{marker}: {:?}", out.diagnostics);
-        assert_eq!(out.records.len(), 1, "{marker}");
+        // One unit plus its label binding: a labelled unit now yields two records, because
+        // a label has to reach the wire as its own record to stay outside identity.
+        assert_eq!(out.units().count(), 1, "{marker}");
         assert_eq!(out.comments, 1, "{marker}: not counted");
     }
 }
@@ -724,4 +738,61 @@ fn a_commented_document_still_round_trips() {
     let b = parse_surface(&text).unwrap();
     assert_eq!(a.records, b.records);
     assert_eq!(b.comments, 0, "canonical form should carry no comments");
+}
+
+// ── Label bindings (0.2.0) ──────────────────────────────────────────────────
+
+/// **The gap this closes.** Before `Record::LabelBinding`, labels survived a parse and not
+/// a store round trip: a document that had been through `merge` came back with every
+/// reference spelled as a canonical uid. It re-checked clean and no reader could follow it.
+#[test]
+fn labels_survive_a_cbor_round_trip() {
+    use smysl_core::{from_cbor_seq, to_cbor_seq};
+
+    let out = parse_surface(&corpus()).unwrap();
+    let bytes = to_cbor_seq(&out.records);
+    let (back, _) = from_cbor_seq(&bytes).unwrap();
+
+    let bound: std::collections::BTreeMap<_, _> = back
+        .iter()
+        .filter_map(|r| match r {
+            Record::LabelBinding(b) => Some((b.label.clone(), b.uid)),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        bound, out.labels,
+        "labels did not survive the wire; every reference would come back as a bare uid"
+    );
+    assert!(!bound.is_empty(), "the corpus binds labels");
+}
+
+/// A label is not identity: binding one cannot move the unit it names.
+#[test]
+fn a_binding_does_not_change_the_uid_it_names() {
+    let out = parse_surface(&corpus()).unwrap();
+    let uid = out.uid_of(&label("e/trace-jul")).unwrap();
+    let core = out
+        .units()
+        .find(|u| smysl_core::canonical_uid(u) == uid)
+        .unwrap();
+    // Recomputing from the core alone must agree: nothing about the label is hashed.
+    assert_eq!(smysl_core::canonical_uid(core), uid);
+}
+
+/// Re-emitting a document must not multiply its bindings.
+#[test]
+fn bindings_are_not_duplicated_by_a_round_trip() {
+    let a = parse_surface(&corpus()).unwrap();
+    let text = write_surface(a.view.as_ref(), &a.records, &WriteContext::from_labels(&a.labels));
+    let b = parse_surface(&text).unwrap();
+    let count = |o: &smysl_core::surface::ParseOutcome| {
+        o.records
+            .iter()
+            .filter(|r| matches!(r, Record::LabelBinding(_)))
+            .count()
+    };
+    assert_eq!(count(&a), count(&b));
+    assert_eq!(a.labels, b.labels);
 }

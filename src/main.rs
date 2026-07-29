@@ -1108,7 +1108,17 @@ fn load_store(
         Ok((Store::from_records(out.records.clone()), out.labels))
     } else {
         let (records, _) = smysl::from_cbor_seq(&bytes).map_err(|e| e.to_string())?;
-        Ok((Store::from_records(records), Default::default()))
+        // Recover the labels from their bindings. This is the whole point of the record
+        // existing: before it, this arm returned an empty map, so every reference in a
+        // re-emitted store came back as a bare uid - valid, checkable, and unreadable.
+        let labels = records
+            .iter()
+            .filter_map(|r| match r {
+                smysl::Record::LabelBinding(b) => Some((b.label.clone(), b.uid)),
+                _ => None,
+            })
+            .collect();
+        Ok((Store::from_records(records), labels))
     }
 }
 

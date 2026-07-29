@@ -914,6 +914,19 @@ impl<'a> Parser<'a> {
             }
         }
 
+        // Emit the bindings as records, so a label reaches the log rather than living only
+        // in `ParseOutcome`. Everything downstream - the store, `merge`, `log_bytes` - then
+        // carries labels for free, which is what it means for a label to survive a round
+        // trip. They sit after the units they name so a reader meets the unit first.
+        for (label, uid) in &labels {
+            self.out
+                .records
+                .push(Record::LabelBinding(crate::types::LabelBinding::new(
+                    label.clone(),
+                    *uid,
+                )));
+        }
+
         for r in &self.relations {
             let (Some(from), Some(to)) = (
                 lookup(&r.from.value, &mut self.out, r.span),

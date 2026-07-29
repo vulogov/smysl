@@ -3,7 +3,7 @@
 //! `[ type_code: uint, payload: map ]`. Integer keys rather than CBOR tags: no IANA
 //! registration, more compact, and determinism is easier to guarantee.
 
-use crate::types::aux::{Contention, PackInfo, SchemaDecl};
+use crate::types::aux::{Contention, LabelBinding, PackInfo, SchemaDecl};
 use crate::types::provenance::Attestation;
 use crate::types::relation::Relation;
 use crate::types::thread::Thread;
@@ -23,6 +23,12 @@ pub mod code {
     /// Reserved for checkpointing (D-11). Not implemented: the format interacts with
     /// content addressing and must not be retrofitted, but 0.1 does not need it.
     pub const CHECKPOINT: u64 = 9;
+    /// A label bound to the uid it names (0.2.0).
+    ///
+    /// Additive by construction: a 0.1 reader decodes this as `Record::Unknown`, preserves
+    /// the payload verbatim and re-emits it identically, so a 0.2 store round-trips through
+    /// an older build without loss. Verified rather than assumed.
+    pub const LABEL_BINDING: u64 = 10;
 
     pub const KNOWN: &[u64] = &[
         UNIT_CORE,
@@ -33,6 +39,7 @@ pub mod code {
         CONTENTION,
         PACK_INFO,
         SCHEMA_DECL,
+        LABEL_BINDING,
     ];
 }
 
@@ -48,6 +55,8 @@ pub enum Record {
     Contention(Contention),
     PackInfo(PackInfo),
     SchemaDecl(SchemaDecl),
+    /// A label bound to the uid it names. Not identity: never hashed.
+    LabelBinding(LabelBinding),
     /// A record type this build does not know (`SMY-W014`).
     ///
     /// Preserved verbatim - payload bytes exactly as they arrived - and skipped
@@ -70,6 +79,7 @@ impl Record {
             Record::Contention(_) => code::CONTENTION,
             Record::PackInfo(_) => code::PACK_INFO,
             Record::SchemaDecl(_) => code::SCHEMA_DECL,
+            Record::LabelBinding(_) => code::LABEL_BINDING,
             Record::Unknown { code, .. } => *code,
         }
     }
@@ -84,6 +94,7 @@ impl Record {
             Record::Contention(_) => "contention",
             Record::PackInfo(_) => "packinfo",
             Record::SchemaDecl(_) => "schemadecl",
+            Record::LabelBinding(_) => "labelbinding",
             Record::Unknown { .. } => "unknown",
         }
     }
@@ -133,13 +144,18 @@ mod tests {
 
     #[test]
     fn checkpoint_is_reserved_not_known() {
-        assert_eq!(code::KNOWN.len(), 8);
         assert!(!code::KNOWN.contains(&code::CHECKPOINT));
     }
 
+    /// Ascending, and with a hole. Codes 1-8 are 0.1's records; 9 stays reserved for
+    /// checkpointing, whose format interacts with content addressing and must not be
+    /// retrofitted; 10 is 0.2's label binding. The list was contiguous until the hole
+    /// became real, and contiguity was never the property that mattered - being ascending
+    /// and free of duplicates is, since a code is a permanent wire commitment.
     #[test]
-    fn known_codes_are_contiguous_from_one() {
-        assert_eq!(code::KNOWN, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    fn known_codes_ascend_and_skip_the_reserved_slot() {
+        assert_eq!(code::KNOWN, &[1, 2, 3, 4, 5, 6, 7, 8, 10]);
+        assert!(code::KNOWN.windows(2).all(|w| w[0] < w[1]));
     }
 
     #[test]

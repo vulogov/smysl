@@ -15,10 +15,10 @@ use crate::cbor::keys;
 use crate::cbor::reader::Dec;
 use crate::cbor::writer::{enc, Enc, MapBuilder};
 use crate::error::CodecError;
-use crate::ids::{AgentId, ContentionId, LangTag, SchemaId, ThreadId, ViewId};
+use crate::ids::{AgentId, ContentionId, Label, LangTag, SchemaId, ThreadId, ViewId};
 use crate::types::aux::{
-    Contention, ContentionStatus, Detected, DetectionKind, DropReason, Optimality, PackInfo,
-    PackMode, SchemaDecl,
+    Contention, ContentionStatus, Detected, DetectionKind, DropReason, LabelBinding, Optimality,
+    PackInfo, PackMode, SchemaDecl,
 };
 use crate::types::epistemics::{Date, Lod, SourceKind, SourceRef, Status};
 use crate::types::provenance::{Attestation, Hlc, Op, Rung};
@@ -261,6 +261,42 @@ fn schema_decl_bytes(d: &SchemaDecl) -> Vec<u8> {
     m.into_bytes()
 }
 
+/// Two keys, neither optional. `extra` carries anything a later version adds (rule X).
+fn label_binding_bytes(b: &LabelBinding) -> Vec<u8> {
+    let mut m = MapBuilder::new();
+    m.put(keys::label_binding::LABEL, |e| e.text(b.label.as_str()));
+    m.put(keys::label_binding::UID, |e| e.uid(&b.uid));
+    m.put_extra(&b.extra);
+    m.into_bytes()
+}
+
+/// Decode a label binding. Both keys are required: a binding missing either half binds
+/// nothing, and accepting one would put a half-record in the store.
+fn dec_label_binding(d: &mut Dec<'_>) -> Res<LabelBinding> {
+    let at = d.position();
+    let mut label = None;
+    let mut uid = None;
+    let mut extra = Extra::new();
+
+    read_map(d, &mut extra, |d, k| match k {
+        keys::label_binding::LABEL => {
+            label = Some(Label::new(d.text()?).map_err(|_| bad(at))?);
+            Ok(true)
+        }
+        keys::label_binding::UID => {
+            uid = Some(d.uid()?);
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+
+    Ok(LabelBinding {
+        label: label.ok_or_else(|| bad(at))?,
+        uid: uid.ok_or_else(|| bad(at))?,
+        extra,
+    })
+}
+
 /// Encode one record as a complete envelope.
 pub fn to_cbor(r: &Record) -> Vec<u8> {
     let payload = match r {
@@ -272,6 +308,7 @@ pub fn to_cbor(r: &Record) -> Vec<u8> {
         Record::Contention(c) => contention_bytes(c),
         Record::PackInfo(p) => packinfo_bytes(p),
         Record::SchemaDecl(d) => schema_decl_bytes(d),
+        Record::LabelBinding(b) => label_binding_bytes(b),
         Record::Unknown { payload, .. } => payload.clone(),
     };
     let mut e = Enc::with_capacity(payload.len() + 4);
@@ -915,6 +952,7 @@ pub fn from_cbor(bytes: &[u8]) -> Res<(Record, usize)> {
         code::CONTENTION => Record::Contention(dec_contention(&mut d)?),
         code::PACK_INFO => Record::PackInfo(dec_packinfo(&mut d)?),
         code::SCHEMA_DECL => Record::SchemaDecl(dec_schema_decl(&mut d)?),
+        code::LABEL_BINDING => Record::LabelBinding(dec_label_binding(&mut d)?),
         other => {
             // `SMY-W014`: preserved verbatim, skipped semantically. The payload is still
             // parsed strictly, so an unknown record cannot smuggle in a non-deterministic

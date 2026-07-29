@@ -349,11 +349,39 @@ impl SchemaDecl {
     }
 }
 
-/// A label binding, as carried by a view. Not hashed, not identity (§1.2).
+/// A binding of a human-readable label to the uid it names. Not hashed, not identity (§1.2).
+///
+/// Labels being outside identity is exactly why this is its own record rather than a field
+/// on a unit: putting a label inside hashed content would make renaming one produce a
+/// different unit.
+///
+/// The type was declared in 0.1 and wired to nothing. Until 0.2 it had no envelope code and
+/// no codec, so labels survived a parse and not a store round trip — a document that had
+/// been through `merge` came back with every reference spelled as a canonical uid. It
+/// re-checked clean and no reader could follow it, which quietly broke the format's central
+/// claim that the bytes a machine reads are the bytes a person opens. The claim held for
+/// hand-written files and failed for precisely the multi-agent case the format exists for.
+///
+/// Scope is the store the record lives in. Two stores binding the same label to different
+/// uids are a `label-collision` contention on merge — machinery that already existed and
+/// could not fire between two CBOR stores, because labels arrived out of band and a CBOR
+/// store had none to offer.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LabelBinding {
     pub label: Label,
     pub uid: Uid,
+    /// Rule X: keys a later version adds, preserved verbatim.
+    pub extra: Extra,
+}
+
+impl LabelBinding {
+    pub fn new(label: Label, uid: Uid) -> LabelBinding {
+        LabelBinding {
+            label,
+            uid,
+            extra: Extra::new(),
+        }
+    }
 }
 
 #[cfg(test)]
