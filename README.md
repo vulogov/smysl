@@ -108,21 +108,28 @@ smysl-eval` reproduces it, without calling a model.
 real model summarising at each one, judged by a model that is shown a claim and a passage
 and asked what the *passage* supports:
 
-| Five hops over F1 | Tokens | Claims kept | Hedges lost |
-|---|---|---|---|
-| control — no summarisation | 1.00 | 8 / 8 | **0 of 8** |
-| prose baseline | 0.46 – 0.50 | 7–8 / 8 | **3–5 of 8** |
-| smysl | 0.56 | 8 / 8 | **0 of 8** |
+| Five hops over F1 | Tokens | Claims kept | Hedges lost | Sources kept |
+|---|---|---|---|---|
+| control — no summarisation | 1.00 | 8 / 8 | **0 of 8** | **4 / 4** |
+| prose baseline | 0.30 – 0.50 | 6–8 / 8 | **3–5 of 8** | **0–1 of 4** |
+| smysl | 0.56 | 8 / 8 | **0 of 8** | **4 / 4** |
 
-Three runs. Compression is a wash — both arms land near half. What differs is that three to
-five surviving claims came out the prose end reading as *measurements* when the original had
-called them inferred, cited or derived. A guess arriving as a finding is the failure the
-whole format exists to prevent, and here it is, happening.
+Compression is a wash — both arms land near half. Two other things differ.
 
-Read the numbers with their limits: one fixture, one model, three runs — a data point, not
-a benchmark. The control row is what makes it worth anything. The baseline prose states
-every hedge in words, and the same judge reads all eight back correctly *before* any
-summarisation, so the losses after five hops are the chain's rather than the instrument's.
+Three to five surviving claims came out of the prose end reading as *measurements* when the
+original called them inferred, cited or derived. And **the sources are simply gone**: of the
+four claims that named where they came from, the prose chain kept at most one, usually none.
+A guess arriving as a finding, and a number nobody can trace, are the two failures the format
+exists to prevent — and here they are, happening.
+
+On the smysl side both are structural rather than lucky. Confidence is a field checked by
+rule M; the source is a field that travels with anything that travels.
+
+Read the numbers with their limits: one fixture, one model, a handful of runs — a data point,
+not a benchmark. The control row is what makes it worth anything. The baseline prose states
+every hedge *and every source* in words, and the same judge reads all of them back correctly
+before any summarisation, so the losses after five hops are the chain's rather than the
+instrument's. The live test refuses to report a figure the control does not clear.
 The live arm needs `GEMINI_API_KEY`; without one it skips rather than inventing a baseline.
 
 **People stay in the loop without a special tool.** The review artifact *is* the document.

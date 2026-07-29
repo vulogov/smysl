@@ -17,7 +17,7 @@
 
 use std::collections::BTreeSet;
 
-use smysl_core::{tokens, Status, Uid};
+use smysl_core::{tokens, SourceRef, Status, Uid};
 use smysl_graph::Store;
 
 /// Anything that can go wrong in an arm that talks to a model.
@@ -47,6 +47,9 @@ pub struct Claim {
     pub gist: String,
     /// What the original said about its own confidence.
     pub status: Status,
+    /// What the original said it rested on, as the prose names it. `None` when the unit
+    /// carried no source, in which case there is no attribution to lose.
+    pub source: Option<String>,
 }
 
 /// A judge's reading of one claim against one piece of prose.
@@ -58,6 +61,9 @@ pub struct Verdict {
     /// The strongest confidence the *text* supports, which is the number E3 is about.
     /// `None` when the judge would not rule.
     pub as_stated: Option<Status>,
+    /// What the passage says the claim rests on, if it still says anything. `None` means
+    /// the text states the claim with nothing behind it.
+    pub attributed_to: Option<String>,
 }
 
 impl Verdict {
@@ -65,6 +71,7 @@ impl Verdict {
         Verdict {
             present: false,
             as_stated: None,
+            attributed_to: None,
         }
     }
 }
@@ -123,6 +130,27 @@ fn hedge(status: Status) -> &'static str {
     }
 }
 
+/// How a careful writer would state a source in ordinary prose.
+///
+/// **The second load-bearing renderer, and wrong in the same way the first was.** A store
+/// keeps provenance in a field; prose has none, so a renderer that dropped the source would
+/// hand the baseline a passage attributing nothing — every attribution "lost" before the
+/// first hop, and the measurement would be of this function rather than of summarisation.
+fn attribution(source: &SourceRef) -> String {
+    format!(
+        "according to {} {}",
+        match source.kind {
+            smysl_core::SourceKind::Metric => "the metric",
+            smysl_core::SourceKind::Doc => "the document",
+            smysl_core::SourceKind::File => "the file",
+            smysl_core::SourceKind::Url => "the page at",
+            smysl_core::SourceKind::Tool => "the tool",
+            _ => "the source",
+        },
+        source.reference
+    )
+}
+
 /// Lower an ordinary leading capital so the hedge reads as a sentence. `IEEE`, `SLO` and
 /// `p99` are left exactly as written - the same rule the renderer's connectives use.
 fn joined(hedge: &str, text: &str) -> String {
@@ -152,6 +180,9 @@ pub fn to_prose(store: &Store) -> String {
             out.push_str("\n\n");
         }
         out.push_str(&joined(hedge(unit.core.status), &unit.core.gist));
+        if let Some(src) = &unit.core.source {
+            out.push_str(&format!(" — {}.", attribution(src)));
+        }
         if let Some(body) = &unit.core.body {
             out.push(' ');
             out.push_str(body);
@@ -168,6 +199,7 @@ pub fn claims_of(store: &Store) -> Vec<Claim> {
             uid: *uid,
             gist: unit.core.gist.clone(),
             status: unit.core.status,
+            source: unit.core.source.as_ref().map(|s| s.reference.clone()),
         })
         .collect()
 }
@@ -211,6 +243,16 @@ pub struct Judged {
     /// folding abstentions into "absent" would flatter the format.
     pub abstained: usize,
     pub total: usize,
+
+    /// Surviving claims whose *source* the passage still names.
+    ///
+    /// The second thing prose loses, after hedges. "By the third hop nobody can say where
+    /// the number came from" is the README's own claim, and this is what tests it.
+    pub attributed: BTreeSet<Uid>,
+    /// Claims that had a source to lose in the first place - the denominator. A claim the
+    /// original never sourced cannot have its attribution dropped, and counting it would
+    /// dilute the measure in the format's favour.
+    pub attributable: usize,
 }
 
 impl Judged {
@@ -225,6 +267,14 @@ impl Judged {
     pub fn is_usable(&self) -> bool {
         self.total > 0 && self.abstained * 2 < self.total
     }
+
+    /// The fraction of sourced claims whose attribution survived.
+    pub fn attribution(&self) -> f64 {
+        if self.attributable == 0 {
+            return 1.0;
+        }
+        self.attributed.len() as f64 / self.attributable as f64
+    }
 }
 
 /// Ask a judge which claims survived, and which got stronger on the way.
@@ -235,10 +285,21 @@ pub fn judge(claims: &[Claim], text: &str, judge: &dyn Judge) -> Result<Judged, 
     };
     for claim in claims {
         let v = judge.verdict(claim, text)?;
+        if claim.source.is_some() {
+            out.attributable += 1;
+        }
         if !v.present {
             continue;
         }
         out.surviving.insert(claim.uid);
+
+        // Attribution counts only when the passage names *this* claim's source, not merely
+        // that some source exists somewhere in the text.
+        if let (Some(was), Some(now)) = (&claim.source, &v.attributed_to) {
+            if names_the_same_source(was, now) {
+                out.attributed.insert(claim.uid);
+            }
+        }
         match v.as_stated {
             None => out.abstained += 1,
             Some(read) if read > claim.status => out.inflated.push((claim.uid, claim.status, read)),
@@ -246,6 +307,26 @@ pub fn judge(claims: &[Claim], text: &str, judge: &dyn Judge) -> Result<Judged, 
         }
     }
     Ok(out)
+}
+
+/// Whether what the passage attributes a claim to is the source the original recorded.
+///
+/// Lenient about how a summariser words it and strict about the identifier: a reference is
+/// a name, and a passage that says "a metric" without saying which one has not preserved
+/// the attribution — it has preserved the *fact that there was one*, which is what a reader
+/// cannot act on.
+fn names_the_same_source(original: &str, stated: &str) -> bool {
+    let norm = |s: &str| {
+        s.to_lowercase()
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '.' || *c == '_' || *c == '/')
+            .collect::<String>()
+    };
+    let (o, s) = (norm(original), norm(stated));
+    if o.is_empty() {
+        return false;
+    }
+    s.contains(&o) || o.contains(&s) && s.len() >= o.len() / 2
 }
 
 #[cfg(test)]
@@ -283,8 +364,38 @@ mod tests {
             Ok(Verdict {
                 present: text.contains(&claim.gist),
                 as_stated: Some(Status::Measured),
+                attributed_to: claim.source.clone(),
             })
         }
+    }
+
+    /// The baseline prose has to state the source in words, or attribution is "lost"
+    /// before the first hop and the measurement is of `to_prose` rather than of the chain -
+    /// the same mistake the hedges made.
+    #[test]
+    fn the_baseline_prose_states_the_source_in_words() {
+        let core = UnitCoreBuilder::new(KernelType::Evidence, "p95 rose", Status::Measured)
+            .source(smysl_core::SourceRef::new(
+                smysl_core::SourceKind::Metric,
+                "checkout.p95",
+            ))
+            .build()
+            .unwrap();
+        let text = to_prose(&Store::from_records(vec![Record::Unit(core)]));
+        assert!(text.contains("checkout.p95"), "{text}");
+        assert!(text.contains("according to"), "{text}");
+    }
+
+    /// A passage naming "a metric" without saying which one has kept the *fact* of a source
+    /// and lost the attribution, which is the half a reader can act on.
+    #[test]
+    fn a_vague_attribution_does_not_count_as_survival() {
+        assert!(names_the_same_source(
+            "checkout.p95",
+            "the metric checkout.p95"
+        ));
+        assert!(!names_the_same_source("checkout.p95", "a metric"));
+        assert!(!names_the_same_source("checkout.p95", "pool.wait_ms"));
     }
 
     fn store() -> Store {
@@ -360,6 +471,7 @@ mod tests {
                 Ok(Verdict {
                     present: true,
                     as_stated: None,
+                    attributed_to: None,
                 })
             }
         }

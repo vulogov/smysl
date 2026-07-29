@@ -65,8 +65,11 @@ impl Judge for Model<'_> {
              Reply with exactly one line and nothing else:\n\
              ABSENT\n\
              or\n\
-             PRESENT <level>\n\
-             where <level> is the strongest reading the PASSAGE supports:\n\
+             PRESENT <level> | <source>\n\
+             where <source> is what the PASSAGE says the claim rests on - a metric name, a \
+             document, a file - copied as the passage names it, or NONE if the passage \
+             gives none.\n\
+             <level> is the strongest reading the PASSAGE supports:\n\
              speculative - a possibility, guess or hypothesis\n\
              inferred    - reasoned from other statements\n\
              derived     - follows from evidence stated in the passage\n\
@@ -103,13 +106,23 @@ fn parse_verdict(answer: &str) -> Verdict {
     if !line.starts_with("present") {
         return Verdict::absent();
     }
+    // `PRESENT <level> | <source>`. The level is looked for in the part before the bar so a
+    // source that happens to contain the word "measured" cannot be read as the level.
+    let (head, tail) = match line.split_once('|') {
+        Some((h, t)) => (h, Some(t.trim())),
+        None => (line.as_str(), None),
+    };
     let status = ["measured", "cited", "derived", "inferred", "speculative"]
         .iter()
-        .find(|s| line.contains(**s))
+        .find(|s| head.contains(**s))
         .and_then(|s| smysl_core::Status::parse(s));
+
     let mut v = Verdict::absent();
     v.present = true;
     v.as_stated = status;
+    v.attributed_to = tail
+        .filter(|t| !t.is_empty() && *t != "none")
+        .map(str::to_string);
     v
 }
 
@@ -170,20 +183,32 @@ fn both_arms_over_the_same_fixture() {
         val(Metric::EpistemicCorruption)
     );
     eprintln!(
-        "  control E1 1.000  E2 {:.3}  E3 {} inflated  ({} abstention(s) of {})  <- hop 0, unsummarised",
+        "  control E1 1.000  E2 {:.3}  E3 {} inflated  attribution {:.3}  ({} abstention(s) of {})  <- hop 0",
         control.survival(),
         control.inflated.len(),
+        control.attribution(),
         control.abstained,
         control.total
     );
     eprintln!(
-        "  prose   E1 {:.3}  E2 {:.3}  E3 {} inflated  ({} abstention(s) of {})",
+        "  prose   E1 {:.3}  E2 {:.3}  E3 {} inflated  attribution {:.3}  ({} abstention(s) of {})",
         run.final_tokens() as f64 / run.initial_tokens().max(1) as f64,
         judged.survival(),
         judged.inflated.len(),
+        judged.attribution(),
         judged.abstained,
         judged.total
     );
+    eprintln!(
+        "          {} of {} sourced claim(s) still name their source",
+        judged.attributed.len(),
+        judged.attributable
+    );
+
+    // On the smysl arm attribution survival is 1.0 by construction: `source` is a field of
+    // the unit, so it travels with anything that travels. Structural, like E3 and E4 - and
+    // stated rather than measured, because measuring it would only confirm the type system.
+    eprintln!("  smysl   attribution 1.000 (structural: `source` is a field of the unit)");
     for (uid, was, now) in &judged.inflated {
         eprintln!(
             "          {} {was} -> read as {now}",
@@ -213,6 +238,17 @@ fn both_arms_over_the_same_fixture() {
         control.is_usable(),
         "the judge abstained on the control; it cannot read hedges at all"
     );
+    // The same control the hedges get. The baseline prose names every source in words, so a
+    // judge that cannot read them back from the *unsummarised* text is not measuring the
+    // chain - and an attribution figure taken without this is an artefact.
+    assert!(
+        control.attribution() > 0.5,
+        "the judge recovered only {:.0}% of sources from unsummarised prose; the \
+         post-chain attribution figure of {:.0}% would measure the instrument",
+        control.attribution() * 100.0,
+        judged.attribution() * 100.0
+    );
+
     assert!(
         control.inflated.len() < judged.inflated.len().max(1),
         "the control inflated {} of {} claims before a single hop ran: the instrument is \
