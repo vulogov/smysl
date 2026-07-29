@@ -1461,7 +1461,63 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     }
 
     let out = global.get_one::<String>("output");
-    let bytes = store.log_bytes();
+
+    // `--format` is global and means the same thing here as everywhere else: the *shape*
+    // of the output. Emitting the log unconditionally made a merged store the one artifact
+    // in the tool a person could not read back - `fmt` takes surface text, so there was no
+    // route from a merge result to something reviewable. Since the format's whole claim is
+    // that the wire form and the review copy are the same document, that gap mattered more
+    // than the line count of this branch suggests.
+    //
+    // Labels are folded across inputs first-wins: an earlier input's name for a uid beats a
+    // later one, and any uid nobody named falls back to its canonical form inside
+    // `write_surface`. Colliding labels are already reported as a `label-collision`
+    // contention above, so this does not hide anything the merge did not already say.
+    let surface = global
+        .get_one::<String>("format")
+        .map(|f| f == "surface")
+        .unwrap_or(false);
+
+    let bytes = if surface {
+        let mut folded: std::collections::BTreeMap<smysl::Label, Uid> =
+            std::collections::BTreeMap::new();
+        for l in &labels {
+            for (label, uid) in l {
+                folded.entry(label.clone()).or_insert(*uid);
+            }
+        }
+        let ctx = WriteContext::from_labels(&folded);
+        let records: Vec<Record> = store.iter().cloned().collect();
+
+        // Only units, relations and threads have a surface spelling; attestations,
+        // contentions, pack info and schema declarations travel as CBOR only. For most
+        // commands that gap is academic. For `merge` it is not: a contention is the whole
+        // point of the command, and a surface rendering that dropped one silently would
+        // hand back a document that reads unanimous over a store that is not - rule V2's
+        // failure mode, committed by the tool that exists to prevent it.
+        //
+        // So the text form stays available and stops being silent about what it is: a
+        // readable view of the store, not the store.
+        let dropped = records
+            .iter()
+            .filter(|r| {
+                !matches!(
+                    r,
+                    Record::Unit(_) | Record::Relation(_) | Record::Thread(_)
+                )
+            })
+            .count();
+        if dropped > 0 {
+            eprintln!(
+                "smysl merge: warning: {dropped} record(s) have no surface form and were \
+                 omitted (contentions, attestations); the default CBOR output preserves them"
+            );
+        }
+        write_surface(None, &records, &ctx).into_bytes()
+    } else {
+        store.log_bytes()
+    };
+
     match out {
         Some(p) => {
             if let Err(e) = std::fs::write(p, &bytes) {

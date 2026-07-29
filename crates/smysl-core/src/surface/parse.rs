@@ -674,8 +674,21 @@ impl<'a> Parser<'a> {
         let at = find_arrow(body)?;
         let role_txt = body[..at].trim();
         let rest = body[at + arrow_len(body, at)..].trim();
-        let (ref_txt, note) = match rest.split_once(':') {
-            Some((r, n)) => (r.trim(), Some(n.trim().to_string())),
+        // A step is `role -> target[: note]`, and the note separator is a colon - but a
+        // canonical uid contains one too (`b3:` + 52 chars). Splitting on the first colon
+        // therefore tore `b3:xxxx` into the reference `b3` and a note, so a thread step
+        // could name a label and never a uid. That made `write_surface` output unparseable
+        // whenever a step's target had no label to fall back on, which is exactly what
+        // `merge` produces for a unit none of its inputs named.
+        //
+        // Skip past the uid's own colon before looking for the note's.
+        let note_from = if rest.starts_with(Uid::PREFIX) {
+            Uid::PREFIX.len()
+        } else {
+            0
+        };
+        let (ref_txt, note) = match rest[note_from..].split_once(':') {
+            Some((r, n)) => (rest[..note_from + r.len()].trim(), Some(n.trim().to_string())),
             None => (rest, None),
         };
         let role = match Role::parse(role_txt) {

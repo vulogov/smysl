@@ -569,3 +569,71 @@ fn every_accepted_mutation_round_trips() {
         "no mutation stayed valid, so nothing was checked"
     );
 }
+
+/// A thread step's target may be a canonical uid, not only a label.
+///
+/// The note separator in `role -> target: note` is a colon, and a canonical uid contains
+/// one — so splitting on the first colon tore `b3:xxxx` into the reference `b3` plus a
+/// note, and `SMY-E001: malformed reference `b3`` was the only way a step could ever name
+/// a uid. That mattered beyond the syntax: `write_surface` falls back to the canonical uid
+/// for any target with no label bound, which is exactly what `merge` produces for a unit
+/// none of its inputs named — so the writer emitted documents its own parser rejected.
+#[test]
+fn a_thread_step_may_target_a_canonical_uid() {
+    let uid = "b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let src = format!(
+        "@claim c/a {{ status: speculative }}\n~ a\n\n\
+         @thread t/x {{ schema: brief, owner: \"human:v\" }}\n~ g\n  bottom-line -> {uid}\n"
+    );
+    let out = parse_surface(&src).unwrap();
+    assert!(
+        !out.has_errors(),
+        "canonical uid rejected in a thread step: {:?}",
+        out.diagnostics
+    );
+}
+
+/// The colon that *is* a note separator still separates, whichever form the target takes.
+#[test]
+fn a_step_note_survives_both_target_forms() {
+    let uid = "b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    for target in [uid, "c/a"] {
+        let src = format!(
+            "@claim c/a {{ status: speculative }}\n~ a\n\n\
+             @thread t/x {{ schema: brief, owner: \"human:v\" }}\n~ g\n  \
+             bottom-line -> {target}: the headline\n"
+        );
+        let out = parse_surface(&src).unwrap();
+        assert!(!out.has_errors(), "{target}: {:?}", out.diagnostics);
+        let text = write_surface(None, &out.records, &WriteContext::from_labels(&out.labels));
+        assert!(text.contains("the headline"), "note lost for {target}: {text}");
+    }
+}
+
+/// Whatever `write_surface` emits, `parse_surface` must accept — including for a store
+/// whose steps point at units nobody labelled.
+#[test]
+fn an_unlabelled_step_target_round_trips_through_surface() {
+    let uid = "b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let src = format!(
+        "@claim c/a {{ status: speculative }}\n~ a\n\n\
+         @thread t/x {{ schema: brief, owner: \"human:v\" }}\n~ g\n  bottom-line -> {uid}\n"
+    );
+    let a = parse_surface(&src).unwrap();
+    // Without this the test passes vacuously: a setup that failed to parse leaves no
+    // thread to emit, so the round-trip below has nothing to get wrong.
+    assert!(!a.has_errors(), "setup did not parse: {:?}", a.diagnostics);
+    assert!(
+        a.records.iter().any(|r| matches!(r, Record::Thread(_))),
+        "setup produced no thread record"
+    );
+    // Emit with an *empty* label map, forcing the canonical-uid fallback on every target.
+    let text = write_surface(None, &a.records, &WriteContext::from_labels(&Default::default()));
+    let b = parse_surface(&text).unwrap();
+    assert!(
+        !b.has_errors(),
+        "writer emitted what the parser rejects: {text}\n{:?}",
+        b.diagnostics
+    );
+    assert_eq!(a.records, b.records);
+}
