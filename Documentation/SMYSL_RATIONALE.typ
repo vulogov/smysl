@@ -177,12 +177,19 @@
     dnode((0, 3), [*inferred*\ a model reasoned it out]),
     dnode((0, 4), [*speculative*\ offered, not yet grounded]),
     dnode((0, 5), [*unfounded*\ reachable only by retracting], fill: ink_code_bg),
-    edge((0, 5), (0, 4), "->"), edge((0, 4), (0, 3), "->"),
-    edge((0, 3), (0, 2), "->"), edge((0, 2), (0, 1), "->"),
-    edge((0, 1), (0, 0), "->"),
-    edge((1, 5.2), (1, -0.2), "->", stroke: 1pt + ink_accent,
+    // Plain connectors, not arrows. These join the rungs of a ladder — they say
+    // which rung sits above which, and nothing about direction of travel. Drawn
+    // as arrowheads they pointed *up*, alongside a caption reading "may only move
+    // down", and the eye believes the arrowhead over the sentence.
+    edge((0, 5), (0, 4), "-"), edge((0, 4), (0, 3), "-"),
+    edge((0, 3), (0, 2), "-"), edge((0, 2), (0, 1), "-"),
+    edge((0, 1), (0, 0), "-"),
+    // The one arrow in the figure, carrying the one directional claim. `label-side`
+    // is relative to the direction of travel, so a downward arrow needs `left` to
+    // keep its caption on the page's right.
+    edge((1, -0.2), (1, 5.2), "->", stroke: 1pt + ink_accent,
       label: text(font: body_family, size: 8pt, fill: ink_accent, [a hop may only\ move *down*]),
-      label-side: right),
+      label-side: left),
   ))
   figure_note[Six rungs, checked mechanically on every unit: nothing here is a matter of tone or house style — it is validated the same way a type error is.]
   v(3mm)
