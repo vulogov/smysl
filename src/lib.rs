@@ -127,9 +127,14 @@ mod tests {
         assert_eq!(kernel_major(KERNEL_SCHEMA), Some(KERNEL_MAJOR));
     }
 
+    /// A tripwire, not a tautology. `VERSION` is `env!("CARGO_PKG_VERSION")`, so it cannot
+    /// fail to be the cargo version — what the literal pins is *which release this is
+    /// meant to be*, so a bump has to be an edit somebody made on purpose rather than
+    /// something that drifted in with a dependency update. Update it when you bump the
+    /// manifest, and the diff will say what you decided.
     #[test]
-    fn crate_version_is_the_cargo_version() {
-        assert_eq!(VERSION, "0.1.0");
+    fn the_crate_version_is_the_one_we_intend_to_ship() {
+        assert_eq!(VERSION, "0.2.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two
