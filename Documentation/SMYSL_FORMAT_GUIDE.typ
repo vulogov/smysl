@@ -344,8 +344,56 @@ a `speculative` one is itself no better than speculative, whatever status you wr
   ),
 )
 
-No rung reaches `measured` — only an `imported` reading from an instrument may claim it;
-an authored unit marked `measured` is `SMY-W035` at best.
+No rung reaches `measured` on its own, and the way it *is* reached is worth stating
+exactly, because the obvious reading is wrong. It takes an attestation recording
+`op: imported` #emph[at the `computed` rung] — a deterministic tool transcribing a
+reading. The op alone is not enough: `ingest` also records `imported`, because it too
+transcribes rather than authors, so unlocking on the op by itself would let a model mark
+anything it read in a document as measured. Ingest runs at `document`, `web` or `model`
+and stays capped there.
+
+#callout(label: "Why you can still type it")[
+  You may write `status: measured` in a `.smy` file and `check` will pass it, which looks
+  like a contradiction and is not. Rule T is checked against a unit's *attestation*, and a
+  `.smy` file cannot express one — provenance has no surface syntax. With nothing recorded
+  about where a unit came from, there is no ceiling to check it against, so the rule stands
+  aside rather than guessing. What you have written is an unchecked claim, not a licensed
+  one, and it becomes checkable the moment the unit acquires provenance.
+
+  The producer that writes `measured` *with* the provenance that licenses it is the
+  `import` command, which transcribes a table of readings. A unit whose attestation
+  records some other op is `SMY-W035`.
+]
+
+#subsection("Keys the grammar does not know")
+
+A header key that is not one of the fields above is *not* an error. It is kept, verbatim,
+in the unit's payload and written back out in the same place — the surface half of rule X.
+A reader from a later version, or from a team that records something yours does not, loses
+nothing by passing through yours.
+
+```
+@data t/latency { status: measured, source: { kind: file, ref: "by-region.csv" },
+                  x.stats/method: "empirical-quantile",
+                  columns: ["region", "p50_ms", "p95_ms"], rows: 6 }
+~ Checkout latency by region, June 2026.
+```
+
+`rows`, `columns` and `x.stats/method` are none of the kernel's business. They survive a
+parse, a round trip through the binary encoding, and a merge — and they come back in
+canonical order rather than the order you typed them, which is why `smysl fmt` returns the
+unit above with `rows` first and `x.stats/method` last. Keys sort by encoded length, then
+content. That is not tidiness: identity is computed from the encoded bytes, so two people
+who record the same thing in a different order still compute the same unit.
+
+#callout(label: "Two names the tooling writes")[
+  Ingest puts two of its own keys in the same place, and you will meet them reading a
+  staged file rather than writing one. `ingest:quote` carries the span of the source
+  document a unit was drawn from — checked against that document, so a quote that is not
+  in it is an error rather than a decoration. `ingest:unrepaired` marks a span that
+  survived its repair budget and was kept as opaque prose rather than dropped. Neither is
+  reserved by the grammar; both are conventions you can read, write, or ignore.
+]
 
 #subsection("Source references")
 
@@ -693,17 +741,34 @@ whole file. The codes below are the ones ordinary hand-authoring runs into.
   ),
 )
 
+Three more you will only meet in a document a model produced, never one you typed. They
+are listed because you will read them in a staged file and should know they are not your
+mistake:
+
+#dtable(
+  (auto, 1fr),
+  (
+    ([Code], [What it means]),
+    ([`SMY-W036`], [Rule M applied at ingest — a unit claimed more than its grounds support and was lowered to what they do. The record of a model overreaching, not work outstanding.]),
+    ([`SMY-E307`], [An attributed `ingest:quote` does not occur in the source document. A fabricated attribution, and the one thing here worth another turn of the model.]),
+    ([`SMY-W308`], [The quote occurs only loosely — elided or reworded. Honest attribution with a clause dropped.]),
+  ),
+)
+
 #recap((
   [Four constructs are hand-authored: `@doc` once, units as many as you need, `@rel` for
    typed edges, `@thread` to walk them in an order.],
   [Every unit shares one anatomy — label, status, gist/body/detail, `deps`/`grounds`,
    `source`, `salience` — whatever its type.],
   [Status only ever falls, never rises, across `grounds` (rule M) and is ceilinged by the
-   rung doing the authoring (rule T); only an import may write `measured`.],
+   rung doing the authoring (rule T); `measured` needs `op: imported` at the `computed`
+   rung, which in practice means `smysl import` and nothing else.],
   [Thirteen unit types are yours to write; `contention` and `packinfo` are tooling-only.],
   [Fourteen relation kinds, five thread schemas, twenty-four roles — all closed sets, all
    with an escape hatch (`x.<domain>/<kind>`) that degrades gracefully rather than being
    dropped.],
+  [Header keys the grammar does not know are kept verbatim in the payload rather than
+   refused, so a document from a later version or another team passes through yours intact.],
   [There are no comments, no blank line between a header and its gist, and no reserved
    label namespaces — only what the grammar actually checks.],
 ))
