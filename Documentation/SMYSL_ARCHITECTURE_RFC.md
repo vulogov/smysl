@@ -2,7 +2,7 @@
 
 **Status:** descriptive, not normative.
 **Describes:** the code at `main`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
-**Compiled:** 2026-07-28, from SM-P0 through SM-P15.
+**Compiled:** 2026-07-29, from SM-P0 through SM-P15 and the operational-merit work after it.
 
 This document says **what the implementation actually does**. It is not RFC SMYSL-1 and does
 not restate it: where the two differ, the differences are enumerated in
@@ -10,7 +10,7 @@ not restate it: where the two differ, the differences are enumerated in
 is the authority on behaviour.
 
 Everything below was read off the source rather than remembered. Where a number appears — ten
-check passes, seven constraints, fifty diagnostics — it is a number a test pins.
+check passes, seven constraints, fifty-two diagnostics — it is a number a test pins.
 
 ---
 
@@ -108,6 +108,12 @@ Rungs order how a unit came to exist, and each caps what may be claimed from it:
 | `document` | user-supplied document | `cited` |
 | `web` | fetched content | `cited` |
 | `model` | the model's own priors | `inferred` |
+
+**No rung reaches `measured`, and that is deliberate.** The op raises the ceiling, not the
+rung: `Op::Imported` at the `computed` rung — a deterministic tool transcribing a reading —
+is the only route to it. Keying on the op alone would not do, because `ingest` also records
+`Imported` (it transcribes rather than authors), and that would let a model assign `measured`
+to whatever it read. Ingest runs at `document`, `web` or `model` and stays capped there.
 
 ---
 
@@ -222,13 +228,33 @@ Ten passes, in order:
 9. **Extension** — extension and conformance
 10. **Hashes** — recomputed uids against stored
 
-Diagnostics are a closed registry of **50 codes** in eight groups (parse, identity, LOD,
+Diagnostics are a closed registry of **52 codes** in eight groups (parse, identity, LOD,
 epistemics, merge, pack/render, extension, provider). Every code carries a severity, and
 fixtures assert exact code sets rather than "some error".
 
 ---
 
 ## 7. Salience, packing, threads, rendering
+
+### 7.0 Salience and episodes
+
+`raw(u) = w_c·centrality + w_r·corroboration + w_t·role + w_recency·recency`
+
+Centrality is personalised PageRank over the support graph; corroboration counts independent
+attesting groups; role comes from the active thread.
+
+**Recency is measured in hops, not wall-clock time.** A hop is one handoff of a pipeline,
+recorded on every attestation, and `Store::hop_of` / `hops` / `at_hop` are what let a store
+answer *what did the last step add* — a question it could not answer before, although the
+field had always been written. Decay halves per hop, and the reference hop is supplied by the
+caller rather than read from the store, so a replay can ask what salience looked like *at hop
+4*. Measuring in hops rather than seconds is also what keeps rule D intact: no clock is read.
+
+**Weighted zero by default.** Salience feeds `pack`, so a non-zero default would silently
+change what every existing store carries forward. `SalienceWeights::recent()` turns it on;
+`--weights c,r,t[,recency]` takes an optional fourth number, so command lines written before
+recency existed still mean what they meant. A unit with no attestation gets no recency rather
+than the worst — it is unplaced, not old.
 
 ### 7.1 Packing
 
@@ -296,7 +322,8 @@ describes its response schema as a subset of JSON Schema draft 2020-12. It is no
 an OpenAPI 3.0 `Schema` proto with no `additionalProperties` field and no `if`/`then` — so
 every structured call was refused until a live key proved it, and no recorded fixture could
 have caught it. **Appendix C's schema is therefore translated per mapper, not shared**, because
-OpenAI strict *requires* the field Gemini does not have.
+OpenAI strict *requires* the field Gemini does not have. The schema has since grown twice —
+`relations` and `quote` — which widens the surface an untested mapper can reject.
 
 Transport rules learned the same way:
 
@@ -354,7 +381,36 @@ batch topologically, rewriting references as it goes, which moves those units' u
 labels follow the remap. Since `attainable` floors at `speculative`, which needs no shape, a
 walk-down always lands and the pass never has to reject.
 
-### 9.4 Rule S — it never writes directly
+### 9.4 It attributes itself, and the attribution is checked
+
+A `source` names a document; it cannot name a passage. Each unit may therefore carry a
+`quote` — the span it was drawn from — and **the quote is checked against the text the chunk
+came from**. That is what makes it worth more than another assertion by the thing under
+review: a quote that does not occur in the source was invented, and the tool says so.
+
+Three outcomes. *Present* once case, whitespace and smart punctuation are normalised.
+*Loose* (`SMY-W308`) when every word appears in order but not contiguously — an elision,
+which is honest and must not cost a repair turn. *Absent* (`SMY-E307`) when the words are not
+there in that order: a fabrication, an error, and worth the repair turn because it is the one
+thing a model can fix. Normalisation stops short of stemming and synonyms, which would make a
+*reworded* claim look attributed.
+
+The quote rides in the payload under `ingest:quote` (rule X) rather than as a field of
+`SourceRef`, where provenance belongs. That is a wire change, deferred until the shape has
+been used in anger.
+
+### 9.5 It produces edges, not only units
+
+Ingest emitted no relations at all until SM-P15, which left most of the format inert on any
+real input: rule R had no rebuttals to keep with a claim, merge could not detect a live
+rebuttal, threads could not fill a `caveat` role, and rendering had no kind to pick a
+connective by. All of it worked only on hand-authored fixtures.
+
+The batch schema now carries `relations`, resolved by the same label-or-uid rule `grounds`
+uses. `supersedes` and `retracts` are excluded: a model reading a document cannot know a
+graph's history, and either would let it delete evidence by mentioning it.
+
+### 9.6 Rule S — it never writes directly
 
 Output lands in `.smysl/staged.smy` as readable surface text, and `merge --staged` is the
 confirmation. The thing a human is asked to approve is the thing they can read.
@@ -367,13 +423,27 @@ compared across vendors.
 
 ## 10. Command surface
 
-Eighteen commands. Only two consult a model.
+Twenty commands. Only two consult a model.
 
 | Purity | Commands |
 |---|---|
-| Pure | `fmt` `check` `pack` `merge` `diff` `trace` `view` `bundle` `salience` `retract` `render` `providers` `usage` `reindex` `ui` |
+| Pure | `fmt` `check` `pack` `merge` `diff` `trace` `view` `bundle` `salience` `retract` `render` `providers` `usage` `reindex` `import` `relink` `ui` |
 | Mixed | `thread` (`--derive` pure; `--refine` consults a model) |
 | Model | `ingest` `attest` |
+
+Two are worth naming because they close gaps the rest of the design assumed away.
+
+**`import`** reads a delimiter-separated file and transcribes it into `measured` units, one
+per row, with an `op: Imported` attestation at the `computed` rung. It is the only producer
+of `measured` and the only producer of units that consults no model. Before it, the top of
+the status ladder had no writer and every `measured` unit in the corpus was hand-authored.
+
+**`relink`** re-points references onto the units that replaced their targets. Identity is
+content, so a corrected unit is a *different* unit and whatever rested on the original still
+rests on the original. Within one document this never shows — references are labels, and uids
+recompute on parse — but across stores it does. `supersedes` is the only basis used; a fork
+is refused with exit 5 rather than adjudicated, and corrections are appended rather than
+applied in place.
 
 `ui` is a seven-pane browser — graph, detail, thread, contentions, lineage, pack simulator,
 staging. State and the key map are pure and hold no terminal, so every pane is asserted as
@@ -458,11 +528,21 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
 ## 14. Known gaps
 
 - **Anthropic and OpenAI mappers are untested.** OpenAI has a concrete suspect: strict mode
-  requires every `properties` key in `required`, and the shared schema lists 3 of 11.
+  requires every `properties` key in `required`, and the shared schema lists a fraction of
+  them. The risk has grown, not shrunk — Appendix C gained `relations` and `quote` since,
+  and the mapper passes it through unchanged. Blocked on a key.
+- **The store only grows.** There is no compaction: `pack` and `salience` recompute over the
+  whole store on every call, and nothing drops what supersession and retraction have already
+  settled. This is the gap that binds first on a store that lives for weeks.
 - **Labels have no wire record**, so they survive a parse and not a store round trip.
 - **`ingest` exit codes do not distinguish** a batch where rule M weakened something from one
   where nothing happened. The CLI prints it; the code does not encode it.
+- **`merge` ignores `--format surface`** while `pack` and `render` honour it, and `fmt`
+  cannot read a CBOR store although `check` can.
+- **Quoting appears to coarsen units.** The same fixture that gave five or six units gives
+  three once each must carry a quotable span. Observed, not diagnosed — it may be the prompt
+  or it may be inherent to anchoring a unit to text it can quote.
 - **`SchemaId` decoding is strict**, so a kernel type added in a later 0.x minor fails to
   decode rather than degrading. Must be revisited before any store exists if kernel types may
   be added within 0.x.
-- **58 divergences from the RFC** remain unreconciled — see [`RFC_PROPOSAL.md`](RFC_PROPOSAL.md).
+- **~66 divergences from the RFC** remain unreconciled — see [`RFC_PROPOSAL.md`](RFC_PROPOSAL.md).

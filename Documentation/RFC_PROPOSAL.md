@@ -1,11 +1,11 @@
 # RFC SMYSL-1 — proposed amendments
 
 **Status:** proposal, awaiting application to the RFC.
-**Covers:** SM-P0 through SM-P15 (2026-07-24 → 28).
+**Covers:** SM-P0 through SM-P15, and the operational-merit work after it (2026-07-24 → 29).
 **Format version affected:** `smysl/0.1`, kernel `smysl.kernel/0.1`.
 
 The RFC states that it has zero open design decisions. Implementing it in full produced the
-58 items below: places where the specification is silent, self-contradictory, or contradicted
+66 items below: places where the specification is silent, self-contradictory, or contradicted
 outright by a live endpoint.
 
 **Each one is already resolved in code and pinned by a test.** That is what makes this a
@@ -26,6 +26,11 @@ Two markers:
 
 Two items are *known contradictions of the RFC's stated text* rather than gaps, and are the
 ones to read first: **§9.1 (item 4)** and **Appendix D (item 5)**.
+
+Items **59–66** came from asking what the implementation was actually worth for keeping
+context in a pipeline, rather than from following the spec. They are the ones a re-reading of
+the RFC would never have produced, because each is a thing the RFC does not know it is
+missing.
 
 ---
 
@@ -59,9 +64,11 @@ unit". Rejection turned out to be the wrong operational choice and the RFC shoul
 over-claimed rung ceiling. **[live]** — the defect showed as an intermittent `SMY-E060` in the
 provider gate, about one run in four.
 
-**5. `SMY-W036` is an addition to Appendix D.** A weakening has to be reportable and Appendix
-D has no code for one. The registry is now 50 codes; `diag::tests::registry_matches_appendix_d_size`
-states the reason rather than merely counting higher.
+**5. Appendix D is short by three codes.** A rule M weakening has to be reportable
+(`SMY-W036`), and so does an attributed quote the source does not support (`SMY-E307`) or
+supports only loosely (`SMY-W308`). The registry is now 52;
+`diag::tests::registry_matches_appendix_d_size` states the reason rather than merely counting
+higher.
 
 **6. Weakening moves an identity.** Status is hashed into the uid, so lowering a unit changes
 its uid and every unit grounded on it points at something that no longer exists. The RFC
@@ -355,3 +362,71 @@ The difference is epistemic, not economic.
 rather than degrading. Consistent with §2.1 declaring the type set closed — but if kernel
 types may be added within 0.x, this must be revisited **before any store exists**, because it
 is a decode-side compatibility break.
+
+---
+
+## Found by asking what it is worth, not by reading (items 59–66)
+
+**59. Ingest could not produce relations at all.** The batch schema accepted units and
+nothing else, so a graph built through the tool's own front door had no `rebuts`, `causes`,
+`warrant` or `answers` edges — and rule R, live-rebuttal detection, thread `caveat` roles and
+every rendering connective read exactly those. Most of the format's machinery was inert on
+any real input and worked only on hand-authored fixtures. **[live]** — confirmed against
+Gemini output, which returned units with `grounds` and not one edge. Appendix C now carries
+`relations`, excluding `supersedes` and `retracts`: a model reading a document cannot know a
+graph's history, and either would let it delete evidence by mentioning it.
+
+**60. `measured` was unreachable for anything that recorded its provenance.** No rung's
+ceiling reaches it — the highest is `computed`, at `derived` — and an attestation's ceiling
+consulted the rung alone. An importer with a machine-checkable source got `SMY-E033` at every
+rung, while a unit carrying **no attestation at all** passed clean, because the trust pass has
+no ceiling to check and skips it. The only way to hold a checkable `measured` unit was to
+strip its provenance, which is the exact inverse of rule T's purpose. Resolved: `Op::Imported`
+at the `computed` rung raises the ceiling. Op alone is deliberately not enough — `ingest` also
+records `Imported`, and unlocking on op would let a model assign `measured` to anything it
+read.
+
+**61. §23 has no command that produces units without a model.** Until `import`, the top of the
+status ladder had no writer at all and every `measured` unit in the corpus was hand-authored,
+so the distinction between `measured` and `inferred` was a claim about a design rather than a
+property of a system.
+
+**62. §23 has no command for re-pointing a reference after its target is replaced.**
+Content-addressed identity makes that a routine consequence of editing, not an edge case:
+a corrected unit is a *different* unit, and whatever rested on the original still rests on the
+original. `relink` follows `supersedes` only — the one statement someone actually made — and
+refuses a fork rather than adjudicating it.
+
+**63. Salience has no temporal term, and §1.5's formula has no place for one.** Centrality
+only grows, so a well-connected month-old claim outranks a fresh critical one permanently —
+backwards for the long-running pipelines the format is aimed at. Added as
+`w_recency·recency`, measured in **hops rather than wall-clock time**: a clock read inside
+`salience` would break rule D, while a hop count is already in the record and is what "how
+many handoffs ago" means. Weighted zero by default, because salience feeds `pack`.
+
+**64. `Attestation.hop` was written and never read.** The field recorded which handoff
+produced a unit and nothing could ask, so a store could not answer *what did the last step
+add*. `Store::hop_of`, `hops`, `latest_hop` and `at_hop` are that question.
+
+**65. Nothing can name the passage a unit came from.** A `source` names a document, so a
+reviewer cannot check a claim against the sentence that produced it — and checking a unit
+against its source is most of what review is. The byte offsets were even being computed and
+discarded. Units may now carry a `quote`, and the quote is **checked against the source**:
+present, loose (`SMY-W308`, an elision) or absent (`SMY-E307`, a fabrication). It rides in the
+payload under `ingest:quote` pending a decision on giving `SourceRef` a field, which is where
+provenance belongs.
+
+**66. Any transform that changes a unit changes its identity, and the RFC never says so.**
+Rule T's cap, rule M's weakening and relinking all move a uid, and everything pointing at the
+old one dangles. This produced a real defect — a rule T cap already left `grounds` dangling,
+surfacing later as an `SMY-E060` at staging that looked like a model error. One topological
+re-pointing sweep now serves all three. Any future operation that edits a unit needs it too,
+and the RFC should say that where it defines identity.
+
+---
+
+## Still unreconciled
+
+The RFC has not been amended for any of the above. Highest-consequence first: **§9.1** and
+**Appendix D** (items 4–5), then **Appendix C**'s two schema additions (59, 65), then **§23**'s
+two new commands (61, 62).
