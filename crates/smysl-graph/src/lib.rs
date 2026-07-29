@@ -14,6 +14,7 @@
 pub mod adjacency;
 pub mod lineage;
 pub mod merge;
+pub mod relink;
 pub mod salience;
 pub mod store;
 pub mod traverse;

@@ -74,6 +74,7 @@ pub use smysl_render::{
 };
 
 // ---- graph ----------------------------------------------------------------
+pub use smysl_graph::relink::{relink, Relinked};
 pub use smysl_graph::{
     closure, cycles, dependents, diff, effective_status, hop_diff, membership, merge,
     plan_retraction, rebuttals_of, reverse_closure, salience, topo, trace, view_roots, Adjacency,

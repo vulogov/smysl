@@ -68,6 +68,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "retract",   about: "Retract a unit; report the blast radius first",       purity: Purity::Pure,  phase: "SM-P6"  },
     Cmd { name: "render",    about: "Thread plus profile to artifact",                     purity: Purity::Pure,  phase: "SM-P12" },
     Cmd { name: "import",    about: "Tabular readings to measured units, without a model",  purity: Purity::Pure,  phase: "SM-P15" },
+    Cmd { name: "relink",    about: "Re-point references onto superseded units",             purity: Purity::Pure,  phase: "SM-P15" },
     Cmd { name: "ingest",    about: "Prose or data to staged units",                       purity: Purity::Model, phase: "SM-P14" },
     Cmd { name: "attest",    about: "Semantic checks that require a model",                purity: Purity::Model, phase: "SM-P14" },
     Cmd { name: "providers", about: "List providers, capabilities, and what would egress", purity: Purity::Pure,  phase: "SM-P13" },
@@ -686,6 +687,18 @@ fn cli() -> Command {
                     Arg::new("reset")
                         .long("reset")
                         .help("Discard the ledger")
+                        .action(ArgAction::SetTrue),
+                ),
+            "relink" => sub
+                .arg(
+                    Arg::new("path")
+                        .help("Store to relink; `-` reads stdin (rule P)")
+                        .value_name("PATH"),
+                )
+                .arg(
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .help("Report what would be re-pointed without emitting anything")
                         .action(ArgAction::SetTrue),
                 ),
             "import" => sub
@@ -2665,6 +2678,93 @@ fn cmd_usage(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
     ExitCode::Usage
 }
 
+/// `smysl relink` - re-point references onto the units that replaced their targets.
+///
+/// Identity is content, so correcting a unit produces a *different* unit and whatever rested
+/// on the original still rests on the original. Within one document that never shows,
+/// because references are labels and uids are recomputed on parse. Across stores it does.
+///
+/// Append-only throughout: the corrected units are new records carrying `supersedes`, so the
+/// old reading stays available and rule U still holds.
+fn cmd_relink(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let path = match m
+        .get_one::<String>("path")
+        .or_else(|| global.get_one::<String>("store"))
+    {
+        Some(p) => p.clone(),
+        None => {
+            eprintln!("smysl relink: no store given");
+            return ExitCode::Usage;
+        }
+    };
+    let (store, _) = match load_store(&path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("smysl relink: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let out = smysl::relink(&store);
+    for (holder, target) in &out.dangling {
+        eprintln!(
+            "smysl relink: {} names {}, which this store has never held",
+            &holder.to_string()[..14],
+            &target.to_string()[..14]
+        );
+    }
+    // A fork is a disagreement about what replaced what. Choosing a side would be
+    // adjudicating it, which merge refuses to do and so does this.
+    for target in &out.forked {
+        eprintln!(
+            "smysl relink: {} has two replacements and no ordering between them; \
+             resolve the contention first",
+            &target.to_string()[..14]
+        );
+    }
+
+    if out.is_empty() {
+        eprintln!("smysl relink: nothing to re-point");
+        // Exit 5 for a fork: it *is* an unresolved contention, and the same code merge
+        // uses for one means a pipeline does not need a second convention to read.
+        return if !out.forked.is_empty() {
+            ExitCode::Contentions
+        } else if out.needs_attention() {
+            ExitCode::CheckErrors
+        } else {
+            ExitCode::Success
+        };
+    }
+    eprintln!("smysl relink: {} unit(s) re-pointed", out.moved.len());
+
+    if m.get_flag("dry-run") {
+        for (was, now) in &out.moved {
+            eprintln!("  {} -> {}", &was.to_string()[..14], &now.to_string()[..14]);
+        }
+        return ExitCode::Success;
+    }
+
+    let mut records: Vec<Record> = store.iter().cloned().collect();
+    records.extend(out.records);
+    let relinked = Store::from_records(records);
+    let bytes = relinked.log_bytes();
+    match global.get_one::<String>("output") {
+        Some(p) => {
+            if let Err(e) = std::fs::write(p, &bytes) {
+                eprintln!("smysl relink: {p}: {e}");
+                return ExitCode::Failure;
+            }
+        }
+        None => {
+            let mut stdout = std::io::stdout().lock();
+            if stdout.write_all(&bytes).is_err() {
+                return ExitCode::Failure;
+            }
+        }
+    }
+    ExitCode::Success
+}
+
 /// `smysl import` - tabular readings to `measured` units.
 ///
 /// The only command that produces `measured`, and the only producer of units that consults
@@ -2927,6 +3027,7 @@ fn main() -> ProcExitCode {
         "usage" => cmd_usage(sub, &matches),
         "reindex" => cmd_reindex(sub, &matches),
         "import" => cmd_import(sub, &matches),
+        "relink" => cmd_relink(sub, &matches),
         "ui" => cmd_ui(sub, &matches),
         _ => {
             eprintln!(
@@ -2950,13 +3051,15 @@ mod tests {
 
     /// §23's table, plus one.
     ///
-    /// **`import` is an addition.** §23 has no command that produces units without a model,
-    /// and without one the top of the status ladder was unreachable: `measured` requires an
-    /// `op: Imported` attestation at the `computed` rung, and nothing in the system wrote
-    /// one. A divergence to reconcile, not a miscount.
+    /// **`import` and `relink` are additions.** §23 has no command that produces units
+    /// without a model, and without one the top of the status ladder was unreachable:
+    /// `measured` needs an `op: Imported` attestation at the `computed` rung and nothing
+    /// wrote one. It also has no command for re-pointing a reference after the unit it
+    /// names is replaced, which content-addressed identity makes a routine consequence of
+    /// editing. Divergences to reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 19);
+        assert_eq!(COMMANDS.len(), 20);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -2974,6 +3077,7 @@ mod tests {
                 "retract",
                 "render",
                 "import",
+                "relink",
                 "ingest",
                 "attest",
                 "providers",

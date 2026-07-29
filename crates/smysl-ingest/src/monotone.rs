@@ -24,7 +24,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use smysl_core::{canonical_uid, Relation, Status, Uid, UnitCore};
+use smysl_core::{canonical_uid, Status, Uid, UnitCore};
 use smysl_graph::Store;
 
 use crate::ceiling;
@@ -73,102 +73,12 @@ fn status_of(
     store.get(uid).map(|u| u.core.status)
 }
 
-/// Batch units ordered so that a unit's grounds inside the batch come before it.
+/// Re-point references after a transform moved identities.
 ///
-/// Kahn over the grounds edges. A cycle cannot be ordered and is left in input order: rule
-/// M is unverifiable through a cycle, `check` reports `SMY-E061` for it, and that is fatal
-/// anyway - so this pass declines to guess rather than looping.
-fn topological(units: &[UnitCore]) -> Vec<usize> {
-    let index: BTreeMap<Uid, usize> = units
-        .iter()
-        .enumerate()
-        .map(|(i, u)| (canonical_uid(u), i))
-        .collect();
-
-    let mut pending: Vec<BTreeSet<usize>> = units
-        .iter()
-        .map(|u| {
-            u.grounds
-                .iter()
-                .filter_map(|g| index.get(g).copied())
-                .collect()
-        })
-        .collect();
-
-    let mut out = Vec::with_capacity(units.len());
-    let mut done = vec![false; units.len()];
-    for _ in 0..units.len() {
-        let Some(next) = (0..units.len()).find(|i| !done[*i] && pending[*i].is_empty()) else {
-            break; // a cycle: stop ordering and fall through below
-        };
-        done[next] = true;
-        out.push(next);
-        for p in pending.iter_mut() {
-            p.remove(&next);
-        }
-    }
-    // Anything a cycle left unplaced still has to be carried, in its original order.
-    out.extend((0..units.len()).filter(|i| !done[*i]));
-    out
-}
-
-/// Re-point every reference after units have been rewritten in place.
-///
-/// **Any transform that changes a unit's content changes its uid**, and everything pointing
-/// at the old one then dangles. Rule T's cap in [`crate::repair::convert`] has exactly this
-/// shape: it lowers a status, which moves an identity, and the `grounds` and `deps` of the
-/// units around it — and any relation touching it — have to follow.
-///
-/// `before[i]` is the uid `units[i]` had prior to the transform. The sweep is topological, so
-/// a unit is re-pointed only after everything it references has settled, and one pass
-/// suffices rather than iterating to a fixed point.
-pub fn resettle(
-    before: &[Uid],
-    units: Vec<UnitCore>,
-    relations: Vec<Relation>,
-) -> (Vec<UnitCore>, Vec<Relation>, BTreeMap<Uid, Uid>) {
-    let mut remap: BTreeMap<Uid, Uid> = BTreeMap::new();
-    for (i, u) in units.iter().enumerate() {
-        let Some(was) = before.get(i) else { continue };
-        let now = canonical_uid(u);
-        if now != *was {
-            remap.insert(*was, now);
-        }
-    }
-
-    let mut placed: Vec<Option<UnitCore>> = vec![None; units.len()];
-    for i in topological(&units) {
-        let was = canonical_uid(&units[i]);
-        let mut core = units[i].clone();
-        core.grounds = core
-            .grounds
-            .iter()
-            .map(|g| remap.get(g).copied().unwrap_or(*g))
-            .collect();
-        core.deps = core
-            .deps
-            .iter()
-            .map(|d| remap.get(d).copied().unwrap_or(*d))
-            .collect();
-
-        let now = canonical_uid(&core);
-        if now != was {
-            remap.insert(was, now);
-        }
-        placed[i] = Some(core);
-    }
-
-    let relations = relations
-        .into_iter()
-        .map(|mut r| {
-            r.from = remap.get(&r.from).copied().unwrap_or(r.from);
-            r.to = remap.get(&r.to).copied().unwrap_or(r.to);
-            r
-        })
-        .collect();
-
-    (placed.into_iter().flatten().collect(), relations, remap)
-}
+/// Re-exported from [`smysl_graph::relink`], which is where it belongs: rule T's cap, rule
+/// M's weakening and `relink` all need it, and the third copy is the one that proves it is
+/// graph surgery rather than an ingest detail.
+pub use smysl_graph::relink::resettle;
 
 /// Bring a batch into rule M, weakening what overclaims and rewriting what then points at
 /// a moved identity.
@@ -184,7 +94,7 @@ pub fn apply(store: &Store, units: Vec<UnitCore>) -> Applied {
     let mut out = Applied::default();
     let mut rewritten: BTreeMap<Uid, UnitCore> = BTreeMap::new();
 
-    for i in topological(&units) {
+    for i in smysl_graph::relink::topological(&units) {
         let before = canonical_uid(&units[i]);
         let mut core = units[i].clone();
 
