@@ -637,3 +637,91 @@ fn an_unlabelled_step_target_round_trips_through_surface() {
     );
     assert_eq!(a.records, b.records);
 }
+
+// ── Comments (0.2.0) ────────────────────────────────────────────────────────
+//
+// HJSON headers already accepted `#` and `//` *inside* a record, so rejecting them
+// between records made the surface contradict itself. A format whose selling point is
+// human review has to let a reviewer annotate what they are reviewing.
+
+/// The case the feature exists for: a note above the record it is about.
+#[test]
+fn a_comment_between_records_is_not_stray_text() {
+    for marker in ["#", "//"] {
+        let src = format!(
+            "{marker} a note for the reviewer\n\
+             @claim c/a {{ status: speculative }}\n~ A claim.\n"
+        );
+        let out = parse_surface(&src).unwrap();
+        assert!(!out.has_errors(), "{marker}: {:?}", out.diagnostics);
+        assert_eq!(out.records.len(), 1, "{marker}");
+        assert_eq!(out.comments, 1, "{marker}: not counted");
+    }
+}
+
+/// **The bug the first attempt at this shipped.** A body runs from the gist to the next
+/// record, so a comment between two records falls inside that range. Keeping it made the
+/// comment become the previous unit's body - content invented out of a note, with a
+/// granularity warning fired about it.
+#[test]
+fn a_comment_after_a_gist_does_not_become_the_body() {
+    let src = "@claim c/a { status: speculative }\n~ A claim.\n\n\
+               // TODO: get the dashboard link\n\
+               @claim c/b { status: speculative }\n~ Another claim.\n";
+    let out = parse_surface(src).unwrap();
+    assert!(!out.has_errors(), "{:?}", out.diagnostics);
+    let bodies: Vec<_> = out.units().filter_map(|u| u.body.as_deref()).collect();
+    assert!(
+        bodies.is_empty(),
+        "a comment was absorbed as a body: {bodies:?}"
+    );
+    assert_eq!(out.comments, 1);
+}
+
+/// A comment is a comment wherever it sits, including inside a body. That costs a body
+/// the ability to open a line with `#`, and the alternative was worse: a line whose
+/// meaning depended on how far it happened to be from the next record.
+#[test]
+fn a_comment_inside_a_body_is_still_a_comment() {
+    let src = "@claim c/a { status: speculative }\n~ A claim.\n\n\
+               First paragraph.\n# not a heading, a comment\nSecond paragraph.\n";
+    let out = parse_surface(src).unwrap();
+    assert!(!out.has_errors(), "{:?}", out.diagnostics);
+    let body = out.units().next().unwrap().body.as_deref().unwrap();
+    assert!(!body.contains("comment"), "comment kept in body: {body:?}");
+    assert!(body.contains("First paragraph."));
+    assert!(body.contains("Second paragraph."));
+    assert_eq!(out.comments, 1);
+}
+
+/// Only at column 0. An indented `#` is inside prose a reader wrote on purpose.
+#[test]
+fn an_indented_hash_is_not_a_comment() {
+    let src = "@claim c/a { status: speculative }\n~ A claim.\n\n\
+               A paragraph.\n  # indented, so prose\n";
+    let out = parse_surface(src).unwrap();
+    let body = out.units().next().unwrap().body.as_deref().unwrap();
+    assert!(body.contains("# indented"), "body was {body:?}");
+    assert_eq!(out.comments, 0);
+}
+
+/// A document of nothing but comments is empty, not malformed.
+#[test]
+fn a_file_of_only_comments_parses_to_nothing() {
+    let out = parse_surface("# just a note\n// and another\n").unwrap();
+    assert!(!out.has_errors(), "{:?}", out.diagnostics);
+    assert!(out.records.is_empty());
+    assert_eq!(out.comments, 2);
+}
+
+/// Canonical form cannot carry a comment, so a re-emission must still round trip - the
+/// property `fmt` asserts before it writes anything.
+#[test]
+fn a_commented_document_still_round_trips() {
+    let src = "# a note\n@claim c/a { status: speculative }\n~ A claim.\n";
+    let a = parse_surface(src).unwrap();
+    let text = write_surface(a.view.as_ref(), &a.records, &WriteContext::from_labels(&a.labels));
+    let b = parse_surface(&text).unwrap();
+    assert_eq!(a.records, b.records);
+    assert_eq!(b.comments, 0, "canonical form should carry no comments");
+}

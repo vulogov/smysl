@@ -815,6 +815,18 @@ fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             continue;
         }
 
+        // Comments are not part of any record, so canonical form cannot reproduce them.
+        // This book recommends `fmt --write` as a pre-commit habit, which makes silent
+        // deletion of a reviewer's notes the difference between a formatter and a hazard.
+        // Say it instead, once per file, and let the operator decide.
+        if out.comments > 0 {
+            eprintln!(
+                "{path}: warning: {} comment line(s) are not part of any record and will \
+                 not survive formatting",
+                out.comments
+            );
+        }
+
         let ctx = WriteContext::from_labels(&out.labels).with_salience(out.salience.clone());
         let formatted = write_surface(out.view.as_ref(), &out.records, &ctx);
 
@@ -1004,6 +1016,32 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 /// A CBOR log has neither: its records were validated when they were decoded, and labels
 /// have no wire record. So the CBOR path returns an outcome with an empty diagnostic set,
 /// which is the truth rather than a convenience.
+/// Whether a store's bytes are surface text rather than a CBOR log.
+///
+/// Surface text starts with a sigil - but it may be *preceded* by blank lines and comments,
+/// so sniffing the first byte is not enough. This looks past those to the first line that
+/// carries anything.
+///
+/// Trying UTF-8 first is safe: a CBOR record sequence opens with an array head (`0x82`),
+/// which is a continuation byte and never legal at the start of UTF-8, so bytes that decode
+/// cleanly are text rather than a store.
+///
+/// One function rather than two call sites with the same literal, because there were two and
+/// adding comments to the grammar broke both - the second one silently.
+fn looks_like_surface(bytes: &[u8]) -> bool {
+    let Ok(s) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    match s
+        .lines()
+        .find(|l| !(l.trim().is_empty() || l.starts_with('#') || l.starts_with("//")))
+    {
+        // Empty, or nothing but comments: a valid, empty surface document.
+        None => true,
+        Some(l) => l.starts_with('@'),
+    }
+}
+
 fn read_store(path: &str) -> Result<smysl::ParseOutcome, ExitCode> {
     let bytes = match read_bytes(path) {
         Ok(b) => b,
@@ -1013,7 +1051,7 @@ fn read_store(path: &str) -> Result<smysl::ParseOutcome, ExitCode> {
         }
     };
 
-    if bytes.first() == Some(&b'@') || bytes.is_empty() {
+    if looks_like_surface(&bytes) {
         let src = match String::from_utf8(bytes) {
             Ok(s) => s,
             Err(e) => {
@@ -1064,8 +1102,7 @@ fn load_store(
         std::fs::read(path).map_err(|e| format!("{path}: {e}"))?
     };
 
-    // Surface text always starts with a sigil; a CBOR sequence starts with an array head.
-    if bytes.first() == Some(&b'@') || bytes.is_empty() {
+    if looks_like_surface(&bytes) {
         let src = String::from_utf8(bytes).map_err(|e| e.to_string())?;
         let out = parse_surface(&src).map_err(|e| e.to_string())?;
         Ok((Store::from_records(out.records.clone()), out.labels))

@@ -27,6 +27,14 @@ pub enum LineClass {
     /// `--` alone on its line.
     Separator,
     Blank,
+    /// `# a note` or `// a note` at column 0.
+    ///
+    /// Classified here and *interpreted by the parser*, because the same line means two
+    /// different things depending on where it lands. Between records it is a comment and
+    /// is skipped. Inside a body it is prose - a body is free text, and `# Heading` is a
+    /// perfectly ordinary thing to write in it, so treating that as a comment would
+    /// silently delete a reader's words. `block()` keeps it; `run()` drops it.
+    Comment,
     /// Anything else: body, detail, or a gist continuation.
     Text,
 }
@@ -89,6 +97,12 @@ fn classify(line: &str) -> LineClass {
     }
     if line.trim_end() == "--" && !line.starts_with(' ') {
         return LineClass::Separator;
+    }
+    // Column 0 only. An indented `#` is inside a body or a step, where it is prose.
+    // Both markers, because an HJSON header already accepts both inside a record - the
+    // surface contradicted itself by rejecting between records what it took within one.
+    if line.starts_with('#') || line.starts_with("//") {
+        return LineClass::Comment;
     }
     if let Some(rest) = line.strip_prefix('@') {
         let word = rest

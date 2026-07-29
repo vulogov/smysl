@@ -44,6 +44,14 @@ pub struct ParseOutcome {
     pub diagnostics: Vec<Diagnostic>,
     /// Records skipped by error recovery.
     pub recovered: usize,
+    /// Comment lines seen and dropped.
+    ///
+    /// Comments are not part of any record, so nothing downstream can carry them and a
+    /// re-emission cannot reproduce them. Counted so that a *writer* can say so instead of
+    /// deleting a reviewer's notes in silence - the manual recommends `fmt --write` as a
+    /// pre-commit habit, which makes silent loss the difference between a formatter and a
+    /// hazard.
+    pub comments: usize,
 }
 
 impl ParseOutcome {
@@ -174,6 +182,13 @@ impl<'a> Parser<'a> {
             let l = self.lines[self.i];
             match l.class {
                 LineClass::Blank => self.i += 1,
+                // A comment between records carries nothing the graph can hold, so it is
+                // skipped rather than diagnosed - but counted, so a writer can report that
+                // re-emitting the document will not reproduce it.
+                LineClass::Comment => {
+                    self.out.comments += 1;
+                    self.i += 1;
+                }
                 LineClass::DocHeader => self.doc_header()?,
                 LineClass::RecordStart => {
                     if let Some(u) = self.unit() {
@@ -460,6 +475,19 @@ impl<'a> Parser<'a> {
                 c if c.starts_record() => break,
                 LineClass::Separator if !through_separator => break,
                 LineClass::Gist => break,
+                // Skipped, not kept and not a terminator. A body runs from the gist to the
+                // next record, so a comment sitting *between* records falls inside this
+                // range - keeping it made the comment become the previous unit's body,
+                // which is worse than any alternative: content invented from a note, and
+                // a granularity warning fired about it.
+                //
+                // The cost is that a body cannot begin a line with `#` or `//`; such a line
+                // is a comment wherever it appears, and is dropped. Predictable beats
+                // context-dependent here, and there is no escape syntax yet.
+                LineClass::Comment => {
+                    self.out.comments += 1;
+                    self.i += 1;
+                }
                 _ => {
                     lines.push(l.text);
                     self.i += 1;
