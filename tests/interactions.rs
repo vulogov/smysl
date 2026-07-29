@@ -6,8 +6,11 @@
 //! are exactly the seams a per-feature test does not cover.
 //!
 //! Each test below is a question that had a plausible wrong answer.
-
-use std::collections::BTreeMap;
+//!
+//! Three of them reach into `smysl-ingest`, which is an optional dependency of the facade,
+//! so they are gated on the `ingest` feature. Without that gate the file fails to compile
+//! under `--no-default-features` — which `--all-features` alone will never tell you, and
+//! `make test-matrix` will.
 
 use smysl::{
     canonical_uid, compact, relink, AgentId, Attestation, Hlc, KernelType, Op, Record, RelKind,
@@ -28,6 +31,7 @@ fn unit(gist: &str, grounds: Vec<Uid>) -> UnitCore {
 }
 
 /// A unit carrying an attributed quote in its payload, as ingest produces.
+#[cfg(feature = "ingest")]
 fn quoted(gist: &str, quote: &str, grounds: Vec<Uid>) -> UnitCore {
     let span = smysl::Span::new(0, 0);
     let mut o = smysl::surface::hjson::HObject::default();
@@ -68,6 +72,8 @@ fn attested(uid: Uid, hop: u32) -> Attestation {
 /// dropped anything it did not explicitly copy, the attribution would vanish silently — and
 /// a quote lost is exactly the kind of loss nothing downstream would notice, because a unit
 /// without one is perfectly legal.
+// Needs the ingest layer, which `--no-default-features` leaves out.
+#[cfg(feature = "ingest")]
 #[test]
 fn a_quote_survives_being_relinked() {
     let old = unit("the original evidence", vec![]);
@@ -198,6 +204,8 @@ fn recency_ranks_the_same_before_and_after_compaction() {
 /// relations are a separate record type, and an edge left pointing at the pre-weakening uid
 /// would dangle. `rebuts` edges are the ones rule R needs, so losing one silently loses the
 /// constraint rather than merely a link.
+// Needs the ingest layer, which `--no-default-features` leaves out.
+#[cfg(feature = "ingest")]
 #[test]
 fn weakening_at_staging_carries_relations_to_the_new_identities() {
     use smysl_ingest::stage::{prepare, Attest};
@@ -219,7 +227,7 @@ fn weakening_at_staging_carries_relations_to_the_new_identities() {
         &Store::new(),
         vec![weak, over, rebutter],
         vec![edge],
-        BTreeMap::new(),
+        std::collections::BTreeMap::new(),
         &attest,
     );
 
@@ -258,6 +266,8 @@ fn weakening_at_staging_carries_relations_to_the_new_identities() {
 /// it, and rule M caps conclusions at their weakest ground. A claim resting on an imported
 /// measurement should be allowed to be `derived` — which it could not have been when the
 /// only checkable `measured` units were ones with no provenance at all.
+// Needs the ingest layer, which `--no-default-features` leaves out.
+#[cfg(feature = "ingest")]
 #[test]
 fn a_conclusion_resting_on_an_imported_measurement_may_be_derived() {
     use smysl_ingest::import::{from_csv, ImportOptions};

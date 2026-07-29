@@ -278,6 +278,54 @@ cannot see. `smysl` takes a different position: make the artifact itself
 precise enough to carry hedges, sources and disagreement structurally, *and*
 plain enough that the same file is what a person opens to check the work.
 
+#section("What that costs, measured")
+
+The three losses above are the ones everybody who has run a multi-hop pipeline
+already believes in. It is worth knowing how large they actually are, because
+the answer is not "a little, at the margins" — and because a pipeline losing
+them gives no sign that it has. Prose does not announce what it dropped.
+
+So: five documents, five hops each, summarised by a real model at every hop,
+run twice over — once through `gemini-3.5-flash-lite` and once through
+`deepseek-chat`. Ninety claims in total. A second model reads the output
+afterwards and is asked, for each original claim, whether the final text still
+states it, how confidently the *text* now puts it, and what the text says it
+rests on.
+
+#screen(caption: "the evaluation harness, `make eval-live`")[
+```
+                          tokens   claims kept   hedges lost   sources kept
+  control (no summarising)  1.00        90/90          0/90          50/50
+  prose baseline            0.29        72/90         42/90           1/50
+  smysl                     0.49        90/90          0/90          50/50
+```
+]
+
+Read the bottom two rows against each other. The prose chain compresses
+*harder* than it was asked to — 0.29 of the original against smysl's 0.49 —
+and pays for it twice. Forty-two of ninety surviving claims came out the far
+end reading as measurements when the document that went in had called them
+inferred, cited or derived. And of the fifty claims that named where they came
+from, exactly one still named it.
+
+The top row is what makes the other two mean anything. The same judge, the
+same prompt, reading the document *before* any summarising, recovers every
+hedge and every source — it declined to rule on none of the ninety. Whatever
+went missing over five hops went missing in the chain, not in the instrument
+that measured it.
+
+#callout(label: "The point")[
+  Nothing here is a criticism of the models. Both were asked to summarise and
+  both summarised well — the output reads fluently and says broadly the right
+  things. Hedges and citations are simply not what prose is built to preserve,
+  and a summariser has no way to know it dropped one. On the `smysl` side both
+  numbers are structural rather than lucky: confidence is a field that a rule
+  checks, and a source is a field that travels with whatever travels.
+]
+
+Two models, five documents, one run each — enough to say the effect is not one
+model's quirk, not enough to put an error bar on it.
+
 #section("What the document actually looks like")
 
 There is no separate machine version. This is a complete, real excerpt — the
@@ -468,6 +516,50 @@ prefer whichever arrived second, the way an ordinary "last write wins" merge
 would. It records the disagreement as a *contention*, on the document, for a
 person to resolve deliberately. Nothing is picked for you behind your back.
 
+#section("Where it sits in a pipeline")
+
+None of the above requires rebuilding a pipeline, and it is worth being
+concrete about what adopting it does and does not involve, because the honest
+answer is narrower than the argument might suggest.
+
+There is exactly one place a model is needed: the entrance. `ingest` turns a
+document into units, and it is the only operation here that costs a model
+call. Everything downstream of it — fitting to a budget, merging two agents'
+work, ordering a reading, rendering an artifact, checking any of it — is
+ordinary computation over the graph. Same input, same output, byte for byte,
+no inference and no variance.
+
+That is the shape of the trade. A pipeline that summarises at every hop pays a
+model at every hop and cannot tell you what each one discarded. A pipeline
+carrying `smysl` pays a model once at the boundary and then stops paying:
+the five hops in the measurement above cost five model calls on the prose side
+and zero on the other.
+
+#term("The boundary")[
+  Model output does not enter the graph directly. It is parsed, checked
+  against the rules above, and written to a staging file for a person or a
+  later step to accept — `merge --staged` is that acceptance. A model
+  overstating its confidence is corrected and the correction recorded, at the
+  door, before anything downstream can rest on it.
+]
+
+Two further things follow from that boundary being the only model-dependent
+part. Instrument data does not go through it at all: `import` transcribes a
+table of readings directly, which is the only path allowed to record
+`measured`, because a tool copying a number is doing something a model reading
+a document cannot. And adoption is incremental — one pipeline, or even one
+hop of one pipeline, produces documents that the rest of the system can keep
+treating as text, because that is what they are.
+
+#callout(label: "What it does not do")[
+  The boundary is the one place with no guarantee behind it. A model
+  converting prose to units can misread the prose, and everything downstream
+  inherits whatever it got wrong; the rules constrain what it may *claim*, not
+  whether it read correctly. What the format offers is that from the boundary
+  onward nothing degrades further, and that what did arrive is reviewable by
+  the person it arrives at.
+]
+
 #section("What this buys, both ways")
 
 #recap((
@@ -483,4 +575,10 @@ person to resolve deliberately. Nothing is picked for you behind your back.
   [Merging is a mathematical join — commutative, order-independent, and
    honest about disagreement — computed from what a claim *says*, so two
    agents recording the same fact need no registry to agree on its identity.],
+  [Across five documents and two models, prose summarising lost 42 of 90
+   hedges and 49 of 50 citations while compressing *harder* than the format
+   did; on the `smysl` side both are zero by construction, not by care.],
+  [One model call at the entrance, none afterwards: every operation downstream
+   of ingest is deterministic computation over the graph rather than another
+   round of inference.],
 ))

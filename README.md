@@ -111,7 +111,7 @@ and asked what the *passage* supports:
 | Five hops, 5 fixtures × 2 models | Tokens | Claims kept | Hedges lost | Sources kept |
 |---|---|---|---|---|
 | control — no summarisation | 1.00 | 90 / 90 | **0 / 90** | **50 / 50** |
-| prose baseline | 0.29 | 73 / 90 | **42 / 90** | **1 / 50** |
+| prose baseline | 0.29 | 72 / 90 | **42 / 90** | **1 / 50** |
 | smysl | 0.49 | 90 / 90 | **0 / 90** | **50 / 50** |
 
 Ten runs: F1–F5 through `gemini-3.5-flash-lite` and `deepseek-chat`, 90 claims in total. The
