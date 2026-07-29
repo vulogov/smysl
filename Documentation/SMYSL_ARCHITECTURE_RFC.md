@@ -423,11 +423,11 @@ compared across vendors.
 
 ## 10. Command surface
 
-Twenty commands. Only two consult a model.
+Twenty-one commands. Only two consult a model.
 
 | Purity | Commands |
 |---|---|
-| Pure | `fmt` `check` `pack` `merge` `diff` `trace` `view` `bundle` `salience` `retract` `render` `providers` `usage` `reindex` `import` `relink` `ui` |
+| Pure | `fmt` `check` `pack` `merge` `diff` `trace` `view` `bundle` `salience` `retract` `render` `providers` `usage` `reindex` `import` `relink` `compact` `ui` |
 | Mixed | `thread` (`--derive` pure; `--refine` consults a model) |
 | Model | `ingest` `attest` |
 
@@ -437,6 +437,15 @@ Two are worth naming because they close gaps the rest of the design assumed away
 per row, with an `op: Imported` attestation at the `computed` rung. It is the only producer
 of `measured` and the only producer of units that consults no model. Before it, the top of
 the status ladder had no writer and every `measured` unit in the corpus was hand-authored.
+
+**`compact`** drops superseded units that nothing needs. The log is grow-only, and that is
+what makes merge a join-semilattice — so compaction is *not* an operation inside that
+algebra but a lossy projection to a new store. Two consequences are stated rather than left
+to be found: it does **not survive a merge** (a peer still holding the dropped records brings
+them back, correctly, because union is union), and a **retraction is never dropped**, since
+dropping a retracted unit drops the record that it was retracted and the next merge would
+resurrect it without one. It refuses to write to stdout or over its own input, being the one
+command whose output cannot reconstruct its input.
 
 **`relink`** re-points references onto the units that replaced their targets. Identity is
 content, so a corrected unit is a *different* unit and whatever rested on the original still
@@ -531,9 +540,9 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
   requires every `properties` key in `required`, and the shared schema lists a fraction of
   them. The risk has grown, not shrunk — Appendix C gained `relations` and `quote` since,
   and the mapper passes it through unchanged. Blocked on a key.
-- **The store only grows.** There is no compaction: `pack` and `salience` recompute over the
-  whole store on every call, and nothing drops what supersession and retraction have already
-  settled. This is the gap that binds first on a store that lives for weeks.
+- **`pack` and `salience` recompute over the whole store on every call.** `compact` bounds
+  how large that store gets, but nothing bounds the per-call cost, and PageRank runs over the
+  full adjacency each time. No evidence yet that it bites; no measurement either.
 - **Labels have no wire record**, so they survive a parse and not a store round trip.
 - **`ingest` exit codes do not distinguish** a batch where rule M weakened something from one
   where nothing happened. The CLI prints it; the code does not encode it.
@@ -545,4 +554,4 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
 - **`SchemaId` decoding is strict**, so a kernel type added in a later 0.x minor fails to
   decode rather than degrading. Must be revisited before any store exists if kernel types may
   be added within 0.x.
-- **~66 divergences from the RFC** remain unreconciled — see [`RFC_PROPOSAL.md`](RFC_PROPOSAL.md).
+- **~67 divergences from the RFC** remain unreconciled — see [`RFC_PROPOSAL.md`](RFC_PROPOSAL.md).

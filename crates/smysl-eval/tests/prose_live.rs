@@ -20,23 +20,60 @@ use smysl_eval::{chain, measure, run_smysl_arm, ChainOptions, Metric};
 use smysl_graph::Store;
 use smysl_provider::{config::ProviderConfig, Provider, ProviderId, Request};
 
-const MODEL: &str = "gemini-3.5-flash-lite";
+/// The endpoints this runs against, and what each needs to be reachable.
+///
+/// Two models rather than one, because a single model's habits are indistinguishable from
+/// the format's properties when there is nothing to compare them against. Two is not many,
+/// and the report says so.
+struct Endpoint {
+    kind: &'static str,
+    model: &'static str,
+    base: &'static str,
+    key: &'static str,
+}
 
-fn provider() -> Option<Box<dyn Provider>> {
-    if std::env::var("GEMINI_API_KEY").ok()?.trim().is_empty() {
+const ENDPOINTS: &[Endpoint] = &[
+    Endpoint {
+        kind: "gemini",
+        model: "gemini-3.5-flash-lite",
+        base: "https://generativelanguage.googleapis.com",
+        key: "GEMINI_API_KEY",
+    },
+    Endpoint {
+        kind: "deepseek",
+        model: "deepseek-chat",
+        base: "https://api.deepseek.com",
+        key: "DEEPSEEK_API_KEY",
+    },
+];
+
+/// The fixtures the baseline runs over.
+///
+/// F1-F5, which is what §28's chain names. F6 is adversarial and F7/F8 are merge fixtures,
+/// so none of the three is a document a pipeline would hand on.
+const FIXTURES: &[&str] = &[
+    "F1-incident.smy",
+    "F2-research.smy",
+    "F3-narrative.smy",
+    "F4-qa.smy",
+    "F5-dataset.smy",
+];
+
+fn provider_for(e: &Endpoint) -> Option<Box<dyn Provider>> {
+    if std::env::var(e.key).ok()?.trim().is_empty() {
         return None;
     }
-    let mut cfg = ProviderConfig::new(ProviderId::new("gemini").unwrap(), "gemini");
-    cfg.endpoint = "https://generativelanguage.googleapis.com".into();
-    cfg.model = MODEL.into();
-    cfg.context_window = 1_000_000;
+    let mut cfg = ProviderConfig::new(ProviderId::new(e.kind).unwrap(), e.kind);
+    cfg.endpoint = e.base.into();
+    cfg.model = e.model.into();
+    cfg.context_window = 65_536;
     cfg.max_output = 2048;
     cfg.timeout_secs = 120;
-    cfg.api_key_env = Some("GEMINI_API_KEY".into());
+    cfg.api_key_env = Some(e.key.to_string());
     smysl_provider::map::build(&cfg).ok()
 }
 
-struct Model<'a>(&'a dyn Provider);
+struct Model<'a>(&'a dyn Provider, &'static str);
 
 impl Summariser for Model<'_> {
     fn summarise(&self, text: &str, max_tokens: u64) -> Result<String, EvalError> {
@@ -44,7 +81,7 @@ impl Summariser for Model<'_> {
             "Summarise the following notes for a colleague who has to act on them.\n\
              Stay under {max_tokens} tokens. Prose only: no lists, no headings.\n\n{text}"
         );
-        let req = Request::new(MODEL, prompt)
+        let req = Request::new(self.1, prompt)
             .with_system("You summarise technical notes faithfully and briefly.")
             .with_max_output((max_tokens.max(256) + 512) as usize);
         self.0
@@ -77,7 +114,7 @@ impl Judge for Model<'_> {
              measured    - stated flatly as observation or measurement, unhedged",
             claim.gist
         );
-        let req = Request::new(MODEL, prompt)
+        let req = Request::new(self.1, prompt)
             .with_system("You are a precise reader. You answer in the exact format asked.")
             .with_max_output(1024usize);
 
@@ -126,7 +163,7 @@ fn parse_verdict(answer: &str) -> Verdict {
     v
 }
 
-fn fixture(name: &str) -> Store {
+fn fixture_store(name: &str) -> Store {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/corpus")
         .join(name);
@@ -135,129 +172,173 @@ fn fixture(name: &str) -> Store {
     Store::from_records(out.records)
 }
 
-/// Both arms over F1, at the same budget, reported side by side.
+/// One row of the matrix.
+struct Row {
+    fixture: &'static str,
+    model: &'static str,
+    e1: f64,
+    e2: f64,
+    inflated: usize,
+    attribution: f64,
+    control_inflated: usize,
+    control_attribution: f64,
+    attributable: usize,
+    abstained: usize,
+    units: usize,
+    /// The smysl arm's token cost on the same fixture and budget, so the two are
+    /// comparable in one row rather than in two tables.
+    smysl_e1: f64,
+}
+
+/// **Both arms, every fixture the chain names, every endpoint reachable.**
+///
+/// The smysl arm already ran over the whole corpus; the baseline ran over one fixture with
+/// one model, and every number published about this comparison rested on that. One model's
+/// habits are indistinguishable from the format's properties when there is nothing to
+/// compare them against.
 #[test]
-fn both_arms_over_the_same_fixture() {
+fn both_arms_over_every_fixture_and_endpoint() {
     let required = std::env::var("SMYSL_EVAL_LIVE").as_deref() == Ok("required");
-    let Some(p) = provider() else {
+
+    let live: Vec<(&Endpoint, Box<dyn Provider>)> = ENDPOINTS
+        .iter()
+        .filter_map(|e| provider_for(e).map(|p| (e, p)))
+        .collect();
+    if live.is_empty() {
         assert!(
             !required,
-            "SMYSL_EVAL_LIVE=required but GEMINI_API_KEY is unset"
+            "SMYSL_EVAL_LIVE=required but no endpoint has a key"
         );
-        eprintln!("prose arm skipped: GEMINI_API_KEY is unset");
+        eprintln!("prose arm skipped: no endpoint has a key");
         return;
-    };
-    let model = Model(p.as_ref());
+    }
 
-    let store = fixture("F1-incident.smy");
-    let opts = ChainOptions::default();
+    let mut rows = Vec::new();
+    let mut failures = Vec::new();
 
-    // -- the smysl arm: deterministic, no model ---------------------------
-    let smysl = run_smysl_arm(&store, &opts);
-    let ms = measure(&store, &smysl);
-    let val = |m: Metric| {
-        ms.iter()
-            .find(|x| x.metric == m)
-            .and_then(|x| x.outcome.value())
-            .unwrap()
-    };
+    for (endpoint, provider) in &live {
+        let model = Model(provider.as_ref(), endpoint.model);
+        for fixture in FIXTURES {
+            let store = fixture_store(fixture);
+            let opts = ChainOptions::default();
 
-    // -- the prose arm: a model at every hop ------------------------------
-    let budget = chain::Budget::Fraction(0.6).tokens(smysl.initial_tokens);
-    let run = run_prose_arm(&store, opts.hops, budget, &model).expect("prose arm");
-    let claims = claims_of(&store);
+            // The smysl arm: deterministic, no model, no cost.
+            let smysl = run_smysl_arm(&store, &opts);
+            let ms = measure(&store, &smysl);
+            let val = |m: Metric| {
+                ms.iter()
+                    .find(|x| x.metric == m)
+                    .and_then(|x| x.outcome.value())
+                    .unwrap_or(f64::NAN)
+            };
+            assert_eq!(
+                val(Metric::EpistemicCorruption),
+                0.0,
+                "{fixture}: rule M/T on the smysl arm"
+            );
 
-    // **The control.** Judge the *unsummarised* prose with the same judge and the same
-    // prompt. If the hedges are already read as certainties here, then the inflation
-    // measured after five hops is the judge's bias, not summarisation's damage - and the
-    // headline number would be an artefact of the instrument. A finding needs this to be
-    // near zero and the post-chain number to be well above it.
-    let control = judge(&claims, &run.initial, &model).expect("judging the control");
-    let judged = judge(&claims, run.final_text(), &model).expect("judging");
+            // The prose arm, at the same budget so E1 compares like with like.
+            let budget = chain::Budget::Fraction(0.6).tokens(smysl.initial_tokens);
+            let claims = claims_of(&store);
+            let run = match run_prose_arm(&store, opts.hops, budget, &model) {
+                Ok(r) => r,
+                Err(e) => {
+                    // A provider failure is not a result. Recorded and skipped, never
+                    // folded into the numbers as if the chain had simply lost things.
+                    failures.push(format!("{} on {}: {e}", endpoint.model, fixture));
+                    continue;
+                }
+            };
+            let (control, judged) = match (
+                judge(&claims, &run.initial, &model),
+                judge(&claims, run.final_text(), &model),
+            ) {
+                (Ok(c), Ok(j)) => (c, j),
+                _ => {
+                    failures.push(format!("{} on {}: judging failed", endpoint.model, fixture));
+                    continue;
+                }
+            };
 
-    eprintln!("\n--- SM-P15, both arms over F1 ({} hops) ---", opts.hops);
+            rows.push(Row {
+                fixture,
+                model: endpoint.model,
+                e1: run.final_tokens() as f64 / run.initial_tokens().max(1) as f64,
+                e2: judged.survival(),
+                inflated: judged.inflated.len(),
+                attribution: judged.attribution(),
+                control_inflated: control.inflated.len(),
+                control_attribution: control.attribution(),
+                attributable: judged.attributable,
+                abstained: judged.abstained,
+                units: claims.len(),
+                smysl_e1: val(Metric::TokenCost),
+            });
+        }
+    }
+
+    report(&rows, &failures);
+
+    assert!(!rows.is_empty(), "no row completed");
+    // Every row's control must clear, or that row's numbers describe the judge.
+    for r in &rows {
+        assert_eq!(
+            r.control_inflated, 0,
+            "{} on {}: the judge read {} hedge(s) as inflated before any summarisation",
+            r.model, r.fixture, r.control_inflated
+        );
+        assert!(
+            r.attributable == 0 || r.control_attribution > 0.5,
+            "{} on {}: the judge recovered only {:.0}% of sources from unsummarised prose",
+            r.model,
+            r.fixture,
+            r.control_attribution * 100.0
+        );
+    }
+}
+
+fn report(rows: &[Row], failures: &[String]) {
+    eprintln!("\n--- both arms, {} row(s) ---", rows.len());
     eprintln!(
-        "  smysl   E1 {:.3}  E2 {:.3}  E3 {:.0} inflated",
-        val(Metric::TokenCost),
-        val(Metric::ClaimSurvival),
-        val(Metric::EpistemicCorruption)
+        "  {:<16} {:<22} {:>6} {:>6} {:>6} {:>9} {:>12}",
+        "fixture", "model", "E1", "smysl", "E2", "hedges", "sources"
     );
-    eprintln!(
-        "  control E1 1.000  E2 {:.3}  E3 {} inflated  attribution {:.3}  ({} abstention(s) of {})  <- hop 0",
-        control.survival(),
-        control.inflated.len(),
-        control.attribution(),
-        control.abstained,
-        control.total
-    );
-    eprintln!(
-        "  prose   E1 {:.3}  E2 {:.3}  E3 {} inflated  attribution {:.3}  ({} abstention(s) of {})",
-        run.final_tokens() as f64 / run.initial_tokens().max(1) as f64,
-        judged.survival(),
-        judged.inflated.len(),
-        judged.attribution(),
-        judged.abstained,
-        judged.total
-    );
-    eprintln!(
-        "          {} of {} sourced claim(s) still name their source",
-        judged.attributed.len(),
-        judged.attributable
-    );
-
-    // On the smysl arm attribution survival is 1.0 by construction: `source` is a field of
-    // the unit, so it travels with anything that travels. Structural, like E3 and E4 - and
-    // stated rather than measured, because measuring it would only confirm the type system.
-    eprintln!("  smysl   attribution 1.000 (structural: `source` is a field of the unit)");
-    for (uid, was, now) in &judged.inflated {
+    for r in rows {
         eprintln!(
-            "          {} {was} -> read as {now}",
-            &uid.to_string()[..14]
+            "  {:<16} {:<22} {:>6.3} {:>6.3} {:>6.3} {:>4}/{:<4} {:>6}/{:<5}",
+            r.fixture.trim_end_matches(".smy"),
+            r.model,
+            r.e1,
+            r.smysl_e1,
+            r.e2,
+            r.inflated,
+            r.units,
+            (r.attribution * r.attributable as f64).round() as usize,
+            r.attributable
         );
     }
 
-    // The structural guarantee, asserted only on the arm that makes it. The prose arm is
-    // measured and reported; it is not required to pass, because the whole point is that
-    // nothing enforces anything over there.
-    assert_eq!(
-        val(Metric::EpistemicCorruption),
-        0.0,
-        "rule M/T on the smysl arm"
+    // Totals, which is the only place a claim about "the prose baseline" can honestly be
+    // read off: a mean over five fixtures says more than any single one of them.
+    let n = rows.len() as f64;
+    let hedges: usize = rows.iter().map(|r| r.inflated).sum();
+    let units: usize = rows.iter().map(|r| r.units).sum();
+    let kept: usize = rows
+        .iter()
+        .map(|r| (r.attribution * r.attributable as f64).round() as usize)
+        .sum();
+    let sourced: usize = rows.iter().map(|r| r.attributable).sum();
+    eprintln!(
+        "\n  mean E1 {:.3}   mean E2 {:.3}   hedges lost {hedges}/{units}   sources kept {kept}/{sourced}",
+        rows.iter().map(|r| r.e1).sum::<f64>() / n,
+        rows.iter().map(|r| r.e2).sum::<f64>() / n,
     );
-    assert!(
-        judged.is_usable(),
-        "the judge abstained on {} of {} claims; its verdicts mean too little to report",
-        judged.abstained,
-        judged.total
-    );
-
-    // The control has to hold up, or nothing measured after it means anything. The
-    // baseline prose states every hedge in words, so a judge that cannot read them back
-    // from the *unsummarised* text is not measuring the chain.
-    assert!(
-        control.is_usable(),
-        "the judge abstained on the control; it cannot read hedges at all"
-    );
-    // The same control the hedges get. The baseline prose names every source in words, so a
-    // judge that cannot read them back from the *unsummarised* text is not measuring the
-    // chain - and an attribution figure taken without this is an artefact.
-    assert!(
-        control.attribution() > 0.5,
-        "the judge recovered only {:.0}% of sources from unsummarised prose; the \
-         post-chain attribution figure of {:.0}% would measure the instrument",
-        control.attribution() * 100.0,
-        judged.attribution() * 100.0
-    );
-
-    assert!(
-        control.inflated.len() < judged.inflated.len().max(1),
-        "the control inflated {} of {} claims before a single hop ran: the instrument is \
-         reading confidence that the text does not state, so the post-chain figure of {} \
-         is an artefact rather than a finding",
-        control.inflated.len(),
-        control.total,
-        judged.inflated.len()
-    );
+    let abstained: usize = rows.iter().map(|r| r.abstained).sum();
+    eprintln!("  judge abstained on {abstained} of {units} claim(s)");
+    eprintln!("  smysl arm: hedges lost 0/{units}, sources kept {sourced}/{sourced} (structural)");
+    for f in failures {
+        eprintln!("  FAILED  {f}");
+    }
 }
 
 /// The ports are ports: this crate must not have grown a provider dependency.

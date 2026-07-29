@@ -5,7 +5,7 @@
 **Format version affected:** `smysl/0.1`, kernel `smysl.kernel/0.1`.
 
 The RFC states that it has zero open design decisions. Implementing it in full produced the
-66 items below: places where the specification is silent, self-contradictory, or contradicted
+67 items below: places where the specification is silent, self-contradictory, or contradicted
 outright by a live endpoint.
 
 **Each one is already resolved in code and pinned by a test.** That is what makes this a
@@ -422,6 +422,14 @@ old one dangles. This produced a real defect — a rule T cap already left `grou
 surfacing later as an `SMY-E060` at staging that looked like a model error. One topological
 re-pointing sweep now serves all three. Any future operation that edits a unit needs it too,
 and the RFC should say that where it defines identity.
+
+**67. Nothing can drop what supersession has settled, and a grow-only log cannot do it for
+itself.** §7.3 makes the log append-only, which is what makes merge a join-semilattice — and
+leaves a store that lives for weeks with no way to shed the versions it has replaced.
+`compact` is that operation, and the RFC should say what it is: **not** a member of the
+algebra but a lossy projection to a new store, which does not survive a merge with an
+uncompacted peer, and which never drops a retracted unit — because dropping one drops the
+record that it *was* retracted, and the next merge resurrects it without its retraction.
 
 ---
 

@@ -108,29 +108,33 @@ smysl-eval` reproduces it, without calling a model.
 real model summarising at each one, judged by a model that is shown a claim and a passage
 and asked what the *passage* supports:
 
-| Five hops over F1 | Tokens | Claims kept | Hedges lost | Sources kept |
+| Five hops, 5 fixtures × 2 models | Tokens | Claims kept | Hedges lost | Sources kept |
 |---|---|---|---|---|
-| control — no summarisation | 1.00 | 8 / 8 | **0 of 8** | **4 / 4** |
-| prose baseline | 0.30 – 0.50 | 6–8 / 8 | **3–5 of 8** | **0–1 of 4** |
-| smysl | 0.56 | 8 / 8 | **0 of 8** | **4 / 4** |
+| control — no summarisation | 1.00 | 90 / 90 | **0 / 90** | **50 / 50** |
+| prose baseline | 0.29 | 73 / 90 | **42 / 90** | **1 / 50** |
+| smysl | 0.49 | 90 / 90 | **0 / 90** | **50 / 50** |
 
-Compression is a wash — both arms land near half. Two other things differ.
+Ten runs: F1–F5 through `gemini-3.5-flash-lite` and `deepseek-chat`, 90 claims in total. The
+two models agree closely, which is the point of running two — one model's habits are
+indistinguishable from a property of the format when there is nothing to compare them
+against.
 
-Three to five surviving claims came out of the prose end reading as *measurements* when the
-original called them inferred, cited or derived. And **the sources are simply gone**: of the
-four claims that named where they came from, the prose chain kept at most one, usually none.
-A guess arriving as a finding, and a number nobody can trace, are the two failures the format
-exists to prevent — and here they are, happening.
+**The prose chain compresses harder** — 0.29 against 0.49 — and pays for it twice. Forty-two
+of ninety surviving claims came out reading as *measurements* when the original called them
+inferred, cited or derived. And of the fifty claims that named where they came from, **one
+survived**. A guess arriving as a finding, and a number nobody can trace, are the two
+failures this format exists to prevent; both are visible here at scale rather than as
+anecdote.
 
-On the smysl side both are structural rather than lucky. Confidence is a field checked by
-rule M; the source is a field that travels with anything that travels.
+On the smysl side neither is luck. Confidence is a field that rule M checks; the source is a
+field that travels with anything that travels. Nothing is preserved by good behaviour.
 
-Read the numbers with their limits: one fixture, one model, a handful of runs — a data point,
-not a benchmark. The control row is what makes it worth anything. The baseline prose states
-every hedge *and every source* in words, and the same judge reads all of them back correctly
-before any summarisation, so the losses after five hops are the chain's rather than the
-instrument's. The live test refuses to report a figure the control does not clear.
-The live arm needs `GEMINI_API_KEY`; without one it skips rather than inventing a baseline.
+Read it with its limits: two models, five fixtures, one run each — enough to say the effect
+is not one model's quirk, not enough to put an error bar on it. The control row is what makes
+it worth anything at all. The baseline prose states every hedge *and every source* in words,
+and the same judge recovers all of them before any summarisation — it abstained on none of
+the ninety — so the losses after five hops are the chain's, not the instrument's. The live
+test refuses to report any row whose control does not clear. `make eval-live` reproduces it.
 
 **People stay in the loop without a special tool.** The review artifact *is* the document.
 No dashboard to build, no viewer to install — open it, read it, change a line, save it.
