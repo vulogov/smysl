@@ -15,7 +15,13 @@
 #import "manual/design.typ": *
 
 #book((
+  // ── Front matter — reading paths, and what the boxes mean ─────────────
+  include "manual/how-to-read.typ",
+
   // ── Part I — Foundations ──────────────────────────────────────────────
+  // Chapters 1-2: why you would want this at all, and what it is made of.
+  // Everything from here on was renumbered +2 when these two were added.
+  include "manual/ch01-02-why-shape.typ",
   include "manual/ch01-03-foundations.typ",
 
   // ── Part II — Creating and Formatting Documents ──────────────────────
@@ -43,4 +49,7 @@
 
   // ── Appendices ─────────────────────────────────────────────────────────
   include "manual/appendices.typ",
+
+  // ── Afterword ──────────────────────────────────────────────────────────
+  include "manual/about-the-author.typ",
 ))

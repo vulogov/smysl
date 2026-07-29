@@ -2,7 +2,7 @@
 
 #part(number: "V", title: "Operating on Documents")
 
-#chapter(number: 11, title: "merge — Union Without a Referee")
+#chapter(number: 13, title: "merge — Union Without a Referee")
 
 Two agents — or the same person, an hour apart — can work from the same
 corpus at once. Neither has to wait for the other, neither has to ask a
@@ -54,7 +54,7 @@ fixtures/corpus/F1-incident.smy: contention k/ccm3actwjjti65famnoe6mapo5d over b
 ]
 
 `b3:cvhirtgs2mpvli2ethhyeo32uf` is `c/pool-saturation` — the same real uid
-this book has used since Chapter 17's `pack --focus`, because these are
+this book has used since Chapter 19's `pack --focus`, because these are
 content hashes and this fixture has not changed. The contention id,
 `k/ccm3actwjjti65famnoe6mapo5d`, is derived from the contention's own content
 — the kind, the unit it is over, and its positions — never allocated, so two
@@ -72,7 +72,7 @@ every merge, however many inputs there were.
   successors fork or chain can change the moment a third store supplies the
   edge that orders them — writing a stale finding into an append-only log
   would make it permanent for no good reason. If a finding should travel
-  with the document, someone resolves it deliberately (Chapter 16) and that
+  with the document, someone resolves it deliberately (Chapter 18) and that
   resolution is what gets recorded.
 ]
 
@@ -112,8 +112,8 @@ actual source:
 
 Nothing here was adjudicated. All five of alpha's and beta's competing claims
 are in the merged store, queryable, exactly as their authors wrote them —
-`diff` (Chapter 12) will show you all ten units are present, and `trace`
-(Chapter 13) can walk from either `c/cause` to what it actually rests on.
+`diff` (Chapter 14) will show you all ten units are present, and `trace`
+(Chapter 15) can walk from either `c/cause` to what it actually rests on.
 What changed is that a human reading only the contention list — not the
 whole ten-unit store — already knows there are three specific places where
 the two agents' work does not simply combine, and exactly which units are on
@@ -150,7 +150,7 @@ fixtures/corpus/F8b-agent-beta.smy: contention k/cboxvjp36tnst3vmpsoo2mmvhqu ove
   cannot delete `c/pool-size-32` just because `--policy latest` was passed,
   any more than it could delete `c/pool-size-64`. Both revisions are in the
   merged store under every policy; you can `trace --parents` from either one
-  straight to `c/alpha-scope` regardless of `--policy` (Chapter 13 does
+  straight to `c/alpha-scope` regardless of `--policy` (Chapter 15 does
   exactly this). What `--policy` actually decides is narrower and more
   honest than "which one wins": whether the fork gets raised as an open
   contention for a human to see, or passes through silently because you
@@ -168,7 +168,7 @@ fixtures/corpus/F8b-agent-beta.smy: contention k/cboxvjp36tnst3vmpsoo2mmvhqu ove
   merge that in like anything else — the fork closes because there is now a
   latest that both prior revisions feed into. Withdrawing belief outright,
   as opposed to superseding it with something better, is `retract`'s job
-  instead (Chapter 16), and it computes exactly what else would fall before
+  instead (Chapter 18), and it computes exactly what else would fall before
   it lets you do that.
 ]
 
@@ -282,7 +282,7 @@ and decide.
 
 #section("--staged: the other half of ingest's pause")
 
-Chapter 8 left `ingest` exiting `10`, a batch of proposed units sitting in
+Chapter 10 left `ingest` exiting `10`, a batch of proposed units sitting in
 `.smysl/staged.smy`, waiting for a decision — and promised that committing
 it was "the ordinary merge join." That promise is literal: `--staged` reads
 the project's staged file and merges its records into your store exactly
@@ -290,7 +290,7 @@ like any other document, no separate code path, no special ceremony.
 
 Here is that loop closed for real. A small store already holding
 `F1-incident.smy`, and a staged batch — hand-authored here, standing in for
-what a real `ingest` run would have written, since Chapter 8's own live
+what a real `ingest` run would have written, since Chapter 10's own live
 attempt degraded to opaque prose in this offline sandbox:
 
 #screen(caption: "$ cat .smysl/staged.smy")[
@@ -326,12 +326,47 @@ detection as `F8a-agent-alpha.smy` or any other input.
   You now have a merged store — from two agents' work, from a retraction,
   or from a staged batch. The next honest question is *what actually
   changed*: which units are new, which survived untouched, which one side
-  had that the other did not. That is exactly what Chapter 12's `diff`
+  had that the other did not. That is exactly what Chapter 14's `diff`
   answers, and it is not a coincidence that the staged-merge example above
   reappears there as a live before/after. If instead you want to know why
   one specific unit ended up the way it did — what it rests on, who is
-  behind it — Chapter 13's `trace` walks that lineage directly.
+  behind it — Chapter 15's `trace` walks that lineage directly.
 ]
+
+#exercises((
+  [Merge `F8a-agent-alpha.smy` and `F8b-agent-beta.smy` and read the
+   contentions on stderr. Three *kinds* appear: `supersession-fork`,
+   `live-rebuttal`, and `label-collision`. For each, describe in one sentence
+   the real mistake two agents would have to make to produce it.],
+  [Run the merge twice, swapping the order of the two files, and send each
+   result to a file. The two files are *not* byte-identical. Now run
+   `smysl diff` on the pair. Reconcile the two observations with rule U's
+   promise that merge is commutative.],
+  [Run the merge again with `--fail-on-contention` and check the exit code.
+   Then argue the other side: name a pipeline where exiting non-zero on a
+   contention would be the wrong thing to do.],
+))
+
+#answers((
+  [`supersession-fork`: both agents decided they were replacing the *same*
+   earlier unit, so there are two competing successors and no rule that picks
+   one. `live-rebuttal`: one agent's unit carries a `rebuts` edge against a
+   unit the other agent asserted, so the merged graph contains an argument in
+   progress. `label-collision`: both used the same short name — `c/cause` — for
+   what turned out to be two different units, so the name no longer resolves.],
+  [Rule U promises the merge is commutative *as a set of records*, and `diff`
+   confirms it: `0 only, 0 only, 11 common` in either order. What differs is
+   the order records happen to be serialised in, which carries no meaning — no
+   uid, no reference, and no diagnostic depends on it. Commutativity of content
+   is the property that lets two teams merge in whatever order they like and
+   agree; byte-order equality was never promised and would buy nothing.],
+  [It exits `5`. The case against: a nightly job that merges every agent's
+   output into a shared store *expects* disagreement — that is what the store
+   is for — and failing the build every time two agents disagree would train
+   everyone to pass `--no-fail` and stop reading. `--fail-on-contention`
+   belongs at a gate where a human is supposed to look before something ships,
+   not on the path that collects work.],
+))
 
 #recap((
   [`merge` is a join over stores keyed by canonical identity — commutative,
@@ -358,7 +393,7 @@ detection as `F8a-agent-alpha.smy` or any other input.
    with no separate commit mechanism to learn.],
 ))
 
-#chapter(number: 12, title: "diff — What Changed")
+#chapter(number: 14, title: "diff — What Changed")
 
 `merge` tells you what a union contains. It does not tell you, in plain
 terms, what is *new* since the last time you looked, what one source has
@@ -412,7 +447,7 @@ idea," because that judgement is exactly the kind of soft equivalence a
 content hash refuses to manufacture.
 
 `common` becomes the informative column once the two stores in question
-really did share a starting point — which is precisely what Chapter 11's
+really did share a starting point — which is precisely what Chapter 13's
 `--staged` example produced. Diff the original store against the one with
 the staged batch committed into it:
 
@@ -450,7 +485,7 @@ and it is worth being honest about why rather than reaching for a fixture
 that happens to look different. Every `.smy` file this book has used is
 hand-authored surface text — a person wrote `@claim c/pool-saturation`
 directly. Attestations, and the hop number carried on them, are stamped by
-`ingest` (Chapter 8) or by a semantic pass (Chapter 9), not by the surface
+`ingest` (Chapter 10) or by a semantic pass (Chapter 11), not by the surface
 grammar itself: there is no way to write a hop into a `.smy` file by hand,
 because attesting *is* the act of a pipeline recording who touched a unit
 and when. A store built entirely from hand-authored text has zero
@@ -478,7 +513,7 @@ flag reads.
     prompt template and its version. Two attestations sharing a
     `recipe_family` but not a `recipe` were produced by a different vendor
     answering the same logical question; two differing in `recipe_family`
-    came from a genuinely different prompt. Chapter 10 covers where this
+    came from a genuinely different prompt. Chapter 12 covers where this
     hash comes from in full.
   ]
   each attestation carries. Both inherit the same requirement `--hop` has:
@@ -490,8 +525,43 @@ flag reads.
   changed it. It does not tell you *why* a specific surviving unit is
   entitled to the status it has, or what would fall if one of its grounds
   were pulled out from under it. That question — walking a single unit's
-  actual support, not the whole store's turnover — is Chapter 13's `trace`.
+  actual support, not the whole store's turnover — is Chapter 15's `trace`.
 ]
+
+#exercises((
+  [Run `smysl diff fixtures/corpus/F8a-agent-alpha.smy
+   fixtures/corpus/F8b-agent-beta.smy`. It reports *6 only, 5 only, 0 common* —
+   two documents about the same incident with not one unit in common. Given
+   Chapter 2's rule about how identity is computed, explain why that is
+   unsurprising rather than alarming.],
+  [Following from that: what would have to be true of two independently written
+   documents for `diff` to report units in common? Is that a realistic thing to
+   engineer for, and if not, what is `merge` for?],
+  [Merge the two files, then `diff` the merged store against each input in
+   turn. Predict both numbers before you run it.],
+))
+
+#answers((
+  [A uid is a hash of the unit's canonical content, and two agents writing
+   independently about the same incident will not produce byte-identical
+   gists — one writes "Gateway p99 rose to 2.4 s", the other phrases it
+   differently. Different content, different identity. `0 common` means the two
+   agents wrote separately, which is what they did; it is not a sign that
+   anything went wrong.],
+  [They would have to share an *exact* unit — the same type, gist, status,
+   grounds and payload, byte for byte — which in practice means one document
+   was derived from the other, or both from a common ancestor. Engineering for
+   it is not the goal. `merge` exists precisely because the interesting case is
+   documents with *no* units in common but plenty to say about each other: it
+   keeps both sides and materialises the disagreements as contentions rather
+   than pretending the overlap it needed was there.],
+  [`5 only, 0 only, 6 common` against alpha and `6 only, 0 only, 5 common`
+   against beta — the middle column is zero both times, and 6 + 5 is the
+   merged store's 11 units. The merge added and never subtracted. That middle
+   column is the one to watch as a habit: a non-zero count there would mean a
+   unit present in an input went missing from the merge, which rule U forbids
+   outright.],
+))
 
 #recap((
   [`diff` between two stores partitions uids into `only in A`, `only in B`,
@@ -513,9 +583,9 @@ flag reads.
    provenance.],
 ))
 
-#chapter(number: 13, title: "trace — Walking Provenance")
+#chapter(number: 15, title: "trace — Walking Provenance")
 
-`salience` (Chapter 15) ranks a whole store; `pack` (Chapter 17) decides what
+`salience` (Chapter 17) ranks a whole store; `pack` (Chapter 19) decides what
 survives a budget. Neither one answers the question you actually reach for
 when someone pushes back on a specific claim: *where does this one thing's
 certainty actually come from?* `trace` walks exactly that — one unit's
@@ -576,7 +646,7 @@ answer to "where did this content come from," not a broken trace: for a
 document nobody derived from an earlier version, the honest lineage is one
 step long.
 
-`F8a-agent-alpha.smy` has real `supersedes` edges — Chapter 11's fork over
+`F8a-agent-alpha.smy` has real `supersedes` edges — Chapter 13's fork over
 `c/alpha-scope` — and `--parents` finds them from either side:
 
 #screen(caption: "$ smysl trace --parents b3:e3f6wpuw6ie4ruf2ba62yrtagg fixtures/corpus/F8a-agent-alpha.smy")[
@@ -588,7 +658,7 @@ fixtures/corpus/F8a-agent-alpha.smy: 2 unit(s) over 1 step(s)
 ]
 
 That revision of the pool-size claim supersedes `c/alpha-scope`
-(`b3:v5sjn55…`) — the exact unit Chapter 11 showed forked, from the other
+(`b3:v5sjn55…`) — the exact unit Chapter 13 showed forked, from the other
 direction: tracing *from* `c/alpha-scope` itself with `--parents` finds
 nothing, because `trace` follows `supersedes` outward from whichever unit
 you name, and `c/alpha-scope` is the *target* of that edge, not its source.
@@ -634,7 +704,7 @@ fixtures/corpus/F1-incident.smy: 6 unit(s) over 2 step(s)
 ```
 ]
 
-No bracketed agent names appear, for the same reason Chapter 12's `--hop`
+No bracketed agent names appear, for the same reason Chapter 14's `--hop`
 came up empty: attribution reads from attestations, and a store built
 straight from hand-authored surface text has none. `--agents` earns its
 keep once a corpus has actually been through `ingest` or `attest` — at that
@@ -647,7 +717,7 @@ whichever agents actually touched it, turning "what does this rest on" into
 Every uid-taking flag in this book — `--focus`, `--seed`, `--roots`, and
 `trace`'s own positional argument — takes a real content hash, never a
 surface label. This is not a suggestion; the store enforces it, and the
-failure is exactly as blunt as Chapter 17 already showed for `pack`:
+failure is exactly as blunt as Chapter 19 already showed for `pack`:
 
 #screen(caption: "$ smysl trace c/pool-saturation fixtures/corpus/F1-incident.smy")[
 ```
@@ -659,7 +729,7 @@ Exit code `1`. `c/pool-saturation` is only ever a name inside the one file
 that declared it — it has no existence at the store level, where the only
 identity a unit has is the hash of what it says. The real uid behind that
 label, `b3:cvhirtgs2mpvli2ethhyeo32uf`, is what every example in this chapter
-actually used, and it is exactly the same hash Chapter 17's `pack --focus`
+actually used, and it is exactly the same hash Chapter 19's `pack --focus`
 resolved for the same claim — content hashes are stable across every command
 that ever touches this fixture, which is the whole point of computing
 identity from content rather than position.
@@ -668,7 +738,7 @@ When you do not already know a unit's real uid, the practical path is the
 one this book has used throughout: run `smysl --format surface pack --budget
 <large> --explain <file>` and read every unit's hash straight off the top of
 the output, or reach for `thread --show` once a thread already names the
-unit you care about (Chapter 18). Either way, the uid you paste into `trace`
+unit you care about (Chapter 20). Either way, the uid you paste into `trace`
 has to have come from the store itself — never typed from memory, never
 guessed from a label that merely looks similar.
 
@@ -676,10 +746,46 @@ guessed from a label that merely looks similar.
   Once you can walk from a claim to exactly what it rests on, the next
   question is usually "how do I hand *that* to someone else" — not the
   whole corpus, just the reachable set a trace just proved matters.
-  Chapter 14's `view` and `bundle` take a set of roots and compute exactly
+  Chapter 16's `view` and `bundle` take a set of roots and compute exactly
   that reachable closure as a portable, self-contained store — the natural
   next step once `trace` has told you what the roots should be.
 ]
+
+#exercises((
+  [Run `trace` on `f/root-cause` in `F1-incident.smy` with the default
+   `--grounds`, then again with `--parents`. The first walks six units over two
+   steps; the second returns just the root, over zero steps. The second result
+   looks broken. Argue that it is exactly right.],
+  [`trace --grounds` reaches `d/p95`, a *definition*, through `deps` rather
+   than `grounds`. If you retracted `d/p95`, would `c/regression` become
+   unfounded? Answer from what the two edge kinds mean, then check yourself
+   against Chapter 18.],
+  [Someone challenges the finding in a review. Using only `trace` output, write
+   the two-sentence answer you would give them — and then name the one thing
+   `trace` cannot tell you that they might have actually been asking.],
+))
+
+#answers((
+  [`--parents` walks *causal* lineage: attestation parents and `supersedes`.
+   `F1-incident.smy` is a single hand-authored document — no unit in it was
+   transformed from an earlier one and nothing supersedes anything — so there
+   is genuinely no causal ancestry to walk. Zero steps is the honest answer to
+   "where did this content come from" for content that came from a person
+   typing it. A tool that invented a chain here would be worse than one that
+   returns a root alone.],
+  [No. `deps` means *you need this to parse the wording* — `c/regression` says
+   "p95 tripled" and `d/p95` defines what p95 means. `grounds` means *the claim
+   falls without this*. Retracting the definition makes the claim harder to
+   read, not unsupported; only its `grounds` (`e/trace`) carries its truth. The
+   distinction is why the two lists are separate fields rather than one.],
+  [Something like: the finding rests on `c/pool-saturation` and `c/regression`;
+   those rest in turn on two measured metrics and a cited definition, two steps
+   down, with no gaps. What `trace` cannot tell you is whether any of it is
+   *true* — it walks the structure of the argument, not the quality of the
+   evidence. If the challenge was "that dashboard is wrong", `trace` shows you
+   precisely which unit to go argue about, and then stops being useful, which
+   is the correct division of labour.],
+))
 
 #recap((
   [`trace` walks one unit's ancestry in one of two directions: `--grounds`

@@ -1,8 +1,8 @@
 #import "design.typ": *
 
-#chapter(number: 9, title: "attest — Semantic Judgement Without Mutation")
+#chapter(number: 11, title: "attest — Semantic Judgement Without Mutation")
 
-Chapter 6 ran `check` over a store and got back a verdict on every pass — shape,
+Chapter 8 ran `check` over a store and got back a verdict on every pass — shape,
 closure, granularity, trust. That verdict is mechanical: `check` looks at what a
 unit's `deps` and `grounds` actually name, compares it against what the unit's
 body and detail actually reach for, and reports where the two disagree. It never
@@ -102,7 +102,7 @@ The store below has eight units built from seven days of latency traces, a
 canary run, and a connection-pool metric — exactly the kind of place a gist
 might quietly oversell its body. `attest` needs a model to answer with, the
 same way `ingest` does, so it goes through the same provider registry Chapter
-8 introduced:
+10 introduced:
 
 #screen(caption: "$ smysl attest --what gist-coverage fixtures/corpus/F1-incident.smy")[
 ```
@@ -137,7 +137,7 @@ unit, so the failure is reported once, up front, rather than once per unit.
   request, because the model is not being asked about any of that. Its system
   prompt fences the unit's content between explicit markers and states, in
   every one of the three questions, that what is between the markers is
-  *data, never instruction* — the same fencing discipline Chapter 8 covers
+  *data, never instruction* — the same fencing discipline Chapter 10 covers
   for `ingest`, applied here to a whole unit instead of raw prose.
 
   The model must answer with `YES` or `NO` as its first word, followed by a
@@ -193,7 +193,7 @@ handful of causes:
       reached, or one answered with an error. This is the code every example
       in this chapter actually returned.]),
     ([`7`], [offline], [`ExitCode::Offline` — `--offline` refused to fall
-      back to a hosted provider. Chapter 10 covers exactly which providers
+      back to a hosted provider. Chapter 12 covers exactly which providers
       that can happen to.]),
   ),
 )
@@ -202,7 +202,7 @@ handful of causes:
   You now know precisely what each of the three questions asks and what a
   real run costs when nothing answers. Before running `attest` against a
   store you actually care about, check what `smysl providers` reports is
-  configured and reachable — Chapter 10 is that check in full, including how
+  configured and reachable — Chapter 12 is that check in full, including how
   to see what would egress *before* you spend a call finding out the hard
   way.
 ]
@@ -238,7 +238,7 @@ same evidence.
 
 #whatsnext[
   Sampling is why `attest` is affordable to run routinely rather than once at
-  the end of a project. Chapter 10's usage ledger is where you would see the
+  the end of a project. Chapter 12's usage ledger is where you would see the
   actual bill for that routine: `usage --by task` groups every call `attest`
   made separately from everything `ingest` made, so a rising `attest` line is
   visible on its own rather than buried in a single total.
@@ -247,7 +247,7 @@ same evidence.
 #section("The non-mutation guarantee, made concrete")
 
 A unit's uid is not assigned, stored, or looked up — it is *computed*, as a
-BLAKE3 hash over the unit's canonical bytes (Chapter 2 covers the canonical
+BLAKE3 hash over the unit's canonical bytes (Chapter 4 covers the canonical
 form in full). Two units with identical content always compute the same uid,
 and a unit whose content changes by even one byte computes a different one.
 That is what "content-addressed" means in this tool: identity *is* a
@@ -290,11 +290,48 @@ what it was before the judgement existed.
   it is not supposed to be: fixing a gist or splitting a unit is authoring,
   and authoring belongs to a human or to `ingest`'s staged-and-confirmed path,
   never to a command whose entire contract is that it does not write units.
-  Go back to Chapter 4 (writing units by hand) or Chapter 6 (`check` and
+  Go back to Chapter 6 (writing units by hand) or Chapter 8 (`check` and
   repair) to act on what the judgement told you — rewrite the gist, split the
   unit, or record that you disagree and move on. `attest` has done its job
   once the judgement exists; deciding what to do about it is yours.
 ]
+
+#exercises((
+  [Run `smysl attest --offline fixtures/corpus/F1-incident.smy` and check the
+   exit code. Now recall from Chapter 10 that `ingest --offline` on plain text
+   exits `10` and produces a degraded unit. Same missing model, two different
+   outcomes. Explain the difference in terms of what each command would have
+   to invent in order to carry on.],
+  [The chapter title says *without mutation*. Run `attest` against a store and
+   then check whether any unit's uid changed. Why would an `attest` that
+   adjusted statuses in place be a worse tool, even if its judgements were
+   perfect?],
+  [An attestation records a rung. Given Chapter 2's rule T, describe what
+   happens to a unit that already reads `measured` when an attestation is
+   attached to it at the `model` rung.],
+))
+
+#answers((
+  [`ingest` can fall back to opaque prose: the text exists whether or not a
+   model structured it, so there is always something honest to record — a
+   `speculative` unit marked `ingest:unrepaired`. `attest` is asked for a
+   *judgement*, and there is no honest fallback for a judgement nobody made.
+   Degrading would mean fabricating an opinion, so it declines and exits `6`.
+   Rule I is a promise about progress, not a promise that every command can
+   always produce output.],
+  [Because the judgement and the document would become inseparable. Keeping
+   the attestation as a separate record means you can see *that* a model
+   assessed a unit, at what rung, and when — and disagree with it without
+   rewriting the unit. A tool that silently adjusted statuses would leave a
+   document whose history could not be reconstructed, and the reviewer would
+   have no way to tell an author's `inferred` from a machine's.],
+  [Nothing is rewritten, but the unit is now checkable and fails: rule T caps
+   a unit at the ceiling of its provenance, and the `model` rung's ceiling is
+   `inferred`, so `measured` exceeds it and `check` reports `SMY-E033`. This
+   is the mechanism from Chapter 1 doing its job — before the attestation the
+   `measured` was an unchecked claim, and attaching provenance is exactly what
+   makes it checkable.],
+))
 
 #recap((
   [`check` verifies consistency mechanically; `attest` asks a model a
@@ -317,7 +354,7 @@ what it was before the judgement existed.
     to authoring — by hand or through `ingest`.],
 ))
 
-#chapter(number: 10, title: "Providers and Usage")
+#chapter(number: 12, title: "Providers and Usage")
 
 `attest` and `ingest` both need to reach a model, and both go through the
 same registry to do it. This chapter is that registry from the outside: what
@@ -329,7 +366,7 @@ both are recorded so neither is a surprise.
 #callout(label: "Why")[
   A model call to a hosted provider sends unit content somewhere outside this
   machine. Knowing *that will happen* before it happens is the entire point
-  of `--offline` (Chapter 7) — and `--offline` is only as trustworthy as your
+  of `--offline` (Chapter 9) — and `--offline` is only as trustworthy as your
   own knowledge of what is routed where. `providers` is how you get that
   knowledge without spending a call to find it out: every mode below either
   reports configuration that is already known, or makes exactly one round
@@ -567,7 +604,7 @@ be an error.
 To see a populated ledger without a reachable model, run `ingest` against a
 scrap of prose in this same offline environment. `ingest` degrades a chunk to
 opaque prose when the provider it needs cannot be reached rather than
-failing the whole run — Chapter 8 covers that path in full — and it still
+failing the whole run — Chapter 10 covers that path in full — and it still
 records the attempt:
 
 #screen(caption: "$ echo \"The auth service saw a latency regression after the 4.2 release.\" | smysl ingest --yes")[
@@ -601,7 +638,7 @@ silently discarding one.
 Read this honestly rather than generalising it: in this build, `ingest` is
 the command that writes the ledger from the CLI. `attest`'s own report
 carries a token total too (the `N token(s)` in its final summary line from
-Chapter 9), but that total is not currently appended to
+Chapter 11), but that total is not currently appended to
 `.smysl/usage.log` the way an `ingest` call's is. If you are reconciling
 `usage` totals against a batch of `attest` runs, the ledger will
 under-report them — the number to trust for `attest`'s own cost, today, is
@@ -650,10 +687,48 @@ history, never permission.
   (`providers`), and after a call, exactly what it cost and under what recipe
   (`usage`). That is the whole cost and egress discipline this manual asks of
   you — the rest of the book is about the documents themselves. Part V opens
-  with Chapter 11, `merge`: the first command that actually changes what a
+  with Chapter 13, `merge`: the first command that actually changes what a
   store contains by joining two of them, now that you know what it costs to
   get material into one in the first place.
 ]
+
+#exercises((
+  [Run `smysl providers --tasks` with no network available. It prints a
+   routing table anyway. Read the `egress` column: every row says `local`
+   against a default build. Change nothing, and say what that column would
+   have to show before you would be willing to run `ingest` on a document
+   under embargo.],
+  [Run `smysl usage`. If you have ever run `ingest`, you have rows. Note what
+   the ledger records — provider, call count, token counts — and what it
+   conspicuously does not. Why is the omission the whole point of keeping a
+   ledger at all?],
+  [`providers` exits `0` even when no provider is reachable. Contrast that
+   with `attest --offline`, which exits `6`. Both commands "failed to reach a
+   model." Why is only one of them a failure?],
+))
+
+#answers((
+  [Any row reading `hosted` (or naming a remote vendor) for a task the
+   document would exercise — `content-ingest` and `relation-extraction` are
+   the two `ingest` uses. The value of the column is that it is computed from
+   configuration rather than observed from traffic, so you can answer "where
+   would this go" before anything goes anywhere, which is the only order in
+   which the question is useful.],
+  [It records that a call happened, to whom, and how large — never the content
+   of the call. A ledger that stored prompts would be a second copy of every
+   document you ever ingested, sitting in a cache nobody audits, which is
+   precisely the exposure the boundary exists to control. You get cost and
+   volume accountability without creating a new place for the content to
+   leak.],
+  [`providers` succeeded at its job. Its job is to report configuration, and
+   it reported configuration correctly — reachability is not a precondition
+   for describing a routing table. `attest`'s job is to obtain a judgement
+   from a model; with no model, there is no judgement, and unlike `ingest`
+   there is nothing to degrade to. Rule I promises `ingest` always makes
+   progress because a span can fall back to opaque prose; a semantic
+   judgement has no such fallback, so `attest` reports `6` rather than
+   inventing one.],
+))
 
 #recap((
   [`providers` (no flags) reports configuration without contacting anything;

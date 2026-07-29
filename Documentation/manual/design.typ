@@ -147,6 +147,75 @@
   v(2mm)
 }
 
+// ── "Try this" — a short, checkable exercise the reader can actually run.
+//    Distinct from `callout` on purpose: a callout is something to read, this
+//    is something to do, and the reader should be able to tell at a glance
+//    which is which while skimming. Every exercise in this book was run
+//    against the real binary before it was written down. ──
+#let ink_try    = rgb("#8a5a2b")
+#let ink_try_bg = rgb("#f7f0e6")
+
+#let exercise(label: "Try this", body) = {
+  v(2mm)
+  block(
+    fill: ink_try_bg, stroke: (left: 2pt + ink_try),
+    inset: (left: 9pt, right: 9pt, top: 7pt, bottom: 7pt),
+    width: 100%, radius: 1pt, breakable: false,
+    {
+      text(font: body_family, size: 8pt, weight: "bold", fill: ink_try, tracking: 1.5pt, upper(label))
+      v(2mm)
+      body
+    },
+  )
+  v(2mm)
+}
+
+// ── Chapter-end exercises, and their answers ─────────────────────────────
+//
+// Answers sit immediately below the questions rather than in an appendix.
+// That is a deliberate trade: it costs a reader the chance to be tested
+// honestly, and it buys a reader who is *not* at a terminal the ability to
+// still learn something from the exercise. This book assumes the second
+// reader is more common. The answers are set smaller and greyer so the eye
+// can be told to stop at the questions.
+#let exercises(items) = {
+  v(7mm)
+  block(
+    fill: ink_try_bg, stroke: (left: 2pt + ink_try),
+    inset: (left: 9pt, right: 9pt, top: 8pt, bottom: 8pt),
+    width: 100%, radius: 1pt, breakable: true,
+    {
+      text(font: body_family, size: 9pt, weight: "bold", fill: ink_try, tracking: 1.5pt, "TRY THIS")
+      v(2mm)
+      enum(..items)
+    },
+  )
+}
+
+#let answers(items) = {
+  v(2mm)
+  block(
+    stroke: (left: 1pt + ink_rule),
+    inset: (left: 9pt, right: 9pt, top: 5pt, bottom: 5pt),
+    width: 100%, breakable: true,
+    {
+      text(font: body_family, size: 8pt, weight: "bold", fill: ink_faint, tracking: 1.5pt, "ANSWERS")
+      v(1.5mm)
+      set text(size: 9.5pt, fill: ink_gray)
+      // Inline code inherits the book-wide 9.5pt rule, which is set against 11pt body
+      // text. At the answers' 9.5pt it reads a size too large and, worse, an over-long
+      // span cannot break - it shoves the line it sits on into a river of white space.
+      // Scaling it here keeps the proportion the rest of the book has.
+      show raw.where(block: false): it => box(
+        fill: ink_code_bg, inset: (x: 2pt, y: 0pt), outset: (y: 1.5pt), radius: 1pt,
+        text(font: mono_family, size: 8.2pt, it),
+      )
+      enum(..items)
+    },
+  )
+  v(3mm)
+}
+
 // ── Chapter-end recap ────────────────────────────────────────────────────
 #let recap(items) = {
   v(7mm)

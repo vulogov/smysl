@@ -2,7 +2,7 @@
 
 #part(number: "III", title: "Validating While You Write")
 
-#chapter(number: 6, title: "check in the Authoring Loop")
+#chapter(number: 8, title: "check in the Authoring Loop")
 
 You have written a handful of units by hand, or ingested a handful and staged
 them — either way, you now have a `.smy` file and a belief that it says what
@@ -10,7 +10,7 @@ you meant. `check` is how that belief stops being a belief. This chapter is
 about the loop you actually run while a document is still moving: write a
 little, check it, read what comes back, fix it, write more. The full ten-pass
 pipeline — what each pass does, in what order, and why that order is fixed —
-is Chapter 19. Here, `check` is a tool you reach for mid-sentence, not a
+is Chapter 21. Here, `check` is a tool you reach for mid-sentence, not a
 report you generate at the end.
 
 #section("Why check is a step, and not a formality")
@@ -145,7 +145,7 @@ mistake3.smy: 3 records, 2 units, 1 diagnostic(s)
 
 Exit code `0`. This is the first diagnostic in this chapter that did not
 stop anything: the summary line still prints, and the process still succeeds.
-`SMY-W041` is a *granularity* remark (Chapter 19 covers the full pass) — the
+`SMY-W041` is a *granularity* remark (Chapter 21 covers the full pass) — the
 default profile expects an `l1` body of 40 to 120 tokens, and three tokens is
 under that, but nothing here is factually wrong. A three-word elaboration is
 usable; it just is not doing the elaborating it claims to be there for. A
@@ -189,8 +189,8 @@ progress" and "a document a CI job is about to let through":
   A document that `check` reports clean is trustworthy in the narrow sense
   `check` promises — internally consistent, shape-valid, nothing dangling —
   and that is now the fork. If the next thing you want is more content, an
-  outside model can propose units at the boundary Chapter 7 sets up, and
-  Chapter 8 shows exactly how that proposal gets reviewed before it counts.
+  outside model can propose units at the boundary Chapter 9 sets up, and
+  Chapter 10 shows exactly how that proposal gets reviewed before it counts.
   If the document is already complete and you want to *operate* on it —
   merge it with another author's work, diff two versions, trace a claim back
   to its grounds — that is Part V. If it is ready to leave your machine as a
@@ -199,6 +199,39 @@ progress" and "a document a CI job is about to let through":
   because none of the commands on the other side of this fork re-derive
   consistency for you.
 ]
+
+#exercises((
+  [Run `smysl check fixtures/corpus/F7-mixed-granularity.smy` and note the
+   exit code. Then run it again with `--strict`. The diagnostics printed are
+   *identical* and the exit codes differ. Explain what `--strict` actually
+   changes, and name a situation where you want each setting.],
+  [Run `smysl check --json fixtures/corpus/F6-adversarial.smy`. Compare the
+   shape of that output to the human form. What does the JSON deliberately
+   *not* include that the text form does, and who is the missing part for?],
+  [`check` reports "13 records, 9 units" on `F7`. Chapter 8 says `check`
+   verifies consistency and never correctness. Write down one thing about that
+   file a clean `check` run does *not* entitle you to believe.],
+))
+
+#answers((
+  [Nothing about the analysis — only the threshold at which the run is called
+   a failure. Plain `check` prints warnings and exits `0`; `--strict` promotes
+   warning severity to the failure threshold and exits `3`. Use plain while
+   drafting, where a granularity warning is information and not a blocker, and
+   `--strict` in CI, where the point is to refuse anything the tool frowns at
+   before it reaches a reviewer.],
+  [It omits the summary line and the human-facing `[try: …]` suggestion
+   framing, giving one JSON object per diagnostic with `code`, `severity` and
+   `message`. The omitted parts are for a person deciding what to do next; a
+   program wants a stable, parseable record per finding and computes its own
+   summary. Two audiences, two renderings, one analysis.],
+  [That any claim in it is true. A clean run means every reference resolves,
+   no status outranks its grounds, and every unit fits its declared
+   granularity — all properties of the *bytes*. The document could be
+   internally impeccable and factually wrong throughout, and `check` would
+   still print `0 diagnostic(s)`. Correctness is what the source references
+   and a human reviewer are for.],
+))
 
 #recap((
   [`check` verifies consistency, not correctness — it catches a dangling
@@ -213,7 +246,7 @@ progress" and "a document a CI job is about to let through":
 
 #part(number: "IV", title: "Infer and Enrich")
 
-#chapter(number: 7, title: "The Model Boundary")
+#chapter(number: 9, title: "The Model Boundary")
 
 Everything in Part III happens on your machine, deterministically, from
 files you already have. This chapter is about the three places that stops
@@ -226,6 +259,12 @@ being true.
   (the one flag on `thread` that touches a model — plain `thread` does not).
   Every other command in `smysl` is a pure function of its inputs: same
   bytes in, same bytes out, on any machine, forever.
+
+  This is a statement about *permission*, and the distinction matters when you
+  audit a build. `--refine` is not wired in this version, so only two commands
+  can actually open a socket today. `thread` is classified against what it is
+  allowed to become, so that nothing downstream has to be re-audited on the
+  day the flag lands.
 ]
 
 #callout(label: "Why")[
@@ -265,7 +304,7 @@ egress content nobody asked to send. Route a task to a hosted provider
 instead — an Anthropic or OpenAI-shaped endpoint that is not a loopback
 address — and the same column reports `LEAVES`, before anything is sent,
 because `egress` here is read from configuration, not from a probe.
-Chapter 10 covers configuring providers in depth; what matters here is that
+Chapter 12 covers configuring providers in depth; what matters here is that
 the report is unconditionally safe to run — asking the question makes no
 network call itself.
 
@@ -317,16 +356,53 @@ whether the network happens to be up, and it costs nothing to check.
 #whatsnext[
   You now know which three commands can reach outside this machine, and how
   to prove it (`--tasks`) and forbid it (`--offline`) without trusting either
-  claim. Chapter 8 walks through the first of the three in full: `ingest`,
+  claim. Chapter 10 walks through the first of the three in full: `ingest`,
   which is where a model gets to *propose* new units, and the whole chapter
   is about why "propose" is the right word and what has to happen before a
   proposal counts as part of your document.
 ]
 
+#exercises((
+  [Run `smysl providers --tasks` (Chapter 12 covers the output in full). It
+   makes no network call, yet it can tell you what *would* be sent where. How
+   is that possible, and why is a command that reports on egress without
+   performing any the right tool for auditing a policy?],
+  [`--offline` is described as enforcement rather than a warning. Construct
+   the argument for why a *flag* can be trusted as enforcement here, given
+   that a flag is just an argument a caller might forget. What in the build,
+   rather than in the flag, is doing the real work?],
+  [Chapter 9 draws the model boundary as narrowly as it can. Name a
+   convenience the tool gives up by refusing to let, say, `render` consult a
+   model to smooth its prose — and then name what that refusal buys.],
+))
+
+#answers((
+  [Routing is configuration, not a conversation: which task goes to which
+   provider is decided locally before any socket opens, so it can be reported
+   locally. That is what makes it auditable — a command that had to call out
+   to tell you what it calls out to would be useless as a policy check,
+   because running the audit would itself be the thing you were trying to
+   police.],
+  [The flag is the *interface*, not the mechanism. The library layers that can
+   open a socket are separate crates behind feature flags, and the purity
+   classification is asserted by the binary's own test suite rather than
+   documented and hoped for. A build compiled without those features cannot
+   reach a model whatever flags you pass, which is the version of the promise
+   you can hand to someone who does not trust you.],
+  [It gives up fluency: a rendered brief is exactly as well-written as the
+   gists people typed, and no step will quietly improve them. What it buys is
+   that `render` is bit-reproducible — the same thread and profile produce the
+   same bytes forever, on any machine — so a rendered artifact can be
+   regenerated years later and compared against the one that was signed off.
+   A model in that path would make the artifact unreproducible, and an
+   unreproducible artifact cannot be audited.],
+))
+
 #recap((
-  [Exactly three commands may depend on a model: `ingest`, `attest`, and
-   `thread --refine`. Everything else is a pure function of its inputs,
-   asserted in the binary's own tests, not just documented.],
+  [Exactly three commands may *ever* depend on a model: `ingest`, `attest`,
+   and `thread --refine` — of which only the first two are wired today.
+   Everything else is a pure function of its inputs, asserted in the binary's
+   own tests, not just documented.],
   [`smysl providers --tasks` reports, with no network call, which task
    routes to which provider and whether that provider is local or would
    leave the machine.],
@@ -337,7 +413,7 @@ whether the network happens to be up, and it costs nothing to check.
    nothing hosted to refuse.],
 ))
 
-#chapter(number: 8, title: "ingest: From Prose to Staged Units")
+#chapter(number: 10, title: "ingest: From Prose to Staged Units")
 
 `ingest` is the command that turns prose, or any document you did not write
 in `.smy` yourself, into units a model proposed on your behalf. It is also
@@ -549,7 +625,7 @@ have three ordinary options at this point, not a mysterious ritual:
   keeping, correct a `gist`, tighten a status you think the model was
   generous with. It is text; edit it like text.
 - *Check it first.* `smysl check .smysl/staged.smy` runs the same pipeline
-  Chapter 6 walked through, against the staged file directly — catching a
+  Chapter 8 walked through, against the staged file directly — catching a
   shape problem before it ever touches your real store.
 - *Merge it, or don't.* Confirmed units become part of your document only
   when you say so, which is the next section.
@@ -568,7 +644,7 @@ first-class, not workarounds:
   (
     ([Action], [What it does], [Why you'd choose it]),
     ([Do nothing yet], [Staged file sits at `.smysl/staged.smy`; exit stays `10`], [You want to read it, maybe in an editor, before deciding — the default, and the safest one]),
-    ([`smysl merge --staged`], [Commits the staged records into a real store, via the ordinary merge join (Chapter 11)], [You've reviewed it — by eye, by `check`, or both — and it's ready to become part of the document]),
+    ([`smysl merge --staged`], [Commits the staged records into a real store, via the ordinary merge join (Chapter 13)], [You've reviewed it — by eye, by `check`, or both — and it's ready to become part of the document]),
     ([`ingest --yes`], [Same staging happens, but `ingest` itself exits `0` — "staged and confirmed" — instead of `10`], [You've decided in advance that this class of ingest doesn't need a pause — a script that already trusts this recipe and provider]),
     ([`rm .smysl/staged.smy`], [Discards the batch outright; nothing was ever in your real store to undo], [The proposal isn't worth keeping — maybe the whole run degraded, maybe you changed your mind]),
   ),
@@ -644,14 +720,48 @@ never a failed run.
   A staged batch is just a store that happens to live at
   `.smysl/staged.smy` instead of wherever your real document lives — which
   is why every tool that works on a store already works on it. Before
-  merging anything, run `smysl check .smysl/staged.smy` the way Chapter 6
+  merging anything, run `smysl check .smysl/staged.smy` the way Chapter 8
   showed, on the batch alone, so you're reading the model's proposal against
   the same bar your own hand-written units have to clear. Once it's clean —
   or you've edited it until it is — `smysl merge --staged` is where it stops
-  being a proposal, and Chapter 11 picks up exactly there: what a join
+  being a proposal, and Chapter 13 picks up exactly there: what a join
   actually does, how a contention is recorded rather than silently resolved,
   and what "merge" means when two independent batches disagree.
 ]
+
+#exercises((
+  [Run `smysl ingest --offline` on any plain-text file, with no model
+   configured at all. It does not fail. Read the three lines it prints, then
+   `cat .smysl/staged.smy`, then run `echo $?`. Three separate rules are being
+   demonstrated at once — name them.],
+  [Look at the staged unit's status. It is `speculative`, and it carries
+   `ingest:unrepaired: true`. Given that the provider was never reachable and
+   no model saw this text, argue why `speculative` is the only defensible
+   status the tool could have written there.],
+  [Delete `.smysl/staged.smy` without merging it. What have you lost, and what
+   is the state of your real store? Now explain why that is the answer the
+   design wants.],
+))
+
+#answers((
+  [Rule I — ingest always makes progress: the provider was unreachable, so the
+   span degraded to opaque prose (`SMY-W304`) rather than the run failing.
+   Rule S — model output never enters a store directly: the unit went to
+   `.smysl/staged.smy`, not to anything you own. And the exit code is `10`,
+   not `0`, because the job is deliberately unfinished — the tool is telling a
+   calling script that a decision is outstanding.],
+  [Nothing supports it. `speculative` is precisely the rung for *offered, not
+   yet grounded*, and every other rung would be a lie: `inferred` would claim
+   a model reasoned it out, and no model ran; `cited` or `measured` would
+   claim a source, and the only "source" is the sentence itself. Rule T caps
+   what ingest may claim in the first place, and with no successful call there
+   is nothing to claim at all.],
+  [You have lost nothing except the proposal, and your real store was never
+   touched — it is exactly as it was before you ran the command. That is the
+   design: the default outcome of an ingest you do not actively accept is that
+   nothing happened. Making rejection free and acceptance deliberate is what
+   puts the human decision on the path rather than beside it.],
+))
 
 #recap((
   [`ingest` never writes to your real store; it writes readable, editable

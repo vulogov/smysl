@@ -4,7 +4,7 @@
 #part(number: "VIII", title: "smysl as a Library")
 // ═══════════════════════════════════════════════════════════════════════
 
-#chapter(number: 25, title: "The Facade Crate and Feature Flags")
+#chapter(number: 27, title: "The Facade Crate and Feature Flags")
 
 Every workflow so far has gone through the `smysl` binary. This chapter is about the
 thing underneath it — because the binary is not where the work happens.
@@ -27,7 +27,7 @@ thing underneath it — because the binary is not where the work happens.
 ```
 
 The rest of this section is that promise checked, not asserted. Take `pack` — the command
-Chapter 16 built a whole workflow around. `src/lib.rs` re-exports it from `smysl-pack`:
+Chapter 18 built a whole workflow around. `src/lib.rs` re-exports it from `smysl-pack`:
 
 ```
 pub use smysl_pack::{
@@ -48,7 +48,7 @@ let outcome = smysl::pack(&store, &sal, &req);
 There is no private `pack_impl` inside the binary that the public `smysl::pack` merely
 wraps. `req` is a `PackRequest` you could have built yourself; `store` is a `Store` you
 could have built yourself; `sal` is a `SalienceReport` from a call you could have made
-yourself. Chapter 26 does exactly that, end to end, with nothing named `main`.
+yourself. Chapter 28 does exactly that, end to end, with nothing named `main`.
 
 #term("Facade crate")[
   The `smysl` crate itself: a `[lib]` re-exporting the public surface of every other crate
@@ -129,14 +129,50 @@ client, no argument parser, anywhere.
 
 The same flag makes the test suite itself meaningfully smaller: `cargo test
 --no-default-features --lib` builds and runs the crate's own unit tests, including the one
-Chapter 26 walks through, with nothing beyond `smysl-core`, `smysl-graph`, `smysl-check`,
+Chapter 28 walks through, with nothing beyond `smysl-core`, `smysl-graph`, `smysl-check`,
 `smysl-pack`, `smysl-thread`, and `smysl-render` compiled at all.
 
 #whatsnext[
   You now know *what* is reachable from Rust and *how little* it costs to reach it.
-  Chapter 26 reaches it — a real program, compiled and run against exactly this facade,
+  Chapter 28 reaches it — a real program, compiled and run against exactly this facade,
   with `default-features = false` the whole way through.
 ]
+
+#exercises((
+  [Chapter 27 claims nothing the CLI does is unreachable from the crate. Pick a
+   command you have used in this book and find the library function behind it.
+   Then say why "the library is the product, the CLI is its first consumer" is
+   a testable claim rather than a slogan.],
+  [Run `cargo build --no-default-features` and then
+   `cargo build --no-default-features --bin smysl`. Explain the difference in
+   outcome to somebody who has not read Chapter 4.],
+  [You are asked to add `smysl` to a service that must be certified as unable
+   to send data to a third party. Which feature flags do you enable, and what
+   can you tell the auditor that a runtime flag could not?],
+))
+
+#answers((
+  [Because if it were false, some behaviour would exist only inside
+   `src/main.rs` and could not be reached from a test that imports the crate.
+   The claim is checked by the CLI itself being written against the public API
+   — every subcommand is a thin argument-parsing shell over a library call.
+   The consequence for you is that anything this book demonstrates at the
+   command line is something you can do in-process, with the same guarantees
+   and no subprocess.],
+  [The first builds the library and quietly skips the binary, because the
+   binary target declares that it requires the `cli` feature and cargo builds
+   only what the enabled features permit. The second asks for the binary by
+   name, so cargo can no longer skip it and reports the missing feature. The
+   library is the crate's primary product; the binary is an optional target
+   layered on top.],
+  [Neither `remote` nor anything that pulls it in — the default set is `cli`,
+   `tui`, `local`, `render-typst`, and `local` wires ingest to a model running
+   on your own machine. For the strongest statement, build with
+   `--no-default-features` plus only what you need. What you can tell the
+   auditor is that the HTTP client is not in the binary: not disabled, not
+   configured off, but absent from the dependency tree, which is a property
+   they can verify from `cargo tree` rather than take on trust.],
+))
 
 #recap((
   [Rule A is load-bearing, not aspirational: every `cmd_*` function in `src/main.rs` calls
@@ -152,11 +188,27 @@ Chapter 26 walks through, with nothing beyond `smysl-core`, `smysl-graph`, `smys
 
 // ═══════════════════════════════════════════════════════════════════════
 
-#chapter(number: 26, title: "A Minimal Embedding, End to End")
+#chapter(number: 28, title: "A Minimal Embedding, End to End")
 
-Chapter 25 established that nothing stops you from calling `smysl` from Rust directly.
+Chapter 27 established that nothing stops you from calling `smysl` from Rust directly.
 This chapter does it — twice: once at the smallest possible scale, and once with two units
 and a real dependency between them.
+
+#callout(label: "Why")[
+  You maintain a service that already produces incident write-ups — a bot that
+  watches alerts, or an internal tool that collects postmortems. It has its own
+  storage, its own web UI, and no interest in acquiring a command-line tool, a
+  TUI, an argument parser, or an async HTTP client just to emit a document
+  other systems can check.
+
+  Shelling out to a binary would mean shipping that binary, matching its
+  version to your code, parsing its stdout, and turning its exit codes back
+  into your own error type. Every one of those is a place for the two to
+  drift. Calling the library means the units your service builds are the same
+  units `check` validates, constructed through the same constructors, failing
+  the same way — and the dependency you add is a synchronous crate with no
+  I/O in it at all.
+]
 
 #section("The smallest possible round trip")
 
@@ -279,17 +331,57 @@ stack.
   This is not sample code copied from a comment — it is a real `#[test]` that was compiled
   and run against the `smysl` crate with `cargo test --no-default-features --test
   ch26_scratch`, and it passed. `--no-default-features` matters here: it is the same proof
-  as Chapter 25's `cargo tree`, done by actually building and running code against the bare
+  as Chapter 27's `cargo tree`, done by actually building and running code against the bare
   facade rather than only inspecting its dependency graph.
 ]
 
 #whatsnext[
   You have now seen every operation this book covers from both sides: the CLI, which
   parses a command line and prints a report, and the library underneath it, which takes
-  and returns ordinary Rust values. Chapter 27 goes back to the CLI side and chains
+  and returns ordinary Rust values. Chapter 29 goes back to the CLI side and chains
   everything — authoring, checking, merging, retracting, packing, threading, and rendering
   — into one continuous piece of work, the way a person actually does it.
 ]
+
+#exercises((
+  [The round-trip test in `src/lib.rs` passes under `--no-default-features`.
+   Build the crate that way yourself and confirm no binary appears. Then list
+   what your dependency tree does *not* contain in that configuration, and say
+   which absence you would care about most when adding this to an existing
+   service.],
+  [The richer example builds two units with a real `grounds` dependency between
+   them. Try building the dependent unit *first*, before the unit it grounds
+   on exists. What does the API let you do, and at what point does the mistake
+   surface?],
+  [Take the two-unit example and change the dependent unit's status to
+   something its grounds cannot support. Where does that fail — at
+   construction, at encoding, or at `check`? Explain why that is the right
+   place.],
+))
+
+#answers((
+  [No `clap`, no TUI, no HTTP client, no async runtime, no TLS stack. Which
+   matters most depends on your service, but the async runtime is usually the
+   answer: pulling one into a synchronous codebase is invasive in a way an
+   argument parser is not, and a library that quietly required `tokio` would
+   rule itself out of a whole class of programs. The facade is synchronous with
+   no I/O, which is what makes "add this to an existing service" a small
+   decision.],
+  [The API lets you: a unit's `grounds` names uids, and nothing stops you
+   naming one you have not built. The mistake surfaces when something walks the
+   graph — a closure check, a `check` run, a bundle — and finds the reference
+   unresolved. This is the same behaviour the surface syntax has, and for the
+   same reason: documents are written in the order people think, not in
+   dependency order, and forcing the second would make the API unusable for
+   the case it exists to serve.],
+  [At `check`, not at construction or encoding. A unit is a value; you can
+   build one that says anything, and encoding it is a mechanical translation
+   that has no opinion. Rule M is a property of a unit *in relation to its
+   grounds*, so it can only be evaluated once the graph is assembled — which
+   is precisely why `check` is a separate pass rather than a constructor
+   guard. The design lets you hold an invalid intermediate state and refuses to
+   let you certify it.],
+))
 
 #recap((
   [`UnitCoreBuilder::new(...).build()` is where shape validation happens, once, at
@@ -308,7 +400,7 @@ stack.
 #part(number: "IX", title: "A Complete Walkthrough")
 // ═══════════════════════════════════════════════════════════════════════
 
-#chapter(number: 27, title: "Incident to Report: The Full Pipeline")
+#chapter(number: 29, title: "Incident to Report: The Full Pipeline")
 
 Every other chapter in this book takes one command at a time. This one does not — it is a
 single incident, worked start to finish, with every command earning its place in the story
@@ -316,6 +408,23 @@ rather than being demonstrated for its own sake. The scenario is a real gateway 
 incident with two engineers investigating the same page from different angles, and it uses
 every part of the tool this book has covered: authoring, checking, merging, retracting,
 packing, threading, rendering, and a closing conformance check.
+
+#callout(label: "Why")[
+  A chapter per command teaches you what each one does and leaves out the thing
+  that actually makes the tool worth adopting: that the commands compose, and
+  that the document survives every hop between them.
+
+  The scenario here is the ordinary one. Two engineers page in on the same
+  alert, look at different subsystems, and reach conclusions that partly
+  contradict each other. Overnight a metric arrives that disproves one of the
+  theories. In the morning somebody has to hand a leadership audience a brief
+  that fits on a page — and be able to answer, three weeks later in a review,
+  where any sentence in it came from.
+
+  Done in prose, that last question has no answer by the second retelling;
+  Chapter 1 measured how fast it stops having one. This chapter is the same
+  incident with the answer still attached at the end.
+]
 
 #section("The page, and the first write-up")
 
@@ -362,7 +471,7 @@ forty-minute window.
 You do not remember the exact pool size, so you write down both figures you saw quoted in
 chat, each `supersedes`-ing your scope claim — a decision to reconcile later, not now, and
 one this format lets you defer honestly rather than silently pick a number. Check it before
-moving on, the way Chapter 6 taught you to:
+moving on, the way Chapter 8 taught you to:
 
 #screen(caption: "$ smysl check alpha.smy")[
 ```
@@ -459,7 +568,7 @@ merged1.cbor: 19 records, 11 units, 0 diagnostic(s)
 
 Twenty minutes later, someone rolls gateway 7.1 back, and the incident channel gets a note
 about it. There is no model provider configured in this environment to run `smysl ingest`
-against live, so — as Chapters 8 and 11 do when the same gap comes up — this step is
+against live, so — as Chapters 10 and 13 do when the same gap comes up — this step is
 honestly hand-simulated at exactly the point `ingest` would hand off: a reviewed batch
 sitting in `.smysl/staged.smy`, waiting for `merge --staged` to confirm it, precisely as
 rule S requires.
@@ -595,7 +704,7 @@ merged4.cbor: 3 of 13 unit(s), 112 of 120 tokens, greedy mode, gap 0.154
 ```
 ]
 
-Read the three kept lines the way Chapter 16 taught you to: the surviving claim (`C5`, in
+Read the three kept lines the way Chapter 18 taught you to: the surviving claim (`C5`, in
 focus), its rebuttal (`C3` — "retries were already elevated" travels with the claim it
 objects to, not silently dropped), and its ground (`C2`). Alpha's retracted claim is not
 merely low-priority here — it is `dropped: budget`, competing on density like anything
@@ -704,6 +813,44 @@ about the store's *shape*, never about whether every question in it has been ans
   construct like `--supersedes--` or `granularity` is spelled, `SMYSL_RATIONALE.typ` and
   `SMYSL_FORMAT_GUIDE.typ` are the two sibling documents that slow back down.
 ]
+
+#exercises((
+  [Work the whole chapter's scenario yourself, from the two write-ups to the
+   final `check --conformance`. Then answer the question the chapter opens
+   with: pick any sentence in the rendered brief and say, using only the store,
+   where it came from and how strong it is entitled to be.],
+  [At the retraction step, a theory is disproven by new evidence. Run the
+   retraction with `--dry-run` first and note what it says it will reach. Now
+   consider the counterfactual: if this incident had been handled in a chat
+   thread and a shared document, what would have happened to the claims that
+   rested on the disproven theory?],
+  [The chapter ends with a conformance check rather than a render. Argue for
+   that ordering — why is certifying the store the last step rather than
+   producing the artifact?],
+))
+
+#answers((
+  [Every sentence traces to a unit, every unit carries a status and its
+   grounds, and `trace` walks the chain to whatever measurement or citation
+   sits at the bottom. That is the entire claim of this book made concrete: not
+   that the brief is *better written* than a prose one, but that it is
+   answerable. If you found a sentence you could not trace, it came from the
+   thread's framing rather than a unit, and that is worth noticing too.],
+  [Nothing would have happened to them, which is the problem. They would have
+   remained in the document, reading exactly as confident as before, because
+   prose has no mechanism by which withdrawing one paragraph reaches the
+   paragraphs that depended on it. Somebody would have had to remember — weeks
+   later, under time pressure — which conclusions rested on the theory that
+   turned out to be wrong. `retract --dry-run` answers that question by
+   walking `grounds`, before you commit to anything.],
+  [Because the artifact is disposable and the store is not. A rendered brief
+   can be regenerated at any time from the store — `render` is pure, so the
+   same store gives the same bytes forever. The store is the thing that has to
+   be right, and certifying it last means you are asserting the *final* state
+   is consumable, after every merge, retraction and derivation has landed.
+   Checking before the last edit would certify something that no longer
+   exists.],
+))
 
 #recap((
   [Two independently-authored, individually clean documents about the same incident can

@@ -2,9 +2,9 @@
 
 #part(number: "VI", title: "Verification")
 
-#chapter(number: 19, title: "`check`, Pass by Pass")
+#chapter(number: 21, title: "`check`, Pass by Pass")
 
-Chapter 6 used `check` the way you actually use it while drafting — a quick,
+Chapter 8 used `check` the way you actually use it while drafting — a quick,
 cheap loop, run after every change, read for whatever it turns up. This
 chapter takes the same command apart. Ten passes are named in
 the format's own specification (§17), each with its own diagnostic codes, its
@@ -22,7 +22,7 @@ evidence you can reason about.
   English inside a gist or a body. Whether the eu-west pool was *actually*
   saturated is not one of those properties, and no pass below decides it —
   that question belongs to a person, or to `attest` asking a model a bounded
-  question and citing its answer as evidence rather than as fact (Chapter 9).
+  question and citing its answer as evidence rather than as fact (Chapter 11).
   The boundary is exact: a mechanical pass can verify a *relationship*
   between things already in the document; it cannot verify a *fact* about
   the world the document describes.
@@ -47,7 +47,7 @@ exactly one of them:
     ([7], [`trust`], [Rule T — status never exceeds the ceiling of its best attested rung.], [Yes.]),
     ([8], [`retraction`], [Retraction authority and orphaning.], [No — enforced by `merge`, not by `check`.]),
     ([9], [`extension`], [An extension never redefines a kernel rule; unknown schemas degrade, never silently.], [Yes.]),
-    ([10], [`hashes`], [Recomputed uids match a stored index, entry for entry.], [No — belongs to `Store::verify_against`, surfaced by `reindex --verify` (Chapter 21).]),
+    ([10], [`hashes`], [Recomputed uids match a stored index, entry for entry.], [No — belongs to `Store::verify_against`, surfaced by `reindex --verify` (Chapter 23).]),
   ),
 )
 
@@ -64,7 +64,7 @@ different from each other and worth knowing individually:
   report, it is the reason `check` never gets that far.
 - `retraction`'s codes (`SMY-E050`, `SMY-W052`) are real and enforced today,
   just not by `check` — they fire inside `merge`'s own retraction-integrity
-  step instead (Chapter 11). The registry reserved pass 8 for it; the
+  step instead (Chapter 13). The registry reserved pass 8 for it; the
   implementation landed the *check* in a different command than the one
   this chapter is about.
 - `hashes` is the store's business, not a graph-shape question — verifying
@@ -468,7 +468,7 @@ nothing in the current CLI sets `verify_hashes: true` when opening a store,
 so it is not yet reachable from any flag. What *is* reachable, and produces
 the practically equivalent result, is `reindex --verify` — a whole-index
 byte comparison rather than a per-unit `E070` report, covered in full in
-Chapter 21 alongside the rest of what `reindex` does. If your document
+Chapter 23 alongside the rest of what `reindex` does. If your document
 checks clean on all seven implemented passes, hash verification is the next
 question worth asking, and it belongs to that chapter, not this one.
 
@@ -546,11 +546,48 @@ call for.
   sound. But a clean report answers only "is this store safe to touch at
   all." It does not yet answer "is this store safe for the *kind* of use I
   have in mind" — reading only, versus producing new units into it, versus
-  merging it with someone else's. Chapter 20 is that second question:
+  merging it with someone else's. Chapter 22 is that second question:
   conformance classes ask what a store is safe for; fidelity asks what one
   particular consumer, implementing one particular set of schemas, can
   actually get out of it.
 ]
+
+#exercises((
+  [`check` runs its passes in a fixed order, and this chapter walks them one
+   at a time. Given that a parse failure makes every later pass meaningless,
+   predict what `check` does when a file fails to parse partway through — does
+   it report the parse error alone, or does it also report what it can see of
+   the rest?],
+  [Chapter 21 says pass 6 is rule M and pass 7 is rule T. Run `check` on
+   `F6-adversarial.smy` (which trips M) and recall the `SMY-E033` example that
+   trips T. Why is it useful that these are separate passes with separate
+   codes, when both amount to "this status is too strong"?],
+  [Write the shortest `.smy` file you can that produces *exactly one*
+   diagnostic. Then try to write one that produces exactly two from a single
+   mistake. Which was harder, and what does that tell you about reading
+   `check` output?],
+))
+
+#answers((
+  [It reports what it can. The parser is built to keep going past a bad span
+   rather than stopping at the first fault, so you get the parse error *and*
+   whatever the later passes could establish about the records that did admit.
+   The alternative — one error per run — turns fixing a file into a sequence of
+   round trips, and this chapter's whole argument is that a checker is a tool
+   you use continuously rather than a gate you visit once.],
+  [Because the two have different fixes and different meanings. `SMY-E030`
+   (rule M) says the claim outran *what it rests on* — the answer is inside the
+   document, in its grounds. `SMY-E033` (rule T) says the claim outran *who
+   produced it* — the answer is outside the document, in the provenance, and no
+   amount of editing grounds will help. Collapsing them into one code would
+   leave you guessing which of the two situations you were in.],
+  [One is easy: a single unit with `status: unfounded` does it. Two from one
+   mistake is easier than it sounds — a broken label in a `grounds` list
+   usually gets you an unresolved reference *and* a shape error on the unit
+   that failed to admit, and Chapter 5 showed one mistake producing three.
+   The lesson is that diagnostic *count* is not fault count. Fix the most
+   structural one and re-run before reading the rest.],
+))
 
 #recap((
   [`check` verifies consistency, never truth — a mechanical pass reasons
@@ -572,9 +609,9 @@ call for.
    build-stopping error.],
 ))
 
-#chapter(number: 20, title: "Conformance and Fidelity")
+#chapter(number: 22, title: "Conformance and Fidelity")
 
-Chapter 19 answered one question per pass: is this specific relationship in
+Chapter 21 answered one question per pass: is this specific relationship in
 the document consistent. This chapter asks two broader questions that sit on
 top of a clean `check` run. Both start from the same seven-pass report, and
 both are ways of reading it — neither adds a new pass of its own.
@@ -648,7 +685,7 @@ forbid. That is the uninteresting case; the useful one is a store that
 passes a *lower* class while failing a *higher* one, because that is
 exactly the situation conformance classes exist to describe. The corpus's
 `F6-adversarial` fixture is built entirely around rule M violations
-(`SMY-E030`, Chapter 19's pass 6), and `SMY-E030` is classified as
+(`SMY-E030`, Chapter 21's pass 6), and `SMY-E030` is classified as
 *epistemic* — which `C-Read` does not forbid, but every other class does:
 
 #screen(caption: "$ smysl check --conformance C-Read fixtures/corpus/F6-adversarial.smy")[
@@ -776,7 +813,7 @@ fixtures/corpus/F7-mixed-granularity.smy: 13 records, 9 units, 2 diagnostic(s)
 ]
 
 The two `SMY-W041` warnings are ordinary pass-5 length advisories on
-individual units — advisory, not fatal, exactly as Chapter 19 described —
+individual units — advisory, not fatal, exactly as Chapter 21 described —
 and the granularity line above them is not a diagnostic at all, just a
 count of how many views this store declares at each profile. A store with
 several views at several profiles would print one line per profile, with
@@ -784,15 +821,49 @@ no ranking implied between them: this flag exists so a reader can see what
 they are looking at, not to tell them they are looking at the wrong thing.
 
 #whatsnext[
-  You now know what a store is safe for — structurally (Chapter 19),
+  You now know what a store is safe for — structurally (Chapter 21),
   categorically (conformance), and for one specific reader (fidelity). None
   of that has asked anything about the *tool* yet: whether the index
   `smysl` keeps beside a CBOR log actually describes the log it sits next
   to, and whether the same invocation really does produce the same bytes on
-  a different machine. Chapter 21 turns to those two guarantees —
+  a different machine. Chapter 23 turns to those two guarantees —
   properties of `smysl` itself, not of any document it happens to be
   reading.
 ]
+
+#exercises((
+  [Run `smysl check --conformance C-Consume fixtures/corpus/F1-incident.smy`,
+   then again with `C-Full`. Both pass. Explain what you have and have not
+   learned about the file from two passes.],
+  [Run `smysl check --as x.sre/incident
+   fixtures/corpus/F7-mixed-granularity.smy`. It reports fidelity `Full`, and
+   *also* two `SMY-W041` granularity warnings. Both are true at once. What is
+   each one telling you, and which would block a pipeline?],
+  [Conformance is a property of a store; fidelity is a property of a pairing.
+   Describe a store that conforms at every class and still gives a particular
+   consumer almost nothing.],
+))
+
+#answers((
+  [You have learned the store is consumable by any conforming implementation,
+   at both the minimum and the full class — no exotic record shapes, no version
+   the reader could not handle. You have learned nothing about whether the
+   claims are true, whether the argument is any good, or whether *your*
+   consumer will find it useful. Conformance answers "can this be processed",
+   which is a lower bar than it sounds and a necessary one.],
+  [Fidelity `Full` says a consumer implementing `x.sre/incident` gets everything
+   the store has to offer — nothing in it needs a schema that consumer lacks.
+   The `W041` warnings say two bodies are shorter than the document's own
+   declared granularity range, which is a drafting observation about prose
+   length. Neither blocks by default; under `--strict` the warnings would, and
+   fidelity would not, because fidelity is a report rather than a diagnostic.],
+  [A store using only kernel types conforms everywhere — every implementation
+   understands `@claim` and `@evidence`. Hand it to a consumer that exists to
+   process `x.sre/incident` extensions and it finds not one unit it was built
+   for. Perfectly conformant, near-zero fidelity for that reader. This is why
+   both numbers exist: conformance is about the store alone, fidelity only
+   means anything once you name who is reading.],
+))
 
 #recap((
   [Conformance and fidelity are both readings of a report you already have,
@@ -809,7 +880,7 @@ they are looking at, not to tell them they are looking at the wrong thing.
    never a verdict — mixed granularity is legal by design.],
 ))
 
-#chapter(number: 21, title: "Determinism, `reindex`, and the Index")
+#chapter(number: 23, title: "Determinism, `reindex`, and the Index")
 
 Everything so far has verified properties of a *document*. This chapter
 verifies properties of the *tool*: does the on-disk index next to a CBOR log
@@ -979,14 +1050,50 @@ actual guarantee.
 
 #whatsnext[
   Verification is complete at this point, in the sense this Part set out to
-  cover: a document's own consistency (Chapter 19), what it is safe for and
-  for whom (Chapter 20), and the tool's guarantees about its own index and
+  cover: a document's own consistency (Chapter 21), what it is safe for and
+  for whom (Chapter 22), and the tool's guarantees about its own index and
   its own reproducibility (this chapter). Everything you have built so far —
   a checked, conformant, correctly-fidelity-reported graph — is still a
   graph: units, relations, a thread's ordered walk over a selection of them.
   Part VII turns that graph into something a person actually reads, starting
   with `render` and the profiles that shape it.
 ]
+
+#exercises((
+  [Run `smysl reindex` on a `.smy` surface file. It fails with `SMY-E004:
+   malformed envelope at byte 0`. Now `merge -o store.cbor` that same file and
+   reindex *that* — it reports the record count and an index size. Why does the
+   command only make sense against one of the two forms?],
+  [Run any pure command twice with `--seed-check` and confirm it exits `0`.
+   Then say what `--seed-check` would have to observe to exit non-zero, and why
+   a flag like this exists at all when CI already runs
+   `cargo xtask determinism`.],
+  [Delete a store's index entirely and reindex it. Nothing is lost. Now
+   construct the argument for why the *log* could not be treated the same way
+   — what property does the log have that the index does not?],
+))
+
+#answers((
+  [An index is derived state over an append-only *log*, and a surface file is
+   not a log — it is text that parses into records. There is no envelope to
+   index, no byte offsets to record, nothing to be stale against. `reindex`
+   rebuilds a cache beside a binary store; pointed at surface text it is being
+   asked to cache something that has no persistent form to cache.],
+  [It would have to find that running the same operation over the same bytes
+   produced different output — a clock read, a hash-map iteration order leaking
+   through, an uninitialised salt. The CI gate proves determinism for the
+   *inputs the gate happens to use*; `--seed-check` lets you assert it for
+   *your* input, in your pipeline, on the machine that will actually run it.
+   A guarantee you can re-verify locally is worth more than one you have to
+   take on trust from someone else's CI.],
+  [Everything in the index is recomputable from the log, so losing it costs
+   time and nothing else. The log is the only place the content exists — it is
+   append-only and content-addressed, which is exactly what makes it
+   authoritative: entries are never rewritten, and each one's identity is a
+   hash of what it contains, so corruption is detectable rather than silent.
+   Derived state can be thrown away because it can be re-derived; the log
+   cannot, because there is nothing to re-derive it from.],
+))
 
 #recap((
   [An index is derived, disposable state, recoverable from the log alone —

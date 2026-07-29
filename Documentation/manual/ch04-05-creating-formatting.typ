@@ -2,9 +2,9 @@
 
 #part(number: "II", title: "Creating and Formatting Documents")
 
-#chapter(number: 4, title: "Writing Surface Syntax, With Room to Get It Wrong")
+#chapter(number: 6, title: "Writing Surface Syntax, With Room to Get It Wrong")
 
-Chapter 3 got you to a two-unit file that passed `check` on the first try —
+Chapter 5 got you to a two-unit file that passed `check` on the first try —
 a `.smy` file small enough that nothing in it could plausibly be wrong. Real
 documents are not like that. You will write a claim before its evidence
 exists, forget that `derived` demands `grounds`, indent a line by the wrong
@@ -18,6 +18,22 @@ The exhaustive reference — every field, every type, one example each — is
 `SMYSL_FORMAT_GUIDE.typ`. This chapter does not repeat it. What it adds is
 the experience the reference guide deliberately leaves out: what it feels
 like to get one of these wrong, and exactly what the tool says back.
+
+#callout(label: "Why")[
+  It is 02:40, the incident is live, and you are typing evidence into a file
+  while a second person keeps talking. You will refer to `e/pool-wait` two
+  minutes before you declare it, because that is the order the conversation
+  happened in. You will write `derived` on a claim whose grounds you fully
+  intend to fill in as soon as somebody finds the dashboard link.
+
+  Both are correct things to do while thinking and dangerous things to leave in
+  a document somebody else will act on tomorrow. The format is deliberately
+  strict about each of them — and strictness only helps if the message you get
+  back tells you *which* mistake you made, in a file you are still holding in
+  your head. That is what this chapter is for: to make every one of those
+  diagnostics something you have already seen on purpose, in daylight, before
+  you meet one at 02:40.
+]
 
 #section("What you hand-author")
 
@@ -506,12 +522,49 @@ degrades gracefully instead of losing the record.
 #whatsnext[
   You now have a file that `check` accepts. That is not the same thing as
   a file that is *canonically formatted* — the next question, and Chapter
-  5's whole subject, is what `fmt` does to the exact bytes you just wrote
-  and why it insists on doing it. Once formatting is routine, Chapter 6
+  7's whole subject, is what `fmt` does to the exact bytes you just wrote
+  and why it insists on doing it. Once formatting is routine, Chapter 8
   goes back to `check` itself, in full: the ten-pass pipeline, conformance
   classes, and what it means to check a document against a *named*
   consumer rather than against the kernel alone.
 ]
+
+#exercises((
+  [Write a two-line file containing only `@claim c/a { status: unfounded }`
+   and a gist, and run `check` on it. You get `SMY-E034`. Chapter 2's status
+   table lists `unfounded` as a real rung — so why is authoring one an error,
+   and what is the only legitimate way for a unit to reach that status?],
+  [Add a key the kernel has never heard of to a valid claim — say
+   `x.sre/severity: "sev2"` — and run `check`, then `fmt`. `check` reports no
+   diagnostic and `fmt` hands the key back to you. Which rule is this, and
+   what would the alternative behaviour cost a team whose peer records
+   something yours does not?],
+  [Take any clean file, delete one character from a label inside a `grounds`
+   list, and run `check`. Count the diagnostics. Now predict what happens to
+   that count when you fix the single character, and check whether you were
+   right.],
+))
+
+#answers((
+  [`unfounded` means *this was knocked out from under* — it is the state a
+   unit lands in when something it rested on is retracted. It is a
+   consequence, not a claim you are entitled to assert directly; a unit that
+   never had support was `speculative` all along, and saying `unfounded`
+   instead is claiming a history that did not happen. The only way in is
+   `retract` (Chapter 18).],
+  [Rule X — unknown extensions survive verbatim. Without it, a document from
+   a team that records incident severity, or from a version of the format
+   newer than your binary, would either be rejected at your boundary or come
+   out the far side quietly stripped. Neither failure is visible to the person
+   who sent it, which is the same silent-loss problem Chapter 1 is about,
+   committed by your own tooling.],
+  [You will usually get more than one, and fixing the character usually clears
+   all of them at once. A broken reference means the unit that referred to it
+   may fail to admit at all, and every *other* unit that referred to *that*
+   one now dangles in turn. This is why the advice is to fix the first
+   structural diagnostic and re-run rather than working down the list — the
+   list is frequently one fault wearing several hats.],
+))
 
 #recap((
   [Four constructs are hand-authored — `@doc`, units, `@rel`, `@thread` —
@@ -534,7 +587,7 @@ degrades gracefully instead of losing the record.
    a graceful fallback for a reader who doesn't have the extension.],
 ))
 
-#chapter(number: 5, title: "Canonical Form and fmt")
+#chapter(number: 7, title: "Canonical Form and fmt")
 
 #term("Canonical form")[
   The one, unique byte-for-byte spelling of a given set of records. Two
@@ -558,7 +611,7 @@ degrades gracefully instead of losing the record.
 
 #section("`fmt --check` finds drift")
 
-The file from Chapter 4, as hand-typed, is not canonical — nobody's
+The file from Chapter 6, as hand-typed, is not canonical — nobody's
 first draft is:
 
 #screen(caption: "$ smysl fmt --check checkout.smy")[
@@ -599,7 +652,7 @@ what "expanded, nothing left implicit" actually means:
 `lang` appeared from nowhere — its default, `en`, is written out explicitly
 rather than left to be inferred later by whoever reads the file next — and
 `granularity` grew from a bare profile name into the full set of numbers
-that name actually means. Now the rest of Chapter 4's file, before and
+that name actually means. Now the rest of Chapter 6's file, before and
 after, field by field. As typed:
 
 ```
@@ -780,7 +833,7 @@ string. The obvious candidate is a `ref` that looks like a number:
 ```
 ]
 
-It stays quoted. The quoting rule (Chapter 5's field-by-field table, above)
+It stays quoted. The quoting rule (Chapter 7's field-by-field table, above)
 already special-cases exactly this: a quoteless value that would parse as
 a number, `true`, `false`, or `null` is quoted anyway, specifically because
 an unquoted `42` would come back as an integer, not the string it started
@@ -792,16 +845,49 @@ which is the guarantee doing its job, not a gap in the testing.
 #whatsnext[
   A canonical file is a clean starting point, not a finished one — `fmt`
   never asked whether any of the claims in it are actually well-formed
-  arguments, only whether the bytes have one correct spelling. Chapter 6
+  arguments, only whether the bytes have one correct spelling. Chapter 8
   picks the validation question back up in full: the ten-pass pipeline
   `check` actually runs, in order, and why that order is fixed. And because
   `fmt --check` is silent exactly when a file needs no attention and exits
   `3` the moment it does, it is the kind of command that belongs in CI
-  before a commit lands — Chapters 19 and 21 come back to that same exit
+  before a commit lands — Chapters 21 and 23 come back to that same exit
   code from the other direction, as part of what a reproducible, verifiable
   pipeline demands on every run, not just the ones you remember to check
   by hand.
 ]
+
+#exercises((
+  [Write the same two units into two files, but order the fields differently
+   in each — `{ grounds: [...], status: derived }` in one and
+   `{ status: derived, grounds: [...] }` in the other, and swap `kind` and
+   `ref` inside a `source` block. Run `fmt` on both and `diff` the results.
+   Predict the outcome first.],
+  [Run `fmt` on an already-canonical file. Then run `fmt` on *that* output.
+   Compare. What property are you demonstrating, and why would `fmt` be
+   unusable in a pre-commit hook without it?],
+  [`fmt --check` on a non-canonical file exits `3`, not `1`. Look up both
+   codes in Chapter 4's table and explain, in one sentence, why `3` is the
+   defensible choice.],
+))
+
+#answers((
+  [The two outputs are byte-identical. Field order in the surface text is
+   yours; field order in canonical form is the format's, and `fmt` is the
+   function that maps the first onto the second. This is the property that
+   makes a `diff` between two canonical files a diff of *content* — if it were
+   not true, every reviewer would learn to skim `.smy` diffs, and the format's
+   central promise of being reviewable would quietly stop being cashed.],
+  [Idempotence: `fmt(fmt(x)) = fmt(x)`. Without it, a pre-commit hook that
+   runs `fmt --write` would produce a new diff every time it ran, so the hook
+   would never converge and a repository could never be in a formatted state.
+   Idempotence is what makes "canonical" a place a file can arrive at rather
+   than a direction it can be pushed in.],
+  [`1` is a generic failure — something went wrong. `3` is *check errors*: the
+   tool looked at your document and found it wanting in a specific,
+   documented way. `fmt --check` is a check, so it reports like one, which
+   means a CI pipeline can treat `fmt --check` and `check` under the same
+   branch without special-casing either.],
+))
 
 #recap((
   [Canonical form is one unique spelling per set of records — quoting

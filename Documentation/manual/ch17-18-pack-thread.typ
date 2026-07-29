@@ -1,6 +1,6 @@
 #import "design.typ": *
 
-#chapter(number: 17, title: "pack — Budget-Bounded Selection")
+#chapter(number: 19, title: "pack — Budget-Bounded Selection")
 
 Every earlier chapter in this part assumed the whole store travels: `view`
 picks roots, `salience` ranks, `bundle` groups, but nothing so far has had to
@@ -85,7 +85,7 @@ smysl pack: `c/pool-saturation` is not a uid
 ```
   ]
 
-  Mine the real uid from `thread --show` (Chapter 18 covers it directly) or
+  Mine the real uid from `thread --show` (Chapter 20 covers it directly) or
   `salience`, then pass that instead.
 ]
 
@@ -212,7 +212,7 @@ satisfied by L0 because there is nothing higher to buy; `--lod L0` puts
 every unit, including the focus, in exactly that position on purpose). What
 you get back is breadth without depth: every claim named, none of them
 argued out past a sentence. Whether that trade is the right one depends on
-what happens next to the pack — Chapter 22 covers the render side of that
+what happens next to the pack — Chapter 24 covers the render side of that
 same trade in `--lod`'s other home.
 
 #subsection("Two ways to solve: `--mode greedy` and `--mode exact`")
@@ -348,15 +348,54 @@ having to re-audit it by hand.
   you hand to a model with a context limit, or to a person who does not have
   time for the whole store — that is the whole job this chapter's command
   does. Two things follow from here. If what you actually want is prose
-  rather than a truncated surface excerpt, Chapter 22's `render` is the
+  rather than a truncated surface excerpt, Chapter 24's `render` is the
   command that turns a selection into an artifact meant to be *read*, not
   decoded; `pack`'s non-surface output — the default CBOR form this chapter
   mostly suppressed with `--format surface` for readability — is a portable
   sub-store in its own right, small enough to ship and still a real store
   any later command can open. And a pack has no opinion yet about *order* —
   it says what survives, not what order a reader should meet it in. That
-  question is Chapter 18's.
+  question is Chapter 20's.
 ]
+
+#exercises((
+  [Run `smysl pack --budget 60 --explain --format surface
+   fixtures/corpus/F1-incident.smy`. Three units survive and five are dropped
+   under *three different reasons*: `budget`, `low-value`, and `closure-cost`.
+   Explain what makes `closure-cost` a different kind of rejection from
+   `budget`.],
+  [In that same run, `f/root-cause` is kept while `c/pool-saturation`, one of
+   the two units it grounds on, is dropped. That looks like a closure
+   violation. Consult the constraint table at the top of this chapter and
+   explain why it is not.],
+  [Feed the packed surface output back into `check`. It reports `SMY-E031` and
+   `SMY-E032` — the packed document does not validate. Is that a bug? Answer
+   before reading on.],
+))
+
+#answers((
+  [`budget` means the unit was affordable in isolation and there was no room
+   left by the time the packer reached it. `closure-cost` means the unit itself
+   was cheap but bringing it *legally* was not — selecting it would have
+   obliged the packer to bring its grounds, or its rebuttals under rule R, and
+   the whole bundle did not fit. The distinction is worth having because the
+   fixes differ: a `budget` drop is answered by raising the budget, a
+   `closure-cost` drop often by restructuring what the unit depends on.],
+  [Because the closure constraints are level-dependent. C1, C2 and C6 — deps,
+   grounds, warrants — bind only at L1 and above. `f/root-cause` was selected
+   at *L0*, a bare gist, where the only constraint that still binds is C3:
+   rule R, rebuttals. A gist is an assertion the reader can see is
+   unelaborated; an L1 block that showed its reasoning while hiding the ground
+   that reasoning rests on would be the dishonest case, and that is the one
+   the constraints forbid.],
+  [Not a bug — but the packed output is not a document. At L0 a unit is emitted
+   as a gist with its fields stripped, so a `derived` claim arrives with no
+   `grounds` and a `cited` definition with no `source`, which is exactly what
+   `SMY-E031` and `SMY-E032` describe. A pack is a *payload* built to fit a
+   budget, with a `@packinfo` receipt saying what was dropped and degraded; it
+   is meant to be read, not re-validated as a store. If you want something that
+   checks clean, `bundle` a view — closure there is the whole point.],
+))
 
 #recap((
   [Seven constraints, C1 through C7, govern every pack; six are closure
@@ -379,7 +418,7 @@ having to re-audit it by hand.
    that looks uncontested because it was too small to hold the objection.],
 ))
 
-#chapter(number: 18, title: "thread — Deriving Structure")
+#chapter(number: 20, title: "thread — Deriving Structure")
 
 `salience` ranks. `pack` compresses to a budget. Neither one arranges what
 survives into a path a specific reader is meant to walk. A finding, its
@@ -738,7 +777,7 @@ writing one directly and having `thread --show` treat it identically.
   `--show`'s second column is the uid sitting right next to the gist it
   names — the practical technique this whole book leans on for finding a
   real uid to hand to `--focus`, `--seed`, or `--scope` elsewhere. Every
-  worked `pack` example in Chapter 17 started life as a line from exactly
+  worked `pack` example in Chapter 19 started life as a line from exactly
   this output.
 ]
 
@@ -794,12 +833,49 @@ fit the table — with the means to check, on demand, when it matters.
   A thread names an order and a role for each unit; it does not yet say
   what words those roles are rendered in, what register they read at, or
   what target format they land in — `smysl thread --derive schema | render
-  --profile … --target …` is Chapter 22's command, and it composes directly
+  --profile … --target …` is Chapter 24's command, and it composes directly
   with this one because a derived thread carries its originating store with
   it (`--only` is what strips that away, for exactly the cases where you
   want the thread record alone). Everything in this chapter has been about
-  *which* reading; Chapter 22 is about how that reading actually gets said.
+  *which* reading; Chapter 24 is about how that reading actually gets said.
 ]
+
+#exercises((
+  [Run `smysl thread --derive analysis --format surface
+   fixtures/corpus/F1-incident.smy` and read the derived thread's steps. Then
+   derive under `brief` instead. `analysis` gives you six steps under
+   `context`, `finding`, `rebuttal` and `implication`; `brief` gives five under
+   `bottom-line`, `support` and `risk`. Same graph, same facts, different walk.
+   What does that tell you about where a thread's meaning lives — in the units,
+   or in the thread?],
+  [The derived thread's owner is `tool:smysl` and its timestamp is `[0, 0]`.
+   Both are deliberate. Explain the timestamp in terms of rule D, and the owner
+   in terms of what a reader needs to know when two threads disagree.],
+  [`thread --derive` is deterministic; `--refine` would not be. Given that the
+   derived analysis thread is serviceable but plainly mechanical, argue for
+   shipping the deterministic one anyway rather than waiting for the model.],
+))
+
+#answers((
+  [In the thread. The units are the same facts either way — a schema decides
+   which of them the reader is walked through, in what order, and under what
+   label. `analysis` opens with context and works toward implications;
+   `brief` leads with the bottom line. Writing three summaries by hand would
+   mean three artifacts to keep in sync; deriving three threads over one graph
+   means the facts cannot drift apart, because there is only one copy of them.],
+  [A timestamp is a clock reading, and rule D says a pure operation must be a
+   function of its inputs alone — so `thread --derive` supplies a fixed clock
+   rather than reading the real one, and running it twice produces the same
+   bytes. The owner matters for a different reason: when two threads over the
+   same graph tell different stories, the first question is who made each, and
+   `tool:smysl` versus `human:vladimir` is the difference between a
+   disagreement worth investigating and a machine doing what it was told.],
+  [Because a mechanical ordering that is always available, always free, and
+   always the same beats a good ordering that costs a call, varies between
+   runs, and cannot be regenerated years later to compare against what was
+   signed off. The derived thread is a floor, not a ceiling — and a floor that
+   a pipeline can depend on is worth more than a better answer it cannot.],
+))
 
 #recap((
   [A thread is a named, ordered, role-annotated walk over existing units —

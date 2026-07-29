@@ -1,6 +1,6 @@
 #import "design.typ": *
 
-#chapter(number: 14, title: "view and bundle — Naming and Packaging Reachability")
+#chapter(number: 16, title: "view and bundle — Naming and Packaging Reachability")
 
 You have a store — a fully-parsed, checked `.smy` file, or several merged
 together. It might hold a hundred units built over months: measurements,
@@ -52,7 +52,7 @@ v/f1: 1 root(s), 0 thread(s), 6 unit(s) reachable
 ```
 ]
 
-The file has eight units total (confirmed in Chapter 9 by `pack --explain`,
+The file has eight units total (confirmed in Chapter 11 by `pack --explain`,
 which lists every one of them), but the view reaches only six. The two left
 out are `c/canary-clean` and its evidence `e/canary`. That is not an
 oversight in the fixture — it is the single most important thing to
@@ -131,7 +131,7 @@ union of two root sets is still just a root set.
 #whatsnext[
   A view names *what is reachable*. It says nothing about which of those
   six, or five, or seven units matters most if you can only keep three.
-  That ranking is `salience` — Chapter 15 — and it is exactly why `view`
+  That ranking is `salience` — Chapter 17 — and it is exactly why `view`
   exists as a separate, cheap step: rank a hundred units and you are
   wasting cycles on the ninety a reader will never see; name the view
   first, then rank only what is actually in play.
@@ -181,7 +181,7 @@ not — is 2192 bytes:
 `--view v/f1` picks which of a store's declared views to bundle, if there
 is more than one; the first declared view is the default. `--include-
 retracted` controls one specific edge case in that closure — a unit that
-has been retracted (Chapter 16) but that something *else* in the bundle
+has been retracted (Chapter 18) but that something *else* in the bundle
 still points at by `grounds` or `deps`. `bundle`'s default already keeps
 that unit, because a bundle with a dangling reference is strictly worse
 than one carrying a unit nobody believes anymore; `--include-retracted`
@@ -205,10 +205,48 @@ ever there.
 #whatsnext[
   You now have two ways to name a reachable set — cheaply as a view,
   durably as a bundle — but neither one tells you which units in that set
-  are load-bearing and which are along for the ride. Chapter 15's
+  are load-bearing and which are along for the ride. Chapter 17's
   `salience` answers exactly that, over the same reachability this chapter
   built.
 ]
+
+#exercises((
+  [Run `smysl view --id v/narrow --roots b3:wo4t2c46lq45fnakd6tajlgcac
+   --format surface fixtures/corpus/F1-incident.smy`. One root reaches three
+   units. Trace by hand, in the source file, why those three and not the other
+   five.],
+  [A view stores *roots*, not a list of members. Suppose you add a new claim
+   that grounds on a unit already inside `v/narrow`. Without re-running
+   anything, is it in the view? Now suppose you had stored a member list
+   instead. What breaks?],
+  [`bundle` takes a view and emits its reachable closure. Given rule L, predict
+   what `bundle` must do about a unit that is reachable but whose grounds are
+   not — and explain why the alternative would make a bundle dangerous to
+   send.],
+))
+
+#answers((
+  [Reachability follows `grounds` and `deps` downward from the root. The root
+   is `c/regression`; it grounds on `e/trace` and depends on the definition
+   `d/p95` — three units, and the walk stops there because measured evidence
+   and a cited definition rest on nothing further. The other five sit *above*
+   the root — `f/root-cause` and what it reaches through its other branch —
+   and a downward walk never sees them. A view is a question asked of the
+   graph, and the answer is whatever the edges say.],
+  [Yes, it is in the view the moment you add it, with no re-run — because
+   membership is computed from the roots every time rather than stored. With a
+   member list you would have two copies of the truth, and they would diverge
+   the first time anyone edited the graph without remembering to update the
+   list. Worse, two views naming the same unit would each hold their own copy,
+   and a change to one would silently disagree with the other.],
+  [It must pull the grounds in too — that is rule L, closure: whatever a unit
+   needs travels with it. A bundle that arrived containing a `derived` claim
+   whose evidence had been left behind would be a document that cannot be
+   checked by whoever receives it: the claim would read as supported, its
+   support would be a dangling reference, and the recipient has no way to
+   fetch what they were not sent. Closure is what makes a bundle safe to hand
+   to someone who has nothing else.],
+))
 
 #recap((
   [A view is a name plus a root set, never a container: every unit reachable
@@ -232,7 +270,7 @@ ever there.
     unconditionally, and the difference shows up directly in byte count.],
 ))
 
-#chapter(number: 15, title: "salience — What Matters, and Why")
+#chapter(number: 17, title: "salience — What Matters, and Why")
 
 `view` tells you what is reachable. It does not tell you that a seven-day
 trace and a one-line definition matter more to an incident brief than the
@@ -296,7 +334,7 @@ back to plain, unweighted PageRank only when a store declares *no* view at
 all). The finding gets first claim on rank because dangling mass returns to
 the seed on every one of the walk's 32 iterations, and the unit you are
 ranking *for* is the one thing you certainly care about. The two zero
-scores are exactly the two units Chapter 14 found `v/f1` cannot reach at
+scores are exactly the two units Chapter 16 found `v/f1` cannot reach at
 all — `c/canary-clean` and `e/canary`. A unit that is not reachable from
 the active seed has no path for rank to travel along, so it scores
 nothing; unreachable is not "low salience," it is *no* salience, and that
@@ -448,7 +486,7 @@ agreeing because they both read the same upstream source is not
 independent evidence, it is one piece of evidence read twice.
 
 #whatsnext[
-  Salience is what lets `pack` (Chapter 17) fit a large store into a small
+  Salience is what lets `pack` (Chapter 19) fit a large store into a small
   budget without asking a model which units to keep. `pack` does not derive
   its own notion of importance — it asks exactly this ranking, unit by
   unit, and spends the budget top-down. Everything demonstrated in this
@@ -456,6 +494,43 @@ independent evidence, it is one piece of evidence read twice.
   will reach for again once the question changes from "what matters" to
   "what fits."
 ]
+
+#exercises((
+  [Run `smysl salience --explain b3:js4xzessu5zwjpv2rawtugnuvj
+   fixtures/corpus/F1-incident.smy`. The unit scores 0.5000, made of
+   centrality 1.0000 at weight 0.50, corroboration 0.0000, and role 0.0000.
+   It is the highest-ranked unit in the document *and* scores zero on two of
+   three terms. Explain how both are true.],
+  [That unit's corroboration is `0 independent group(s)`. Look at
+   `F1-incident.smy` and say what would have to be added — not changed — to
+   raise it, and why "add another claim agreeing with it" is not the answer.],
+  [Run plain `smysl salience` on the same file. Two units score exactly
+   `0.0000`. Find them in the source. Are they unimportant?],
+))
+
+#answers((
+  [The three terms measure different things and most units score zero on most
+   of them. Centrality is structural — how much of the argument flows through
+   this unit — and the finding is where everything converges, so it maxes out.
+   Corroboration asks whether *independent* lines of support arrive at it, and
+   role asks whether a thread has assigned it a job. Scoring 0.5 out of a
+   possible 1.0 while leading the document tells you the document is a single
+   chain of reasoning rather than several converging ones — which is a real
+   and useful thing to learn about an incident brief.],
+  [A second, independent evidential path to the same finding — a different
+   measurement, not resting on the ones already there. Another *claim* agreeing
+   with it adds no corroboration if it grounds on the same evidence, because
+   the term counts independent groups rather than voices; two claims sharing a
+   ground are one line of support wearing two hats. This is precisely the
+   property that stops a document from looking better-supported by restating
+   itself.],
+  [They are the two units nothing else points at and no thread names — in this
+   document, the ones off the main argumentative spine. Zero salience means
+   *nothing in this store's structure asks for it*, which is a statement about
+   the graph and not about the world. A retracted-but-important caveat, or a
+   piece of evidence somebody forgot to ground anything on, scores zero too.
+   Salience decides what survives a budget; it does not decide what matters.],
+))
 
 #recap((
   [Salience is `[0,1]`, built from three named, independently-inspectable
@@ -479,7 +554,7 @@ independent evidence, it is one piece of evidence read twice.
     shared source is not two independent checks.],
 ))
 
-#chapter(number: 16, title: "retract — Blast Radius First")
+#chapter(number: 18, title: "retract — Blast Radius First")
 
 Every other command in this part of the book adds information to a store,
 or names a slice of what is already there. `retract` is the one command
@@ -604,7 +679,7 @@ corrob-two.cbor: 2 unit(s) now read as unfounded
 ```
 ]
 
-— `model:openai/gpt-4` is one of the two agents Chapter 15 attested that
+— `model:openai/gpt-4` is one of the two agents Chapter 17 attested that
 same evidence unit with, so `origin` authority accepts it. A stranger, on
 the same store, is refused exactly like the F1 example above. `quorum:2` on
 the same target shows the same pattern with a distinct-agent count instead
@@ -627,7 +702,7 @@ typed.
 
 `--authority` decides *who* may retract; it has nothing to do with *how
 far* a retraction reaches once it is allowed. That second question —
-`strict`, `advisory`, or `ignore` — is the retraction policy Chapter 11
+`strict`, `advisory`, or `ignore` — is the retraction policy Chapter 13
 covers as one of `merge`'s three knobs, and it governs the exact
 transitivity this chapter has been demonstrating under its default,
 `strict`. Under `advisory`, the same retraction marks the target
@@ -643,14 +718,52 @@ blast radius is wrong.
 #whatsnext[
   A retraction changes what a store *means* without changing a single
   byte of any other unit's declared content — which is exactly the kind of
-  change that is easy to lose track of. `diff --hop` (Chapter 12) is the
+  change that is easy to lose track of. `diff --hop` (Chapter 14) is the
   most direct way to confirm the aftermath matches what the blast radius
-  promised, unit by unit; `check` (Chapters 6 and 19) is the broader
+  promised, unit by unit; `check` (Chapters 8 and 21) is the broader
   sweep, and will surface any unit left orphaned as `SMY-E050` if the
   active retraction policy is transitive. Run one of the two after any
   retraction you did not just dry-run — the whole point of computing the
   blast radius in advance was to know what to expect from it.
 ]
+
+#exercises((
+  [Run `smysl retract --dry-run b3:re42iey2e7syg6zp73tfrlqbvh
+   fixtures/corpus/F1-incident.smy`. It reports reaching 2 units and orphaning
+   1, and *names* the unit that would lose all of its grounds. Now run the same
+   dry run against `b3:ekitkvj75uvgzxpvq3ad2nrv3b`. Why does one orphan
+   something and the other not?],
+  [The command is `--dry-run` by default in every example this chapter shows.
+   Make the argument for why a tool would make you ask twice to retract, when
+   it does not make you ask twice to merge.],
+  [A unit that loses all of its grounds becomes `unfounded`. Look back at
+   Chapter 6's exercise, where authoring `unfounded` directly was an error.
+   Reconcile the two: why may the tool write a status you may not?],
+))
+
+#answers((
+  [Because blast radius follows `grounds`, and the two units sit at different
+   depths of the argument. One is a leaf that nothing else rests on; the other
+   is the sole support of a claim above it, so retracting it leaves that claim
+   holding nothing. The output names the orphan rather than counting it,
+   because "1 unit would be orphaned" is not actionable and
+   "`b3:wo4t2…` would lose all of its grounds" is.],
+  [Because merge is additive and retraction is not. A merge that surprises you
+   leaves everything it found still in the store, and you can look again. A
+   retraction propagates: it can change the standing of units nobody has looked
+   at in months, several hops from the one you named. The asymmetry is between
+   operations you can inspect *after* and operations you had better inspect
+   *before* — and the tool refuses to let the second kind be discovered by
+   running it.],
+  [Because the tool is recording a history that actually happened and you would
+   be asserting one that did not. `unfounded` means *something this rested on
+   was withdrawn* — when `retract` writes it, that is a true statement about an
+   event in the store. Typed by hand on a unit that never had support, it
+   claims a collapse that never occurred; `speculative` is the honest word for
+   a claim that never had grounds. The status is not reserved because it is
+   dangerous, but because it is a *consequence*, and only the tool is in a
+   position to observe it.],
+))
 
 #recap((
   [Blast radius is every unit a retraction would reach, computed and
@@ -669,7 +782,7 @@ blast radius is wrong.
     unconditionally; `quorum:N` requires `N` distinct agents, where the
     same agent named twice still counts as one.],
   [Authority governs *who* may retract; retraction policy — chosen at
-    merge time, Chapter 11 — governs *how far* an authorised retraction
+    merge time, Chapter 13 — governs *how far* an authorised retraction
     reaches, from fully transitive (`strict`) to recorded-but-inert
     (`ignore`).],
 ))

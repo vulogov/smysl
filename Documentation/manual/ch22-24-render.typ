@@ -2,7 +2,7 @@
 
 #part(number: "VII", title: "Export for Human Consumption")
 
-#chapter(number: 22, title: "render and Profiles")
+#chapter(number: 24, title: "render and Profiles")
 
 #callout(label: "Why")[
   Every command before this chapter produces more graph: more units, a narrower
@@ -25,7 +25,7 @@ a word. Changing the profile never changes what a claim says or what it rests
 on; it only changes how loudly the surrounding apparatus talks about it.
 
 Here is the whole pipeline, run for real against the incident brief from
-Chapter 6's fixtures — `fixtures/corpus/F1-incident.smy`, which carries an
+Chapter 8's fixtures — `fixtures/corpus/F1-incident.smy`, which carries an
 authored `t/brief` thread with three steps and one live rebuttal.
 
 #screen(caption: "$ smysl render --thread t/brief --profile plain fixtures/corpus/F1-incident.smy")[```
@@ -75,7 +75,7 @@ short of asking for that explicitly (rule V2, a few pages on).
   contentions are surfaced. A profile never touches what a claim says, what it
   rests on, or what its status is — only how the surrounding text talks about
   those facts. `smysl` ships three built in: `plain`, `exec`, `analyst`. You can
-  also write your own (Chapter 24) and pass its file path in place of a name.
+  also write your own (Chapter 26) and pass its file path in place of a name.
 ]
 
 #whatsnext[
@@ -399,7 +399,7 @@ refuses instead.
 
 Construct the situation for real: derive a second `t/brief` from the same
 `F1-incident` store, owned by a different agent (`thread --derive`, covered in
-full in Chapter 18, always defaults its derived thread's id to
+full in Chapter 20, always defaults its derived thread's id to
 `t/derived-<schema>` specifically so it never collides with an authored one by
 accident — colliding here is deliberate, via an explicit `--id`):
 
@@ -460,10 +460,47 @@ you meant, not in what a profile is allowed to render.
   You can now render one thread three ways, override its depth, control
   whether a disagreement shows in the text, and pick the right thread out of a
   store that holds more than one. The other axis of `render` is *format*
-  rather than *voice* — Chapter 23 runs the same thread through every target
+  rather than *voice* — Chapter 25 runs the same thread through every target
   this build can produce, from a PR-ready Markdown file to a JSON document
   meant for another program to consume.
 ]
+
+#exercises((
+  [Render `F1-incident.smy` under `--profile plain`, then under
+   `--profile analyst`. The same finding comes out as `≈ Pool saturation…` in
+   one and `[inferred] Pool saturation…` in the other, and only the second
+   prints what the claim rests on. Neither is more *correct*. Say which you
+   would put in front of an executive and which in front of an auditor, and
+   defend the choice.],
+  [Run `render --profile plain --contentions suppress`. The tool emits
+   `SMY-W211` on stderr *and* leaves a comment in the artifact naming the
+   suppressed contention by id. Argue why naming it — rather than counting it
+   — is the difference between rule V2 being honoured and merely gestured at.],
+  [A profile can hide a contention. It cannot hide a *status*. Explain why the
+   format is willing to let a rendering suppress one and not the other.],
+))
+
+#answers((
+  [`plain` for the executive: the marker is compact and the audience wants the
+   shape of the situation, not the apparatus. `analyst` for the auditor: the
+   status is spelled as a word that cannot be misread, and each claim carries
+   what it rests on, so the reader can walk the argument without the source
+   document. The point of profiles is that this is a *presentation* decision
+   made once, rather than two summaries that can drift apart.],
+  [Because a count is not actionable and an id is. "1 contention suppressed"
+   tells a reader something was hidden and gives them no way to go look; the id
+   lets them find it in the store and decide for themselves. Rule V2 exists so
+   that a rendered artifact can never read unanimous over a store that is not —
+   and a reader who cannot locate what was hidden is, for practical purposes,
+   reading a unanimous document.],
+  [Because a contention is a fact *about the document* and a status is a fact
+   *about the claim*. Suppressing a disagreement produces a shorter honest
+   document with a marked omission; suppressing a status would produce a
+   sentence that asserts more than the document does — the reader would see a
+   claim and have no way to tell a measurement from a guess. That is precisely
+   the loss the whole format exists to prevent, so no profile is permitted to
+   cause it: rule V1 requires every status to render distinctly.],
+))
 
 #recap((
   [`render` is a pure function of (store, thread, profile, target): the same
@@ -484,14 +521,14 @@ you meant, not in what a profile is allowed to render.
    the owner and resolves it.],
 ))
 
-#chapter(number: 23, title: "Every Target Format")
+#chapter(number: 25, title: "Every Target Format")
 
 #callout(label: "Why")[
   A brief read by an engineering lead, a brief pasted into a pull request, a
   brief opened in a browser, a brief projected on a screen, and a brief
   consumed by another program are five different jobs, not one job with five
   fonts. `--target` is the axis that answers "who — or what — reads this
-  artifact next," independently of the profile axis from Chapter 22, which
+  artifact next," independently of the profile axis from Chapter 24, which
   answers "in what voice." The two compose freely: any profile, any target.
 ]
 
@@ -513,7 +550,7 @@ you meant, not in what a profile is allowed to render.
   ),
 )
 
-Every target is built from the same IR (Chapter 22's `build_ir` step) by a
+Every target is built from the same IR (Chapter 24's `build_ir` step) by a
 backend that only ever sees that IR — never the store, never the thread
 directly. That is a deliberate seam: a backend that could reach back into the
 store could disagree with another backend about what the document says,
@@ -521,10 +558,10 @@ which would make "the same thread renders to the same meaning in every
 format" false. It is asserted directly in
 `crates/smysl-render/src/backend/mod.rs`: every available target renders
 every block, keeps every status distinguishable, and records rule V2
-suppression identically — the same properties Chapter 22 showed for Markdown
+suppression identically — the same properties Chapter 24 showed for Markdown
 hold for all six.
 
-Markdown is the default and already fully shown in Chapter 22 — the same
+Markdown is the default and already fully shown in Chapter 24 — the same
 `t/brief` / `plain` render from there is what you get with no `--target` flag
 at all. The rest of this chapter runs that identical render through the
 other five.
@@ -732,7 +769,7 @@ not `typst`.
 }
 ```]
 
-This is close to the IR itself, serialized: every field Chapter 22 discussed
+This is close to the IR itself, serialized: every field Chapter 24 discussed
 by name — `status`, `marker`, `level`, `connective`, `notes` with their
 `kind` — appears as a JSON field with the same name. Reach for this target
 when the reader is a program: a dashboard that wants to colour by `status`, a
@@ -821,9 +858,44 @@ HTML.
   and the same suppression record. Pick the target that matches your actual
   downstream reader — a person (`markdown`, `html`, `slides`), a typesetter
   chasing a PDF (`typst`), or another program (`json`) — rather than defaulting
-  to Markdown out of habit. Chapter 24 goes the other direction: instead of
+  to Markdown out of habit. Chapter 26 goes the other direction: instead of
   picking a shipped profile, you write your own from scratch.
 ]
+
+#exercises((
+  [Render `F1-incident.smy` to `markdown`, `text`, `json` and `slides` in turn.
+   The `slides` output is Typst source, not an image, and `json` is a tree
+   rather than prose. Given that all four came from one thread under one
+   profile, say what the *target* axis controls that the profile axis does
+   not.],
+  [Run `render --target html` on a default build. It reports that the target is
+   not available. Look back at Chapter 4's feature table and say why a missing
+   render backend is a build-time decision rather than a runtime one.],
+  [Render the same document twice with the same flags and compare hashes. They
+   match. Name the property, and then name one thing you would have to add to
+   `render` to lose it.],
+))
+
+#answers((
+  [The target decides *who or what reads the artifact next* — a person in a
+   terminal, a person in a browser, a projector, another program — and
+   therefore its syntax and structure. The profile decides *in what voice* the
+   same content is put. They are independent on purpose: you can send the
+   analyst voice to a slide deck or the executive voice to JSON, and neither
+   axis has to know about the other.],
+  [Because the backends are separate code with separate dependencies, and
+   compiling them in is a choice about what you want in your dependency tree.
+   A build without `render-html` genuinely does not contain an HTML renderer,
+   which is a stronger and more auditable statement than a runtime flag that
+   disables one. The command tells you plainly rather than silently emitting
+   something else.],
+  [Determinism — rule D. `render` is a pure function of the graph, the thread
+   and the profile, so the same inputs give the same bytes forever, and an
+   artifact signed off last year can be regenerated and compared today. You
+   would lose it by adding almost any of the obvious conveniences: a
+   generated-on timestamp in the header, a model call to smooth the prose, or
+   anything that consulted the wall clock or the network.],
+))
 
 #recap((
   [Six targets: `markdown` (default), `typst`, `html`, `slides`, `json`,
@@ -841,7 +913,7 @@ HTML.
    for when the next reader is a program rather than a person.],
 ))
 
-#chapter(number: 24, title: "Writing a Custom Profile")
+#chapter(number: 26, title: "Writing a Custom Profile")
 
 #callout(label: "Why")[
   `plain`, `exec`, and `analyst` cover the common cases — a neutral default,
@@ -973,11 +1045,11 @@ word-vs-marker), no connective softening the `risk` block into "on the other
 hand" the way `plain` and `exec` both did, and every block carries the
 `*rests on …*` grounds note that only `verbosity: full` unlocks. Nothing about
 the claims or their status changed from the plain render at the start of
-Chapter 22 — only how insistently the apparatus around them talks.
+Chapter 24 — only how insistently the apparatus around them talks.
 
 #section("Breaking rule V1 on purpose, one more time")
 
-The same refusal from Chapter 22 applies to every custom profile, built-in or
+The same refusal from Chapter 24 applies to every custom profile, built-in or
 not — because it is enforced once, in `Profile::load`, before a name is ever
 attached to a `Profile` value. Ask this new profile file to also hide status,
 and it fails exactly the way the hand-built `flat` profile did:
@@ -1006,13 +1078,49 @@ less) or a custom `markers` block with your own six distinct strings — never
 
 #whatsnext[
   You now have full control over every stage this manual has covered so far:
-  creation (Chapters 4–5), enrichment (7–10), operation (11–18), verification
+  creation (Chapters 6–7), enrichment (7–10), operation (11–18), verification
   (19–21), and — as of these three chapters — export. Part VIII shows the
   same primitives (`Profile`, `Target`, `build_ir`, `emit`) used as a Rust
   library rather than through this CLI, for a program that wants to render
-  without shelling out; Chapter 27 chains everything in this manual, `render`
+  without shelling out; Chapter 29 chains everything in this manual, `render`
   included, into one realistic end-to-end scenario.
 ]
+
+#exercises((
+  [`render --profiles` lists three built-ins and their settings: `plain` is
+   neutral at L1 with a status *marker*, `analyst` is L2 with a status *word*.
+   Before writing any profile of your own, say which of those two axes — level
+   of detail, or how status is spelled — you would expect a regulator to care
+   about, and why.],
+  [Rule V1 says a profile must render every status distinctly. Try to write a
+   profile that maps both `inferred` and `derived` to the same marker, and see
+   what `Profile::load` says. Then explain why this is enforced at *load* time
+   rather than when the offending unit is first encountered.],
+  [Your house style forbids the terse register `exec` uses, but you want its
+   brevity. Which parts of a profile can you change to get that, and which part
+   of the output is not the profile's to decide at all?],
+))
+
+#answers((
+  [The status spelling. A marker like `≈` is compact and assumes the reader
+   knows the convention; the word `[inferred]` cannot be misread by someone
+   encountering the document once, under obligation, possibly in a dispute.
+   Level of detail matters too, but it trades length against completeness —
+   the status axis trades *nothing*, which is why an audience that must not
+   misunderstand gets words.],
+  [It refuses to load. Enforcing it at load time means a profile is either
+   valid for every document or rejected outright — the failure cannot depend
+   on which units a particular store happens to contain. The alternative would
+   be a profile that renders a thousand documents correctly and then flattens
+   two statuses on the one document where the distinction mattered, which is
+   the hedge loss from Chapter 1 arriving at the very last step.],
+  [You can change the register, the verbosity, the level of detail, the status
+   spelling, and whether an audience line is printed. You cannot change what
+   the units *say* — a profile selects and frames gists, it never rewrites
+   them. That boundary is why rendering stays pure: if a profile could reword
+   a claim, the artifact would no longer be a function of the graph, and two
+   renderings of one document could disagree about what it asserts.],
+))
 
 #recap((
   [A profile file is an optional `profile NAME { … }` header over an Hjson
