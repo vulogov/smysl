@@ -20,6 +20,7 @@ pub mod json_ast;
 pub mod monotone;
 pub mod path;
 pub mod prompt;
+pub mod quote;
 pub mod recipe;
 pub mod repair;
 pub mod schema;
@@ -314,6 +315,12 @@ impl<'a> Ingestor<'a> {
 
             let (units, relations, mut diagnostics) =
                 repair::convert(&completion.text, path, self.opts.rung);
+
+            // Check every attributed quote against the text this chunk was drawn from.
+            // A quote that is not in the source is a fabricated attribution, and an error -
+            // so it buys a repair turn, which is the one thing a model can actually fix
+            // here. An elided quote is a warning and passes.
+            diagnostics.extend(quote::verify(&units, text));
             // §22.3: check what can be checked without the store, so the model still has a
             // turn in which to fix it. Discovering a granularity violation at staging would
             // mean discovering it after the calls were paid for.

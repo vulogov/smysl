@@ -724,3 +724,89 @@ fn ingest_stamps_the_hop_and_the_store_reads_it_back() {
         out.get(&old)
     );
 }
+
+// ---------------------------------------------------------------------------
+// Attributed quotes
+// ---------------------------------------------------------------------------
+
+/// A `source` names a document; nothing named the *passage*, so a reviewer could not check
+/// a unit against the text it came from. A quote can - and unlike everything else a model
+/// asserts about its own output, a quote is checkable against text we already hold.
+#[test]
+fn an_attributed_quote_is_carried_and_checked() {
+    let (r, _) = registry(Scripted::saying(
+        r#"{"units":[{"type":"observation","gist":"p95 rose","status":"speculative",
+             "quote":"p95 request latency rose from 180ms to 410ms"}]}"#,
+    ));
+    let (staged, _) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(
+            &Store::new(),
+            "On Thursday the eu-west shard slowed: p95 request latency rose from 180ms to 410ms.",
+        )
+        .unwrap();
+
+    assert_eq!(staged.len(), 1);
+    assert_eq!(
+        smysl_ingest::quote::quote_of(&staged.units[0]).as_deref(),
+        Some("p95 request latency rose from 180ms to 410ms"),
+        "the attribution did not survive to staging"
+    );
+    assert!(
+        staged.report.fail_on(Severity::Error).is_ok(),
+        "{:?}",
+        staged.report
+    );
+}
+
+/// **The case the whole feature exists for.** A quote the document does not contain is a
+/// fabricated attribution, and the tool says so rather than the reader having to notice.
+/// It is an error, so it buys a repair turn - which is the one thing a model can fix here.
+#[test]
+fn an_invented_quote_is_caught_rather_than_believed() {
+    let invented = r#"{"units":[{"type":"observation","gist":"the database was misconfigured",
+        "status":"speculative","quote":"the database was misconfigured all along"}]}"#;
+    let (r, calls) = registry(Scripted::saying(invented));
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(
+            &Store::new(),
+            "On Thursday the eu-west shard slowed: p95 latency rose from 180ms to 410ms.",
+        )
+        .unwrap();
+
+    assert!(
+        report.diagnostics.iter().any(|d| d.code == Code::E307),
+        "an invented quote passed unremarked: {:?}",
+        report.diagnostics
+    );
+    // It spent the repair budget rather than being accepted on the first answer.
+    assert!(
+        calls.load(Ordering::SeqCst) > 1,
+        "the model was not asked again"
+    );
+    // Rule I still holds: the run produced something.
+    assert!(!staged.is_empty());
+}
+
+/// Models elide. A quote with the middle dropped is honest attribution and must not cost a
+/// repair turn - a warning says it, and the batch still stages.
+#[test]
+fn an_elided_quote_warns_without_spending_the_budget() {
+    let (r, calls) = registry(Scripted::saying(
+        r#"{"units":[{"type":"observation","gist":"latency rose","status":"speculative",
+             "quote":"p95 request latency rose ... to 410ms"}]}"#,
+    ));
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(
+            &Store::new(),
+            "On Thursday: p95 request latency rose steadily from 180ms to 410ms.",
+        )
+        .unwrap();
+
+    assert!(report.diagnostics.iter().any(|d| d.code == Code::W308));
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "an elision cost a repair turn"
+    );
+    assert_eq!(staged.len(), 1);
+}

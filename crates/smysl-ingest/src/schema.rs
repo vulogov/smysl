@@ -47,6 +47,7 @@ pub fn unit_schema() -> String {
         "captured": {{ "type": "string" }}
       }}
     }},
+    "quote": {{ "type": "string", "minLength": 1, "maxLength": 400 }},
     "deps": {{ "type": "array", "items": {{ "type": "string" }} }},
     "grounds": {{ "type": "array", "items": {{ "type": "string" }} }},
     "payload": {{ "type": "object" }}

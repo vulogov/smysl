@@ -243,6 +243,8 @@ registry! {
         W304 = "SMY-W304", Warn,  "Span unrepairable; degraded to opaque prose (rule I)";
         W305 = "SMY-W305", Warn,  "Token count estimated rather than provider-reported";
         W306 = "SMY-W306", Warn,  "Usage threshold exceeded - informational only, never blocks";
+        E307 = "SMY-E307", Error, "Attributed quote does not occur in the source text";
+        W308 = "SMY-W308", Warn,  "Attributed quote occurs only loosely - elided or reworded";
     }
 }
 
@@ -512,15 +514,18 @@ mod tests {
         assert_eq!(Code::parse(""), None);
     }
 
-    /// Appendix D, counted section by section: 7 + 7 + 7 + 7 + 6 + 5 + 4 + 7.
+    /// Appendix D, counted section by section: 7 + 7 + 7 + 7 + 6 + 5 + 4 + 9.
     ///
     /// **One more than Appendix D lists.** `SMY-W036` is an addition: rule M at the ingest
     /// boundary lowers an over-claiming unit rather than rejecting it, and the lowering has
     /// to be reportable. Appendix D has no code for it because §9.1 assumed rejection, so
     /// this is a divergence to reconcile rather than a miscount.
+    ///
+    /// `SMY-E307` and `SMY-W308` are two more: a unit may now attribute itself to a quote
+    /// from its source, and a quote that is not in the source has to be sayable.
     #[test]
     fn registry_matches_appendix_d_size() {
-        assert_eq!(Code::ALL.len(), 50);
+        assert_eq!(Code::ALL.len(), 52);
     }
 
     #[test]

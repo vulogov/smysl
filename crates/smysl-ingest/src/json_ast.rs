@@ -233,7 +233,8 @@ fn unit(
     // the provider to is what stops an invented field from being silently dropped - which
     // is rule X's problem arriving through the wrong door.
     const KNOWN: &[&str] = &[
-        "type", "label", "gist", "body", "detail", "status", "source", "deps", "grounds", "payload",
+        "type", "label", "gist", "body", "detail", "status", "source", "deps", "grounds",
+        "payload", "quote",
     ];
     for key in o.keys() {
         if !KNOWN.contains(&key) {
@@ -328,6 +329,25 @@ fn unit(
     }
     if let Some(s) = source {
         b = b.source(s);
+    }
+
+    // The quote travels in the payload under `ingest:quote` (rule X), where
+    // `crate::quote::verify` reads it back and checks it against the text the unit was
+    // drawn from. A `source` names the document; this names the passage - and unlike the
+    // rest of what a model asserts about itself, it is checkable.
+    if let Some(q) = o.get("quote").and_then(|v| v.value.as_str()) {
+        let span = smysl_core::Span::new(0, 0);
+        let mut obj = smysl_core::surface::hjson::HObject::default();
+        obj.insert(
+            smysl_core::surface::hjson::Spanned::new(crate::quote::QUOTE_KEY.to_string(), span),
+            smysl_core::surface::hjson::Spanned::new(
+                smysl_core::surface::hjson::HValue::Str(q.to_string()),
+                span,
+            ),
+        );
+        if let Some(p) = smysl_core::surface::payload::object_to_payload(&obj) {
+            b = b.payload(p);
+        }
     }
 
     match b.build() {

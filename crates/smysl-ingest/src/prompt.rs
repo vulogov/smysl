@@ -90,7 +90,14 @@ pub fn content_ingest_json() -> Template {
              Reference earlier units by their `label`, never by any other identifier.\n\
              Never use status `measured` - only an instrument may assign that - and never \
              `unfounded`. When unsure, use `speculative` with no grounds: a weaker status \
-             that holds is worth more than a stronger one that does not."
+             that holds is worth more than a stronger one that does not.\n\
+             Give each unit a `quote`: the span of the document it came from, copied \
+             exactly. Use ... for anything you leave out of the middle. The quote is \
+             checked against the document, so a quote that is not in it is worse than no \
+             quote at all - omit it if you cannot copy one.\n\
+             Where two units stand in a relation, say so in `relations`: `causes`, \
+             `rebuts`, `warrant`, `answers`, `contrasts` and the rest, naming both ends \
+             by `label`."
         ),
         user: format!("{FENCE}\n{{input}}\n{FENCE}"),
     }
