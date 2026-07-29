@@ -12,6 +12,7 @@
 #![deny(rust_2018_idioms)]
 
 pub mod adjacency;
+pub mod compact;
 pub mod lineage;
 pub mod merge;
 pub mod relink;

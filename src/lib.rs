@@ -74,6 +74,7 @@ pub use smysl_render::{
 };
 
 // ---- graph ----------------------------------------------------------------
+pub use smysl_graph::compact::{compact, Compacted};
 pub use smysl_graph::relink::{relink, Relinked};
 pub use smysl_graph::{
     closure, cycles, dependents, diff, effective_status, hop_diff, membership, merge,

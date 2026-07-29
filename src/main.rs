@@ -69,6 +69,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "render",    about: "Thread plus profile to artifact",                     purity: Purity::Pure,  phase: "SM-P12" },
     Cmd { name: "import",    about: "Tabular readings to measured units, without a model",  purity: Purity::Pure,  phase: "SM-P15" },
     Cmd { name: "relink",    about: "Re-point references onto superseded units",             purity: Purity::Pure,  phase: "SM-P15" },
+    Cmd { name: "compact",   about: "Drop superseded units nothing needs; never in place",   purity: Purity::Pure,  phase: "SM-P15" },
     Cmd { name: "ingest",    about: "Prose or data to staged units",                       purity: Purity::Model, phase: "SM-P14" },
     Cmd { name: "attest",    about: "Semantic checks that require a model",                purity: Purity::Model, phase: "SM-P14" },
     Cmd { name: "providers", about: "List providers, capabilities, and what would egress", purity: Purity::Pure,  phase: "SM-P13" },
@@ -687,6 +688,18 @@ fn cli() -> Command {
                     Arg::new("reset")
                         .long("reset")
                         .help("Discard the ledger")
+                        .action(ArgAction::SetTrue),
+                ),
+            "compact" => sub
+                .arg(
+                    Arg::new("path")
+                        .help("Store to compact; `-` reads stdin (rule P)")
+                        .value_name("PATH"),
+                )
+                .arg(
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .help("Report what would be dropped without emitting anything")
                         .action(ArgAction::SetTrue),
                 ),
             "relink" => sub
@@ -2678,6 +2691,82 @@ fn cmd_usage(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
     ExitCode::Usage
 }
 
+/// `smysl compact` - drop superseded units that nothing needs.
+///
+/// **Never in place.** The log is grow-only, which is what makes merge a join-semilattice,
+/// so compaction is not an operation inside that algebra - it is a lossy projection to a new
+/// store. A compaction that turns out to be wrong is not undoable from its own output, and a
+/// peer that never compacted will bring the dropped records back on the next merge.
+fn cmd_compact(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let path = match m
+        .get_one::<String>("path")
+        .or_else(|| global.get_one::<String>("store"))
+    {
+        Some(p) => p.clone(),
+        None => {
+            eprintln!("smysl compact: no store given");
+            return ExitCode::Usage;
+        }
+    };
+    let (store, _) = match load_store(&path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("smysl compact: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let out = smysl::compact(&store);
+    if !out.still_referenced.is_empty() {
+        eprintln!(
+            "smysl compact: {} superseded unit(s) kept because something still points at \
+             them; `smysl relink` moves those references first",
+            out.still_referenced.len()
+        );
+    }
+    if !out.retracted.is_empty() {
+        eprintln!(
+            "smysl compact: {} retracted unit(s) kept; a retraction must outlive what it \
+             retracts",
+            out.retracted.len()
+        );
+    }
+    if out.is_empty() {
+        eprintln!("smysl compact: nothing to drop");
+        return ExitCode::Success;
+    }
+    eprintln!(
+        "smysl compact: {} unit(s) dropped, {} of {} record(s) removed",
+        out.dropped.len(),
+        out.saved(),
+        out.records_before
+    );
+
+    if m.get_flag("dry-run") {
+        return ExitCode::Success;
+    }
+
+    // Refusing to overwrite the input is the point: this is the one command whose output
+    // cannot reconstruct its input.
+    let Some(dest) = global.get_one::<String>("output") else {
+        eprintln!(
+            "smysl compact: refusing to write to stdout without -o; compaction is not \
+             reversible from its own output"
+        );
+        return ExitCode::Usage;
+    };
+    if dest == &path {
+        eprintln!("smysl compact: refusing to overwrite the store being compacted");
+        return ExitCode::Usage;
+    }
+    let bytes = Store::from_records(out.records).log_bytes();
+    if let Err(e) = std::fs::write(dest, &bytes) {
+        eprintln!("smysl compact: {dest}: {e}");
+        return ExitCode::Failure;
+    }
+    ExitCode::Success
+}
+
 /// `smysl relink` - re-point references onto the units that replaced their targets.
 ///
 /// Identity is content, so correcting a unit produces a *different* unit and whatever rested
@@ -3028,6 +3117,7 @@ fn main() -> ProcExitCode {
         "reindex" => cmd_reindex(sub, &matches),
         "import" => cmd_import(sub, &matches),
         "relink" => cmd_relink(sub, &matches),
+        "compact" => cmd_compact(sub, &matches),
         "ui" => cmd_ui(sub, &matches),
         _ => {
             eprintln!(
@@ -3051,15 +3141,17 @@ mod tests {
 
     /// §23's table, plus one.
     ///
-    /// **`import` and `relink` are additions.** §23 has no command that produces units
+    /// **`import`, `relink` and `compact` are additions.** §23 has no command that produces units
     /// without a model, and without one the top of the status ladder was unreachable:
     /// `measured` needs an `op: Imported` attestation at the `computed` rung and nothing
     /// wrote one. It also has no command for re-pointing a reference after the unit it
     /// names is replaced, which content-addressed identity makes a routine consequence of
-    /// editing. Divergences to reconcile, not a miscount.
+    /// editing. Nor one for dropping what supersession has settled, which a store that
+    /// lives for weeks needs and a grow-only log cannot do for itself. Divergences to
+    /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 20);
+        assert_eq!(COMMANDS.len(), 21);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -3078,6 +3170,7 @@ mod tests {
                 "render",
                 "import",
                 "relink",
+                "compact",
                 "ingest",
                 "attest",
                 "providers",
