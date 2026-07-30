@@ -15,6 +15,13 @@
 //! a leading `{` would miss exactly the case that matters — `check --json` shipped emitting
 //! Rust's `\u{1}` debug escape, which no JSON parser accepts.
 
+// The whole file tests the *binary*, which the `[[bin]]` target only builds with the `cli`
+// feature. `cargo test --workspace --no-default-features` — one of the seven configurations
+// CI runs — therefore has no binary to test, and every case here failed with
+// `NotFound`. Compiled out rather than skipped at runtime: a test that silently passes
+// because it could not find its subject is worse than one that is not there.
+#![cfg(feature = "cli")]
+
 use std::process::Command;
 
 const BIN: &str = env!("CARGO_BIN_EXE_smysl");
