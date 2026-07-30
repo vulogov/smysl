@@ -908,10 +908,47 @@ It stays quoted. The quoting rule (Chapter 7's field-by-field table, above)
 already special-cases exactly this: a quoteless value that would parse as
 a number, `true`, `false`, or `null` is quoted anyway, specifically because
 an unquoted `42` would come back as an integer, not the string it started
-as. The round-trip guard and the quoting rule were written by the same
-hand for the same reason, and between them there is no string this manual
-could find that survives being written unquoted and comes back changed —
-which is the guarantee doing its job, not a gap in the testing.
+as.
+
+Through 0.3 this manual said that no string it could find survived being
+written unquoted and came back changed, and offered that as the guarantee
+doing its job rather than a gap in the testing. That was true and it was
+also the wrong conclusion, and it is worth keeping the correction on the
+page rather than quietly editing it out.
+
+#callout(label: "What a hand-written search could not find")[
+  In 0.4 a fuzzer — a program that generates millions of inputs and checks
+  an assertion on each — was pointed at exactly this property. It found
+  seven defects in a few minutes, several of which had been in the tree
+  since before 0.2:
+
+  - a header *key* holding a `:` or a newline, written unquoted while
+    values were quoted, which tore the header apart and lost the record;
+  - a value beginning `#` or `//`, which the comment syntax added in 0.2
+    then ate along with the closing brace;
+  - a body line ending in a carriage return, which shed one per pass;
+  - a gist assembled from continuation lines, which kept a leading space
+    the reader then stripped;
+  - two labels naming one unit, where the parser and the writer disagreed
+    about which name survived;
+  - unknown header text that skipped Unicode normalisation, so two peers
+    writing identical content got *different uids* — silently, in release
+    builds;
+  - and two CBOR decoders that filled in defaults for fields the encoder
+    always writes, so two different byte strings decoded to one record.
+
+  Every one is fixed and pinned by a regression test, and the fuzz job now
+  blocks CI rather than merely reporting.
+
+  The lesson is not that the guard was useless — the guard is what turned
+  each of these into a loud failure instead of a silent corruption. The
+  lesson is about the sentence this manual used to carry. "I looked and
+  could not find one" is a statement about the search, not about the code.
+  A hand-written search explores the cases its author already imagined; the
+  bugs that survive are precisely the ones nobody thought to imagine. When
+  a property is worth asserting, it is worth handing to something that does
+  not share your assumptions about where to look.
+]
 
 #whatsnext[
   A canonical file is a clean starting point, not a finished one — `fmt`

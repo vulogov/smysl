@@ -123,6 +123,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --test conformance_fixtures --no-default-features
 
+  # The manual prints 43 replayable command transcripts, and until 0.4 nothing checked that
+  # the binary still produced them. A teaching document whose transcripts have quietly
+  # drifted is worse than one with none: a reader who types the command and gets something
+  # else has no way to tell which of the two is wrong.
+  #
+  # The script exits non-zero on drift as of 0.4. It could not before, because it reported
+  # fifteen permanent mismatches — every one an artifact of how it captured output rather
+  # than a stale manual. Concatenating two separately-captured streams does not reproduce
+  # the order a terminal shows, and a block quoting one stream, or eliding with `...`, could
+  # never match. Fixed at the source, so a gate here means something.
+  doc-output:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: make doc-output
+
   # Both fuzz targets existed from the start and nothing ever ran them, which is how two
   # stack overflows survived to 0.3: the surface parser aborted at ~5 000 nesting levels and
   # the CBOR reader at ~20 000, both reachable from input another agent hands you. A fuzzer

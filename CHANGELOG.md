@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 0.4.0
+## 0.4.0 — 2026-07-30
 
 ### Fixed
 
@@ -70,15 +70,55 @@ must name exactly one byte string. Regression tests pin every case.
   value that large has no faithful representation under the constraint, so there is nothing
   to preserve.
 
+### Changed
+
+- **The fuzz CI job blocks.** It ran with `continue-on-error` through the 0.4 cycle while it
+  worked off the backlog it discovered on its first run. That backlog is clear, both targets
+  run for minutes without a finding, and every case is pinned by a regression test.
+
+### Documentation
+
+- **Three wired subcommands were missing from Appendix A entirely.** `import`, `relink` and
+  `compact` were wired in SM-P15 and the appendix was never extended, while its opening
+  paragraph claimed the table could not drift from the binary. It could, and it had. All
+  twenty are now covered, and the purity table in Chapter 3 lists all twenty-one commands
+  rather than seventeen.
+
+- **`make doc-output` reports zero drift, exits non-zero on any, and runs in CI.** It had
+  reported fifteen mismatches since it was written, which is why it was never made a gate —
+  and every one of them was an artifact of the script rather than a stale manual:
+
+  - it concatenated two separately-captured streams, which does not reproduce the order a
+    terminal shows (`check --granularity` writes to stdout, then stderr, then stdout again);
+  - a block quoting *one* stream — the usual shape when stdout is a store and the report
+    goes to stderr — could never equal both;
+  - a block eliding with `...`, or a caption abbreviated with `…`, or one annotated as a
+    different build, was compared as though it were complete and literal.
+
+  Fixed at the source rather than by loosening the comparison: it still catches a
+  one-character change to a documented count, which was tested before the gate was turned
+  on. A check with a permanent backlog of false positives teaches people to ignore it, and
+  then it catches nothing when something real breaks.
+
+- **The manual's round-trip section claimed too much.** It said no string it could find
+  survived being written unquoted and came back changed, and offered that as evidence the
+  guarantee was working. Four of the seven defects above are exactly that string. The
+  section now carries the correction and what it costs: "I looked and could not find one" is
+  a statement about the search, not about the code.
+
+- **`SMY-W036`, `SMY-E307` and `SMY-W308` were emitted but undocumented**, and `SMY-W054`'s
+  entry described behaviour it no longer has. Appendix D now matches the registry exactly,
+  and says outright that `SMY-W305` and `SMY-W306` have no emission site rather than leaving
+  a reader waiting for a diagnostic that cannot arrive.
+
+- **The presentation was not in `make docs`**, so it was the one document that could drift
+  without anyone noticing. It is now built with the other three.
+
 ### Known limits
 
-- **The surface round trip does not hold for some input.** `parse -> write -> parse` returns
-  different records for at least one document, found by the same fuzz run. Open, with the
-  artifact in `fuzz/artifacts/surface/`. Not a regression: this is the first time either fuzz
-  target has ever been run.
-
-- The fuzz CI job is **reporting rather than blocking** until that is fixed. A gate that fails
-  on a backlog it has just discovered teaches people to ignore it.
+- **The fuzz corpus is not seeded**, so each CI run starts cold and reaches less far in its
+  sixty seconds than a local run does. Noted rather than quietly skipped: cold still catches
+  the regressions the job exists to catch.
 
 Carried forward, in the order I would take them:
 
@@ -92,12 +132,12 @@ Carried forward, in the order I would take them:
   ordered structure, where the subtlety is that affordability moves with `used` even for
   candidates nothing has touched.
 - **An escape syntax for a body line opening `#` or `//`.** 0.2 documented the limitation
-  rather than solving it.
-- **`make doc-output` in CI.** It exists and nothing runs it, so the docs can drift between
-  releases exactly as they did before it existed.
+  rather than solving it. 0.4 fixed the *header value* half of this — a value starting with a
+  marker is now quoted — which leaves the body case as the only place the limitation bites.
 - **`W305` and `W306`**, the two diagnostic codes with no emission site. `W305`'s information
   already reaches users through the usage totals line; `W306` describes a threshold feature
-  that does not exist. Emit or delete.
+  that does not exist. Emit or delete. Documented as unreachable in the meantime, so at least
+  nobody waits for one.
 - **OpenAI and Anthropic mappers**, when credentials exist. Still blocked, and the risk has
   grown rather than shrunk since Appendix C gained `relations` and `quote`.
 - **The ~69 RFC divergences**, which are real debt and not a release feature.

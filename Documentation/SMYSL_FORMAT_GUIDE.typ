@@ -178,7 +178,7 @@
     #line(length: 34%, stroke: 0.6pt + ink_accent)
     #v(5mm)
     #text(font: body_family, size: 10pt, style: "italic", fill: ink_smoke,
-      "Vladimir Ulogov · 2026 · smysl 0.3.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
+      "Vladimir Ulogov · 2026 · smysl 0.4.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
   ],
 )
 #v(6mm)
@@ -210,8 +210,16 @@ meet them. Blank lines separate records but carry no meaning of their own.
   before dropping them. A note that has to survive belongs in a unit — typically
   `@question` or `@prose` — where it is content and travels like content.
 
+  Inside a header the markers work the same way, which has one consequence for values: a
+  value that *begins* with `#` or `//` must be quoted, or the rest of the line — closing
+  brace included — is read as a comment. The writer quotes such a value for you. A marker
+  in the *middle* of a value is ordinary text, because a quoteless value runs to `,`, `}`,
+  `]` or end of line without stopping at either marker. So `ref: grafana://board/12` needs
+  no quotes and gets none.
+
   New in 0.2. Before that there was no comment syntax at all, and such a line was
-  `SMY-E001`.
+  `SMY-E001`. The quoting rule for values is 0.4: until then the writer emitted such a
+  value bare and lost the record it belonged to.
 ]
 
 Any other line that is not part of a record's header, gist, body, or detail is a
@@ -336,7 +344,27 @@ its usual 5 ms band over the same seven-day window.
 
 The gist must immediately follow the header — not even a blank line may separate them
 (`SMY-E021`). A gist continuation line is indented by exactly two spaces; a body or
-detail line is not indented at all.
+detail line is not indented at all. The assembled gist is trimmed: whitespace around it is
+never content, because the reader strips the `~` sigil and the space after it, so a gist
+that carried a leading space could not be written back and read again unchanged.
+
+#callout(label: "What is not content")[
+  Identity is content, so anything the format treats as *not* content has to be settled
+  before a uid is computed — otherwise two documents that say the same thing hash
+  differently. Three things are normalised on the way in:
+
+  - *Line endings.* A CRLF file and an LF file are the same document. Every carriage
+    return at the end of a line is stripped, not just one. A carriage return *inside* a
+    line is ordinary text and survives.
+  - *Whitespace around a gist*, as above.
+  - *Unicode form.* All text is normalised to NFC — including the unknown header keys and
+    values that rule X carries verbatim. `é` written as one code point and `é` written as
+    `e` plus a combining accent are the same text and get the same uid.
+
+  Each of these was a real defect before 0.4, and the Unicode one was the worst of them:
+  it failed silently in release builds, so two peers could write identical content and
+  disagree about its identity.
+]
 
 #subsection("Status: the six-rung ladder")
 

@@ -12,8 +12,12 @@ sync with the binary. Each subcommand heading repeats three facts from the comma
 in `src/main.rs` (`§23`): its one-line description, its *purity* (`pure` — a bit-reproducible
 function of its inputs; `mixed` — pure except for one option; `model-dependent` — the only
 kind that can reach off the machine), and the delivery phase that wired it up. All
-seventeen wired subcommands are covered; `ui` (SM-P15) is a stub in this build and prints
+twenty wired subcommands are covered; `ui` (SM-P15) is a stub in this build and prints
 "not wired in this build" rather than accepting flags, so it has no flag table.
+
+Three of them — `import`, `relink` and `compact` — were absent from this appendix until
+0.4.0. They were wired in SM-P15 and the appendix was never extended to match, which is
+exactly the drift the paragraph above claims this table cannot have. It could, and it did.
 
 #section("Global flags")
 
@@ -241,6 +245,46 @@ not yet wired) · SM-P11.
   ),
 )
 
+#section("import")
+
+*Tabular readings to measured units, without a model.* Pure · SM-P15.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`--key`], [`COL` (repeatable)], [Columns naming the reading rather than carrying its value.]),
+    ([`--kind`], [`file|metric|tool|url|doc`], [Source kind recorded on each unit; `file` by default.]),
+    ([`PATH`], [positional, required], [Delimiter-separated file to import; `-` reads stdin (rule P).]),
+  ),
+)
+
+#section("relink")
+
+*Re-point references onto superseded units.* Pure · SM-P15.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`--dry-run`], [—], [Report what would be re-pointed without emitting anything.]),
+    ([`PATH`], [positional], [Store to relink; `-` reads stdin (rule P).]),
+  ),
+)
+
+#section("compact")
+
+*Drop superseded units nothing needs; never in place.* Pure · SM-P15.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`--dry-run`], [—], [Report what would be dropped without emitting anything.]),
+    ([`PATH`], [positional], [Store to compact; `-` reads stdin (rule P).]),
+  ),
+)
+
 #section("ingest")
 
 *Prose or data to staged units.* Model-dependent · SM-P14.
@@ -402,6 +446,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-E033`], [error], [Rule T violation — status exceeds the ceiling for the attestation's rung.]),
     ([`SMY-E034`], [error], [`unfounded` authored.]),
     ([`SMY-W035`], [warning], [`measured` with `op: Authored` rather than `Imported`.]),
+    ([`SMY-W036`], [warning], [Rule M applied at ingest — status lowered to what its grounds support.]),
   ),
 )
 
@@ -415,7 +460,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-E051`], [error], [Retraction authority not satisfied.]),
     ([`SMY-W052`], [warning], [Retracted unit retained under advisory.]),
     ([`SMY-W053`], [warning], [Concurrent supersession materialised as a contention.]),
-    ([`SMY-W054`], [warning], [Label bound to differing uids across views in scope.]),
+    ([`SMY-W054`], [warning], [Label and uid do not correspond one to one — two labels for one unit, or one label for two.]),
     ([`SMY-W055`], [warning], [Agent contention rate exceeds `--max-contentions-per-agent`.]),
   ),
 )
@@ -460,8 +505,16 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W304`], [warning], [Span unrepairable; degraded to opaque prose (rule I).]),
     ([`SMY-W305`], [warning], [Token count estimated rather than provider-reported.]),
     ([`SMY-W306`], [warning], [Usage threshold exceeded — informational only, never blocks.]),
+    ([`SMY-E307`], [error], [Attributed quote does not occur in the source text.]),
+    ([`SMY-W308`], [warning], [Attributed quote occurs only loosely — elided or reworded.]),
   ),
 )
+
+Two of these have no emission site and are listed for completeness only:
+`SMY-W305`'s information already reaches you through the usage totals line, and
+`SMY-W306` describes a threshold feature that does not exist. They are on the
+list to be emitted or deleted rather than left as codes you could wait for
+forever.
 
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix C — Exit Codes

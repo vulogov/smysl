@@ -321,7 +321,7 @@ precisely and names the two rules that enforce it.
   [*It does not write your prose.* Every gist in a document was typed by a
    person or proposed by a model you explicitly invoked. Nothing generates
    text on its own initiative.],
-  [*It does not phone home.* Of the seventeen commands, exactly two —
+  [*It does not phone home.* Of the twenty-one commands, exactly two —
    `ingest` and `attest`, whose entire job is calling a model — can open a
    socket, and they will tell you what they would send before they send it.
    The restriction is enforced by a build-time check rather than by promise.],
@@ -428,7 +428,7 @@ did this number come from" and get an answer.
    unverifiable instruction. `smysl` makes one artifact that is both checkable
    and readable.],
   [The tool judges no truth, resolves no disagreement, writes no prose, and
-   cannot reach the network in fifteen of its seventeen commands.],
+   cannot reach the network in nineteen of its twenty-one commands.],
 ))
 
 #chapter(number: 2, title: "The Shape of the System, and the Twelve Rules")
