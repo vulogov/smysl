@@ -94,6 +94,12 @@ agent hands you. Every threshold below was measured against the built binary.
 
 ### Known limits
 
+- **`pack` is quadratic in store size**, and this release does not fix it — 2.8s at 4 000
+  units, 12s at 8 000. `scripts/bench-scaling.py` reproduces it. Two measurements narrow it
+  and correct the architecture note, which had blamed the wrong things: `salience` is linear,
+  and `improve()` — the obvious nested loop — accounts for under 1% of the time. It is worst
+  with an ample budget and linear with a binding one. A profile points at call *volume* into
+  `closure::required`, not at any single expensive call.
 - `thread` still defaults to surface output where `merge` and `pack` default to CBOR, so it
   sits awkwardly against rule P. Changing the default would be right by the rule and would
   also change what every documented `thread --derive` example prints, so it is left for a

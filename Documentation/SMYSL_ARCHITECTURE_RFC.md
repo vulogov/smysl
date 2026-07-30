@@ -566,9 +566,30 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
   requires every `properties` key in `required`, and the shared schema lists a fraction of
   them. The risk has grown, not shrunk — Appendix C gained `relations` and `quote` since,
   and the mapper passes it through unchanged. Blocked on a key.
-- **`pack` and `salience` recompute over the whole store on every call.** `compact` bounds
-  how large that store gets, but nothing bounds the per-call cost, and PageRank runs over the
-  full adjacency each time. No evidence yet that it bites; no measurement either.
+- **`pack` is quadratic in store size.** Measured, which corrected two guesses this note
+  previously made: `salience` is *linear* and fine, and PageRank over the full adjacency is
+  not the problem. Reproduce with `python3 scripts/bench-scaling.py`, which prints the ratio
+  between successive sizes — 2.0 is linear, 4.0 is quadratic:
+
+  | units | check | salience | merge | pack |
+  |---:|---:|---:|---:|---:|
+  | 1000 | 8 (1.6x) | 8 (1.5x) | 10 (1.7x) | 161 (3.9x) |
+  | 2000 | 13 (1.7x) | 12 (1.6x) | 19 (1.8x) | 658 (4.1x) |
+  | 4000 | 25 (2.0x) | 23 (1.9x) | 37 (2.0x) | 2818 (4.3x) |
+
+  Two further facts, both measured, both narrowing where to look:
+
+  - **It is worst when packing is easiest.** With a budget that admits everything, `pack` is
+    quadratic (3.8x, 4.3x per doubling); with a budget that binds, it is linear (1.9x, 2.0x).
+  - **It is not `improve()`.** Setting `IMPROVEMENT_PASSES` to 0 changes the time by under
+    1% at 4000 units, so the local-improvement pass — the obvious nested loop, and the first
+    thing reading the code suggests — is not the cost.
+
+  A sampling profile points instead at `closure::required` → `Store::rebuttals_of` →
+  `Adjacency::incoming`. Per call that chain is cheap: `in_edges` is an indexed lookup and
+  `rebuttals_of` is one non-transitive hop. So the cost is call *volume* rather than per-call
+  work, and the next step is counting calls rather than optimising any of them. **Not yet
+  fixed**, and deliberately not guessed at twice.
 - **Quoting appears to coarsen units** (below) and the two measurement gaps remain.
 - **Quoting appears to coarsen units.** The same fixture that gave five or six units gives
   three once each must carry a quotable span. Observed, not diagnosed — it may be the prompt
