@@ -790,7 +790,50 @@ fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     for path in inputs {
         bar.set_label(format!("formatting {path}"));
         bar.tick();
-        let src = match read_input(&path) {
+        let bytes = match read_bytes(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                bar.abandon();
+                eprintln!("smysl fmt: {path}: {e}");
+                return ExitCode::Failure;
+            }
+        };
+
+        // `check` reads either form; `fmt` read only text, and failed on a CBOR store with
+        // "stream did not contain valid UTF-8". That asymmetry mattered because turning a
+        // store back into something readable is exactly what `fmt` is for.
+        //
+        // The two flags do not carry over, and are refused rather than reinterpreted.
+        // `--check` asks whether a *text* file is spelled canonically; a CBOR log is
+        // canonical by construction, so there is nothing to compare. `--write` would
+        // replace a binary store with text in place, which is a conversion rather than a
+        // formatting, and not something to do to somebody's file on the strength of a flag
+        // that means something else.
+        if !looks_like_surface(&bytes) {
+            if check || write {
+                bar.abandon();
+                let flag = if check { "--check" } else { "--write" };
+                eprintln!(
+                    "smysl fmt: {path}: {flag} applies to surface text; a CBOR log is \
+                     already canonical. Drop the flag to emit it as surface."
+                );
+                return ExitCode::Usage;
+            }
+            match cbor_to_surface(&bytes) {
+                Ok(text) => {
+                    bar.suspend();
+                    print!("{text}");
+                    continue;
+                }
+                Err(e) => {
+                    bar.abandon();
+                    eprintln!("smysl fmt: {path}: {e}");
+                    return ExitCode::Failure;
+                }
+            }
+        }
+
+        let src = match String::from_utf8(bytes) {
             Ok(s) => s,
             Err(e) => {
                 bar.abandon();
@@ -1016,6 +1059,27 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 /// A CBOR log has neither: its records were validated when they were decoded, and labels
 /// have no wire record. So the CBOR path returns an outcome with an empty diagnostic set,
 /// which is the truth rather than a convenience.
+/// Render a CBOR log as canonical surface text.
+///
+/// Labels come from their bindings, which is what makes the output readable rather than a
+/// wall of uids; before `Record::LabelBinding` there was nothing to recover them from.
+fn cbor_to_surface(bytes: &[u8]) -> Result<String, String> {
+    let (records, _) = smysl::from_cbor_seq(bytes).map_err(|e| e.to_string())?;
+    let labels: std::collections::BTreeMap<smysl::Label, Uid> = records
+        .iter()
+        .filter_map(|r| match r {
+            smysl::Record::LabelBinding(b) => Some((b.label.clone(), b.uid)),
+            _ => None,
+        })
+        .collect();
+    let view = records.iter().find_map(|r| match r {
+        smysl::Record::View(v) => Some(v.clone()),
+        _ => None,
+    });
+    let ctx = WriteContext::from_labels(&labels);
+    Ok(write_surface(view.as_ref(), &records, &ctx))
+}
+
 /// Whether a store's bytes are surface text rather than a CBOR log.
 ///
 /// Surface text starts with a sigil - but it may be *preceded* by blank lines and comments,

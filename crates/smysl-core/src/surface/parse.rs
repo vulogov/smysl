@@ -333,7 +333,17 @@ impl<'a> Parser<'a> {
         let after_sigil = &start.text[1..];
         let mut words = after_sigil.split_whitespace();
         let ty = words.next().unwrap_or("");
-        let schema = match SchemaId::parse(ty) {
+        // `parse_forward`: a bare type this build does not know becomes
+        // `SchemaId::UnknownKernel` rather than a refusal, so a document written by a later
+        // version parses here and re-emits unchanged. It is not silent - `check`'s extension
+        // pass reports every one as `SMY-W010`, naming the type.
+        //
+        // This does change what a typo does. `@clai c/a { … }` used to be a hard `SMY-E001`
+        // and is now a warning naming `clai`. The tool cannot tell a typo from a kernel type
+        // added next year - the two are structurally identical - so it can have forward
+        // compatibility or typo-as-error, not both. `--strict` restores the failure for
+        // anyone who wants it, and the message is more precise than it was.
+        let schema = match SchemaId::parse_forward(ty) {
             Ok(s) => s,
             Err(_) => {
                 self.err(Code::E001, start.span, format!("unknown unit type `{ty}`"));

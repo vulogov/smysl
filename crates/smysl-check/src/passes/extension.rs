@@ -90,6 +90,35 @@ pub fn run(store: &Store, profile: Option<&ConsumerProfile>, report: &mut Report
         )));
     }
 
+    // `SMY-W014` - a whole record type this build does not know.
+    //
+    // The code was in the registry from 0.1 with no emission site anywhere, so an unknown
+    // record was preserved in perfect silence: a reader was never told the store held
+    // something it could not interpret. Preservation is rule X working; saying nothing
+    // about it is how a reader comes to believe they have seen the whole document.
+    for r in store.iter() {
+        if let smysl_core::Record::Unknown { code, payload } = r {
+            report.push(Diagnostic::new(Code::W014).with_message(format!(
+                "record type {code} is not known to this build; \
+                 {} byte(s) preserved verbatim, skipped semantically",
+                payload.len()
+            )));
+        }
+    }
+
+    // `SMY-W010` - a type this *build* does not know, which is stronger than the
+    // consumer-profile case below and does not depend on one being supplied. A unit whose
+    // type arrived from a later version decodes and round-trips (rule X), but nothing here
+    // can interpret it, and a reader who is not told that has been misled by silence.
+    for (uid, unit) in store.units() {
+        if let smysl_core::SchemaId::UnknownKernel(name) = &unit.core.schema {
+            report.push(Diagnostic::on(Code::W010, *uid).with_message(format!(
+                "unit type `{name}` is not known to this build; \
+                 preserved verbatim, interpretation lost"
+            )));
+        }
+    }
+
     // `SMY-W010` - a schema this consumer does not implement.
     if let Some(p) = profile {
         for (uid, unit) in store.units() {

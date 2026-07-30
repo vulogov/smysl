@@ -796,3 +796,80 @@ fn bindings_are_not_duplicated_by_a_round_trip() {
     assert_eq!(count(&a), count(&b));
     assert_eq!(a.labels, b.labels);
 }
+
+// ── Forward compatibility (0.2.0) ───────────────────────────────────────────
+
+/// A unit whose type a later version added must decode, not fail the record.
+///
+/// Before this, an unrecognised type produced `SMY-E004: malformed envelope` — corruption,
+/// not degradation — while an unknown *record* type and an unknown *extension* type both
+/// degraded correctly. One kernel type added in a later 0.x made every store carrying it
+/// unreadable to an earlier build.
+#[test]
+fn an_unknown_kernel_type_decodes_and_re_encodes_unchanged() {
+    use smysl_core::{from_cbor, to_cbor, SchemaId};
+
+    let core = smysl_core::UnitCoreBuilder::new(
+        SchemaId::parse_forward("postmortem").expect("a bare identifier must degrade"),
+        "a gist",
+        Status::Speculative,
+    )
+    .build()
+    .expect("an unknown type is still a valid unit");
+
+    let bytes = to_cbor(&Record::Unit(core.clone()));
+    let (back, n) = from_cbor(&bytes).expect("must decode, not fail the record");
+    assert_eq!(n, bytes.len());
+    assert_eq!(back.as_unit(), Some(&core), "the type did not survive");
+    // Re-encoding must be byte-identical, or identity would move under a reader that
+    // happens not to know the type.
+    assert_eq!(to_cbor(&back), bytes);
+}
+
+/// Surface parsing and decoding need *opposite* behaviour here, and this pins the split.
+/// On the wire an unrecognised type is forward compatibility; `parse` still refuses the
+/// shapes that are malformed rather than merely unfamiliar.
+#[test]
+fn parse_forward_admits_bare_identifiers_and_nothing_else() {
+    use smysl_core::SchemaId;
+
+    // Degrades: a well-formed bare identifier.
+    for s in ["postmortem", "post-mortem", "sev2"] {
+        assert!(
+            matches!(SchemaId::parse_forward(s), Ok(SchemaId::UnknownKernel(_))),
+            "`{s}` should degrade"
+        );
+        assert!(SchemaId::parse(s).is_err(), "`{s}` must still fail `parse`");
+    }
+    // Known types are unaffected by either.
+    assert!(matches!(
+        SchemaId::parse_forward("claim"),
+        Ok(SchemaId::Kernel(_))
+    ));
+    // Malformed, not unfamiliar: still refused by both.
+    for s in ["", "Postmortem", "post!mortem", "x.sre", "a/b/c"] {
+        assert!(
+            SchemaId::parse_forward(s).is_err(),
+            "`{s}` is malformed and must still fail"
+        );
+    }
+}
+
+/// The writer must not emit what the parser rejects. `write_surface` emits the exact type
+/// string it decoded — it has to, since the type is hashed — so the lexer has to accept it.
+#[test]
+fn an_unknown_type_survives_a_surface_round_trip() {
+    let src = "@postmortem p/a { status: speculative }\n~ a gist\n";
+    let a = parse_surface(src).unwrap();
+    assert!(!a.has_errors(), "{:?}", a.diagnostics);
+    assert_eq!(a.units().count(), 1);
+
+    let text = write_surface(a.view.as_ref(), &a.records, &WriteContext::from_labels(&a.labels));
+    let b = parse_surface(&text).unwrap();
+    assert!(
+        !b.has_errors(),
+        "writer emitted what the parser rejects: {text}\n{:?}",
+        b.diagnostics
+    );
+    assert_eq!(a.records, b.records);
+}

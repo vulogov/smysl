@@ -429,7 +429,11 @@ fn dec_unit(d: &mut Dec<'_>) -> Res<UnitCore> {
 
     read_map(d, &mut extra, |d, k| match k {
         keys::unit::SCHEMA => {
-            schema = Some(SchemaId::parse(d.text()?).map_err(|_| bad(at))?);
+            // `parse_forward`, not `parse`: a type this build does not know is a later
+            // version's kernel type, and refusing it would fail the whole record. It
+            // decodes to `SchemaId::UnknownKernel`, re-encodes to the same bytes, and is
+            // reported as `SMY-W014` by a caller that wants to say so.
+            schema = Some(SchemaId::parse_forward(d.text()?).map_err(|_| bad(at))?);
             Ok(true)
         }
         keys::unit::GIST => {
