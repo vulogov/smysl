@@ -10,6 +10,10 @@
 //! holds. That extends §7.1 rather than contradicting it - the kernel records themselves
 //! are unaffected.
 
+use std::borrow::Cow;
+
+use unicode_normalization::UnicodeNormalization;
+
 use crate::cbor::reader::Dec;
 use crate::cbor::writer::{enc, Enc};
 use crate::cbor::{major, NULL};
@@ -34,10 +38,35 @@ pub fn object_to_payload(o: &HObject) -> Option<Vec<u8>> {
     Some(e.into_bytes())
 }
 
+/// Normalise to NFC before encoding.
+///
+/// Every other text field is normalised once on construction, so the encoder only asserts
+/// the invariant. Unknown header keys and their string values reach the encoder straight
+/// from the parser and were the one path that skipped it — a debug build panicked on the
+/// assertion, and a release build silently encoded non-NFC text, so two peers writing the
+/// same content in different Unicode forms produced different uids. That is rule D, and it
+/// failed silently in the build people ship. Found by fuzzing on `"\0\u{341}"`, which NFC
+/// folds to `"\0\u{301}"`.
+///
+/// Sorting happens *after* this, on the encoded bytes, so normalisation cannot disturb the
+/// canonical key order.
+fn nfc(s: &str) -> Cow<'_, str> {
+    if unicode_normalization::is_nfc(s) {
+        Cow::Borrowed(s)
+    } else {
+        Cow::Owned(s.nfc().collect())
+    }
+}
+
 fn write_object(e: &mut Enc, o: &HObject) {
     let mut entries: Vec<(Vec<u8>, Vec<u8>)> = o
         .iter()
-        .map(|(k, v)| (enc(|e| e.text(&k.value)), enc(|e| write_value(e, &v.value))))
+        .map(|(k, v)| {
+            (
+                enc(|e| e.text(&nfc(&k.value))),
+                enc(|e| write_value(e, &v.value)),
+            )
+        })
         .collect();
     entries.sort_by(|a, b| a.0.cmp(&b.0));
     entries.dedup_by(|a, b| a.0 == b.0);
@@ -56,7 +85,7 @@ fn write_value(e: &mut Enc, v: &HValue) {
         HValue::Int(i) if *i >= 0 => e.uint(*i as u64),
         HValue::Int(i) => e.head(major::NEGINT, (-1 - *i) as u64),
         HValue::Float(f) => e.f32q(*f as f32),
-        HValue::Str(s) => e.text(s),
+        HValue::Str(s) => e.text(&nfc(s)),
         HValue::Array(items) => {
             e.head(major::ARRAY, items.len() as u64);
             for i in items {

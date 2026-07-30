@@ -11,6 +11,55 @@ and the facade asserts the two are independent.
 
 ### Fixed
 
+Seven round-trip and determinism defects, all found by fuzzing. Each one broke the same
+promise from a different side: `parse -> write -> parse` must be a fixed point, and a uid
+must name exactly one byte string. Regression tests pin every case.
+
+- **Two labels naming one unit lost a coin toss.** Identity is content, so two declarations
+  with the same gist, status and grounds *are* one unit — and surface syntax has room for
+  one name on the declaration. The parser kept whichever came first in the file; the writer
+  kept the alphabetically first. So the surviving name changed on each pass. Both now keep
+  the canonically first, and the loss is reported as `SMY-W054` rather than happening in
+  silence. Invisible before `Record::LabelBinding` existed, because nothing carried a label
+  through the wire to notice it going missing.
+
+- **A carriage return at the end of a body line eroded one per round trip.** The lexer
+  stripped exactly one `\r` before a `\n`, so `x\r\r\n` became `x\r`, which the writer
+  emitted as `x\r` + `\n`, which the next parse read as a plain CRLF. All trailing carriage
+  returns are now stripped: line endings are not content. Were they, the same document
+  checked out with CRLF endings would hash differently from one checked out with LF, and
+  identity would depend on a git config. A `\r` *inside* a line still is content, and stays.
+
+- **Unknown header keys were written unquoted.** Values went through the quoter; keys did
+  not. Rule X keeps an unknown key verbatim and nothing constrains what a peer puts in one,
+  so a key holding a `:`, a `}` or a newline tore the header apart and the **whole unit**
+  vanished on re-parse.
+
+- **A header value starting with `#` or `//` was written unquoted**, so the comment syntax
+  added in 0.2.0 ate the rest of the line — closing brace included, taking the unit with it.
+  Only a *leading* marker is a hazard: the comment skip runs before a value begins, while a
+  quoteless value runs to `,`, `}`, `]` or end of line without stopping at either marker.
+  So `grafana://board/12` needed no quotes, and still gets none.
+
+- **Unknown header text was not NFC-normalised before hashing.** Every other text field is
+  normalised once on construction, so the encoder only asserts the invariant; unknown keys
+  and their string values reached it straight from the parser. A debug build tripped the
+  assertion. A **release build encoded the non-NFC text**, so two peers writing the same
+  content in different Unicode forms produced different uids — rule D failing silently, in
+  the build people ship.
+
+- **A gist assembled from continuation lines kept a leading space.** The writer emits `~ ` +
+  gist and the reader strips the sigil *and* the whitespace after it, so the space was eaten
+  on re-parse and the uid moved with it. The assembled gist is now trimmed.
+
+- **`PackInfo` and `View` decoded with defaults for mandatory fields.** The encoder writes
+  them unconditionally, so `[7, {0: 0}]` was accepted and re-encoded as a four-key map: two
+  distinct byte strings mapping to one record, which is exactly what stops a uid from being
+  an identity. Both now reject a record missing a field the encoder always emits. A sweep
+  over every record kind and low key guards the invariant generally — an earlier version of
+  that sweep probed with integers alone, never entered `dec_view` (whose key 0 is a text id),
+  and let the second instance survive another fuzz run.
+
 - **`quantise` returned infinity for a large payload float**, which is not a multiple of
   1/1024 and not finite, so the CBOR writer's `debug_assert!(is_quantised(q))` fired. In
   release the assertion is compiled out and the infinity was written to the store instead —

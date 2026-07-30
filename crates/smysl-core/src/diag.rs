@@ -213,7 +213,7 @@ registry! {
         E051 = "SMY-E051", Error, "Retraction authority not satisfied";
         W052 = "SMY-W052", Warn,  "Retracted unit retained under advisory";
         W053 = "SMY-W053", Warn,  "Concurrent supersession materialised as a contention";
-        W054 = "SMY-W054", Warn,  "Label bound to differing uids across views in scope";
+        W054 = "SMY-W054", Warn,  "Label and uid do not correspond one to one - two labels for a unit, or one label for two";
         W055 = "SMY-W055", Warn,  "Agent contention rate exceeds --max-contentions-per-agent";
     }
 

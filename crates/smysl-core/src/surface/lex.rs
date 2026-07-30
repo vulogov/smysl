@@ -77,7 +77,16 @@ pub fn lex(src: &str) -> Vec<Line<'_>> {
         // `split` keeps a trailing empty field for a final newline; drop it so a file
         // ending in `\n` does not gain a phantom blank line.
         let is_last = offset + raw.len() >= src.len();
-        let text = raw.strip_suffix('\r').unwrap_or(raw);
+        // *All* trailing carriage returns, not one. Stripping exactly one made `x\r\r\n`
+        // parse to a body line `x\r`, which the writer emitted as `x\r` + `\n` — and the
+        // next parse read that as one CRLF and dropped another. Every round trip shed a
+        // `\r`, so the document was never a fixed point. Found by fuzzing.
+        //
+        // The alternative — keep every `\r` as content and split on `\n` alone — is also a
+        // fixed point, and worse: identity is content, so the same document checked out
+        // with CRLF endings would hash differently from one checked out with LF. Line
+        // endings are not content. A `\r` *inside* a line still is, and survives.
+        let text = raw.trim_end_matches('\r');
         if !(is_last && text.is_empty() && offset > 0) {
             out.push(Line {
                 class: classify(text),

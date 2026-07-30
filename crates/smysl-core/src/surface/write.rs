@@ -28,9 +28,20 @@ pub struct WriteContext {
 
 impl WriteContext {
     /// Build from the label map a parse produced.
+    ///
+    /// Two labels can name one uid — identity is content, so `@claim a/x` and `@claim a/y`
+    /// with the same gist and status are the same unit under two names. Surface syntax
+    /// writes a label as part of a unit declaration and has nowhere to put a second, so one
+    /// of them cannot be emitted. This keeps the **first in canonical order** and the parser
+    /// drops the same one, so `parse -> write -> parse` agrees with itself rather than
+    /// silently swapping which name survives.
     pub fn from_labels(labels: &BTreeMap<Label, Uid>) -> WriteContext {
+        let mut out: BTreeMap<Uid, Label> = BTreeMap::new();
+        for (l, u) in labels {
+            out.entry(*u).or_insert_with(|| l.clone());
+        }
         WriteContext {
-            labels: labels.iter().map(|(l, u)| (*u, l.clone())).collect(),
+            labels: out,
             salience: BTreeMap::new(),
         }
     }
@@ -149,7 +160,7 @@ fn write_unit(out: &mut String, u: &UnitCore, ctx: &WriteContext) {
         // Unknown header keys come back out as they went in (rule X).
         if let Ok(o) = payload_to_object(p) {
             for (k, v) in o.iter() {
-                fields.push(format!("{}: {}", k.value, value(&v.value)));
+                fields.push(format!("{}: {}", quoted_key(&k.value), value(&v.value)));
             }
         }
     }
@@ -241,7 +252,7 @@ fn value(v: &HValue) -> String {
 
 fn object(o: &HObject) -> String {
     o.iter()
-        .map(|(k, v)| format!("{}: {}", k.value, value(&v.value)))
+        .map(|(k, v)| format!("{}: {}", quoted_key(&k.value), value(&v.value)))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -260,10 +271,47 @@ fn quoteless_or_quoted(s: &str) -> String {
             )
         })
         || matches!(s, "true" | "false" | "null")
+        // A header accepts `#` and `//` comments inside a record. The comment skip runs
+        // *before* a value begins, while a quoteless value itself runs to `,`, `}`, `]` or
+        // end of line without stopping at either marker — so the hazard is a value that
+        // **starts** with one, which gets eaten along with the rest of the line and the
+        // closing brace, losing the whole unit. A marker in the middle is ordinary text,
+        // which is why `grafana://board/12` needs no quotes and does not get any. Comments
+        // arrived in 0.2.0 and this quoter was not revisited; found by fuzzing on `["#x"]`.
+        || s.starts_with('#')
+        || s.starts_with("//")
         || s.parse::<f64>().is_ok();
     if !needs_quotes {
         return s.to_string();
     }
+    quoted(s)
+}
+
+/// Quote a *key* when a bare one would not read back as the same key.
+///
+/// Keys were emitted raw while values went through `quoteless_or_quoted`. An unknown header
+/// key survives verbatim under rule X, and nothing constrains what a peer puts there — a key
+/// holding a newline, a `:` or a `}` tore the header apart, and the whole unit vanished on
+/// re-parse. Found by fuzzing: the writer emitting what its own parser rejects.
+///
+/// The bare-key terminators are the parser's own (`:`, whitespace, `,`, `{`, `}`), plus the
+/// two characters that would break the quoted form itself. `char::is_whitespace` is wider
+/// than the parser's `is_ascii_whitespace` on purpose: quoting one key too many costs a pair
+/// of quotes, and quoting one too few loses a record.
+fn quoted_key(s: &str) -> String {
+    let needs_quotes = s.is_empty()
+        || s.starts_with('#')
+        || s.starts_with("//")
+        || s.chars()
+            .any(|c| c.is_whitespace() || matches!(c, ':' | ',' | '{' | '}' | '"' | '\\'));
+    if !needs_quotes {
+        return s.to_string();
+    }
+    quoted(s)
+}
+
+/// The quoted form, with the escapes the parser understands.
+fn quoted(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for c in s.chars() {

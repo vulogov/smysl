@@ -455,3 +455,47 @@ fn the_corpus_encoding_matches_the_golden_file() {
         "the canonical encoding of the corpus changed"
     );
 }
+
+/// A record the decoder accepts must re-encode to the exact bytes it came from.
+///
+/// `dec_packinfo` defaulted `budget`, `used`, `optimality` and `estimator` when they were
+/// absent, while the encoder writes all four unconditionally. So `[7, {0: 0}]` decoded fine
+/// and re-encoded as a four-key map: two distinct byte strings mapping to one record, which
+/// is precisely what stops a uid from being an identity. Found by fuzzing.
+#[test]
+fn a_pack_info_missing_a_mandatory_field_is_rejected_not_defaulted() {
+    // array(2), 7 (PackInfo), map(1) { 0: 0 } — budget alone.
+    let truncated = [0x82u8, 0x07, 0xA1, 0x00, 0x00];
+    assert!(
+        smysl_core::from_cbor(&truncated).is_err(),
+        "a PackInfo missing three mandatory fields was accepted and silently completed"
+    );
+
+    // The invariant itself, swept over every record kind and every low key. Several value
+    // shapes, because a decoder is only reachable through the ones its fields accept — an
+    // earlier version of this sweep used integers alone, so `dec_view` (whose key 0 is a
+    // text id) was never entered and its identical defect survived another fuzz run.
+    let values: [&[u8]; 5] = [
+        &[0x00],                   // 0
+        &[0x60],                   // ""
+        &[0x80],                   // []
+        &[0xF6],                   // null
+        &[0x63, b'a', b'/', b'b'], // "a/b", a plausible id
+    ];
+    for code in 0u8..=12 {
+        for key in 0u8..=9 {
+            for v in values {
+                let mut bytes = vec![0x82, code, 0xA1, key];
+                bytes.extend_from_slice(v);
+                if let Ok((r, n)) = smysl_core::from_cbor(&bytes) {
+                    assert_eq!(
+                        smysl_core::to_cbor(&r),
+                        &bytes[..n],
+                        "record code {code} with only key {key} = {v:?} did not re-encode \
+                         to itself; the decoder supplied a default the encoder always writes"
+                    );
+                }
+            }
+        }
+    }
+}

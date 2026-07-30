@@ -189,6 +189,9 @@ fn every_command_either_honours_output_or_says_it_cannot() {
 /// to warn about proves nothing either way.
 #[test]
 fn strict_promotes_a_warning_wherever_a_command_has_one() {
+    // With `exact-pack` on, the `push` below is compiled out and nothing mutates this —
+    // so the `mut` is unused in exactly one of the seven configurations CI builds.
+    #[allow(unused_mut)]
     let mut cases: Vec<(&str, Vec<&str>)> = vec![("check", vec!["check", F7])];
 
     // `--mode exact` warns `SMY-W202` — "exact packing is not compiled in" — only on a build
