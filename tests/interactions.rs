@@ -415,3 +415,66 @@ fn a_label_collision_is_detected_across_a_cbor_round_trip() {
             .collect::<Vec<_>>()
     );
 }
+
+/// Every command that emits a *store* must carry the label bindings for what it emitted.
+///
+/// `merge` was fixed in 0.2 and `bundle` and `pack` were not, which made the two artifacts
+/// most likely to be handed to somebody else the two that arrived unreadable. A bundle is
+/// the worst case: closure exists precisely so it can be given to a recipient who has
+/// nothing else to read it against.
+///
+/// Asserted through the library rather than the CLI, so the property is pinned where the
+/// behaviour lives.
+#[test]
+fn a_bundled_store_carries_the_labels_of_the_units_it_contains() {
+    use smysl::{from_cbor_seq, Label, LabelBinding, View, ViewId};
+
+    let e = unit("a measured reading", vec![]);
+    let e_uid = canonical_uid(&e);
+    let c = unit("a claim resting on it", vec![e_uid]);
+    let c_uid = canonical_uid(&c);
+
+    let mut view = View::new(ViewId::new("v/x").unwrap(), "incident-brief");
+    view.roots.insert(c_uid);
+
+    let mut store = Store::new();
+    store
+        .append(&[
+            Record::Unit(e.clone()),
+            Record::Unit(c.clone()),
+            Record::View(view.clone()),
+            Record::LabelBinding(LabelBinding::new(Label::new("e/reading").unwrap(), e_uid)),
+            Record::LabelBinding(LabelBinding::new(Label::new("c/claim").unwrap(), c_uid)),
+        ])
+        .expect("a store we just built must append");
+
+    let bytes = store.bundle_with(&view, false);
+    let (records, _) = from_cbor_seq(&bytes).expect("a bundle must decode");
+
+    // The units travelled — that is closure, and it already worked.
+    let units: Vec<Uid> = records
+        .iter()
+        .filter_map(Record::as_unit)
+        .map(canonical_uid)
+        .collect();
+    assert!(units.contains(&c_uid), "closure lost the root");
+    assert!(units.contains(&e_uid), "closure lost the ground");
+
+    // A binding for every unit that travelled is what makes the bundle readable. This is
+    // the half that was missing: `bundle_with` emits no bindings, so the CLI appends them,
+    // and this test pins the requirement rather than the implementation.
+    let bound: std::collections::BTreeSet<Uid> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::LabelBinding(b) => Some(b.uid),
+            _ => None,
+        })
+        .collect();
+    for u in &units {
+        assert!(
+            bound.contains(u),
+            "unit {u} travelled without its label; every reference to it in the bundle \
+             would read as a bare uid"
+        );
+    }
+}

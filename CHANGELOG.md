@@ -9,9 +9,38 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 0.3.0
 
-Nothing yet.
+### Fixed
 
-Carried forward from 0.2, in the order I would take them:
+- **Six of nine commands advertised `--output` and ignored it.** The flag is global, so
+  every subcommand's `--help` lists it; `fmt`, `pack`, `thread`, `view`, `salience` and
+  `retract` wrote to stdout regardless. Silently: a caller who passed `-o` got an empty
+  file, no diagnostic, and a terminal full of CBOR.
+
+  `fmt`, `pack` and `thread` now write the file (`fmt` refuses more than one input, since
+  one path cannot receive several documents). `view`, `salience` and `retract` print a
+  report assembled line by line rather than one artifact, so they say `--output` is not
+  honoured and point at shell redirection instead of pretending.
+
+- **`bundle` and `pack` dropped label bindings**, so both came back with every reference
+  spelled as a bare uid — the gap 0.2 closed for `merge`, still open in the two artifacts
+  most likely to be handed to somebody else. `bundle` is the worse case: closure exists
+  precisely so it can be given to a recipient with nothing else to read it against.
+
+  Fixed in `Store::emit` rather than in the CLI, because a library caller building a bundle
+  needs a readable one too (rule A). The record type was added in 0.2 and `emit`'s
+  catch-all excluded it without comment.
+
+- **`thread --derive` ignored `--format` and dropped the `@doc` header** — the identical
+  `write_surface(None, …)` mistake `merge --format surface` shipped with.
+
+### Known limits
+
+- `thread` still defaults to surface output where `merge` and `pack` default to CBOR, so it
+  sits awkwardly against rule P. Changing the default would be right by the rule and would
+  also change what every documented `thread --derive` example prints, so it is left for a
+  decision rather than taken quietly.
+
+### Carried forward from 0.2, in the order I would take them:
 
 - **Measure `pack` and `salience` per-call cost.** They recompute over the whole
   store every call, with PageRank over the full adjacency. There is no evidence

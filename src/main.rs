@@ -787,6 +787,7 @@ fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let n = inputs.len();
     let mut bar = Bar::new(progress_style(global), "formatting", n);
     let mut worst = ExitCode::Success;
+    let n_inputs = inputs.len();
     for path in inputs {
         bar.set_label(format!("formatting {path}"));
         bar.tick();
@@ -881,6 +882,21 @@ fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 worst = worse(worst, ExitCode::HashVerification);
                 continue;
             }
+        }
+
+        if let Some(dest) = global.get_one::<String>("output") {
+            if n_inputs > 1 {
+                eprintln!(
+                    "smysl fmt: --output takes one document, and {n_inputs} were given; \
+                     use --write to format them in place"
+                );
+                return ExitCode::Usage;
+            }
+            if let Err(e) = std::fs::write(dest, formatted.as_bytes()) {
+                eprintln!("smysl fmt: {dest}: {e}");
+                return ExitCode::Failure;
+            }
+            continue;
         }
 
         if check {
@@ -1348,6 +1364,7 @@ fn cmd_view(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eprintln!("smysl view: no store given");
         return ExitCode::Usage;
     };
+    warn_output_is_a_report(global, "view");
     let (store, _) = match load_store(&path) {
         Ok(v) => v,
         Err(e) => {
@@ -1434,22 +1451,11 @@ fn cmd_bundle(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Usage;
     };
 
+    // Bindings travel with the bundle because `bundle_with` includes them - fixed in the
+    // library rather than here, since a library caller building a bundle needs a readable
+    // one just as much as the CLI does (rule A).
     let bytes = store.bundle_with(&view, m.get_flag("include-retracted"));
-    match global.get_one::<String>("output") {
-        Some(p) => {
-            if let Err(e) = std::fs::write(p, &bytes) {
-                eprintln!("smysl bundle: {p}: {e}");
-                return ExitCode::Failure;
-            }
-        }
-        None => {
-            let mut stdout = std::io::stdout().lock();
-            if stdout.write_all(&bytes).is_err() {
-                return ExitCode::Failure;
-            }
-        }
-    }
-    ExitCode::Success
+    emit(global, "bundle", &bytes)
 }
 
 /// `smysl merge` - join-semilattice union, materialising disagreement (§23.1).
@@ -1670,6 +1676,7 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             return ExitCode::Usage;
         }
     };
+    warn_output_is_a_report(global, "retract");
     let (mut store, _) = match load_store(&path) {
         Ok(v) => v,
         Err(e) => {
@@ -1862,23 +1869,78 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .map(|f| f == "surface")
         .unwrap_or(false);
 
-    if surface {
-        let text = emit_pack_surface(&store, &packed, &labels);
-        let mut stdout = std::io::stdout().lock();
-        if stdout.write_all(text.as_bytes()).is_err() {
-            return ExitCode::Failure;
-        }
+    let bytes = if surface {
+        emit_pack_surface(&store, &packed, &labels).into_bytes()
     } else {
-        let records: Vec<Record> = packed
+        let mut records: Vec<Record> = packed
             .selection
             .keys()
             .filter_map(|u| store.get(u).map(|unit| Record::Unit(unit.core.clone())))
             .collect();
+        // Carry the bindings for the units that survived. Without them a packed store
+        // decoded to bare uids, so the surface path was readable and the CBOR path — the
+        // one a pipeline actually moves — was not. Only the survivors: a binding for a
+        // dropped unit would name something the pack does not contain.
+        records.extend(bindings_for(&labels, |u| packed.selection.contains_key(u)));
         let mut bytes = smysl::to_cbor_seq(&records);
         bytes.extend_from_slice(&smysl::to_cbor(&Record::PackInfo(packed.info.clone())));
-        let mut stdout = std::io::stdout().lock();
-        if stdout.write_all(&bytes).is_err() {
-            return ExitCode::Failure;
+        bytes
+    };
+
+    emit(global, "pack", &bytes)
+}
+
+/// The `LabelBinding` records for whichever uids a caller kept.
+///
+/// Every command that emits a store needs this, and each one that forgot it produced a
+/// store whose references were bare uids: valid, re-checking clean, and unreadable. That
+/// was the whole point of the record existing.
+fn bindings_for(
+    labels: &std::collections::BTreeMap<smysl::Label, Uid>,
+    keep: impl Fn(&Uid) -> bool,
+) -> Vec<Record> {
+    labels
+        .iter()
+        .filter(|(_, uid)| keep(uid))
+        .map(|(label, uid)| {
+            Record::LabelBinding(smysl::LabelBinding::new(label.clone(), *uid))
+        })
+        .collect()
+}
+
+/// Say so when `--output` cannot be honoured, instead of ignoring it.
+///
+/// `salience`, `view` and `retract` print a *report* — many lines, assembled as they are
+/// discovered, not one artifact. Routing that through a file is shell redirection's job.
+/// What is not acceptable is what these three did before: accept a documented flag, write
+/// to stdout anyway, and leave the caller with an empty file and no diagnostic.
+fn warn_output_is_a_report(global: &ArgMatches, cmd: &str) {
+    if global.get_one::<String>("output").is_some() {
+        eprintln!(
+            "smysl {cmd}: warning: --output is not honoured here — {cmd} prints a report, \
+             not a store. Redirect stdout instead."
+        );
+    }
+}
+
+/// Write a command's output to `--output`, or to stdout when none was given.
+///
+/// The flag is global, so every subcommand advertises it — and six of nine ignored it,
+/// writing to stdout regardless. Silently: a caller who passed `-o` got an empty file, no
+/// diagnostic, and a terminal full of CBOR.
+fn emit(global: &ArgMatches, cmd: &str, bytes: &[u8]) -> ExitCode {
+    match global.get_one::<String>("output") {
+        Some(p) => {
+            if let Err(e) = std::fs::write(p, bytes) {
+                eprintln!("smysl {cmd}: {p}: {e}");
+                return ExitCode::Failure;
+            }
+        }
+        None => {
+            let mut stdout = std::io::stdout().lock();
+            if stdout.write_all(bytes).is_err() {
+                return ExitCode::Failure;
+            }
         }
     }
     ExitCode::Success
@@ -1955,6 +2017,7 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eprintln!("smysl salience: no store given");
         return ExitCode::Usage;
     };
+    warn_output_is_a_report(global, "salience");
     let (store, _) = match load_store(&path) {
         Ok(v) => v,
         Err(e) => {
@@ -2203,8 +2266,34 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         store.iter().cloned().collect()
     };
     records.push(Record::Thread(thread));
-    print!("{}", write_surface(None, &records, &ctx));
-    ExitCode::Success
+
+    // Three things this got wrong, all of them the same shape as bugs found elsewhere in
+    // this audit: `--format` was advertised and ignored, so rule P did not hold and a pipe
+    // got text; `-o` was advertised and ignored, so a caller who asked for a file got
+    // nothing; and `write_surface` was handed `None` for the view, which drops the `@doc`
+    // header — the identical mistake `merge --format surface` shipped with.
+    // `--format` is now honoured when given. The *default* is left as surface, which is
+    // where this command sits awkwardly against rule P: `merge` and `pack` default to CBOR
+    // and `thread` does not. Changing it would be right by the rule and would also change
+    // what every documented `thread --derive` example prints, so it is left for a decision
+    // rather than taken here.
+    let surface = global
+        .get_one::<String>("format")
+        .map(|f| f == "surface")
+        .unwrap_or(true);
+
+    let bytes = if surface {
+        let view = if m.get_flag("only") {
+            None
+        } else {
+            store.views().next().cloned()
+        };
+        write_surface(view.as_ref(), &records, &ctx).into_bytes()
+    } else {
+        smysl::to_cbor_seq(&records)
+    };
+
+    emit(global, "thread", &bytes)
 }
 
 fn show_thread(store: &Store, t: &smysl::Thread) -> ExitCode {

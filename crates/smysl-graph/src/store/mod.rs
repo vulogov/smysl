@@ -393,6 +393,16 @@ impl Store {
                 Record::Thread(t) => view.threads.contains(&t.id),
                 Record::View(v) => v.id == view.id,
                 Record::Contention(c) => keep.contains(&c.over),
+                // A bundle is the artifact designed to travel alone - closure exists so it
+                // can be handed to a recipient with nothing else to read it against. Without
+                // the bindings it arrived with every reference spelled as a bare uid: valid,
+                // re-checking clean, and unreadable, in the one case where the reader has no
+                // other copy. The catch-all below excluded them silently when the record
+                // type was added.
+                Record::LabelBinding(b) => keep.contains(&b.uid),
+                // Pack manifests and schema declarations are about a whole store rather than
+                // any unit in it, so there is no `keep` question to ask; an unknown record
+                // cannot be judged at all.
                 _ => false,
             };
             if included {
