@@ -351,7 +351,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-E001`], [error], [Surface parse error.]),
     ([`SMY-E002`], [error], [Unsupported kernel major version.]),
     ([`SMY-E003`], [error], [Unsupported format version.]),
-    ([`SMY-E004`], [error], [Malformed CBOR envelope.]),
+    ([`SMY-E004`], [error], [Malformed CBOR envelope — or, since 0.3, nesting deeper than 128. The reader walks containers recursively, so an unbounded depth let deeply nested input overflow the stack and *abort the process*, which is worse than an error because it cannot be caught. 128 is far above anything real: the deepest shape the kernel defines is three levels.]),
     ([`SMY-W014`], [warning], [Unknown envelope type code — preserved verbatim, skipped semantically. Reported by `check` since 0.2; before that the code existed and nothing emitted it, so an unknown record was preserved in silence.]),
     ([`SMY-E080`], [error], [Non-deterministic encoding (key order, indefinite length, non-shortest int, null optional, non-NFC text).]),
     ([`SMY-E081`], [error], [Float not binary32 or not quantised to 1/1024.]),

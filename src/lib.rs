@@ -35,16 +35,16 @@
 pub use smysl_core::surface;
 pub use smysl_core::surface::{parse_surface, write_surface, ParseOutcome, WriteContext};
 pub use smysl_core::{
-    canonical_uid, format_version_supported, from_cbor, from_cbor_seq, hash_bytes, kernel_major,
-    quantise, to_cbor, to_cbor_seq, tokens, unit_core_bytes, verify, Admission, AgentId, AgentKind,
-    Attestation, Code, CodecError, Contention, ContentionId, ContentionStatus, Date, Detected,
-    DetectionKind, Diagnostic, DropReason, Error, ExitCode, Extra, Fidelity, GranularityProfile,
-    Group, Hlc, IdError, IntegrityError, KernelType, Label, LabelBinding, LangTag, Lod,
-    NonDetReason, Op, Optimality, PackInfo, PackMode, ParseError, Record, RelKind, Relation, Report,
-    Role, Rung,
-    SchemaDecl, SchemaId, Severity, ShapeError, SourceKind, SourceRef, Span, Status, Step, Subject,
-    Thread, ThreadId, ThreadSchema, Uid, UidPrefix, Unit, UnitCore, UnitCoreBuilder, View, ViewId,
-    FORMAT_VERSIONS_SUPPORTED, KERNEL_MAJOR, KERNEL_SCHEMA,
+    canonical_uid, format_version_supported, from_cbor, from_cbor_seq, hash_bytes, json_escape,
+    kernel_major, quantise, to_cbor, to_cbor_seq, tokens, unit_core_bytes, verify, Admission,
+    AgentId, AgentKind, Attestation, Code, CodecError, Contention, ContentionId, ContentionStatus,
+    Date, Detected, DetectionKind, Diagnostic, DropReason, Error, ExitCode, Extra, Fidelity,
+    GranularityProfile, Group, Hlc, IdError, IntegrityError, KernelType, Label, LabelBinding,
+    LangTag, Lod, NonDetReason, Op, Optimality, PackInfo, PackMode, ParseError, Record, RelKind,
+    Relation, Report, Role, Rung, SchemaDecl, SchemaId, Severity, ShapeError, SourceKind,
+    SourceRef, Span, Status, Step, Subject, Thread, ThreadId, ThreadSchema, Uid, UidPrefix, Unit,
+    UnitCore, UnitCoreBuilder, View, ViewId, FORMAT_VERSIONS_SUPPORTED, KERNEL_MAJOR,
+    KERNEL_SCHEMA,
 };
 
 // ---- check ----------------------------------------------------------------
@@ -135,7 +135,7 @@ mod tests {
     /// manifest, and the diff will say what you decided.
     #[test]
     fn the_crate_version_is_the_one_we_intend_to_ship() {
-        assert_eq!(VERSION, "0.2.0");
+        assert_eq!(VERSION, "0.3.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two

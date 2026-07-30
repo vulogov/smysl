@@ -40,7 +40,7 @@ MATRIX := \
 .DEFAULT_GOAL := help
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix gates purity update \
         determinism conformance eval live-ollama live-hosted doc fuzz clean sweep \
-        commit ci toolchain eval-live docs doc-output
+        commit ci toolchain eval-live docs doc-output fuzz-long
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -153,7 +153,13 @@ live-hosted: ## Live ingest gate against whichever hosted providers have keys se
 	SMYSL_INGEST_LIVE=1 $(CARGO) test -p smysl-ingest --features gemini,deepseek,openai,anthropic \
 		--test providers_live -- --nocapture --test-threads=1
 
-fuzz: ## Fuzz the surface parser (nightly; runs until interrupted)
+fuzz: ## Fuzz both parsers for 60s each, as CI does (nightly)
+	@echo "Both targets existed from the start and nothing ran them, which is how two stack"
+	@echo "overflows survived to 0.3. Sixty seconds each catches a regression of that shape."
+	cargo +nightly fuzz run surface -- -max_total_time=60
+	cargo +nightly fuzz run cbor -- -max_total_time=60
+
+fuzz-long: ## Fuzz the surface parser until interrupted
 	cargo +nightly fuzz run surface
 
 # ---------------------------------------------------------------------------

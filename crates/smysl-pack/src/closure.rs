@@ -78,13 +78,70 @@ pub fn required(store: &Store, uid: Uid, level: Lod) -> Selection {
 /// Only the shortfall: a requirement already met costs nothing, which is what makes the
 /// second unit from a cluster so much cheaper than the first.
 pub fn delta(store: &Store, selected: &Selection, uid: Uid, level: Lod) -> Selection {
-    required(store, uid, level)
-        .into_iter()
+    keep_shortfall(required(store, uid, level), selected)
+}
+
+/// The part of an obligation a selection has not met yet.
+///
+/// Split out of [`delta`] so a caller holding a memoised `required` can reuse it — see
+/// [`Needs`].
+pub fn keep_shortfall(need: Selection, selected: &Selection) -> Selection {
+    need.into_iter()
         .filter(|(u, l)| match selected.get(u) {
             Some(existing) => existing < l,
             None => true,
         })
         .collect()
+}
+
+/// Memoised [`required`].
+///
+/// `required` is a pure function of `(store, uid, level)` — it does not consult the
+/// selection, because an *obligation* does not change as a selection grows; only the
+/// shortfall against it does. The greedy in `solve` did not exploit that, so it re-walked
+/// the graph on every candidate in every round: 7 487 469 calls for 4 001 units, against at
+/// most two distinct results per unit.
+///
+/// Memoising is exactly output-preserving — the same inputs return the same obligation — so
+/// this buys the whole saving without touching how the greedy chooses.
+#[derive(Default)]
+pub struct Needs {
+    cache: BTreeMap<(Uid, Lod), Selection>,
+}
+
+impl Needs {
+    pub fn new() -> Needs {
+        Needs::default()
+    }
+
+    /// The obligation for `(uid, level)`, walking the graph at most once per pair.
+    pub fn required(&mut self, store: &Store, uid: Uid, level: Lod) -> &Selection {
+        self.cache
+            .entry((uid, level))
+            .or_insert_with(|| required(store, uid, level))
+    }
+
+    /// What `(uid, level)` would still cost against `selected`.
+    ///
+    /// Filters the cached obligation in place rather than cloning it: the shortfall is
+    /// usually a small part of the whole, and cloning the obligation per candidate per round
+    /// put a `BTreeMap` copy back into the inner loop the memo exists to empty.
+    pub fn delta(
+        &mut self,
+        store: &Store,
+        selected: &Selection,
+        uid: Uid,
+        level: Lod,
+    ) -> Selection {
+        self.required(store, uid, level)
+            .iter()
+            .filter(|(u, l)| match selected.get(*u) {
+                Some(existing) => existing < l,
+                None => true,
+            })
+            .map(|(u, l)| (*u, *l))
+            .collect()
+    }
 }
 
 /// Why a unit is in a pack (`pack --explain`).

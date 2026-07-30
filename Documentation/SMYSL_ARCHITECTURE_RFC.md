@@ -1,9 +1,10 @@
 # smysl — implemented architecture
 
 **Status:** descriptive, not normative.
-**Describes:** the code at `dev/0.2.0`, crate `0.2.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
-**Compiled:** 2026-07-29, from SM-P0 through SM-P15, the operational-merit work after it, and
-the 0.2 cycle: label bindings, comment syntax, forward compatibility.
+**Describes:** the code at `main`, crate `0.3.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
+**Compiled:** 2026-07-30, from SM-P0 through SM-P15, the operational-merit work after it, the
+0.2 cycle (label bindings, comment syntax, forward compatibility) and the 0.3 cycle (global
+flags, nesting bounds, packer performance).
 
 The crate version moved and the format version deliberately did not. Nothing about the wire
 format changed incompatibly in 0.2 — a record type was *added*, which an older reader
@@ -566,15 +567,73 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
   requires every `properties` key in `required`, and the shared schema lists a fraction of
   them. The risk has grown, not shrunk — Appendix C gained `relations` and `quote` since,
   and the mapper passes it through unchanged. Blocked on a key.
-- **`pack` and `salience` recompute over the whole store on every call.** `compact` bounds
-  how large that store gets, but nothing bounds the per-call cost, and PageRank runs over the
-  full adjacency each time. No evidence yet that it bites; no measurement either.
+- **`pack` is quadratic in store size.** Measured, which corrected two guesses this note
+  previously made: `salience` is *linear* and fine, and PageRank over the full adjacency is
+  not the problem. Reproduce with `python3 scripts/bench-scaling.py`, which prints the ratio
+  between successive sizes — 2.0 is linear, 4.0 is quadratic:
+
+  | units | check | salience | merge | pack |
+  |---:|---:|---:|---:|---:|
+  | 1000 | 8 (1.6x) | 8 (1.5x) | 10 (1.7x) | 161 (3.9x) |
+  | 2000 | 13 (1.7x) | 12 (1.6x) | 19 (1.8x) | 658 (4.1x) |
+  | 4000 | 25 (2.0x) | 23 (1.9x) | 37 (2.0x) | 2818 (4.3x) |
+
+  Two further facts, both measured, both narrowing where to look:
+
+  - **It is worst when packing is easiest.** With a budget that admits everything, `pack` is
+    quadratic (3.8x, 4.3x per doubling); with a budget that binds, it is linear (1.9x, 2.0x).
+  - **It is not `improve()`.** Setting `IMPROVEMENT_PASSES` to 0 changes the time by under
+    1% at 4000 units, so the local-improvement pass — the obvious nested loop, and the first
+    thing reading the code suggests — is not the cost.
+
+  Counting the calls settled it. `closure::delta` ran 7 487 469 times for 4 001 units and
+  scaled exactly 4.0x per doubling, with roughly one graph visit per call — so the cost was
+  call *volume*, and per-call optimisation would have been wasted effort.
+
+  The volume is structural. The greedy runs one round per unit admitted and re-evaluates every
+  remaining candidate each round to choose a global best: O(n²) by construction, not by
+  accident. Worth paying when the budget binds; worth nothing when it does not.
+
+  **Fixed for the ample-budget case** by skipping the greedy rather than changing it: if the
+  whole scope fits at its top level, take it. Value is monotonic in level and a selection that
+  omits nothing satisfies every closure constraint, so if it fits there is nothing to trade.
+  4 000 units went from 2 818ms to 26ms, verified byte-identical against the old
+  implementation across every fixture at seven budgets. `--explain` now reads `earned on
+  density` throughout on that path, since nothing was dragged in under pressure.
+
+  **Still quadratic when the budget binds.** Sub-quadratic there needs lazy re-evaluation with
+  a priority queue — a change to the packer's core, not a shortcut around it.
 - **Quoting appears to coarsen units** (below) and the two measurement gaps remain.
 - **Quoting appears to coarsen units.** The same fixture that gave five or six units gives
   three once each must carry a quotable span. Observed, not diagnosed — it may be the prompt
   or it may be inherent to anchoring a unit to text it can quote.
 - **~69 divergences from the RFC** remain unreconciled — see [`RFC_PROPOSAL.md`](RFC_PROPOSAL.md),
   plus exit code `11`, which Appendix E does not have.
+
+### Closed in 0.3
+
+- **Twelve global flags were advertised by every subcommand and implemented by a handful.**
+  Measured before the work: `--output` honoured by 3 of 9 commands, `--json` by 1 of 6,
+  `--strict` by 1 of 8, `--quiet` by none. A caller who read `--json` in `smysl trace --help`,
+  passed it, and got prose had no way to learn the flag was never wired. All four are now
+  either honoured or refused out loud, and `tests/global_flags.rs` asserts the matrix so the
+  next flag added cannot arrive unwired in nineteen places.
+- **`check --json` emitted invalid JSON.** It used Rust's `{:?}`, which renders a control
+  character as `\u{1}`; no parser accepts that, and a diagnostic message quotes document
+  content. `json_escape` existed for exactly this and the one command emitting JSON did not
+  use it.
+- **Two stack overflows.** The surface parser aborted at ~5 000 nesting levels and the CBOR
+  reader at ~20 000, the latter reached through an unknown key — rule X, the
+  forward-compatibility mechanism, was the route to the crash. Both bounded at 128. An abort
+  is worse than a panic: it cannot be caught, so an embedder cannot contain it.
+- **`--budget Nk` overflowed**, panicking in debug and *wrapping* in release, so a huge budget
+  became 384 tokens and was reported as the budget.
+- **`pack` was quadratic.** 2 818ms to 26ms at 4 000 units when the budget admits everything,
+  and 6-7x faster when it binds. Both fixes are exact and verified byte-identical.
+- **`bundle` and `pack` dropped label bindings**, so the two artifacts most likely to be handed
+  to someone else arrived spelled in bare uids.
+- **Both fuzz targets now run in CI.** They existed from the first commit and nothing ran them,
+  which is how the two stack overflows survived to 0.3.
 
 ### Closed in 0.2
 

@@ -787,6 +787,7 @@ fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let n = inputs.len();
     let mut bar = Bar::new(progress_style(global), "formatting", n);
     let mut worst = ExitCode::Success;
+    let n_inputs = inputs.len();
     for path in inputs {
         bar.set_label(format!("formatting {path}"));
         bar.tick();
@@ -853,6 +854,11 @@ fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         for d in &out.diagnostics {
             eprintln!("{path}: {d}");
         }
+        // A document that parses with warnings is still formattable, and under `--strict` it
+        // is still something a gate asked to be told about.
+        if global.get_flag("strict") && out.diagnostics.iter().any(|d| !d.is_error()) {
+            worst = worse(worst, ExitCode::CheckErrors);
+        }
         if out.has_errors() {
             worst = worse(worst, ExitCode::CheckErrors);
             continue;
@@ -881,6 +887,21 @@ fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 worst = worse(worst, ExitCode::HashVerification);
                 continue;
             }
+        }
+
+        if let Some(dest) = global.get_one::<String>("output") {
+            if n_inputs > 1 {
+                eprintln!(
+                    "smysl fmt: --output takes one document, and {n_inputs} were given; \
+                     use --write to format them in place"
+                );
+                return ExitCode::Usage;
+            }
+            if let Err(e) = std::fs::write(dest, formatted.as_bytes()) {
+                eprintln!("smysl fmt: {dest}: {e}");
+                return ExitCode::Failure;
+            }
+            continue;
         }
 
         if check {
@@ -1016,9 +1037,16 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 
         for d in report.iter() {
             if json {
+                // `json_escape`, not `{:?}`. Rust's debug form renders a control character
+                // as `\u{1}`, which no JSON parser accepts — and a diagnostic message
+                // quotes document content, so an authored gist or a model's output could
+                // put one there and break whatever was consuming the stream. Verified
+                // against a real parser rather than assumed.
                 println!(
-                    "{{\"code\":\"{}\",\"severity\":\"{}\",\"message\":{:?}}}",
-                    d.code, d.severity, d.message
+                    "{{\"code\":\"{}\",\"severity\":\"{}\",\"message\":{}}}",
+                    d.code,
+                    d.severity,
+                    smysl::json_escape(&d.message)
                 );
             } else {
                 eprintln!("{path}: {d}");
@@ -1040,7 +1068,11 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         };
         if report.fail_on(threshold).is_err() {
             worst = worse(worst, ExitCode::CheckErrors);
-        } else if !json {
+        } else if !json && !global.get_flag("quiet") {
+            // `--quiet` suppresses exactly this: the line that says it worked. Diagnostics
+            // still print, the exit code still carries the verdict, and anything explicitly
+            // asked for — `--json`, `--explain`, the artifact itself — is untouched. The flag
+            // promised "suppress non-error output" and had only ever dimmed the progress bar.
             println!(
                 "{path}: {} records, {} units, {} diagnostic(s)",
                 store.len(),
@@ -1200,7 +1232,7 @@ fn store_arg(m: &ArgMatches, global: &ArgMatches) -> Option<String> {
 }
 
 /// `smysl diff` - what changed, and who changed it (§23.1).
-fn cmd_diff(m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+fn cmd_diff(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let inputs: Vec<String> = m
         .get_many::<String>("inputs")
         .map(|v| v.cloned().collect())
@@ -1278,6 +1310,17 @@ fn cmd_diff(m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
         }
     }
     let d = smysl::diff(&stores[0], &stores[1]);
+    if global.get_flag("json") {
+        // One object, not a line per uid: a diff is a single answer about two stores, and
+        // a caller wants the three sets rather than to reassemble them from prefixes.
+        println!(
+            "{{\"only_in_a\":[{}],\"only_in_b\":[{}],\"common\":[{}]}}",
+            uid_array(&d.only_in_a),
+            uid_array(&d.only_in_b),
+            uid_array(&d.common)
+        );
+        return ExitCode::Success;
+    }
     println!(
         "{} only, {} only, {} common",
         d.only_in_a.len(),
@@ -1291,6 +1334,17 @@ fn cmd_diff(m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
         println!("+ {u}");
     }
     ExitCode::Success
+}
+
+/// A comma-separated JSON array of quoted uids.
+///
+/// Canonical form, not the display abbreviation: a machine reading this needs the identity,
+/// and `SMY-E071` exists because a short uid in a record silently weakens it.
+fn uid_array<'a>(uids: impl IntoIterator<Item = &'a Uid>) -> String {
+    uids.into_iter()
+        .map(|u| smysl::json_escape(&u.canonical()))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// `smysl trace` - walk a unit's ancestry (§23.1). The direct answer to F3.
@@ -1324,6 +1378,40 @@ fn cmd_trace(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let depth = m.get_one::<String>("depth").and_then(|s| s.parse().ok());
 
     let l = smysl::trace(&store, target, kind, depth);
+    if global.get_flag("json") {
+        // The tree's shape is what a caller wants, so `depth` and `via` travel per node
+        // rather than being encoded as indentation a machine would have to count.
+        let nodes: Vec<String> = l
+            .nodes
+            .iter()
+            .map(|n| {
+                let hop = n
+                    .hop
+                    .map(|h| h.to_string())
+                    .unwrap_or_else(|| "null".into());
+                let agents: Vec<String> = n
+                    .agents
+                    .iter()
+                    .map(|a| smysl::json_escape(&a.to_string()))
+                    .collect();
+                format!(
+                    "{{\"uid\":{},\"depth\":{},\"via\":{},\"hop\":{},\"agents\":[{}]}}",
+                    smysl::json_escape(&n.uid.canonical()),
+                    n.depth,
+                    smysl::json_escape(n.via.as_str()),
+                    hop,
+                    agents.join(",")
+                )
+            })
+            .collect();
+        println!(
+            "{{\"units\":{},\"steps\":{},\"nodes\":[{}]}}",
+            l.len(),
+            l.max_depth(),
+            nodes.join(",")
+        );
+        return ExitCode::Success;
+    }
     for n in &l.nodes {
         let indent = "  ".repeat(n.depth as usize);
         let hop = n.hop.map(|h| format!(" @hop{h}")).unwrap_or_default();
@@ -1348,6 +1436,7 @@ fn cmd_view(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eprintln!("smysl view: no store given");
         return ExitCode::Usage;
     };
+    warn_output_is_a_report(global, "view");
     let (store, _) = match load_store(&path) {
         Ok(v) => v,
         Err(e) => {
@@ -1397,6 +1486,20 @@ fn cmd_view(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     };
 
     let members = smysl::membership(&store, &view.roots);
+    if global.get_flag("json") {
+        println!(
+            "{{\"view\":{},\"roots\":[{}],\"threads\":[{}],\"reachable\":[{}]}}",
+            smysl::json_escape(view.id.as_str()),
+            uid_array(&view.roots),
+            view.threads
+                .iter()
+                .map(|t| smysl::json_escape(t.as_str()))
+                .collect::<Vec<_>>()
+                .join(","),
+            uid_array(&members)
+        );
+        return ExitCode::Success;
+    }
     println!(
         "{}: {} root(s), {} thread(s), {} unit(s) reachable",
         view.id,
@@ -1434,22 +1537,11 @@ fn cmd_bundle(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Usage;
     };
 
+    // Bindings travel with the bundle because `bundle_with` includes them - fixed in the
+    // library rather than here, since a library caller building a bundle needs a readable
+    // one just as much as the CLI does (rule A).
     let bytes = store.bundle_with(&view, m.get_flag("include-retracted"));
-    match global.get_one::<String>("output") {
-        Some(p) => {
-            if let Err(e) = std::fs::write(p, &bytes) {
-                eprintln!("smysl bundle: {p}: {e}");
-                return ExitCode::Failure;
-            }
-        }
-        None => {
-            let mut stdout = std::io::stdout().lock();
-            if stdout.write_all(&bytes).is_err() {
-                return ExitCode::Failure;
-            }
-        }
-    }
-    ExitCode::Success
+    emit(global, "bundle", &bytes)
 }
 
 /// `smysl merge` - join-semilattice union, materialising disagreement (§23.1).
@@ -1516,6 +1608,9 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let mut bar = Bar::new(progress_style(global), "merging", merged);
     let mut store = Store::new();
     let mut labels = Vec::new();
+    // `--strict` folds every input's report together: a warning on the third of five stores
+    // is still a warning the gate asked to hear about.
+    let mut strict_failed = false;
     for path in &inputs {
         bar.set_label(format!("merging {path}"));
         bar.tick();
@@ -1535,6 +1630,7 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 for d in r.report.iter() {
                     eprintln!("{path}: {d}");
                 }
+                strict_failed |= strict_threshold(global, &r.report).is_some();
                 for c in &r.new_contentions {
                     eprintln!(
                         "{path}: contention {} over {} ({} positions, {})",
@@ -1562,7 +1658,10 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 for d in r.report.iter() {
                     eprintln!("staged: {d}");
                 }
-                eprintln!("smysl merge: committed {n} staged record(s)");
+                strict_failed |= strict_threshold(global, &r.report).is_some();
+                if !global.get_flag("quiet") {
+                    eprintln!("smysl merge: committed {n} staged record(s)");
+                }
             }
             Err(e) => {
                 eprintln!("smysl merge: {e}");
@@ -1652,6 +1751,9 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             }
         }
     }
+    if strict_failed {
+        return ExitCode::CheckErrors;
+    }
     ExitCode::Success
 }
 
@@ -1670,6 +1772,7 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             return ExitCode::Usage;
         }
     };
+    warn_output_is_a_report(global, "retract");
     let (mut store, _) = match load_store(&path) {
         Ok(v) => v,
         Err(e) => {
@@ -1702,13 +1805,33 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let policy = RetractionPolicy::default();
 
     let plan = plan_retraction(&store, target, &agents, policy, authority);
-    println!(
-        "{path}: retracting {target} would reach {} unit(s), orphaning {}",
-        plan.blast_radius.len(),
-        plan.orphaned.len()
-    );
-    for u in &plan.orphaned {
-        println!("{path}:   {u} would lose all of its grounds");
+    if global.get_flag("json") {
+        // `authorised` and `refusal` travel too: a caller gating on a retraction needs to
+        // know it was refused, and refusal is reported on stderr in the text form where a
+        // machine reading stdout would never see it.
+        println!(
+            "{{\"target\":{},\"blast_radius\":[{}],\"orphaned\":[{}],\"authorised\":{},\"refusal\":{}}}",
+            smysl::json_escape(&target.canonical()),
+            uid_array(&plan.blast_radius),
+            uid_array(&plan.orphaned),
+            plan.authorised,
+            plan.refusal
+                .as_deref()
+                .map(smysl::json_escape)
+                .unwrap_or_else(|| "null".into())
+        );
+        if m.get_flag("dry-run") {
+            return ExitCode::Success;
+        }
+    } else {
+        println!(
+            "{path}: retracting {target} would reach {} unit(s), orphaning {}",
+            plan.blast_radius.len(),
+            plan.orphaned.len()
+        );
+        for u in &plan.orphaned {
+            println!("{path}:   {u} would lose all of its grounds");
+        }
     }
 
     if m.get_flag("dry-run") {
@@ -1827,6 +1950,9 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     for d in packed.report.iter() {
         eprintln!("{path}: {d}");
     }
+    // A pack that warned — an exact search refused, a unit degraded — is a pack a gate may
+    // reasonably want to stop on.
+    let strict_failed = strict_threshold(global, &packed.report).is_some();
 
     if m.get_flag("explain") {
         for (uid, level) in &packed.selection {
@@ -1862,23 +1988,103 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .map(|f| f == "surface")
         .unwrap_or(false);
 
-    if surface {
-        let text = emit_pack_surface(&store, &packed, &labels);
-        let mut stdout = std::io::stdout().lock();
-        if stdout.write_all(text.as_bytes()).is_err() {
-            return ExitCode::Failure;
-        }
+    let bytes = if surface {
+        emit_pack_surface(&store, &packed, &labels).into_bytes()
     } else {
-        let records: Vec<Record> = packed
+        let mut records: Vec<Record> = packed
             .selection
             .keys()
             .filter_map(|u| store.get(u).map(|unit| Record::Unit(unit.core.clone())))
             .collect();
+        // Carry the bindings for the units that survived. Without them a packed store
+        // decoded to bare uids, so the surface path was readable and the CBOR path — the
+        // one a pipeline actually moves — was not. Only the survivors: a binding for a
+        // dropped unit would name something the pack does not contain.
+        records.extend(bindings_for(&labels, |u| packed.selection.contains_key(u)));
         let mut bytes = smysl::to_cbor_seq(&records);
         bytes.extend_from_slice(&smysl::to_cbor(&Record::PackInfo(packed.info.clone())));
-        let mut stdout = std::io::stdout().lock();
-        if stdout.write_all(&bytes).is_err() {
-            return ExitCode::Failure;
+        bytes
+    };
+
+    let code = emit(global, "pack", &bytes);
+    if strict_failed && code == ExitCode::Success {
+        return ExitCode::CheckErrors;
+    }
+    code
+}
+
+/// The `LabelBinding` records for whichever uids a caller kept.
+///
+/// Every command that emits a store needs this, and each one that forgot it produced a
+/// store whose references were bare uids: valid, re-checking clean, and unreadable. That
+/// was the whole point of the record existing.
+fn bindings_for(
+    labels: &std::collections::BTreeMap<smysl::Label, Uid>,
+    keep: impl Fn(&Uid) -> bool,
+) -> Vec<Record> {
+    labels
+        .iter()
+        .filter(|(_, uid)| keep(uid))
+        .map(|(label, uid)| Record::LabelBinding(smysl::LabelBinding::new(label.clone(), *uid)))
+        .collect()
+}
+
+/// `--strict` promotes a warning to the failure threshold, wherever a command has a report.
+///
+/// It was honoured by `check` and by one branch of `render`, and accepted-and-ignored by
+/// `merge`, `pack`, `bundle`, `thread` and `fmt`. That is worse than an unimplemented flag:
+/// this book recommends `--strict` for CI gates, so a pipeline running `merge --strict`
+/// believed it would fail on a warning and would not.
+///
+/// Returns the exit code the caller should fold in, or `None` when there is nothing to fail
+/// on — so a command reports its diagnostics exactly as before and only the *threshold*
+/// moves.
+fn strict_threshold(global: &ArgMatches, report: &smysl::Report) -> Option<ExitCode> {
+    if !global.get_flag("strict") {
+        return None;
+    }
+    report
+        .fail_on(Severity::Warn)
+        .err()
+        .map(|_| ExitCode::CheckErrors)
+}
+
+/// Say so when `--output` cannot be honoured, instead of ignoring it.
+///
+/// These commands print a *report* — many lines, assembled as they are discovered, not one
+/// artifact — so routing it through a file is shell redirection's job. What is not
+/// acceptable is what they did before: accept a documented flag, write to stdout anyway,
+/// and leave the caller with an empty file and no diagnostic.
+///
+/// `--json` is the answer for a caller who wants this machine-readable, and the message
+/// says so rather than leaving them to guess.
+fn warn_output_is_a_report(global: &ArgMatches, cmd: &str) {
+    if global.get_one::<String>("output").is_some() {
+        eprintln!(
+            "smysl {cmd}: warning: --output is not honoured here — {cmd} prints a report, \
+             not a store. Redirect stdout, and use --json if you are parsing it."
+        );
+    }
+}
+
+/// Write a command's output to `--output`, or to stdout when none was given.
+///
+/// The flag is global, so every subcommand advertises it — and six of nine ignored it,
+/// writing to stdout regardless. Silently: a caller who passed `-o` got an empty file, no
+/// diagnostic, and a terminal full of CBOR.
+fn emit(global: &ArgMatches, cmd: &str, bytes: &[u8]) -> ExitCode {
+    match global.get_one::<String>("output") {
+        Some(p) => {
+            if let Err(e) = std::fs::write(p, bytes) {
+                eprintln!("smysl {cmd}: {p}: {e}");
+                return ExitCode::Failure;
+            }
+        }
+        None => {
+            let mut stdout = std::io::stdout().lock();
+            if stdout.write_all(bytes).is_err() {
+                return ExitCode::Failure;
+            }
         }
     }
     ExitCode::Success
@@ -1887,7 +2093,11 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 /// `8000` or `8k`.
 fn parse_budget(s: &str) -> Option<u64> {
     match s.strip_suffix(['k', 'K']) {
-        Some(n) => n.parse::<u64>().ok().map(|v| v * 1000),
+        // `checked_mul`, because `v * 1000` overflowed. In a debug build that panicked; in
+        // release it wrapped, so `--budget 18446744073709552k` silently became 384 tokens
+        // and `--explain` then reported 384 *as the budget*. A budget that quietly becomes
+        // a different budget is the failure mode this whole project argues against.
+        Some(n) => n.parse::<u64>().ok().and_then(|v| v.checked_mul(1000)),
         None => s.parse().ok(),
     }
 }
@@ -1955,6 +2165,7 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eprintln!("smysl salience: no store given");
         return ExitCode::Usage;
     };
+    warn_output_is_a_report(global, "salience");
     let (store, _) = match load_store(&path) {
         Ok(v) => v,
         Err(e) => {
@@ -2045,6 +2256,20 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .get_one::<String>("top")
         .and_then(|s| s.parse().ok())
         .unwrap_or(usize::MAX);
+    if global.get_flag("json") {
+        let rows: Vec<String> = report
+            .top(n)
+            .into_iter()
+            .map(|(uid, score)| {
+                format!(
+                    "{{\"uid\":{},\"score\":{score:.4}}}",
+                    smysl::json_escape(&uid.canonical())
+                )
+            })
+            .collect();
+        println!("{{\"ranking\":[{}]}}", rows.join(","));
+        return ExitCode::Success;
+    }
     for (uid, score) in report.top(n) {
         println!("{score:.4}  {uid}");
     }
@@ -2057,6 +2282,7 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 /// any machine. `--refine`, which does consult one, is what makes the command *mixed* - and
 /// it arrives with the provider layer, because there is nothing to refine with until then.
 fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let mut strict_failed = false;
     let Some(path) = store_arg(m, global) else {
         eprintln!("smysl thread: no store given");
         return ExitCode::Usage;
@@ -2187,6 +2413,12 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         for role in &report.unfilled {
             eprintln!("{path}: {role} is required by {schema} and nothing could fill it");
         }
+        // `derive` has no `Report` to threshold, so `--strict` keys on the condition it
+        // prints: a role the schema requires that nothing could fill. The thread is still
+        // emitted — the caller asked for one and gets one — but a gate is told.
+        if global.get_flag("strict") && !report.unfilled.is_empty() {
+            strict_failed = true;
+        }
         for (added, needed_by) in &report.repaired {
             eprintln!("{path}: {added} added by repair; {needed_by} depends on it");
         }
@@ -2203,8 +2435,38 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         store.iter().cloned().collect()
     };
     records.push(Record::Thread(thread));
-    print!("{}", write_surface(None, &records, &ctx));
-    ExitCode::Success
+
+    // Three things this got wrong, all of them the same shape as bugs found elsewhere in
+    // this audit: `--format` was advertised and ignored, so rule P did not hold and a pipe
+    // got text; `-o` was advertised and ignored, so a caller who asked for a file got
+    // nothing; and `write_surface` was handed `None` for the view, which drops the `@doc`
+    // header — the identical mistake `merge --format surface` shipped with.
+    // `--format` is now honoured when given. The *default* is left as surface, which is
+    // where this command sits awkwardly against rule P: `merge` and `pack` default to CBOR
+    // and `thread` does not. Changing it would be right by the rule and would also change
+    // what every documented `thread --derive` example prints, so it is left for a decision
+    // rather than taken here.
+    let surface = global
+        .get_one::<String>("format")
+        .map(|f| f == "surface")
+        .unwrap_or(true);
+
+    let bytes = if surface {
+        let view = if m.get_flag("only") {
+            None
+        } else {
+            store.views().next().cloned()
+        };
+        write_surface(view.as_ref(), &records, &ctx).into_bytes()
+    } else {
+        smysl::to_cbor_seq(&records)
+    };
+
+    let code = emit(global, "thread", &bytes);
+    if strict_failed && code == ExitCode::Success {
+        return ExitCode::CheckErrors;
+    }
+    code
 }
 
 fn show_thread(store: &Store, t: &smysl::Thread) -> ExitCode {

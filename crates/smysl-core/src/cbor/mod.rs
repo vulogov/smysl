@@ -15,6 +15,19 @@
 //! one byte sequence. Normalising on read would mean two byte sequences hash to one uid
 //! for the reader and two for everyone else.
 
+/// The deepest nesting the reader will walk before refusing.
+///
+/// The reader descends into containers recursively, so an unbounded depth means a deeply
+/// nested value overflows the stack and **aborts the process** — measured at roughly 20 000
+/// levels, reached through an unknown key, which is to say through rule X. An abort is worse
+/// than an error: it cannot be caught, so an embedder cannot contain it, and rule A1
+/// promises no panics on untrusted input.
+///
+/// 128 is far above anything a real document produces — the deepest structure the kernel
+/// defines is a source reference inside a unit header, three levels — and far below the
+/// depth that threatens the stack. A bound that refuses honestly beats a walk that aborts.
+pub const MAX_NESTING: usize = 128;
+
 pub mod envelope;
 pub mod keys;
 pub mod reader;

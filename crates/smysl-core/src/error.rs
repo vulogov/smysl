@@ -243,6 +243,18 @@ pub enum CodecError {
     TruncatedUid { at: usize, len: usize },
     /// Input ended mid-item.
     Truncated { at: usize },
+    /// Nesting beyond [`crate::cbor::MAX_NESTING`].
+    ///
+    /// Not corruption: the bytes may be perfectly well-formed CBOR. The reader walks
+    /// containers recursively, so without a bound a deeply nested value overflows the stack
+    /// and **aborts the process** — measured at ~20 000 levels, reached through an unknown
+    /// key, which is to say through rule X, the forward-compatibility mechanism itself.
+    /// An abort cannot be caught, so an embedder could not contain it.
+    ///
+    /// Reported as `SMY-E004` rather than a new code: a distinct Rust variant lets a caller
+    /// tell "too deep" from "corrupt", without adding to the wire-visible diagnostic
+    /// registry mid-cycle.
+    NestingTooDeep { at: usize, limit: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -274,7 +286,9 @@ impl NonDetReason {
 impl CodecError {
     pub const fn code(&self) -> Code {
         match self {
-            CodecError::MalformedEnvelope { .. } | CodecError::Truncated { .. } => Code::E004,
+            CodecError::MalformedEnvelope { .. }
+            | CodecError::Truncated { .. }
+            | CodecError::NestingTooDeep { .. } => Code::E004,
             CodecError::NonDeterministic { .. } => Code::E080,
             CodecError::Float { .. } => Code::E081,
             CodecError::TruncatedUid { .. } => Code::E071,
@@ -294,6 +308,12 @@ impl fmt::Display for CodecError {
             CodecError::Float { at } => write!(
                 f,
                 "{}: float is not binary32 quantised to 1/1024, at byte {at}",
+                self.code()
+            ),
+            CodecError::NestingTooDeep { at, limit } => write!(
+                f,
+                "{}: nesting deeper than {limit} at byte {at}; refused rather than risking \
+                 the stack",
                 self.code()
             ),
             CodecError::Truncated { at } => {

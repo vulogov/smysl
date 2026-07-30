@@ -470,6 +470,17 @@ lines from one mistake, all pointing at the same two units.
 is to find the actual, non-circular ground for one of them — typically new
 evidence, not just a rearranged edge.
 
+#callout(label: "How deep a header may go")[
+  Nesting inside a header is bounded at 128 levels, and the same bound applies to a CBOR
+  store. Nothing you write by hand will approach it — the deepest shape the kernel defines
+  is a source reference inside a unit, three levels.
+
+  It exists because both readers walk containers recursively, so before 0.3 a deeply nested
+  document did not produce an error, it *aborted the process*. An abort cannot be caught, so
+  a program embedding the library could not contain it — and a `.smy` file is untrusted by
+  definition, since it is the thing another agent hands you.
+]
+
 #section("Annotating what you are writing")
 
 #callout(label: "Why")[

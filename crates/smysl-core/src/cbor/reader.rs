@@ -316,11 +316,19 @@ impl<'a> Dec<'a> {
     /// is still a rejection.
     pub fn skip_item(&mut self) -> Res<&'a [u8]> {
         let start = self.pos;
-        self.skip_one()?;
+        self.skip_one(0)?;
         Ok(&self.buf[start..self.pos])
     }
 
-    fn skip_one(&mut self) -> Res<()> {
+    /// `depth` is carried as a parameter rather than kept on `Dec`, so it unwinds with the
+    /// recursion and there is no state to forget to reset between items.
+    fn skip_one(&mut self, depth: usize) -> Res<()> {
+        if depth > crate::cbor::MAX_NESTING {
+            return Err(CodecError::NestingTooDeep {
+                at: self.pos,
+                limit: crate::cbor::MAX_NESTING,
+            });
+        }
         let b = self.peek()?;
         if b == NULL {
             return Err(self.nondet(NonDetReason::NullOptional));
@@ -349,14 +357,14 @@ impl<'a> Dec<'a> {
             }
             major::ARRAY => {
                 for _ in 0..arg {
-                    self.skip_one()?;
+                    self.skip_one(depth + 1)?;
                 }
                 Ok(())
             }
             major::MAP => {
                 for _ in 0..arg {
-                    self.skip_one()?;
-                    self.skip_one()?;
+                    self.skip_one(depth + 1)?;
+                    self.skip_one(depth + 1)?;
                 }
                 Ok(())
             }

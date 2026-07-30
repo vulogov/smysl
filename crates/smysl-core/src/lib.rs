@@ -34,9 +34,9 @@ pub use ids::{
 pub use types::{
     json_escape, quantise, tokens, Admission, Attestation, Contention, ContentionStatus, Date,
     Detected, DetectionKind, DropReason, Extra, Fidelity, GranularityProfile, Hlc, LabelBinding,
-    Lod, Op,
-    Optimality, PackInfo, PackMode, Record, RelKind, Relation, Role, Rung, SchemaDecl, SourceKind,
-    SourceRef, Status, Step, Thread, ThreadSchema, Unit, UnitCore, UnitCoreBuilder, View,
+    Lod, Op, Optimality, PackInfo, PackMode, Record, RelKind, Relation, Role, Rung, SchemaDecl,
+    SourceKind, SourceRef, Status, Step, Thread, ThreadSchema, Unit, UnitCore, UnitCoreBuilder,
+    View,
 };
 
 /// Format versions this implementation accepts in a `@doc` header (§11).

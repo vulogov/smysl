@@ -833,9 +833,10 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "smysl"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
+ "serde_json",
  "smysl-check",
  "smysl-core",
  "smysl-graph",
@@ -849,7 +850,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-check"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
@@ -857,7 +858,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "blake3",
  "unicode-normalization",
@@ -865,7 +866,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-eval"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "smysl-check",
  "smysl-core",
@@ -876,14 +877,14 @@ dependencies = [
 
 [[package]]
 name = "smysl-graph"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "smysl-core",
 ]
 
 [[package]]
 name = "smysl-ingest"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "smysl-check",
  "smysl-core",
@@ -893,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-pack"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
@@ -901,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-provider"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -912,7 +913,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-render"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
@@ -921,7 +922,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-thread"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
@@ -929,7 +930,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-tui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crossterm",
  "ratatui",
@@ -1305,7 +1306,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "xtask"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "yoke"

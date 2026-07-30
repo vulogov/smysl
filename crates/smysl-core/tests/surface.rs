@@ -606,7 +606,10 @@ fn a_step_note_survives_both_target_forms() {
         let out = parse_surface(&src).unwrap();
         assert!(!out.has_errors(), "{target}: {:?}", out.diagnostics);
         let text = write_surface(None, &out.records, &WriteContext::from_labels(&out.labels));
-        assert!(text.contains("the headline"), "note lost for {target}: {text}");
+        assert!(
+            text.contains("the headline"),
+            "note lost for {target}: {text}"
+        );
     }
 }
 
@@ -628,7 +631,11 @@ fn an_unlabelled_step_target_round_trips_through_surface() {
         "setup produced no thread record"
     );
     // Emit with an *empty* label map, forcing the canonical-uid fallback on every target.
-    let text = write_surface(None, &a.records, &WriteContext::from_labels(&Default::default()));
+    let text = write_surface(
+        None,
+        &a.records,
+        &WriteContext::from_labels(&Default::default()),
+    );
     let b = parse_surface(&text).unwrap();
     assert!(
         !b.has_errors(),
@@ -734,7 +741,11 @@ fn a_file_of_only_comments_parses_to_nothing() {
 fn a_commented_document_still_round_trips() {
     let src = "# a note\n@claim c/a { status: speculative }\n~ A claim.\n";
     let a = parse_surface(src).unwrap();
-    let text = write_surface(a.view.as_ref(), &a.records, &WriteContext::from_labels(&a.labels));
+    let text = write_surface(
+        a.view.as_ref(),
+        &a.records,
+        &WriteContext::from_labels(&a.labels),
+    );
     let b = parse_surface(&text).unwrap();
     assert_eq!(a.records, b.records);
     assert_eq!(b.comments, 0, "canonical form should carry no comments");
@@ -785,7 +796,11 @@ fn a_binding_does_not_change_the_uid_it_names() {
 #[test]
 fn bindings_are_not_duplicated_by_a_round_trip() {
     let a = parse_surface(&corpus()).unwrap();
-    let text = write_surface(a.view.as_ref(), &a.records, &WriteContext::from_labels(&a.labels));
+    let text = write_surface(
+        a.view.as_ref(),
+        &a.records,
+        &WriteContext::from_labels(&a.labels),
+    );
     let b = parse_surface(&text).unwrap();
     let count = |o: &smysl_core::surface::ParseOutcome| {
         o.records
@@ -864,7 +879,11 @@ fn an_unknown_type_survives_a_surface_round_trip() {
     assert!(!a.has_errors(), "{:?}", a.diagnostics);
     assert_eq!(a.units().count(), 1);
 
-    let text = write_surface(a.view.as_ref(), &a.records, &WriteContext::from_labels(&a.labels));
+    let text = write_surface(
+        a.view.as_ref(),
+        &a.records,
+        &WriteContext::from_labels(&a.labels),
+    );
     let b = parse_surface(&text).unwrap();
     assert!(
         !b.has_errors(),
@@ -872,4 +891,102 @@ fn an_unknown_type_survives_a_surface_round_trip() {
         b.diagnostics
     );
     assert_eq!(a.records, b.records);
+}
+
+// ── Nesting bounds (0.3.0) ──────────────────────────────────────────────────
+//
+// Both parsers walked containers recursively with no depth bound, so deeply nested input
+// overflowed the stack and **aborted the process**: measured at ~5 000 levels for the
+// surface parser and ~20 000 for the CBOR reader, the latter reached through an unknown key
+// — which is to say through rule X, the forward-compatibility mechanism.
+//
+// An abort is worse than a panic. It cannot be caught, so an embedder cannot contain it, and
+// rule A1 promises no panics on untrusted input. A `.smy` file and a CBOR store are both
+// untrusted by definition: they are what another agent hands you.
+//
+// The depths below deliberately exceed the *old* crash thresholds. A test at the limit would
+// pass against the unfixed code.
+
+/// Refuses, rather than aborting, at a depth that used to kill the process.
+#[test]
+fn a_deeply_nested_header_is_refused_not_fatal() {
+    for depth in [200usize, 10_000] {
+        let src = format!(
+            "@claim c/a {{ status: speculative, x/n: {}{} }}\n~ a gist.\n",
+            "[".repeat(depth),
+            "]".repeat(depth)
+        );
+        let out = parse_surface(&src).expect("a refusal is a diagnostic, not a hard error");
+        assert!(
+            out.has_errors(),
+            "nesting {depth} was accepted; the bound is not holding"
+        );
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.message.contains("nesting")),
+            "refused for the wrong reason at {depth}: {:?}",
+            out.diagnostics
+        );
+    }
+}
+
+/// The CBOR side, reached the way the crash was: an unknown key, preserved under rule X.
+#[test]
+fn deeply_nested_cbor_under_an_unknown_key_is_refused_not_fatal() {
+    fn nested(depth: usize) -> Vec<u8> {
+        let mut b = vec![0x80]; // empty array
+        for _ in 0..depth {
+            let mut w = vec![0x81]; // array of one, wrapping
+            w.extend_from_slice(&b);
+            b = w;
+        }
+        b
+    }
+
+    for depth in [200usize, 50_000] {
+        // [1, { 0:"claim", 1:"gist", 6:1, 99:<nested> }] — key 99 is unknown, so the
+        // reader reaches it through `skip_item`.
+        let mut payload = vec![0xA4];
+        payload.extend_from_slice(&[0x00, 0x65, b'c', b'l', b'a', b'i', b'm']);
+        payload.extend_from_slice(&[0x01, 0x64, b'g', b'i', b's', b't']);
+        payload.extend_from_slice(&[0x06, 0x01]);
+        payload.extend_from_slice(&[0x18, 0x63]);
+        payload.extend_from_slice(&nested(depth));
+
+        let mut rec = vec![0x82, 0x01];
+        rec.extend_from_slice(&payload);
+
+        let err = smysl_core::from_cbor(&rec)
+            .expect_err("nesting past the bound must be refused")
+            .to_string();
+        assert!(
+            err.contains("nesting"),
+            "refused for the wrong reason at {depth}: {err}"
+        );
+    }
+}
+
+/// The bound must not reject anything real. Every shipped fixture is well inside it, and a
+/// limit that broke the corpus would be a worse bug than the one it fixed.
+#[test]
+fn the_nesting_bound_admits_every_shipped_fixture() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/corpus");
+    let mut seen = 0;
+    for entry in std::fs::read_dir(&dir).expect("the corpus directory") {
+        let path = entry.expect("a readable entry").path();
+        if path.extension().is_some_and(|e| e == "smy") {
+            let src = std::fs::read_to_string(&path).expect("a readable fixture");
+            let out = parse_surface(&src).expect("a fixture must parse");
+            assert!(
+                !out.diagnostics
+                    .iter()
+                    .any(|d| d.message.contains("nesting")),
+                "{} tripped the nesting bound",
+                path.display()
+            );
+            seen += 1;
+        }
+    }
+    assert!(seen >= 9, "expected the whole corpus, saw {seen}");
 }
