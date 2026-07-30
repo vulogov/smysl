@@ -1,8 +1,15 @@
 # smysl — implemented architecture
 
 **Status:** descriptive, not normative.
-**Describes:** the code at `main`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
-**Compiled:** 2026-07-29, from SM-P0 through SM-P15 and the operational-merit work after it.
+**Describes:** the code at `dev/0.2.0`, crate `0.2.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
+**Compiled:** 2026-07-29, from SM-P0 through SM-P15, the operational-merit work after it, and
+the 0.2 cycle: label bindings, comment syntax, forward compatibility.
+
+The crate version moved and the format version deliberately did not. Nothing about the wire
+format changed incompatibly in 0.2 — a record type was *added*, which an older reader
+degrades rather than refuses — so `smysl/0.1` still describes what is on the wire. A crate
+major bump must not imply a format break, and the facade asserts the two are independent
+axes.
 
 This document says **what the implementation actually does**. It is not RFC SMYSL-1 and does
 not restate it: where the two differ, the differences are enumerated in
@@ -91,8 +98,15 @@ status.** Two consequences run through the whole system:
 - **Changing a unit changes its identity.** Anything referring to the old uid now refers to
   something that does not exist. Section 9.3 covers where this bites.
 
-Labels (`c/pool-saturation`) are document-local nicknames for reading and writing. They are
-not identity and, at present, have no wire record — see `RFC_PROPOSAL.md` item 16.
+Labels (`c/pool-saturation`) are nicknames for reading and writing. They are **not identity**
+— not hashed, and renaming one cannot move a uid — which is precisely why a binding is its
+own record (`Record::LabelBinding`, type code 10) rather than a field on the unit: a label
+inside hashed content would make renaming it produce a different unit.
+
+Scope is the store the record lives in. Two stores binding the same label to different uids
+are a `label-collision` contention on merge, which was machinery the format already had and
+could not use between two CBOR stores, because labels arrived out of band and a CBOR store
+had none to offer.
 
 ### 2.5 Provenance
 
@@ -174,8 +188,18 @@ Detail follows the body, after a rule.
 `~` marks the gist. Headers are HJSON; unknown header keys become the unit's `payload`
 (rule X). Source kinds are `url`, `file`, `metric`, `tool`, `doc`.
 
-**There is no comment syntax.** A `#` line between records lexes as body text and is absorbed
-into the preceding unit.
+**Comments** are `#` or `//` at column 0, new in 0.2. Both markers, because an HJSON header
+inside a record already took both. A comment is a comment wherever it appears — including
+inside a body, which costs a body the ability to open a line with either marker. The reverse
+choice was tried and was worse: a body runs from the gist to the next record, so a comment
+between records fell inside that range and became the previous unit's body, inventing content
+out of a note and firing a granularity warning about the invention.
+
+No record carries a comment, so canonical form cannot reproduce one; `fmt` counts them
+(`ParseOutcome::comments`) and warns before dropping any. Format sniffing had to change with
+it — the "surface text starts with `@`" test is now one function that looks past leading
+blanks and comments, because there were two copies of that test and adding comments broke
+both, one of them silently.
 
 ### 4.3 Level of detail
 
@@ -360,7 +384,8 @@ and degrades a chunk of correctly capped units.
 ### 9.2 Rule I — it cannot fail silently
 
 A span that survives its repair budget becomes an opaque `prose` unit carrying the raw text
-verbatim, and the run exits 10. A corpus with some opaque units is usable; a failed ingest is
+verbatim, and the run exits 10 — or 11, if rule M also lowered a unit. A corpus with some
+opaque units is usable; a failed ingest is
 not. `prose` is exempt from single-assertion admission, because requiring the opaque-text type
 to be one assertion is requiring it not to be prose.
 
@@ -371,7 +396,8 @@ contain, so a claim resting on something ingested an hour ago is the normal case
 violation.
 
 A unit claiming more than its grounds support is **weakened to what they support, and
-reported** (`SMY-W036`) — the same treatment rule T gives an over-claimed rung. Both weakening
+reported** (`SMY-W036`, and exit `11` since 0.2) — the same treatment rule T gives an
+over-claimed rung. Both weakening
 and rejection satisfy rule M identically, and only one keeps the content: rejection cascades
 through everything grounded on the unit, loses the text, and is irreversible against the
 later merge that would have justified the claim.
@@ -543,15 +569,33 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
 - **`pack` and `salience` recompute over the whole store on every call.** `compact` bounds
   how large that store gets, but nothing bounds the per-call cost, and PageRank runs over the
   full adjacency each time. No evidence yet that it bites; no measurement either.
-- **Labels have no wire record**, so they survive a parse and not a store round trip.
-- **`ingest` exit codes do not distinguish** a batch where rule M weakened something from one
-  where nothing happened. The CLI prints it; the code does not encode it.
-- **`merge` ignores `--format surface`** while `pack` and `render` honour it, and `fmt`
-  cannot read a CBOR store although `check` can.
+- **Quoting appears to coarsen units** (below) and the two measurement gaps remain.
 - **Quoting appears to coarsen units.** The same fixture that gave five or six units gives
   three once each must carry a quotable span. Observed, not diagnosed — it may be the prompt
   or it may be inherent to anchoring a unit to text it can quote.
-- **`SchemaId` decoding is strict**, so a kernel type added in a later 0.x minor fails to
-  decode rather than degrading. Must be revisited before any store exists if kernel types may
-  be added within 0.x.
-- **~67 divergences from the RFC** remain unreconciled — see [`RFC_PROPOSAL.md`](RFC_PROPOSAL.md).
+- **~69 divergences from the RFC** remain unreconciled — see [`RFC_PROPOSAL.md`](RFC_PROPOSAL.md),
+  plus exit code `11`, which Appendix E does not have.
+
+### Closed in 0.2
+
+Recorded rather than deleted, because what a gap turned out to cost is worth keeping.
+
+- **Labels had no wire record**, so they survived a parse and not a store round trip. A
+  document that had been through `merge` came back with every reference spelled as a bare
+  uid: valid, re-checking clean, and unreadable — which broke the format's central claim for
+  exactly the multi-agent case it exists to serve. Now `Record::LabelBinding`, type code 10.
+- **`SchemaId` decoding was strict**, so a kernel type added in a later 0.x failed the whole
+  record with `SMY-E004` while an unknown *record* type and an unknown *extension* type both
+  degraded. Now `SchemaId::UnknownKernel`, reported as `SMY-W010`, re-encoding byte for byte.
+  Decoding and surface parsing needed opposite behaviour — a typo must stay a typo — so
+  `parse_forward` is a second entry point rather than a loosening of `parse`.
+- **`SMY-W014` was declared and never emitted.** An unknown record type was preserved in
+  silence. `check` now reports it, as it now reports `SMY-W010` without waiting for `--as`.
+- **`merge` ignored `--format surface`** and **`fmt` could not read a CBOR store**, so a
+  merged store was the one artifact nobody could read back. Both fixed. Fixing the first
+  exposed that `write_surface` emitted thread steps naming canonical uids that its own parser
+  rejected.
+- **`ingest` exit codes did not distinguish** a weakened batch. Now exit `11`; under `--yes`
+  it returned plain `0`, so the outcome most worth knowing about was the one that looked like
+  nothing having happened.
+- **There was no comment syntax**, while HJSON headers accepted `#` and `//` inside a record.

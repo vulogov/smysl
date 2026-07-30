@@ -476,6 +476,19 @@ pub enum SchemaId {
     KernelSchema(String),
     /// An extension type or schema, `x.<domain>/<segment>`.
     Extension(String),
+    /// A bare type name this build does not know — a kernel type a later version added.
+    ///
+    /// Only ever produced by *decoding*, never by parsing surface text. The two need
+    /// opposite behaviour: on the wire an unrecognised type is forward compatibility and
+    /// must survive, but in a hand-written file `@clai` is a typo and must stay an error.
+    /// `SchemaId::parse` therefore still rejects these, and `parse_forward` accepts them.
+    ///
+    /// Before this arm existed, a unit whose type a build did not recognise failed the
+    /// whole record with `SMY-E004: malformed envelope` — corruption, not degradation. So
+    /// adding one kernel type in a later 0.x made every store carrying it unreadable to an
+    /// earlier build, while an unknown *record* type and an unknown *extension* type both
+    /// degraded correctly. This closes that asymmetry.
+    UnknownKernel(String),
 }
 
 impl SchemaId {
@@ -503,10 +516,32 @@ impl SchemaId {
         }
     }
 
+    /// Parse for *decoding*, where an unrecognised bare type is preserved rather than
+    /// refused. Surface parsing keeps using [`SchemaId::parse`], so a typo stays a typo.
+    pub fn parse_forward(s: &str) -> Result<SchemaId, IdError> {
+        match SchemaId::parse(s) {
+            Ok(id) => Ok(id),
+            // Only a well-formed *bare* identifier degrades. A string that claims a
+            // namespace - `x.` for an extension, `smysl.kernel/` for the kernel schema -
+            // is being measured against that namespace's grammar, so a malformed one is
+            // malformed rather than merely unfamiliar and still fails. Empty strings,
+            // mixed case and punctuation cannot name a type at all.
+            Err(e) => {
+                let claims_a_namespace =
+                    s.starts_with("x.") || s.starts_with("smysl.kernel/") || s.contains('/');
+                if !claims_a_namespace && is_ext_segment(s) {
+                    Ok(SchemaId::UnknownKernel(s.to_string()))
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         match self {
             SchemaId::Kernel(k) => k.as_str(),
-            SchemaId::KernelSchema(s) | SchemaId::Extension(s) => s,
+            SchemaId::KernelSchema(s) | SchemaId::Extension(s) | SchemaId::UnknownKernel(s) => s,
         }
     }
 

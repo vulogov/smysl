@@ -350,3 +350,68 @@ fn relink_then_compact_shrinks_the_store_and_leaves_it_sound() {
         "the correction itself was dropped"
     );
 }
+
+/// A label bound in one store and a *different* uid bound to the same label in another is a
+/// `label-collision` contention. This pins that it survives the wire.
+///
+/// It could not, before `Record::LabelBinding`. Labels reached `merge` out of band — one map
+/// per input, supplied by whoever parsed the surface — and a CBOR store had no labels to
+/// supply, so the CLI handed merge an empty map and the detection had nothing to compare.
+/// The format carried a dedicated contention kind for disagreements about a thing it could
+/// not store.
+///
+/// Written as an interaction test because neither half shows it alone: the codec round trip
+/// looks fine without merge, and merge looks fine when handed surface files.
+#[test]
+fn a_label_collision_is_detected_across_a_cbor_round_trip() {
+    use smysl::{from_cbor_seq, merge, to_cbor_seq, Label, LabelBinding, MergeOptions};
+
+    // Same label, two different units — so two different uids.
+    let mk = |gist: &str| -> Vec<Record> {
+        let core = unit(gist, vec![]);
+        let uid = canonical_uid(&core);
+        vec![
+            Record::Unit(core),
+            Record::LabelBinding(LabelBinding::new(Label::new("c/cause").unwrap(), uid)),
+        ]
+    };
+
+    // Through the wire and back, which is the step that used to lose the bindings.
+    let via_cbor = |records: Vec<Record>| -> Store {
+        let bytes = to_cbor_seq(&records);
+        let (back, _) = from_cbor_seq(&bytes).expect("a store we just wrote must decode");
+        Store::from_records(back)
+    };
+
+    let a = via_cbor(mk("the pool is saturated"));
+    let b = via_cbor(mk("the index is missing"));
+
+    // Recover each store's labels from its bindings, exactly as the CLI does.
+    let labels_of = |s: &Store| -> std::collections::BTreeMap<Label, Uid> {
+        s.iter()
+            .filter_map(|r| match r {
+                Record::LabelBinding(lb) => Some((lb.label.clone(), lb.uid)),
+                _ => None,
+            })
+            .collect()
+    };
+
+    let mut store = a;
+    let mut opts = MergeOptions::default();
+    opts.now = Some(Hlc::new(0, 0, agent()));
+    opts.labels = vec![labels_of(&store), labels_of(&b)];
+
+    let report = merge(&mut store, &b, opts).expect("merge must not fail");
+    assert!(
+        report
+            .contentions
+            .iter()
+            .any(|c| c.detected.kind == smysl::DetectionKind::LabelCollision),
+        "a label bound to two different uids went undetected: {:?}",
+        report
+            .contentions
+            .iter()
+            .map(|c| c.detected.kind)
+            .collect::<Vec<_>>()
+    );
+}

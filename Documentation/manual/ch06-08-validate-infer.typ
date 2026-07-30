@@ -63,7 +63,7 @@ the smallest thing worth calling a document.
 
 #screen(caption: "$ smysl check brief.smy")[
 ```
-brief.smy: 3 records, 2 units, 0 diagnostic(s)
+brief.smy: 5 records, 2 units, 0 diagnostic(s)
 ```
 ]
 
@@ -139,7 +139,7 @@ Saturated.
 #screen(caption: "$ smysl check mistake3.smy")[
 ```
 mistake3.smy: warning: SMY-W041: body is 3 tokens, under the default range 40..120 (at b3:rdmccg53fegdhoyvxzgwwm34gf)
-mistake3.smy: 3 records, 2 units, 1 diagnostic(s)
+mistake3.smy: 5 records, 2 units, 1 diagnostic(s)
 ```
 ]
 
@@ -208,7 +208,7 @@ progress" and "a document a CI job is about to let through":
   [Run `smysl check --json fixtures/corpus/F6-adversarial.smy`. Compare the
    shape of that output to the human form. What does the JSON deliberately
    *not* include that the text form does, and who is the missing part for?],
-  [`check` reports "13 records, 9 units" on `F7`. Chapter 8 says `check`
+  [`check` reports "22 records, 9 units" on `F7`. Chapter 8 says `check`
    verifies consistency and never correctness. Write down one thing about that
    file a clean `check` run does *not* entitle you to believe.],
 ))
@@ -680,7 +680,7 @@ smysl merge: committed 1 staged record(s)
 #screen(caption: "$ smysl check combined.cbor")[
 ```
 combined.cbor: warning: SMY-W041: body is 35 tokens, under the default range 40..120 (at b3:wmixdny4fa7xm4j6pprsiy4r3r)
-combined.cbor: 4 records, 3 units, 1 diagnostic(s)
+combined.cbor: 6 records, 3 units, 1 diagnostic(s)
 ```
 ]
 

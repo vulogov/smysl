@@ -241,7 +241,16 @@ fn every_corpus_fixture_produces_its_expected_diagnostics() {
 fn every_corpus_fixture_round_trips() {
     use smysl::{parse_surface, write_surface, WriteContext};
     for f in fixtures(&corpus_dir(), "smy") {
-        if !expected_codes(&f).is_empty() {
+        // Skip on an *error*, not on any diagnostic. A fixture with error-severity
+        // expectations has units that never admitted, so there is nothing coherent to round
+        // trip. A fixture whose expectations are only warnings is a perfectly good document
+        // that the tool has an opinion about - and excluding those meant the round trip went
+        // unchecked for exactly the interesting cases: a granularity warning, or a type from
+        // a later version that has to survive the trip verbatim.
+        if expected_codes(&f)
+            .iter()
+            .any(|c| c.severity() == Severity::Error)
+        {
             continue;
         }
         let src = std::fs::read_to_string(&f).unwrap();

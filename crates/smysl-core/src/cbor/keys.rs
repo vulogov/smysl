@@ -67,6 +67,16 @@ pub mod view {
     pub const HIGHEST: u16 = LANG;
 }
 
+/// Label binding (type code 10).
+///
+/// Two keys and no more: a label names a uid, and neither is optional. Anything a later
+/// version adds — a view scope, an author — arrives as a higher key and survives rule X.
+pub mod label_binding {
+    pub const LABEL: u16 = 0;
+    pub const UID: u16 = 1;
+    pub const HIGHEST: u16 = UID;
+}
+
 /// Contention (type code 6).
 pub mod contention {
     pub const ID: u16 = 0;

@@ -475,7 +475,7 @@ moving on, the way Chapter 8 taught you to:
 
 #screen(caption: "$ smysl check alpha.smy")[
 ```
-alpha.smy: 10 records, 6 units, 0 diagnostic(s)
+alpha.smy: 16 records, 6 units, 0 diagnostic(s)
 ```
 ]
 
@@ -522,7 +522,7 @@ already recorded an objection to their own leading theory. Checked clean on its 
 
 #screen(caption: "$ smysl check beta.smy")[
 ```
-beta.smy: 9 records, 5 units, 0 diagnostic(s)
+beta.smy: 14 records, 5 units, 0 diagnostic(s)
 ```
 ]
 
@@ -554,7 +554,7 @@ not an invalidity:
 
 #screen(caption: "$ smysl check merged1.cbor")[
 ```
-merged1.cbor: 19 records, 11 units, 0 diagnostic(s)
+merged1.cbor: 30 records, 11 units, 0 diagnostic(s)
 ```
 ]
 
@@ -594,7 +594,7 @@ smysl merge: committed 2 staged record(s)
 
 #screen(caption: "$ smysl check merged2.cbor")[
 ```
-merged2.cbor: 21 records, 13 units, 0 diagnostic(s)
+merged2.cbor: 34 records, 13 units, 0 diagnostic(s)
 ```
 ]
 
@@ -658,7 +658,7 @@ persists exactly what `retract` just reported:
 
 #screen(caption: "$ smysl merge merged2.cbor retract.smy -o merged3.cbor  &&  smysl check merged3.cbor")[
 ```
-merged3.cbor: 22 records, 13 units, 0 diagnostic(s)
+merged3.cbor: 35 records, 13 units, 0 diagnostic(s)
 ```
 ]
 
@@ -681,7 +681,7 @@ now supports:
 
 #screen(caption: "$ smysl merge merged3.cbor finding.smy -o merged4.cbor  &&  smysl check merged4.cbor")[
 ```
-merged4.cbor: 23 records, 14 units, 0 diagnostic(s)
+merged4.cbor: 37 records, 14 units, 0 diagnostic(s)
 ```
 ]
 
@@ -794,7 +794,7 @@ to someone else to read, merge, or build on":
 #screen(caption: "$ smysl check --conformance C-Full merged4.cbor")[
 ```
 merged4.cbor: C-Full: pass
-merged4.cbor: 23 records, 14 units, 0 diagnostic(s)
+merged4.cbor: 37 records, 14 units, 0 diagnostic(s)
 ```
 ]
 

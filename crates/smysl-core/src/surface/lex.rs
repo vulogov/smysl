@@ -27,6 +27,14 @@ pub enum LineClass {
     /// `--` alone on its line.
     Separator,
     Blank,
+    /// `# a note` or `// a note` at column 0.
+    ///
+    /// Classified here and *interpreted by the parser*, because the same line means two
+    /// different things depending on where it lands. Between records it is a comment and
+    /// is skipped. Inside a body it is prose - a body is free text, and `# Heading` is a
+    /// perfectly ordinary thing to write in it, so treating that as a comment would
+    /// silently delete a reader's words. `block()` keeps it; `run()` drops it.
+    Comment,
     /// Anything else: body, detail, or a gist continuation.
     Text,
 }
@@ -90,6 +98,12 @@ fn classify(line: &str) -> LineClass {
     if line.trim_end() == "--" && !line.starts_with(' ') {
         return LineClass::Separator;
     }
+    // Column 0 only. An indented `#` is inside a body or a step, where it is prose.
+    // Both markers, because an HJSON header already accepts both inside a record - the
+    // surface contradicted itself by rejecting between records what it took within one.
+    if line.starts_with('#') || line.starts_with("//") {
+        return LineClass::Comment;
+    }
     if let Some(rest) = line.strip_prefix('@') {
         let word = rest
             .split(|c: char| c.is_whitespace() || c == '{')
@@ -100,6 +114,16 @@ fn classify(line: &str) -> LineClass {
             "rel" => LineClass::RelLine,
             "thread" => LineClass::ThreadStart,
             w if is_record_type(w) => LineClass::RecordStart,
+            // A type this build does not know, which a later version may have added. The
+            // writer emits exactly the type string it decoded - it has to, since the type
+            // is hashed - so refusing it here meant emitting documents this parser
+            // rejected.
+            //
+            // Gated on what *follows* rather than on the word, because the word alone
+            // cannot distinguish a future kernel type from a typo or an @mention. A record
+            // start carries a label or an open brace; `@vulogov mentioned this` carries
+            // neither and stays body text.
+            w if is_ext_segment_word(w) && has_label_or_header(rest) => LineClass::RecordStart,
             _ => LineClass::Text,
         };
     }
@@ -121,6 +145,39 @@ pub fn is_record_type(word: &str) -> bool {
         return true;
     }
     word.starts_with("x.") && SchemaId::parse(word).is_ok()
+}
+
+/// Whether a word could name a type at all: lowercase, digits, `-`, `.`, non-empty.
+///
+/// Deliberately not "is a known type" - the point is to admit a type this build has never
+/// heard of - but still narrow enough that punctuation and mixed case do not qualify.
+fn is_ext_segment_word(w: &str) -> bool {
+    !w.is_empty()
+        && w.bytes()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-' || c == b'.')
+}
+
+/// Whether what follows an unrecognised `@word` looks like a record rather than prose.
+///
+/// A label (`ns/name`) or an open brace. This is what keeps an `@mention` in a body from
+/// silently truncating the unit it sits inside.
+fn has_label_or_header(rest: &str) -> bool {
+    let after = match rest.find(|c: char| c.is_whitespace() || c == '{') {
+        Some(i) => &rest[i..],
+        None => return false,
+    };
+    let trimmed = after.trim_start();
+    if trimmed.starts_with('{') {
+        return true;
+    }
+    let next = match trimmed.split_whitespace().next() {
+        Some(w) => w,
+        None => return false,
+    };
+    match next.split_once('/') {
+        Some((ns, name)) => !ns.is_empty() && !name.is_empty() && is_ext_segment_word(ns),
+        None => false,
+    }
 }
 
 /// `  role → ref` or `  role -> ref`, at exactly the two-space step indent.
@@ -204,11 +261,31 @@ mod tests {
     /// An `@` in prose must not truncate a record. This is why classification consults
     /// the type set rather than just the sigil.
     #[test]
+    /// An `@word` in prose stays prose. What decides is whether a *label or a header*
+    /// follows, not whether the word is a type this build knows - because a kernel type
+    /// added in a later version is indistinguishable from an unknown word, and refusing it
+    /// meant the writer emitted documents this parser rejected.
     fn an_unrecognised_at_word_is_body_text() {
+        // A mention, an address, a sentence: no label, no brace, so prose.
         assert_eq!(classify("@vladimir please look"), LineClass::Text);
         assert_eq!(classify("@ claim"), LineClass::Text);
-        assert_eq!(classify("@claimant c/x"), LineClass::Text);
         assert_eq!(classify("@x.sre"), LineClass::Text);
+        assert_eq!(classify("@postmortem and then some prose"), LineClass::Text);
+        assert_eq!(classify("@team see the thread"), LineClass::Text);
+    }
+
+    /// The other side of that boundary, and a deliberate change: `@claimant c/x` used to
+    /// be body text and is now a record of an unrecognised type. It is shaped exactly like
+    /// a record - a type, then a label - and a version that adds `claimant` would write it
+    /// this way. `check` reports every one as `SMY-W010` rather than passing it in silence.
+    #[test]
+    fn an_unrecognised_type_with_a_label_or_header_starts_a_record() {
+        assert_eq!(classify("@claimant c/x"), LineClass::RecordStart);
+        assert_eq!(classify("@postmortem p/a { status: speculative }"), LineClass::RecordStart);
+        assert_eq!(classify("@postmortem { status: speculative }"), LineClass::RecordStart);
+        // Mixed case and punctuation cannot name a type, so they stay prose either way.
+        assert_eq!(classify("@Postmortem p/a"), LineClass::Text);
+        assert_eq!(classify("@post!mortem p/a"), LineClass::Text);
     }
 
     #[test]

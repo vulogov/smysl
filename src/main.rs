@@ -790,7 +790,50 @@ fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     for path in inputs {
         bar.set_label(format!("formatting {path}"));
         bar.tick();
-        let src = match read_input(&path) {
+        let bytes = match read_bytes(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                bar.abandon();
+                eprintln!("smysl fmt: {path}: {e}");
+                return ExitCode::Failure;
+            }
+        };
+
+        // `check` reads either form; `fmt` read only text, and failed on a CBOR store with
+        // "stream did not contain valid UTF-8". That asymmetry mattered because turning a
+        // store back into something readable is exactly what `fmt` is for.
+        //
+        // The two flags do not carry over, and are refused rather than reinterpreted.
+        // `--check` asks whether a *text* file is spelled canonically; a CBOR log is
+        // canonical by construction, so there is nothing to compare. `--write` would
+        // replace a binary store with text in place, which is a conversion rather than a
+        // formatting, and not something to do to somebody's file on the strength of a flag
+        // that means something else.
+        if !looks_like_surface(&bytes) {
+            if check || write {
+                bar.abandon();
+                let flag = if check { "--check" } else { "--write" };
+                eprintln!(
+                    "smysl fmt: {path}: {flag} applies to surface text; a CBOR log is \
+                     already canonical. Drop the flag to emit it as surface."
+                );
+                return ExitCode::Usage;
+            }
+            match cbor_to_surface(&bytes) {
+                Ok(text) => {
+                    bar.suspend();
+                    print!("{text}");
+                    continue;
+                }
+                Err(e) => {
+                    bar.abandon();
+                    eprintln!("smysl fmt: {path}: {e}");
+                    return ExitCode::Failure;
+                }
+            }
+        }
+
+        let src = match String::from_utf8(bytes) {
             Ok(s) => s,
             Err(e) => {
                 bar.abandon();
@@ -813,6 +856,18 @@ fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         if out.has_errors() {
             worst = worse(worst, ExitCode::CheckErrors);
             continue;
+        }
+
+        // Comments are not part of any record, so canonical form cannot reproduce them.
+        // This book recommends `fmt --write` as a pre-commit habit, which makes silent
+        // deletion of a reviewer's notes the difference between a formatter and a hazard.
+        // Say it instead, once per file, and let the operator decide.
+        if out.comments > 0 {
+            eprintln!(
+                "{path}: warning: {} comment line(s) are not part of any record and will \
+                 not survive formatting",
+                out.comments
+            );
         }
 
         let ctx = WriteContext::from_labels(&out.labels).with_salience(out.salience.clone());
@@ -1004,6 +1059,53 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 /// A CBOR log has neither: its records were validated when they were decoded, and labels
 /// have no wire record. So the CBOR path returns an outcome with an empty diagnostic set,
 /// which is the truth rather than a convenience.
+/// Render a CBOR log as canonical surface text.
+///
+/// Labels come from their bindings, which is what makes the output readable rather than a
+/// wall of uids; before `Record::LabelBinding` there was nothing to recover them from.
+fn cbor_to_surface(bytes: &[u8]) -> Result<String, String> {
+    let (records, _) = smysl::from_cbor_seq(bytes).map_err(|e| e.to_string())?;
+    let labels: std::collections::BTreeMap<smysl::Label, Uid> = records
+        .iter()
+        .filter_map(|r| match r {
+            smysl::Record::LabelBinding(b) => Some((b.label.clone(), b.uid)),
+            _ => None,
+        })
+        .collect();
+    let view = records.iter().find_map(|r| match r {
+        smysl::Record::View(v) => Some(v.clone()),
+        _ => None,
+    });
+    let ctx = WriteContext::from_labels(&labels);
+    Ok(write_surface(view.as_ref(), &records, &ctx))
+}
+
+/// Whether a store's bytes are surface text rather than a CBOR log.
+///
+/// Surface text starts with a sigil - but it may be *preceded* by blank lines and comments,
+/// so sniffing the first byte is not enough. This looks past those to the first line that
+/// carries anything.
+///
+/// Trying UTF-8 first is safe: a CBOR record sequence opens with an array head (`0x82`),
+/// which is a continuation byte and never legal at the start of UTF-8, so bytes that decode
+/// cleanly are text rather than a store.
+///
+/// One function rather than two call sites with the same literal, because there were two and
+/// adding comments to the grammar broke both - the second one silently.
+fn looks_like_surface(bytes: &[u8]) -> bool {
+    let Ok(s) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    match s
+        .lines()
+        .find(|l| !(l.trim().is_empty() || l.starts_with('#') || l.starts_with("//")))
+    {
+        // Empty, or nothing but comments: a valid, empty surface document.
+        None => true,
+        Some(l) => l.starts_with('@'),
+    }
+}
+
 fn read_store(path: &str) -> Result<smysl::ParseOutcome, ExitCode> {
     let bytes = match read_bytes(path) {
         Ok(b) => b,
@@ -1013,7 +1115,7 @@ fn read_store(path: &str) -> Result<smysl::ParseOutcome, ExitCode> {
         }
     };
 
-    if bytes.first() == Some(&b'@') || bytes.is_empty() {
+    if looks_like_surface(&bytes) {
         let src = match String::from_utf8(bytes) {
             Ok(s) => s,
             Err(e) => {
@@ -1064,14 +1166,23 @@ fn load_store(
         std::fs::read(path).map_err(|e| format!("{path}: {e}"))?
     };
 
-    // Surface text always starts with a sigil; a CBOR sequence starts with an array head.
-    if bytes.first() == Some(&b'@') || bytes.is_empty() {
+    if looks_like_surface(&bytes) {
         let src = String::from_utf8(bytes).map_err(|e| e.to_string())?;
         let out = parse_surface(&src).map_err(|e| e.to_string())?;
         Ok((Store::from_records(out.records.clone()), out.labels))
     } else {
         let (records, _) = smysl::from_cbor_seq(&bytes).map_err(|e| e.to_string())?;
-        Ok((Store::from_records(records), Default::default()))
+        // Recover the labels from their bindings. This is the whole point of the record
+        // existing: before it, this arm returned an empty map, so every reference in a
+        // re-emitted store came back as a bare uid - valid, checkable, and unreadable.
+        let labels = records
+            .iter()
+            .filter_map(|r| match r {
+                smysl::Record::LabelBinding(b) => Some((b.label.clone(), b.uid)),
+                _ => None,
+            })
+            .collect();
+        Ok((Store::from_records(records), labels))
     }
 }
 
@@ -1498,13 +1609,22 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         //
         // So the text form stays available and stops being silent about what it is: a
         // readable view of the store, not the store.
+        // The `@doc` header is a View, and `write_surface` emits one only when it is handed
+        // in as the `view` argument - a View sitting in `records` is skipped. Passing `None`
+        // therefore dropped the header and then counted it as "no surface form", which was
+        // wrong twice: it is expressible, and the warning blamed contentions for it.
+        let view = store.views().next().cloned();
+        let emitted = view.as_ref().map(|v| v.id.clone());
+
+        // Only the one view handed to `write_surface` becomes a `@doc` header; the surface
+        // grammar has room for at most one per file, so any further view in the store is
+        // genuinely dropped and worth counting.
         let dropped = records
             .iter()
-            .filter(|r| {
-                !matches!(
-                    r,
-                    Record::Unit(_) | Record::Relation(_) | Record::Thread(_)
-                )
+            .filter(|r| match r {
+                Record::Unit(_) | Record::Relation(_) | Record::Thread(_) => false,
+                Record::View(v) => Some(&v.id) != emitted.as_ref(),
+                _ => true,
             })
             .count();
         if dropped > 0 {
@@ -1513,7 +1633,7 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                  omitted (contentions, attestations); the default CBOR output preserves them"
             );
         }
-        write_surface(None, &records, &ctx).into_bytes()
+        write_surface(view.as_ref(), &records, &ctx).into_bytes()
     } else {
         store.log_bytes()
     };
@@ -2426,10 +2546,11 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         );
     }
     eprintln!(
-        "smysl ingest: {} chunk(s), {} call(s), {} unit(s), {} degraded, {} token(s)",
+        "smysl ingest: {} chunk(s), {} call(s), {} unit(s), {} weakened, {} degraded, {} token(s)",
         report.chunks,
         report.calls,
         staged.len(),
+        staged.weakened.len(),
         report.degraded,
         report.usage.total()
     );
@@ -2459,9 +2580,21 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Failure;
     }
 
+    // Rule M corrected the model, and a pipeline should be able to branch on that without
+    // parsing `--json`. It refines the outcome rather than replacing it: the batch is intact
+    // either way, and every lowered unit is in it at the status its grounds support.
+    let corrected = !staged.weakened.is_empty();
+
     if m.get_flag("yes") {
         println!("{} unit(s) staged and confirmed", staged.len());
-        return ExitCode::Success;
+        // `--yes` used to return 0 here whatever happened, so the one outcome most worth
+        // knowing about - the model over-claimed and was corrected - was the outcome
+        // indistinguishable from nothing having happened.
+        return if corrected {
+            ExitCode::StagedWithCorrections
+        } else {
+            ExitCode::Success
+        };
     }
     println!(
         "{} unit(s) staged in {}; review, then `smysl merge --staged`",
@@ -2469,7 +2602,11 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         root.join(smysl::stage::PATH).display()
     );
     // Rule S: staged output awaits confirmation, and exit 10 is how a pipeline is told.
-    ExitCode::Staged
+    if corrected {
+        ExitCode::StagedWithCorrections
+    } else {
+        ExitCode::Staged
+    }
 }
 
 /// `smysl attest` - semantic checks that require a model (§23.1). **Model-dependent.**

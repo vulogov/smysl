@@ -80,7 +80,7 @@ Start with the reading that kicked off the investigation:
 
 #screen(caption: "$ smysl check step1.smy")[
 ```
-step1.smy: 1 records, 1 units, 0 diagnostic(s)
+step1.smy: 2 records, 1 units, 0 diagnostic(s)
 ```
 ]
 
@@ -103,7 +103,7 @@ Add the claim the evidence is for:
 
 #screen(caption: "$ smysl check step2.smy")[
 ```
-step2.smy: 2 records, 2 units, 0 diagnostic(s)
+step2.smy: 4 records, 2 units, 0 diagnostic(s)
 ```
 ]
 
@@ -135,7 +135,7 @@ evidence, not on the definition:
 
 #screen(caption: "$ smysl check step3.smy")[
 ```
-step3.smy: 3 records, 3 units, 0 diagnostic(s)
+step3.smy: 6 records, 3 units, 0 diagnostic(s)
 ```
 ]
 
@@ -182,7 +182,7 @@ a review thread nobody reopens:
 
 #screen(caption: "$ smysl check checkout.smy")[
 ```
-checkout.smy: 8 records, 6 units, 0 diagnostic(s)
+checkout.smy: 14 records, 6 units, 0 diagnostic(s)
 ```
 ]
 
@@ -470,6 +470,66 @@ lines from one mistake, all pointing at the same two units.
 is to find the actual, non-circular ground for one of them — typically new
 evidence, not just a rearranged edge.
 
+#section("Annotating what you are writing")
+
+#callout(label: "Why")[
+  You are reading somebody else's incident document at 09:00 and you want to
+  leave a note for them — *check this against the deploy log* — without asserting
+  it as a claim. A note is not a unit: it has no status, nothing grounds it, and
+  it should not survive into a rendered brief. It is a message to a person.
+]
+
+A line beginning `#` or `//` at column 0 is a comment. Both markers, because an
+HJSON header inside a record already accepted both, and the surface used to
+contradict itself by rejecting between records what it took within one.
+
+```
+# Checked against the deploy log; the 4.2 timing lines up.
+@claim c/regression { status: derived, grounds: [e/trace] }
+~ p95 auth latency tripled after the 4.2 rollout.
+
+// TODO: get a link for the canary run before this goes out.
+@evidence e/canary { status: measured, source: { kind: metric, ref: "canary.p95" } }
+~ The 4.2 canary ran the same pool configuration without the regression.
+```
+
+Two things to know, and the second is a real limitation rather than a detail.
+
+#subsection("A comment is a comment wherever it sits")
+
+Including inside a body. That costs you the ability to open a body line with `#`
+or `//` — a Markdown heading in a body is read as a comment and dropped.
+
+The alternative was worse. A body runs from the gist to the next record, so a
+comment sitting *between* two records falls inside that range; treating it as
+prose made the comment become the previous unit's body. Content invented out of
+a note, with a granularity warning fired about the invented content. A rule that
+depends on how far a line happens to be from the next record is not a rule
+anybody can hold in their head.
+
+#subsection("`fmt` cannot keep them, and says so")
+
+A comment is not part of any record, so canonical form has nowhere to put one.
+
+#screen(caption: "$ smysl fmt --write draft.smy")[
+```
+draft.smy: warning: 2 comment line(s) are not part of any record and will not
+survive formatting
+```
+]
+
+That warning exists because this book recommends `fmt --write` as a pre-commit
+habit, and silently deleting a reviewer's notes is the difference between a
+formatter and a hazard. If a note has to survive, it belongs in a unit — a
+`@question`, or a body paragraph — where it is content and travels like content.
+
+#whatsnext[
+  Comments are for the humans in the chain. If what you want to record is
+  something the *graph* should know — an open question, a caveat, a
+  disagreement — Chapter 6's schemas and `@rel` are where it goes, and it will
+  then survive a merge, a pack and a render like anything else.
+]
+
 #section("Reaching past the kernel: extension types")
 
 The thirteen kernel unit types cover claims, evidence, definitions, and the
@@ -485,7 +545,7 @@ waiting on a kernel RFC revision to get one. That is what
 
 #screen(caption: "$ smysl check runbook.smy")[
 ```
-runbook.smy: 1 records, 1 units, 0 diagnostic(s)
+runbook.smy: 2 records, 1 units, 0 diagnostic(s)
 ```
 ]
 
@@ -500,7 +560,7 @@ kernel type. Relations get the same escape hatch:
 #screen(caption: "$ smysl check extrel.smy")[
 ```
 extrel.smy: warning: SMY-W013: relation kind `x.sre/mitigates` is undeclared; treated as elaborates
-extrel.smy: 4 records, 3 units, 1 diagnostic(s)
+extrel.smy: 7 records, 3 units, 1 diagnostic(s)
 ```
 ]
 
@@ -764,7 +824,7 @@ with `check`:
 
 #screen(caption: "$ cat checkout.smy | smysl fmt | smysl check -")[
 ```
--: 8 records, 6 units, 0 diagnostic(s)
+-: 14 records, 6 units, 0 diagnostic(s)
 ```
 ]
 

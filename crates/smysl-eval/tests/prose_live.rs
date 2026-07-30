@@ -1,13 +1,22 @@
 //! **The SM-P15 gate's last clause: both arms, measured, on the same fixture.**
 //!
-//! Skipped without a key, like every other live test here, because a test that fails for
-//! want of a credential is a test everyone learns to ignore. `SMYSL_EVAL_LIVE=required`
-//! turns the skip into a failure.
+//! **Opt-in, not key-triggered.** A credential in the environment is not consent to spend
+//! it. This arm runs a model at five hops over five fixtures for every endpoint that has a
+//! key, and then again to judge the result - minutes of wall clock and real money - so
+//! having exported a key while doing something else must not be enough to start it.
+//!
+//! It used to be. `make test-matrix` therefore charged anyone with a key on their shell and
+//! skipped silently in CI, which is the worst distribution of that cost: invisible where it
+//! is watched, and automatic where it is not.
 //!
 //! ```text
-//! GEMINI_API_KEY=…            the arm runs
-//! SMYSL_EVAL_LIVE=required    it must run, or the test fails
+//! (unset)                     skipped, whatever keys exist
+//! SMYSL_EVAL_LIVE=1           runs for every endpoint that has a key
+//! SMYSL_EVAL_LIVE=required    must run, or the test fails
 //! ```
+//!
+//! A skip is still a skip rather than a failure, because a test that fails for want of a
+//! credential is a test everyone learns to ignore.
 //!
 //! The judge is deliberately not told what the original claimed. It is shown a claim and a
 //! passage and asked what the *passage* supports, so E3 measures the prose rather than the
@@ -198,7 +207,12 @@ struct Row {
 /// compare them against.
 #[test]
 fn both_arms_over_every_fixture_and_endpoint() {
-    let required = std::env::var("SMYSL_EVAL_LIVE").as_deref() == Ok("required");
+    let gate = std::env::var("SMYSL_EVAL_LIVE").unwrap_or_default();
+    let required = gate == "required";
+    if gate.trim().is_empty() {
+        eprintln!("prose arm skipped: set SMYSL_EVAL_LIVE=1 to spend tokens on it");
+        return;
+    }
 
     let live: Vec<(&Endpoint, Box<dyn Provider>)> = ENDPOINTS
         .iter()

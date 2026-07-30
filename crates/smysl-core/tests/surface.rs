@@ -635,5 +635,241 @@ fn an_unlabelled_step_target_round_trips_through_surface() {
         "writer emitted what the parser rejects: {text}\n{:?}",
         b.diagnostics
     );
+    // Label bindings are excluded deliberately. This emission uses an *empty* label map to
+    // force the canonical-uid fallback on every step target, which also strips the unit's
+    // own label - so the re-parse has no binding to produce. What is under test is whether
+    // a uid-shaped step target survives, not whether labels do; `labels_survive_a_store_
+    // round_trip` covers that.
+    let semantic = |o: &smysl_core::surface::ParseOutcome| -> Vec<Record> {
+        o.records
+            .iter()
+            .filter(|r| !matches!(r, Record::LabelBinding(_)))
+            .cloned()
+            .collect()
+    };
+    assert_eq!(semantic(&a), semantic(&b));
+}
+
+// ── Comments (0.2.0) ────────────────────────────────────────────────────────
+//
+// HJSON headers already accepted `#` and `//` *inside* a record, so rejecting them
+// between records made the surface contradict itself. A format whose selling point is
+// human review has to let a reviewer annotate what they are reviewing.
+
+/// The case the feature exists for: a note above the record it is about.
+#[test]
+fn a_comment_between_records_is_not_stray_text() {
+    for marker in ["#", "//"] {
+        let src = format!(
+            "{marker} a note for the reviewer\n\
+             @claim c/a {{ status: speculative }}\n~ A claim.\n"
+        );
+        let out = parse_surface(&src).unwrap();
+        assert!(!out.has_errors(), "{marker}: {:?}", out.diagnostics);
+        // One unit plus its label binding: a labelled unit now yields two records, because
+        // a label has to reach the wire as its own record to stay outside identity.
+        assert_eq!(out.units().count(), 1, "{marker}");
+        assert_eq!(out.comments, 1, "{marker}: not counted");
+    }
+}
+
+/// **The bug the first attempt at this shipped.** A body runs from the gist to the next
+/// record, so a comment between two records falls inside that range. Keeping it made the
+/// comment become the previous unit's body - content invented out of a note, with a
+/// granularity warning fired about it.
+#[test]
+fn a_comment_after_a_gist_does_not_become_the_body() {
+    let src = "@claim c/a { status: speculative }\n~ A claim.\n\n\
+               // TODO: get the dashboard link\n\
+               @claim c/b { status: speculative }\n~ Another claim.\n";
+    let out = parse_surface(src).unwrap();
+    assert!(!out.has_errors(), "{:?}", out.diagnostics);
+    let bodies: Vec<_> = out.units().filter_map(|u| u.body.as_deref()).collect();
+    assert!(
+        bodies.is_empty(),
+        "a comment was absorbed as a body: {bodies:?}"
+    );
+    assert_eq!(out.comments, 1);
+}
+
+/// A comment is a comment wherever it sits, including inside a body. That costs a body
+/// the ability to open a line with `#`, and the alternative was worse: a line whose
+/// meaning depended on how far it happened to be from the next record.
+#[test]
+fn a_comment_inside_a_body_is_still_a_comment() {
+    let src = "@claim c/a { status: speculative }\n~ A claim.\n\n\
+               First paragraph.\n# not a heading, a comment\nSecond paragraph.\n";
+    let out = parse_surface(src).unwrap();
+    assert!(!out.has_errors(), "{:?}", out.diagnostics);
+    let body = out.units().next().unwrap().body.as_deref().unwrap();
+    assert!(!body.contains("comment"), "comment kept in body: {body:?}");
+    assert!(body.contains("First paragraph."));
+    assert!(body.contains("Second paragraph."));
+    assert_eq!(out.comments, 1);
+}
+
+/// Only at column 0. An indented `#` is inside prose a reader wrote on purpose.
+#[test]
+fn an_indented_hash_is_not_a_comment() {
+    let src = "@claim c/a { status: speculative }\n~ A claim.\n\n\
+               A paragraph.\n  # indented, so prose\n";
+    let out = parse_surface(src).unwrap();
+    let body = out.units().next().unwrap().body.as_deref().unwrap();
+    assert!(body.contains("# indented"), "body was {body:?}");
+    assert_eq!(out.comments, 0);
+}
+
+/// A document of nothing but comments is empty, not malformed.
+#[test]
+fn a_file_of_only_comments_parses_to_nothing() {
+    let out = parse_surface("# just a note\n// and another\n").unwrap();
+    assert!(!out.has_errors(), "{:?}", out.diagnostics);
+    assert!(out.records.is_empty());
+    assert_eq!(out.comments, 2);
+}
+
+/// Canonical form cannot carry a comment, so a re-emission must still round trip - the
+/// property `fmt` asserts before it writes anything.
+#[test]
+fn a_commented_document_still_round_trips() {
+    let src = "# a note\n@claim c/a { status: speculative }\n~ A claim.\n";
+    let a = parse_surface(src).unwrap();
+    let text = write_surface(a.view.as_ref(), &a.records, &WriteContext::from_labels(&a.labels));
+    let b = parse_surface(&text).unwrap();
+    assert_eq!(a.records, b.records);
+    assert_eq!(b.comments, 0, "canonical form should carry no comments");
+}
+
+// ── Label bindings (0.2.0) ──────────────────────────────────────────────────
+
+/// **The gap this closes.** Before `Record::LabelBinding`, labels survived a parse and not
+/// a store round trip: a document that had been through `merge` came back with every
+/// reference spelled as a canonical uid. It re-checked clean and no reader could follow it.
+#[test]
+fn labels_survive_a_cbor_round_trip() {
+    use smysl_core::{from_cbor_seq, to_cbor_seq};
+
+    let out = parse_surface(&corpus()).unwrap();
+    let bytes = to_cbor_seq(&out.records);
+    let (back, _) = from_cbor_seq(&bytes).unwrap();
+
+    let bound: std::collections::BTreeMap<_, _> = back
+        .iter()
+        .filter_map(|r| match r {
+            Record::LabelBinding(b) => Some((b.label.clone(), b.uid)),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        bound, out.labels,
+        "labels did not survive the wire; every reference would come back as a bare uid"
+    );
+    assert!(!bound.is_empty(), "the corpus binds labels");
+}
+
+/// A label is not identity: binding one cannot move the unit it names.
+#[test]
+fn a_binding_does_not_change_the_uid_it_names() {
+    let out = parse_surface(&corpus()).unwrap();
+    let uid = out.uid_of(&label("e/trace-jul")).unwrap();
+    let core = out
+        .units()
+        .find(|u| smysl_core::canonical_uid(u) == uid)
+        .unwrap();
+    // Recomputing from the core alone must agree: nothing about the label is hashed.
+    assert_eq!(smysl_core::canonical_uid(core), uid);
+}
+
+/// Re-emitting a document must not multiply its bindings.
+#[test]
+fn bindings_are_not_duplicated_by_a_round_trip() {
+    let a = parse_surface(&corpus()).unwrap();
+    let text = write_surface(a.view.as_ref(), &a.records, &WriteContext::from_labels(&a.labels));
+    let b = parse_surface(&text).unwrap();
+    let count = |o: &smysl_core::surface::ParseOutcome| {
+        o.records
+            .iter()
+            .filter(|r| matches!(r, Record::LabelBinding(_)))
+            .count()
+    };
+    assert_eq!(count(&a), count(&b));
+    assert_eq!(a.labels, b.labels);
+}
+
+// ── Forward compatibility (0.2.0) ───────────────────────────────────────────
+
+/// A unit whose type a later version added must decode, not fail the record.
+///
+/// Before this, an unrecognised type produced `SMY-E004: malformed envelope` — corruption,
+/// not degradation — while an unknown *record* type and an unknown *extension* type both
+/// degraded correctly. One kernel type added in a later 0.x made every store carrying it
+/// unreadable to an earlier build.
+#[test]
+fn an_unknown_kernel_type_decodes_and_re_encodes_unchanged() {
+    use smysl_core::{from_cbor, to_cbor, SchemaId};
+
+    let core = smysl_core::UnitCoreBuilder::new(
+        SchemaId::parse_forward("postmortem").expect("a bare identifier must degrade"),
+        "a gist",
+        Status::Speculative,
+    )
+    .build()
+    .expect("an unknown type is still a valid unit");
+
+    let bytes = to_cbor(&Record::Unit(core.clone()));
+    let (back, n) = from_cbor(&bytes).expect("must decode, not fail the record");
+    assert_eq!(n, bytes.len());
+    assert_eq!(back.as_unit(), Some(&core), "the type did not survive");
+    // Re-encoding must be byte-identical, or identity would move under a reader that
+    // happens not to know the type.
+    assert_eq!(to_cbor(&back), bytes);
+}
+
+/// Surface parsing and decoding need *opposite* behaviour here, and this pins the split.
+/// On the wire an unrecognised type is forward compatibility; `parse` still refuses the
+/// shapes that are malformed rather than merely unfamiliar.
+#[test]
+fn parse_forward_admits_bare_identifiers_and_nothing_else() {
+    use smysl_core::SchemaId;
+
+    // Degrades: a well-formed bare identifier.
+    for s in ["postmortem", "post-mortem", "sev2"] {
+        assert!(
+            matches!(SchemaId::parse_forward(s), Ok(SchemaId::UnknownKernel(_))),
+            "`{s}` should degrade"
+        );
+        assert!(SchemaId::parse(s).is_err(), "`{s}` must still fail `parse`");
+    }
+    // Known types are unaffected by either.
+    assert!(matches!(
+        SchemaId::parse_forward("claim"),
+        Ok(SchemaId::Kernel(_))
+    ));
+    // Malformed, not unfamiliar: still refused by both.
+    for s in ["", "Postmortem", "post!mortem", "x.sre", "a/b/c"] {
+        assert!(
+            SchemaId::parse_forward(s).is_err(),
+            "`{s}` is malformed and must still fail"
+        );
+    }
+}
+
+/// The writer must not emit what the parser rejects. `write_surface` emits the exact type
+/// string it decoded — it has to, since the type is hashed — so the lexer has to accept it.
+#[test]
+fn an_unknown_type_survives_a_surface_round_trip() {
+    let src = "@postmortem p/a { status: speculative }\n~ a gist\n";
+    let a = parse_surface(src).unwrap();
+    assert!(!a.has_errors(), "{:?}", a.diagnostics);
+    assert_eq!(a.units().count(), 1);
+
+    let text = write_surface(a.view.as_ref(), &a.records, &WriteContext::from_labels(&a.labels));
+    let b = parse_surface(&text).unwrap();
+    assert!(
+        !b.has_errors(),
+        "writer emitted what the parser rejects: {text}\n{:?}",
+        b.diagnostics
+    );
     assert_eq!(a.records, b.records);
 }

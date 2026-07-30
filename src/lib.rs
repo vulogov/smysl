@@ -39,8 +39,9 @@ pub use smysl_core::{
     quantise, to_cbor, to_cbor_seq, tokens, unit_core_bytes, verify, Admission, AgentId, AgentKind,
     Attestation, Code, CodecError, Contention, ContentionId, ContentionStatus, Date, Detected,
     DetectionKind, Diagnostic, DropReason, Error, ExitCode, Extra, Fidelity, GranularityProfile,
-    Group, Hlc, IdError, IntegrityError, KernelType, Label, LangTag, Lod, NonDetReason, Op,
-    Optimality, PackInfo, PackMode, ParseError, Record, RelKind, Relation, Report, Role, Rung,
+    Group, Hlc, IdError, IntegrityError, KernelType, Label, LabelBinding, LangTag, Lod,
+    NonDetReason, Op, Optimality, PackInfo, PackMode, ParseError, Record, RelKind, Relation, Report,
+    Role, Rung,
     SchemaDecl, SchemaId, Severity, ShapeError, SourceKind, SourceRef, Span, Status, Step, Subject,
     Thread, ThreadId, ThreadSchema, Uid, UidPrefix, Unit, UnitCore, UnitCoreBuilder, View, ViewId,
     FORMAT_VERSIONS_SUPPORTED, KERNEL_MAJOR, KERNEL_SCHEMA,
@@ -127,9 +128,14 @@ mod tests {
         assert_eq!(kernel_major(KERNEL_SCHEMA), Some(KERNEL_MAJOR));
     }
 
+    /// A tripwire, not a tautology. `VERSION` is `env!("CARGO_PKG_VERSION")`, so it cannot
+    /// fail to be the cargo version — what the literal pins is *which release this is
+    /// meant to be*, so a bump has to be an edit somebody made on purpose rather than
+    /// something that drifted in with a dependency update. Update it when you bump the
+    /// manifest, and the diff will say what you decided.
     #[test]
-    fn crate_version_is_the_cargo_version() {
-        assert_eq!(VERSION, "0.1.0");
+    fn the_crate_version_is_the_one_we_intend_to_ship() {
+        assert_eq!(VERSION, "0.2.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two

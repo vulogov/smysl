@@ -44,6 +44,14 @@ pub struct ParseOutcome {
     pub diagnostics: Vec<Diagnostic>,
     /// Records skipped by error recovery.
     pub recovered: usize,
+    /// Comment lines seen and dropped.
+    ///
+    /// Comments are not part of any record, so nothing downstream can carry them and a
+    /// re-emission cannot reproduce them. Counted so that a *writer* can say so instead of
+    /// deleting a reviewer's notes in silence - the manual recommends `fmt --write` as a
+    /// pre-commit habit, which makes silent loss the difference between a formatter and a
+    /// hazard.
+    pub comments: usize,
 }
 
 impl ParseOutcome {
@@ -174,6 +182,13 @@ impl<'a> Parser<'a> {
             let l = self.lines[self.i];
             match l.class {
                 LineClass::Blank => self.i += 1,
+                // A comment between records carries nothing the graph can hold, so it is
+                // skipped rather than diagnosed - but counted, so a writer can report that
+                // re-emitting the document will not reproduce it.
+                LineClass::Comment => {
+                    self.out.comments += 1;
+                    self.i += 1;
+                }
                 LineClass::DocHeader => self.doc_header()?,
                 LineClass::RecordStart => {
                     if let Some(u) = self.unit() {
@@ -318,7 +333,17 @@ impl<'a> Parser<'a> {
         let after_sigil = &start.text[1..];
         let mut words = after_sigil.split_whitespace();
         let ty = words.next().unwrap_or("");
-        let schema = match SchemaId::parse(ty) {
+        // `parse_forward`: a bare type this build does not know becomes
+        // `SchemaId::UnknownKernel` rather than a refusal, so a document written by a later
+        // version parses here and re-emits unchanged. It is not silent - `check`'s extension
+        // pass reports every one as `SMY-W010`, naming the type.
+        //
+        // This does change what a typo does. `@clai c/a { … }` used to be a hard `SMY-E001`
+        // and is now a warning naming `clai`. The tool cannot tell a typo from a kernel type
+        // added next year - the two are structurally identical - so it can have forward
+        // compatibility or typo-as-error, not both. `--strict` restores the failure for
+        // anyone who wants it, and the message is more precise than it was.
+        let schema = match SchemaId::parse_forward(ty) {
             Ok(s) => s,
             Err(_) => {
                 self.err(Code::E001, start.span, format!("unknown unit type `{ty}`"));
@@ -460,6 +485,19 @@ impl<'a> Parser<'a> {
                 c if c.starts_record() => break,
                 LineClass::Separator if !through_separator => break,
                 LineClass::Gist => break,
+                // Skipped, not kept and not a terminator. A body runs from the gist to the
+                // next record, so a comment sitting *between* records falls inside this
+                // range - keeping it made the comment become the previous unit's body,
+                // which is worse than any alternative: content invented from a note, and
+                // a granularity warning fired about it.
+                //
+                // The cost is that a body cannot begin a line with `#` or `//`; such a line
+                // is a comment wherever it appears, and is dropped. Predictable beats
+                // context-dependent here, and there is no escape syntax yet.
+                LineClass::Comment => {
+                    self.out.comments += 1;
+                    self.i += 1;
+                }
                 _ => {
                     lines.push(l.text);
                     self.i += 1;
@@ -884,6 +922,19 @@ impl<'a> Parser<'a> {
                 }
                 self.out.records.push(Record::Unit(c));
             }
+        }
+
+        // Emit the bindings as records, so a label reaches the log rather than living only
+        // in `ParseOutcome`. Everything downstream - the store, `merge`, `log_bytes` - then
+        // carries labels for free, which is what it means for a label to survive a round
+        // trip. They sit after the units they name so a reader meets the unit first.
+        for (label, uid) in &labels {
+            self.out
+                .records
+                .push(Record::LabelBinding(crate::types::LabelBinding::new(
+                    label.clone(),
+                    *uid,
+                )));
         }
 
         for r in &self.relations {

@@ -812,7 +812,7 @@ t/odd-brief  brief
 
 #screen(caption: "$ smysl check foreign-role.smy")[
 ```
-foreign-role.smy: 14 records, 8 units, 0 diagnostic(s)
+foreign-role.smy: 22 records, 8 units, 0 diagnostic(s)
 ```
 ]
 
