@@ -189,14 +189,20 @@ fn every_command_either_honours_output_or_says_it_cannot() {
 /// to warn about proves nothing either way.
 #[test]
 fn strict_promotes_a_warning_wherever_a_command_has_one() {
-    let cases: &[(&str, Vec<&str>)] = &[
-        ("check", vec!["check", F7]),
-        // `--mode exact` without the `exact-pack` feature warns `SMY-W202`.
-        (
-            "pack",
-            vec!["pack", "--budget", "200", "--mode", "exact", F1],
-        ),
-    ];
+    let mut cases: Vec<(&str, Vec<&str>)> = vec![("check", vec!["check", F7])];
+
+    // `--mode exact` warns `SMY-W202` — "exact packing is not compiled in" — only on a build
+    // *without* the feature. With `exact-pack` on, the search succeeds, reports "proven
+    // optimal", and there is no warning for `--strict` to promote. Asserting one either way
+    // made this fail under `--all-features`, which is a test that depends on how it was
+    // built rather than on what the code does.
+    #[cfg(not(feature = "exact-pack"))]
+    cases.push((
+        "pack",
+        vec!["pack", "--budget", "200", "--mode", "exact", F1],
+    ));
+
+    let cases = &cases[..];
     for (name, base) in cases {
         let plain = run(base);
         assert_eq!(

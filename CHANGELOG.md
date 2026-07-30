@@ -7,7 +7,15 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 0.3.0
+## 0.3.0 — 2026-07-30
+
+Format stays at `smysl/0.1`, kernel at `smysl.kernel/0.1`. Nothing on the wire changed.
+
+The theme: **a flag the tool advertises is a flag the tool honours, or says it cannot.**
+Twelve global flags are declared once and therefore appear in every subcommand's `--help`;
+measured at the start of the cycle, `--output` was honoured by 3 of 9 commands, `--json` by 1
+of 6, `--strict` by 1 of 8, and `--quiet` by none. The stability and performance work came out
+of a scan run against that same instinct — check what is claimed, then measure it.
 
 ### Fixed — stability
 
