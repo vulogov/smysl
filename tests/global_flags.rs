@@ -208,3 +208,36 @@ fn strict_is_honoured_by_check_and_the_others_are_recorded_as_not() {
         );
     }
 }
+
+/// A budget that cannot be represented is refused, not wrapped.
+///
+/// `--budget Nk` multiplied by 1000 without checking. Debug builds panicked; release builds
+/// **wrapped**, so `--budget 18446744073709552k` silently became 384 tokens — and
+/// `--explain` then reported 384 as the budget. A budget that quietly becomes a different
+/// budget is precisely the silent-degradation failure this project exists to prevent, and it
+/// was worse in the build people ship.
+#[test]
+fn an_unrepresentable_budget_is_refused_rather_than_wrapped() {
+    // u64::MAX / 1000 is 18446744073709551, so one above it overflows the multiply.
+    let out = run(&["pack", "--budget", "18446744073709552k", F1]);
+    assert_eq!(
+        out.code,
+        2,
+        "an overflowing budget must be a usage error; stderr was: {}",
+        out.stderr.trim()
+    );
+    assert!(
+        out.stdout.trim().is_empty(),
+        "a refused budget must not also emit a pack"
+    );
+
+    // The largest budget that *does* fit still works, so the bound is on overflow rather
+    // than on being large.
+    let ok = run(&["pack", "--budget", "18446744073709551k", F1]);
+    assert_eq!(
+        ok.code,
+        0,
+        "the largest representable budget must still pack; stderr: {}",
+        ok.stderr.trim()
+    );
+}

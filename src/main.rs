@@ -2047,7 +2047,11 @@ fn emit(global: &ArgMatches, cmd: &str, bytes: &[u8]) -> ExitCode {
 /// `8000` or `8k`.
 fn parse_budget(s: &str) -> Option<u64> {
     match s.strip_suffix(['k', 'K']) {
-        Some(n) => n.parse::<u64>().ok().map(|v| v * 1000),
+        // `checked_mul`, because `v * 1000` overflowed. In a debug build that panicked; in
+        // release it wrapped, so `--budget 18446744073709552k` silently became 384 tokens
+        // and `--explain` then reported 384 *as the budget*. A budget that quietly becomes
+        // a different budget is the failure mode this whole project argues against.
+        Some(n) => n.parse::<u64>().ok().and_then(|v| v.checked_mul(1000)),
         None => s.parse().ok(),
     }
 }

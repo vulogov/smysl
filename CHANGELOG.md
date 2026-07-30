@@ -9,7 +9,39 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 0.3.0
 
+### Fixed — stability
+
+Three defects found by a performance and stability scan, all reachable from input another
+agent hands you. Every threshold below was measured against the built binary.
+
+- **Stack overflow in the surface parser.** `object`/`array`/`value` recursed with no depth
+  bound, so a deeply nested header **aborted the process** — `fatal runtime error: stack
+  overflow` at roughly 5 000 levels. An abort is worse than a panic: it cannot be caught, so
+  an embedder cannot contain it, and rule A1 promises no panics on untrusted input.
+
+- **Stack overflow in the CBOR reader**, at roughly 20 000 levels. More serious than the
+  above, for two reasons: CBOR is the wire format, so this is a store arriving from another
+  agent; and the way in is `skip_item`, which preserves unknown keys — meaning rule X, the
+  forward-compatibility mechanism, was the route to the crash.
+
+  Both now refuse at `cbor::MAX_NESTING` (128), far above anything a real document produces
+  — the deepest shape the kernel defines is three levels — and far below what threatens the
+  stack. `CodecError::NestingTooDeep` is a distinct variant so a caller can tell "too deep"
+  from "corrupt", reported as the existing `SMY-E004` rather than adding to the diagnostic
+  registry mid-cycle.
+
+- **Integer overflow in `--budget Nk`.** The multiply was unchecked: debug builds panicked,
+  and release builds — the ones people ship — **wrapped**. `--budget 18446744073709552k`
+  silently became 384 tokens, and `--explain` then reported 384 *as the budget*. A budget
+  that quietly becomes a different budget is the exact silent-degradation failure this
+  project argues against. Now refused as a usage error.
+
 ### Added
+
+- **Both fuzz targets run in CI**, time-boxed to sixty seconds each. They existed from the
+  start and nothing ever ran them, which is how the two stack overflows survived to 0.3 — a
+  fuzzer finds that shape in seconds. `make fuzz` runs the same pair locally; `make
+  fuzz-long` is the old unbounded behaviour.
 
 - **`--json` is honoured by every command that reports something** — `diff`, `trace`,
   `salience`, `view` and `retract`, where before it was accepted and ignored. Only `check`

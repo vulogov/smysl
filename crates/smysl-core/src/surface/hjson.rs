@@ -192,7 +192,7 @@ pub fn parse_object(src: &str, base: usize) -> Res<Spanned<HObject>> {
         base,
     };
     p.skip_trivia();
-    let o = p.object()?;
+    let o = p.object(0)?;
     p.skip_trivia();
     if p.i < p.s.len() {
         return Err(HError::new(p.base + p.i, "trailing content after object"));
@@ -212,7 +212,7 @@ pub fn parse_object_prefix(src: &str, base: usize) -> Res<Spanned<HObject>> {
         base,
     };
     p.skip_trivia();
-    p.object()
+    p.object(0)
 }
 
 /// Parse a bare value, for configuration files and tests.
@@ -224,7 +224,7 @@ pub fn parse_value(src: &str, base: usize) -> Res<Spanned<HValue>> {
         base,
     };
     p.skip_trivia();
-    let v = p.value()?;
+    let v = p.value(0)?;
     p.skip_trivia();
     if p.i < p.s.len() {
         return Err(HError::new(p.base + p.i, "trailing content after value"));
@@ -276,6 +276,26 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Refuse rather than descend.
+    ///
+    /// `object`/`array`/`value` are mutually recursive, so an unbounded depth meant a deeply
+    /// nested header overflowed the stack and **aborted the process** — measured at roughly
+    /// 5 000 levels. An abort cannot be caught, so an embedder could not contain it, and
+    /// rule A1 promises no panics on untrusted input. A `.smy` file is untrusted by
+    /// definition: it is the thing another agent hands you.
+    ///
+    /// The limit is shared with the CBOR reader, since both walk the same shapes and a
+    /// document that survives one should survive the other.
+    fn check_depth(&self, depth: usize) -> Res<()> {
+        if depth > crate::cbor::MAX_NESTING {
+            return Err(HError::new(
+                self.base + self.i,
+                format!("nesting deeper than {}", crate::cbor::MAX_NESTING),
+            ));
+        }
+        Ok(())
+    }
+
     fn skip_line(&mut self) {
         while self.i < self.s.len() && self.s[self.i] != b'\n' {
             self.i += 1;
@@ -294,7 +314,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn object(&mut self) -> Res<Spanned<HObject>> {
+    /// `depth` is a parameter rather than a field on the parser, so it unwinds with the
+    /// recursion: there is no counter to decrement on each of the `?` paths, and therefore
+    /// no way to leak one.
+    fn object(&mut self, depth: usize) -> Res<Spanned<HObject>> {
+        self.check_depth(depth)?;
         let start = self.i;
         if self.peek() != Some(b'{') {
             return Err(HError::new(self.base + self.i, "expected `{`"));
@@ -325,12 +349,13 @@ impl<'a> Parser<'a> {
             }
             self.i += 1;
             self.skip_inline_trivia();
-            let value = self.value()?;
+            let value = self.value(depth + 1)?;
             obj.insert(key, value);
         }
     }
 
-    fn array(&mut self) -> Res<Spanned<HValue>> {
+    fn array(&mut self, depth: usize) -> Res<Spanned<HValue>> {
+        self.check_depth(depth)?;
         let start = self.i;
         self.i += 1; // `[`
         let mut items = Vec::new();
@@ -346,7 +371,7 @@ impl<'a> Parser<'a> {
                     self.i += 1;
                     continue;
                 }
-                _ => items.push(self.value()?),
+                _ => items.push(self.value(depth + 1)?),
             }
         }
     }
@@ -372,16 +397,16 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    fn value(&mut self) -> Res<Spanned<HValue>> {
+    fn value(&mut self, depth: usize) -> Res<Spanned<HValue>> {
         self.skip_inline_trivia();
         let start = self.i;
         match self.peek() {
             None => Err(self.eof("value")),
             Some(b'{') => {
-                let o = self.object()?;
+                let o = self.object(depth + 1)?;
                 Ok(Spanned::new(HValue::Object(o.value), o.span))
             }
-            Some(b'[') => self.array(),
+            Some(b'[') => self.array(depth + 1),
             Some(b'"') => {
                 let s = self.quoted()?;
                 Ok(Spanned::new(HValue::Str(s), self.span(start)))
