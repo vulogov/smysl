@@ -121,24 +121,31 @@ agent hands you. Every threshold below was measured against the built binary.
   caches it, which is exactly output-preserving and takes the binding-budget case from 2 807ms
   to 2 041ms at 4 000 units.
 
+- **The binding-budget case is 6-7x faster**, by caching each candidate's cost and value and
+  recomputing only those a change can have touched. At 4 000 units: 1 924ms to 273ms at half
+  the store's cost, 2 698 to 421 at 90%, 2 820 to 448 at 99%. Per-doubling growth falls from
+  ~4.3x to ~3x.
+
+  The invalidation is exact, not approximate. A candidate's figures depend on the selection
+  *only* through its own obligation — `delta` filters the obligation by what is held and
+  `weigh` prices each member against the level held for it — so raising a unit can disturb
+  only candidates whose obligation mentions that unit, and every other cached figure stays as
+  valid as it was. Verified byte-identical against the previous implementation across ten
+  fixtures at eight budgets and two synthetic stores at five more, `--explain` included.
+
+  A lazy greedy over stale densities was considered and rejected as **unsound**: density is
+  not monotone under selection growth. When a member leaves a delta because the selection
+  already covers it, density becomes `(dv - v_m)/(dc - c_m)`, which *exceeds* `dv/dc` whenever
+  the departing member's own density was the lower. A probe found no violations on the corpus,
+  which is evidence and not a guarantee — and a packer that silently chose differently would be
+  a far worse defect than a slow one.
+
 ### Known limits
 
-- **`pack` is still quadratic when the budget binds**, and this is corrected from what 0.3
-  first recorded: it is quadratic at *every* binding fraction, not only near-full ones. An
-  earlier measurement suggesting the tight case was linear used a fixed budget against
-  growing stores, so the budget was a shrinking fraction and the round count stayed flat —
-  the measurement, not the code, was linear.
-
-  The remaining cost is structural: one round per unit admitted, every remaining candidate
-  re-weighed each round, which is what makes the choice a global best. Memoising removed the
-  graph walk from that loop; it did not remove the loop.
-
-  Making it sub-quadratic needs recomputing only the candidates whose obligation intersects
-  what was just admitted, plus an ordered structure for the maximum. Note for whoever does it:
-  a lazy greedy over stale densities as upper bounds is **unsound here**, because density is
-  not monotone under selection growth — if a departing member's own density is below the
-  bundle's, removing it *raises* the bundle's. Zero violations were observed on the corpus,
-  which is evidence and not a guarantee.
+- `pack` is still super-linear when the budget binds (~3x per doubling): the greedy still
+  scans every candidate each round, and only the *pricing* is now cached. Removing the scan
+  needs an ordered structure over the cached figures, where the subtlety is that affordability
+  moves with `used` even for candidates nothing has touched.
 - `thread` still defaults to surface output where `merge` and `pack` default to CBOR, so it
   sits awkwardly against rule P. Changing the default would be right by the rule and would
   also change what every documented `thread --derive` example prints, so it is left for a

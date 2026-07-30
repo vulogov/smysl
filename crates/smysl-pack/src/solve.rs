@@ -258,48 +258,100 @@ pub fn pack(
     // Memoising leaves every choice identical and removes the walk from the inner loop.
     let mut needs = closure::Needs::new();
 
+    // The candidate set, fixed for the run: every (unit, level) the greedy could ever weigh.
+    let candidates: Vec<(Uid, Lod)> = scope
+        .iter()
+        .filter_map(|u| store.get(u).map(|unit| (*u, unit)))
+        .flat_map(|(u, unit)| {
+            available_levels(&unit.core)
+                .into_iter()
+                .map(move |l| (u, cap(l)))
+        })
+        .collect();
+
+    // Which candidates a unit's level affects.
+    //
+    // This is what makes invalidation *exact* rather than a heuristic. A candidate's cost and
+    // value depend on the selection only through the units in its own obligation: `delta`
+    // filters the obligation by what is already held, and `weigh` charges each member against
+    // the level currently held for it. Nothing outside the obligation can change either
+    // number. So raising unit `u` can only disturb candidates whose obligation mentions `u`,
+    // and every other cached figure stays exactly as valid as it was.
+    let mut affected: BTreeMap<Uid, Vec<usize>> = BTreeMap::new();
+    for (i, (u, l)) in candidates.iter().enumerate() {
+        for x in needs.required(store, *u, *l).keys() {
+            affected.entry(*x).or_default().push(i);
+        }
+    }
+
+    // `(dc, dv)` per candidate; `None` means it must be recomputed before use. A zero cost
+    // stands for "nothing left to buy", which is what both an empty delta and a free one meant
+    // to the original loop — each simply moved on.
+    let mut weighed: Vec<Option<(u64, f64)>> = vec![None; candidates.len()];
+
     loop {
-        let mut best: Option<(f64, f32, Uid, Lod, u64, Selection)> = None;
-        for uid in &scope {
-            let Some(unit) = store.get(uid) else { continue };
-            for level in available_levels(&unit.core) {
-                let level = cap(level);
-                if selection.get(uid).is_some_and(|l| *l >= level) {
-                    continue;
+        let mut best: Option<(f64, f32, Uid, Lod, u64, usize)> = None;
+        for (i, (uid, level)) in candidates.iter().enumerate() {
+            if selection.get(uid).is_some_and(|l| *l >= *level) {
+                continue;
+            }
+            if weighed[i].is_none() {
+                let d = needs.delta(store, &selection, *uid, *level);
+                weighed[i] = Some(if d.is_empty() {
+                    (0, 0.0)
+                } else {
+                    weigh(store, &selection, &d, &local, &req.estimator)
+                });
+            }
+            let (dc, dv) = weighed[i].expect("just filled");
+            // Re-checked every round rather than cached: `used` moves even when this
+            // candidate does not.
+            if dc == 0 || used + dc > req.budget {
+                continue;
+            }
+            let density = dv / dc as f64;
+            let salience_here = local.get(uid).copied().unwrap_or(0.0);
+            // Total tie-break: density, then salience, then uid, then level.
+            let better = match &best {
+                None => true,
+                Some((bd, bs, bu, bl, _, _)) => {
+                    (
+                        density,
+                        salience_here,
+                        std::cmp::Reverse(*uid),
+                        std::cmp::Reverse(*level),
+                    ) > (*bd, *bs, std::cmp::Reverse(*bu), std::cmp::Reverse(*bl))
                 }
-                let d = needs.delta(store, &selection, *uid, level);
-                if d.is_empty() {
-                    continue;
-                }
-                let (dc, dv) = weigh(store, &selection, &d, &local, &req.estimator);
-                if dc == 0 || used + dc > req.budget {
-                    continue;
-                }
-                let density = dv / dc as f64;
-                let salience_here = local.get(uid).copied().unwrap_or(0.0);
-                // Total tie-break: density, then salience, then uid, then level.
-                let better = match &best {
-                    None => true,
-                    Some((bd, bs, bu, bl, _, _)) => {
-                        (
-                            density,
-                            salience_here,
-                            std::cmp::Reverse(*uid),
-                            std::cmp::Reverse(level),
-                        ) > (*bd, *bs, std::cmp::Reverse(*bu), std::cmp::Reverse(*bl))
-                    }
-                };
-                if better {
-                    best = Some((density, salience_here, *uid, level, dc, d));
-                }
+            };
+            if better {
+                best = Some((density, salience_here, *uid, *level, dc, i));
             }
         }
+
+        // The winner's delta is recomputed rather than carried through the scan: the
+        // selection has not moved since it was weighed, so this is the same set the original
+        // loop held on to — and holding one per candidate would have traded the walk for a
+        // pile of clones.
+        let best = best.map(|(d0, s0, u, l, dc, i)| {
+            let d = needs.delta(store, &selection, u, l);
+            let _ = i;
+            (d0, s0, u, l, dc, d)
+        });
 
         let Some((_, _, uid, level, dc, d)) = best else {
             break;
         };
         for (u, l) in d {
+            // Only a level that actually moved can invalidate anything. `raise` is a no-op
+            // when the selection already holds `u` at or above `l`, and treating that as a
+            // change would dirty candidates whose figures are still perfectly good.
+            let moved = selection.get(&u).map(|held| *held < l).unwrap_or(true);
             raise(&mut selection, u, l);
+            if moved {
+                for i in affected.get(&u).map(Vec::as_slice).unwrap_or(&[]) {
+                    weighed[*i] = None;
+                }
+            }
             why.entry(u).or_insert_with(|| {
                 if u == uid {
                     closure::Reason::Density

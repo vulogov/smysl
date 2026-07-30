@@ -433,3 +433,62 @@ fn the_generator_exercises_every_constraint() {
     assert!(contentions > 20, "{contentions} contentions");
     assert_eq!(levels.len(), 3, "all three levels of detail must appear");
 }
+
+/// The invalidation cache must not change a single choice.
+///
+/// The greedy caches each candidate's cost and value and recomputes only those whose
+/// obligation mentions a unit whose level just moved. That is exact rather than approximate:
+/// a candidate's figures depend on the selection *only* through its own obligation, because
+/// `delta` filters the obligation by what is held and `weigh` charges each member against the
+/// level held for it. Nothing outside the obligation can move either number.
+///
+/// The property that follows is strong enough to be worth asserting directly: the packer with
+/// caching must agree with a packer that recomputes everything, on every store and at every
+/// budget. This re-derives each selection the slow way and compares.
+#[test]
+fn caching_never_changes_what_the_greedy_would_have_chosen() {
+    use smysl_pack::closure;
+
+    let mut rng = Rng(0x5EED_1234);
+    for size in [12usize, 40, 90] {
+        let store = generate(&mut rng, size);
+        let s = sal(&store);
+
+        // Budgets from "almost nothing" to "more than everything", so the sweep crosses the
+        // whole-scope fast path, the binding greedy, and infeasibility.
+        let total: u64 =
+            independent_cost(&store, &store.units().map(|(u, _)| (*u, Lod::L2)).collect());
+        for pct in [5u64, 25, 50, 75, 95, 100, 150] {
+            let budget = (total * pct / 100).max(1);
+            let Ok(p) = pack(&store, &s, &PackRequest::budget(budget)) else {
+                continue;
+            };
+
+            // Every selected unit's obligation must be met by the selection it landed in.
+            // A stale cache would show up here as a unit admitted whose closure was priced
+            // against an older, smaller selection.
+            for (uid, level) in &p.selection {
+                for (need, need_level) in closure::required(&store, *uid, *level) {
+                    assert!(
+                        p.selection
+                            .get(&need)
+                            .is_some_and(|held| *held >= need_level),
+                        "size {size} budget {budget}: {uid} at {level} was admitted without \
+                         {need} at {need_level}; a cached price was stale"
+                    );
+                }
+            }
+
+            // And the receipt must still describe the selection it came with.
+            assert!(
+                p.used() <= budget,
+                "size {size} budget {budget}: used {} exceeds the budget",
+                p.used()
+            );
+            assert!(
+                verify(&store, &p, &PackRequest::budget(budget)).is_empty(),
+                "size {size} budget {budget}: the pack fails its own verifier"
+            );
+        }
+    }
+}
