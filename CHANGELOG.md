@@ -7,6 +7,34 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 0.4.0
+
+Nothing yet.
+
+Carried forward, in the order I would take them:
+
+- **The two measurement gaps.** The quoting coarsening — a fixture that yields five or six
+  units yields three once each must carry a quotable span — is observed once and never
+  explained; it may be the prompt or it may be inherent to anchoring a unit to text. One
+  experiment settles it. And `salience` is now the only pure command whose per-call cost has
+  never been characterised, though it measures linear.
+- **`pack`'s remaining scan.** Still super-linear when the budget binds (~3x per doubling):
+  the pricing is cached but the per-round scan over candidates is not. Removing it needs an
+  ordered structure, where the subtlety is that affordability moves with `used` even for
+  candidates nothing has touched.
+- **An escape syntax for a body line opening `#` or `//`.** 0.2 documented the limitation
+  rather than solving it.
+- **`make doc-output` in CI.** It exists and nothing runs it, so the docs can drift between
+  releases exactly as they did before it existed.
+- **`W305` and `W306`**, the two diagnostic codes with no emission site. `W305`'s information
+  already reaches users through the usage totals line; `W306` describes a threshold feature
+  that does not exist. Emit or delete.
+- **OpenAI and Anthropic mappers**, when credentials exist. Still blocked, and the risk has
+  grown rather than shrunk since Appendix C gained `relations` and `quote`.
+- **The ~69 RFC divergences**, which are real debt and not a release feature.
+
+---
+
 ## 0.3.0 — 2026-07-30
 
 Format stays at `smysl/0.1`, kernel at `smysl.kernel/0.1`. Nothing on the wire changed.
