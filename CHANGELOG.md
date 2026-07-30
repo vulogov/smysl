@@ -7,6 +7,29 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 0.3.0
+
+Nothing yet.
+
+Carried forward from 0.2, in the order I would take them:
+
+- **Measure `pack` and `salience` per-call cost.** They recompute over the whole
+  store every call, with PageRank over the full adjacency. There is no evidence
+  it bites and no measurement either, and the missing measurement is the actual
+  gap — a benchmark that finds the knee, not an optimisation.
+- **Diagnose the quoting coarsening.** A fixture that yields five or six units
+  yields three once each must carry a quotable span. Observed once, never
+  explained; it may be the prompt or it may be inherent to anchoring a unit to
+  text it can quote.
+- **An escape syntax for a body line opening `#` or `//`.** 0.2 documented the
+  limitation rather than solving it.
+- **OpenAI and Anthropic mappers**, when credentials exist. The risk has grown
+  rather than shrunk: Appendix C gained `relations` and `quote`, and the mappers
+  pass it through unchanged.
+- **The ~69 RFC divergences**, which are real debt and not a release feature.
+
+---
+
 ## 0.2.0 — 2026-07-29
 
 Format stays at `smysl/0.1`, kernel at `smysl.kernel/0.1`. A record type was
