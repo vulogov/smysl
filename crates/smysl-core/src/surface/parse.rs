@@ -726,7 +726,10 @@ impl<'a> Parser<'a> {
             0
         };
         let (ref_txt, note) = match rest[note_from..].split_once(':') {
-            Some((r, n)) => (rest[..note_from + r.len()].trim(), Some(n.trim().to_string())),
+            Some((r, n)) => (
+                rest[..note_from + r.len()].trim(),
+                Some(n.trim().to_string()),
+            ),
             None => (rest, None),
         };
         let role = match Role::parse(role_txt) {

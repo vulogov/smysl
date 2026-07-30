@@ -90,3 +90,9 @@ smysl-provider = { workspace = true, optional = true }
 smysl-ingest   = { workspace = true, optional = true }
 smysl-tui      = { workspace = true, optional = true }
 clap           = { workspace = true, optional = true }
+
+[dev-dependencies]
+# The global-flag matrix test parses `--json` output with a real parser rather than
+# pattern-matching it: machine-readable output that a machine cannot read is the bug
+# being guarded against, so the guard has to be a parser.
+serde_json = { workspace = true }

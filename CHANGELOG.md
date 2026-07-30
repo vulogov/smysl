@@ -9,7 +9,34 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 0.3.0
 
+### Added
+
+- **`--json` is honoured by every command that reports something** — `diff`, `trace`,
+  `salience`, `view` and `retract`, where before it was accepted and ignored. Only `check`
+  implemented it, while all twelve global flags are declared once and therefore advertised
+  in every subcommand's `--help`. A caller who read `--json` in `smysl trace --help`,
+  passed it, and got prose had no way to learn the flag was never wired.
+
+  `retract --json` carries `authorised` and `refusal`, which the text form reports on
+  *stderr* where a machine reading stdout would never see them.
+
+- **`tests/global_flags.rs`** asserts the matrix: every (command, global flag) pair is
+  either honoured or explicitly refused, and silence is a failure. Fixing instances does not
+  stop the class — the next flag added reaches every subcommand's help the moment it is
+  declared — so the shape is pinned rather than the instances.
+
+  `--json` is checked with a real parser, because the bug being guarded against is
+  machine-readable output a machine cannot read.
+
 ### Fixed
+
+- **`check --json` emitted invalid JSON.** It used Rust's `{:?}`, which renders a control
+  character as `\u{1}` — no parser accepts that. A diagnostic message quotes document
+  content, so an authored gist or a model's output through `ingest` could break whatever was
+  consuming the stream. `json_escape` existed for exactly this, documented as shared by
+  "every caller that emits JSON", and the one command emitting JSON did not use it. It was
+  also not re-exported from the facade, so a library caller could not have used it either
+  (rule A).
 
 - **Six of nine commands advertised `--output` and ignored it.** The flag is global, so
   every subcommand's `--help` lists it; `fmt`, `pack`, `thread`, `view`, `salience` and

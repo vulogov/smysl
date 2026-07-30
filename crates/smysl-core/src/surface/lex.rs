@@ -281,8 +281,14 @@ mod tests {
     #[test]
     fn an_unrecognised_type_with_a_label_or_header_starts_a_record() {
         assert_eq!(classify("@claimant c/x"), LineClass::RecordStart);
-        assert_eq!(classify("@postmortem p/a { status: speculative }"), LineClass::RecordStart);
-        assert_eq!(classify("@postmortem { status: speculative }"), LineClass::RecordStart);
+        assert_eq!(
+            classify("@postmortem p/a { status: speculative }"),
+            LineClass::RecordStart
+        );
+        assert_eq!(
+            classify("@postmortem { status: speculative }"),
+            LineClass::RecordStart
+        );
         // Mixed case and punctuation cannot name a type, so they stay prose either way.
         assert_eq!(classify("@Postmortem p/a"), LineClass::Text);
         assert_eq!(classify("@post!mortem p/a"), LineClass::Text);

@@ -606,7 +606,10 @@ fn a_step_note_survives_both_target_forms() {
         let out = parse_surface(&src).unwrap();
         assert!(!out.has_errors(), "{target}: {:?}", out.diagnostics);
         let text = write_surface(None, &out.records, &WriteContext::from_labels(&out.labels));
-        assert!(text.contains("the headline"), "note lost for {target}: {text}");
+        assert!(
+            text.contains("the headline"),
+            "note lost for {target}: {text}"
+        );
     }
 }
 
@@ -628,7 +631,11 @@ fn an_unlabelled_step_target_round_trips_through_surface() {
         "setup produced no thread record"
     );
     // Emit with an *empty* label map, forcing the canonical-uid fallback on every target.
-    let text = write_surface(None, &a.records, &WriteContext::from_labels(&Default::default()));
+    let text = write_surface(
+        None,
+        &a.records,
+        &WriteContext::from_labels(&Default::default()),
+    );
     let b = parse_surface(&text).unwrap();
     assert!(
         !b.has_errors(),
@@ -734,7 +741,11 @@ fn a_file_of_only_comments_parses_to_nothing() {
 fn a_commented_document_still_round_trips() {
     let src = "# a note\n@claim c/a { status: speculative }\n~ A claim.\n";
     let a = parse_surface(src).unwrap();
-    let text = write_surface(a.view.as_ref(), &a.records, &WriteContext::from_labels(&a.labels));
+    let text = write_surface(
+        a.view.as_ref(),
+        &a.records,
+        &WriteContext::from_labels(&a.labels),
+    );
     let b = parse_surface(&text).unwrap();
     assert_eq!(a.records, b.records);
     assert_eq!(b.comments, 0, "canonical form should carry no comments");
@@ -785,7 +796,11 @@ fn a_binding_does_not_change_the_uid_it_names() {
 #[test]
 fn bindings_are_not_duplicated_by_a_round_trip() {
     let a = parse_surface(&corpus()).unwrap();
-    let text = write_surface(a.view.as_ref(), &a.records, &WriteContext::from_labels(&a.labels));
+    let text = write_surface(
+        a.view.as_ref(),
+        &a.records,
+        &WriteContext::from_labels(&a.labels),
+    );
     let b = parse_surface(&text).unwrap();
     let count = |o: &smysl_core::surface::ParseOutcome| {
         o.records
@@ -864,7 +879,11 @@ fn an_unknown_type_survives_a_surface_round_trip() {
     assert!(!a.has_errors(), "{:?}", a.diagnostics);
     assert_eq!(a.units().count(), 1);
 
-    let text = write_surface(a.view.as_ref(), &a.records, &WriteContext::from_labels(&a.labels));
+    let text = write_surface(
+        a.view.as_ref(),
+        &a.records,
+        &WriteContext::from_labels(&a.labels),
+    );
     let b = parse_surface(&text).unwrap();
     assert!(
         !b.has_errors(),

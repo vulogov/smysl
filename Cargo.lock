@@ -836,6 +836,7 @@ name = "smysl"
 version = "0.3.0"
 dependencies = [
  "clap",
+ "serde_json",
  "smysl-check",
  "smysl-core",
  "smysl-graph",

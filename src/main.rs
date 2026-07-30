@@ -1032,9 +1032,16 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 
         for d in report.iter() {
             if json {
+                // `json_escape`, not `{:?}`. Rust's debug form renders a control character
+                // as `\u{1}`, which no JSON parser accepts — and a diagnostic message
+                // quotes document content, so an authored gist or a model's output could
+                // put one there and break whatever was consuming the stream. Verified
+                // against a real parser rather than assumed.
                 println!(
-                    "{{\"code\":\"{}\",\"severity\":\"{}\",\"message\":{:?}}}",
-                    d.code, d.severity, d.message
+                    "{{\"code\":\"{}\",\"severity\":\"{}\",\"message\":{}}}",
+                    d.code,
+                    d.severity,
+                    smysl::json_escape(&d.message)
                 );
             } else {
                 eprintln!("{path}: {d}");
@@ -1216,7 +1223,7 @@ fn store_arg(m: &ArgMatches, global: &ArgMatches) -> Option<String> {
 }
 
 /// `smysl diff` - what changed, and who changed it (§23.1).
-fn cmd_diff(m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+fn cmd_diff(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let inputs: Vec<String> = m
         .get_many::<String>("inputs")
         .map(|v| v.cloned().collect())
@@ -1294,6 +1301,17 @@ fn cmd_diff(m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
         }
     }
     let d = smysl::diff(&stores[0], &stores[1]);
+    if global.get_flag("json") {
+        // One object, not a line per uid: a diff is a single answer about two stores, and
+        // a caller wants the three sets rather than to reassemble them from prefixes.
+        println!(
+            "{{\"only_in_a\":[{}],\"only_in_b\":[{}],\"common\":[{}]}}",
+            uid_array(&d.only_in_a),
+            uid_array(&d.only_in_b),
+            uid_array(&d.common)
+        );
+        return ExitCode::Success;
+    }
     println!(
         "{} only, {} only, {} common",
         d.only_in_a.len(),
@@ -1307,6 +1325,17 @@ fn cmd_diff(m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
         println!("+ {u}");
     }
     ExitCode::Success
+}
+
+/// A comma-separated JSON array of quoted uids.
+///
+/// Canonical form, not the display abbreviation: a machine reading this needs the identity,
+/// and `SMY-E071` exists because a short uid in a record silently weakens it.
+fn uid_array<'a>(uids: impl IntoIterator<Item = &'a Uid>) -> String {
+    uids.into_iter()
+        .map(|u| smysl::json_escape(&u.canonical()))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// `smysl trace` - walk a unit's ancestry (§23.1). The direct answer to F3.
@@ -1340,6 +1369,40 @@ fn cmd_trace(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let depth = m.get_one::<String>("depth").and_then(|s| s.parse().ok());
 
     let l = smysl::trace(&store, target, kind, depth);
+    if global.get_flag("json") {
+        // The tree's shape is what a caller wants, so `depth` and `via` travel per node
+        // rather than being encoded as indentation a machine would have to count.
+        let nodes: Vec<String> = l
+            .nodes
+            .iter()
+            .map(|n| {
+                let hop = n
+                    .hop
+                    .map(|h| h.to_string())
+                    .unwrap_or_else(|| "null".into());
+                let agents: Vec<String> = n
+                    .agents
+                    .iter()
+                    .map(|a| smysl::json_escape(&a.to_string()))
+                    .collect();
+                format!(
+                    "{{\"uid\":{},\"depth\":{},\"via\":{},\"hop\":{},\"agents\":[{}]}}",
+                    smysl::json_escape(&n.uid.canonical()),
+                    n.depth,
+                    smysl::json_escape(n.via.as_str()),
+                    hop,
+                    agents.join(",")
+                )
+            })
+            .collect();
+        println!(
+            "{{\"units\":{},\"steps\":{},\"nodes\":[{}]}}",
+            l.len(),
+            l.max_depth(),
+            nodes.join(",")
+        );
+        return ExitCode::Success;
+    }
     for n in &l.nodes {
         let indent = "  ".repeat(n.depth as usize);
         let hop = n.hop.map(|h| format!(" @hop{h}")).unwrap_or_default();
@@ -1414,6 +1477,20 @@ fn cmd_view(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     };
 
     let members = smysl::membership(&store, &view.roots);
+    if global.get_flag("json") {
+        println!(
+            "{{\"view\":{},\"roots\":[{}],\"threads\":[{}],\"reachable\":[{}]}}",
+            smysl::json_escape(view.id.as_str()),
+            uid_array(&view.roots),
+            view.threads
+                .iter()
+                .map(|t| smysl::json_escape(t.as_str()))
+                .collect::<Vec<_>>()
+                .join(","),
+            uid_array(&members)
+        );
+        return ExitCode::Success;
+    }
     println!(
         "{}: {} root(s), {} thread(s), {} unit(s) reachable",
         view.id,
@@ -1709,13 +1786,33 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let policy = RetractionPolicy::default();
 
     let plan = plan_retraction(&store, target, &agents, policy, authority);
-    println!(
-        "{path}: retracting {target} would reach {} unit(s), orphaning {}",
-        plan.blast_radius.len(),
-        plan.orphaned.len()
-    );
-    for u in &plan.orphaned {
-        println!("{path}:   {u} would lose all of its grounds");
+    if global.get_flag("json") {
+        // `authorised` and `refusal` travel too: a caller gating on a retraction needs to
+        // know it was refused, and refusal is reported on stderr in the text form where a
+        // machine reading stdout would never see it.
+        println!(
+            "{{\"target\":{},\"blast_radius\":[{}],\"orphaned\":[{}],\"authorised\":{},\"refusal\":{}}}",
+            smysl::json_escape(&target.canonical()),
+            uid_array(&plan.blast_radius),
+            uid_array(&plan.orphaned),
+            plan.authorised,
+            plan.refusal
+                .as_deref()
+                .map(smysl::json_escape)
+                .unwrap_or_else(|| "null".into())
+        );
+        if m.get_flag("dry-run") {
+            return ExitCode::Success;
+        }
+    } else {
+        println!(
+            "{path}: retracting {target} would reach {} unit(s), orphaning {}",
+            plan.blast_radius.len(),
+            plan.orphaned.len()
+        );
+        for u in &plan.orphaned {
+            println!("{path}:   {u} would lose all of its grounds");
+        }
     }
 
     if m.get_flag("dry-run") {
@@ -1902,23 +1999,24 @@ fn bindings_for(
     labels
         .iter()
         .filter(|(_, uid)| keep(uid))
-        .map(|(label, uid)| {
-            Record::LabelBinding(smysl::LabelBinding::new(label.clone(), *uid))
-        })
+        .map(|(label, uid)| Record::LabelBinding(smysl::LabelBinding::new(label.clone(), *uid)))
         .collect()
 }
 
 /// Say so when `--output` cannot be honoured, instead of ignoring it.
 ///
-/// `salience`, `view` and `retract` print a *report* — many lines, assembled as they are
-/// discovered, not one artifact. Routing that through a file is shell redirection's job.
-/// What is not acceptable is what these three did before: accept a documented flag, write
-/// to stdout anyway, and leave the caller with an empty file and no diagnostic.
+/// These commands print a *report* — many lines, assembled as they are discovered, not one
+/// artifact — so routing it through a file is shell redirection's job. What is not
+/// acceptable is what they did before: accept a documented flag, write to stdout anyway,
+/// and leave the caller with an empty file and no diagnostic.
+///
+/// `--json` is the answer for a caller who wants this machine-readable, and the message
+/// says so rather than leaving them to guess.
 fn warn_output_is_a_report(global: &ArgMatches, cmd: &str) {
     if global.get_one::<String>("output").is_some() {
         eprintln!(
             "smysl {cmd}: warning: --output is not honoured here — {cmd} prints a report, \
-             not a store. Redirect stdout instead."
+             not a store. Redirect stdout, and use --json if you are parsing it."
         );
     }
 }
@@ -2108,6 +2206,20 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .get_one::<String>("top")
         .and_then(|s| s.parse().ok())
         .unwrap_or(usize::MAX);
+    if global.get_flag("json") {
+        let rows: Vec<String> = report
+            .top(n)
+            .into_iter()
+            .map(|(uid, score)| {
+                format!(
+                    "{{\"uid\":{},\"score\":{score:.4}}}",
+                    smysl::json_escape(&uid.canonical())
+                )
+            })
+            .collect();
+        println!("{{\"ranking\":[{}]}}", rows.join(","));
+        return ExitCode::Success;
+    }
     for (uid, score) in report.top(n) {
         println!("{score:.4}  {uid}");
     }
