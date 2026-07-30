@@ -9,7 +9,27 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 0.4.0
 
-Nothing yet.
+### Fixed
+
+- **`quantise` returned infinity for a large payload float**, which is not a multiple of
+  1/1024 and not finite, so the CBOR writer's `debug_assert!(is_quantised(q))` fired. In
+  release the assertion is compiled out and the infinity was written to the store instead —
+  a value the codec's own contract forbids, emitted silently, which is the worse half.
+  Reachable from a `.smy` file, so from a document another agent hands you.
+
+  `quantise` is now total, saturating at the largest magnitude constraint 4 can express. A
+  value that large has no faithful representation under the constraint, so there is nothing
+  to preserve.
+
+### Known limits
+
+- **The surface round trip does not hold for some input.** `parse -> write -> parse` returns
+  different records for at least one document, found by the same fuzz run. Open, with the
+  artifact in `fuzz/artifacts/surface/`. Not a regression: this is the first time either fuzz
+  target has ever been run.
+
+- The fuzz CI job is **reporting rather than blocking** until that is fixed. A gate that fails
+  on a backlog it has just discovered teaches people to ignore it.
 
 Carried forward, in the order I would take them:
 
