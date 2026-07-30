@@ -1,0 +1,26 @@
+@doc smysl/0.1 {
+  id: v/f9
+  intent: incident-brief
+  lang: en
+  requires: ["smysl.kernel/0.1"]
+  granularity: { profile: default }
+  roots: [c/regression]
+}
+
+# A store written by a later version, read by this one. Nothing here is exotic on
+# purpose: the point is that an unfamiliar type is carried rather than refused, and
+# that a reader is told so rather than left to assume it saw everything.
+
+@evidence e/latency { status: measured, source: { kind: metric, ref: "auth.p95", captured: 2026-07-22 } }
+~ p95 on the auth path rose from 180 ms to 540 ms over four hours.
+
+@claim c/regression { status: derived, grounds: [e/latency] }
+~ The 4.2 rollout regressed auth latency.
+
+// `postmortem` is not a kernel type this build knows. A later version added it, and
+// this document has to survive the trip: preserved verbatim, reported as SMY-W010,
+// re-emitted byte for byte.
+@postmortem pm/incident-92 { status: cited, source: { kind: doc, ref: "postmortems/92" } }
+~ The written record of incident 92, filed the following morning.
+
+@rel pm/incident-92 --elaborates--> c/regression

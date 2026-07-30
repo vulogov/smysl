@@ -2546,10 +2546,11 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         );
     }
     eprintln!(
-        "smysl ingest: {} chunk(s), {} call(s), {} unit(s), {} degraded, {} token(s)",
+        "smysl ingest: {} chunk(s), {} call(s), {} unit(s), {} weakened, {} degraded, {} token(s)",
         report.chunks,
         report.calls,
         staged.len(),
+        staged.weakened.len(),
         report.degraded,
         report.usage.total()
     );
@@ -2579,9 +2580,21 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Failure;
     }
 
+    // Rule M corrected the model, and a pipeline should be able to branch on that without
+    // parsing `--json`. It refines the outcome rather than replacing it: the batch is intact
+    // either way, and every lowered unit is in it at the status its grounds support.
+    let corrected = !staged.weakened.is_empty();
+
     if m.get_flag("yes") {
         println!("{} unit(s) staged and confirmed", staged.len());
-        return ExitCode::Success;
+        // `--yes` used to return 0 here whatever happened, so the one outcome most worth
+        // knowing about - the model over-claimed and was corrected - was the outcome
+        // indistinguishable from nothing having happened.
+        return if corrected {
+            ExitCode::StagedWithCorrections
+        } else {
+            ExitCode::Success
+        };
     }
     println!(
         "{} unit(s) staged in {}; review, then `smysl merge --staged`",
@@ -2589,7 +2602,11 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         root.join(smysl::stage::PATH).display()
     );
     // Rule S: staged output awaits confirmation, and exit 10 is how a pipeline is told.
-    ExitCode::Staged
+    if corrected {
+        ExitCode::StagedWithCorrections
+    } else {
+        ExitCode::Staged
+    }
 }
 
 /// `smysl attest` - semantic checks that require a model (§23.1). **Model-dependent.**

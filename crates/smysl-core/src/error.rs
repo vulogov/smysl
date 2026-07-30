@@ -35,6 +35,20 @@ pub enum ExitCode {
     UnsupportedVersion = 8,
     HashVerification = 9,
     Staged = 10,
+    /// Staged or accepted, **and rule M lowered at least one unit** (`SMY-W036`).
+    ///
+    /// A refinement of `Staged`, not a failure: the batch is intact and every corrected
+    /// unit is in it, at the status its grounds actually support. What it adds is that the
+    /// model claimed more than it could support and was corrected, which a pipeline may
+    /// reasonably want to route differently - to a reviewer, to a re-prompt, to a log -
+    /// without parsing `--json` to find out.
+    ///
+    /// It supersedes both `Staged` and `Success`: `ingest --yes` used to return `0` on a
+    /// corrected batch, so the one outcome most worth knowing about was the one indistinguish-
+    /// able from nothing having happened.
+    ///
+    /// A script testing `= 10` for "staged" should test `>= 10`.
+    StagedWithCorrections = 11,
 }
 
 impl ExitCode {
@@ -50,6 +64,7 @@ impl ExitCode {
         ExitCode::UnsupportedVersion,
         ExitCode::HashVerification,
         ExitCode::Staged,
+        ExitCode::StagedWithCorrections,
     ];
 
     pub const fn as_i32(self) -> i32 {
@@ -69,6 +84,7 @@ impl ExitCode {
             ExitCode::UnsupportedVersion => "unsupported format or kernel major",
             ExitCode::HashVerification => "hash verification failure",
             ExitCode::Staged => "output staged; confirmation required",
+            ExitCode::StagedWithCorrections => "output staged; rule M lowered a unit",
         }
     }
 }
@@ -686,7 +702,7 @@ mod tests {
     use crate::diag::Diagnostic;
 
     #[test]
-    fn exit_codes_match_appendix_e() {
+    fn exit_codes_match_appendix_e_plus_the_0_2_addition() {
         let pairs = [
             (ExitCode::Success, 0),
             (ExitCode::Failure, 1),
@@ -699,17 +715,23 @@ mod tests {
             (ExitCode::UnsupportedVersion, 8),
             (ExitCode::HashVerification, 9),
             (ExitCode::Staged, 10),
+            // 11 is new in 0.2.0 and is *not* in Appendix E. An exit code is a permanent
+            // contract, so a new one is a divergence worth naming rather than absorbing:
+            // `ingest` knew rule M had corrected the model and had no way to say so, and
+            // under `--yes` returned plain success - the one outcome most worth knowing
+            // about, reported as though nothing had happened.
+            (ExitCode::StagedWithCorrections, 11),
         ];
         for (code, n) in pairs {
             assert_eq!(code.as_i32(), n, "{code:?} must stay at {n}");
         }
-        assert_eq!(ExitCode::ALL.len(), 11);
+        assert_eq!(ExitCode::ALL.len(), 12);
     }
 
     #[test]
     fn exit_codes_are_contiguous_and_unique() {
         let nums: Vec<i32> = ExitCode::ALL.iter().map(|c| c.as_i32()).collect();
-        assert_eq!(nums, (0..=10).collect::<Vec<_>>());
+        assert_eq!(nums, (0..=11).collect::<Vec<_>>());
     }
 
     #[test]
