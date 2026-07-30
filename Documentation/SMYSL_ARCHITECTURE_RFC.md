@@ -1,9 +1,10 @@
 # smysl — implemented architecture
 
 **Status:** descriptive, not normative.
-**Describes:** the code at `dev/0.2.0`, crate `0.2.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
-**Compiled:** 2026-07-29, from SM-P0 through SM-P15, the operational-merit work after it, and
-the 0.2 cycle: label bindings, comment syntax, forward compatibility.
+**Describes:** the code at `main`, crate `0.3.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
+**Compiled:** 2026-07-30, from SM-P0 through SM-P15, the operational-merit work after it, the
+0.2 cycle (label bindings, comment syntax, forward compatibility) and the 0.3 cycle (global
+flags, nesting bounds, packer performance).
 
 The crate version moved and the format version deliberately did not. Nothing about the wire
 format changed incompatibly in 0.2 — a record type was *added*, which an older reader
@@ -608,6 +609,31 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
   or it may be inherent to anchoring a unit to text it can quote.
 - **~69 divergences from the RFC** remain unreconciled — see [`RFC_PROPOSAL.md`](RFC_PROPOSAL.md),
   plus exit code `11`, which Appendix E does not have.
+
+### Closed in 0.3
+
+- **Twelve global flags were advertised by every subcommand and implemented by a handful.**
+  Measured before the work: `--output` honoured by 3 of 9 commands, `--json` by 1 of 6,
+  `--strict` by 1 of 8, `--quiet` by none. A caller who read `--json` in `smysl trace --help`,
+  passed it, and got prose had no way to learn the flag was never wired. All four are now
+  either honoured or refused out loud, and `tests/global_flags.rs` asserts the matrix so the
+  next flag added cannot arrive unwired in nineteen places.
+- **`check --json` emitted invalid JSON.** It used Rust's `{:?}`, which renders a control
+  character as `\u{1}`; no parser accepts that, and a diagnostic message quotes document
+  content. `json_escape` existed for exactly this and the one command emitting JSON did not
+  use it.
+- **Two stack overflows.** The surface parser aborted at ~5 000 nesting levels and the CBOR
+  reader at ~20 000, the latter reached through an unknown key — rule X, the
+  forward-compatibility mechanism, was the route to the crash. Both bounded at 128. An abort
+  is worse than a panic: it cannot be caught, so an embedder cannot contain it.
+- **`--budget Nk` overflowed**, panicking in debug and *wrapping* in release, so a huge budget
+  became 384 tokens and was reported as the budget.
+- **`pack` was quadratic.** 2 818ms to 26ms at 4 000 units when the budget admits everything,
+  and 6-7x faster when it binds. Both fixes are exact and verified byte-identical.
+- **`bundle` and `pack` dropped label bindings**, so the two artifacts most likely to be handed
+  to someone else arrived spelled in bare uids.
+- **Both fuzz targets now run in CI.** They existed from the first commit and nothing ran them,
+  which is how the two stack overflows survived to 0.3.
 
 ### Closed in 0.2
 
