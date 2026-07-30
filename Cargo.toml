@@ -4,7 +4,7 @@ exclude  = ["fuzz"]
 resolver = "2"
 
 [workspace.package]
-version      = "0.4.0"
+version      = "0.5.0"
 edition      = "2021"
 rust-version = "1.79"
 license      = "MPL-2.0"
@@ -12,15 +12,15 @@ authors      = ["Vladimir Ulogov"]
 repository   = "https://github.com/vulogov/smysl"
 
 [workspace.dependencies]
-smysl-core     = { path = "crates/smysl-core",     version = "0.4.0" }
-smysl-graph    = { path = "crates/smysl-graph",    version = "0.4.0" }
-smysl-check    = { path = "crates/smysl-check",    version = "0.4.0" }
-smysl-pack     = { path = "crates/smysl-pack",     version = "0.4.0" }
-smysl-thread   = { path = "crates/smysl-thread",   version = "0.4.0" }
-smysl-render   = { path = "crates/smysl-render",   version = "0.4.0" }
-smysl-provider = { path = "crates/smysl-provider", version = "0.4.0" }
-smysl-ingest   = { path = "crates/smysl-ingest",   version = "0.4.0" }
-smysl-tui      = { path = "crates/smysl-tui",      version = "0.4.0" }
+smysl-core     = { path = "crates/smysl-core",     version = "0.5.0" }
+smysl-graph    = { path = "crates/smysl-graph",    version = "0.5.0" }
+smysl-check    = { path = "crates/smysl-check",    version = "0.5.0" }
+smysl-pack     = { path = "crates/smysl-pack",     version = "0.5.0" }
+smysl-thread   = { path = "crates/smysl-thread",   version = "0.5.0" }
+smysl-render   = { path = "crates/smysl-render",   version = "0.5.0" }
+smysl-provider = { path = "crates/smysl-provider", version = "0.5.0" }
+smysl-ingest   = { path = "crates/smysl-ingest",   version = "0.5.0" }
+smysl-tui      = { path = "crates/smysl-tui",      version = "0.5.0" }
 
 # `pure` keeps the C SIMD backend out of the build: zero C in the core path (§13).
 blake3                = { version = "1", default-features = false, features = ["std", "pure"] }

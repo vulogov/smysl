@@ -7,6 +7,32 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 0.5.0
+
+Nothing yet. Carried forward from 0.4.0, in the order I would take them:
+
+- **The two measurement gaps.** The quoting coarsening — a fixture that yields five or six
+  units yields three once each must carry a quotable span — is observed once and never
+  explained; it may be the prompt or it may be inherent to anchoring a unit to text. One
+  experiment settles it. And `salience` is now the only pure command whose per-call cost has
+  never been characterised, though it measures linear.
+- **`pack`'s remaining scan.** Still super-linear when the budget binds (~3x per doubling):
+  the pricing is cached but the per-round scan over candidates is not. Removing it needs an
+  ordered structure, where the subtlety is that affordability moves with `used` even for
+  candidates nothing has touched.
+- **Seeding the fuzz corpus.** Each CI run starts cold and reaches less far in its sixty
+  seconds than a local run does. The corpus in `fuzz/artifacts/` is the obvious seed.
+- **An escape syntax for a body line opening `#` or `//`.** 0.2 documented the limitation and
+  0.4 fixed the header-value half of it, which leaves the body case as the only place it
+  bites.
+- **`W305` and `W306`**, the two diagnostic codes with no emission site. Documented as
+  unreachable in 0.4; emit or delete.
+- **OpenAI and Anthropic mappers**, when credentials exist. Still blocked, and the risk has
+  grown rather than shrunk since Appendix C gained `relations` and `quote`.
+- **The ~69 RFC divergences**, which are real debt and not a release feature.
+
+---
+
 ## 0.4.0 — 2026-07-30
 
 ### Fixed
