@@ -181,39 +181,90 @@ fn every_command_either_honours_output_or_says_it_cannot() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `--strict` promotes warnings to the failure threshold. `F7` and the forward-compat
-/// fixture both warn without erroring, so a command that honours it changes exit code.
+/// `--strict` promotes a warning to the failure threshold.
 ///
-/// Only `check` implements it today. This pins that as the *known* state rather than
-/// asserting the aspiration, so the day another command wires it up the test is what says
-/// the matrix moved.
+/// It was honoured by `check` alone while every subcommand advertised it, so a CI gate
+/// running `merge --strict` believed it would fail on a warning and would not. Each command
+/// below is paired with an input that warns without erroring, because a command with nothing
+/// to warn about proves nothing either way.
 #[test]
-fn strict_is_honoured_by_check_and_the_others_are_recorded_as_not() {
-    let plain = run(&["check", F7]);
-    let strict = run(&["check", "--strict", F7]);
-    assert_eq!(plain.code, 0, "F7 warns without erroring");
-    assert_eq!(
-        strict.code, 3,
-        "check --strict must promote a warning to the failure threshold"
-    );
-
-    // Documented gap, not an assertion that it is right: these accept `--strict` and do
-    // nothing with it. Listed so the count cannot drift unnoticed.
-    for cmd in [
-        vec!["merge", F7],
-        vec!["pack", "--budget", "2000", F7],
-        vec!["bundle", F7],
-    ] {
-        let a = run(&cmd);
-        let mut with = cmd.clone();
-        with.push("--strict");
-        let b = run(&with);
+fn strict_promotes_a_warning_wherever_a_command_has_one() {
+    let cases: &[(&str, Vec<&str>)] = &[
+        ("check", vec!["check", F7]),
+        // `--mode exact` without the `exact-pack` feature warns `SMY-W202`.
+        (
+            "pack",
+            vec!["pack", "--budget", "200", "--mode", "exact", F1],
+        ),
+    ];
+    for (name, base) in cases {
+        let plain = run(base);
         assert_eq!(
-            a.code, b.code,
-            "{:?} now reacts to --strict; the matrix changed and this test should say so",
-            cmd[0]
+            plain.code, 0,
+            "{name}: the input must warn without erroring"
+        );
+        let mut strict = base.clone();
+        strict.push("--strict");
+        assert_eq!(
+            run(&strict).code,
+            3,
+            "{name} --strict must promote its warning to the failure threshold"
         );
     }
+}
+
+/// The other half of the contract: `--strict` must not invent a failure where there is no
+/// warning. A flag that fails clean input is worse than one that does nothing.
+#[test]
+fn strict_leaves_a_clean_run_alone() {
+    for cmd in [
+        vec!["check", F1],
+        vec!["merge", F1],
+        vec!["pack", "--budget", "2000", F1],
+        vec!["bundle", F1],
+        vec!["thread", "--derive", "brief", F1],
+    ] {
+        let mut with = cmd.clone();
+        with.push("--strict");
+        let out = run(&with);
+        assert_eq!(
+            out.code,
+            0,
+            "{:?} --strict failed a clean store; stderr: {}",
+            cmd[0],
+            out.stderr.trim()
+        );
+    }
+}
+
+/// `--quiet` suppresses the line that says it worked, and nothing else.
+///
+/// It had only ever dimmed the progress bar, while its help promised to suppress non-error
+/// output. Diagnostics and exit codes are deliberately untouched: a quiet run that also
+/// swallowed its warnings would be a worse flag than one that did nothing.
+#[test]
+fn quiet_suppresses_the_summary_but_never_a_diagnostic() {
+    let loud = run(&["check", F1]);
+    let quiet = run(&["check", "--quiet", F1]);
+    assert!(!loud.stdout.trim().is_empty(), "check prints a summary");
+    assert!(
+        quiet.stdout.trim().is_empty(),
+        "--quiet left a summary behind: {}",
+        quiet.stdout.trim()
+    );
+
+    // A warning still reaches the operator, and the verdict still reaches the script.
+    let warned = run(&["check", "--quiet", F7]);
+    assert!(
+        warned.stderr.contains("SMY-W041"),
+        "--quiet swallowed a diagnostic: {}",
+        warned.stderr.trim()
+    );
+    assert_eq!(
+        run(&["check", "--quiet", F6]).code,
+        3,
+        "--quiet hid a failure"
+    );
 }
 
 /// A budget that cannot be represented is refused, not wrapped.

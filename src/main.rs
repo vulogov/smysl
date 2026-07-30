@@ -854,6 +854,11 @@ fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         for d in &out.diagnostics {
             eprintln!("{path}: {d}");
         }
+        // A document that parses with warnings is still formattable, and under `--strict` it
+        // is still something a gate asked to be told about.
+        if global.get_flag("strict") && out.diagnostics.iter().any(|d| !d.is_error()) {
+            worst = worse(worst, ExitCode::CheckErrors);
+        }
         if out.has_errors() {
             worst = worse(worst, ExitCode::CheckErrors);
             continue;
@@ -1063,7 +1068,11 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         };
         if report.fail_on(threshold).is_err() {
             worst = worse(worst, ExitCode::CheckErrors);
-        } else if !json {
+        } else if !json && !global.get_flag("quiet") {
+            // `--quiet` suppresses exactly this: the line that says it worked. Diagnostics
+            // still print, the exit code still carries the verdict, and anything explicitly
+            // asked for — `--json`, `--explain`, the artifact itself — is untouched. The flag
+            // promised "suppress non-error output" and had only ever dimmed the progress bar.
             println!(
                 "{path}: {} records, {} units, {} diagnostic(s)",
                 store.len(),
@@ -1599,6 +1608,9 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let mut bar = Bar::new(progress_style(global), "merging", merged);
     let mut store = Store::new();
     let mut labels = Vec::new();
+    // `--strict` folds every input's report together: a warning on the third of five stores
+    // is still a warning the gate asked to hear about.
+    let mut strict_failed = false;
     for path in &inputs {
         bar.set_label(format!("merging {path}"));
         bar.tick();
@@ -1618,6 +1630,7 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 for d in r.report.iter() {
                     eprintln!("{path}: {d}");
                 }
+                strict_failed |= strict_threshold(global, &r.report).is_some();
                 for c in &r.new_contentions {
                     eprintln!(
                         "{path}: contention {} over {} ({} positions, {})",
@@ -1645,7 +1658,10 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 for d in r.report.iter() {
                     eprintln!("staged: {d}");
                 }
-                eprintln!("smysl merge: committed {n} staged record(s)");
+                strict_failed |= strict_threshold(global, &r.report).is_some();
+                if !global.get_flag("quiet") {
+                    eprintln!("smysl merge: committed {n} staged record(s)");
+                }
             }
             Err(e) => {
                 eprintln!("smysl merge: {e}");
@@ -1734,6 +1750,9 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 return ExitCode::Failure;
             }
         }
+    }
+    if strict_failed {
+        return ExitCode::CheckErrors;
     }
     ExitCode::Success
 }
@@ -1931,6 +1950,9 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     for d in packed.report.iter() {
         eprintln!("{path}: {d}");
     }
+    // A pack that warned — an exact search refused, a unit degraded — is a pack a gate may
+    // reasonably want to stop on.
+    let strict_failed = strict_threshold(global, &packed.report).is_some();
 
     if m.get_flag("explain") {
         for (uid, level) in &packed.selection {
@@ -1984,7 +2006,11 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         bytes
     };
 
-    emit(global, "pack", &bytes)
+    let code = emit(global, "pack", &bytes);
+    if strict_failed && code == ExitCode::Success {
+        return ExitCode::CheckErrors;
+    }
+    code
 }
 
 /// The `LabelBinding` records for whichever uids a caller kept.
@@ -2001,6 +2027,26 @@ fn bindings_for(
         .filter(|(_, uid)| keep(uid))
         .map(|(label, uid)| Record::LabelBinding(smysl::LabelBinding::new(label.clone(), *uid)))
         .collect()
+}
+
+/// `--strict` promotes a warning to the failure threshold, wherever a command has a report.
+///
+/// It was honoured by `check` and by one branch of `render`, and accepted-and-ignored by
+/// `merge`, `pack`, `bundle`, `thread` and `fmt`. That is worse than an unimplemented flag:
+/// this book recommends `--strict` for CI gates, so a pipeline running `merge --strict`
+/// believed it would fail on a warning and would not.
+///
+/// Returns the exit code the caller should fold in, or `None` when there is nothing to fail
+/// on — so a command reports its diagnostics exactly as before and only the *threshold*
+/// moves.
+fn strict_threshold(global: &ArgMatches, report: &smysl::Report) -> Option<ExitCode> {
+    if !global.get_flag("strict") {
+        return None;
+    }
+    report
+        .fail_on(Severity::Warn)
+        .err()
+        .map(|_| ExitCode::CheckErrors)
 }
 
 /// Say so when `--output` cannot be honoured, instead of ignoring it.
@@ -2236,6 +2282,7 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 /// any machine. `--refine`, which does consult one, is what makes the command *mixed* - and
 /// it arrives with the provider layer, because there is nothing to refine with until then.
 fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let mut strict_failed = false;
     let Some(path) = store_arg(m, global) else {
         eprintln!("smysl thread: no store given");
         return ExitCode::Usage;
@@ -2366,6 +2413,12 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         for role in &report.unfilled {
             eprintln!("{path}: {role} is required by {schema} and nothing could fill it");
         }
+        // `derive` has no `Report` to threshold, so `--strict` keys on the condition it
+        // prints: a role the schema requires that nothing could fill. The thread is still
+        // emitted — the caller asked for one and gets one — but a gate is told.
+        if global.get_flag("strict") && !report.unfilled.is_empty() {
+            strict_failed = true;
+        }
         for (added, needed_by) in &report.repaired {
             eprintln!("{path}: {added} added by repair; {needed_by} depends on it");
         }
@@ -2409,7 +2462,11 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         smysl::to_cbor_seq(&records)
     };
 
-    emit(global, "thread", &bytes)
+    let code = emit(global, "thread", &bytes);
+    if strict_failed && code == ExitCode::Success {
+        return ExitCode::CheckErrors;
+    }
+    code
 }
 
 fn show_thread(store: &Store, t: &smysl::Thread) -> ExitCode {

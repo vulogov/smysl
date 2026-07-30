@@ -43,6 +43,22 @@ agent hands you. Every threshold below was measured against the built binary.
   fuzzer finds that shape in seconds. `make fuzz` runs the same pair locally; `make
   fuzz-long` is the old unbounded behaviour.
 
+- **`--strict` is honoured wherever a command has a warning to promote** — `merge`, `pack`,
+  `thread` and `fmt`, where before only `check` and one branch of `render` acted on it. This
+  book recommends `--strict` for CI gates, so a pipeline running `merge --strict` believed it
+  would fail on a warning and would not.
+
+  `thread` has no diagnostic report to threshold, so it keys on the condition it already
+  prints: a role the schema requires that nothing could fill. The thread is still emitted —
+  the caller asked for one — but the gate is told.
+
+  `bundle` is untouched deliberately: it produces no diagnostics, so there is nothing for
+  `--strict` to promote and honouring it is a no-op rather than a gap.
+
+- **`--quiet` suppresses the summary line**, which is what its help always promised; it had
+  only ever dimmed the progress bar. Diagnostics and exit codes are untouched on purpose — a
+  quiet run that also swallowed its warnings would be a worse flag than one that did nothing.
+
 - **`--json` is honoured by every command that reports something** — `diff`, `trace`,
   `salience`, `view` and `retract`, where before it was accepted and ignored. Only `check`
   implemented it, while all twelve global flags are declared once and therefore advertised
