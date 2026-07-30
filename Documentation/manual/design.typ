@@ -32,7 +32,7 @@
 #let book_subtitle = "A complete, worked guide to every workflow — the CLI, the document format, and the library beneath both"
 #let book_author   = "Vladimir Ulogov"
 #let book_year     = "2026"
-#let book_version  = "smysl 0.3.0 · format smysl/0.1 · kernel smysl.kernel/0.1"
+#let book_version  = "smysl 0.4.0 · format smysl/0.1 · kernel smysl.kernel/0.1"
 
 #let book_page = (
   paper: "a4",

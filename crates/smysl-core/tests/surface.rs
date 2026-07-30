@@ -990,3 +990,179 @@ fn the_nesting_bound_admits_every_shipped_fixture() {
     }
     assert!(seen >= 9, "expected the whole corpus, saw {seen}");
 }
+
+/// Two labels can name one unit, and only one of them survives the wire.
+///
+/// Identity is content, so `@claim a/x` and `@claim a/y` with the same gist, status and
+/// grounds are a single unit under two names. Surface syntax writes a label as part of the
+/// unit declaration and has nowhere to put a second, so a round trip has to drop one — and
+/// before this, parser and writer disagreed about *which*, so `parse -> write -> parse`
+/// returned different records. Found by fuzzing.
+///
+/// Both now keep the first in canonical order, and the document is told.
+#[test]
+fn two_labels_for_one_unit_round_trip_to_the_same_one() {
+    let src = "@claim a/y { status: speculative }\n~ same content.\n\n\
+               @claim a/x { status: speculative }\n~ same content.\n";
+    let a = parse_surface(src).unwrap();
+
+    // The later name is reported rather than silently dropped.
+    assert!(
+        a.diagnostics
+            .iter()
+            .any(|d| d.code == smysl_core::Code::W054),
+        "a second name for one unit must be reported: {:?}",
+        a.diagnostics
+    );
+    assert_eq!(
+        a.labels.keys().map(Label::as_str).collect::<Vec<_>>(),
+        vec!["a/x"],
+        "the first label in canonical order is the one that survives"
+    );
+
+    // And the round trip is a fixed point, which is the property the fuzzer broke.
+    let text = write_surface(
+        a.view.as_ref(),
+        &a.records,
+        &WriteContext::from_labels(&a.labels),
+    );
+    let b = parse_surface(&text).unwrap();
+    assert_eq!(a.records, b.records, "round trip changed the records");
+    assert_eq!(a.labels, b.labels, "round trip changed which name survived");
+}
+
+/// A body line ending in a carriage return survives a round trip unchanged.
+///
+/// The lexer stripped exactly one `\r` before a `\n`. So `x\r\r\n` parsed to the body line
+/// `x\r`, the writer emitted `x\r` + `\n`, and the next parse read that as a plain CRLF and
+/// dropped the second one too. Each pass shed a `\r`; the document was never a fixed point.
+/// Found by fuzzing, which is the only way anyone was going to find it.
+#[test]
+fn carriage_returns_at_a_line_end_do_not_erode_across_round_trips() {
+    let src = "@claim a/x { status: speculative }\n~ a gist here.\n| line\r\r\r\n| next\n";
+    let a = parse_surface(src).unwrap();
+    let ctx = WriteContext::from_labels(&a.labels);
+    let once = write_surface(None, &a.records, &ctx);
+    let b = parse_surface(&once).unwrap();
+    assert_eq!(
+        a.records, b.records,
+        "a trailing carriage return changed the records on a round trip"
+    );
+
+    // Normalised away entirely rather than preserved: line endings are not content. Were
+    // they, the same document checked out with CRLF endings would hash differently from one
+    // checked out with LF, and identity would depend on a git config.
+    let body = a.records.iter().find_map(|r| match r {
+        Record::Unit(u) => u.body.clone(),
+        _ => None,
+    });
+    assert_eq!(body.as_deref(), Some("| line\n| next"));
+
+    // A carriage return *inside* a line is ordinary content and stays.
+    let mid =
+        parse_surface("@claim a/x { status: speculative }\n~ a gist here.\n| a\rb\n").unwrap();
+    let mid_body = mid.records.iter().find_map(|r| match r {
+        Record::Unit(u) => u.body.clone(),
+        _ => None,
+    });
+    assert_eq!(mid_body.as_deref(), Some("| a\rb"));
+}
+
+/// An unknown header key with awkward characters survives a round trip.
+///
+/// Rule X keeps unknown keys verbatim, and nothing constrains what a peer puts in one. Values
+/// were quoted on the way out; keys were not. A key holding a `:`, a `}` or a newline tore the
+/// header apart, and the *entire unit* disappeared on re-parse — the writer emitting what its
+/// own parser rejects. Found by fuzzing.
+#[test]
+fn an_unknown_header_key_needing_quotes_survives_a_round_trip() {
+    let src = "@claim a/x { status: speculative, \"od:d\": 1, \"has space\": 2, \
+               \"br}ace\": 3, \"line\\nbreak\": 4 }\n~ a gist here.\n";
+    let a = parse_surface(src).unwrap();
+    let ctx = WriteContext::from_labels(&a.labels);
+    let once = write_surface(None, &a.records, &ctx);
+    let b = parse_surface(&once).unwrap();
+    assert_eq!(
+        b.records, a.records,
+        "an awkward unknown key did not survive; the writer emitted:\n{once}"
+    );
+    assert!(
+        !b.records.is_empty(),
+        "the unit vanished entirely on re-parse"
+    );
+}
+
+/// A header value carrying a comment marker survives a round trip.
+///
+/// A header accepts `#` and `//` comments inside a record. An unquoted value containing
+/// either had the rest of its line eaten on re-parse — including the closing brace, so the
+/// unit itself was lost. Comments landed in 0.2.0 and the writer's quoting rule was never
+/// revisited to match. Found by fuzzing.
+#[test]
+fn a_header_value_containing_a_comment_marker_survives_a_round_trip() {
+    let src = "@claim a/x { status: speculative, note: [\"#hash\"], \
+               url: \"http://x/y\", \"k#ey\": 1 }\n~ a gist here.\n";
+    let a = parse_surface(src).unwrap();
+    let ctx = WriteContext::from_labels(&a.labels);
+    let once = write_surface(None, &a.records, &ctx);
+    let b = parse_surface(&once).unwrap();
+    assert_eq!(
+        b.records, a.records,
+        "a comment marker in a value ate the rest of the header; the writer emitted:\n{once}"
+    );
+
+    // Idempotent, so `fmt` on a formatted file still changes nothing.
+    let twice = write_surface(None, &b.records, &WriteContext::from_labels(&b.labels));
+    assert_eq!(once, twice, "quoting a comment marker is not idempotent");
+}
+
+/// Unknown header text is NFC-normalised before it is hashed.
+///
+/// Every other text field is normalised once on construction, so the CBOR encoder only
+/// asserts the invariant. Unknown keys and their string values reached the encoder straight
+/// from the parser, skipping it: a debug build tripped the assertion, and a *release* build
+/// silently encoded non-NFC text — so two peers writing the same content in different
+/// Unicode forms produced different uids. That is rule D failing in the build people ship.
+/// Found by fuzzing.
+#[test]
+fn unknown_header_text_is_normalised_before_hashing() {
+    // U+0341 (combining acute tone mark) folds to U+0301 under NFC, in both key and value.
+    let composed = "@claim a/x { status: speculative, \"k\u{301}\": \"v\u{301}\" }\n~ a gist.\n";
+    let decomposed = "@claim a/x { status: speculative, \"k\u{341}\": \"v\u{341}\" }\n~ a gist.\n";
+    let a = parse_surface(composed).unwrap();
+    let b = parse_surface(decomposed).unwrap();
+    assert_eq!(
+        a.records, b.records,
+        "two Unicode forms of one document produced different records, so different uids"
+    );
+
+    // And it still round-trips.
+    let ctx = WriteContext::from_labels(&b.labels);
+    let once = write_surface(None, &b.records, &ctx);
+    assert_eq!(parse_surface(&once).unwrap().records, b.records);
+}
+
+/// A gist assembled from continuation lines carries no surrounding whitespace.
+///
+/// `~` alone followed by an indented continuation produced a gist with a leading space. The
+/// writer emits `~ ` + gist and the reader strips the sigil *and* the whitespace after it,
+/// so that space was eaten on re-parse — and since identity is content, the uid moved with
+/// it. Found by fuzzing.
+#[test]
+fn a_continued_gist_does_not_carry_leading_whitespace() {
+    let src = "@claim a/x { status: speculative }\n~\n  the gist\n  continues here\n";
+    let a = parse_surface(src).unwrap();
+    let gist = a.records.iter().find_map(|r| match r {
+        Record::Unit(u) => Some(u.gist.clone()),
+        _ => None,
+    });
+    assert_eq!(gist.as_deref(), Some("the gist continues here"));
+
+    let ctx = WriteContext::from_labels(&a.labels);
+    let once = write_surface(None, &a.records, &ctx);
+    assert_eq!(
+        parse_surface(&once).unwrap().records,
+        a.records,
+        "a continued gist did not survive a round trip; the writer emitted:\n{once}"
+    );
+}

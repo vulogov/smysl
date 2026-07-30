@@ -77,7 +77,7 @@ doc: ## Build API documentation, no dependencies
 # The three books in Documentation/ are tracked as PDFs as well as sources, because they
 # are deliverables people are handed rather than artefacts people build. Tracking the
 # output of a build makes it drift, so this target is what keeps the two in step.
-DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE
+DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE SMYSL_RATIONALE_PRESENTATION
 
 #
 # `SOURCE_DATE_EPOCH` is what makes that work. Typst stamps a creation time into every PDF,

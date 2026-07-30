@@ -7,6 +7,143 @@ and the facade asserts the two are independent.
 
 ---
 
+## 0.4.0 — 2026-07-30
+
+### Fixed
+
+Seven round-trip and determinism defects, all found by fuzzing. Each one broke the same
+promise from a different side: `parse -> write -> parse` must be a fixed point, and a uid
+must name exactly one byte string. Regression tests pin every case.
+
+- **Two labels naming one unit lost a coin toss.** Identity is content, so two declarations
+  with the same gist, status and grounds *are* one unit — and surface syntax has room for
+  one name on the declaration. The parser kept whichever came first in the file; the writer
+  kept the alphabetically first. So the surviving name changed on each pass. Both now keep
+  the canonically first, and the loss is reported as `SMY-W054` rather than happening in
+  silence. Invisible before `Record::LabelBinding` existed, because nothing carried a label
+  through the wire to notice it going missing.
+
+- **A carriage return at the end of a body line eroded one per round trip.** The lexer
+  stripped exactly one `\r` before a `\n`, so `x\r\r\n` became `x\r`, which the writer
+  emitted as `x\r` + `\n`, which the next parse read as a plain CRLF. All trailing carriage
+  returns are now stripped: line endings are not content. Were they, the same document
+  checked out with CRLF endings would hash differently from one checked out with LF, and
+  identity would depend on a git config. A `\r` *inside* a line still is content, and stays.
+
+- **Unknown header keys were written unquoted.** Values went through the quoter; keys did
+  not. Rule X keeps an unknown key verbatim and nothing constrains what a peer puts in one,
+  so a key holding a `:`, a `}` or a newline tore the header apart and the **whole unit**
+  vanished on re-parse.
+
+- **A header value starting with `#` or `//` was written unquoted**, so the comment syntax
+  added in 0.2.0 ate the rest of the line — closing brace included, taking the unit with it.
+  Only a *leading* marker is a hazard: the comment skip runs before a value begins, while a
+  quoteless value runs to `,`, `}`, `]` or end of line without stopping at either marker.
+  So `grafana://board/12` needed no quotes, and still gets none.
+
+- **Unknown header text was not NFC-normalised before hashing.** Every other text field is
+  normalised once on construction, so the encoder only asserts the invariant; unknown keys
+  and their string values reached it straight from the parser. A debug build tripped the
+  assertion. A **release build encoded the non-NFC text**, so two peers writing the same
+  content in different Unicode forms produced different uids — rule D failing silently, in
+  the build people ship.
+
+- **A gist assembled from continuation lines kept a leading space.** The writer emits `~ ` +
+  gist and the reader strips the sigil *and* the whitespace after it, so the space was eaten
+  on re-parse and the uid moved with it. The assembled gist is now trimmed.
+
+- **`PackInfo` and `View` decoded with defaults for mandatory fields.** The encoder writes
+  them unconditionally, so `[7, {0: 0}]` was accepted and re-encoded as a four-key map: two
+  distinct byte strings mapping to one record, which is exactly what stops a uid from being
+  an identity. Both now reject a record missing a field the encoder always emits. A sweep
+  over every record kind and low key guards the invariant generally — an earlier version of
+  that sweep probed with integers alone, never entered `dec_view` (whose key 0 is a text id),
+  and let the second instance survive another fuzz run.
+
+- **`quantise` returned infinity for a large payload float**, which is not a multiple of
+  1/1024 and not finite, so the CBOR writer's `debug_assert!(is_quantised(q))` fired. In
+  release the assertion is compiled out and the infinity was written to the store instead —
+  a value the codec's own contract forbids, emitted silently, which is the worse half.
+  Reachable from a `.smy` file, so from a document another agent hands you.
+
+  `quantise` is now total, saturating at the largest magnitude constraint 4 can express. A
+  value that large has no faithful representation under the constraint, so there is nothing
+  to preserve.
+
+### Changed
+
+- **The fuzz CI job blocks.** It ran with `continue-on-error` through the 0.4 cycle while it
+  worked off the backlog it discovered on its first run. That backlog is clear, both targets
+  run for minutes without a finding, and every case is pinned by a regression test.
+
+### Documentation
+
+- **Three wired subcommands were missing from Appendix A entirely.** `import`, `relink` and
+  `compact` were wired in SM-P15 and the appendix was never extended, while its opening
+  paragraph claimed the table could not drift from the binary. It could, and it had. All
+  twenty are now covered, and the purity table in Chapter 3 lists all twenty-one commands
+  rather than seventeen.
+
+- **`make doc-output` reports zero drift, exits non-zero on any, and runs in CI.** It had
+  reported fifteen mismatches since it was written, which is why it was never made a gate —
+  and every one of them was an artifact of the script rather than a stale manual:
+
+  - it concatenated two separately-captured streams, which does not reproduce the order a
+    terminal shows (`check --granularity` writes to stdout, then stderr, then stdout again);
+  - a block quoting *one* stream — the usual shape when stdout is a store and the report
+    goes to stderr — could never equal both;
+  - a block eliding with `...`, or a caption abbreviated with `…`, or one annotated as a
+    different build, was compared as though it were complete and literal.
+
+  Fixed at the source rather than by loosening the comparison: it still catches a
+  one-character change to a documented count, which was tested before the gate was turned
+  on. A check with a permanent backlog of false positives teaches people to ignore it, and
+  then it catches nothing when something real breaks.
+
+- **The manual's round-trip section claimed too much.** It said no string it could find
+  survived being written unquoted and came back changed, and offered that as evidence the
+  guarantee was working. Four of the seven defects above are exactly that string. The
+  section now carries the correction and what it costs: "I looked and could not find one" is
+  a statement about the search, not about the code.
+
+- **`SMY-W036`, `SMY-E307` and `SMY-W308` were emitted but undocumented**, and `SMY-W054`'s
+  entry described behaviour it no longer has. Appendix D now matches the registry exactly,
+  and says outright that `SMY-W305` and `SMY-W306` have no emission site rather than leaving
+  a reader waiting for a diagnostic that cannot arrive.
+
+- **The presentation was not in `make docs`**, so it was the one document that could drift
+  without anyone noticing. It is now built with the other three.
+
+### Known limits
+
+- **The fuzz corpus is not seeded**, so each CI run starts cold and reaches less far in its
+  sixty seconds than a local run does. Noted rather than quietly skipped: cold still catches
+  the regressions the job exists to catch.
+
+Carried forward, in the order I would take them:
+
+- **The two measurement gaps.** The quoting coarsening — a fixture that yields five or six
+  units yields three once each must carry a quotable span — is observed once and never
+  explained; it may be the prompt or it may be inherent to anchoring a unit to text. One
+  experiment settles it. And `salience` is now the only pure command whose per-call cost has
+  never been characterised, though it measures linear.
+- **`pack`'s remaining scan.** Still super-linear when the budget binds (~3x per doubling):
+  the pricing is cached but the per-round scan over candidates is not. Removing it needs an
+  ordered structure, where the subtlety is that affordability moves with `used` even for
+  candidates nothing has touched.
+- **An escape syntax for a body line opening `#` or `//`.** 0.2 documented the limitation
+  rather than solving it. 0.4 fixed the *header value* half of this — a value starting with a
+  marker is now quoted — which leaves the body case as the only place the limitation bites.
+- **`W305` and `W306`**, the two diagnostic codes with no emission site. `W305`'s information
+  already reaches users through the usage totals line; `W306` describes a threshold feature
+  that does not exist. Emit or delete. Documented as unreachable in the meantime, so at least
+  nobody waits for one.
+- **OpenAI and Anthropic mappers**, when credentials exist. Still blocked, and the risk has
+  grown rather than shrunk since Appendix C gained `relations` and `quote`.
+- **The ~69 RFC divergences**, which are real debt and not a release feature.
+
+---
+
 ## 0.3.0 — 2026-07-30
 
 Format stays at `smysl/0.1`, kernel at `smysl.kernel/0.1`. Nothing on the wire changed.

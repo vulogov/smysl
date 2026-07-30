@@ -461,7 +461,13 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-        if gist.trim().is_empty() {
+        // Trim the assembled gist, not just test it. `~` alone followed by a continuation
+        // line produced a gist with a leading space, and the writer emits `~ ` + gist while
+        // the reader strips the sigil *and* the whitespace after it — so that space was
+        // silently eaten on re-parse and the uid moved with it. A gist is a one-line
+        // summary; surrounding whitespace was never content. Found by fuzzing.
+        let gist = gist.trim().to_string();
+        if gist.is_empty() {
             self.err(Code::E021, header_span, "empty gist");
             return None;
         }
@@ -894,10 +900,40 @@ impl<'a> Parser<'a> {
         self.out.diagnostics.append(&mut diagnostics);
 
         let mut labels = BTreeMap::new();
+        // A uid may be named twice — identity is content, so two declarations with the same
+        // gist, status and grounds are one unit under two names. Surface syntax puts a label
+        // on the unit declaration and has nowhere to put a second, so only one can be written
+        // back. Keeping the first in canonical order, and having the writer keep the same
+        // one, is what makes `parse -> write -> parse` a fixed point instead of a coin toss
+        // over which name survives.
+        //
+        // Found by fuzzing: before `Record::LabelBinding` the loss was invisible, because
+        // nothing carried a label through the wire to notice it going missing.
+        // Collect first, then choose — because "first" must mean *canonical* order, not
+        // document order. The writer keeps the smallest label for a uid, so a parser keeping
+        // whichever appeared first in the file disagrees with it and the round trip swaps
+        // names. That is this bug exactly, and my first fix reproduced it from the other side.
+        let mut by_uid: BTreeMap<Uid, Vec<(Label, Span)>> = BTreeMap::new();
         for (i, u) in self.units.iter().enumerate() {
             if let (Some(l), Some(uid)) = (&u.label, resolved[i]) {
-                labels.insert(l.clone(), uid);
+                by_uid.entry(uid).or_default().push((l.clone(), u.span));
             }
+        }
+        for (uid, mut names) in by_uid {
+            names.sort_by(|a, b| a.0.cmp(&b.0));
+            let keeper = names[0].0.clone();
+            for (l, span) in names.into_iter().skip(1) {
+                if l == keeper {
+                    continue;
+                }
+                self.out
+                    .diagnostics
+                    .push(Diagnostic::at(Code::W054, span).with_message(format!(
+                        "`{l}` names the same unit as `{keeper}`; only `{keeper}` survives \
+                         a round trip, because a unit carries one name"
+                    )));
+            }
+            labels.insert(keeper, uid);
         }
 
         let lookup = |r: &Ref, out: &mut ParseOutcome, span: Span| -> Option<Uid> {

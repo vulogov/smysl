@@ -84,8 +84,8 @@ of love made for the people who can least afford to pay for software — the
 researcher on a battered laptop, the graduate student whose pipeline has to be
 defensible at a viva, the small team accountable for a system nobody funded
 properly — and turning it into a commercial product would betray the reason it
-exists. It carries no analytics, no telemetry, no upsell. Fifteen of its
-seventeen commands cannot open a socket at all, and the two that can will tell
+exists. It carries no analytics, no telemetry, no upsell. Nineteen of its
+twenty-one commands cannot open a socket at all, and the two that can will tell
 you what they would send before they send it. The binary will never phone home.
 
 #section("A note on cooperation")

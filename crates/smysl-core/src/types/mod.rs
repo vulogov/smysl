@@ -95,8 +95,42 @@ mod json_tests {
 /// float path that derived a value: two implementations that compute a weight slightly
 /// differently still encode the same bytes.
 pub fn quantise(v: f32) -> f32 {
-    (v * 1024.0).round() / 1024.0
+    // Total by construction, because every caller treats the result as quantised and one of
+    // them asserts it. `v * 1024.0` overflows `f32` for anything past about 3.3e35, so the
+    // naive form returned *infinity* — which is not a multiple of 1/1024, is not finite, and
+    // tripped `debug_assert!(is_quantised(q))` in the writer. In release the assertion is
+    // compiled out and the infinity was written to the store instead, which is the worse
+    // half: a value the codec's own contract forbids, emitted silently.
+    //
+    // Found by fuzzing the surface parser, through a payload float in a `.smy` file — author
+    // data, so reachable from a document another agent hands you.
+    //
+    // Saturating rather than refusing keeps this a pure function that the hash path can rely
+    // on. A magnitude this large cannot be represented under constraint 4 at all, so there is
+    // no faithful value to preserve; `MAX_QUANTISED` is the largest one there is.
+    if !v.is_finite() {
+        return if v.is_nan() {
+            0.0
+        } else if v > 0.0 {
+            MAX_QUANTISED
+        } else {
+            -MAX_QUANTISED
+        };
+    }
+    let scaled = v * 1024.0;
+    if !scaled.is_finite() {
+        return if v > 0.0 {
+            MAX_QUANTISED
+        } else {
+            -MAX_QUANTISED
+        };
+    }
+    scaled.round() / 1024.0
 }
+
+/// The largest magnitude that survives `* 1024.0` in `binary32`, and so the largest value
+/// constraint 4 can express.
+pub const MAX_QUANTISED: f32 = f32::MAX / 1024.0;
 
 /// Whether `v` is already an exact multiple of 1/1024 representable in `binary32`.
 /// The reader rejects anything else (`SMY-E081`).
@@ -107,6 +141,45 @@ pub fn is_quantised(v: f32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `quantise` is total, and every caller depends on that: the CBOR writer asserts its
+    /// result is quantised, and in release — where the assertion is gone — it writes whatever
+    /// it was given. A large payload float used to make `v * 1024.0` overflow to infinity,
+    /// which is neither finite nor a multiple of 1/1024. Found by fuzzing the surface parser.
+    #[test]
+    fn quantise_is_total_even_where_the_scale_overflows() {
+        // `1e39` cannot be written as an `f32` literal — the compiler refuses it — but the
+        // surface parser produces exactly that at runtime from a payload float, which is how
+        // this reached the writer in the first place. Built rather than typed, for the same
+        // reason.
+        let overflowing: f32 = "1e39"
+            .parse()
+            .expect("parses to infinity, as the parser does");
+        for v in [
+            overflowing,
+            -overflowing,
+            3.4e38,
+            f32::MAX,
+            f32::MIN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NAN,
+        ] {
+            let q = quantise(v);
+            assert!(
+                is_quantised(q),
+                "quantise({v}) produced {q}, which the writer would refuse to encode"
+            );
+        }
+    }
+
+    /// And it still leaves ordinary values exactly where they were.
+    #[test]
+    fn quantise_does_not_disturb_a_value_it_can_represent() {
+        for v in [0.0_f32, 0.5, 614.0 / 1024.0, -0.25, 1.0, 1000.0] {
+            assert_eq!(quantise(v), (v * 1024.0).round() / 1024.0);
+        }
+    }
 
     #[test]
     fn the_estimator_is_the_documented_formula() {

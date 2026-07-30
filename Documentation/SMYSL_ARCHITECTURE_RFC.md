@@ -1,10 +1,11 @@
 # smysl — implemented architecture
 
 **Status:** descriptive, not normative.
-**Describes:** the code at `main`, crate `0.3.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
+**Describes:** the code at `main`, crate `0.4.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
 **Compiled:** 2026-07-30, from SM-P0 through SM-P15, the operational-merit work after it, the
-0.2 cycle (label bindings, comment syntax, forward compatibility) and the 0.3 cycle (global
-flags, nesting bounds, packer performance).
+0.2 cycle (label bindings, comment syntax, forward compatibility), the 0.3 cycle (global
+flags, nesting bounds, packer performance) and the 0.4 cycle (the fuzz backlog: seven
+round-trip and determinism defects, and a fuzz job that now blocks).
 
 The crate version moved and the format version deliberately did not. Nothing about the wire
 format changed incompatibly in 0.2 — a record type was *added*, which an older reader
@@ -610,6 +611,50 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
 - **~69 divergences from the RFC** remain unreconciled — see [`RFC_PROPOSAL.md`](RFC_PROPOSAL.md),
   plus exit code `11`, which Appendix E does not have.
 
+### Closed in 0.4
+
+One theme, approached from eight sides: **a uid must name exactly one byte string, and
+`parse -> write -> parse` must be a fixed point.** Every item below was found by fuzzing,
+none was a regression, and none would have been found by reading the code — several had been
+in the tree since before 0.2. Each is pinned by a regression test.
+
+- **`quantise` returned infinity** for a large payload float, which the CBOR writer asserts
+  against. Debug builds panicked; release builds wrote the infinity to the store — a value
+  the codec's own contract forbids, emitted in silence. Now total, saturating at the largest
+  magnitude constraint 4 can express.
+- **Two labels can name one unit**, because identity is content: two declarations with the
+  same gist, status and grounds *are* one unit, and the surface has room for one name on the
+  declaration. The parser kept the first in document order and the writer the first in
+  canonical order, so the surviving name changed on every pass. Both now keep the canonically
+  first, and the loss is reported as `SMY-W054` rather than happening silently. Invisible
+  before `Record::LabelBinding` existed, because nothing carried a label through the wire to
+  notice it going missing.
+- **A trailing carriage return eroded one per round trip.** The lexer stripped exactly one
+  `\r` before a `\n`. All of them now go: line endings are not content, or the same document
+  would hash differently under CRLF and LF and identity would depend on a git config.
+- **Unknown header keys were written unquoted** while values were quoted, so a key holding a
+  `:`, a `}` or a newline tore the header apart and the whole unit vanished on re-parse.
+- **A header value starting with `#` or `//` was written unquoted**, so the comment syntax
+  added in 0.2 ate the rest of the line and the closing brace with it. Only a *leading*
+  marker is a hazard — a quoteless value runs to `,`, `}`, `]` or end of line without
+  stopping at either — so `grafana://board/12` still needs no quotes and still gets none.
+- **Unknown header text skipped NFC normalisation**, the one text path that did. Debug builds
+  tripped the encoder's assertion; release builds encoded the non-NFC text, so two peers
+  writing the same content in different Unicode forms produced different uids. Rule D failing
+  silently, in the build people ship.
+- **A gist assembled from continuation lines kept a leading space** that the reader ate on the
+  way back, moving the uid with it.
+- **`PackInfo` and `View` decoded with defaults for mandatory fields** the encoder always
+  writes, so `[7, {0: 0}]` was accepted and re-encoded as a four-key map — two byte strings
+  mapping to one record. Both now reject what they cannot re-emit, and a sweep over every
+  record kind and low key guards the invariant generally.
+
+The last one is worth a note on method. The first version of that sweep probed with integer
+values alone, so it never entered `dec_view` — whose key 0 is a text id — and reported the
+class clean while a second instance of it sat in the tree. The fuzzer found it the next run.
+A test that cannot reach the code it claims to cover is worse than no test, because it also
+supplies confidence.
+
 ### Closed in 0.3
 
 - **Twelve global flags were advertised by every subcommand and implemented by a handful.**
@@ -633,7 +678,8 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
 - **`bundle` and `pack` dropped label bindings**, so the two artifacts most likely to be handed
   to someone else arrived spelled in bare uids.
 - **Both fuzz targets now run in CI.** They existed from the first commit and nothing ran them,
-  which is how the two stack overflows survived to 0.3.
+  which is how the two stack overflows survived to 0.3. Reporting-only at first, because the
+  first run found a backlog; blocking as of 0.4, when that backlog was cleared.
 
 ### Closed in 0.2
 

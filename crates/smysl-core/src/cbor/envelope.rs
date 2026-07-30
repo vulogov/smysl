@@ -704,9 +704,12 @@ fn dec_view(d: &mut Dec<'_>) -> Res<View> {
     let mut roots = BTreeSet::new();
     let mut threads = BTreeSet::new();
     let mut requires = BTreeSet::new();
-    let mut granularity = GranularityProfile::default();
-    let mut intent = String::new();
-    let mut lang = LangTag::default();
+    // Required, not defaulted — the encoder writes all three unconditionally, so a decoder
+    // that filled a default for a missing one accepted bytes that re-encoded into different
+    // bytes. Same defect as `dec_packinfo`; both found by fuzzing.
+    let mut granularity = None;
+    let mut intent = None;
+    let mut lang = None;
     let mut extra = Extra::new();
 
     read_map(d, &mut extra, |d, k| match k {
@@ -733,15 +736,15 @@ fn dec_view(d: &mut Dec<'_>) -> Res<View> {
             Ok(true)
         }
         keys::view::GRANULARITY => {
-            granularity = dec_granularity(d)?;
+            granularity = Some(dec_granularity(d)?);
             Ok(true)
         }
         keys::view::INTENT => {
-            intent = d.text()?.to_string();
+            intent = Some(d.text()?.to_string());
             Ok(true)
         }
         keys::view::LANG => {
-            lang = LangTag::new(d.text()?).map_err(|_| bad(at))?;
+            lang = Some(LangTag::new(d.text()?).map_err(|_| bad(at))?);
             Ok(true)
         }
         _ => Ok(false),
@@ -752,9 +755,9 @@ fn dec_view(d: &mut Dec<'_>) -> Res<View> {
         roots,
         threads,
         requires,
-        granularity,
-        intent,
-        lang,
+        granularity: granularity.ok_or_else(|| bad(at))?,
+        intent: intent.ok_or_else(|| bad(at))?,
+        lang: lang.ok_or_else(|| bad(at))?,
         extra,
     })
 }
@@ -813,25 +816,27 @@ fn dec_contention(d: &mut Dec<'_>) -> Res<Contention> {
 
 fn dec_packinfo(d: &mut Dec<'_>) -> Res<PackInfo> {
     let at = d.position();
-    let mut budget = 0;
-    let mut used = 0;
+    // Required rather than defaulted. The encoder writes all four of these unconditionally,
+    // so a decoder that supplied a default for a missing one accepted an encoding that did
+    // not re-encode to itself — two distinct byte strings mapping to one record, which is
+    // exactly what makes a uid stop being an identity. Found by fuzzing on `[7, {0: 0}]`,
+    // which came back as a four-key map.
+    let mut budget = None;
+    let mut used = None;
     let mut thread = None;
     let mut dropped = Vec::new();
     let mut degraded = Vec::new();
-    let mut optimality = Optimality {
-        mode: PackMode::Greedy,
-        gap: 0.0,
-    };
-    let mut estimator = String::new();
+    let mut optimality = None;
+    let mut estimator = None;
     let mut extra = Extra::new();
 
     read_map(d, &mut extra, |d, k| match k {
         keys::packinfo::BUDGET => {
-            budget = d.uint()?;
+            budget = Some(d.uint()?);
             Ok(true)
         }
         keys::packinfo::USED => {
-            used = d.uint()?;
+            used = Some(d.uint()?);
             Ok(true)
         }
         keys::packinfo::THREAD => {
@@ -871,27 +876,27 @@ fn dec_packinfo(d: &mut Dec<'_>) -> Res<PackInfo> {
             }
             let mode = PackMode::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(a))?)
                 .ok_or_else(|| bad(a))?;
-            optimality = Optimality {
+            optimality = Some(Optimality {
                 mode,
                 gap: d.f32q()?,
-            };
+            });
             Ok(true)
         }
         keys::packinfo::ESTIMATOR => {
-            estimator = d.text()?.to_string();
+            estimator = Some(d.text()?.to_string());
             Ok(true)
         }
         _ => Ok(false),
     })?;
 
     Ok(PackInfo {
-        budget,
-        used,
+        budget: budget.ok_or_else(|| bad(at))?,
+        used: used.ok_or_else(|| bad(at))?,
         thread,
         dropped,
         degraded,
-        optimality,
-        estimator,
+        optimality: optimality.ok_or_else(|| bad(at))?,
+        estimator: estimator.ok_or_else(|| bad(at))?,
         extra,
     })
 }
