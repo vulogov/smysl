@@ -3523,6 +3523,12 @@ fn cmd_reindex(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     ExitCode::Success
 }
 
+/// Gated to match its only caller, `cmd_ingest`. Without the gate this is dead code in
+/// every build that leaves `ingest` out — which CI compiles with `-D warnings`, so the
+/// build failed rather than warned. The determinism job builds exactly that configuration
+/// (`--no-default-features --features cli`) to run its permutations, so it reported "rule D
+/// failed" when nothing about determinism was wrong at all: the binary would not compile.
+#[cfg(feature = "ingest")]
 fn read_input(path: &str) -> std::io::Result<String> {
     if path == "-" {
         let mut s = String::new();

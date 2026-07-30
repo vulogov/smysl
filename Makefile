@@ -28,10 +28,18 @@ CARGO     := cargo $(TOOLCHAIN)
 
 # The feature sets CI's test-matrix covers. A combination that builds only in one of them
 # is a combination nobody builds.
+#
+# `--features cli` is here even though CI's test-matrix does not name it, because the
+# determinism job *builds* it — its permutations run
+# `cargo run --no-default-features --features cli`. Nothing else compiled that combination,
+# so a function that went dead in it went unnoticed, and with `-D warnings` the build
+# failed rather than warned. The determinism job then reported "rule D failed" for three
+# releases running, when nothing about determinism was wrong: the binary would not compile.
 MATRIX := \
 	--no-default-features \
 	@ \
 	--all-features \
+	--no-default-features@--features@cli \
 	--no-default-features@--features@local \
 	--no-default-features@--features@remote \
 	--no-default-features@--features@exact-pack \
@@ -107,7 +115,7 @@ test-matrix: ## Every feature combination CI builds
 	@set -e; for f in $(MATRIX); do \
 		args=$$(echo "$$f" | tr '@' ' ' | sed 's/^ *//'); \
 		echo "==> cargo test --workspace $$args"; \
-		$(CARGO) test --workspace $$args; \
+		RUSTFLAGS="-D warnings" $(CARGO) test --workspace $$args; \
 	done
 
 purity: ## Rules A and B: the library stays synchronous and offline
