@@ -7,12 +7,14 @@
 //!
 //! ```text
 //! SMYSL_OLLAMA=required   ollama must be reachable
-//! DEEPSEEK_API_KEY=…      deepseek runs
-//! ANTHROPIC_API_KEY=…     anthropic runs
-//! OPENAI_API_KEY=…        openai runs
-//! GEMINI_API_KEY=…        gemini runs
+//! (unset)                 skipped, whatever keys exist
+//! SMYSL_INGEST_LIVE=1     every provider with a key runs
 //! SMYSL_INGEST_LIVE=all   every provider above must run, or the test fails
 //! ```
+//!
+//! Opt-in rather than key-triggered: a credential in the environment is not consent to
+//! spend it. A key alone used to be enough, which charged anyone running the test suite
+//! with one exported and skipped silently in CI, where nobody could see what was missing.
 //!
 //! **Conformant** is the claim being tested, and it is deliberately not "the units are
 //! good". It is: every unit passes `check`, no unit exceeds its rung's ceiling, and the run
@@ -132,7 +134,12 @@ fn usable(c: &Candidate) -> Result<Box<dyn Provider>, String> {
 /// **The gate.** The same fixture, every reachable provider, one assertion.
 #[test]
 fn the_same_fixture_yields_conformant_units_on_every_reachable_provider() {
-    let require_all = std::env::var("SMYSL_INGEST_LIVE").as_deref() == Ok("all");
+    let gate = std::env::var("SMYSL_INGEST_LIVE").unwrap_or_default();
+    if gate.trim().is_empty() {
+        eprintln!("ingest live gate skipped: set SMYSL_INGEST_LIVE=1 to call real providers");
+        return;
+    }
+    let require_all = gate == "all";
     let mut ran = Vec::new();
     let mut skipped = Vec::new();
 

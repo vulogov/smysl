@@ -30,8 +30,18 @@ fn cfg() -> ProviderConfig {
     c
 }
 
+/// Opt-in, not key-triggered: a credential in the environment is not consent to spend it.
+///
+/// `SMYSL_DEEPSEEK` unset means skip whatever keys exist, `=1` means run where a key is
+/// available, `=required` means a missing key is a failure. A key alone used to be enough,
+/// which quietly charged anyone running `make test-matrix` with one exported.
 fn available(what: &str) -> bool {
-    let required = std::env::var("SMYSL_DEEPSEEK").as_deref() == Ok("required");
+    let gate = std::env::var("SMYSL_DEEPSEEK").unwrap_or_default();
+    if gate.trim().is_empty() {
+        eprintln!("skipping {what}: set SMYSL_DEEPSEEK=1 to call the real endpoint");
+        return false;
+    }
+    let required = gate == "required";
     let has_key = std::env::var(KEY_VAR).is_ok_and(|v| !v.trim().is_empty());
     if has_key {
         return true;
