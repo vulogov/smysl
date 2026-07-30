@@ -26,3 +26,7 @@ target
 /fuzz/artifacts/
 /fuzz/corpus/
 /fuzz/target/
+
+# Core dumps. A qemu segfault under an emulated container dropped a 315 MB one in the
+# working tree, and `git add -A` swept it into a commit the remote refused.
+*.core

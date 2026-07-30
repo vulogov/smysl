@@ -17,14 +17,18 @@ Known limits, all of them "skipped" rather than silently passed:
   * commands with a pipe, redirect or `$(…)` are not replayed;
   * commands naming a file the chapter built earlier in its own narrative are skipped,
     since the setup is prose;
-  * the docs trim long output with `…` and wrap long lines to the page, so a reported
-    mismatch is often formatting rather than drift — read the diff before believing it.
+  * the docs trim long output with `...`, abbreviate a caption with `…`, wrap long lines
+    to the page, quote one stream of two, or name a build this script is not running.
 
-What it does catch reliably is a changed *number*, which is the failure mode that
-actually happens."""
+All five are now understood and handled rather than reported as drift, so a mismatch here
+means the manual and the binary genuinely disagree. Verified by breaking one documented
+count by a single character and confirming this script catches it."""
 import re, subprocess, glob, os, sys
 
-ROOT = '/Users/gandalf/Src/smysl'
+# Derived from this file's location, not hardcoded. It was an absolute path to one
+# developer's home directory, so the script ran nowhere else — including CI, where it
+# failed on `os.chdir` before comparing a single transcript.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
 SM = './target/debug/smysl'
 
@@ -96,6 +100,16 @@ for f in sorted(glob.glob('Documentation/manual/*.typ')):
                 else:
                     out.append(l)
             return '\n'.join(out)
+        # A build that lacks the feature a command needs answers by saying so. Comparing
+        # that against a transcript taken from a build that has it compares two different
+        # programs — the same reason a caption annotated "built with …" is skipped. This
+        # one is detected from the answer rather than the caption, because the manual does
+        # not annotate it: `make doc-output` builds default features on purpose, and
+        # `attest` needs `--features local`.
+        if any('this build has no' in c for c in candidates):
+            ran -= 1
+            skipped += 1
+            continue
         want = norm(claimed)
         if any(want == norm(c) for c in candidates):
             continue

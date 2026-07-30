@@ -62,7 +62,18 @@ jobs:
         run: |
           sudo locale-gen ru_RU.UTF-8
           sudo update-locale
-      - run: cargo xtask determinism
+      # Echo the failure into an annotation, not just the log. Job logs and uploaded
+      # artifacts both need admin rights on this repository, so a maintainer without them
+      # sees "exit code 1" and nothing else — which is how this job stayed red across three
+      # releases while passing on every machine it could be run on. Annotations are readable
+      # through the public API, so the reason travels with the failure.
+      - name: determinism
+        run: |
+          set -o pipefail
+          cargo xtask determinism 2>&1 | tee /tmp/det.log || {
+            echo "::error title=determinism::$(tail -c 3000 /tmp/det.log | tr '\n' '|')"
+            exit 1
+          }
 
   # G7 stated as a build failure rather than an intention: if a pure crate ever acquires
   # a network dependency, this job fails instead of the property quietly lapsing.
@@ -166,10 +177,29 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-fuzz --locked
+      # The crash input, base64 in an annotation, for the same reason: the uploaded artifact
+      # below needs admin rights to download, so without this a fuzz failure is a report that
+      # something broke with no way to reproduce it.
       - name: surface parser
-        run: cargo +nightly fuzz run surface -- -max_total_time=60
+        run: |
+          ls fuzz/artifacts/surface > /tmp/before-surface.txt 2>/dev/null || true
+          cargo +nightly fuzz run surface -- -max_total_time=60 || {
+            ls fuzz/artifacts/surface > /tmp/after-surface.txt 2>/dev/null || true
+            for f in $(comm -13 /tmp/before-surface.txt /tmp/after-surface.txt); do
+              echo "::error title=surface-crash::$f = $(base64 -w0 fuzz/artifacts/surface/$f)"
+            done
+            exit 1
+          }
       - name: cbor codec
-        run: cargo +nightly fuzz run cbor -- -max_total_time=60
+        run: |
+          ls fuzz/artifacts/cbor > /tmp/before-cbor.txt 2>/dev/null || true
+          cargo +nightly fuzz run cbor -- -max_total_time=60 || {
+            ls fuzz/artifacts/cbor > /tmp/after-cbor.txt 2>/dev/null || true
+            for f in $(comm -13 /tmp/before-cbor.txt /tmp/after-cbor.txt); do
+              echo "::error title=cbor-crash::$f = $(base64 -w0 fuzz/artifacts/cbor/$f)"
+            done
+            exit 1
+          }
       # A crash leaves its input behind; publish it so the failure is reproducible rather
       # than merely reported.
       - name: upload any crash found
