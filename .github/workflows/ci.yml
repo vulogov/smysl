@@ -2,7 +2,11 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    # Development branches too, not just `main`. Running only on `main` meant CI first saw
+    # a cycle's work at the release commit, which is how the determinism job stayed red
+    # across 0.2.0, 0.3.0 and 0.4.0: nobody was watching a branch that never got a run, and
+    # by the time it did the release was already cut.
+    branches: [main, "dev/**"]
   pull_request:
 
 env:
