@@ -1,12 +1,19 @@
 # RFC SMYSL-1 — proposed amendments
 
 **Status:** proposal, awaiting application to the RFC.
-**Covers:** SM-P0 through SM-P15, and the operational-merit work after it (2026-07-24 → 29).
+**Covers:** SM-P0 through SM-P15, the operational-merit work after it, and the 0.2 cycle
+(2026-07-24 → 29).
 **Format version affected:** `smysl/0.1`, kernel `smysl.kernel/0.1`.
 
 The RFC states that it has zero open design decisions. Implementing it in full produced the
-67 items below: places where the specification is silent, self-contradictory, or contradicted
+69 items below: places where the specification is silent, self-contradictory, or contradicted
 outright by a live endpoint.
+
+Two were flagged as needing a *decision* rather than merely a ratification, and the 0.2 cycle
+took both — marked *Decided in 0.2*, with the reasoning and what the alternative would have
+cost, because a choice recorded without its reasoning is one the next person has to make again.
+Two more items are new in 0.2: exit code `11`, and the requirement that an unknown kernel type
+degrade rather than fail its record.
 
 **Each one is already resolved in code and pinned by a test.** That is what makes this a
 proposal rather than a bug list — the implementation had to choose something in order to
@@ -113,10 +120,42 @@ type directly; there is no separate `type` key.
 append-only, unknown keys ignored on read. A corrupt line is skipped rather than fatal —
 losing a row of cost accounting must not stop the work that generates it.
 
-**16. Labels have no wire record.** `Unit.labels` and the index `labels` table exist, but no
-record type carries a binding, so labels survive a parse and not a store round trip.
-`CheckOptions.labels` is how a caller supplies them. **Needs a decision:** either a record
-type, or an explicit statement that labels are document-scoped.
+**16. Labels have no wire record.** *Decided in 0.2: a record type.* `Record::LabelBinding`,
+envelope type code 10, two keys — the label and the uid it names.
+
+The decision was between a wire record and declaring labels document-scoped with synthesised
+names on merge. The record won on two grounds. First, what the alternative costs: a document
+that had been through `merge` came back with every reference spelled as a bare uid — valid,
+re-checking clean, and unreadable — which breaks the format's central claim for exactly the
+multi-agent case it exists to serve, and synthesised names would have discarded the author's
+own. Second, the format *already* carried a `label-collision` contention kind for two
+documents disagreeing about a label, and could not fire it between two CBOR stores because
+labels arrived out of band and a CBOR store had none to offer. A contention kind dedicated to
+disagreements about a thing the format cannot store is incoherent either way.
+
+The binding is a separate record rather than a field because a label is not identity: inside
+hashed content, renaming one would produce a different unit. Adding the code is additive —
+verified, not assumed: a reader that does not know code 10 decodes it as `Record::Unknown`,
+preserves the payload verbatim and re-emits it identically.
+
+**Consequence for the RFC:** a labelled unit yields two records, so any record count in the
+specification's worked examples is now larger than it was.
+
+**17. Exit code 11, `StagedWithCorrections`.** Not in Appendix E. `ingest` knew rule M had
+corrected the model and had no way to say so; under `--yes` it returned plain `0`, making the
+outcome most worth knowing about indistinguishable from nothing having happened. A refinement
+of `Staged` rather than a failure — a script testing `= 10` should test `>= 10`.
+
+**18. Unknown kernel types must degrade.** `SchemaId` decoding was strict, so a kernel type
+added in a later 0.x failed the whole record with `SMY-E004` — corruption, not degradation —
+while an unknown record type and an unknown extension type both degraded correctly. Now
+`SchemaId::UnknownKernel`, reported `SMY-W010`, re-encoding byte for byte.
+
+Decoding and surface parsing need *opposite* behaviour here and cannot share one function: on
+the wire an unrecognised type is forward compatibility, but `@clai` in a hand-written file is
+a typo. `parse_forward` is a second entry point; `parse` still refuses. A consequence worth
+the RFC's attention: a typo is now `SMY-W010` rather than a hard error, because a tool cannot
+distinguish a typo from a kernel type added next year — the two are structurally identical.
 
 ---
 
@@ -125,9 +164,18 @@ type, or an explicit statement that labels are document-scoped.
 **17. Appendix A's grammar rejects the RFC's own example.** `ext-type = "x." ident "/" ident`
 cannot parse `x.sre/1` (§6). Relaxed to allow a leading digit and dots after the slash.
 
-**18. The surface has no comment syntax.** HJSON headers take `#` and `//`, but a `#` line
-*between records* lexes as body text and is absorbed into the preceding unit — it reports
-`SMY-E001: stray Text outside a record`. Confirmed again while writing fixture F7.
+**18. The surface has no comment syntax.** *Decided in 0.2: it does now — `#` or `//` at
+column 0.* HJSON headers already took both markers inside a record, so the surface rejected
+between records what it accepted within one.
+
+Appendix A needs a comment production, and two consequences stated with it. A comment is a
+comment *wherever* it appears, including inside a body, which costs a body the ability to open
+a line with either marker; the reverse was implemented first and was worse, because a body
+runs from the gist to the next record, so a comment between two records fell inside that range
+and became the previous unit's body — content invented out of a note, with a granularity
+warning fired about the invention. And no record carries a comment, so canonical form cannot
+reproduce one: `ParseOutcome` counts them and `fmt` warns before dropping any, since this
+project recommends `fmt --write` as a pre-commit habit.
 
 **19. Attestations have no surface syntax.** `record = unit | relation | thread` cannot
 express provenance, so rule T is unexercisable from a `.smy` file.

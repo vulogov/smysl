@@ -194,14 +194,28 @@ invented for the page.
 A `.smy` file is a flat sequence of *records*, each starting at column 0. Order does not
 matter to the meaning of the document — a claim can cite evidence that appears later in
 the file — though it is conventional to write things in the order a reader would want to
-meet them. Blank lines separate records but carry no meaning of their own, and nothing in
-the format is a comment: every line is either part of a record or it is a parse error.
+meet them. Blank lines separate records but carry no meaning of their own.
 
-#callout(label: "No comments")[
-  There is no `//` or `#` comment syntax. A stray line that isn't part of a record's
-  header, gist, body, or detail is a diagnostic (`SMY-E001`), not an ignored remark. If
-  you want a note to a future reader, it has to be a real unit — typically `@prose`.
+#callout(label: "Comments")[
+  A line beginning `#` or `//` at column 0 is a comment. Both markers, because an HJSON
+  header inside a record already accepted both, and rejecting between records what was
+  accepted within one made the surface contradict itself.
+
+  A comment is a comment *wherever it sits*, including inside a body — so a body cannot
+  open a line with either marker. The alternative was worse: a body runs from the gist to
+  the next record, so a comment between two records fell inside that range and became the
+  previous unit's body, inventing content out of a note.
+
+  No record carries a comment, so canonical form cannot reproduce one and `fmt` warns
+  before dropping them. A note that has to survive belongs in a unit — typically
+  `@question` or `@prose` — where it is content and travels like content.
+
+  New in 0.2. Before that there was no comment syntax at all, and such a line was
+  `SMY-E001`.
 ]
+
+Any other line that is not part of a record's header, gist, body, or detail is a
+diagnostic (`SMY-E001`), not an ignored remark.
 
 Four kinds of record are ever hand-authored in surface syntax:
 
@@ -216,10 +230,21 @@ Four kinds of record are ever hand-authored in surface syntax:
   ),
 )
 
-Two more record kinds exist in the format — `attestation` and `contention` — but neither
-is something you write directly: an attestation is stamped on automatically by whatever
-tool ingests or authors a unit, and a contention is what `merge` produces when two
-documents disagree. Nothing below asks you to author either by hand.
+Other record kinds exist in the format and none is something you write directly. An
+*attestation* is stamped on automatically by whatever tool ingests or authors a unit; a
+*contention* is what `merge` produces when two documents disagree; a *pack manifest* is
+`pack`'s receipt; a *schema declaration* names an extension a store depends on.
+
+A *label binding* is the one worth knowing about, because it explains a number. Writing
+`@claim c/cache-cold` declares both a unit and a name for it, and the name travels as its
+own record — so a labelled unit yields two. That is why `check` reports more records than
+you typed, and why `units` rather than `records` is the figure to read when you want to
+know how much document you have.
+
+The binding has to be separate because a label is *not identity*: it is not hashed, and
+renaming one must not produce a different unit. New in 0.2 — before it, labels survived a
+parse and not a store round trip, so a document that had been through `merge` came back
+with every reference spelled as a bare uid.
 
 #section("The `@doc` header")
 
@@ -769,6 +794,9 @@ mistake:
    dropped.],
   [Header keys the grammar does not know are kept verbatim in the payload rather than
    refused, so a document from a later version or another team passes through yours intact.],
-  [There are no comments, no blank line between a header and its gist, and no reserved
-   label namespaces — only what the grammar actually checks.],
+  [A `#` or `//` line at column 0 is a comment, and no record carries one — `fmt` warns
+   before dropping them. There is still no blank line permitted between a header and its
+   gist, and no reserved label namespaces: only what the grammar actually checks.],
+  [A labelled unit yields two records, because the label travels as its own binding rather
+   than inside the hashed content that decides identity.],
 ))

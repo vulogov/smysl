@@ -40,7 +40,7 @@ MATRIX := \
 .DEFAULT_GOAL := help
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix gates purity update \
         determinism conformance eval live-ollama live-hosted doc fuzz clean sweep \
-        commit ci toolchain eval-live docs
+        commit ci toolchain eval-live docs doc-output
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -119,6 +119,11 @@ determinism: ## Rule D: pure operations are bit-reproducible
 gates: purity determinism ## Both xtask gates
 	@echo "gates: purity and determinism clean"
 
+doc-output: ## Replay the manual's documented commands against the real binary
+	@echo "Needs a default-features build: a stale --all-features binary reports false drift."
+	$(CARGO) build
+	python3 scripts/verify-doc-output.py
+
 conformance: ## The conformance suite, as CI runs it
 	$(CARGO) test --test conformance_fixtures --no-default-features
 
@@ -144,7 +149,8 @@ eval-live: ## Both eval arms, prose baseline included (needs GEMINI_API_KEY)
 live-hosted: ## Live ingest gate against whichever hosted providers have keys set
 	@echo "Runs whichever of GEMINI_API_KEY / DEEPSEEK_API_KEY / OPENAI_API_KEY /"
 	@echo "ANTHROPIC_API_KEY are set. The rest are skipped and named in the output."
-	$(CARGO) test -p smysl-ingest --features gemini,deepseek,openai,anthropic \
+	@echo "Spends tokens: SMYSL_INGEST_LIVE opts in, since 0.2 a key alone does not."
+	SMYSL_INGEST_LIVE=1 $(CARGO) test -p smysl-ingest --features gemini,deepseek,openai,anthropic \
 		--test providers_live -- --nocapture --test-threads=1
 
 fuzz: ## Fuzz the surface parser (nightly; runs until interrupted)

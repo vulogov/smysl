@@ -36,13 +36,15 @@ count of both when it looks at one:
 
 #screen(caption: "$ smysl check fixtures/corpus/F1-incident.smy")[
 ```
-fixtures/corpus/F1-incident.smy: 13 records, 8 units, 0 diagnostic(s)
+fixtures/corpus/F1-incident.smy: 21 records, 8 units, 0 diagnostic(s)
 ```
 ]
 
-13 records reduce to 8 units because a store holds more than one record
-shape. The rest of this section is about what those shapes are, and which
-ones you'll ever type yourself.
+21 records reduce to 8 units because a store holds more than one record shape,
+and most of them are bookkeeping. Eight units, three relations, one thread, the
+`@doc` header — and eight *label bindings*, one for every name the file gave a
+unit. The rest of this section is about what those shapes are, and which ones
+you'll ever type yourself.
 
 #section("What you author, and what the tool derives")
 
@@ -55,10 +57,10 @@ ones you'll ever type yourself.
   it can form.
 ]
 
-A record is one of eight kinds (`smysl-core`'s `Record` enum, verbatim):
+A record is one of nine kinds (`smysl-core`'s `Record` enum, verbatim):
 `Unit`, `Attestation`, `Relation`, `Thread`, `View`, `Contention`,
-`PackInfo`, `SchemaDecl`. You will hand-author three of these regularly, one
-occasionally, and never touch the rest directly:
+`PackInfo`, `SchemaDecl`, `LabelBinding`. You will hand-author three of these
+regularly, one occasionally, and never touch the rest directly:
 
 #dtable(
   (auto, auto, 1fr),
@@ -72,8 +74,21 @@ occasionally, and never touch the rest directly:
     ([Contention], [The tool, during `merge`], [A materialised disagreement between two stores that both spoke about the same unit — the thing rule C promises never gets silently dropped.]),
     ([PackInfo], [The tool, during `pack`], [A self-describing receipt: how much of the budget was used, what got dropped or degraded, and under which estimator.]),
     ([SchemaDecl], [The tool, rarely you], [A declaration of a non-kernel schema extension a store depends on.]),
+    ([LabelBinding], [The tool, from what you typed], [The record that remembers `c/pool-saturation` names a particular unit. You write the label as part of the unit; the binding is how it reaches the wire. It has to be its own record because a label is *not* identity — putting one inside hashed content would make renaming it produce a different unit.]),
   ),
 )
+
+#callout(label: "Why the record count is larger than it looks")[
+  A labelled unit yields two records, so the number `check` prints is always
+  bigger than the number of things you typed. Worth knowing once and then
+  forgetting: read *units* when you want to know how much document you have,
+  and *records* when you want to know what a merge or a round trip has to carry.
+
+  Before 0.2 the bindings did not exist, and labels survived a parse but not a
+  store — a document that had been through `merge` came back with every
+  reference spelled as a bare `b3:…` uid. It still passed `check`, and no reader
+  could follow it.
+]
 
 The pattern above is the one to keep: *you write intent, the tool writes
 provenance.* Nowhere in this book will you type an `@attestation` or a
@@ -202,7 +217,7 @@ thing you do continuously along the way.
 
 #exercises((
   [Run `smysl fmt fixtures/corpus/F1-incident.smy | smysl check -`. The
-   report is identical to running `check` on the file directly — *13 records,
+   report is identical to running `check` on the file directly — *21 records,
    8 units, 0 diagnostic(s)*. Two things are being demonstrated at once. Name
    both.],
   [You are on a plane with no network. Which of the seventeen commands in the
@@ -402,6 +417,7 @@ you can read in this book.
     ([8], [UnsupportedVersion], [The store declares a format or kernel major version this build doesn't understand.]),
     ([9], [HashVerification], [A stored hash doesn't match its recomputed value — includes a truncated or corrupted uid, and `fmt`'s own round-trip check if canonicalising ever moved an identity.]),
     ([10], [Staged], [Model output (from `ingest`) was written to a staging area rather than merged, and is waiting for `--yes` or `merge --staged` to confirm it.]),
+    ([11], [StagedWithCorrections], [The same, *and* rule M lowered at least one unit: the model claimed more than its grounds support and was corrected. Not a failure — the batch is intact and every corrected unit is in it — but a pipeline may want to route it differently. New in 0.2; a script testing `= 10` for "staged" should test `>= 10`.]),
   ),
 )
 
@@ -463,7 +479,7 @@ that refusal is the point, not a bug.
   [Twelve global flags apply to every subcommand — most importantly
    `--store`/`--output`/`--format` for where data comes from and goes, and
    `--strict`/`--offline`/`--json` for how a pipeline enforces policy.],
-  [Eleven exit codes (0–10) are a stable contract a script can branch on;
+  [Twelve exit codes (0–11) are a stable contract a script can branch on;
    `3` (check errors) and `10` (staged, awaiting confirmation) are the two
    you'll meet soonest.],
 ))
@@ -551,7 +567,7 @@ Add the missing grounds:
 
 #screen(caption: "$ smysl check first.smy")[
 ```
-first.smy: 4 records, 2 units, 0 diagnostic(s)
+first.smy: 6 records, 2 units, 0 diagnostic(s)
 ```
 ]
 
@@ -680,7 +696,7 @@ a shorter form instead of disappearing outright.
 #exercises((
   [The broken `first.smy` produced three errors from one mistake. This chapter
    fixed it by adding `grounds: [e/cpu-spike]`. There is a second fix that
-   also makes `check` pass with `4 records, 2 units, 0 diagnostic(s)`: change
+   also makes `check` pass with `6 records, 2 units, 0 diagnostic(s)`: change
    `status: derived` to `status: speculative` and leave `grounds` empty. Try
    it. Both files are valid — so what did you change about what the document
    *means*, and which fix was right?],

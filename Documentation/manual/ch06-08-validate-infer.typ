@@ -208,7 +208,7 @@ progress" and "a document a CI job is about to let through":
   [Run `smysl check --json fixtures/corpus/F6-adversarial.smy`. Compare the
    shape of that output to the human form. What does the JSON deliberately
    *not* include that the text form does, and who is the missing part for?],
-  [`check` reports "13 records, 9 units" on `F7`. Chapter 8 says `check`
+  [`check` reports "22 records, 9 units" on `F7`. Chapter 8 says `check`
    verifies consistency and never correctness. Write down one thing about that
    file a clean `check` run does *not* entitle you to believe.],
 ))

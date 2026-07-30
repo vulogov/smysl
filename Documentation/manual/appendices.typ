@@ -352,7 +352,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-E002`], [error], [Unsupported kernel major version.]),
     ([`SMY-E003`], [error], [Unsupported format version.]),
     ([`SMY-E004`], [error], [Malformed CBOR envelope.]),
-    ([`SMY-W014`], [warning], [Unknown envelope type code — preserved verbatim, skipped semantically.]),
+    ([`SMY-W014`], [warning], [Unknown envelope type code — preserved verbatim, skipped semantically. Reported by `check` since 0.2; before that the code existed and nothing emitted it, so an unknown record was preserved in silence.]),
     ([`SMY-E080`], [error], [Non-deterministic encoding (key order, indefinite length, non-shortest int, null optional, non-NFC text).]),
     ([`SMY-E081`], [error], [Float not binary32 or not quantised to 1/1024.]),
   ),
@@ -440,7 +440,7 @@ reporting structure only; it carries no weight on the wire.
   (auto, auto, 1fr),
   (
     ([Code], [Sev.], [Meaning]),
-    ([`SMY-W010`], [warning], [Unknown schema — degraded fidelity (rule X).]),
+    ([`SMY-W010`], [warning], [Unknown schema — degraded fidelity (rule X). Two cases: a type this *build* does not know, reported always; and a type the named `--as` consumer does not implement, reported only when one is named. The first covers a kernel type added by a later version, which decodes and round-trips rather than failing.]),
     ([`SMY-E011`], [error], [Rule X violation — unrecognised payload dropped on re-emission.]),
     ([`SMY-E012`], [error], [Extension schema attempts to weaken a kernel rule.]),
     ([`SMY-W013`], [warning], [Unknown relation kind treated as `elaborates` for closure.]),
@@ -469,7 +469,7 @@ reporting structure only; it carries no weight on the wire.
 
 #appendix(letter: "C", title: "Exit Codes")
 
-Eleven codes, `0` through `10`, declared in `ExitCode` in
+Twelve codes, `0` through `11`, declared in `ExitCode` in
 `crates/smysl-core/src/error.rs`. They are part of the contract: stable across minor
 versions, so a pipeline can branch on exactly what happened rather than parsing stderr.
 A workspace test (`exit_codes_are_contiguous_and_unique`) asserts the set never grows a
@@ -490,6 +490,7 @@ gap or a duplicate.
     ([`8`], [`UnsupportedVersion`], [The document's format or kernel major isn't supported by this build.], [Parsing a store from a future or otherwise incompatible format/kernel major.]),
     ([`9`], [`HashVerification`], [A recomputed hash didn't match a stored uid.], [`fmt`'s round-trip check, `reindex --verify`, integrity failures.]),
     ([`10`], [`Staged`], [Output is staged, awaiting `merge --staged` to confirm it.], [`ingest`, unless `--yes` is given.]),
+    ([`11`], [`StagedWithCorrections`], [The same, and rule M lowered at least one unit — the model claimed more than its grounds support and was corrected. Not a failure. New in 0.2; a script testing `= 10` should test `>= 10`.], [`ingest`, including under `--yes`.]),
   ),
 )
 
@@ -548,6 +549,22 @@ and this page for a quick reminder of what the word means.
 #term("Ledger")[
   A local, append-only record of what was called, how many tokens it cost, and under what
   recipe — never the content itself. `usage` reads it back; `usage --reset` discards it.
+]
+
+#term("Label binding")[
+  The record that remembers a label names a particular unit. You write the label as part of
+  the unit; the binding is how it reaches the wire, and it is a separate record because a
+  label is not identity — a label inside hashed content would make renaming one produce a
+  different unit. Two stores binding the same label to different uids are a
+  `label-collision` contention on merge. New in 0.2: before it, labels survived a parse and
+  not a store round trip.
+]
+
+#term("Comment")[
+  A line beginning `#` or `//` at column 0, outside any record. Skipped by the parser and
+  not carried by any record, so canonical form cannot reproduce one — `fmt` warns before it
+  drops them. A comment is a comment wherever it appears, including inside a body, which is
+  why a body cannot open a line with either marker.
 ]
 
 #term("Contention")[

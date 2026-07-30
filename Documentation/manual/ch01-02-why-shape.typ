@@ -373,8 +373,8 @@ did this number come from" and get an answer.
 ]
 
 #exercises((
-  [Run `smysl check fixtures/corpus/F1-incident.smy`. It reports *13 records,
-   8 units*. Open the file and account for the five records that are not
+  [Run `smysl check fixtures/corpus/F1-incident.smy`. It reports *21 records,
+   8 units*. Open the file and account for the thirteen records that are not
    units — what are they, and why would a format that only had units be
    unable to carry Chapter 1's third loss?],
   [In that file, `c/pool-saturation` is `inferred` and rests on `e/pool-wait`,
@@ -391,8 +391,8 @@ did this number come from" and get an answer.
 ))
 
 #answers((
-  [Three `@rel` edges, one `@thread`, and the `@doc` header, which is
-   8 + 3 + 1 + 1 records in total. The relations are the point:
+  [Three `@rel` edges, one `@thread`, the `@doc` header, and one label
+   binding per named unit: 8 + 3 + 1 + 1 + 8 = 21. The relations are the point:
    `--rebuts-->` is an edge, not a unit, so a
    format carrying only units would have nowhere to put a disagreement except
    inside the prose of one of the two units that disagree — which is exactly

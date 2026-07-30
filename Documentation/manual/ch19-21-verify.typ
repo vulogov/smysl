@@ -441,7 +441,7 @@ realistic case:
 #screen(caption: "$ smysl check /tmp/w013.smy")[
 ```
 /tmp/w013.smy: warning: SMY-W013: relation kind `x.sre/mitigated-by` is undeclared; treated as elaborates
-/tmp/w013.smy: 3 records, 2 units, 1 diagnostic(s)
+/tmp/w013.smy: 5 records, 2 units, 1 diagnostic(s)
 ```
 ]
 
@@ -519,7 +519,7 @@ warning now fails:
 #screen(caption: "$ smysl check /tmp/w013.smy")[
 ```
 /tmp/w013.smy: warning: SMY-W013: relation kind `x.sre/mitigated-by` is undeclared; treated as elaborates
-/tmp/w013.smy: 3 records, 2 units, 1 diagnostic(s)
+/tmp/w013.smy: 5 records, 2 units, 1 diagnostic(s)
 ```
 ]
 
@@ -675,7 +675,7 @@ smysl check: unknown conformance class
 #screen(caption: "$ smysl check --conformance C-Full fixtures/corpus/F1-incident.smy")[
 ```
 fixtures/corpus/F1-incident.smy: C-Full: pass
-fixtures/corpus/F1-incident.smy: 13 records, 8 units, 0 diagnostic(s)
+fixtures/corpus/F1-incident.smy: 21 records, 8 units, 0 diagnostic(s)
 ```
 ]
 
@@ -738,7 +738,7 @@ that has not adopted the SRE extension yet":
 /tmp/fidelity-demo.smy: as `smysl.kernel/0.1`: Degraded
 /tmp/fidelity-demo.smy:   b3:bwmw4g2dyfmtsyw2vb7gdzamr3 degraded: x.sre/incident not implemented
 /tmp/fidelity-demo.smy: warning: SMY-W010: schema x.sre/incident is not implemented by `smysl.kernel/0.1`; payload preserved, interpretation lost (at b3:bwmw4g2dyfmtsyw2vb7gdzamr3)
-/tmp/fidelity-demo.smy: 2 records, 1 units, 1 diagnostic(s)
+/tmp/fidelity-demo.smy: 3 records, 1 units, 1 diagnostic(s)
 ```
 ]
 
@@ -751,7 +751,7 @@ still-traceable unit. A reader that has adopted the same extension gets
 #screen(caption: "$ smysl check --as x.sre/incident /tmp/fidelity-demo.smy")[
 ```
 /tmp/fidelity-demo.smy: as `x.sre/incident`: Full
-/tmp/fidelity-demo.smy: 2 records, 1 units, 0 diagnostic(s)
+/tmp/fidelity-demo.smy: 3 records, 1 units, 0 diagnostic(s)
 ```
 ]
 
@@ -808,7 +808,7 @@ research trace (`fine` profile):
 fixtures/corpus/F7-mixed-granularity.smy: 1 view(s) at granularity default
 fixtures/corpus/F7-mixed-granularity.smy: warning: SMY-W041: body is 30 tokens, under the default range 40..120 (at b3:s6etp4fjq3gkd7335lzdwjzx54)
 fixtures/corpus/F7-mixed-granularity.smy: warning: SMY-W041: body is 26 tokens, under the default range 40..120 (at b3:tfhgiir2fegvfkvq2fplgtvgq7)
-fixtures/corpus/F7-mixed-granularity.smy: 13 records, 9 units, 2 diagnostic(s)
+fixtures/corpus/F7-mixed-granularity.smy: 22 records, 9 units, 2 diagnostic(s)
 ```
 ]
 
@@ -917,7 +917,7 @@ found:
 
 #screen(caption: "$ smysl reindex /tmp/incident.cbor")[
 ```
-/tmp/incident.cbor: 13 records, 8 units, index 1759 bytes
+/tmp/incident.cbor: 21 records, 8 units, index 1759 bytes
 ```
 ]
 
@@ -981,7 +981,7 @@ changes nothing about the output of any command today.
 
 #screen(caption: "$ smysl --seed-check check fixtures/corpus/F1-incident.smy")[
 ```
-fixtures/corpus/F1-incident.smy: 13 records, 8 units, 0 diagnostic(s)
+fixtures/corpus/F1-incident.smy: 21 records, 8 units, 0 diagnostic(s)
 ```
 ]
 
