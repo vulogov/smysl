@@ -190,8 +190,64 @@ pub fn pack(
         }
     }
 
-    // --- 2. greedy by density ---------------------------------------------
+    // Hoisted above the selection so the whole-scope path below can be *verified* rather
+    // than argued for. It depends only on the request, so there was never a reason for it to
+    // be built after the fact.
+    let constraints = Constraints {
+        pinned: req.focus.clone(),
+        budget: req.budget,
+    };
+
+    // --- 2a. everything fits ----------------------------------------------
+    //
+    // The greedy below is O(n^2) *by construction*: it runs one round per unit admitted and
+    // re-evaluates every remaining candidate each round to pick the best. Measured on a
+    // synthetic store, `closure::delta` was called 7.5 million times for 4 000 units, scaling
+    // exactly 4.0x per doubling.
+    //
+    // That is inherent to picking a global best each round, and worth paying when the budget
+    // actually binds. It is worth nothing at all when the budget admits the whole scope: the
+    // greedy then spends quadratic time arriving at the answer this block reaches in one
+    // pass. Which is why the pathology showed up in the *easy* case — ample budget quadratic,
+    // binding budget linear.
+    //
+    // Taking everything at its top level is not a heuristic here, it is optimal: value is
+    // monotonic in level, so no unit is worth less for being fuller, and every closure
+    // constraint (C1-C7, including rule R) is trivially satisfied by a selection that omits
+    // nothing. If it fits, there is nothing left to trade.
+    let everything: Selection = scope
+        .iter()
+        .filter_map(|u| {
+            let unit = store.get(u)?;
+            let top = available_levels(&unit.core).into_iter().map(&cap).max()?;
+            Some((*u, top))
+        })
+        .collect();
+    let everything_cost = cost_of(store, &everything, &req.estimator);
+
     let mut used = floor_cost;
+    let mut selection = selection;
+    if everything_cost <= req.budget
+        && violations(store, &everything, everything_cost, &constraints).is_empty()
+    {
+        // Every unit reads `earned on density`, and that is the honest answer here rather
+        // than a shortcut. The C-reasons mean "this was dragged in by something else's
+        // obligation under budget pressure" — and under this path there was no pressure and
+        // nothing was dragged: the whole scope fit. Attributing `C3 rebuts …` would describe
+        // a trade that did not happen.
+        //
+        // The greedy's attribution cannot be reproduced without the greedy in any case: it
+        // depends on admission *order*, giving `Density` to whichever unit it chose and a
+        // C-reason to what that choice pulled along, first writer winning. Order is exactly
+        // what this path does not compute.
+        for (u, l) in &everything {
+            raise(&mut selection, *u, *l);
+            why.entry(*u).or_insert(closure::Reason::Density);
+        }
+        used = everything_cost;
+    }
+
+    // --- 2b. greedy by density --------------------------------------------
     loop {
         let mut best: Option<(f64, f32, Uid, Lod, u64, Selection)> = None;
         for uid in &scope {
@@ -248,10 +304,6 @@ pub fn pack(
     }
 
     // --- 3. local improvement ---------------------------------------------
-    let constraints = Constraints {
-        pinned: req.focus.clone(),
-        budget: req.budget,
-    };
     for _ in 0..req.improvement_passes {
         if !improve(
             store,

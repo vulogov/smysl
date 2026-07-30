@@ -92,14 +92,35 @@ agent hands you. Every threshold below was measured against the built binary.
 - **`thread --derive` ignored `--format` and dropped the `@doc` header** — the identical
   `write_surface(None, …)` mistake `merge --format surface` shipped with.
 
+### Fixed — performance
+
+- **`pack` is no longer quadratic when the budget admits the whole scope**: 2 818ms to 26ms
+  at 4 000 units, and linear thereafter. Reproduce with `scripts/bench-scaling.py`.
+
+  Counting the calls found it. `closure::delta` ran 7.5 million times for 4 000 units,
+  scaling exactly 4.0x per doubling, because the greedy is O(n²) *by construction* — one
+  round per unit admitted, every remaining candidate re-evaluated each round to pick a global
+  best. That is worth paying when the budget binds and worth nothing when it does not, which
+  is why the pathology appeared in the *easy* case.
+
+  So the greedy is untouched and skipped: if the whole scope fits at its top level, that
+  selection is taken directly. Not a heuristic — value is monotonic in level and every
+  closure constraint is trivially met by a selection that omits nothing, so if it fits there
+  is nothing left to trade. Verified byte-identical against the previous implementation across
+  every corpus fixture at seven budgets.
+
+  **One user-visible change.** Under this path `--explain` reads `earned on density` for every
+  unit, where the greedy would have credited some to `C3 rebuts …` or `C1 dep of …`. The
+  C-reasons mean "dragged in by another unit's obligation under budget pressure", and on this
+  path there was no pressure and nothing was dragged. The greedy's attribution also cannot be
+  reproduced without the greedy: it depends on admission order.
+
 ### Known limits
 
-- **`pack` is quadratic in store size**, and this release does not fix it — 2.8s at 4 000
-  units, 12s at 8 000. `scripts/bench-scaling.py` reproduces it. Two measurements narrow it
-  and correct the architecture note, which had blamed the wrong things: `salience` is linear,
-  and `improve()` — the obvious nested loop — accounts for under 1% of the time. It is worst
-  with an ample budget and linear with a binding one. A profile points at call *volume* into
-  `closure::required`, not at any single expensive call.
+- **`pack` is still quadratic when the budget binds** — the greedy's O(n²) is structural, not
+  a defect, and the fast path above only skips it when it provably cannot matter. Making the
+  bound case sub-quadratic needs lazy re-evaluation with a priority queue, which is a change
+  to the packer's core rather than a shortcut around it.
 - `thread` still defaults to surface output where `merge` and `pack` default to CBOR, so it
   sits awkwardly against rule P. Changing the default would be right by the rule and would
   also change what every documented `thread --derive` example prints, so it is left for a

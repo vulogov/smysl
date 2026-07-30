@@ -585,11 +585,23 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
     1% at 4000 units, so the local-improvement pass — the obvious nested loop, and the first
     thing reading the code suggests — is not the cost.
 
-  A sampling profile points instead at `closure::required` → `Store::rebuttals_of` →
-  `Adjacency::incoming`. Per call that chain is cheap: `in_edges` is an indexed lookup and
-  `rebuttals_of` is one non-transitive hop. So the cost is call *volume* rather than per-call
-  work, and the next step is counting calls rather than optimising any of them. **Not yet
-  fixed**, and deliberately not guessed at twice.
+  Counting the calls settled it. `closure::delta` ran 7 487 469 times for 4 001 units and
+  scaled exactly 4.0x per doubling, with roughly one graph visit per call — so the cost was
+  call *volume*, and per-call optimisation would have been wasted effort.
+
+  The volume is structural. The greedy runs one round per unit admitted and re-evaluates every
+  remaining candidate each round to choose a global best: O(n²) by construction, not by
+  accident. Worth paying when the budget binds; worth nothing when it does not.
+
+  **Fixed for the ample-budget case** by skipping the greedy rather than changing it: if the
+  whole scope fits at its top level, take it. Value is monotonic in level and a selection that
+  omits nothing satisfies every closure constraint, so if it fits there is nothing to trade.
+  4 000 units went from 2 818ms to 26ms, verified byte-identical against the old
+  implementation across every fixture at seven budgets. `--explain` now reads `earned on
+  density` throughout on that path, since nothing was dragged in under pressure.
+
+  **Still quadratic when the budget binds.** Sub-quadratic there needs lazy re-evaluation with
+  a priority queue — a change to the packer's core, not a shortcut around it.
 - **Quoting appears to coarsen units** (below) and the two measurement gaps remain.
 - **Quoting appears to coarsen units.** The same fixture that gave five or six units gives
   three once each must carry a quotable span. Observed, not diagnosed — it may be the prompt
