@@ -364,7 +364,7 @@ than hiding it:
 
 #screen(caption: "$ smysl check --pass retraction /tmp/retraction-demo.smy")[
 ```
-/tmp/retraction-demo.smy: 4 records, 3 units, 0 diagnostic(s)
+/tmp/retraction-demo.smy: 7 records, 3 units, 0 diagnostic(s)
 ```
 ]
 
@@ -402,7 +402,7 @@ none of the seven pipeline passes look at `retracts` edges at all:
 
 #screen(caption: "$ smysl check /tmp/retraction-demo.cbor")[
 ```
-/tmp/retraction-demo.cbor: 4 records, 3 units, 0 diagnostic(s)
+/tmp/retraction-demo.cbor: 7 records, 3 units, 0 diagnostic(s)
 ```
 ]
 

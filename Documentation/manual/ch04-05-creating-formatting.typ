@@ -560,7 +560,7 @@ kernel type. Relations get the same escape hatch:
 #screen(caption: "$ smysl check extrel.smy")[
 ```
 extrel.smy: warning: SMY-W013: relation kind `x.sre/mitigates` is undeclared; treated as elaborates
-extrel.smy: 4 records, 3 units, 1 diagnostic(s)
+extrel.smy: 7 records, 3 units, 1 diagnostic(s)
 ```
 ]
 

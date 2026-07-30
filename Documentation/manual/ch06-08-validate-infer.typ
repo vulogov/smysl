@@ -63,7 +63,7 @@ the smallest thing worth calling a document.
 
 #screen(caption: "$ smysl check brief.smy")[
 ```
-brief.smy: 3 records, 2 units, 0 diagnostic(s)
+brief.smy: 5 records, 2 units, 0 diagnostic(s)
 ```
 ]
 
@@ -139,7 +139,7 @@ Saturated.
 #screen(caption: "$ smysl check mistake3.smy")[
 ```
 mistake3.smy: warning: SMY-W041: body is 3 tokens, under the default range 40..120 (at b3:rdmccg53fegdhoyvxzgwwm34gf)
-mistake3.smy: 3 records, 2 units, 1 diagnostic(s)
+mistake3.smy: 5 records, 2 units, 1 diagnostic(s)
 ```
 ]
 
@@ -680,7 +680,7 @@ smysl merge: committed 1 staged record(s)
 #screen(caption: "$ smysl check combined.cbor")[
 ```
 combined.cbor: warning: SMY-W041: body is 35 tokens, under the default range 40..120 (at b3:wmixdny4fa7xm4j6pprsiy4r3r)
-combined.cbor: 4 records, 3 units, 1 diagnostic(s)
+combined.cbor: 6 records, 3 units, 1 diagnostic(s)
 ```
 ]
 
