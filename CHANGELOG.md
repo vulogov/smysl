@@ -115,12 +115,30 @@ agent hands you. Every threshold below was measured against the built binary.
   path there was no pressure and nothing was dragged. The greedy's attribution also cannot be
   reproduced without the greedy: it depends on admission order.
 
+- **Obligations are memoised.** `closure::required` is a pure function of `(uid, level)` — an
+  obligation does not change as a selection grows, only the shortfall against it does — and
+  the greedy re-walked the graph for every candidate in every round anyway. `closure::Needs`
+  caches it, which is exactly output-preserving and takes the binding-budget case from 2 807ms
+  to 2 041ms at 4 000 units.
+
 ### Known limits
 
-- **`pack` is still quadratic when the budget binds** — the greedy's O(n²) is structural, not
-  a defect, and the fast path above only skips it when it provably cannot matter. Making the
-  bound case sub-quadratic needs lazy re-evaluation with a priority queue, which is a change
-  to the packer's core rather than a shortcut around it.
+- **`pack` is still quadratic when the budget binds**, and this is corrected from what 0.3
+  first recorded: it is quadratic at *every* binding fraction, not only near-full ones. An
+  earlier measurement suggesting the tight case was linear used a fixed budget against
+  growing stores, so the budget was a shrinking fraction and the round count stayed flat —
+  the measurement, not the code, was linear.
+
+  The remaining cost is structural: one round per unit admitted, every remaining candidate
+  re-weighed each round, which is what makes the choice a global best. Memoising removed the
+  graph walk from that loop; it did not remove the loop.
+
+  Making it sub-quadratic needs recomputing only the candidates whose obligation intersects
+  what was just admitted, plus an ordered structure for the maximum. Note for whoever does it:
+  a lazy greedy over stale densities as upper bounds is **unsound here**, because density is
+  not monotone under selection growth — if a departing member's own density is below the
+  bundle's, removing it *raises* the bundle's. Zero violations were observed on the corpus,
+  which is evidence and not a guarantee.
 - `thread` still defaults to surface output where `merge` and `pack` default to CBOR, so it
   sits awkwardly against rule P. Changing the default would be right by the rule and would
   also change what every documented `thread --derive` example prints, so it is left for a

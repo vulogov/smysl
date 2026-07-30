@@ -226,7 +226,6 @@ pub fn pack(
     let everything_cost = cost_of(store, &everything, &req.estimator);
 
     let mut used = floor_cost;
-    let mut selection = selection;
     if everything_cost <= req.budget
         && violations(store, &everything, everything_cost, &constraints).is_empty()
     {
@@ -248,6 +247,17 @@ pub fn pack(
     }
 
     // --- 2b. greedy by density --------------------------------------------
+    //
+    // One memo for the whole run. The greedy is O(n^2) in *candidate evaluations* by
+    // construction — one round per unit admitted, every remaining candidate re-weighed each
+    // round — and that is what makes it pick a global best. What it does not need is to
+    // re-walk the graph for each of those evaluations: an obligation is a pure function of
+    // `(uid, level)`, so there are at most two distinct answers per unit and the greedy was
+    // computing 7.5 million of them for 4 001 units.
+    //
+    // Memoising leaves every choice identical and removes the walk from the inner loop.
+    let mut needs = closure::Needs::new();
+
     loop {
         let mut best: Option<(f64, f32, Uid, Lod, u64, Selection)> = None;
         for uid in &scope {
@@ -257,7 +267,7 @@ pub fn pack(
                 if selection.get(uid).is_some_and(|l| *l >= level) {
                     continue;
                 }
-                let d = closure::delta(store, &selection, *uid, level);
+                let d = needs.delta(store, &selection, *uid, level);
                 if d.is_empty() {
                     continue;
                 }
