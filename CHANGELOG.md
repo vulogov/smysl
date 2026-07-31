@@ -7,6 +7,160 @@ and the facade asserts the two are independent.
 
 ---
 
+## 0.6.0 — 2026-07-31
+
+### Added
+
+- **`pack --query TEXT`** — the composition retrieval was built for, of which 0.5.0 shipped
+  only half. Retrieval answers which units are relevant; packing answers what fits without
+  holes. The hits become `--focus`, so pack pulls in their grounds, deps and live rebuttals
+  and returns an argument rather than excerpts that scored well. Failing loudly when the
+  focus does not fit is deliberate; `--query-limit` defaults to 3, because each focused unit
+  drags its closure in behind it.
+
+- **`\#`, `\//` and `\\` escape a body or detail line.** A line opening with a comment
+  marker is a comment wherever it sits, so a body could never *begin* one — and a Markdown
+  heading and a line of C++ both do. 0.2 documented the limitation, 0.4 fixed the
+  header-value half, and until now the line was dropped in silence. Only those three
+  sequences, only at column 0.
+
+- **`make seed-fuzz`**, and CI seeds the sixty-second gate with the corpus fixtures and every
+  input that has ever broken something. `make fuzz-long` stays **cold** on purpose: 0.4.0's
+  and 0.5.0's findings both came from a cold run landing where a warm corpus does not go.
+  Seeded runs reach 5 339 coverage points against 3 023 cold.
+
+### Fixed
+
+- **A thread's gist kept its leading whitespace** — the 0.4.0 unit-gist fix in the sibling
+  path, which it never reached. Found within a minute of seeding the fuzzer.
+
+- **Six free-text fields reached the CBOR encoder without NFC normalisation.** The encoder
+  asserted the invariant in debug and trusted it in release; constructors establish it for a
+  unit's gist, body and detail and for nothing else — not a thread's gist, a step's note, a
+  view's intent, a granularity profile, a source reference or a pack estimator. Two had
+  already been found by fuzzing in two separate releases, each fixed by normalising in one
+  more constructor, which is a class being treated as a list. **The encoder normalises now**,
+  which costs a quick-check on text about to be BLAKE3'd anyway and makes the implementation
+  match what `SMYSL_FORMAT_SPEC.md` already promised.
+
+- **`ui` was documented as a stub and is not one.** `smysl-tui` is a working crate with its
+  own tests, the `tui` feature is in the default set, and the command runs given a terminal.
+  Appendix A said otherwise, so the purity table and the changelog did too — and so did I,
+  twice, while planning work around removing it. It has its flag table now.
+
+### Changed
+
+- **`SMY-W305` is emitted; `SMY-W306` is deleted.** Two releases of "documented as
+  unreachable" is a holding pattern rather than a decision. The ledger had recorded whether
+  each token count came from the provider or from our own estimate since the provider layer
+  landed and nothing surfaced it, so `usage` warns. W306 described a usage threshold that
+  does not exist, and inventing the feature to justify the code would be the wrong way
+  round. The registry is 51.
+
+- **`tui` left the default feature set.** It works and it is tested — that was settled
+  earlier this cycle when the "stub" claim turned out to be false — but `ratatui` and
+  `crossterm` in every default build is a cost an embedder who only calls the library never
+  opted into. `--features tui` for anyone who wants the browser; without it the command says
+  so rather than pretending. A default `cargo install smysl` no longer pulls either crate.
+
+- **The CI matrix and `make test-matrix` had drifted**, and now agree at nine rows. Two of
+  them are new and neither was reachable from any other: `--no-default-features --features
+  cli` and `--features tui`. Default brings `ingest` with it, so a function used only by an
+  ingest command is live under default and dead under `cli` alone — which is exactly the
+  dead-code error that failed the determinism job for three releases under `-D warnings`.
+  `--all-features` cannot substitute for either, being the combination nobody ships.
+
+- Retired-RFC references removed from a user-facing error and from `diag.rs`.
+
+### Performance
+
+- **`pack` is linear when the budget binds.** It was quadratic — 2.81, 3.46, 3.87x per
+  doubling, converging on 4.0 — because the greedy ran one round per unit admitted and
+  scanned every remaining candidate each round to pick a global best. 0.3.0 removed the
+  *pricing* from that scan by caching it behind an exact invalidation index; what remained
+  was the scan itself.
+
+  The scan is now an ordered set keyed on the choice, so a round is a pop rather than a walk.
+  Measured: 2.07, 2.20, 1.94, 2.23, 2.11x per doubling out to 8 000 units, and 2.05 ms at
+  2 000 units against 18.54 ms — **9x**, and the gap widens with size.
+
+  Two things made it sound where the textbook lazy greedy is not:
+
+  - The order is now *one named type*, `Choice`, used by nothing else. The risk in this
+    change was a heap reproducing three of the four tie-break terms and producing packs that
+    are legal, deterministic, monotone in budget and **different** — and the suite could not
+    have caught it, since no corpus fixture ties on density without also tying on salience.
+    Having one implementation of the order removes the question instead of testing around it.
+  - Affordability is checked at pop, and a candidate that cannot be afforded is *parked*
+    rather than dropped. `used` only grows, so an unaffordable candidate can never become
+    affordable — **unless its marginal cost falls**, which happens exactly when something in
+    its obligation is selected and therefore already paid for. That is a dirty event, so a
+    parked candidate is reconsidered when and only when it is dirtied. This is the
+    non-monotonicity that makes the naive lazy greedy unsound here.
+
+  Verified byte-identical: `tests/golden-packs.txt` records what `pack` selects across nine
+  fixtures at six budgets, and not one line moved.
+
+### Measured
+
+- **`salience` is linear**, isolated from parsing and process startup: 2.07–2.22× per
+  doubling, 3.96 ms at 16 000 units. It was the last pure operation whose per-call cost had
+  only ever been *assumed* — the same assumption that was twice wrong about `pack`.
+
+- **`pack` with a binding budget** was measured at 3.87x per doubling and 18.5 ms at 2 000
+  units, which is what made the fix above worth doing and is how it was shown to have
+  worked. Measured in process rather than inferred from command timings dominated by
+  parsing.
+
+  Both live in `crates/smysl-graph/tests/scaling.rs`, `#[ignore]`d: a measurement, not a
+  gate. Timing assertions on shared runners fail for reasons unrelated to the code, and a
+  test that cries wolf gets muted.
+
+### Packaging
+
+- **Publish-readiness, checked with a dry run rather than after the first bug report.** Three
+  things it found: `src/types/aux.rs` is a reserved device name on Windows, so `smysl-core`
+  would have been unbuildable there from the day it was published (now `annex.rs`);
+  `smysl-graph` had a circular dev-dependency on `smysl-pack`, which depends on it normally,
+  so neither could be published first (the pack measurement moved to the crate whose
+  operation it measures); and the root package would have shipped 8 MB of PDFs and images
+  against a 10 MB limit, so most of a consumer's download would have been a book they never
+  unpacked.
+
+### Deferred to 0.7.0
+
+- **A semantic retrieval backend.** 0.5.0 produced the measurement that says where one would
+  help — `claim`, `finding` and `hypothesis`, where a paraphrased query ranks the right unit
+  first once in eight — and 0.5.0 also built the seam it would sit behind. What is left is a
+  cycle's worth of work rather than an item: a new impure crate, a model-distribution story,
+  and the evaluation re-run per kernel type to show it actually beat 0.12 rather than merely
+  arrived.
+
+  `model2vec-rs` remains the candidate, and the reasoning has not changed: pure Rust, no
+  ONNX Runtime, no `ort` release-candidate pin, and static embeddings that are a table
+  lookup rather than a forward pass — so they are reproducible across machines, which
+  matters more here than accuracy at the margin. It would dispatch by kernel type rather
+  than replace BM25, because BM25 is already perfect on identifiers and on `evidence`.
+
+  Deferred deliberately, with a number waiting for it. That is a better position to start
+  from than most work gets.
+
+### Still carried
+
+- **The quoting coarsening.** A fixture that yields five or six units yields three once each
+  must carry a quotable span. Observed once, never explained — it may be the prompt or it may
+  be inherent to anchoring a unit to text it can quote. One experiment settles it, and the
+  experiment needs a model, so it sits behind the same credentials question as the mappers.
+- **OpenAI and Anthropic mappers**, still blocked on credentials. The risk has grown rather
+  than shrunk since Appendix C gained `relations` and `quote`.
+
+Everything else carried out of 0.5.0 was closed in this cycle: `pack`'s scan, the fuzz
+corpus, the body-line escape syntax, both dead diagnostic codes, the `ui` decision, and
+`salience`'s per-call cost — which was the other half of the "two measurement gaps" and is
+now measured rather than assumed.
+
+---
+
 ## 0.5.0 — 2026-07-31
 
 ### Added
@@ -148,8 +302,9 @@ Carried forward, in the order I would take them:
   unreachable in 0.4; emit or delete.
 - **OpenAI and Anthropic mappers**, when credentials exist. Still blocked, and the risk has
   grown rather than shrunk since Appendix C gained `relations` and `quote`.
-- **The `ui` stub**, which prints "not wired in this build" — the one advertised command
-  that does nothing. Build it or remove it.
+- **`ui`**, which this list called a stub through 0.5.0 and which is nothing of the sort —
+  a working TUI, in the default feature set. Corrected in 0.6.0; the open question is
+  whether it earns its dependencies, not whether it exists.
 
 ---
 

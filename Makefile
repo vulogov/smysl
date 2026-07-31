@@ -40,13 +40,14 @@ MATRIX := \
 	@ \
 	--all-features \
 	--no-default-features@--features@cli \
+	--no-default-features@--features@tui \
 	--no-default-features@--features@local \
 	--no-default-features@--features@remote \
 	--no-default-features@--features@exact-pack \
 	--no-default-features@--features@render-typst,render-html
 
 .DEFAULT_GOAL := help
-.PHONY: help all rebuild release test lint clippy fmt fix test-matrix gates purity update \
+.PHONY: help all rebuild release test lint clippy fmt fix test-matrix gates purity update seed-fuzz \
         determinism conformance eval live-ollama live-hosted doc fuzz clean sweep \
         commit ci toolchain eval-live docs doc-output fuzz-long
 
@@ -167,7 +168,25 @@ live-hosted: ## Live ingest gate against whichever hosted providers have keys se
 # feedback drives the search instead of a fixed seed and 200 blind rounds.
 FUZZ_TARGETS := surface cbor merge_algebra pack_constraints pipeline pack_exact
 
-fuzz: ## Fuzz every target for 60s each, as CI does (nightly)
+# Seeds, not a corpus. The repo already holds inputs worth starting from — the corpus
+# fixtures are real `.smy` documents, and `fuzz/artifacts/` holds every input that has ever
+# broken something — so seeding costs no repo weight and skips the minutes a cold run spends
+# rediscovering that `@claim` exists. Measured: a cold 60s run of `surface` reaches 2093
+# coverage points; seeded with these it found a *new defect* in under sixty seconds, in the
+# `@thread` gist path, which cold runs had never reached.
+#
+# A minimised corpus was the obvious alternative and is not viable: `cargo fuzz cmin` takes
+# `cbor` from 6780 inputs to 2093, and 2093 inputs is still 8.2 MB. Seeds stay small on
+# purpose.
+seed-fuzz: ## Copy the repo's own inputs into each fuzz corpus
+	@set -e; for t in $(FUZZ_TARGETS); do \
+		mkdir -p fuzz/corpus/$$t; \
+		cp -f fuzz/artifacts/$$t/* fuzz/corpus/$$t/ 2>/dev/null || true; \
+	done; \
+	mkdir -p fuzz/corpus/surface; cp -f fixtures/corpus/*.smy fuzz/corpus/surface/ 2>/dev/null || true
+	@echo "seeded from fixtures/corpus and fuzz/artifacts"
+
+fuzz: seed-fuzz ## Fuzz every target for 60s each, as CI does (nightly)
 	@echo "The parser targets existed from the start and nothing ran them, which is how two"
 	@echo "stack overflows survived to 0.3 and eight more defects to 0.4. Sixty seconds each"
 	@echo "catches a regression; finding something new takes the long run below."
@@ -176,8 +195,12 @@ fuzz: ## Fuzz every target for 60s each, as CI does (nightly)
 		cargo +nightly fuzz run $$t -- -max_total_time=60; \
 	done
 
-fuzz-long: ## Fuzz one target until interrupted: make fuzz-long T=merge_algebra
-	cargo +nightly fuzz run $(or $(T),surface)
+# Deliberately *not* seeded, and deliberately not depending on `seed-fuzz`. A warm corpus
+# explores deeply around what it already knows; a cold one lands somewhere arbitrary. Both
+# 0.4.0's duplicate-key defect and 0.5.0's schema-declaration defect came from a cold run,
+# so the two searches are kept as two searches.
+fuzz-long: ## Fuzz one target from cold until interrupted: make fuzz-long T=merge_algebra
+	cargo +nightly fuzz run $(or $(T),surface) $(shell mktemp -d)
 
 # ---------------------------------------------------------------------------
 # Housekeeping

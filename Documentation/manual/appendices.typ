@@ -12,8 +12,13 @@ sync with the binary. Each subcommand heading repeats three facts from the comma
 in `src/main.rs` (`§23`): its one-line description, its *purity* (`pure` — a bit-reproducible
 function of its inputs; `mixed` — pure except for one option; `model-dependent` — the only
 kind that can reach off the machine), and the delivery phase that wired it up. All
-twenty-one wired subcommands are covered; `ui` (SM-P15) is a stub in this build and prints
-"not wired in this build" rather than accepting flags, so it has no flag table.
+all twenty-two subcommands are covered.
+
+`ui` was described here as a stub through 0.5.0. It is not, and was not: `smysl-tui` is a
+working crate with its own test suite, the `tui` feature is in the *default* set, and the
+command runs against any store given a terminal. The claim was written once and then
+believed — including by me, twice, while planning work around removing it. This appendix's
+opening paragraph says it cannot drift from the binary; that is the second time it had.
 
 Three of them — `import`, `relink` and `compact` — were absent from this appendix until
 0.4.0. They were wired in SM-P15 and the appendix was never extended to match, which is
@@ -86,6 +91,8 @@ These apply to every subcommand, in any position on the command line.
     ([`--explain`], [—], [Say which constraint put each unit in.]),
     ([`--tokenizer`], [`ID`], [Cost model; recorded in the packinfo either way (D-2).]),
     ([`--mode`], [`greedy|exact`], [`exact` proves optimality by branch and bound; needs the `exact-pack` feature.]),
+    ([`--query`], [`TEXT`], [Focus on what this query finds, instead of naming uids.]),
+    ([`--query-limit`], [`N`], [How many hits `--query` focuses on; 3 by default.]),
     ([`PATH`], [positional], [Store to pack.]),
   ),
 )
@@ -364,6 +371,27 @@ ended at SM-P15, and writing `SM-P16` here would invent one to satisfy a naming 
   ),
 )
 
+#section("ui")
+
+*Terminal UI.* Pure · SM-P15.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`PATH`], [positional], [Store to browse; `-` reads stdin (rule P).]),
+  ),
+)
+
+No flags of its own beyond the global set — the interface is the terminal, not the command
+line. It refuses to start when stdout is not a terminal, rather than emitting escape codes
+into a pipe.
+
+`tui` left the default feature set in 0.6.0. It works and it is tested; what it does not
+justify is `ratatui` and `crossterm` in every build, including one an embedder installs to
+call the library and nothing else. Build with `--features tui` to get it; without it the
+command says so rather than pretending.
+
 #section("reindex")
 
 *Rebuild the derived index from the log alone.* Pure · SM-P3.
@@ -523,17 +551,23 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W303`], [warning], [Structured output unsupported; fell back to the surface path.]),
     ([`SMY-W304`], [warning], [Span unrepairable; degraded to opaque prose (rule I).]),
     ([`SMY-W305`], [warning], [Token count estimated rather than provider-reported.]),
-    ([`SMY-W306`], [warning], [Usage threshold exceeded — informational only, never blocks.]),
     ([`SMY-E307`], [error], [Attributed quote does not occur in the source text.]),
     ([`SMY-W308`], [warning], [Attributed quote occurs only loosely — elided or reworded.]),
   ),
 )
 
-Two of these have no emission site and are listed for completeness only:
-`SMY-W305`'s information already reaches you through the usage totals line, and
-`SMY-W306` describes a threshold feature that does not exist. They are on the
-list to be emitted or deleted rather than left as codes you could wait for
-forever.
+Both of the codes this appendix once listed as unreachable have been resolved in 0.6.0,
+because "documented as unreachable" is a holding pattern rather than a decision.
+
+`SMY-W305` is now emitted by `usage`. The ledger had recorded whether each token count came
+from the provider or from our own estimate since the provider layer landed, and nothing ever
+surfaced it — so a total built partly from an estimate looked exactly like one the provider
+reported. The claim in this appendix that the information "already reaches you through the
+usage totals line" was simply wrong.
+
+`SMY-W306` is deleted. It described a usage threshold that does not exist and never did, and
+inventing the feature to justify the code would have been the wrong way round. A code nobody
+can trigger is worse than a missing one, because a reader waits for it.
 
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix C — Exit Codes
@@ -635,8 +669,8 @@ and this page for a quick reminder of what the word means.
 #term("Comment")[
   A line beginning `#` or `//` at column 0, outside any record. Skipped by the parser and
   not carried by any record, so canonical form cannot reproduce one — `fmt` warns before it
-  drops them. A comment is a comment wherever it appears, including inside a body, which is
-  why a body cannot open a line with either marker.
+  drops them. A comment is a comment wherever it appears, including inside a body; a body
+  that needs to open a line with a marker escapes it as `\#` or `\//` (0.6).
 ]
 
 #term("Contention")[

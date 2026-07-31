@@ -4,7 +4,7 @@
 [`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md), which is deliberately a fraction of this
 one's length: interoperability needs identity, encoding and the rules, not an account of how
 this implementation happens to be built.
-**Describes:** the code at `main`, crate `0.5.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
+**Describes:** the code at `main`, crate `0.6.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
 **Compiled:** 2026-07-30, from SM-P0 through SM-P15, the operational-merit work after it, the
 0.2 cycle (label bindings, comment syntax, forward compatibility), the 0.3 cycle (global
 flags, nesting bounds, packer performance) and the 0.4 cycle (the fuzz backlog: seven
@@ -571,7 +571,9 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
   requires every `properties` key in `required`, and the shared schema lists a fraction of
   them. The risk has grown, not shrunk — Appendix C gained `relations` and `quote` since,
   and the mapper passes it through unchanged. Blocked on a key.
-- **`pack` is quadratic in store size.** Measured, which corrected two guesses this note
+- **`pack` was quadratic in store size**, and is not any more — see "Closed in 0.6" below
+  for the fix; the history is kept because what a gap cost is worth keeping. Measured, which
+  corrected two guesses this note
   previously made: `salience` is *linear* and fine, and PageRank over the full adjacency is
   not the problem. Reproduce with `python3 scripts/bench-scaling.py`, which prints the ratio
   between successive sizes — 2.0 is linear, 4.0 is quadratic:
@@ -605,14 +607,60 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
   implementation across every fixture at seven budgets. `--explain` now reads `earned on
   density` throughout on that path, since nothing was dragged in under pressure.
 
-  **Still quadratic when the budget binds.** Sub-quadratic there needs lazy re-evaluation with
-  a priority queue — a change to the packer's core, not a shortcut around it.
-- **Quoting appears to coarsen units** (below) and the two measurement gaps remain.
-- **Quoting appears to coarsen units.** The same fixture that gave five or six units gives
-  three once each must carry a quotable span. Observed, not diagnosed — it may be the prompt
-  or it may be inherent to anchoring a unit to text it can quote.
-- **~69 divergences from the RFC** remain unreconciled — see [`RFC_PROPOSAL.md`](RFC_PROPOSAL.md),
-  plus exit code `11`, which Appendix E does not have.
+  **Closed in 0.6.** The scan is an ordered set keyed on the choice, so a round is a pop
+  rather than a walk: 2.07, 2.20, 1.94, 2.23, 2.11x per doubling out to 8 000 units, and
+  2.05 ms at 2 000 units against 18.54 ms. Verified byte-identical against a recorded
+  baseline of what `pack` selects across nine fixtures at six budgets.
+
+  Two things made it sound where the textbook lazy greedy is not. The tie-break became one
+  named type used by the pop and nothing else — the risk was never the algorithm but a heap
+  reproducing three of four terms, and no corpus fixture ties on density without also tying
+  on salience, so the suite could not have caught it. And an unaffordable candidate is
+  *parked* rather than dropped: `used` only grows, so it can never become affordable unless
+  its marginal cost falls, which happens exactly when something in its obligation is
+  selected and therefore already paid for. That non-monotonicity is what made the 0.3.0
+  attempt unsound.
+
+### Closed in 0.6
+
+- **`pack` is linear when the budget binds** — see the performance note above, which is where
+  the numbers and the soundness argument live.
+
+- **NFC is enforced by the encoder rather than asserted in debug.** Constructors establish
+  the invariant for a unit's gist, body and detail and for nothing else: a thread's gist, a
+  step's note, a view's intent, a granularity profile, a source reference and a pack
+  estimator all reached the encoder unchecked. Two of those had been found by fuzzing in two
+  separate releases and each fixed by normalising in one more constructor — a class treated
+  as a list. Enforcing costs a quick-check on text about to be BLAKE3'd anyway, and makes the
+  implementation match what the format spec already promised. A debug-only assertion never
+  could, because the builds that matter compile it out.
+
+- **`pack --query`**, the composition retrieval was built for. Retrieval names which units
+  are relevant; packing pulls in their grounds, deps and live rebuttals, so the result is an
+  argument rather than excerpts that scored well. Neither half achieves that alone.
+
+- **`\#`, `\//` and `\\` escape a body or detail line**, which 0.2 documented as a
+  limitation and 0.4 half-fixed. A Markdown heading and a line of C++ both open a line the
+  way a comment does, and were dropped in silence.
+
+- **A thread's gist kept its leading whitespace** — the 0.4 unit-gist fix in a sibling path
+  it never reached. Found within a minute of seeding the fuzzer.
+
+- **The fuzz gate is seeded** from the corpus fixtures and every input that has ever broken
+  something; the long run stays cold on purpose, because 0.4 and 0.5 both had findings that
+  came from a cold run landing where a warm corpus does not go.
+
+- **`SMY-W305` is emitted and `SMY-W306` deleted**, after two releases of "documented as
+  unreachable" — which is a holding pattern rather than a decision.
+
+- **`tui` left the default feature set**, and the CI matrix gained the two combinations
+  nothing was building: `cli` alone and `tui` alone. Neither is reachable from any other row,
+  and that gap is exactly how a dead-code error under `-D warnings` made the determinism job
+  report "rule D failed" for three releases.
+
+- **`ui` was documented as a stub and is not one.** A working TUI, described as unwired
+  because a single sentence in Appendix A said so and nobody checked — including me, twice,
+  while planning work around removing it.
 
 ### Closed in 0.5
 

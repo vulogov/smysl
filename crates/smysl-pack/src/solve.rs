@@ -131,6 +131,65 @@ impl Pack {
 }
 
 /// Pack a store to a budget (§18.3).
+/// The greedy's choice, as one orderable value.
+///
+/// Extracted so that the scan and the ordered structure that replaces it cannot disagree.
+/// The order used to live inline in a comparison, and the risk in replacing the scan was
+/// that a heap would reproduce three of its four terms — producing packs that are legal,
+/// deterministic and monotone in budget, and *different*. Nothing in the suite covered the
+/// salience term, because no corpus fixture ties on density without also tying on salience.
+/// One implementation of the order removes that question rather than testing around it.
+///
+/// `Ord` is derived, so the field order **is** the tie-break: density, then salience, then
+/// uid descending, then level descending, then candidate index ascending. The last term is
+/// what makes the order total — the scan kept the first candidate it met among equals,
+/// because it replaced `best` only on a strictly-greater key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Choice {
+    density: Ordered,
+    salience: Ordered,
+    uid: std::cmp::Reverse<Uid>,
+    level: std::cmp::Reverse<Lod>,
+    index: std::cmp::Reverse<usize>,
+}
+
+/// A finite float that can live in an ordered structure.
+///
+/// `total_cmp` rather than `partial_cmp().unwrap()`: densities are finite by construction
+/// here, and a panic inside a packer because one was not is a worse failure than an
+/// arbitrary-but-consistent order.
+#[derive(Debug, Clone, Copy)]
+struct Ordered(f64);
+
+impl PartialEq for Ordered {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.total_cmp(&other.0) == core::cmp::Ordering::Equal
+    }
+}
+impl Eq for Ordered {}
+impl PartialOrd for Ordered {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Ordered {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
+
+impl Choice {
+    fn new(density: f64, salience: f32, uid: Uid, level: Lod, index: usize) -> Choice {
+        Choice {
+            density: Ordered(density),
+            salience: Ordered(salience as f64),
+            uid: core::cmp::Reverse(uid),
+            level: core::cmp::Reverse(level),
+            index: core::cmp::Reverse(index),
+        }
+    }
+}
+
 pub fn pack(
     store: &Store,
     salience: &SalienceReport,
@@ -289,58 +348,92 @@ pub fn pack(
     // to the original loop — each simply moved on.
     let mut weighed: Vec<Option<(u64, f64)>> = vec![None; candidates.len()];
 
+    // The scan is gone. What replaced it, and why each piece is needed:
+    //
+    // `ready` holds every candidate whose cached pricing is current *and* affordable, keyed
+    // by `Choice`, so the round's winner is `ready.pop_last()` rather than a walk over
+    // everything. `dirty` is the set whose pricing a selection change invalidated — exactly
+    // `affected[u]` for each unit whose level moved. `parked` holds candidates priced
+    // correctly but unaffordable at the current `used`.
+    //
+    // Parking is the subtle part, and it is why a naive lazy greedy is unsound here. `used`
+    // only grows, so a candidate that cannot be afforded now can never be afforded later —
+    // *unless its marginal cost falls*, which happens when something in its obligation gets
+    // selected and is therefore already paid for. That is precisely a dirty event. So a
+    // parked candidate is reconsidered when, and only when, it is dirtied, and nothing has to
+    // sweep the parked set per round.
+    //
+    // Affordability is checked at pop rather than eagerly, because `used` changes every round
+    // and re-testing every ready entry would reintroduce the scan. Each pop that parks is
+    // charged against the insert or dirty event that put the entry there, so the work is
+    // amortised rather than per-round.
+    let mut ready: BTreeSet<Choice> = BTreeSet::new();
+    let mut parked: BTreeSet<usize> = BTreeSet::new();
+    let mut placed: Vec<Option<Choice>> = vec![None; candidates.len()];
+    let mut dirty: Vec<usize> = (0..candidates.len()).collect();
+
     loop {
-        let mut best: Option<(f64, f32, Uid, Lod, u64, usize)> = None;
-        for (i, (uid, level)) in candidates.iter().enumerate() {
-            if selection.get(uid).is_some_and(|l| *l >= *level) {
+        // Reprice what a selection change invalidated, and place it.
+        for i in std::mem::take(&mut dirty) {
+            if let Some(old) = placed[i].take() {
+                ready.remove(&old);
+            }
+            parked.remove(&i);
+
+            let (uid, level) = candidates[i];
+            // Satisfied candidates leave the running entirely. A unit's own candidates are
+            // in `affected[uid]`, because a candidate's obligation always contains its own
+            // unit, so raising it dirties them and they land here.
+            if selection.get(&uid).is_some_and(|l| *l >= level) {
                 continue;
             }
-            if weighed[i].is_none() {
-                let d = needs.delta(store, &selection, *uid, *level);
-                weighed[i] = Some(if d.is_empty() {
-                    (0, 0.0)
-                } else {
-                    weigh(store, &selection, &d, &local, &req.estimator)
-                });
-            }
-            let (dc, dv) = weighed[i].expect("just filled");
-            // Re-checked every round rather than cached: `used` moves even when this
-            // candidate does not.
-            if dc == 0 || used + dc > req.budget {
-                continue;
-            }
-            let density = dv / dc as f64;
-            let salience_here = local.get(uid).copied().unwrap_or(0.0);
-            // Total tie-break: density, then salience, then uid, then level.
-            let better = match &best {
-                None => true,
-                Some((bd, bs, bu, bl, _, _)) => {
-                    (
-                        density,
-                        salience_here,
-                        std::cmp::Reverse(*uid),
-                        std::cmp::Reverse(*level),
-                    ) > (*bd, *bs, std::cmp::Reverse(*bu), std::cmp::Reverse(*bl))
-                }
+            let d = needs.delta(store, &selection, uid, level);
+            let w = if d.is_empty() {
+                (0, 0.0)
+            } else {
+                weigh(store, &selection, &d, &local, &req.estimator)
             };
-            if better {
-                best = Some((density, salience_here, *uid, *level, dc, i));
+            weighed[i] = Some(w);
+            let (dc, dv) = w;
+            if dc == 0 {
+                continue;
             }
+            if used + dc > req.budget {
+                parked.insert(i);
+                continue;
+            }
+            let c = Choice::new(
+                dv / dc as f64,
+                local.get(&uid).copied().unwrap_or(0.0),
+                uid,
+                level,
+                i,
+            );
+            placed[i] = Some(c);
+            ready.insert(c);
         }
 
-        // The winner's delta is recomputed rather than carried through the scan: the
-        // selection has not moved since it was weighed, so this is the same set the original
-        // loop held on to — and holding one per candidate would have traded the walk for a
-        // pile of clones.
-        let best = best.map(|(d0, s0, u, l, dc, i)| {
-            let d = needs.delta(store, &selection, u, l);
-            let _ = i;
-            (d0, s0, u, l, dc, d)
-        });
+        // Take the best affordable candidate, parking anything the growing `used` has put
+        // out of reach since it was placed.
+        let winner = loop {
+            let Some(c) = ready.pop_last() else {
+                break None;
+            };
+            let i = c.index.0;
+            placed[i] = None;
+            let (uid, level) = candidates[i];
+            let (dc, _) = weighed[i].expect("placed candidates are priced");
+            if used + dc > req.budget {
+                parked.insert(i);
+                continue;
+            }
+            break Some((uid, level, dc, i));
+        };
 
-        let Some((_, _, uid, level, dc, d)) = best else {
+        let Some((uid, level, dc, _i)) = winner else {
             break;
         };
+        let d = needs.delta(store, &selection, uid, level);
         for (u, l) in d {
             // Only a level that actually moved can invalidate anything. `raise` is a no-op
             // when the selection already holds `u` at or above `l`, and treating that as a
@@ -348,8 +441,12 @@ pub fn pack(
             let moved = selection.get(&u).map(|held| *held < l).unwrap_or(true);
             raise(&mut selection, u, l);
             if moved {
+                // Dirty rather than merely uncached: the entry must also leave `ready`,
+                // because its key is now wrong and a stale key at the top of the order would
+                // be chosen on figures that no longer hold.
                 for i in affected.get(&u).map(Vec::as_slice).unwrap_or(&[]) {
                     weighed[*i] = None;
+                    dirty.push(*i);
                 }
             }
             why.entry(u).or_insert_with(|| {

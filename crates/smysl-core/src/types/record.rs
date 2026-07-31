@@ -3,7 +3,7 @@
 //! `[ type_code: uint, payload: map ]`. Integer keys rather than CBOR tags: no IANA
 //! registration, more compact, and determinism is easier to guarantee.
 
-use crate::types::aux::{Contention, LabelBinding, PackInfo, SchemaDecl};
+use crate::types::annex::{Contention, LabelBinding, PackInfo, SchemaDecl};
 use crate::types::provenance::Attestation;
 use crate::types::relation::Relation;
 use crate::types::thread::Thread;

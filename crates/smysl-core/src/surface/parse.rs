@@ -54,6 +54,27 @@ pub struct ParseOutcome {
     pub comments: usize,
 }
 
+/// Undo the leading-backslash escape on a body or detail line.
+///
+/// A line beginning `#` or `//` at column 0 is a comment wherever it sits, which is what
+/// stops a note between two records from being absorbed into the previous unit's body. The
+/// cost was that a body could never *start* a line with either marker — a real limitation
+/// for exactly the content this format carries, since a Markdown heading and a line of C++
+/// both do.
+///
+/// `\#`, `\//` and `\\` at column 0 are the escape. Only those three: a backslash before
+/// anything else is an ordinary backslash, so prose full of Windows paths and LaTeX needs no
+/// thought. `\\` is escapable because otherwise a body line starting with a literal
+/// backslash could not round-trip.
+fn unescape_body_line(line: &str) -> std::borrow::Cow<'_, str> {
+    match line.strip_prefix('\\') {
+        Some(rest) if rest.starts_with('#') || rest.starts_with("//") || rest.starts_with('\\') => {
+            std::borrow::Cow::Borrowed(rest)
+        }
+        _ => std::borrow::Cow::Borrowed(line),
+    }
+}
+
 impl ParseOutcome {
     pub fn has_errors(&self) -> bool {
         self.diagnostics.iter().any(Diagnostic::is_error)
@@ -485,7 +506,7 @@ impl<'a> Parser<'a> {
     /// Accumulate a markdown block up to the next record start, or - unless `through`
     /// is set - the next `--` separator.
     fn block(&mut self, through_separator: bool) -> Option<String> {
-        let mut lines: Vec<&str> = Vec::new();
+        let mut lines: Vec<std::borrow::Cow<'_, str>> = Vec::new();
         while let Some(l) = self.line() {
             match l.class {
                 c if c.starts_record() => break,
@@ -497,15 +518,15 @@ impl<'a> Parser<'a> {
                 // which is worse than any alternative: content invented from a note, and
                 // a granularity warning fired about it.
                 //
-                // The cost is that a body cannot begin a line with `#` or `//`; such a line
-                // is a comment wherever it appears, and is dropped. Predictable beats
-                // context-dependent here, and there is no escape syntax yet.
+                // A body line that genuinely needs to start with `#` or `//` writes `\#`
+                // or `\//`, unescaped below. That escape is 0.6.0; before it, such a line
+                // was a comment wherever it appeared and was silently dropped.
                 LineClass::Comment => {
                     self.out.comments += 1;
                     self.i += 1;
                 }
                 _ => {
-                    lines.push(l.text);
+                    lines.push(unescape_body_line(l.text));
                     self.i += 1;
                 }
             }
@@ -687,6 +708,13 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+        // Trimmed for the same reason a unit's gist is, and missed when that one was fixed:
+        // the writer emits `~ ` + gist and the reader strips the sigil *and* the whitespace
+        // after it, so surrounding space cannot survive a round trip. A thread's gist runs
+        // through this path rather than `gist_body_detail`, so the 0.4.0 fix never reached
+        // it. Found by seeding the fuzzer with the repo's own corpus fixtures, which reach
+        // `@thread` in seconds where a cold random search does not.
+        let gist = gist.trim().to_string();
 
         let mut steps = Vec::new();
         while let Some(l) = self.line() {

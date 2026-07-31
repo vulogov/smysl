@@ -480,6 +480,20 @@ fn cli() -> Command {
                         .help("Units that must reach L1; packing fails if they cannot"),
                 )
                 .arg(
+                    Arg::new("query")
+                        .long("query")
+                        .value_name("TEXT")
+                        .help("Focus on what this query finds, instead of naming uids"),
+                )
+                .arg(
+                    Arg::new("query-limit")
+                        .long("query-limit")
+                        .value_name("N")
+                        .default_value("3")
+                        .help("How many hits --query focuses on")
+                        .value_parser(clap::value_parser!(usize)),
+                )
+                .arg(
                     Arg::new("lod")
                         .long("lod")
                         .value_name("L")
@@ -1934,6 +1948,41 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
         req = req.focusing(focus);
     }
+
+    // `--query` is the composition retrieval exists for. Retrieval answers *which units are
+    // relevant*; packing answers *what fits, without holes* — it pulls in the grounds and
+    // live rebuttals of whatever it selects, so the result is an argument rather than a list
+    // of excerpts. That is the part ordinary retrieval does not do, and neither half
+    // achieves it alone.
+    //
+    // The hits become `--focus`, so they are required to reach L1 and packing fails loudly
+    // if the budget cannot hold them and their closure. Failing is the right answer: a pack
+    // that silently dropped what you searched for would be worse than none.
+    //
+    // The default limit is 3 rather than `find`'s 10, because every focused unit drags its
+    // closure in with it and ten of those exhaust an ordinary budget before anything is
+    // chosen on merit.
+    if let Some(q) = m.get_one::<String>("query") {
+        use smysl::Retriever as _;
+        let limit = m.get_one::<usize>("query-limit").copied().unwrap_or(3);
+        let hits = smysl::Bm25::index(&store).search(&smysl::Query::new(q.clone(), limit));
+        if hits.is_empty() {
+            eprintln!("smysl pack: --query matched nothing, so there is nothing to focus on");
+            return ExitCode::Failure;
+        }
+        if !global.get_flag("quiet") {
+            eprintln!(
+                "smysl pack: --query focused {} unit(s): {}",
+                hits.len(),
+                hits.iter()
+                    .map(|h| h.uid.short())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        req = req.focusing(hits.into_iter().map(|h| h.uid).collect::<Vec<_>>());
+    }
+
     match m.get_one::<String>("lod").map(String::as_str) {
         Some("L0") => req = req.capped(Lod::L0),
         Some("L1") => req = req.capped(Lod::L1),
@@ -3257,6 +3306,20 @@ fn cmd_usage(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let total: u64 = rows.iter().map(|r| r.total()).sum();
     let calls: u64 = rows.iter().map(|r| r.calls).sum();
     println!("{:-<24} {calls:>6} call(s)  {total:>9} tokens", "");
+
+    // `SMY-W305`, finally emitted. The ledger has recorded `estimated` per entry since the
+    // provider layer landed, and nothing ever surfaced it — so a total built partly from
+    // our own token estimate was indistinguishable from one the provider reported, and the
+    // number was read as authoritative either way. It is a warning rather than a footnote
+    // because the difference matters when someone is reconciling a bill.
+    let estimated = ledger.entries().iter().filter(|e| e.estimated).count();
+    if estimated > 0 {
+        eprintln!(
+            "smysl usage: warning: SMY-W305: {estimated} of {} entr(ies) carry an estimated \
+             token count rather than one the provider reported",
+            ledger.entries().len()
+        );
+    }
     ExitCode::Success
 }
 
@@ -3708,8 +3771,15 @@ fn main() -> ProcExitCode {
         "compact" => cmd_compact(sub, &matches),
         "ui" => cmd_ui(sub, &matches),
         _ => {
+            // Unreachable while every command in `COMMANDS` has an arm above, which
+            // `command_table_matches_section_23` enforces. Kept as the honest answer if one
+            // is ever added to the table and not to the dispatch.
+            //
+            // It used to cite "RFC SMYSL-1 §26". That RFC was retired in 0.5.0, and a user
+            // facing an error should not be sent to a document that no longer governs
+            // anything.
             eprintln!(
-                "smysl {}: not wired in this build; lands in {} (see RFC SMYSL-1 \u{00a7}26)",
+                "smysl {}: declared in the command table but not wired in this build ({})",
                 cmd.name, cmd.phase
             );
             ExitCode::Failure

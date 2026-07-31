@@ -10,3 +10,4 @@ repository.workspace   = true
 
 [dependencies]
 smysl-core = { workspace = true }
+

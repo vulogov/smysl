@@ -1,6 +1,6 @@
 //! The kernel type system (§1, §2, §3, §4, §5).
 
-pub mod aux;
+pub mod annex;
 pub mod epistemics;
 pub mod provenance;
 pub mod record;
@@ -9,7 +9,7 @@ pub mod thread;
 pub mod unit;
 pub mod view;
 
-pub use aux::{
+pub use annex::{
     Contention, ContentionStatus, Detected, DetectionKind, DropReason, LabelBinding, Optimality,
     PackInfo, PackMode, SchemaDecl,
 };

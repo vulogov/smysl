@@ -1,4 +1,8 @@
-//! Diagnostic registry (RFC SMYSL-1 Appendix D) and the report machinery built on it.
+//! The diagnostic registry, and the report machinery built on it.
+//!
+//! Appendix D of the manual transcribes this table; the two are cross-checked at release.
+//! It used to cite RFC SMYSL-1, retired in 0.5.0 — the codes are defined here now, not
+//! ratified elsewhere.
 //!
 //! Every diagnostic the implementation can emit has a stable [`Code`] here. Codes are
 //! stable across minor versions; retiring one requires a major bump (§25). Adding one is
@@ -242,7 +246,6 @@ registry! {
         W303 = "SMY-W303", Warn,  "Structured output unsupported; fell back to the surface path";
         W304 = "SMY-W304", Warn,  "Span unrepairable; degraded to opaque prose (rule I)";
         W305 = "SMY-W305", Warn,  "Token count estimated rather than provider-reported";
-        W306 = "SMY-W306", Warn,  "Usage threshold exceeded - informational only, never blocks";
         E307 = "SMY-E307", Error, "Attributed quote does not occur in the source text";
         W308 = "SMY-W308", Warn,  "Attributed quote occurs only loosely - elided or reworded";
     }
@@ -514,18 +517,21 @@ mod tests {
         assert_eq!(Code::parse(""), None);
     }
 
-    /// Appendix D, counted section by section: 7 + 7 + 7 + 7 + 6 + 5 + 4 + 9.
+    /// The registry is the authority; the manual's Appendix D transcribes it, and the two
+    /// are cross-checked at every release cut.
     ///
-    /// **One more than Appendix D lists.** `SMY-W036` is an addition: rule M at the ingest
-    /// boundary lowers an over-claiming unit rather than rejecting it, and the lowering has
-    /// to be reportable. Appendix D has no code for it because §9.1 assumed rejection, so
-    /// this is a divergence to reconcile rather than a miscount.
+    /// This used to be phrased as a count of RFC SMYSL-1's Appendix D, "one more than it
+    /// lists", with three codes recorded as divergences to reconcile — `SMY-W036` for rule M
+    /// lowering a unit at the ingest boundary rather than rejecting it, and `SMY-E307` and
+    /// `SMY-W308` for a unit attributing itself to a quote. They were never divergences.
+    /// They were the implementation learning something the sketch had not, and the RFC is
+    /// retired.
     ///
-    /// `SMY-E307` and `SMY-W308` are two more: a unit may now attribute itself to a quote
-    /// from its source, and a quote that is not in the source has to be sayable.
+    /// 51 as of 0.6.0: `SMY-W306` was deleted rather than emitted, having described a usage
+    /// threshold that does not exist.
     #[test]
-    fn registry_matches_appendix_d_size() {
-        assert_eq!(Code::ALL.len(), 52);
+    fn the_registry_is_the_size_it_is_meant_to_be() {
+        assert_eq!(Code::ALL.len(), 51);
     }
 
     #[test]
