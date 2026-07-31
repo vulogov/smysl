@@ -88,6 +88,12 @@ pub use smysl_graph::{
     TopoOrder, TraceKind, Via,
 };
 
+// ---- retrieve -------------------------------------------------------------
+// Pure, and deliberately so: the default engine is BM25 with one transitive dependency, no
+// model and no runtime, so retrieval is a bit-reproducible function of the store and the
+// query. `Retriever` is the seam an impure semantic backend would sit behind.
+pub use smysl_retrieve::{tokenize as retrieve_tokenize, Bm25, Hit, Query, Retriever};
+
 // ---- ingest / providers (feature-gated) -----------------------------------
 #[cfg(feature = "ingest")]
 pub use smysl_ingest::ceiling::ceiling;

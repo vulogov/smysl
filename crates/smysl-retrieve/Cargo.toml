@@ -1,0 +1,26 @@
+[package]
+name         = "smysl-retrieve"
+description  = "Retrieval over a smysl store: a seam, and a lexical default."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[dependencies]
+smysl-core  = { workspace = true }
+smysl-graph = { workspace = true }
+
+# `default-features = false` deliberately, which leaves exactly one transitive dependency
+# (`fxhash`) and keeps this crate pure under `xtask check-purity`.
+#
+# The defaults are all wrong here. `default_tokenizer` stems and strips stop words, which
+# destroys identifiers — and a payload may be source code. `language_detection` decides what
+# language a text is, so the same corpus could tokenise differently as it grows, which is
+# rule D gone. `parallelism` pulls rayon, and a parallel float reduction is not something a
+# bit-reproducible operation can contain.
+bm25 = { version = "2", default-features = false }
+
+[dev-dependencies]
+smysl-check = { workspace = true }
