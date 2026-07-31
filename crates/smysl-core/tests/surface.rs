@@ -1166,3 +1166,32 @@ fn a_continued_gist_does_not_carry_leading_whitespace() {
         "a continued gist did not survive a round trip; the writer emitted:\n{once}"
     );
 }
+
+/// A duplicate known-field key does not leak into the unknown-key payload.
+///
+/// `take` removed only the first entry, and whatever a caller leaves behind becomes the
+/// payload under rule X. So a header with two `deps` parsed as one real `deps` plus a
+/// second smuggled into the payload — which the writer then emitted as a plain `deps:`
+/// line, because that is the key's name. The next parse found only one, took it as the
+/// field, and the payload lost a key. Found by fuzzing, in CI rather than locally.
+#[test]
+fn a_duplicate_known_field_does_not_become_payload() {
+    let src = "@claim a/x { status: speculative, deps: [], deps: \"junk\" }\n~ a gist here.\n";
+    let a = parse_surface(src).unwrap();
+    let payload = a.records.iter().find_map(|r| match r {
+        Record::Unit(u) => u.payload.clone(),
+        _ => None,
+    });
+    assert!(
+        payload.is_none(),
+        "a second `deps` was carried as an unknown key, which surface syntax cannot spell"
+    );
+
+    let ctx = WriteContext::from_labels(&a.labels);
+    let once = write_surface(None, &a.records, &ctx);
+    assert_eq!(
+        parse_surface(&once).unwrap().records,
+        a.records,
+        "a duplicate key did not survive a round trip; the writer emitted:\n{once}"
+    );
+}

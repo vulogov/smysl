@@ -36,6 +36,11 @@ const PURE_CRATES: &[&str] = &[
     "smysl-pack",
     "smysl-thread",
     "smysl-render",
+    // Retrieval is pure because its default engine is: BM25 with `default-features = false`
+    // brings in one transitive crate and no runtime. That is a claim worth enforcing rather
+    // than asserting — a semantic backend added later would break it the moment it landed,
+    // which is exactly when someone should have to think about it.
+    "smysl-retrieve",
 ];
 
 /// Symbols that betray a runtime or a socket in source.

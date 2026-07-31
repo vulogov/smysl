@@ -554,6 +554,101 @@ independent evidence, it is one piece of evidence read twice.
     shared source is not two independent checks.],
 ))
 
+#section("The other ranking: `find`")
+
+`salience` answers *what matters here* by looking at the graph — what grounds
+what, what rebuts what, how much of the argument leans on a unit. It never
+reads a word of the content. That is a strength when you want the shape of an
+argument, and useless when you arrive knowing only what you are looking for.
+
+`find` is the complement. It ranks by *words*, over the gist of every unit and
+— at lower weight — the body and detail beneath it.
+
+#screen(caption: "$ smysl find \"connection pool saturated\" fixtures/corpus/F1-incident.smy")[
+```
+7.5637  b3:cvhirtgs2mpvli2ethhyeo32uf  The eu-west connection pool is saturated.
+0.8732  b3:xkys7j42mcuyiaxiyh73xddimr  The 4.2 canary ran the same pool configuration without the regression.
+0.8635  b3:js4xzessu5zwjpv2rawtugnuvj  Pool saturation is the leading cause but is not consistent with the canary.
+0.8541  b3:izyuzlt42mqcvgdfb4nfpllxyq  Pool acquisition wait rose from 2 ms to 310 ms over the same window.
+0.4362  b3:wo4t2c46lq45fnakd6tajlgcac  p95 auth latency tripled after the 4.2 rollout.
+```
+]
+
+#callout(label: "Why")[
+  A store that has been through a few hops holds units nobody on this machine
+  wrote, named by uids nobody can read. `trace` needs a starting uid. `view`
+  needs roots. `pack` needs a budget and gives you what fits. None of them
+  answers the question you actually have when you open a file someone handed
+  you, which is *where is the bit about the connection pool*.
+
+  It searches the *gist* principally, and that is what makes it work whatever
+  the units contain. A unit's payload might be a stack trace, a metric series
+  or a diff — but every unit carries a gist, because the format requires one,
+  and the gist is a sentence about whatever the payload is. You are never
+  searching the telemetry; you are searching the sentence that describes it.
+]
+
+Two properties are worth knowing because they are unusual for a search tool.
+
+It is *pure*. No model, no index written to disk, no network. The same store
+and the same query give the same ranking on any machine, with ties broken by
+uid so there is one right answer rather than an arbitrary one. That is the same
+guarantee `pack` and `merge` carry, and it is why `find` can sit in a
+reproducible pipeline rather than beside one.
+
+And it does *not stem*. A search tool for prose would reduce `latencies` to
+`latenc` so it matches `latency`. That helps English and destroys
+`connection_pool_size`, which is exactly the term someone types. Identifiers
+are split into parts *and* kept whole, so `pool.wait_ms` finds its own unit and
+so does `pool`:
+
+#screen(caption: "$ smysl find \"pool.wait_ms\" --kind evidence fixtures/corpus/F1-incident.smy")[
+```
+6.4462  b3:izyuzlt42mqcvgdfb4nfpllxyq  Pool acquisition wait rose from 2 ms to 310 ms over the same window.
+0.8732  b3:xkys7j42mcuyiaxiyh73xddimr  The 4.2 canary ran the same pool configuration without the regression.
+```
+]
+
+#subsection("Where it is weak, measured rather than guessed")
+
+The project evaluates this rather than asserting it. Twenty queries over the
+corpus, in three classes — queries that share the gist's vocabulary, queries
+that paraphrase it, and bare identifiers:
+
+#dtable(
+  (auto, auto, auto, auto),
+  (
+    ([class], [recall\@5], [MRR], [first place]),
+    ([shared vocabulary], [1.00], [0.94], [0.88]),
+    ([paraphrase], [0.75], [0.41], [0.12]),
+    ([identifier], [1.00], [1.00], [1.00]),
+  ),
+)
+
+Identifiers are perfect and shared vocabulary is nearly so. Paraphrase is
+where it falls down: the right unit reaches the top five three times in four,
+but ranks *first* once in eight. Recall without precision is a list to read,
+not an answer.
+
+Broken down by what kind of unit was being looked for, the reason is plain.
+`evidence` and `data` units score 1.00 — they name concrete things, and
+concrete things are findable by name. `claim` units score 0.67, because a claim
+is an interpretation phrased in whatever words its author reached for, and you
+will reach for different ones.
+
+#callout(label: "What that means for you")[
+  Use `--kind` when you know what you are after. Narrowing to `evidence` when
+  you want a measurement, or to `question` when you want what was asked, beats
+  reading past four things you did not want — and it is a bigger improvement
+  than any tuning of the ranking would be.
+
+  And expect to search for *nouns from the domain* rather than for the
+  sentence you would write. `connection pool` works; "why was it slow" does
+  not. That is a real limitation of lexical search, not a bug, and closing it
+  is what a semantic backend would be for. `Retriever` is a trait precisely so
+  one can be added without disturbing any of this.
+]
+
 #chapter(number: 18, title: "retract — Blast Radius First")
 
 Every other command in this part of the book adds information to a store,

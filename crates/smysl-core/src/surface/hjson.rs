@@ -140,9 +140,22 @@ impl HObject {
 
     /// Remove and return a key. Header parsing takes the keys it knows this way, so
     /// whatever remains is by definition unrecognised and belongs in `payload`.
+    /// Remove **every** entry under `key`, returning the first.
+    ///
+    /// Removing only the first left any duplicate behind, and whatever a caller leaves
+    /// behind becomes the unknown-key payload under rule X. So a header with two `deps`
+    /// parsed as one real `deps` plus a second smuggled into the payload — which the writer
+    /// then emitted as a plain `deps:` line, because that is what the key is called. On the
+    /// next parse there was only one, it was taken as the field, and the payload lost a key:
+    /// `parse -> write -> parse` was not a fixed point. Found by fuzzing.
+    ///
+    /// First wins, which is what `object_to_payload` already does when it sorts and dedups
+    /// unknown keys by encoded bytes. One rule for duplicates, everywhere.
     pub fn take(&mut self, key: &str) -> Option<Spanned<HValue>> {
         let i = self.entries.iter().position(|(k, _)| k.value == key)?;
-        Some(self.entries.remove(i).1)
+        let first = self.entries.remove(i).1;
+        self.entries.retain(|(k, _)| k.value != key);
+        Some(first)
     }
 
     pub fn insert(&mut self, key: Spanned<String>, value: Spanned<HValue>) {

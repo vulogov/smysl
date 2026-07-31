@@ -7,6 +7,152 @@ and the facade asserts the two are independent.
 
 ---
 
+## 0.5.0 — 2026-07-31
+
+### Added
+
+- **Retrieval: `smysl-retrieve` and `smysl find`.** A seam first and an engine second.
+  `Retriever` is a trait; the shipped implementation is BM25 over gists, bodies and details.
+
+  It indexes the **gist** principally, and that is the load-bearing idea. A unit's payload
+  may be a stack trace, a metric series, a diff or a page of prose, and no one way of
+  searching covers all four — but every unit carries a gist because the format requires one,
+  and a gist is a sentence about whatever the payload is. Payload heterogeneity never
+  reaches the index. The cost, stated rather than buried: retrieval quality is bounded by
+  gist quality, which is an ingest concern.
+
+  The crate is **pure** and under the purity gate, which is unusual for search. `bm25` is
+  taken with `default-features = false`, dropping three things that were each wrong here:
+  the default tokeniser stems and strips stop words, destroying identifiers when a payload
+  may be source code; language detection would make tokenisation depend on the corpus, so a
+  store could tokenise differently as it grew; `parallelism` puts a rayon reduction inside a
+  result that must not vary. The tokeniser is ours — split on whitespace and punctuation,
+  split camelCase/snake_case/kebab-case while keeping the whole token, lowercase, nothing
+  else.
+
+  `--kind` and `--min-status` are filters on the query rather than trimming applied
+  afterwards, because trimming a ranked list silently returns fewer than asked for.
+
+- **Measured, not asserted.** 20 queries over the corpus in three classes, none reusing a
+  gist verbatim:
+
+  | class | recall@5 | MRR | P@1 |
+  |---|---:|---:|---:|
+  | shared vocabulary | 1.00 | 0.94 | 0.88 |
+  | paraphrase | 0.75 | 0.41 | 0.12 |
+  | identifier | 1.00 | 1.00 | 1.00 |
+
+  By kernel type, `evidence` and `data` score 1.00 and `claim` 0.67. Concrete things are
+  findable by name; an interpretation is phrased in whatever words its author reached for.
+  So a semantic backend would pay on `claim`, `finding` and `hypothesis` and add nothing on
+  the rest — narrower and better founded than "add embeddings", and the reason the seam is a
+  trait rather than a second engine. Caveats worth keeping: 20 queries is small, the corpus
+  is small, and the same hand wrote the queries and the retriever.
+
+- **A fourth fuzz target, `pack_exact`** — exact packing against brute-force enumeration,
+  which is obviously correct and obviously too slow, and therefore an oracle rather than a
+  second opinion. Both directions are asserted: falling short of the optimum is a weaker
+  pack, but *exceeding* it means the search and the verifier disagree about feasibility.
+
+- **Three fuzz targets over the algebra**, not just the parsers. 0.4.0 found eight defects
+  in minutes, every one in `surface` or `cbor` — the only two subsystems with a target.
+  That is a fact about where anyone was looking, not about where bugs live.
+
+  `merge`, `pack` and `thread` already assert the properties that matter. What drove that
+  generation was a fixed-seed xorshift over 100–200 blind rounds: the same cases every run,
+  forever, with no coverage feedback. The properties are unchanged; the search is not.
+
+  - `merge_algebra` — commutative, associative, idempotent. If any fails, two peers
+    gossiping in different orders reach different stores and the mesh needs coordination,
+    which is what rule U exists to avoid. Nothing reports it: each peer believes itself.
+  - `pack_constraints` — C1–C7 via `verify`, the budget, and value monotone in budget.
+    *Value*, not unit count: a larger budget may take one expensive unit over two cheap
+    ones, so asserting the count would fail on correct packs.
+  - `pipeline` — guarantee A1 across `check`, `salience` and `derive_thread`, plus rule L
+    on every derived thread. A1 had only ever been tested on the two parsers, which is the
+    narrow reading: a store from another agent has been through a parser, but the graph it
+    describes is still adversarial.
+
+  These are where a defect is quiet. A wrong pack still packs.
+
+### Fixed
+
+- **A duplicate known-field key leaked into the unknown-key payload and broke the round
+  trip.** `HObject::take` removed only the first entry under a key, and whatever a caller
+  leaves behind becomes the payload under rule X. A header with two `deps` parsed as one
+  real `deps` plus a second carried as an extension — which the writer emitted as a plain
+  `deps:` line, because that is the key's name. The next parse found one, took it as the
+  field, and the payload came back a key short. `take` now removes every entry and returns
+  the first, which is already what `object_to_payload` does when it dedups by encoded
+  bytes: one rule for duplicates, everywhere.
+
+  Found by the surface fuzzer **in CI, not locally** — a warm corpus and a cold one explore
+  differently.
+
+### Changed
+
+- **CI runs on `dev/**` branches, not only `main`.** It used to see a cycle's work for the
+  first time at the release commit, which is how the determinism job stayed red across
+  0.2.0, 0.3.0 and 0.4.0.
+- **`make test-matrix` sets `RUSTFLAGS=-D warnings`** and covers `--features cli`. Neither
+  was true before, and between them they hid a dead-code error for three releases.
+- **Failing CI jobs report why in an annotation**, and the fuzz jobs emit the crash input as
+  base64. Job logs and uploaded artifacts both need admin rights on this repository, so a
+  failure otherwise read as "exit code 1" and nothing else.
+
+### Fixed (CI)
+
+- **The determinism job was never a determinism failure.** `read_input` is called only from
+  `cmd_ingest`, which is `#[cfg(feature = "ingest")]`, and carried no gate — so it was dead
+  code in any build without `ingest`, and `-D warnings` made that a build error. The
+  determinism job builds exactly that configuration to run its permutations, so the build
+  failed, `pack` exited 101, and the job reported rule D. Three releases running.
+- **`make doc-output` could only run on one laptop.** The script hardcoded an absolute path
+  and `chdir`'d to it, so CI raised `FileNotFoundError` before comparing a transcript. It
+  then found one real skip: `attest` needs `--features local`, which `doc-output` does not
+  build.
+
+### Documentation
+
+- **Everything is at 0.5.0**, and `find` is taught rather than merely shipped — in the
+  salience chapter, because the pairing is the point: `salience` ranks by structure and
+  never reads a word, `find` ranks by words and never looks at the graph. It states where it
+  is weak with the measured numbers. The rationale gains "Finding things again"; the format
+  guide gains the duplicate-key rule and a callout saying plainly that it is *not* the
+  contract; the architecture RFC gains "Closed in 0.5".
+
+- **`make doc-output` runs 45 transcripts**, up from 43 — see the caption-regex defect above.
+
+Carried forward, in the order I would take them:
+
+- **A semantic retrieval backend**, now that there is a measurement saying where one would
+  help. `model2vec-rs` is the candidate: pure Rust, no ONNX Runtime, no `ort` release-
+  candidate pin, static embeddings that are a lookup rather than a forward pass and so are
+  reproducible across machines. It would sit behind `Retriever` in an impure tier, never in
+  the pure crates, and dispatch by kernel type rather than replacing BM25.
+- **The two measurement gaps.** The quoting coarsening — a fixture that yields five or six
+  units yields three once each must carry a quotable span — is observed once and never
+  explained; it may be the prompt or it may be inherent to anchoring a unit to text. One
+  experiment settles it. And `salience` is now the only pure command whose per-call cost has
+  never been characterised, though it measures linear.
+- **`pack`'s remaining scan.** Still super-linear when the budget binds (~3x per doubling):
+  the pricing is cached but the per-round scan over candidates is not. Removing it needs an
+  ordered structure, where the subtlety is that affordability moves with `used` even for
+  candidates nothing has touched.
+- **Seeding the fuzz corpus.** Each CI run starts cold and reaches less far in its sixty
+  seconds than a local run does. The corpus in `fuzz/artifacts/` is the obvious seed.
+- **An escape syntax for a body line opening `#` or `//`.** 0.2 documented the limitation and
+  0.4 fixed the header-value half of it, which leaves the body case as the only place it
+  bites.
+- **`W305` and `W306`**, the two diagnostic codes with no emission site. Documented as
+  unreachable in 0.4; emit or delete.
+- **OpenAI and Anthropic mappers**, when credentials exist. Still blocked, and the risk has
+  grown rather than shrunk since Appendix C gained `relations` and `quote`.
+- **The `ui` stub**, which prints "not wired in this build" — the one advertised command
+  that does nothing. Build it or remove it.
+
+---
+
 ## 0.4.0 — 2026-07-30
 
 ### Fixed
@@ -70,7 +216,43 @@ must name exactly one byte string. Regression tests pin every case.
   value that large has no faithful representation under the constraint, so there is nothing
   to preserve.
 
+- **A third decoder defaulted a field the encoder always writes.** `dec_schema_decl`
+  defaulted `version`, so `[8, {0: "smysl.kernel/x"}]` decoded and re-encoded as a two-key
+  map. Same defect as `dec_packinfo` and `dec_view` in 0.4.0 — and it survived the sweep
+  written to generalise that fix, because none of the sweep's probe values parsed as a
+  `SchemaId`, so the record type was never entered at all.
+
+- **Five vacuity defects in test infrastructure**, none in the product, all found by
+  asserting the shape of what a test is handed rather than trusting a clean run:
+
+  - the fuzz store generator produced **no relations**, so the join-semilattice laws ran
+    against stores with no rebuttals, supersessions or contentions — the entire class the
+    laws are about;
+  - then **no unit above L0**, so `pack` had no level to choose and its search collapsed to
+    in-or-out;
+  - `exact.rs` never generated a `detail`, so **L2 was never in the search space** where
+    branch-and-bound is checked against brute force;
+  - the decoder sweep never entered `dec_schema_decl` (above), and the first repair of that
+    sweep was itself vacuous — a `0x73` header for a sixteen-byte string, so the value
+    failed to decode and the record type stayed skipped;
+  - `make doc-output`'s caption regex stopped at the first `"`, so two newly written
+    transcripts containing a quoted argument were skipped the moment they were written.
+
+  Every one is now pinned by a check that was verified to fail before it was trusted.
+
 ### Changed
+
+- **RFC SMYSL-1 is retired**, and `SMYSL_FORMAT_SPEC.md` is normative in its place — under
+  250 lines covering identity, deterministic CBOR, record framing, the surface round-trip
+  fixed point, rule X, the twelve rules, the conformance classes and the version axes. The
+  RFC was the product idea rather than doctrine; reconciling the code back to it would have
+  been fidelity to a plan nobody holds. `RFC_PROPOSAL.md` becomes a design log rather than a
+  work list — nothing in it was ever outstanding.
+
+  Two claims written from memory were wrong and corrected against the code: the canonical
+  uid text form is 52 base32 characters with a 26-character display form, and the
+  conformance classes are **not a ladder** — C-Merge adds lifecycle obligations to C-Consume
+  and does not subsume C-Produce.
 
 - **The fuzz CI job blocks.** It ran with `continue-on-error` through the 0.4 cycle while it
   worked off the backlog it discovered on its first run. That backlog is clear, both targets

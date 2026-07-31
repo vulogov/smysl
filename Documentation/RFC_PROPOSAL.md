@@ -1,6 +1,24 @@
 # RFC SMYSL-1 — proposed amendments
 
-**Status:** proposal, awaiting application to the RFC.
+**Status: historical. Superseded by [`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md).**
+
+This document was written to be applied back to RFC SMYSL-1. It never will be, and it should
+not be: the RFC was the *product idea*, written before there was an implementation, and the
+right response to 69 divergences is not to reconcile the code to a sketch it has outgrown.
+What needed specifying turned out to be much smaller than what the RFC specified — an
+interchange format needs identity, encoding and rules, not a command surface.
+
+So the format-bearing conclusions below are folded into `SMYSL_FORMAT_SPEC.md`, which is
+normative. This file is kept for the **reasoning**: each item records what the specification
+failed to say, what the implementation chose instead, and what the alternative would have
+cost. A choice recorded without its reasoning is one the next person has to make again.
+
+Read it as a design log, not as a list of outstanding work. Nothing here is outstanding —
+every item was resolved in code and pinned by a test before it was written down.
+
+---
+
+**Original status:** proposal, awaiting application to the RFC.
 **Covers:** SM-P0 through SM-P15, the operational-merit work after it, and the 0.2 cycle
 (2026-07-24 → 29).
 **Format version affected:** `smysl/0.1`, kernel `smysl.kernel/0.1`.

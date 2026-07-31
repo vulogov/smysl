@@ -65,6 +65,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "bundle",    about: "Emit the reachable closure of a view",                purity: Purity::Pure,  phase: "SM-P7"  },
     Cmd { name: "thread",    about: "Derive, refine, list, show, or import threads",       purity: Purity::Mixed, phase: "SM-P11" },
     Cmd { name: "salience",  about: "Report derived salience with per-term breakdown",     purity: Purity::Pure,  phase: "SM-P8"  },
+    Cmd { name: "find",      about: "Rank units against a query, lexically",                purity: Purity::Pure,  phase: "0.5.0"  },
     Cmd { name: "retract",   about: "Retract a unit; report the blast radius first",       purity: Purity::Pure,  phase: "SM-P6"  },
     Cmd { name: "render",    about: "Thread plus profile to artifact",                     purity: Purity::Pure,  phase: "SM-P12" },
     Cmd { name: "import",    about: "Tabular readings to measured units, without a model",  purity: Purity::Pure,  phase: "SM-P15" },
@@ -394,6 +395,40 @@ fn cli() -> Command {
                     Arg::new("store")
                         .value_name("PATH")
                         .help("Store to retract from"),
+                ),
+            "find" => sub
+                .arg(
+                    Arg::new("query")
+                        .value_name("QUERY")
+                        .required(true)
+                        .help("What to search for"),
+                )
+                .arg(
+                    Arg::new("limit")
+                        .long("limit")
+                        .short('n')
+                        .value_name("N")
+                        .default_value("10")
+                        .help("Maximum hits to return")
+                        .value_parser(clap::value_parser!(usize)),
+                )
+                .arg(
+                    Arg::new("kind")
+                        .long("kind")
+                        .value_name("TYPE")
+                        .action(clap::ArgAction::Append)
+                        .help("Restrict to this kernel type; repeatable"),
+                )
+                .arg(
+                    Arg::new("min-status")
+                        .long("min-status")
+                        .value_name("STATUS")
+                        .help("Restrict to units at or above this status"),
+                )
+                .arg(
+                    Arg::new("store")
+                        .value_name("PATH")
+                        .help("Store to search"),
                 ),
             "salience" => sub
                 .arg(
@@ -2276,6 +2311,97 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     ExitCode::Success
 }
 
+/// `smysl find` - rank units against a query.
+///
+/// Pure, which is not the usual shape for search: the default engine is BM25 over gists,
+/// bodies and details, with no model, no index on disk and no network. Two runs over the
+/// same store return the same ranking, ties broken by uid.
+///
+/// It indexes the **gist** principally, and that is what makes it work across payload kinds.
+/// A unit's payload may be a stack trace, a metric series or a diff, but its gist is a
+/// natural-language summary of whatever that is, and the summary is what you search.
+///
+/// Measured over the corpus: near-perfect on identifiers and on `evidence` units, and weak
+/// on `claim` units phrased differently from the query — the right claim reaches the top
+/// five three times in four but ranks first once in eight. `--kind` exists partly for that
+/// reason: narrowing to what you are actually after beats reading past what you are not.
+fn cmd_find(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let Some(path) = store_arg(m, global) else {
+        eprintln!("smysl find: no store given");
+        return ExitCode::Usage;
+    };
+    warn_output_is_a_report(global, "find");
+    let (store, _) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl find: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let text = m.get_one::<String>("query").cloned().unwrap_or_default();
+    let limit = m.get_one::<usize>("limit").copied().unwrap_or(10);
+    let mut q = smysl::Query::new(text, limit);
+
+    if let Some(kinds) = m.get_many::<String>("kind") {
+        let mut parsed = Vec::new();
+        for raw in kinds {
+            match smysl::KernelType::parse(raw) {
+                Some(k) => parsed.push(k),
+                None => {
+                    eprintln!("smysl find: `{raw}` is not a kernel type");
+                    return ExitCode::Usage;
+                }
+            }
+        }
+        q = q.kinds(parsed);
+    }
+    if let Some(raw) = m.get_one::<String>("min-status") {
+        match smysl::Status::parse(raw) {
+            Some(st) => q = q.min_status(st),
+            None => {
+                eprintln!("smysl find: `{raw}` is not a status");
+                return ExitCode::Usage;
+            }
+        }
+    }
+
+    // `Retriever` must be in scope for `search`; the trait is the seam, and using it here
+    // keeps the command honest about depending on the interface rather than the engine.
+    use smysl::Retriever as _;
+    let hits = smysl::Bm25::index(&store).search(&q);
+
+    if global.get_flag("json") {
+        let rows: Vec<String> = hits
+            .iter()
+            .map(|h| {
+                format!(
+                    "{{\"uid\":{},\"score\":{:.4}}}",
+                    smysl::json_escape(&h.uid.canonical()),
+                    h.score
+                )
+            })
+            .collect();
+        println!("{{\"hits\":[{}]}}", rows.join(","));
+        return ExitCode::Success;
+    }
+
+    if hits.is_empty() {
+        // On stderr, so a caller piping stdout gets an empty result rather than a sentence
+        // it has to recognise and strip.
+        eprintln!("{path}: nothing matched");
+        return ExitCode::Success;
+    }
+    for h in &hits {
+        let gist = store
+            .get(&h.uid)
+            .map(|u| u.core.gist.as_str())
+            .unwrap_or("");
+        println!("{:.4}  {}  {}", h.score, h.uid, gist);
+    }
+    ExitCode::Success
+}
+
 /// `smysl thread` - derive, list, or show a thread (§19, §23.1).
 ///
 /// Derivation is pure: no model is consulted, so the same store yields the same thread on
@@ -3567,6 +3693,7 @@ fn main() -> ProcExitCode {
         "view" => cmd_view(sub, &matches),
         "bundle" => cmd_bundle(sub, &matches),
         "salience" => cmd_salience(sub, &matches),
+        "find" => cmd_find(sub, &matches),
         "pack" => cmd_pack(sub, &matches),
         "retract" => cmd_retract(sub, &matches),
         "thread" => cmd_thread(sub, &matches),
@@ -3612,7 +3739,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 21);
+        assert_eq!(COMMANDS.len(), 22);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -3627,6 +3754,7 @@ mod tests {
                 "bundle",
                 "thread",
                 "salience",
+                "find",
                 "retract",
                 "render",
                 "import",
@@ -3664,10 +3792,27 @@ mod tests {
         );
     }
 
+    /// Every command records where it came from.
+    ///
+    /// `SM-Pnn` for the original delivery phases, which ended at SM-P15. A command wired
+    /// after that names the release cycle instead — `find` is the first, and writing
+    /// `SM-P16` for it would invent a phase that never existed to keep a string pattern
+    /// happy. What the field is for is answering "when did this arrive and why", and a
+    /// version answers that as well as a phase does.
     #[test]
     fn every_command_names_the_phase_that_wires_it() {
         for c in COMMANDS {
-            assert!(c.phase.starts_with("SM-P"), "{}: bad phase", c.name);
+            let phase = c.phase.starts_with("SM-P");
+            let cycle = c
+                .phase
+                .split('.')
+                .all(|p| !p.is_empty() && p.chars().all(|ch| ch.is_ascii_digit()));
+            assert!(
+                phase || cycle,
+                "{}: `{}` is neither a phase nor a release",
+                c.name,
+                c.phase
+            );
             assert!(!c.about.is_empty(), "{}: no description", c.name);
         }
     }

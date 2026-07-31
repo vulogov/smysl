@@ -161,14 +161,23 @@ live-hosted: ## Live ingest gate against whichever hosted providers have keys se
 	SMYSL_INGEST_LIVE=1 $(CARGO) test -p smysl-ingest --features gemini,deepseek,openai,anthropic \
 		--test providers_live -- --nocapture --test-threads=1
 
-fuzz: ## Fuzz both parsers for 60s each, as CI does (nightly)
-	@echo "Both targets existed from the start and nothing ran them, which is how two stack"
-	@echo "overflows survived to 0.3. Sixty seconds each catches a regression of that shape."
-	cargo +nightly fuzz run surface -- -max_total_time=60
-	cargo +nightly fuzz run cbor -- -max_total_time=60
+# The two parser targets, plus three that fuzz the *algebra*: rule U's join-semilattice
+# laws, pack's constraints C1-C7, and rule L with guarantee A1 across the pipeline. The
+# properties are the ones the seeded tests already assert; what changes is that coverage
+# feedback drives the search instead of a fixed seed and 200 blind rounds.
+FUZZ_TARGETS := surface cbor merge_algebra pack_constraints pipeline pack_exact
 
-fuzz-long: ## Fuzz the surface parser until interrupted
-	cargo +nightly fuzz run surface
+fuzz: ## Fuzz every target for 60s each, as CI does (nightly)
+	@echo "The parser targets existed from the start and nothing ran them, which is how two"
+	@echo "stack overflows survived to 0.3 and eight more defects to 0.4. Sixty seconds each"
+	@echo "catches a regression; finding something new takes the long run below."
+	@set -e; for t in $(FUZZ_TARGETS); do \
+		echo "==> $$t"; \
+		cargo +nightly fuzz run $$t -- -max_total_time=60; \
+	done
+
+fuzz-long: ## Fuzz one target until interrupted: make fuzz-long T=merge_algebra
+	cargo +nightly fuzz run $(or $(T),surface)
 
 # ---------------------------------------------------------------------------
 # Housekeeping

@@ -71,6 +71,7 @@ fn every_reporting_command_emits_parseable_json() {
             vec!["retract", "--json", "--dry-run", GROUND, F1],
             "blast_radius",
         ),
+        ("find", vec!["find", "--json", "pool", F1], "hits"),
     ];
 
     for (name, args, key) in cases {
@@ -163,6 +164,7 @@ fn every_command_either_honours_output_or_says_it_cannot() {
     // Commands whose output is a report: they must say so, not ignore it.
     let refuses: &[(&str, Vec<&str>)] = &[
         ("salience", vec!["salience", F1]),
+        ("find", vec!["find", "pool", F1]),
         ("view", vec!["view", "--id", "v/x", "--roots", ROOT, F1]),
         ("retract", vec!["retract", "--dry-run", GROUND, F1]),
     ];
@@ -228,6 +230,7 @@ fn strict_promotes_a_warning_wherever_a_command_has_one() {
 fn strict_leaves_a_clean_run_alone() {
     for cmd in [
         vec!["check", F1],
+        vec!["find", "pool", F1],
         vec!["merge", F1],
         vec!["pack", "--budget", "2000", F1],
         vec!["bundle", F1],

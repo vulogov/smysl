@@ -59,17 +59,45 @@ fn generate(rng: &mut Rng, size: usize) -> Store {
 
     for i in 0..size {
         let gist = format!("unit {} of a generated store", rng.next() % 1000);
+        // Bodies and details, because they are part of the unit core and therefore part of
+        // the uid — two units identical but for a body are two different units, and merge
+        // has to keep both. The generator set neither until 0.5.0, so the join-semilattice
+        // laws had only ever been checked over gist-only units.
+        let body = if rng.chance(2) {
+            Some(format!("a body of {} sentences. ", 1 + rng.below(3)).repeat(2))
+        } else {
+            None
+        };
+        let detail = match &body {
+            Some(_) if rng.chance(2) => Some("a detail paragraph.".to_string()),
+            _ => None,
+        };
+        let with_levels = |mut b: UnitCoreBuilder| {
+            if let Some(t) = body.clone() {
+                b = b.body(t);
+            }
+            if let Some(t) = detail.clone() {
+                b = b.detail(t);
+            }
+            b
+        };
         let core = if uids.is_empty() || rng.chance(3) {
             // A rootless unit: measured evidence or a bare speculation.
             if rng.chance(2) {
-                UnitCoreBuilder::new(KernelType::Evidence, gist, Status::Measured)
-                    .source(SourceRef::new(SourceKind::Metric, "m"))
-                    .build()
-                    .unwrap()
+                with_levels(
+                    UnitCoreBuilder::new(KernelType::Evidence, gist, Status::Measured)
+                        .source(SourceRef::new(SourceKind::Metric, "m")),
+                )
+                .build()
+                .unwrap()
             } else {
-                UnitCoreBuilder::new(KernelType::Hypothesis, gist, Status::Speculative)
-                    .build()
-                    .unwrap()
+                with_levels(UnitCoreBuilder::new(
+                    KernelType::Hypothesis,
+                    gist,
+                    Status::Speculative,
+                ))
+                .build()
+                .unwrap()
             }
         } else {
             // A grounded unit. The status is chosen freely, so some of these violate
@@ -81,8 +109,7 @@ fn generate(rng: &mut Rng, size: usize) -> Store {
             } else {
                 Status::Derived
             };
-            UnitCoreBuilder::new(KernelType::Claim, gist, status)
-                .grounds(grounds)
+            with_levels(UnitCoreBuilder::new(KernelType::Claim, gist, status).grounds(grounds))
                 .build()
                 .unwrap()
         };

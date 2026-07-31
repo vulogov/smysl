@@ -88,6 +88,12 @@ fn generate(rng: &mut Rng, size: usize) -> (Vec<Record>, Vec<Uid>) {
         }
         if rng.chance(3) {
             b = b.body("a body worth some tokens, at level one");
+            // And sometimes a detail, so a step can name a unit that has all three levels.
+            // Rendering and packing a thread both care which levels exist; the generator
+            // produced no detail until 0.5.0.
+            if rng.chance(2) {
+                b = b.detail("a detail worth more tokens, at level two");
+            }
         }
         if t == KernelType::Evidence {
             b = b.source(SourceRef::new(SourceKind::Metric, "m"));

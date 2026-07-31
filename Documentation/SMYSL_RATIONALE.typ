@@ -238,7 +238,7 @@
     #line(length: 34%, stroke: 0.6pt + ink_accent)
     #v(5mm)
     #text(font: body_family, size: 10pt, style: "italic", fill: ink_smoke,
-      "Vladimir Ulogov · 2026 · smysl 0.4.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
+      "Vladimir Ulogov · 2026 · smysl 0.5.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
   ],
 )
 #v(6mm)
@@ -522,6 +522,38 @@ two different claims about the same thing — the join does not silently
 prefer whichever arrived second, the way an ordinary "last write wins" merge
 would. It records the disagreement as a *contention*, on the document, for a
 person to resolve deliberately. Nothing is picked for you behind your back.
+
+#section("Finding things again")
+
+A pipeline that has run for a while produces a store nobody has read. It holds
+units written by agents on other machines, named by hashes, and the question
+you arrive with is not "what does the graph say is important" but "where is
+the part about the connection pool".
+
+`salience` cannot answer that. It ranks by structure — what grounds what, what
+the argument leans on — and never reads a word. So `find` ranks by words
+instead, over the *gist* of every unit.
+
+That last detail is what makes it work at all. A unit's payload might be a
+stack trace, a table of measurements, a diff or a page of prose, and no single
+way of searching covers all four. But every unit carries a gist, because the
+format requires one, and a gist is a sentence about whatever the payload
+happens to be. You never search the telemetry. You search the sentence
+somebody — or some model — wrote about it.
+
+It is worth saying plainly what this is not. It is lexical search: it matches
+words, not meanings. Measured over the reference corpus it is perfect on
+identifiers like `pool.wait_ms` and near-perfect when your words match the
+author's, and it is weak when they do not — a paraphrased query finds the right
+claim somewhere in the top five three times in four, but puts it first only
+once in eight. Evidence and data are found reliably because they name concrete
+things; claims are found less reliably because a claim is an interpretation,
+and interpretations get phrased differently by different people.
+
+The honest position is that this is the floor rather than the ceiling, and it
+was built as a seam so the ceiling can be raised without disturbing anything
+beneath it. What it buys today is that a store stops being opaque, with no
+model, no index on disk, no network call, and the same answer on every machine.
 
 #section("Where it sits in a pipeline")
 

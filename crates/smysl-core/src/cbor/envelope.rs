@@ -904,7 +904,12 @@ fn dec_packinfo(d: &mut Dec<'_>) -> Res<PackInfo> {
 fn dec_schema_decl(d: &mut Dec<'_>) -> Res<SchemaDecl> {
     let at = d.position();
     let mut id = None;
-    let mut version = 0u32;
+    // Required, like `dec_packinfo`'s and `dec_view`'s fields before it. The encoder writes
+    // `version` unconditionally, so defaulting it here accepted `[8, {0: "smysl.kernel/x"}]`
+    // and re-encoded it as a two-key map. Third instance of this defect; see the sweep in
+    // `tests/roundtrip.rs`, which missed it because none of its probe values parsed as a
+    // `SchemaId` and so never entered this decoder at all.
+    let mut version = None;
     let mut types = Vec::new();
     let mut relations = Vec::new();
     let mut payload_shape = None;
@@ -916,7 +921,7 @@ fn dec_schema_decl(d: &mut Dec<'_>) -> Res<SchemaDecl> {
             Ok(true)
         }
         keys::schema_decl::VERSION => {
-            version = u32::try_from(d.uint()?).map_err(|_| bad(at))?;
+            version = Some(u32::try_from(d.uint()?).map_err(|_| bad(at))?);
             Ok(true)
         }
         keys::schema_decl::TYPES => {
@@ -936,7 +941,7 @@ fn dec_schema_decl(d: &mut Dec<'_>) -> Res<SchemaDecl> {
 
     Ok(SchemaDecl {
         id: id.ok_or_else(|| bad(at))?,
-        version,
+        version: version.ok_or_else(|| bad(at))?,
         types,
         relations,
         payload_shape,

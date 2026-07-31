@@ -1,0 +1,242 @@
+# smysl — normative format specification
+
+**Status:** normative. This document is the contract.
+**Format version:** `smysl/0.1` · **kernel schema:** `smysl.kernel/0.1`
+**Describes:** crate `0.5.0`.
+
+This is the whole of what a second implementation must obey to interoperate. It is
+deliberately short. Everything it does not say is a free choice.
+
+Three other documents exist and **none of them is normative**:
+
+- `SMYSL_MANUAL.typ` teaches the tool and the reasoning. 254 pages, and none of it binds you.
+- `SMYSL_ARCHITECTURE_RFC.md` describes how this implementation is built. Useful, not required.
+- `RFC_PROPOSAL.md` is a historical record of decisions taken while implementing the original
+  sketch. Its conclusions are folded in here; it is kept for the reasoning, not the rules.
+
+**RFC SMYSL-1 is retired.** It was the product idea, written before there was an
+implementation, and it stated it had zero open design decisions. Building it produced 69
+places where it was silent, self-contradictory, or contradicted by a live endpoint. The
+implementation had to choose something in order to exist, and it chose. Where this document
+and RFC SMYSL-1 disagree, this document is correct and the RFC is history.
+
+---
+
+## 1. What interoperability means here
+
+Identity is content. A unit's uid is a hash of its content, so two implementations that
+encode the same unit differently do not merely differ in bytes — they **disagree about what
+the unit is**, and every reference, merge and pack built on that uid is wrong.
+
+So the requirement is stronger than "parse each other's files." It is:
+
+> Given the same unit, two conformant implementations MUST produce byte-identical canonical
+> CBOR, and therefore the same uid.
+
+Everything in §2–§4 exists to make that achievable. If you implement nothing else here,
+implement those.
+
+## 2. Identity
+
+### 2.1 Uid derivation
+
+```
+uid = BLAKE3-256( canonical_cbor( unit_core ) )
+```
+
+The digest is the full 32 bytes. The **canonical text form** is `b3:` followed by all 256
+bits as 52 base32 characters. A **display form** of `b3:` plus the first 130 bits as 26
+characters is permitted where a human reads it; a parser MUST accept 26 to 52 characters and
+MUST NOT accept fewer. An abbreviated uid is a display convenience and never appears in
+canonical CBOR, which carries the raw 32 bytes.
+
+### 2.2 What is hashed
+
+The **unit core**, and only the unit core: a CBOR map with integer keys, emitted in
+ascending key order, omitting absent optional fields entirely.
+
+| key | field | type | presence |
+|---:|---|---|---|
+| 0 | schema | text | required |
+| 1 | gist | text | required |
+| 2 | body | text | optional |
+| 3 | detail | text | optional |
+| 4 | deps | set of uid | required, MAY be empty |
+| 5 | grounds | set of uid | required, MAY be empty |
+| 6 | status | uint | required |
+| 7 | source | map | optional |
+| 8 | payload | bytes | optional |
+| ≥9 | unknown keys | any | preserved verbatim (§5, rule X) |
+
+An absent optional field MUST be omitted, never encoded as `null`. `deps` and `grounds` are
+**sets**: deduplicated, and sorted by uid bytes.
+
+### 2.3 Status is part of identity
+
+`status` is inside the hash. This is the single most consequential rule in the format and
+the one most likely to be implemented by accident.
+
+It means **a unit's uid changes when its status changes.** Promoting a claim from
+`speculative` to `derived` does not update a unit; it produces a different unit. Anything
+that transforms a unit moves its identity, and the old uid remains the name of the old
+content. Implementations that treat status as mutable metadata will produce uids this
+specification does not.
+
+### 2.4 What is not hashed
+
+Attestations, relations, threads, views, contentions, pack info, schema declarations and
+label bindings are records *about* units. They are never part of a unit's uid. Two stores
+holding the same units with different attestations hold the same units.
+
+## 3. Deterministic CBOR
+
+A conformant encoder MUST satisfy all of the following. A conformant decoder MUST reject
+input that violates any of them (`SMY-E080`), rather than accepting and normalising it —
+otherwise two byte strings decode to one record and a uid stops naming exactly one thing.
+
+1. **Integer map keys** in the kernel. Text keys are permitted only inside a payload (§5).
+2. **Shortest-form integers.** No value encoded in more bytes than it needs.
+3. **Definite lengths.** Indefinite-length arrays, maps, strings and byte strings are
+   forbidden.
+4. **Ascending key order**, by integer value in the kernel and by encoded key bytes in a
+   payload map.
+5. **No `null` for an absent optional.** Omit the key.
+6. **NFC text.** Every text string is Unicode-normalised to NFC before encoding, including
+   unknown payload keys and their string values.
+7. **Floats are binary32, quantised to 1/1024.** `round(v · 1024) / 1024`. Non-finite input
+   saturates to the largest representable multiple rather than encoding an infinity.
+8. **Nesting is bounded at 128.** Deeper input is rejected. Unbounded recursive descent
+   aborts the process on hostile input, which is worse than an error because it cannot be
+   caught.
+
+Rule 4 has a consequence worth stating: a payload map is sorted by **encoded key bytes**, not
+by the string's code points, and duplicate keys are collapsed keeping the first.
+
+### 3.1 Record framing
+
+Every record is a two-element array: `[type_code, body]`.
+
+| code | record |
+|---:|---|
+| 1 | unit core |
+| 2 | attestation |
+| 3 | relation |
+| 4 | thread |
+| 5 | view |
+| 6 | contention |
+| 7 | pack info |
+| 8 | schema declaration |
+| 9 | checkpoint |
+| 10 | label binding |
+
+An **unknown type code MUST be preserved verbatim and skipped semantically** (`SMY-W014`),
+not rejected. Its body is still parsed strictly, so an unknown record cannot smuggle in a
+non-deterministic encoding. A store is a concatenation of records with no framing envelope.
+
+A decoder MUST NOT supply a default for a field the encoder always writes. If a record
+cannot be re-encoded to the bytes it was read from, it MUST be rejected.
+
+## 4. Canonical surface form
+
+Surface syntax is the human-facing form. It is **not** the identity-bearing form — uids come
+from CBOR — but round-tripping must not silently change content:
+
+> `parse → write → parse` MUST be a fixed point.
+
+Consequences that are easy to get wrong, each of which has been a real defect:
+
+- **Line endings are not content.** All trailing carriage returns are stripped, not one. A
+  document checked out with CRLF and the same document checked out with LF are the same
+  document. A carriage return inside a line is content and survives.
+- **Whitespace around a gist is not content.** The assembled gist, including continuation
+  lines, is trimmed.
+- **A value that would re-parse as something else MUST be quoted** on output: one that looks
+  like a number, `true`, `false` or `null`; one beginning `#` or `//`, which the header
+  comment syntax would otherwise consume to end of line.
+- **Keys need quoting too**, on the same principle: a key containing whitespace, `:`, `,`,
+  `{`, `}`, `"` or `\`.
+- **A unit carries one name.** Two labels may denote one uid, because identity is content;
+  only one survives a round trip, and it MUST be the canonically first (`SMY-W054`).
+- **A known field appearing twice keeps the first**, and the duplicate does not become an
+  unknown-key payload — surface syntax cannot spell a second one.
+
+## 5. Extensions (rule X)
+
+Unknown header keys, unknown record types and unknown kernel types MUST survive a round trip
+byte for byte. An implementation that drops what it does not understand breaks the format's
+central claim, because a pipeline is a chain of implementations and the weakest one would
+silently erase what the others rely on.
+
+Unknown header keys are carried as a payload map with text keys. Unknown *kernel* types
+degrade to a preserved-verbatim form and are reported (`SMY-W010`), never rejected.
+
+Decoding and surface parsing deliberately differ here: an unknown type on the wire degrades,
+but an unknown type in hand-written surface text is a typo and stays an error.
+
+## 6. The rules
+
+Named so they can be cited. Numbered constraints C1–C7 for packing are in the manual; these
+are the format-level obligations.
+
+| rule | obligation |
+|---|---|
+| **M** | Monotonicity — a `derived` or `inferred` unit MUST NOT exceed the status of its weakest present ground. |
+| **T** | Trust ceiling — a status MUST NOT exceed the ceiling its attestation's rung allows. |
+| **L** | Closure — a thread's steps MUST reference units whose dependencies are present. |
+| **R** | Rebuttals travel — a selection containing a claim MUST contain its live rebuttals. |
+| **U** | Merge is a join-semilattice: commutative, associative, idempotent. |
+| **I** | Ingest progress — a unit that cannot be repaired degrades rather than failing the batch. |
+| **S** | Staging — ingested units are staged, not committed, until accepted. |
+| **V1/V2** | Rendering — provenance and contentions are shown or suppressed per profile, never silently. |
+| **X** | Extensions survive (§5). |
+| **D** | Determinism — pure operations are bit-reproducible functions of their inputs. |
+| **P** | On a pipe, stdout defaults to CBOR. |
+
+Rule **U** deserves emphasis for the same reason as §2.3: nothing detects a violation from
+inside one peer. Two agents gossiping in different orders reach different stores and each
+believes itself.
+
+## 7. Conformance classes
+
+An implementation declares what it does, not how complete it is.
+
+The classes are **not a single ladder**. They branch, because a consumer and a merger need
+different things and neither needs everything.
+
+| class | obligations |
+|---|---|
+| **C-Read** | *structural* — decode, re-encode byte-identically, reject non-deterministic encoding, preserve unknowns (§5). |
+| **C-Consume** | structural + *epistemic* — enforce rules M and T when interpreting status, and reject an authored `unfounded`. |
+| **C-Produce** | structural + epistemic + *shape* — emit well-formed units: a gist present, grounds where the status demands them, a source where `measured` or `cited` demands one. |
+| **C-Merge** | structural + epistemic + *lifecycle* — honour retraction and supersession. |
+| **C-Full** | all of the above, plus *rendering* obligations. |
+
+Note that **C-Merge does not subsume C-Produce**: an implementation that merges stores need
+not be able to author well-formed units of its own, and one that authors need not implement
+retraction. Declare what you do.
+
+C-Read is the floor and everything rests on it. An implementation that cannot round-trip
+bytes is not conformant at any class.
+
+## 8. Versioning
+
+The **crate version and the format version are independent axes**. A crate major bump does
+not imply a format break, and a format break does not require one. `smysl/0.1` has not
+changed across crate versions 0.1 through 0.5, and record type 10 was *added* in 0.2 without
+a format bump — an older reader preserves it verbatim under rule X, which is exactly what
+rule X is for.
+
+An implementation MUST reject a format version it does not support and MUST NOT guess.
+
+---
+
+## Appendix: what this document deliberately omits
+
+Command-line surface, exit codes, thread schemas, rendering profiles, salience weights, the
+packing algorithm and its constraints C1–C7, the diagnostic registry, ingest and provider
+behaviour.
+
+None of it is required for interoperability. All of it is in the manual, and an
+implementation is free to do any of it differently — or not at all — and still be conformant
+at a class it declares. That freedom is the point: the original RFC specified a product, and
+what actually needs specifying is an interchange format.
