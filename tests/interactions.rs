@@ -478,3 +478,56 @@ fn a_bundled_store_carries_the_labels_of_the_units_it_contains() {
         );
     }
 }
+
+/// `pack --query` returns units the query never matched.
+///
+/// This is the whole point of the composition, and it is the thing ordinary retrieval does
+/// not do. Retrieval answers *which units are relevant*; the units it names are usually
+/// claims, and a claim without its grounds is an assertion. Packing pulls in the closure —
+/// grounds, deps, live rebuttals — so what comes back is an argument rather than a handful
+/// of excerpts that happen to score well.
+///
+/// Asserted as a *strict superset*: the pack must contain something no query term appears
+/// in. An assertion that merely checked the matched units were present would pass on a
+/// `pack` that had lost its closure logic entirely.
+#[test]
+fn packing_a_query_returns_more_than_the_query_matched() {
+    use smysl::Retriever as _;
+
+    let src = std::fs::read_to_string("fixtures/corpus/F1-incident.smy").expect("fixture");
+    let parsed = smysl::parse_surface(&src).expect("fixture parses");
+    let store = smysl::Store::from_records(parsed.records.clone());
+
+    let query = "connection pool saturated";
+    let hits = smysl::Bm25::index(&store).search(&smysl::Query::new(query, 3));
+    assert!(!hits.is_empty(), "the query should match something");
+
+    let s = smysl::salience(&store, &smysl::SalienceRequest::default());
+    let req =
+        smysl::PackRequest::budget(400).focusing(hits.iter().map(|h| h.uid).collect::<Vec<_>>());
+    let pack = smysl::pack(&store, &s, &req).expect("the focus fits in 400 tokens");
+
+    for h in &hits {
+        assert!(
+            pack.selection.contains_key(&h.uid),
+            "a focused unit was left out of its own pack"
+        );
+    }
+
+    let extra: Vec<_> = pack
+        .selection
+        .keys()
+        .filter(|u| !hits.iter().any(|h| h.uid == **u))
+        .collect();
+    assert!(
+        !extra.is_empty(),
+        "the pack held only what the query matched, so closure contributed nothing — which \
+         is precisely the difference between this and ordinary retrieval"
+    );
+
+    // And the result is a legal pack, not merely a bigger set.
+    assert!(
+        smysl::verify_pack(&store, &pack, &req).is_empty(),
+        "the composed pack violates a constraint"
+    );
+}

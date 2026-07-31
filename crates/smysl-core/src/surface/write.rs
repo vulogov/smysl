@@ -172,15 +172,43 @@ fn write_unit(out: &mut String, u: &UnitCore, ctx: &WriteContext) {
 
     if let Some(b) = &u.body {
         out.push('\n');
-        out.push_str(b);
+        out.push_str(&escape_block(b));
         out.push('\n');
     }
     if let Some(d) = &u.detail {
         out.push_str("\n--\n");
-        out.push_str(d);
+        out.push_str(&escape_block(d));
         out.push('\n');
     }
     out.push('\n');
+}
+
+/// Escape any line of a body or detail that would otherwise read back as a comment.
+///
+/// A line beginning `#` or `//` at column 0 is a comment wherever it sits, so a body holding
+/// a Markdown heading or a line of C++ could not be written back and read again unchanged —
+/// the line was simply dropped. `\\` is escaped too, because a line already starting with a
+/// backslash would otherwise be *un*escaped on the way in and lose it.
+///
+/// Nothing else is touched: a backslash anywhere but at the start of a line, and a `#` in
+/// the middle of one, are ordinary text and stay ordinary.
+fn escape_block(text: &str) -> String {
+    if !text
+        .lines()
+        .any(|l| l.starts_with('#') || l.starts_with("//") || l.starts_with('\\'))
+    {
+        return text.to_string();
+    }
+    text.lines()
+        .map(|l| {
+            if l.starts_with('#') || l.starts_with("//") || l.starts_with('\\') {
+                format!("\\{l}")
+            } else {
+                l.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn write_relation(out: &mut String, r: &Relation, ctx: &WriteContext) {

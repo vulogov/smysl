@@ -1225,3 +1225,62 @@ fn a_thread_gist_does_not_carry_leading_whitespace() {
         "a thread gist did not survive a round trip; the writer emitted:\n{once}"
     );
 }
+
+/// A body line may begin with `#` or `//`, escaped.
+///
+/// Such a line is a comment wherever it sits — which is what stops a note between two
+/// records from being absorbed into the previous unit's body — so before 0.6.0 a body simply
+/// could not start a line with either marker, and the line was dropped in silence. That is a
+/// real limitation for what this format carries: a Markdown heading and a line of C++ both
+/// begin that way. 0.2 documented it and 0.4 fixed the header-value half; this is the rest.
+#[test]
+fn an_escaped_body_line_may_open_with_a_comment_marker() {
+    let src = "@claim a/x { status: speculative }\n~ a gist here.\n\n\
+               \\# A heading\n\\// a line of code\nordinary prose\n";
+    let a = parse_surface(src).unwrap();
+    let body = a.records.iter().find_map(|r| match r {
+        Record::Unit(u) => u.body.clone(),
+        _ => None,
+    });
+    assert_eq!(
+        body.as_deref(),
+        Some("# A heading\n// a line of code\nordinary prose"),
+        "the escape should be removed from the content, not kept in it"
+    );
+
+    // And it survives, which needs the writer to put the escape back.
+    let ctx = WriteContext::from_labels(&a.labels);
+    let once = write_surface(None, &a.records, &ctx);
+    assert_eq!(parse_surface(&once).unwrap().records, a.records);
+    assert_eq!(
+        once,
+        write_surface(
+            None,
+            &parse_surface(&once).unwrap().records,
+            &WriteContext::from_labels(&a.labels)
+        ),
+        "escaping is not idempotent, so `fmt` would not be either"
+    );
+}
+
+/// A backslash that is not an escape stays a backslash.
+///
+/// Prose full of Windows paths and LaTeX should need no thought, so only `\#`, `\//` and
+/// `\\` at the start of a line mean anything.
+#[test]
+fn an_ordinary_backslash_is_left_alone() {
+    let src = "@claim a/x { status: speculative }\n~ a gist here.\n\n\
+               C:\\Users\\gandalf and \\alpha mid-line\n\\\\a literal backslash line\n";
+    let a = parse_surface(src).unwrap();
+    let body = a.records.iter().find_map(|r| match r {
+        Record::Unit(u) => u.body.clone(),
+        _ => None,
+    });
+    assert_eq!(
+        body.as_deref(),
+        Some("C:\\Users\\gandalf and \\alpha mid-line\n\\a literal backslash line")
+    );
+    let ctx = WriteContext::from_labels(&a.labels);
+    let once = write_surface(None, &a.records, &ctx);
+    assert_eq!(parse_surface(&once).unwrap().records, a.records);
+}
