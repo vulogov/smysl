@@ -41,6 +41,7 @@ MATRIX := \
 	--all-features \
 	--no-default-features@--features@cli \
 	--no-default-features@--features@tui \
+	--no-default-features@--features@semantic \
 	--no-default-features@--features@local \
 	--no-default-features@--features@remote \
 	--no-default-features@--features@exact-pack \

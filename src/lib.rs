@@ -94,6 +94,12 @@ pub use smysl_graph::{
 // query. `Retriever` is the seam an impure semantic backend would sit behind.
 pub use smysl_retrieve::{tokenize as retrieve_tokenize, Bm25, Hit, Query, Retriever};
 
+// ---- semantic retrieval (feature-gated) -----------------------------------
+// Impure, and outside the pure crates on purpose: it needs a model, and a model is something
+// outside the format deciding the answer. Same tier as the providers, for the same reason.
+#[cfg(feature = "semantic")]
+pub use smysl_embed::{Hybrid, Model as EmbedModel, Semantic};
+
 // ---- ingest / providers (feature-gated) -----------------------------------
 #[cfg(feature = "ingest")]
 pub use smysl_ingest::ceiling::ceiling;

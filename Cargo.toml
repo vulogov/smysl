@@ -19,6 +19,7 @@ smysl-pack     = { path = "crates/smysl-pack",     version = "0.7.0" }
 smysl-thread   = { path = "crates/smysl-thread",   version = "0.7.0" }
 smysl-render   = { path = "crates/smysl-render",   version = "0.7.0" }
 smysl-retrieve = { path = "crates/smysl-retrieve", version = "0.7.0" }
+smysl-embed    = { path = "crates/smysl-embed",    version = "0.7.0" }
 smysl-provider = { path = "crates/smysl-provider", version = "0.7.0" }
 smysl-ingest   = { path = "crates/smysl-ingest",   version = "0.7.0" }
 smysl-tui      = { path = "crates/smysl-tui",      version = "0.7.0" }
@@ -80,6 +81,9 @@ required-features = ["cli"]
 default   = ["cli", "local", "render-typst"]
 cli       = ["dep:clap"]
 tui       = ["dep:smysl-tui", "cli"]
+# Semantic retrieval. Off by default: it needs a model file the operator supplies, and a
+# build that cannot use one should not pay for `tokenizers` in its dependency tree.
+semantic  = ["dep:smysl-embed"]
 providers = ["dep:smysl-provider"]
 ingest    = ["dep:smysl-ingest", "providers"]
 local     = ["ingest", "smysl-provider/ollama", "smysl-ingest/ollama"]
@@ -110,6 +114,7 @@ smysl-render   = { workspace = true }
 smysl-provider = { workspace = true, optional = true }
 smysl-ingest   = { workspace = true, optional = true }
 smysl-tui      = { workspace = true, optional = true }
+smysl-embed    = { workspace = true, optional = true }
 clap           = { workspace = true, optional = true }
 
 [dev-dependencies]
