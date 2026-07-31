@@ -7,9 +7,52 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 0.5.0
+## 0.5.0 — 2026-07-31
 
 ### Added
+
+- **Retrieval: `smysl-retrieve` and `smysl find`.** A seam first and an engine second.
+  `Retriever` is a trait; the shipped implementation is BM25 over gists, bodies and details.
+
+  It indexes the **gist** principally, and that is the load-bearing idea. A unit's payload
+  may be a stack trace, a metric series, a diff or a page of prose, and no one way of
+  searching covers all four — but every unit carries a gist because the format requires one,
+  and a gist is a sentence about whatever the payload is. Payload heterogeneity never
+  reaches the index. The cost, stated rather than buried: retrieval quality is bounded by
+  gist quality, which is an ingest concern.
+
+  The crate is **pure** and under the purity gate, which is unusual for search. `bm25` is
+  taken with `default-features = false`, dropping three things that were each wrong here:
+  the default tokeniser stems and strips stop words, destroying identifiers when a payload
+  may be source code; language detection would make tokenisation depend on the corpus, so a
+  store could tokenise differently as it grew; `parallelism` puts a rayon reduction inside a
+  result that must not vary. The tokeniser is ours — split on whitespace and punctuation,
+  split camelCase/snake_case/kebab-case while keeping the whole token, lowercase, nothing
+  else.
+
+  `--kind` and `--min-status` are filters on the query rather than trimming applied
+  afterwards, because trimming a ranked list silently returns fewer than asked for.
+
+- **Measured, not asserted.** 20 queries over the corpus in three classes, none reusing a
+  gist verbatim:
+
+  | class | recall@5 | MRR | P@1 |
+  |---|---:|---:|---:|
+  | shared vocabulary | 1.00 | 0.94 | 0.88 |
+  | paraphrase | 0.75 | 0.41 | 0.12 |
+  | identifier | 1.00 | 1.00 | 1.00 |
+
+  By kernel type, `evidence` and `data` score 1.00 and `claim` 0.67. Concrete things are
+  findable by name; an interpretation is phrased in whatever words its author reached for.
+  So a semantic backend would pay on `claim`, `finding` and `hypothesis` and add nothing on
+  the rest — narrower and better founded than "add embeddings", and the reason the seam is a
+  trait rather than a second engine. Caveats worth keeping: 20 queries is small, the corpus
+  is small, and the same hand wrote the queries and the retriever.
+
+- **A fourth fuzz target, `pack_exact`** — exact packing against brute-force enumeration,
+  which is obviously correct and obviously too slow, and therefore an oracle rather than a
+  second opinion. Both directions are asserted: falling short of the optimum is a weaker
+  pack, but *exceeding* it means the search and the verifier disagree about feasibility.
 
 - **Three fuzz targets over the algebra**, not just the parsers. 0.4.0 found eight defects
   in minutes, every one in `surface` or `cbor` — the only two subsystems with a target.
@@ -69,8 +112,24 @@ and the facade asserts the two are independent.
   then found one real skip: `attest` needs `--features local`, which `doc-output` does not
   build.
 
-Carried forward from 0.4.0, in the order I would take them:
+### Documentation
 
+- **Everything is at 0.5.0**, and `find` is taught rather than merely shipped — in the
+  salience chapter, because the pairing is the point: `salience` ranks by structure and
+  never reads a word, `find` ranks by words and never looks at the graph. It states where it
+  is weak with the measured numbers. The rationale gains "Finding things again"; the format
+  guide gains the duplicate-key rule and a callout saying plainly that it is *not* the
+  contract; the architecture RFC gains "Closed in 0.5".
+
+- **`make doc-output` runs 45 transcripts**, up from 43 — see the caption-regex defect above.
+
+Carried forward, in the order I would take them:
+
+- **A semantic retrieval backend**, now that there is a measurement saying where one would
+  help. `model2vec-rs` is the candidate: pure Rust, no ONNX Runtime, no `ort` release-
+  candidate pin, static embeddings that are a lookup rather than a forward pass and so are
+  reproducible across machines. It would sit behind `Retriever` in an impure tier, never in
+  the pure crates, and dispatch by kernel type rather than replacing BM25.
 - **The two measurement gaps.** The quoting coarsening — a fixture that yields five or six
   units yields three once each must carry a quotable span — is observed once and never
   explained; it may be the prompt or it may be inherent to anchoring a unit to text. One
@@ -89,7 +148,8 @@ Carried forward from 0.4.0, in the order I would take them:
   unreachable in 0.4; emit or delete.
 - **OpenAI and Anthropic mappers**, when credentials exist. Still blocked, and the risk has
   grown rather than shrunk since Appendix C gained `relations` and `quote`.
-- **The ~69 RFC divergences**, which are real debt and not a release feature.
+- **The `ui` stub**, which prints "not wired in this build" — the one advertised command
+  that does nothing. Build it or remove it.
 
 ---
 
@@ -156,7 +216,43 @@ must name exactly one byte string. Regression tests pin every case.
   value that large has no faithful representation under the constraint, so there is nothing
   to preserve.
 
+- **A third decoder defaulted a field the encoder always writes.** `dec_schema_decl`
+  defaulted `version`, so `[8, {0: "smysl.kernel/x"}]` decoded and re-encoded as a two-key
+  map. Same defect as `dec_packinfo` and `dec_view` in 0.4.0 — and it survived the sweep
+  written to generalise that fix, because none of the sweep's probe values parsed as a
+  `SchemaId`, so the record type was never entered at all.
+
+- **Five vacuity defects in test infrastructure**, none in the product, all found by
+  asserting the shape of what a test is handed rather than trusting a clean run:
+
+  - the fuzz store generator produced **no relations**, so the join-semilattice laws ran
+    against stores with no rebuttals, supersessions or contentions — the entire class the
+    laws are about;
+  - then **no unit above L0**, so `pack` had no level to choose and its search collapsed to
+    in-or-out;
+  - `exact.rs` never generated a `detail`, so **L2 was never in the search space** where
+    branch-and-bound is checked against brute force;
+  - the decoder sweep never entered `dec_schema_decl` (above), and the first repair of that
+    sweep was itself vacuous — a `0x73` header for a sixteen-byte string, so the value
+    failed to decode and the record type stayed skipped;
+  - `make doc-output`'s caption regex stopped at the first `"`, so two newly written
+    transcripts containing a quoted argument were skipped the moment they were written.
+
+  Every one is now pinned by a check that was verified to fail before it was trusted.
+
 ### Changed
+
+- **RFC SMYSL-1 is retired**, and `SMYSL_FORMAT_SPEC.md` is normative in its place — under
+  250 lines covering identity, deterministic CBOR, record framing, the surface round-trip
+  fixed point, rule X, the twelve rules, the conformance classes and the version axes. The
+  RFC was the product idea rather than doctrine; reconciling the code back to it would have
+  been fidelity to a plan nobody holds. `RFC_PROPOSAL.md` becomes a design log rather than a
+  work list — nothing in it was ever outstanding.
+
+  Two claims written from memory were wrong and corrected against the code: the canonical
+  uid text form is 52 base32 characters with a 26-character display form, and the
+  conformance classes are **not a ladder** — C-Merge adds lifecycle obligations to C-Consume
+  and does not subsume C-Produce.
 
 - **The fuzz CI job blocks.** It ran with `continue-on-error` through the 0.4 cycle while it
   worked off the backlog it discovered on its first run. That backlog is clear, both targets
