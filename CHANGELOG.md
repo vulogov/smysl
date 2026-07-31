@@ -28,7 +28,10 @@ Nothing yet. Carried forward from 0.5.0, in the order I would take them:
   not, so the answer is to seed the sixty-second gate and keep a cold arm nightly.
 - **An escape syntax for a body line opening `#` or `//`.** 0.4 fixed the header-value half.
 - **`W305` and `W306`**, the two diagnostic codes with no emission site. Emit or delete.
-- **The `ui` stub**, the one advertised command that does nothing. Build it or remove it.
+- **`ui` deserves a decision.** Not the one I wrote here first — it is *not* a stub. It is a
+  working TUI, on by default, that this changelog and the manual both described as unwired
+  because the manual said so and nobody checked. The real question is whether a terminal
+  browser earns a `ratatui` and `crossterm` dependency in the default build.
 - **OpenAI and Anthropic mappers**, still blocked on credentials.
 
 ---
@@ -174,8 +177,9 @@ Carried forward, in the order I would take them:
   unreachable in 0.4; emit or delete.
 - **OpenAI and Anthropic mappers**, when credentials exist. Still blocked, and the risk has
   grown rather than shrunk since Appendix C gained `relations` and `quote`.
-- **The `ui` stub**, which prints "not wired in this build" — the one advertised command
-  that does nothing. Build it or remove it.
+- **`ui`**, which this list called a stub through 0.5.0 and which is nothing of the sort —
+  a working TUI, in the default feature set. Corrected in 0.6.0; the open question is
+  whether it earns its dependencies, not whether it exists.
 
 ---
 

@@ -124,7 +124,11 @@ mod tests {
 
     #[test]
     fn facade_reexports_the_diagnostic_registry() {
-        assert_eq!(Code::ALL.len(), 52);
+        // 51 as of 0.6.0: `SMY-W306` was deleted rather than emitted. It described a usage
+        // threshold that does not exist and never did, and had sat "documented as
+        // unreachable" for two releases — which is a holding pattern, not a decision. A code
+        // nobody can trigger is worse than a missing one, because a reader waits for it.
+        assert_eq!(Code::ALL.len(), 51);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

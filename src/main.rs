@@ -3257,6 +3257,20 @@ fn cmd_usage(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let total: u64 = rows.iter().map(|r| r.total()).sum();
     let calls: u64 = rows.iter().map(|r| r.calls).sum();
     println!("{:-<24} {calls:>6} call(s)  {total:>9} tokens", "");
+
+    // `SMY-W305`, finally emitted. The ledger has recorded `estimated` per entry since the
+    // provider layer landed, and nothing ever surfaced it — so a total built partly from
+    // our own token estimate was indistinguishable from one the provider reported, and the
+    // number was read as authoritative either way. It is a warning rather than a footnote
+    // because the difference matters when someone is reconciling a bill.
+    let estimated = ledger.entries().iter().filter(|e| e.estimated).count();
+    if estimated > 0 {
+        eprintln!(
+            "smysl usage: warning: SMY-W305: {estimated} of {} entr(ies) carry an estimated \
+             token count rather than one the provider reported",
+            ledger.entries().len()
+        );
+    }
     ExitCode::Success
 }
 
@@ -3708,8 +3722,15 @@ fn main() -> ProcExitCode {
         "compact" => cmd_compact(sub, &matches),
         "ui" => cmd_ui(sub, &matches),
         _ => {
+            // Unreachable while every command in `COMMANDS` has an arm above, which
+            // `command_table_matches_section_23` enforces. Kept as the honest answer if one
+            // is ever added to the table and not to the dispatch.
+            //
+            // It used to cite "RFC SMYSL-1 §26". That RFC was retired in 0.5.0, and a user
+            // facing an error should not be sent to a document that no longer governs
+            // anything.
             eprintln!(
-                "smysl {}: not wired in this build; lands in {} (see RFC SMYSL-1 \u{00a7}26)",
+                "smysl {}: declared in the command table but not wired in this build ({})",
                 cmd.name, cmd.phase
             );
             ExitCode::Failure
