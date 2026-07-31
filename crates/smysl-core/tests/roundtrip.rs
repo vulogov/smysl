@@ -475,12 +475,23 @@ fn a_pack_info_missing_a_mandatory_field_is_rejected_not_defaulted() {
     // shapes, because a decoder is only reachable through the ones its fields accept — an
     // earlier version of this sweep used integers alone, so `dec_view` (whose key 0 is a
     // text id) was never entered and its identical defect survived another fuzz run.
-    let values: [&[u8]; 5] = [
+    // A probe value only tests a decoder it can actually get *into*. `"a/b"` is not a valid
+    // `SchemaId`, so every schema-declaration case was rejected at key 0 and this sweep
+    // reported the class clean while `dec_schema_decl` carried the identical defect — the
+    // third time that has happened. A parseable kernel schema is here for exactly that
+    // reason, and any new decoder guarding key 0 with a parser needs a value that satisfies
+    // it or this sweep silently skips the whole record type.
+    // `0x70` is text(16), and `smysl.kernel/0.1` is sixteen bytes. Getting that header
+    // wrong is how the first attempt at this fix stayed as vacuous as the sweep it was
+    // meant to repair: the value failed to decode, so the record type was skipped again.
+    const KERNEL: &[u8] = b"\x70smysl.kernel/0.1";
+    let values: [&[u8]; 6] = [
         &[0x00],                   // 0
         &[0x60],                   // ""
         &[0x80],                   // []
         &[0xF6],                   // null
-        &[0x63, b'a', b'/', b'b'], // "a/b", a plausible id
+        &[0x63, b'a', b'/', b'b'], // "a/b", a plausible label
+        KERNEL,                    // a schema id that actually parses
     ];
     for code in 0u8..=12 {
         for key in 0u8..=9 {
