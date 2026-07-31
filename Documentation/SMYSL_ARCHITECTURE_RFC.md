@@ -1,6 +1,9 @@
 # smysl — implemented architecture
 
-**Status:** descriptive, not normative.
+**Status:** descriptive, not normative. The normative document is
+[`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md), which is deliberately a fraction of this
+one's length: interoperability needs identity, encoding and the rules, not an account of how
+this implementation happens to be built.
 **Describes:** the code at `main`, crate `0.4.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
 **Compiled:** 2026-07-30, from SM-P0 through SM-P15, the operational-merit work after it, the
 0.2 cycle (label bindings, comment syntax, forward compatibility), the 0.3 cycle (global

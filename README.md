@@ -265,7 +265,14 @@ signature says.
 
 ## Status
 
-Implements **RFC SMYSL-1 (Combined)** — format `smysl/0.1`, kernel `smysl.kernel/0.1`.
+Format `smysl/0.1`, kernel `smysl.kernel/0.1`. The contract is
+[`Documentation/SMYSL_FORMAT_SPEC.md`](Documentation/SMYSL_FORMAT_SPEC.md) — everything a
+second implementation must obey, and nothing else.
+
+RFC SMYSL-1 is retired. It was the product idea, written before there was an implementation;
+building it produced 69 places where it was silent or self-contradictory, each decided in
+code and recorded in [`Documentation/RFC_PROPOSAL.md`](Documentation/RFC_PROPOSAL.md). Those
+decisions are folded into the spec, which is normative in its place.
 Version 0.1: usable and extensively tested, but the format may still shift before 1.0.
 
 | Phase | Delivers | State |
