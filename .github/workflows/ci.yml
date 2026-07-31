@@ -204,6 +204,23 @@ jobs:
             done
             exit 1
           }
+      # The algebra targets. Rule U's join-semilattice laws, pack's C1-C7, and rule L with
+      # guarantee A1 across the pipeline — the same properties the seeded tests assert,
+      # searched by coverage feedback rather than by a fixed seed and 200 blind rounds.
+      # These are where a defect is *quiet*: a wrong merge still merges, a wrong pack still
+      # packs, and neither raises a diagnostic on the way past.
+      - name: algebra
+        run: |
+          for t in merge_algebra pack_constraints pipeline; do
+            ls fuzz/artifacts/$t > /tmp/before-$t.txt 2>/dev/null || true
+            cargo +nightly fuzz run $t -- -max_total_time=60 || {
+              ls fuzz/artifacts/$t > /tmp/after-$t.txt 2>/dev/null || true
+              for f in $(comm -13 /tmp/before-$t.txt /tmp/after-$t.txt); do
+                echo "::error title=$t-crash::$f = $(base64 -w0 fuzz/artifacts/$t/$f)"
+              done
+              exit 1
+            }
+          done
       # A crash leaves its input behind; publish it so the failure is reproducible rather
       # than merely reported.
       - name: upload any crash found

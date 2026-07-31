@@ -10,6 +10,17 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 smysl-core = { path = "../crates/smysl-core" }
+smysl-graph = { path = "../crates/smysl-graph" }
+smysl-pack = { path = "../crates/smysl-pack" }
+smysl-thread = { path = "../crates/smysl-thread" }
+smysl-check = { path = "../crates/smysl-check" }
+
+# A library in the fuzz crate, so the store generator is shared by every algebra target
+# rather than copied into each one. Copies drift, and a generator that differs between
+# targets makes a finding hard to attribute.
+[lib]
+name = "smysl_fuzz"
+path = "src/lib.rs"
 
 [[bin]]
 name = "surface"
@@ -20,5 +31,23 @@ doc = false
 [[bin]]
 name = "cbor"
 path = "fuzz_targets/cbor.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "merge_algebra"
+path = "fuzz_targets/merge_algebra.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "pack_constraints"
+path = "fuzz_targets/pack_constraints.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "pipeline"
+path = "fuzz_targets/pipeline.rs"
 test = false
 doc = false
