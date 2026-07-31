@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 0.6.0
+## 0.6.0 — 2026-07-31
 
 ### Added
 
@@ -115,6 +115,17 @@ and the facade asserts the two are independent.
   Both live in `crates/smysl-graph/tests/scaling.rs`, `#[ignore]`d: a measurement, not a
   gate. Timing assertions on shared runners fail for reasons unrelated to the code, and a
   test that cries wolf gets muted.
+
+### Packaging
+
+- **Publish-readiness, checked with a dry run rather than after the first bug report.** Three
+  things it found: `src/types/aux.rs` is a reserved device name on Windows, so `smysl-core`
+  would have been unbuildable there from the day it was published (now `annex.rs`);
+  `smysl-graph` had a circular dev-dependency on `smysl-pack`, which depends on it normally,
+  so neither could be published first (the pack measurement moved to the crate whose
+  operation it measures); and the root package would have shipped 8 MB of PDFs and images
+  against a 10 MB limit, so most of a consumer's download would have been a book they never
+  unpacked.
 
 ### Deferred to 0.7.0
 
