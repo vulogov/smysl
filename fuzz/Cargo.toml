@@ -11,7 +11,10 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 smysl-core = { path = "../crates/smysl-core" }
 smysl-graph = { path = "../crates/smysl-graph" }
-smysl-pack = { path = "../crates/smysl-pack" }
+# `branch-and-bound` on, because the differential target needs exact mode. Enabling it for
+# every target is harmless: exact is opt-in per request, and the extra code is worth having
+# under the coverage of the others.
+smysl-pack = { path = "../crates/smysl-pack", features = ["branch-and-bound"] }
 smysl-thread = { path = "../crates/smysl-thread" }
 smysl-check = { path = "../crates/smysl-check" }
 
@@ -49,5 +52,11 @@ doc = false
 [[bin]]
 name = "pipeline"
 path = "fuzz_targets/pipeline.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "pack_exact"
+path = "fuzz_targets/pack_exact.rs"
 test = false
 doc = false

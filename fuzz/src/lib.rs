@@ -94,13 +94,44 @@ pub fn generate(c: &mut Choices<'_>, max_units: usize) -> Store {
 
     for i in 0..unit_count {
         let gist = format!("unit {} of a generated store", c.below(1000));
+        // A body makes L1 available and a detail makes L2, so a store without them is one
+        // where `pack` has no level to choose and its whole search collapses to in-or-out.
+        // The first version of this generator set neither, so every unit was L0-only and
+        // the pack targets explored a fraction of what they appeared to. Length varies
+        // because cost is what makes a budget bind.
+        let body = match c.below(3) {
+            0 => None,
+            n => Some("a body sentence. ".repeat(n * 3)),
+        };
+        let detail = match c.below(4) {
+            0 => None,
+            // A detail without a body would be an L2 with no L1 beneath it.
+            _ if body.is_none() => None,
+            n => Some("a detail sentence. ".repeat(n * 2)),
+        };
+        let with_levels = |mut b: UnitCoreBuilder| {
+            if let Some(t) = body.clone() {
+                b = b.body(t);
+            }
+            if let Some(t) = detail.clone() {
+                b = b.detail(t);
+            }
+            b
+        };
         let core = if uids.is_empty() || c.chance(3) {
             if c.chance(2) {
-                UnitCoreBuilder::new(KernelType::Evidence, gist, Status::Measured)
-                    .source(SourceRef::new(SourceKind::Metric, "m"))
-                    .build()
+                with_levels(
+                    UnitCoreBuilder::new(KernelType::Evidence, gist, Status::Measured)
+                        .source(SourceRef::new(SourceKind::Metric, "m")),
+                )
+                .build()
             } else {
-                UnitCoreBuilder::new(KernelType::Hypothesis, gist, Status::Speculative).build()
+                with_levels(UnitCoreBuilder::new(
+                    KernelType::Hypothesis,
+                    gist,
+                    Status::Speculative,
+                ))
+                .build()
             }
         } else {
             let n = 1 + c.below(uids.len().min(3));
@@ -110,8 +141,7 @@ pub fn generate(c: &mut Choices<'_>, max_units: usize) -> Store {
             } else {
                 Status::Derived
             };
-            UnitCoreBuilder::new(KernelType::Claim, gist, status)
-                .grounds(grounds)
+            with_levels(UnitCoreBuilder::new(KernelType::Claim, gist, status).grounds(grounds))
                 .build()
         };
         // A builder can refuse — an empty gist, say. Skip rather than unwrap: a generator
@@ -201,6 +231,7 @@ mod tests {
         let mut sizes = Vec::new();
         let mut with_relations = 0usize;
         let mut with_threads = 0usize;
+        let mut multi_level = 0usize;
         // Inputs of the length libFuzzer actually settles on, varied so this measures the
         // generator rather than one lucky byte string.
         for seed in 0u16..600 {
@@ -216,6 +247,9 @@ mod tests {
             if store.threads().next().is_some() {
                 with_threads += 1;
             }
+            if store.units().any(|(_, u)| u.core.body.is_some()) {
+                multi_level += 1;
+            }
         }
         let non_empty = sizes.iter().filter(|n| **n > 0).count();
         let biggest = sizes.iter().copied().max().unwrap_or(0);
@@ -230,6 +264,12 @@ mod tests {
             "only {with_relations} of {} stores carried a relation, so rebuttals and \
              contentions — the cases the join-semilattice laws are actually about — are \
              barely reached",
+            sizes.len()
+        );
+        assert!(
+            multi_level * 4 >= sizes.len(),
+            "only {multi_level} of {} stores held a unit above L0, so `pack` had no level \
+             to choose and its search collapsed to in-or-out",
             sizes.len()
         );
         assert!(
