@@ -56,6 +56,14 @@ fn generate(rng: &mut Rng, size: usize) -> Store {
                 .source(SourceRef::new(SourceKind::Metric, "m"));
             if rng.chance(4) {
                 b = b.body("a body worth buying when there is room".to_string());
+                // A detail as well, sometimes, so L2 enters the search space at all. Without
+                // one `available_levels` tops out at L1, and this gate — the only place
+                // branch-and-bound is checked against brute force — never compared the two
+                // on a three-level unit. Gated on the body, because an L2 with no L1 beneath
+                // it is not a shape the packer can be handed.
+                if rng.chance(2) {
+                    b = b.detail("a detail worth buying when there is plenty of room".to_string());
+                }
             }
             b.build().unwrap()
         } else {
@@ -65,6 +73,14 @@ fn generate(rng: &mut Rng, size: usize) -> Store {
                 UnitCoreBuilder::new(KernelType::Claim, gist, Status::Speculative).grounds(grounds);
             if rng.chance(4) {
                 b = b.body("a body worth buying when there is room".to_string());
+                // A detail as well, sometimes, so L2 enters the search space at all. Without
+                // one `available_levels` tops out at L1, and this gate — the only place
+                // branch-and-bound is checked against brute force — never compared the two
+                // on a three-level unit. Gated on the body, because an L2 with no L1 beneath
+                // it is not a shape the packer can be handed.
+                if rng.chance(2) {
+                    b = b.detail("a detail worth buying when there is plenty of room".to_string());
+                }
             }
             b.build().unwrap()
         };
@@ -414,6 +430,7 @@ fn the_generator_produces_enumerable_graphs_with_constraints() {
     let mut rebuttals = 0usize;
     let mut enumerable = 0usize;
     let mut with_bodies = 0usize;
+    let mut with_details = 0usize;
 
     for _ in 0..40 {
         let store = generate(&mut rng, 14);
@@ -423,6 +440,10 @@ fn the_generator_produces_enumerable_graphs_with_constraints() {
             enumerable += 1;
         }
         with_bodies += store.units().filter(|(_, u)| u.core.body.is_some()).count();
+        with_details += store
+            .units()
+            .filter(|(_, u)| u.core.detail.is_some())
+            .count();
     }
 
     assert!(rebuttals > 30, "{rebuttals} rebuttals");
@@ -431,4 +452,12 @@ fn the_generator_produces_enumerable_graphs_with_constraints() {
         "only {enumerable} of 40 graphs were enumerable"
     );
     assert!(with_bodies > 10, "{with_bodies} units had bodies");
+    // L2 has to be reachable, or this gate compares brute force against branch-and-bound
+    // over a search space neither can put a unit at its deepest level in. The generator
+    // produced no detail at all until 0.5.0, so every comparison above was over units with
+    // at most two levels — true, and a third of the question.
+    assert!(
+        with_details > 5,
+        "only {with_details} units had a detail, so L2 was barely in the search space"
+    );
 }
