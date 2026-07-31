@@ -1,0 +1,35 @@
+# The retrieval query set. One source, read by every retriever's evaluation, so the
+# numbers are comparable — a query set copied into a second evaluation drifts, and two
+# scores measured on different questions say nothing about each other.
+#
+# Columns: fixture <TAB> class <TAB> expected-label <TAB> query
+#
+# class is one of:
+#   Echo        the query shares vocabulary with the gist; lexical should be near-perfect
+#   Paraphrase  the same meaning in different words; the vocabulary-mismatch case, and
+#               the one a semantic backend exists to fix
+#   Identifier  a metric name, path or symbol; lexical should beat any embedder
+#
+# No query reuses a gist verbatim. A set built by copying gists scores perfectly against
+# any tokeniser that does not corrupt its input, and reports that as evidence.
+
+F1-incident	Echo	e/pool-wait	pool acquisition wait rose
+F1-incident	Echo	e/canary	canary configuration regression
+F1-incident	Echo	d/p95	95th percentile of request latency
+F2-research	Echo	e/cohort-a	cohort A subjects effect size
+F2-research	Echo	e/adherence-flat	adherence per cent in every dose band
+F4-qa	Echo	e/query-count	queries per checkout request rose
+F5-dataset	Echo	e/coverage	trace coverage in all six regions
+F5-dataset	Echo	t/orders-by-hour	order volume by hour of day
+F1-incident	Paraphrase	c/pool-saturation	connection backlog on the european shard
+F1-incident	Paraphrase	f/root-cause	what ultimately caused the slowdown
+F2-research	Paraphrase	c/replicates	the result holds in a second independent group
+F2-research	Paraphrase	c/dose-response	more medicine produced more improvement
+F4-qa	Paraphrase	c/n-plus-one	the shopping basket code asked the database too often
+F4-qa	Paraphrase	c/load-contribution	heavy shopping traffic made it worse but was not to blame
+F5-dataset	Paraphrase	c/tail-is-regional	the slowness sits in one place not everywhere
+F5-dataset	Paraphrase	h/sampling-artefact	could patchy measurement explain the difference
+F1-incident	Identifier	e/pool-wait	pool.wait_ms
+F4-qa	Identifier	e/trace-sample	checkout.p95
+F4-qa	Identifier	e/query-count	db.queries_per_request
+F5-dataset	Identifier	t/latency-by-region	latency_by_region.csv

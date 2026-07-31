@@ -50,7 +50,7 @@ MATRIX := \
 .DEFAULT_GOAL := help
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix gates purity update seed-fuzz \
         determinism conformance eval live-ollama live-hosted doc fuzz clean sweep \
-        commit ci toolchain eval-live docs doc-output fuzz-long
+        commit ci toolchain eval-live eval-semantic docs doc-output seed-fuzz fuzz-long
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -150,6 +150,27 @@ eval: ## The SM-P15 evaluation harness over the corpus (smysl arm, no model)
 live-ollama: ## Live tests against a local Ollama (needs `ollama serve`)
 	SMYSL_OLLAMA=required $(CARGO) test -p smysl-provider --features ollama
 	SMYSL_OLLAMA=required $(CARGO) test -p smysl-ingest --features ollama
+
+# The retrieval comparison. Three engines over one query set, so the tables can be read side
+# by side — which is the only reason to run it. A number from a different query set says
+# nothing about the number it is being compared with.
+#
+# The model is not in this repository and this build cannot fetch one: `hf-hub` is compiled
+# out of `model2vec-rs`, deliberately, so nothing here reaches the network. Get one however
+# you normally would, for example:
+#
+#     pip install huggingface_hub
+#     hf download minishlab/potion-base-8M --local-dir ~/models/potion-base-8M
+#
+# Any Model2Vec model works; `potion-base-8M` is small and the one the numbers below were
+# taken with. The directory needs `tokenizer.json`, `model.safetensors` and `config.json`.
+eval-semantic: ## Semantic vs lexical vs hybrid over the shared query set
+	@test -n "$(SMYSL_EMBED_MODEL)" || { \
+		echo "set SMYSL_EMBED_MODEL to a Model2Vec directory — see the comment above this"; \
+		echo "target in the Makefile for one way to obtain one."; exit 2; }
+	@echo "Queries: fixtures/retrieval/queries.tsv — the same set the lexical evaluation uses."
+	SMYSL_EMBED_MODEL=$(SMYSL_EMBED_MODEL) $(CARGO) test -p smysl-embed --features semantic \
+		--test evaluation -- --nocapture
 
 eval-live: ## Both eval arms, prose baseline included (needs GEMINI_API_KEY)
 	@echo "Runs a model at every hop of the prose arm, and again to judge the result."
