@@ -130,7 +130,7 @@ fn pack_per_call_cost_when_the_budget_binds() {
     println!("\npack with a binding budget, in process, median of 5\n");
     println!("{:>7}  {:>10}  {:>8}", "units", "ms", "x per 2x");
     let mut prev: Option<f64> = None;
-    for n in [250usize, 500, 1_000, 2_000] {
+    for n in [250usize, 500, 1_000, 2_000, 4_000, 8_000] {
         let s = store(n);
         let sal = salience(&s, &SalienceRequest::default());
         // A fraction of what the scope needs, so the greedy has to choose throughout.

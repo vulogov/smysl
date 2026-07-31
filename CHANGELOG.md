@@ -72,15 +72,45 @@ and the facade asserts the two are independent.
 
 - Retired-RFC references removed from a user-facing error and from `diag.rs`.
 
+### Performance
+
+- **`pack` is linear when the budget binds.** It was quadratic — 2.81, 3.46, 3.87x per
+  doubling, converging on 4.0 — because the greedy ran one round per unit admitted and
+  scanned every remaining candidate each round to pick a global best. 0.3.0 removed the
+  *pricing* from that scan by caching it behind an exact invalidation index; what remained
+  was the scan itself.
+
+  The scan is now an ordered set keyed on the choice, so a round is a pop rather than a walk.
+  Measured: 2.07, 2.20, 1.94, 2.23, 2.11x per doubling out to 8 000 units, and 2.05 ms at
+  2 000 units against 18.54 ms — **9x**, and the gap widens with size.
+
+  Two things made it sound where the textbook lazy greedy is not:
+
+  - The order is now *one named type*, `Choice`, used by nothing else. The risk in this
+    change was a heap reproducing three of the four tie-break terms and producing packs that
+    are legal, deterministic, monotone in budget and **different** — and the suite could not
+    have caught it, since no corpus fixture ties on density without also tying on salience.
+    Having one implementation of the order removes the question instead of testing around it.
+  - Affordability is checked at pop, and a candidate that cannot be afforded is *parked*
+    rather than dropped. `used` only grows, so an unaffordable candidate can never become
+    affordable — **unless its marginal cost falls**, which happens exactly when something in
+    its obligation is selected and therefore already paid for. That is a dirty event, so a
+    parked candidate is reconsidered when and only when it is dirtied. This is the
+    non-monotonicity that makes the naive lazy greedy unsound here.
+
+  Verified byte-identical: `tests/golden-packs.txt` records what `pack` selects across nine
+  fixtures at six budgets, and not one line moved.
+
 ### Measured
 
 - **`salience` is linear**, isolated from parsing and process startup: 2.07–2.22× per
   doubling, 3.96 ms at 16 000 units. It was the last pure operation whose per-call cost had
   only ever been *assumed* — the same assumption that was twice wrong about `pack`.
 
-- **`pack` with a binding budget converges on 3.87× per doubling** — quadratic, 18.5 ms at
-  2 000 units. That is the baseline any fix has to beat, and it is now measured in process
-  rather than inferred from command timings dominated by parsing.
+- **`pack` with a binding budget** was measured at 3.87x per doubling and 18.5 ms at 2 000
+  units, which is what made the fix above worth doing and is how it was shown to have
+  worked. Measured in process rather than inferred from command timings dominated by
+  parsing.
 
   Both live in `crates/smysl-graph/tests/scaling.rs`, `#[ignore]`d: a measurement, not a
   gate. Timing assertions on shared runners fail for reasons unrelated to the code, and a
