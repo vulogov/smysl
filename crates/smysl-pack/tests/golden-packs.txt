@@ -1,0 +1,425 @@
+F1-incident budget=40: 2 unit(s), 32 token(s), Greedy
+    b3:ekitkvj75uvgzxpvq3ad2nrv3b L0
+    b3:wo4t2c46lq45fnakd6tajlgcac L0
+F1-incident budget=120: 7 unit(s), 116 token(s), Greedy
+    b3:cvhirtgs2mpvli2ethhyeo32uf L0
+    b3:ekitkvj75uvgzxpvq3ad2nrv3b L0
+    b3:izyuzlt42mqcvgdfb4nfpllxyq L0
+    b3:phsoomklkmlq3sjvbe6cyuqy5v L0
+    b3:re42iey2e7syg6zp73tfrlqbvh L0
+    b3:wo4t2c46lq45fnakd6tajlgcac L0
+    b3:xkys7j42mcuyiaxiyh73xddimr L0
+F1-incident budget=200: 8 unit(s), 137 token(s), Greedy
+    b3:cvhirtgs2mpvli2ethhyeo32uf L0
+    b3:ekitkvj75uvgzxpvq3ad2nrv3b L0
+    b3:izyuzlt42mqcvgdfb4nfpllxyq L0
+    b3:js4xzessu5zwjpv2rawtugnuvj L0
+    b3:phsoomklkmlq3sjvbe6cyuqy5v L0
+    b3:re42iey2e7syg6zp73tfrlqbvh L0
+    b3:wo4t2c46lq45fnakd6tajlgcac L0
+    b3:xkys7j42mcuyiaxiyh73xddimr L0
+F1-incident budget=400: 8 unit(s), 244 token(s), Greedy
+    b3:cvhirtgs2mpvli2ethhyeo32uf L0
+    b3:ekitkvj75uvgzxpvq3ad2nrv3b L0
+    b3:izyuzlt42mqcvgdfb4nfpllxyq L0
+    b3:js4xzessu5zwjpv2rawtugnuvj L0
+    b3:phsoomklkmlq3sjvbe6cyuqy5v L0
+    b3:re42iey2e7syg6zp73tfrlqbvh L0
+    b3:wo4t2c46lq45fnakd6tajlgcac L2
+    b3:xkys7j42mcuyiaxiyh73xddimr L0
+F1-incident budget=1000: 8 unit(s), 244 token(s), Greedy
+    b3:cvhirtgs2mpvli2ethhyeo32uf L0
+    b3:ekitkvj75uvgzxpvq3ad2nrv3b L0
+    b3:izyuzlt42mqcvgdfb4nfpllxyq L0
+    b3:js4xzessu5zwjpv2rawtugnuvj L0
+    b3:phsoomklkmlq3sjvbe6cyuqy5v L0
+    b3:re42iey2e7syg6zp73tfrlqbvh L0
+    b3:wo4t2c46lq45fnakd6tajlgcac L2
+    b3:xkys7j42mcuyiaxiyh73xddimr L0
+F1-incident budget=5000: 8 unit(s), 244 token(s), Greedy
+    b3:cvhirtgs2mpvli2ethhyeo32uf L0
+    b3:ekitkvj75uvgzxpvq3ad2nrv3b L0
+    b3:izyuzlt42mqcvgdfb4nfpllxyq L0
+    b3:js4xzessu5zwjpv2rawtugnuvj L0
+    b3:phsoomklkmlq3sjvbe6cyuqy5v L0
+    b3:re42iey2e7syg6zp73tfrlqbvh L0
+    b3:wo4t2c46lq45fnakd6tajlgcac L2
+    b3:xkys7j42mcuyiaxiyh73xddimr L0
+F2-research budget=40: 2 unit(s), 31 token(s), Greedy
+    b3:gvxrs73kd2xjtaqtbg6q62tcuj L0
+    b3:xiqskepfsn62nfdhjx23ia7ehu L0
+F2-research budget=120: 6 unit(s), 111 token(s), Greedy
+    b3:ff64ph6ao6ienpy4mkotmqufru L0
+    b3:gvxrs73kd2xjtaqtbg6q62tcuj L0
+    b3:o5plnrheckld6vco3n26djcgbo L0
+    b3:ushub6ig3oqiqw745abybctrqj L0
+    b3:xiqskepfsn62nfdhjx23ia7ehu L0
+    b3:yfj6npiqbfzfmrl3bbsdccjud2 L0
+F2-research budget=200: 10 unit(s), 187 token(s), Greedy
+    b3:aqzqvu7igfpokoq527nzmdvyzr L0
+    b3:ff64ph6ao6ienpy4mkotmqufru L0
+    b3:gvxrs73kd2xjtaqtbg6q62tcuj L0
+    b3:nfuptwbysplfxz7yfrvvhgyemx L0
+    b3:o5plnrheckld6vco3n26djcgbo L0
+    b3:ushub6ig3oqiqw745abybctrqj L0
+    b3:xieqoh7qdlh66jvabzl7nwxvuc L0
+    b3:xiqskepfsn62nfdhjx23ia7ehu L0
+    b3:yfj6npiqbfzfmrl3bbsdccjud2 L0
+    b3:6y7ahgjnjzvhcusydfurkkrq72 L0
+F2-research budget=400: 11 unit(s), 397 token(s), Greedy
+    b3:aqzqvu7igfpokoq527nzmdvyzr L1
+    b3:ff64ph6ao6ienpy4mkotmqufru L1
+    b3:gvxrs73kd2xjtaqtbg6q62tcuj L0
+    b3:kucxel7zqupx2eabiedc7n23qz L0
+    b3:nfuptwbysplfxz7yfrvvhgyemx L1
+    b3:o5plnrheckld6vco3n26djcgbo L1
+    b3:ushub6ig3oqiqw745abybctrqj L1
+    b3:xieqoh7qdlh66jvabzl7nwxvuc L0
+    b3:xiqskepfsn62nfdhjx23ia7ehu L0
+    b3:yfj6npiqbfzfmrl3bbsdccjud2 L0
+    b3:6y7ahgjnjzvhcusydfurkkrq72 L0
+F2-research budget=1000: 11 unit(s), 397 token(s), Greedy
+    b3:aqzqvu7igfpokoq527nzmdvyzr L1
+    b3:ff64ph6ao6ienpy4mkotmqufru L1
+    b3:gvxrs73kd2xjtaqtbg6q62tcuj L0
+    b3:kucxel7zqupx2eabiedc7n23qz L0
+    b3:nfuptwbysplfxz7yfrvvhgyemx L1
+    b3:o5plnrheckld6vco3n26djcgbo L1
+    b3:ushub6ig3oqiqw745abybctrqj L1
+    b3:xieqoh7qdlh66jvabzl7nwxvuc L0
+    b3:xiqskepfsn62nfdhjx23ia7ehu L0
+    b3:yfj6npiqbfzfmrl3bbsdccjud2 L0
+    b3:6y7ahgjnjzvhcusydfurkkrq72 L0
+F2-research budget=5000: 11 unit(s), 397 token(s), Greedy
+    b3:aqzqvu7igfpokoq527nzmdvyzr L1
+    b3:ff64ph6ao6ienpy4mkotmqufru L1
+    b3:gvxrs73kd2xjtaqtbg6q62tcuj L0
+    b3:kucxel7zqupx2eabiedc7n23qz L0
+    b3:nfuptwbysplfxz7yfrvvhgyemx L1
+    b3:o5plnrheckld6vco3n26djcgbo L1
+    b3:ushub6ig3oqiqw745abybctrqj L1
+    b3:xieqoh7qdlh66jvabzl7nwxvuc L0
+    b3:xiqskepfsn62nfdhjx23ia7ehu L0
+    b3:yfj6npiqbfzfmrl3bbsdccjud2 L0
+    b3:6y7ahgjnjzvhcusydfurkkrq72 L0
+F3-narrative budget=40: 2 unit(s), 37 token(s), Greedy
+    b3:aj463mnuyc4gc76vsissalfmyo L0
+    b3:oh5fmvgeaqn3ethullkg3vdr4r L0
+F3-narrative budget=120: 5 unit(s), 100 token(s), Greedy
+    b3:aj463mnuyc4gc76vsissalfmyo L0
+    b3:fbfcii7qalm5njg3b5y35cdha4 L0
+    b3:oh5fmvgeaqn3ethullkg3vdr4r L0
+    b3:tgk5vxc6v4aesjgthueofqhjh4 L0
+    b3:wp6ll3ya46fcqi32l7bkgt2yo6 L0
+F3-narrative budget=200: 5 unit(s), 100 token(s), Greedy
+    b3:aj463mnuyc4gc76vsissalfmyo L0
+    b3:fbfcii7qalm5njg3b5y35cdha4 L0
+    b3:oh5fmvgeaqn3ethullkg3vdr4r L0
+    b3:tgk5vxc6v4aesjgthueofqhjh4 L0
+    b3:wp6ll3ya46fcqi32l7bkgt2yo6 L0
+F3-narrative budget=400: 5 unit(s), 261 token(s), Greedy
+    b3:aj463mnuyc4gc76vsissalfmyo L1
+    b3:fbfcii7qalm5njg3b5y35cdha4 L0
+    b3:oh5fmvgeaqn3ethullkg3vdr4r L0
+    b3:tgk5vxc6v4aesjgthueofqhjh4 L0
+    b3:wp6ll3ya46fcqi32l7bkgt2yo6 L0
+F3-narrative budget=1000: 5 unit(s), 411 token(s), Greedy
+    b3:aj463mnuyc4gc76vsissalfmyo L1
+    b3:fbfcii7qalm5njg3b5y35cdha4 L0
+    b3:oh5fmvgeaqn3ethullkg3vdr4r L1
+    b3:tgk5vxc6v4aesjgthueofqhjh4 L0
+    b3:wp6ll3ya46fcqi32l7bkgt2yo6 L0
+F3-narrative budget=5000: 5 unit(s), 411 token(s), Greedy
+    b3:aj463mnuyc4gc76vsissalfmyo L1
+    b3:fbfcii7qalm5njg3b5y35cdha4 L0
+    b3:oh5fmvgeaqn3ethullkg3vdr4r L1
+    b3:tgk5vxc6v4aesjgthueofqhjh4 L0
+    b3:wp6ll3ya46fcqi32l7bkgt2yo6 L0
+F4-qa budget=40: 2 unit(s), 35 token(s), Greedy
+    b3:j3o3fxkpxdb5p2b3kckahr7cdm L0
+    b3:kky3utif4vne76f2olnsich3ur L0
+F4-qa budget=120: 6 unit(s), 107 token(s), Greedy
+    b3:actmilzmbrikzgsgylcfopsp4f L0
+    b3:j3o3fxkpxdb5p2b3kckahr7cdm L0
+    b3:kky3utif4vne76f2olnsich3ur L0
+    b3:ljnsx4kz3brqrjtaukzmheenhu L0
+    b3:tj5scphwxudwa57yj64mhtczch L0
+    b3:ye72f27iy4sdxl7bv6mowopmuj L0
+F4-qa budget=200: 9 unit(s), 166 token(s), Greedy
+    b3:actmilzmbrikzgsgylcfopsp4f L0
+    b3:j3o3fxkpxdb5p2b3kckahr7cdm L0
+    b3:kky3utif4vne76f2olnsich3ur L0
+    b3:ljnsx4kz3brqrjtaukzmheenhu L0
+    b3:tj5scphwxudwa57yj64mhtczch L0
+    b3:uqokanrth55djywmh4fxba46op L0
+    b3:vphjommwrkajtu6jkmvytue5or L0
+    b3:ye72f27iy4sdxl7bv6mowopmuj L0
+    b3:6eofeegm6wpeszogq7qp4bcakk L0
+F4-qa budget=400: 9 unit(s), 391 token(s), Greedy
+    b3:actmilzmbrikzgsgylcfopsp4f L1
+    b3:j3o3fxkpxdb5p2b3kckahr7cdm L0
+    b3:kky3utif4vne76f2olnsich3ur L0
+    b3:ljnsx4kz3brqrjtaukzmheenhu L1
+    b3:tj5scphwxudwa57yj64mhtczch L0
+    b3:uqokanrth55djywmh4fxba46op L0
+    b3:vphjommwrkajtu6jkmvytue5or L1
+    b3:ye72f27iy4sdxl7bv6mowopmuj L1
+    b3:6eofeegm6wpeszogq7qp4bcakk L0
+F4-qa budget=1000: 9 unit(s), 463 token(s), Greedy
+    b3:actmilzmbrikzgsgylcfopsp4f L1
+    b3:j3o3fxkpxdb5p2b3kckahr7cdm L1
+    b3:kky3utif4vne76f2olnsich3ur L0
+    b3:ljnsx4kz3brqrjtaukzmheenhu L1
+    b3:tj5scphwxudwa57yj64mhtczch L0
+    b3:uqokanrth55djywmh4fxba46op L0
+    b3:vphjommwrkajtu6jkmvytue5or L1
+    b3:ye72f27iy4sdxl7bv6mowopmuj L1
+    b3:6eofeegm6wpeszogq7qp4bcakk L0
+F4-qa budget=5000: 9 unit(s), 463 token(s), Greedy
+    b3:actmilzmbrikzgsgylcfopsp4f L1
+    b3:j3o3fxkpxdb5p2b3kckahr7cdm L1
+    b3:kky3utif4vne76f2olnsich3ur L0
+    b3:ljnsx4kz3brqrjtaukzmheenhu L1
+    b3:tj5scphwxudwa57yj64mhtczch L0
+    b3:uqokanrth55djywmh4fxba46op L0
+    b3:vphjommwrkajtu6jkmvytue5or L1
+    b3:ye72f27iy4sdxl7bv6mowopmuj L1
+    b3:6eofeegm6wpeszogq7qp4bcakk L0
+F5-dataset budget=40: 2 unit(s), 33 token(s), Greedy
+    b3:ij2vhim7fptgjpf7ncdav5pcnj L0
+    b3:usxdws6jsrbpxwgai6u67spzf6 L0
+F5-dataset budget=120: 6 unit(s), 106 token(s), Greedy
+    b3:ij2vhim7fptgjpf7ncdav5pcnj L0
+    b3:usxdws6jsrbpxwgai6u67spzf6 L0
+    b3:wtl7eh4atj2nzbnzv3hu3kn7cj L0
+    b3:yfjvvteh3xlnr7ew3ioays7hy3 L0
+    b3:2geod3qfjkoneazsfazv7r275p L0
+    b3:5awlnekzw7ltpeduu3j3m6laxq L0
+F5-dataset budget=200: 10 unit(s), 185 token(s), Greedy
+    b3:aqnhfailhalnggfzojclzvebto L0
+    b3:hrgdfvhnbx5zsck3lscmgc7vff L0
+    b3:ij2vhim7fptgjpf7ncdav5pcnj L0
+    b3:usxdws6jsrbpxwgai6u67spzf6 L0
+    b3:vrgwtgbiexlq5g6qwwpa6u7hgm L0
+    b3:wtl7eh4atj2nzbnzv3hu3kn7cj L0
+    b3:yfjvvteh3xlnr7ew3ioays7hy3 L0
+    b3:2geod3qfjkoneazsfazv7r275p L0
+    b3:3j5m5ejs35mffgmmzuuzpj2qqq L0
+    b3:5awlnekzw7ltpeduu3j3m6laxq L0
+F5-dataset budget=400: 12 unit(s), 337 token(s), Greedy
+    b3:aqnhfailhalnggfzojclzvebto L0
+    b3:hrgdfvhnbx5zsck3lscmgc7vff L1
+    b3:ij2vhim7fptgjpf7ncdav5pcnj L0
+    b3:pmmua35lvhskpx66wdoynia4xd L0
+    b3:twt66lf5quglr72cql5afvwheq L0
+    b3:usxdws6jsrbpxwgai6u67spzf6 L1
+    b3:vrgwtgbiexlq5g6qwwpa6u7hgm L0
+    b3:wtl7eh4atj2nzbnzv3hu3kn7cj L0
+    b3:yfjvvteh3xlnr7ew3ioays7hy3 L0
+    b3:2geod3qfjkoneazsfazv7r275p L0
+    b3:3j5m5ejs35mffgmmzuuzpj2qqq L0
+    b3:5awlnekzw7ltpeduu3j3m6laxq L0
+F5-dataset budget=1000: 12 unit(s), 337 token(s), Greedy
+    b3:aqnhfailhalnggfzojclzvebto L0
+    b3:hrgdfvhnbx5zsck3lscmgc7vff L1
+    b3:ij2vhim7fptgjpf7ncdav5pcnj L0
+    b3:pmmua35lvhskpx66wdoynia4xd L0
+    b3:twt66lf5quglr72cql5afvwheq L0
+    b3:usxdws6jsrbpxwgai6u67spzf6 L1
+    b3:vrgwtgbiexlq5g6qwwpa6u7hgm L0
+    b3:wtl7eh4atj2nzbnzv3hu3kn7cj L0
+    b3:yfjvvteh3xlnr7ew3ioays7hy3 L0
+    b3:2geod3qfjkoneazsfazv7r275p L0
+    b3:3j5m5ejs35mffgmmzuuzpj2qqq L0
+    b3:5awlnekzw7ltpeduu3j3m6laxq L0
+F5-dataset budget=5000: 12 unit(s), 337 token(s), Greedy
+    b3:aqnhfailhalnggfzojclzvebto L0
+    b3:hrgdfvhnbx5zsck3lscmgc7vff L1
+    b3:ij2vhim7fptgjpf7ncdav5pcnj L0
+    b3:pmmua35lvhskpx66wdoynia4xd L0
+    b3:twt66lf5quglr72cql5afvwheq L0
+    b3:usxdws6jsrbpxwgai6u67spzf6 L1
+    b3:vrgwtgbiexlq5g6qwwpa6u7hgm L0
+    b3:wtl7eh4atj2nzbnzv3hu3kn7cj L0
+    b3:yfjvvteh3xlnr7ew3ioays7hy3 L0
+    b3:2geod3qfjkoneazsfazv7r275p L0
+    b3:3j5m5ejs35mffgmmzuuzpj2qqq L0
+    b3:5awlnekzw7ltpeduu3j3m6laxq L0
+F6-adversarial budget=40: 2 unit(s), 36 token(s), Greedy
+    b3:bacqe7jyc3pfhpnmn2vivvpz47 L0
+    b3:4p7cfgyytyimdbqyhq7hkuw2sb L0
+F6-adversarial budget=120: 5 unit(s), 96 token(s), Greedy
+    b3:bacqe7jyc3pfhpnmn2vivvpz47 L0
+    b3:hdn4uifpmzzopwuyajmhyf5xzu L0
+    b3:xa7undjm37yl57reyhuxgkiwmm L0
+    b3:2hkacsatxuvcywj6f4w2lkzojx L0
+    b3:4p7cfgyytyimdbqyhq7hkuw2sb L0
+F6-adversarial budget=200: 5 unit(s), 151 token(s), Greedy
+    b3:bacqe7jyc3pfhpnmn2vivvpz47 L0
+    b3:hdn4uifpmzzopwuyajmhyf5xzu L0
+    b3:xa7undjm37yl57reyhuxgkiwmm L0
+    b3:2hkacsatxuvcywj6f4w2lkzojx L1
+    b3:4p7cfgyytyimdbqyhq7hkuw2sb L0
+F6-adversarial budget=400: 5 unit(s), 272 token(s), Greedy
+    b3:bacqe7jyc3pfhpnmn2vivvpz47 L0
+    b3:hdn4uifpmzzopwuyajmhyf5xzu L1
+    b3:xa7undjm37yl57reyhuxgkiwmm L1
+    b3:2hkacsatxuvcywj6f4w2lkzojx L1
+    b3:4p7cfgyytyimdbqyhq7hkuw2sb L0
+F6-adversarial budget=1000: 5 unit(s), 272 token(s), Greedy
+    b3:bacqe7jyc3pfhpnmn2vivvpz47 L0
+    b3:hdn4uifpmzzopwuyajmhyf5xzu L1
+    b3:xa7undjm37yl57reyhuxgkiwmm L1
+    b3:2hkacsatxuvcywj6f4w2lkzojx L1
+    b3:4p7cfgyytyimdbqyhq7hkuw2sb L0
+F6-adversarial budget=5000: 5 unit(s), 272 token(s), Greedy
+    b3:bacqe7jyc3pfhpnmn2vivvpz47 L0
+    b3:hdn4uifpmzzopwuyajmhyf5xzu L1
+    b3:xa7undjm37yl57reyhuxgkiwmm L1
+    b3:2hkacsatxuvcywj6f4w2lkzojx L1
+    b3:4p7cfgyytyimdbqyhq7hkuw2sb L0
+F7-mixed-granularity budget=40: 2 unit(s), 33 token(s), Greedy
+    b3:de2aqvuf67xtzmx4roisi5ehvt L0
+    b3:7m36vxnjf7u34euhcskndrzott L0
+F7-mixed-granularity budget=120: 7 unit(s), 117 token(s), Greedy
+    b3:de2aqvuf67xtzmx4roisi5ehvt L0
+    b3:s6etp4fjq3gkd7335lzdwjzx54 L0
+    b3:s74a4gkw4dl7uiyavm4aqruof5 L0
+    b3:tfhgiir2fegvfkvq2fplgtvgq7 L0
+    b3:yxgkzufidc5f4lnzo6gec2orlx L0
+    b3:6vyopcz576ffedulovvsyz3npq L0
+    b3:7m36vxnjf7u34euhcskndrzott L0
+F7-mixed-granularity budget=200: 9 unit(s), 183 token(s), Greedy
+    b3:de2aqvuf67xtzmx4roisi5ehvt L0
+    b3:kkjg7kfbzlgopv66j6azxhrt3j L0
+    b3:q3kwrfzcdb3gp4iysrpp4oztsv L0
+    b3:s6etp4fjq3gkd7335lzdwjzx54 L0
+    b3:s74a4gkw4dl7uiyavm4aqruof5 L0
+    b3:tfhgiir2fegvfkvq2fplgtvgq7 L1
+    b3:yxgkzufidc5f4lnzo6gec2orlx L0
+    b3:6vyopcz576ffedulovvsyz3npq L0
+    b3:7m36vxnjf7u34euhcskndrzott L0
+F7-mixed-granularity budget=400: 9 unit(s), 328 token(s), Greedy
+    b3:de2aqvuf67xtzmx4roisi5ehvt L1
+    b3:kkjg7kfbzlgopv66j6azxhrt3j L0
+    b3:q3kwrfzcdb3gp4iysrpp4oztsv L0
+    b3:s6etp4fjq3gkd7335lzdwjzx54 L1
+    b3:s74a4gkw4dl7uiyavm4aqruof5 L1
+    b3:tfhgiir2fegvfkvq2fplgtvgq7 L1
+    b3:yxgkzufidc5f4lnzo6gec2orlx L0
+    b3:6vyopcz576ffedulovvsyz3npq L0
+    b3:7m36vxnjf7u34euhcskndrzott L0
+F7-mixed-granularity budget=1000: 9 unit(s), 328 token(s), Greedy
+    b3:de2aqvuf67xtzmx4roisi5ehvt L1
+    b3:kkjg7kfbzlgopv66j6azxhrt3j L0
+    b3:q3kwrfzcdb3gp4iysrpp4oztsv L0
+    b3:s6etp4fjq3gkd7335lzdwjzx54 L1
+    b3:s74a4gkw4dl7uiyavm4aqruof5 L1
+    b3:tfhgiir2fegvfkvq2fplgtvgq7 L1
+    b3:yxgkzufidc5f4lnzo6gec2orlx L0
+    b3:6vyopcz576ffedulovvsyz3npq L0
+    b3:7m36vxnjf7u34euhcskndrzott L0
+F7-mixed-granularity budget=5000: 9 unit(s), 328 token(s), Greedy
+    b3:de2aqvuf67xtzmx4roisi5ehvt L1
+    b3:kkjg7kfbzlgopv66j6azxhrt3j L0
+    b3:q3kwrfzcdb3gp4iysrpp4oztsv L0
+    b3:s6etp4fjq3gkd7335lzdwjzx54 L1
+    b3:s74a4gkw4dl7uiyavm4aqruof5 L1
+    b3:tfhgiir2fegvfkvq2fplgtvgq7 L1
+    b3:yxgkzufidc5f4lnzo6gec2orlx L0
+    b3:6vyopcz576ffedulovvsyz3npq L0
+    b3:7m36vxnjf7u34euhcskndrzott L0
+F8a-agent-alpha budget=40: 2 unit(s), 32 token(s), Greedy
+    b3:hpffca2bw76gvsrc6tjvr2q6uw L0
+    b3:67eofx62fjigxbfsbufavxjkxg L0
+F8a-agent-alpha budget=120: 6 unit(s), 99 token(s), Greedy
+    b3:cjixk2inyftvxj55d53w2ivxej L0
+    b3:e3f6wpuw6ie4ruf2ba62yrtagg L0
+    b3:hpffca2bw76gvsrc6tjvr2q6uw L0
+    b3:v5sjn55ujeflrdyu5qycgmtvz3 L0
+    b3:5bpbqpyw3yfxrpk53btzsr6ohz L0
+    b3:67eofx62fjigxbfsbufavxjkxg L0
+F8a-agent-alpha budget=200: 6 unit(s), 192 token(s), Greedy
+    b3:cjixk2inyftvxj55d53w2ivxej L1
+    b3:e3f6wpuw6ie4ruf2ba62yrtagg L0
+    b3:hpffca2bw76gvsrc6tjvr2q6uw L1
+    b3:v5sjn55ujeflrdyu5qycgmtvz3 L0
+    b3:5bpbqpyw3yfxrpk53btzsr6ohz L0
+    b3:67eofx62fjigxbfsbufavxjkxg L0
+F8a-agent-alpha budget=400: 6 unit(s), 192 token(s), Greedy
+    b3:cjixk2inyftvxj55d53w2ivxej L1
+    b3:e3f6wpuw6ie4ruf2ba62yrtagg L0
+    b3:hpffca2bw76gvsrc6tjvr2q6uw L1
+    b3:v5sjn55ujeflrdyu5qycgmtvz3 L0
+    b3:5bpbqpyw3yfxrpk53btzsr6ohz L0
+    b3:67eofx62fjigxbfsbufavxjkxg L0
+F8a-agent-alpha budget=1000: 6 unit(s), 192 token(s), Greedy
+    b3:cjixk2inyftvxj55d53w2ivxej L1
+    b3:e3f6wpuw6ie4ruf2ba62yrtagg L0
+    b3:hpffca2bw76gvsrc6tjvr2q6uw L1
+    b3:v5sjn55ujeflrdyu5qycgmtvz3 L0
+    b3:5bpbqpyw3yfxrpk53btzsr6ohz L0
+    b3:67eofx62fjigxbfsbufavxjkxg L0
+F8a-agent-alpha budget=5000: 6 unit(s), 192 token(s), Greedy
+    b3:cjixk2inyftvxj55d53w2ivxej L1
+    b3:e3f6wpuw6ie4ruf2ba62yrtagg L0
+    b3:hpffca2bw76gvsrc6tjvr2q6uw L1
+    b3:v5sjn55ujeflrdyu5qycgmtvz3 L0
+    b3:5bpbqpyw3yfxrpk53btzsr6ohz L0
+    b3:67eofx62fjigxbfsbufavxjkxg L0
+F8b-agent-beta budget=40: 2 unit(s), 37 token(s), Greedy
+    b3:rq5gjownkpszeibxuvkcj5id4c L0
+    b3:34xv6klbhpxqsqsvhm5s3xuegn L0
+F8b-agent-beta budget=120: 5 unit(s), 92 token(s), Greedy
+    b3:rq5gjownkpszeibxuvkcj5id4c L0
+    b3:t65rff76bcbxnwzw4oxzcadthe L0
+    b3:vw6udqf3kcbrqjiv573ai5ox2w L0
+    b3:wo5nb45msupuxfptfxpbh5q4ws L0
+    b3:34xv6klbhpxqsqsvhm5s3xuegn L0
+F8b-agent-beta budget=200: 5 unit(s), 196 token(s), Greedy
+    b3:rq5gjownkpszeibxuvkcj5id4c L0
+    b3:t65rff76bcbxnwzw4oxzcadthe L1
+    b3:vw6udqf3kcbrqjiv573ai5ox2w L0
+    b3:wo5nb45msupuxfptfxpbh5q4ws L0
+    b3:34xv6klbhpxqsqsvhm5s3xuegn L1
+F8b-agent-beta budget=400: 5 unit(s), 196 token(s), Greedy
+    b3:rq5gjownkpszeibxuvkcj5id4c L0
+    b3:t65rff76bcbxnwzw4oxzcadthe L1
+    b3:vw6udqf3kcbrqjiv573ai5ox2w L0
+    b3:wo5nb45msupuxfptfxpbh5q4ws L0
+    b3:34xv6klbhpxqsqsvhm5s3xuegn L1
+F8b-agent-beta budget=1000: 5 unit(s), 196 token(s), Greedy
+    b3:rq5gjownkpszeibxuvkcj5id4c L0
+    b3:t65rff76bcbxnwzw4oxzcadthe L1
+    b3:vw6udqf3kcbrqjiv573ai5ox2w L0
+    b3:wo5nb45msupuxfptfxpbh5q4ws L0
+    b3:34xv6klbhpxqsqsvhm5s3xuegn L1
+F8b-agent-beta budget=5000: 5 unit(s), 196 token(s), Greedy
+    b3:rq5gjownkpszeibxuvkcj5id4c L0
+    b3:t65rff76bcbxnwzw4oxzcadthe L1
+    b3:vw6udqf3kcbrqjiv573ai5ox2w L0
+    b3:wo5nb45msupuxfptfxpbh5q4ws L0
+    b3:34xv6klbhpxqsqsvhm5s3xuegn L1
+F9-forward-compat budget=40: 2 unit(s), 30 token(s), Greedy
+    b3:smydgqdgiz5faqwarmquc6dhnf L0
+    b3:v2mdia2yn6jhzzctkjp5bb5yef L0
+F9-forward-compat budget=120: 3 unit(s), 48 token(s), Greedy
+    b3:kgdpqbsopesclilrl7zwkkyrhy L0
+    b3:smydgqdgiz5faqwarmquc6dhnf L0
+    b3:v2mdia2yn6jhzzctkjp5bb5yef L0
+F9-forward-compat budget=200: 3 unit(s), 48 token(s), Greedy
+    b3:kgdpqbsopesclilrl7zwkkyrhy L0
+    b3:smydgqdgiz5faqwarmquc6dhnf L0
+    b3:v2mdia2yn6jhzzctkjp5bb5yef L0
+F9-forward-compat budget=400: 3 unit(s), 48 token(s), Greedy
+    b3:kgdpqbsopesclilrl7zwkkyrhy L0
+    b3:smydgqdgiz5faqwarmquc6dhnf L0
+    b3:v2mdia2yn6jhzzctkjp5bb5yef L0
+F9-forward-compat budget=1000: 3 unit(s), 48 token(s), Greedy
+    b3:kgdpqbsopesclilrl7zwkkyrhy L0
+    b3:smydgqdgiz5faqwarmquc6dhnf L0
+    b3:v2mdia2yn6jhzzctkjp5bb5yef L0
+F9-forward-compat budget=5000: 3 unit(s), 48 token(s), Greedy
+    b3:kgdpqbsopesclilrl7zwkkyrhy L0
+    b3:smydgqdgiz5faqwarmquc6dhnf L0
+    b3:v2mdia2yn6jhzzctkjp5bb5yef L0
