@@ -12,6 +12,34 @@
 
 ---
 
+## Getting it
+
+**Not on crates.io yet, deliberately.** The format version is `smysl/0.1` and the crate is
+`0.6.0`; the library works and the test suite is real, but publishing reserves a name and
+every version number permanently, and this is not something to hand people as production
+software yet. Both names are held back until it is.
+
+Until then:
+
+```sh
+git clone https://github.com/vulogov/smysl && cd smysl
+cargo build --release          # the CLI, at target/release/smysl
+cargo build --features tui     # …with the terminal browser as well
+```
+
+As a library, by git dependency:
+
+```toml
+[dependencies]
+smysl = { git = "https://github.com/vulogov/smysl", tag = "v0.6.0" }
+```
+
+Add `default-features = false` for the pure library: no async runtime, no HTTP client and no
+argument parser in the dependency tree, verified in CI on every push rather than promised
+here.
+
+---
+
 ## The problem
 
 When one AI hands work to another, it usually hands over **prose**.

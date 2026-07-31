@@ -118,6 +118,12 @@ and the facade asserts the two are independent.
 
 ### Packaging
 
+- **Not published to crates.io, deliberately.** The readiness work below was done and the
+  dry run is clean, but publishing permanently reserves both the name and every version
+  number, and 0.6.0 is not something to hand people as production software. The names are
+  held back until it is; the README now says so, and says how to build from source or depend
+  on a tag in the meantime, which it had never said at all.
+
 - **Publish-readiness, checked with a dry run rather than after the first bug report.** Three
   things it found: `src/types/aux.rs` is a reserved device name on Windows, so `smysl-core`
   would have been unbuildable there from the day it was published (now `annex.rs`);
