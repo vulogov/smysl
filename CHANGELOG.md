@@ -9,7 +9,67 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 0.5.0
 
-Nothing yet. Carried forward from 0.4.0, in the order I would take them:
+### Added
+
+- **Three fuzz targets over the algebra**, not just the parsers. 0.4.0 found eight defects
+  in minutes, every one in `surface` or `cbor` — the only two subsystems with a target.
+  That is a fact about where anyone was looking, not about where bugs live.
+
+  `merge`, `pack` and `thread` already assert the properties that matter. What drove that
+  generation was a fixed-seed xorshift over 100–200 blind rounds: the same cases every run,
+  forever, with no coverage feedback. The properties are unchanged; the search is not.
+
+  - `merge_algebra` — commutative, associative, idempotent. If any fails, two peers
+    gossiping in different orders reach different stores and the mesh needs coordination,
+    which is what rule U exists to avoid. Nothing reports it: each peer believes itself.
+  - `pack_constraints` — C1–C7 via `verify`, the budget, and value monotone in budget.
+    *Value*, not unit count: a larger budget may take one expensive unit over two cheap
+    ones, so asserting the count would fail on correct packs.
+  - `pipeline` — guarantee A1 across `check`, `salience` and `derive_thread`, plus rule L
+    on every derived thread. A1 had only ever been tested on the two parsers, which is the
+    narrow reading: a store from another agent has been through a parser, but the graph it
+    describes is still adversarial.
+
+  These are where a defect is quiet. A wrong pack still packs.
+
+### Fixed
+
+- **A duplicate known-field key leaked into the unknown-key payload and broke the round
+  trip.** `HObject::take` removed only the first entry under a key, and whatever a caller
+  leaves behind becomes the payload under rule X. A header with two `deps` parsed as one
+  real `deps` plus a second carried as an extension — which the writer emitted as a plain
+  `deps:` line, because that is the key's name. The next parse found one, took it as the
+  field, and the payload came back a key short. `take` now removes every entry and returns
+  the first, which is already what `object_to_payload` does when it dedups by encoded
+  bytes: one rule for duplicates, everywhere.
+
+  Found by the surface fuzzer **in CI, not locally** — a warm corpus and a cold one explore
+  differently.
+
+### Changed
+
+- **CI runs on `dev/**` branches, not only `main`.** It used to see a cycle's work for the
+  first time at the release commit, which is how the determinism job stayed red across
+  0.2.0, 0.3.0 and 0.4.0.
+- **`make test-matrix` sets `RUSTFLAGS=-D warnings`** and covers `--features cli`. Neither
+  was true before, and between them they hid a dead-code error for three releases.
+- **Failing CI jobs report why in an annotation**, and the fuzz jobs emit the crash input as
+  base64. Job logs and uploaded artifacts both need admin rights on this repository, so a
+  failure otherwise read as "exit code 1" and nothing else.
+
+### Fixed (CI)
+
+- **The determinism job was never a determinism failure.** `read_input` is called only from
+  `cmd_ingest`, which is `#[cfg(feature = "ingest")]`, and carried no gate — so it was dead
+  code in any build without `ingest`, and `-D warnings` made that a build error. The
+  determinism job builds exactly that configuration to run its permutations, so the build
+  failed, `pack` exited 101, and the job reported rule D. Three releases running.
+- **`make doc-output` could only run on one laptop.** The script hardcoded an absolute path
+  and `chdir`'d to it, so CI raised `FileNotFoundError` before comparing a transcript. It
+  then found one real skip: `attest` needs `--features local`, which `doc-output` does not
+  build.
+
+Carried forward from 0.4.0, in the order I would take them:
 
 - **The two measurement gaps.** The quoting coarsening — a fixture that yields five or six
   units yields three once each must carry a quotable span — is observed once and never
