@@ -116,30 +116,37 @@ and the facade asserts the two are independent.
   gate. Timing assertions on shared runners fail for reasons unrelated to the code, and a
   test that cries wolf gets muted.
 
-Carried forward from 0.5.0, in the order I would take them:
+### Deferred to 0.7.0
 
-- **A semantic retrieval backend.** 0.5.0 produced the measurement that says where one
-  helps: `claim`, `finding` and `hypothesis`, where a paraphrased query ranks the right unit
-  first once in eight. `model2vec-rs` is the candidate — pure Rust, no ONNX Runtime, no
-  `ort` release-candidate pin, and static embeddings that are a table lookup rather than a
-  forward pass, so they are reproducible across machines. Behind `Retriever`, in an impure
-  tier, dispatching by kernel type rather than replacing BM25.
-- **The two measurement gaps.** The quoting coarsening is observed once and never explained;
-  one experiment settles it. And `salience` is the only pure command whose per-call cost has
-  never been characterised, though it measures linear.
-- **`pack`'s remaining scan.** Still super-linear when the budget binds (~3x per doubling).
-  Sub-quadratic there needs lazy re-evaluation with a priority queue, and the trap is known:
-  the obvious lazy-greedy is unsound because density is not monotone.
-- **Seeding the fuzz corpus.** Each CI run starts cold. Worth doing deliberately — 0.4.0 and
-  0.5.0 both had findings that came from a *cold* run reaching somewhere a warm corpus does
-  not, so the answer is to seed the sixty-second gate and keep a cold arm nightly.
-- **An escape syntax for a body line opening `#` or `//`.** 0.4 fixed the header-value half.
-- **`W305` and `W306`**, the two diagnostic codes with no emission site. Emit or delete.
-- **`ui` deserves a decision.** Not the one I wrote here first — it is *not* a stub. It is a
-  working TUI, on by default, that this changelog and the manual both described as unwired
-  because the manual said so and nobody checked. The real question is whether a terminal
-  browser earns a `ratatui` and `crossterm` dependency in the default build.
-- **OpenAI and Anthropic mappers**, still blocked on credentials.
+- **A semantic retrieval backend.** 0.5.0 produced the measurement that says where one would
+  help — `claim`, `finding` and `hypothesis`, where a paraphrased query ranks the right unit
+  first once in eight — and 0.5.0 also built the seam it would sit behind. What is left is a
+  cycle's worth of work rather than an item: a new impure crate, a model-distribution story,
+  and the evaluation re-run per kernel type to show it actually beat 0.12 rather than merely
+  arrived.
+
+  `model2vec-rs` remains the candidate, and the reasoning has not changed: pure Rust, no
+  ONNX Runtime, no `ort` release-candidate pin, and static embeddings that are a table
+  lookup rather than a forward pass — so they are reproducible across machines, which
+  matters more here than accuracy at the margin. It would dispatch by kernel type rather
+  than replace BM25, because BM25 is already perfect on identifiers and on `evidence`.
+
+  Deferred deliberately, with a number waiting for it. That is a better position to start
+  from than most work gets.
+
+### Still carried
+
+- **The quoting coarsening.** A fixture that yields five or six units yields three once each
+  must carry a quotable span. Observed once, never explained — it may be the prompt or it may
+  be inherent to anchoring a unit to text it can quote. One experiment settles it, and the
+  experiment needs a model, so it sits behind the same credentials question as the mappers.
+- **OpenAI and Anthropic mappers**, still blocked on credentials. The risk has grown rather
+  than shrunk since Appendix C gained `relations` and `quote`.
+
+Everything else carried out of 0.5.0 was closed in this cycle: `pack`'s scan, the fuzz
+corpus, the body-line escape syntax, both dead diagnostic codes, the `ui` decision, and
+`salience`'s per-call cost — which was the other half of the "two measurement gaps" and is
+now measured rather than assumed.
 
 ---
 
