@@ -7,6 +7,49 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 0.7.0
+
+Nothing yet. What is queued, in the order I would take it:
+
+- **The semantic retrieval backend**, deferred here from 0.6.0 with a number waiting for it.
+  0.5.0 measured where one helps — `claim`, `finding` and `hypothesis`, where a paraphrased
+  query ranks the right unit first once in eight — and built the seam it sits behind, so what
+  is left is the work rather than the design: a new impure crate, a model-distribution story,
+  and the evaluation re-run per kernel type to show it *beat* 0.12 rather than merely
+  arrived.
+
+  `model2vec-rs` remains the candidate on unchanged grounds: pure Rust, no ONNX Runtime, no
+  `ort` release-candidate pin, and static embeddings that are a table lookup rather than a
+  forward pass, so they reproduce across machines. It dispatches by kernel type rather than
+  replacing BM25, which is already perfect on identifiers and on `evidence`.
+
+- **One crate instead of eleven.** Publishing `smysl` alone is impossible while its
+  dependencies are separate crates — cargo needs every non-dev dependency to resolve from the
+  registry, and a path dependency without a version is only allowed for dev-dependencies. So
+  a single published crate means a single crate: `crates/*/src/**` folded into `src/**` as
+  modules.
+
+  Rule B survives that, contrary to what I first assumed. It is already stated about the
+  facade — "with `default-features = false` this crate is a fully synchronous library with no
+  async runtime, no HTTP client, and no argument parser in its dependency tree" — so
+  `check-purity` would test the same property against one crate instead of six. What is
+  genuinely lost is the crate boundary as a compiler-enforced constraint: today `smysl-core`
+  cannot reach `clap` because it does not depend on it, and afterwards that becomes a `#[cfg]`
+  discipline instead.
+
+- **Publishing, when it is production software.** Not before. The readiness work is done and
+  the dry run is clean; both names are held back on purpose, and the README says so and says
+  what to do in the meantime.
+
+- **The quoting coarsening.** A fixture that yields five or six units yields three once each
+  must carry a quotable span. Observed once, never explained. One experiment settles it, and
+  the experiment needs a model.
+
+- **OpenAI and Anthropic mappers**, still blocked on credentials. The risk has grown rather
+  than shrunk since Appendix C gained `relations` and `quote`.
+
+---
+
 ## 0.6.0 — 2026-07-31
 
 ### Added
