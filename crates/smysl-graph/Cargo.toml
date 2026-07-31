@@ -10,3 +10,6 @@ repository.workspace   = true
 
 [dependencies]
 smysl-core = { workspace = true }
+
+[dev-dependencies]
+smysl-pack = { workspace = true }

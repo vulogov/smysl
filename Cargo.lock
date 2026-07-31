@@ -905,6 +905,7 @@ name = "smysl-graph"
 version = "0.6.0"
 dependencies = [
  "smysl-core",
+ "smysl-pack",
 ]
 
 [[package]]

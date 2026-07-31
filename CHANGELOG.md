@@ -9,7 +9,71 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 0.6.0
 
-Nothing yet. Carried forward from 0.5.0, in the order I would take them:
+### Added
+
+- **`pack --query TEXT`** — the composition retrieval was built for, of which 0.5.0 shipped
+  only half. Retrieval answers which units are relevant; packing answers what fits without
+  holes. The hits become `--focus`, so pack pulls in their grounds, deps and live rebuttals
+  and returns an argument rather than excerpts that scored well. Failing loudly when the
+  focus does not fit is deliberate; `--query-limit` defaults to 3, because each focused unit
+  drags its closure in behind it.
+
+- **`\#`, `\//` and `\\` escape a body or detail line.** A line opening with a comment
+  marker is a comment wherever it sits, so a body could never *begin* one — and a Markdown
+  heading and a line of C++ both do. 0.2 documented the limitation, 0.4 fixed the
+  header-value half, and until now the line was dropped in silence. Only those three
+  sequences, only at column 0.
+
+- **`make seed-fuzz`**, and CI seeds the sixty-second gate with the corpus fixtures and every
+  input that has ever broken something. `make fuzz-long` stays **cold** on purpose: 0.4.0's
+  and 0.5.0's findings both came from a cold run landing where a warm corpus does not go.
+  Seeded runs reach 5 339 coverage points against 3 023 cold.
+
+### Fixed
+
+- **A thread's gist kept its leading whitespace** — the 0.4.0 unit-gist fix in the sibling
+  path, which it never reached. Found within a minute of seeding the fuzzer.
+
+- **Six free-text fields reached the CBOR encoder without NFC normalisation.** The encoder
+  asserted the invariant in debug and trusted it in release; constructors establish it for a
+  unit's gist, body and detail and for nothing else — not a thread's gist, a step's note, a
+  view's intent, a granularity profile, a source reference or a pack estimator. Two had
+  already been found by fuzzing in two separate releases, each fixed by normalising in one
+  more constructor, which is a class being treated as a list. **The encoder normalises now**,
+  which costs a quick-check on text about to be BLAKE3'd anyway and makes the implementation
+  match what `SMYSL_FORMAT_SPEC.md` already promised.
+
+- **`ui` was documented as a stub and is not one.** `smysl-tui` is a working crate with its
+  own tests, the `tui` feature is in the default set, and the command runs given a terminal.
+  Appendix A said otherwise, so the purity table and the changelog did too — and so did I,
+  twice, while planning work around removing it. It has its flag table now.
+
+### Changed
+
+- **`SMY-W305` is emitted; `SMY-W306` is deleted.** Two releases of "documented as
+  unreachable" is a holding pattern rather than a decision. The ledger had recorded whether
+  each token count came from the provider or from our own estimate since the provider layer
+  landed and nothing surfaced it, so `usage` warns. W306 described a usage threshold that
+  does not exist, and inventing the feature to justify the code would be the wrong way
+  round. The registry is 51.
+
+- Retired-RFC references removed from a user-facing error and from `diag.rs`.
+
+### Measured
+
+- **`salience` is linear**, isolated from parsing and process startup: 2.07–2.22× per
+  doubling, 3.96 ms at 16 000 units. It was the last pure operation whose per-call cost had
+  only ever been *assumed* — the same assumption that was twice wrong about `pack`.
+
+- **`pack` with a binding budget converges on 3.87× per doubling** — quadratic, 18.5 ms at
+  2 000 units. That is the baseline any fix has to beat, and it is now measured in process
+  rather than inferred from command timings dominated by parsing.
+
+  Both live in `crates/smysl-graph/tests/scaling.rs`, `#[ignore]`d: a measurement, not a
+  gate. Timing assertions on shared runners fail for reasons unrelated to the code, and a
+  test that cries wolf gets muted.
+
+Carried forward from 0.5.0, in the order I would take them:
 
 - **A semantic retrieval backend.** 0.5.0 produced the measurement that says where one
   helps: `claim`, `finding` and `hypothesis`, where a paraphrased query ranks the right unit
