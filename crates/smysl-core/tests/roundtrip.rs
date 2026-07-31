@@ -510,3 +510,46 @@ fn a_pack_info_missing_a_mandatory_field_is_rejected_not_defaulted() {
         }
     }
 }
+
+/// Unicode form never reaches a uid — for *every* text field, not just a unit's gist.
+///
+/// The encoder used to assert NFC in debug and trust it in release, on the grounds that
+/// constructors establish it. They establish it for a unit's gist, body and detail, and for
+/// nothing else: a thread's gist, a step's note, a view's intent, a granularity profile, a
+/// source reference and a pack estimator all reach the encoder unchecked. Two of those were
+/// found by fuzzing in two separate releases, each fixed by normalising in one more
+/// constructor — which is a class of defect being treated as a list of defects.
+///
+/// The encoder normalises now, so this asserts the property the format spec promises rather
+/// than the discipline of whoever writes the next constructor.
+#[test]
+fn unicode_form_never_reaches_a_uid() {
+    use smysl_core::{AgentId, Hlc, Record, Thread, ThreadId, ThreadSchema};
+
+    // U+0301 (composed) and U+0341 (which NFC folds to U+0301) are the same text.
+    let mk = |mark: char| {
+        let mut gist = String::from("caf");
+        gist.push('e');
+        gist.push(mark);
+        Record::Thread(Thread::new(
+            ThreadId::new("t/x").unwrap(),
+            ThreadSchema::Brief,
+            AgentId::new("tool:test").unwrap(),
+            gist,
+            Hlc::new(0, 0, AgentId::new("tool:test").unwrap()),
+        ))
+    };
+
+    let composed = smysl_core::to_cbor(&mk('\u{301}'));
+    let folded = smysl_core::to_cbor(&mk('\u{341}'));
+    assert_eq!(
+        composed, folded,
+        "two Unicode forms of one thread gist encoded to different bytes, so they would \
+         carry different identities"
+    );
+
+    // And what comes back is the normalised form, so a decode/encode cycle is stable.
+    let (r, n) = smysl_core::from_cbor(&folded).expect("decodes");
+    assert_eq!(n, folded.len());
+    assert_eq!(smysl_core::to_cbor(&r), folded);
+}

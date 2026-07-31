@@ -181,6 +181,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-fuzz --locked
+      # Seed the gate, and only the gate. Sixty seconds from cold is mostly spent
+      # rediscovering the syntax; seeded with the repo's own fixtures and every input that has
+      # ever broken something, it starts where the last finding left off. Measured: seeding
+      # `surface` this way found a new defect in under a minute, in the `@thread` gist path,
+      # which cold runs had never reached.
+      #
+      # The long nightly run stays cold on purpose. 0.4.0's duplicate-key defect and 0.5.0's
+      # schema-declaration defect were both found by a *cold* run landing somewhere a warm
+      # corpus does not go, so seeding everything would have cost both.
+      - name: seed the corpus
+        run: make seed-fuzz
       # The crash input, base64 in an annotation, for the same reason: the uploaded artifact
       # below needs admin rights to download, so without this a fuzz failure is a report that
       # something broke with no way to reproduce it.

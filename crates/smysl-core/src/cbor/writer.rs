@@ -76,15 +76,34 @@ impl Enc {
         self.buf.extend_from_slice(b);
     }
 
-    /// Encode text. The NFC invariant is established by the constructors, so this only
-    /// asserts it in debug builds rather than paying for a scan in release.
+    /// Encode text, **normalising to NFC** rather than assuming someone else did.
+    ///
+    /// This used to assert the invariant in debug and trust it in release, on the grounds
+    /// that constructors establish it. They establish it for a unit's gist, body and detail
+    /// — and not for a thread's gist, a step's note, a view's intent, a granularity profile,
+    /// a source reference or a pack estimator, six free-text fields that reach here
+    /// unchecked. Two of those were found by fuzzing, in two separate releases, and each
+    /// time the fix was to normalise in one more constructor. That is a class of defect, not
+    /// two defects.
+    ///
+    /// Enforcing here closes it, and makes the implementation match what
+    /// `SMYSL_FORMAT_SPEC.md` already promises: `é` written as one code point and `é`
+    /// written as `e` plus a combining accent are the same text and get the same uid. A
+    /// debug-only assertion could never have delivered that, because the builds that matter
+    /// compile it out.
+    ///
+    /// The cost is a quick-check scan of text that is about to be hashed anyway — `is_nfc`
+    /// is O(n) over bytes BLAKE3 is about to read O(n) times, and the common case allocates
+    /// nothing.
     pub fn text(&mut self, s: &str) {
-        debug_assert!(
-            unicode_normalization::is_nfc(s),
-            "text reached the encoder without NFC normalisation: {s:?}"
-        );
-        self.head(major::TEXT, s.len() as u64);
-        self.buf.extend_from_slice(s.as_bytes());
+        if unicode_normalization::is_nfc(s) {
+            self.head(major::TEXT, s.len() as u64);
+            self.buf.extend_from_slice(s.as_bytes());
+        } else {
+            let n: String = unicode_normalization::UnicodeNormalization::nfc(s).collect();
+            self.head(major::TEXT, n.len() as u64);
+            self.buf.extend_from_slice(n.as_bytes());
+        }
     }
 
     /// Encode a float, quantising to 1/1024 first (constraint 4).

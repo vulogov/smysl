@@ -687,6 +687,13 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+        // Trimmed for the same reason a unit's gist is, and missed when that one was fixed:
+        // the writer emits `~ ` + gist and the reader strips the sigil *and* the whitespace
+        // after it, so surrounding space cannot survive a round trip. A thread's gist runs
+        // through this path rather than `gist_body_detail`, so the 0.4.0 fix never reached
+        // it. Found by seeding the fuzzer with the repo's own corpus fixtures, which reach
+        // `@thread` in seconds where a cold random search does not.
+        let gist = gist.trim().to_string();
 
         let mut steps = Vec::new();
         while let Some(l) = self.line() {

@@ -1195,3 +1195,33 @@ fn a_duplicate_known_field_does_not_become_payload() {
         "a duplicate key did not survive a round trip; the writer emitted:\n{once}"
     );
 }
+
+/// A thread's gist carries no surrounding whitespace either.
+///
+/// The same defect as `a_continued_gist_does_not_carry_leading_whitespace`, in the sibling
+/// path: a thread's gist is collected by the `@thread` parser rather than by
+/// `gist_body_detail`, so the 0.4.0 fix never reached it. Found by seeding the fuzzer with
+/// the repo's own corpus fixtures, which reach `@thread` in seconds where a cold random
+/// search does not — the argument for seeding, made concrete within a minute of trying it.
+#[test]
+fn a_thread_gist_does_not_carry_leading_whitespace() {
+    // A gist marker with nothing after it, then a continuation line — the shape that
+    // produced the leading space. The step line keeps the record well-formed.
+    let src = "@thread t/x { schema: brief, owner: \"human:v\" }\n\
+               ~\n  the thread gist\n  bottom-line \u{2192} c/a\n\
+               @claim c/a { status: speculative }\n~ a gist.\n";
+    let a = parse_surface(src).unwrap();
+    let gist = a.records.iter().find_map(|r| match r {
+        Record::Thread(t) => Some(t.gist.clone()),
+        _ => None,
+    });
+    assert_eq!(gist.as_deref(), Some("the thread gist"));
+
+    let ctx = WriteContext::from_labels(&a.labels);
+    let once = write_surface(None, &a.records, &ctx);
+    assert_eq!(
+        parse_surface(&once).unwrap().records,
+        a.records,
+        "a thread gist did not survive a round trip; the writer emitted:\n{once}"
+    );
+}
