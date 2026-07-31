@@ -7,6 +7,32 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 0.6.0
+
+Nothing yet. Carried forward from 0.5.0, in the order I would take them:
+
+- **A semantic retrieval backend.** 0.5.0 produced the measurement that says where one
+  helps: `claim`, `finding` and `hypothesis`, where a paraphrased query ranks the right unit
+  first once in eight. `model2vec-rs` is the candidate — pure Rust, no ONNX Runtime, no
+  `ort` release-candidate pin, and static embeddings that are a table lookup rather than a
+  forward pass, so they are reproducible across machines. Behind `Retriever`, in an impure
+  tier, dispatching by kernel type rather than replacing BM25.
+- **The two measurement gaps.** The quoting coarsening is observed once and never explained;
+  one experiment settles it. And `salience` is the only pure command whose per-call cost has
+  never been characterised, though it measures linear.
+- **`pack`'s remaining scan.** Still super-linear when the budget binds (~3x per doubling).
+  Sub-quadratic there needs lazy re-evaluation with a priority queue, and the trap is known:
+  the obvious lazy-greedy is unsound because density is not monotone.
+- **Seeding the fuzz corpus.** Each CI run starts cold. Worth doing deliberately — 0.4.0 and
+  0.5.0 both had findings that came from a *cold* run reaching somewhere a warm corpus does
+  not, so the answer is to seed the sixty-second gate and keep a cold arm nightly.
+- **An escape syntax for a body line opening `#` or `//`.** 0.4 fixed the header-value half.
+- **`W305` and `W306`**, the two diagnostic codes with no emission site. Emit or delete.
+- **The `ui` stub**, the one advertised command that does nothing. Build it or remove it.
+- **OpenAI and Anthropic mappers**, still blocked on credentials.
+
+---
+
 ## 0.5.0 — 2026-07-31
 
 ### Added
