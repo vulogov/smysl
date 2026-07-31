@@ -91,6 +91,8 @@ These apply to every subcommand, in any position on the command line.
     ([`--explain`], [—], [Say which constraint put each unit in.]),
     ([`--tokenizer`], [`ID`], [Cost model; recorded in the packinfo either way (D-2).]),
     ([`--mode`], [`greedy|exact`], [`exact` proves optimality by branch and bound; needs the `exact-pack` feature.]),
+    ([`--query`], [`TEXT`], [Focus on what this query finds, instead of naming uids.]),
+    ([`--query-limit`], [`N`], [How many hits `--query` focuses on; 3 by default.]),
     ([`PATH`], [positional], [Store to pack.]),
   ),
 )
@@ -667,8 +669,8 @@ and this page for a quick reminder of what the word means.
 #term("Comment")[
   A line beginning `#` or `//` at column 0, outside any record. Skipped by the parser and
   not carried by any record, so canonical form cannot reproduce one — `fmt` warns before it
-  drops them. A comment is a comment wherever it appears, including inside a body, which is
-  why a body cannot open a line with either marker.
+  drops them. A comment is a comment wherever it appears, including inside a body; a body
+  that needs to open a line with a marker escapes it as `\#` or `\//` (0.6).
 ]
 
 #term("Contention")[

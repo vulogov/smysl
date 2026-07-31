@@ -178,7 +178,7 @@
     #line(length: 34%, stroke: 0.6pt + ink_accent)
     #v(5mm)
     #text(font: body_family, size: 10pt, style: "italic", fill: ink_smoke,
-      "Vladimir Ulogov · 2026 · smysl 0.5.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
+      "Vladimir Ulogov · 2026 · smysl 0.6.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
   ],
 )
 #v(6mm)
@@ -212,10 +212,18 @@ meet them. Blank lines separate records but carry no meaning of their own.
   header inside a record already accepted both, and rejecting between records what was
   accepted within one made the surface contradict itself.
 
-  A comment is a comment *wherever it sits*, including inside a body — so a body cannot
-  open a line with either marker. The alternative was worse: a body runs from the gist to
-  the next record, so a comment between two records fell inside that range and became the
-  previous unit's body, inventing content out of a note.
+  A comment is a comment *wherever it sits*, including inside a body. The alternative was
+  worse: a body runs from the gist to the next record, so a comment between two records fell
+  inside that range and became the previous unit's body, inventing content out of a note.
+
+  A body that genuinely needs to open a line with a marker escapes it — `\#` and `\//`,
+  and `\\` for a line that already starts with a backslash. Only those three, and only at
+  column 0, so prose full of Windows paths and LaTeX needs no thought. The writer puts the
+  escape back, so `fmt` stays a fixed point.
+
+  New in 0.6. Before it there was no escape at all: a Markdown heading or a line of C++ in a
+  body was read as a comment and dropped in silence, which is a poor way to treat exactly
+  the content this format carries.
 
   No record carries a comment, so canonical form cannot reproduce one and `fmt` warns
   before dropping them. A note that has to survive belongs in a unit — typically

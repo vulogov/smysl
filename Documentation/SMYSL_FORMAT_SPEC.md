@@ -2,7 +2,7 @@
 
 **Status:** normative. This document is the contract.
 **Format version:** `smysl/0.1` · **kernel schema:** `smysl.kernel/0.1`
-**Describes:** crate `0.5.0`.
+**Describes:** crate `0.6.0`.
 
 This is the whole of what a second implementation must obey to interoperate. It is
 deliberately short. Everything it does not say is a free choice.
@@ -102,7 +102,10 @@ otherwise two byte strings decode to one record and a uid stops naming exactly o
    payload map.
 5. **No `null` for an absent optional.** Omit the key.
 6. **NFC text.** Every text string is Unicode-normalised to NFC before encoding, including
-   unknown payload keys and their string values.
+   unknown payload keys and their string values. Normalise *at the encoder*, not only in the
+   constructors that happen to be remembered: this implementation asserted the invariant in
+   debug and trusted it in release until 0.6, and six free-text fields reached the encoder
+   unchecked the whole time. Two of them were found by fuzzing, in separate releases.
 7. **Floats are binary32, quantised to 1/1024.** `round(v · 1024) / 1024`. Non-finite input
    saturates to the largest representable multiple rather than encoding an infinity.
 8. **Nesting is bounded at 128.** Deeper input is rejected. Unbounded recursive descent
@@ -159,6 +162,10 @@ Consequences that are easy to get wrong, each of which has been a real defect:
   only one survives a round trip, and it MUST be the canonically first (`SMY-W054`).
 - **A known field appearing twice keeps the first**, and the duplicate does not become an
   unknown-key payload — surface syntax cannot spell a second one.
+- **A body or detail line opening `#`, `//` or `\` MUST be escaped with a leading `\`.** A
+  line starting with a comment marker is a comment wherever it sits, so an unescaped one is
+  read as a comment and the content is lost. Only those three sequences, and only at the
+  start of a line.
 
 ## 5. Extensions (rule X)
 

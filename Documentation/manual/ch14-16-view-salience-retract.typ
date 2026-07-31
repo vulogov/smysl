@@ -636,6 +636,57 @@ concrete things are findable by name. `claim` units score 0.67, because a claim
 is an interpretation phrased in whatever words its author reached for, and you
 will reach for different ones.
 
+#subsection("Handing what you found to `pack`")
+
+Retrieval on its own gives you a ranked list. The units at the top of it are
+usually *claims*, and a claim without its grounds is an assertion — which is
+the failure mode of ordinary retrieval-augmented pipelines, where a model is
+handed five relevant-looking passages and left to infer what connects them.
+
+`pack --query` closes that. The hits become the focus, and packing pulls in
+what they depend on:
+
+#screen(caption: "$ smysl --format surface pack --budget 400 --query \"connection pool saturated\" fixtures/corpus/F1-incident.smy")[
+```
+smysl pack: --query focused 3 unit(s): b3:cvhirtgs2mpvli2ethhyeo32uf, b3:xkys7j42mcuyiaxiyh73xddimr, b3:js4xzessu5zwjpv2rawtugnuvj
+@doc smysl/0.1 { id: v/pack, intent: pack }
+
+@claim c/pool-saturation { status: inferred }
+~ The eu-west connection pool is saturated.
+
+@definition d/p95 { status: cited }
+~ The 95th percentile of request latency over a one-minute window.
+
+@evidence e/pool-wait { status: measured }
+~ Pool acquisition wait rose from 2 ms to 310 ms over the same window.
+```
+]
+
+Read the second and third units carefully: *the query matched neither of
+them.* `d/p95` is a definition the matched claim depends on to be understood,
+and `e/pool-wait` is the measurement it rests on. Retrieval found the claim;
+packing refused to hand it over naked.
+
+That is the difference between this and a similarity search, and it is worth
+being precise about why it is not merely "returning more". The extra units are
+not the next-most-similar ones — they are the ones the format says are
+*required*: grounds, deps, and any live rebuttal, because a claim that travels
+without its rebuttal arrives looking uncontested. Rule R is doing that work,
+not the ranking.
+
+#callout(label: "Why")[
+  A model given five relevant passages will connect them, and its connections
+  will be plausible whether or not they are supported. That is not a flaw in
+  the model; it is what happens when the input has no structure saying what
+  supports what. A pack carries that structure, so the same model can tell the
+  difference between a claim you gave it evidence for and one you did not.
+
+  `--query-limit` defaults to 3 rather than `find`'s 10 for the same reason:
+  every focused unit drags its closure in behind it, and ten of them exhaust
+  an ordinary budget before anything gets chosen on merit. If the focus does
+  not fit, packing fails rather than quietly dropping what you searched for.
+]
+
 #callout(label: "What that means for you")[
   Use `--kind` when you know what you are after. Narrowing to `evidence` when
   you want a measurement, or to `question` when you want what was asked, beats

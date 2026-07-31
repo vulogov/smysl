@@ -238,7 +238,7 @@
     #line(length: 34%, stroke: 0.6pt + ink_accent)
     #v(5mm)
     #text(font: body_family, size: 10pt, style: "italic", fill: ink_smoke,
-      "Vladimir Ulogov · 2026 · smysl 0.5.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
+      "Vladimir Ulogov · 2026 · smysl 0.6.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
   ],
 )
 #v(6mm)
@@ -554,6 +554,25 @@ The honest position is that this is the floor rather than the ceiling, and it
 was built as a seam so the ceiling can be raised without disturbing anything
 beneath it. What it buys today is that a store stops being opaque, with no
 model, no index on disk, no network call, and the same answer on every machine.
+
+What it buys when handed to `pack` is different in kind, and it is the part
+worth the attention. Retrieval on its own returns a ranked list, and the units
+at the top of one are usually claims. A claim without its grounds is an
+assertion — which is the ordinary failure of a retrieval-augmented pipeline,
+where a model receives five relevant-looking passages and is left to invent
+what connects them. It will invent something plausible, because that is what
+the input asks of it.
+
+`pack --query` refuses to hand a claim over naked. The matched units become the
+focus, and packing pulls in what the format says is *required*: the grounds
+they rest on, the definitions they need to be read at all, and any live
+rebuttal — because a claim that travels without its rebuttal arrives looking
+uncontested. The result is not the next-most-similar passages. It is the
+argument, cut to a budget, with nothing load-bearing missing.
+
+That composition is the thing neither half does alone, and it is a fair summary
+of the whole design: the format knows what supports what, so a tool built on it
+can answer a question without quietly dropping the reason the answer holds.
 
 #section("Where it sits in a pipeline")
 
