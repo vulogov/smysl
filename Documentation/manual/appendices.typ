@@ -383,7 +383,12 @@ ended at SM-P15, and writing `SM-P16` here would invent one to satisfy a naming 
 
 No flags of its own beyond the global set — the interface is the terminal, not the command
 line. It refuses to start when stdout is not a terminal, rather than emitting escape codes
-into a pipe, and a build without the `tui` feature says so instead of pretending.
+into a pipe.
+
+`tui` left the default feature set in 0.6.0. It works and it is tested; what it does not
+justify is `ratatui` and `crossterm` in every build, including one an embedder installs to
+call the library and nothing else. Build with `--features tui` to get it; without it the
+command says so rather than pretending.
 
 #section("reindex")
 

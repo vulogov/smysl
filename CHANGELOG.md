@@ -57,6 +57,19 @@ and the facade asserts the two are independent.
   does not exist, and inventing the feature to justify the code would be the wrong way
   round. The registry is 51.
 
+- **`tui` left the default feature set.** It works and it is tested — that was settled
+  earlier this cycle when the "stub" claim turned out to be false — but `ratatui` and
+  `crossterm` in every default build is a cost an embedder who only calls the library never
+  opted into. `--features tui` for anyone who wants the browser; without it the command says
+  so rather than pretending. A default `cargo install smysl` no longer pulls either crate.
+
+- **The CI matrix and `make test-matrix` had drifted**, and now agree at nine rows. Two of
+  them are new and neither was reachable from any other: `--no-default-features --features
+  cli` and `--features tui`. Default brings `ingest` with it, so a function used only by an
+  ingest command is live under default and dead under `cli` alone — which is exactly the
+  dead-code error that failed the determinism job for three releases under `-D warnings`.
+  `--all-features` cannot substitute for either, being the combination nobody ships.
+
 - Retired-RFC references removed from a user-facing error and from `diag.rs`.
 
 ### Measured

@@ -58,7 +58,10 @@ path              = "src/main.rs"
 required-features = ["cli"]
 
 [features]
-default   = ["cli", "tui", "local", "render-typst"]
+# `tui` is deliberately absent. It works and it is tested, but `ratatui` and `crossterm` in
+# every default build is a cost an embedder who only calls the library never opted into.
+# `--features tui` for anyone who wants the browser; free for everyone else.
+default   = ["cli", "local", "render-typst"]
 cli       = ["dep:clap"]
 tui       = ["dep:smysl-tui", "cli"]
 providers = ["dep:smysl-provider"]

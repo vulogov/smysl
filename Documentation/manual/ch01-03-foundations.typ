@@ -159,7 +159,7 @@ classification, and each subcommand's own `--help` repeats it under
     ([`providers`], [pure — it reports what *would* egress, without egressing]),
     ([`usage`], [pure]),
     ([`reindex`], [pure]),
-    ([`ui`], [pure — needs a terminal, and the `tui` feature]),
+    ([`ui`], [pure — needs a terminal, and `--features tui`, which is not on by default]),
   ),
 )
 
