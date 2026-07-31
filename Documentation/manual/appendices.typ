@@ -12,7 +12,7 @@ sync with the binary. Each subcommand heading repeats three facts from the comma
 in `src/main.rs` (`§23`): its one-line description, its *purity* (`pure` — a bit-reproducible
 function of its inputs; `mixed` — pure except for one option; `model-dependent` — the only
 kind that can reach off the machine), and the delivery phase that wired it up. All
-twenty wired subcommands are covered; `ui` (SM-P15) is a stub in this build and prints
+twenty-one wired subcommands are covered; `ui` (SM-P15) is a stub in this build and prints
 "not wired in this build" rather than accepting flags, so it has no flag table.
 
 Three of them — `import`, `relink` and `compact` — were absent from this appendix until
@@ -208,6 +208,25 @@ not yet wired) · SM-P11.
     ([`PATH`], [positional], [Store to score.]),
   ),
 )
+
+#section("find")
+
+*Rank units against a query, lexically.* Pure · 0.5.0.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`QUERY`], [positional, required], [What to search for.]),
+    ([`-n, --limit`], [`N`], [Maximum hits to return; 10 by default.]),
+    ([`--kind`], [`TYPE` (repeatable)], [Restrict to this kernel type.]),
+    ([`--min-status`], [`STATUS`], [Restrict to units at or above this status.]),
+    ([`PATH`], [positional], [Store to search.]),
+  ),
+)
+
+The first command whose phase is a release rather than an `SM-Pnn`. The delivery phases
+ended at SM-P15, and writing `SM-P16` here would invent one to satisfy a naming pattern.
 
 #section("retract")
 

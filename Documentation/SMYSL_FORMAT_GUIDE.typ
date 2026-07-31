@@ -178,7 +178,7 @@
     #line(length: 34%, stroke: 0.6pt + ink_accent)
     #v(5mm)
     #text(font: body_family, size: 10pt, style: "italic", fill: ink_smoke,
-      "Vladimir Ulogov · 2026 · smysl 0.4.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
+      "Vladimir Ulogov · 2026 · smysl 0.5.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
   ],
 )
 #v(6mm)
@@ -188,6 +188,17 @@ record you can author, every field it takes, and the rules a validator will hold
 For *why* the format is shaped this way, see `SMYSL_RATIONALE.typ`; this document only
 answers *how*. Every example below is real syntax, checked against the parser rather than
 invented for the page.
+
+#callout(label: "This guide is not the contract")[
+  It is a *writer's* reference — descriptive, and free to explain more than it obliges.
+  What another implementation must obey to interoperate is `SMYSL_FORMAT_SPEC.md`, which
+  is normative and deliberately a fraction of this length: identity and how a uid is
+  derived, the deterministic-CBOR constraints, record framing, the round-trip fixed point,
+  rule X and the conformance classes. Nothing else is required.
+
+  RFC SMYSL-1, which earlier versions of this guide referred to, is retired. It was the
+  product idea rather than the doctrine, and the implementation outgrew it.
+]
 
 #section("How a document is put together")
 
@@ -360,6 +371,11 @@ that carried a leading space could not be written back and read again unchanged.
   - *Unicode form.* All text is normalised to NFC — including the unknown header keys and
     values that rule X carries verbatim. `é` written as one code point and `é` written as
     `e` plus a combining accent are the same text and get the same uid.
+  - *A repeated field.* Writing `deps` twice in one header keeps the first and discards the
+    rest. Before 0.5 the second was carried as an unknown key under rule X and written back
+    out as a plain `deps:` line, which the next parse then read as the field — so the
+    document lost content by being reformatted. There is no way to spell a second `deps` in
+    surface syntax, so first-wins is the only rule that round-trips.
 
   Each of these was a real defect before 0.4, and the Unicode one was the worst of them:
   it failed silently in release builds, so two peers could write identical content and

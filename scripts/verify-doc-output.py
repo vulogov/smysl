@@ -33,15 +33,22 @@ os.chdir(ROOT)
 SM = './target/debug/smysl'
 
 # #screen(caption: "$ cmd")[ ``` ...output... ``` ]
+# `\"` inside the caption is part of the caption, not its end. The first version stopped at
+# any quote, so a documented command containing a quoted argument — `find "connection pool"`
+# — was truncated to nonsense, failed the `fixtures/corpus` test, and was silently skipped.
+# Two transcripts were unverified the moment they were written, which is precisely the drift
+# this script exists to catch.
 BLOCK = re.compile(
-    r'#screen\(caption:\s*"(?P<cap>[^"]*)"\s*\)\[\s*\n```\n(?P<out>.*?)```',
+    r'#screen\(caption:\s*"(?P<cap>(?:[^"\\]|\\.)*)"\s*\)\[\s*\n```\n(?P<out>.*?)```',
     re.S)
 
 mismatches, ran, skipped, excerpts = [], 0, 0, 0
 for f in sorted(glob.glob('Documentation/manual/*.typ')):
     src = open(f).read()
     for m in BLOCK.finditer(src):
-        cap, claimed = m.group('cap').strip(), m.group('out')
+        # Undo the Typst escaping so the command is what a shell would receive.
+        cap = m.group('cap').replace('\\"', '"').strip()
+        claimed = m.group('out')
         if not cap.startswith('$ smysl') or 'fixtures/corpus' not in cap:
             skipped += 1
             continue

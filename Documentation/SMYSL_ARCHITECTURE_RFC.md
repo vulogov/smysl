@@ -4,7 +4,7 @@
 [`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md), which is deliberately a fraction of this
 one's length: interoperability needs identity, encoding and the rules, not an account of how
 this implementation happens to be built.
-**Describes:** the code at `main`, crate `0.4.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
+**Describes:** the code at `main`, crate `0.5.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
 **Compiled:** 2026-07-30, from SM-P0 through SM-P15, the operational-merit work after it, the
 0.2 cycle (label bindings, comment syntax, forward compatibility), the 0.3 cycle (global
 flags, nesting bounds, packer performance) and the 0.4 cycle (the fuzz backlog: seven
@@ -613,6 +613,61 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
   or it may be inherent to anchoring a unit to text it can quote.
 - **~69 divergences from the RFC** remain unreconciled — see [`RFC_PROPOSAL.md`](RFC_PROPOSAL.md),
   plus exit code `11`, which Appendix E does not have.
+
+### Closed in 0.5
+
+- **Retrieval exists**, as `smysl-retrieve` and `smysl find`. It is a *seam* first and an
+  engine second: `Retriever` is a trait, and the shipped implementation is BM25 over gists,
+  bodies and details. The crate is **pure** and under the purity gate, which is unusual for
+  search and follows from taking `bm25` with `default-features = false` — its default
+  tokeniser stems and strips stop words, destroying identifiers; its language detection
+  would make tokenisation depend on the corpus; its `parallelism` feature would put a rayon
+  reduction inside a result that must not vary.
+
+  It indexes the **gist** principally. That is the design's load-bearing idea: a payload may
+  be a stack trace, a metric series or a diff, but every unit carries a gist by construction,
+  and the gist is a sentence about whatever the payload is. Payload heterogeneity never
+  reaches the index.
+
+  Measured rather than asserted — 20 queries over the corpus, in three classes:
+
+  | class | recall@5 | MRR | P@1 |
+  |---|---:|---:|---:|
+  | shared vocabulary | 1.00 | 0.94 | 0.88 |
+  | paraphrase | 0.75 | 0.41 | 0.12 |
+  | identifier | 1.00 | 1.00 | 1.00 |
+
+  By kernel type, `evidence` and `data` score 1.00 and `claim` scores 0.67. Concrete things
+  are findable by name; an interpretation is phrased in whatever words its author reached
+  for. So a semantic backend would pay for itself on `claim`, `finding` and `hypothesis` and
+  add nothing on the rest — a narrower case than "add embeddings", and the reason the trait
+  exists rather than a second engine.
+
+- **The fuzzers reach the algebra**, not just the parsers. Rule U's join-semilattice laws,
+  pack's C1–C7, rule L with guarantee A1 across the pipeline, and exact packing against
+  brute-force enumeration. The properties are the ones the seeded tests already assert; what
+  changed is that coverage feedback picks the graphs instead of a fixed seed and 200 blind
+  rounds.
+
+- **Four vacuity defects**, all in test infrastructure rather than in the product, and all
+  found by asserting the shape of what a test is handed rather than trusting a clean run.
+  The fuzz generator produced no relations, then no unit above L0. `exact.rs` never generated
+  a `detail`, so L2 was never in the search space where branch-and-bound is checked against
+  brute force. And the sweep written to generalise 0.4.0's decoder fix never entered
+  `dec_schema_decl`, because none of its probe values parsed as a `SchemaId` — so a third
+  decoder defaulted a field the encoder always writes, and shipped.
+
+- **A duplicate known-field key leaked into the unknown-key payload.** `HObject::take`
+  removed only the first entry, and what a caller leaves behind becomes the payload under
+  rule X. Two `deps` parsed as one real field plus one extension, which the writer emitted as
+  a plain `deps:` line and the next parse consumed as the field. First wins now, everywhere.
+
+- **CI stopped lying.** It runs on `dev/**` rather than first seeing a cycle at the release
+  commit; `make test-matrix` sets `-D warnings` and covers `--features cli`; and failing jobs
+  report *why* in an annotation, with fuzz crashes carried as base64. That last one matters
+  because job logs and artifacts both need admin rights on this repository — a determinism
+  job reported "rule D failed" for three releases when the truth was that a dead-code error
+  under `-D warnings` stopped the binary compiling.
 
 ### Closed in 0.4
 
