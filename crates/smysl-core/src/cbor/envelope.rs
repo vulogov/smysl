@@ -16,7 +16,7 @@ use crate::cbor::reader::Dec;
 use crate::cbor::writer::{enc, Enc, MapBuilder};
 use crate::error::CodecError;
 use crate::ids::{AgentId, ContentionId, Label, LangTag, SchemaId, ThreadId, ViewId};
-use crate::types::aux::{
+use crate::types::annex::{
     Contention, ContentionStatus, Detected, DetectionKind, DropReason, LabelBinding, Optimality,
     PackInfo, PackMode, SchemaDecl,
 };

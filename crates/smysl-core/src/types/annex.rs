@@ -1,4 +1,9 @@
 //! Contentions, pack manifests, and schema declarations (§5.4, §8, §2.2).
+//!
+//! Named `annex` rather than `aux`, which it was until 0.6.0. `aux` is a reserved device
+//! name on Windows, so a crate containing `src/types/aux.rs` cannot be unpacked there —
+//! `cargo publish` warns about it and the file simply does not survive extraction. Found by
+//! a dry run before the first publish rather than by the first Windows user.
 
 use core::fmt;
 

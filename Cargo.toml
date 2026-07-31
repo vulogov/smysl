@@ -48,6 +48,22 @@ license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
 
+# What a consumer of the crate does not need to download.
+#
+# The manual is 5.9 MB of PDF and the images another 2 MB, against a 10 MB crate limit — so
+# most of the package would have been a book nobody unpacked, and the headroom left for the
+# code would have been whatever remained. The typst sources stay: they are small, they are
+# the thing that changes, and a reader who wants the book can build it.
+#
+# `fixtures/` stays too, at 308 KB, because the conformance suite is part of what makes the
+# format checkable by someone else.
+exclude = [
+    "Documentation/*.pdf",
+    "Documentation/images/**",
+    "fuzz/**",
+    ".github/**",
+]
+
 [lib]
 name = "smysl"
 path = "src/lib.rs"

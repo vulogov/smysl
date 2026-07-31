@@ -1,19 +1,16 @@
-//! In-process cost of the graph operations, isolated from parsing and process startup.
+//! In-process cost of `pack`, isolated from parsing and process startup.
 //!
 //! ```text
-//! cargo test -p smysl-graph --release --test scaling -- --ignored --nocapture
+//! cargo test -p smysl-pack --release --test scaling -- --ignored --nocapture
 //! ```
 //!
-//! `scripts/bench-scaling.py` measures the *commands*, which is what a user experiences and
-//! the right thing to quote. It is the wrong thing for answering "what does `salience` cost",
-//! because at these store sizes the process spends most of its time parsing and starting up
-//! — at 500 units the whole command is 8 ms, and the operation under test is a fraction of
-//! that. A ratio computed from mostly-noise is a ratio about noise.
+//! Lived in `smysl-graph`'s tests until it turned out that a dev-dependency on `smysl-pack`
+//! from `smysl-graph`, which `smysl-pack` depends on normally, is a **circular dependency
+//! that cannot be published** — each would need the other on crates.io first. Found by a
+//! dry run before the first publish. It belongs here regardless: a crate should measure its
+//! own operation.
 //!
-//! `salience` was the last pure operation whose per-call cost had never been characterised.
-//! It was *assumed* linear. That assumption is exactly the shape of two earlier ones about
-//! `pack` that turned out to be wrong when someone finally counted, so it is measured here
-//! rather than asserted anywhere.
+//! The companion measurement of `salience` stays in `smysl-graph` for the same reason.
 //!
 //! `#[ignore]` because it is a measurement, not a gate. Timing assertions on shared CI
 //! runners fail for reasons that have nothing to do with the code, and a test that cries
@@ -92,21 +89,26 @@ fn timed(f: impl Fn()) -> f64 {
 
 #[test]
 #[ignore = "a measurement, not a gate"]
-fn salience_per_call_cost() {
-    println!("\nsalience, in process, median of 5\n");
+fn pack_per_call_cost_when_the_budget_binds() {
+    use smysl_pack::{pack, PackRequest};
+
+    println!("\npack with a binding budget, in process, median of 5\n");
     println!("{:>7}  {:>10}  {:>8}", "units", "ms", "x per 2x");
-    let mut prev: Option<(usize, f64)> = None;
-    for n in [1_000usize, 2_000, 4_000, 8_000, 16_000] {
+    let mut prev: Option<f64> = None;
+    for n in [250usize, 500, 1_000, 2_000, 4_000, 8_000] {
         let s = store(n);
+        let sal = salience(&s, &SalienceRequest::default());
+        // A fraction of what the scope needs, so the greedy has to choose throughout.
+        let budget = (n as u64) * 2;
         let ms = timed(|| {
-            let _ = salience(&s, &SalienceRequest::default());
+            let _ = pack(&s, &sal, &PackRequest::budget(budget));
         });
         let ratio = match prev {
-            Some((_, p)) if p > 0.0 => format!("{:.2}", ms / p),
+            Some(p) if p > 0.0 => format!("{:.2}", ms / p),
             _ => "-".to_string(),
         };
         println!("{n:>7}  {ms:>10.2}  {ratio:>8}");
-        prev = Some((n, ms));
+        prev = Some(ms);
     }
     println!("\n2.0 = linear, 4.0 = quadratic\n");
 }
