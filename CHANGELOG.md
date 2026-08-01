@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 0.7.0
+## 0.7.0 — 2026-08-01
 
 ### Added
 
@@ -145,6 +145,14 @@ What is queued, in the order I would take it:
   So: eleven crates when publishing happens, or none. If the eleven-crate listing is the real
   objection, that is a packaging preference to weigh then, against a restructure whose cost
   is paid in enforcement rather than in lines.
+
+### Documentation
+
+- Everything at 0.7.0, and the semantic backend is taught rather than only shipped. The
+  manual gains "When words are not enough" beside the lexical retrieval section, with the
+  wrong turn kept on the page: the first routing scored worse than the embedder alone and its
+  test passed, because the test only asked it to beat the lexical engine. The rationale says
+  the same thing to a reader deciding whether to adopt any of this.
 
 - **Publishing, when it is production software.** Not before. The readiness work is done and
   the dry run is clean; both names are held back on purpose, and the README says so and says
