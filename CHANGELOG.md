@@ -37,7 +37,27 @@ one unit and degraded it under rule I — at two and a half times the tokens. Th
 `StructuredMode` distinction earning its place in the API: a provider that cannot promise
 conformance is not a slower version of one that can, it is a different pipeline.
 
-**The OpenAI strict-mode suspect is confirmed, without a key.** `openai.rs` has warned in its
+**The OpenAI strict-mode defect is fixed**, and it never needed a key. `strict_schema` in
+`openai_compat.rs` translates Appendix C into the subset strict structured outputs accepts:
+every property required, optionality moved from omission into a nullable type,
+`additionalProperties: false` stated at every level, and the `minLength`/`pattern`/`allOf`
+constructs strict mode rejects dropped — unenforced by the provider, still enforced by
+`check`, which is where rule M and the shape rules were always going to decide.
+
+Translated at the boundary rather than by changing Appendix C, because the shared schema is
+what Gemini and DeepSeek receive and both work with it. A vendor's requirement belongs in
+that vendor's mapper. Verified live afterwards: both still run clean.
+
+Tested against the *real* Appendix C rather than a miniature — the defect was counted on that
+schema, so a transform satisfying a toy version would have fixed nothing. The test also
+asserts the eleven-and-three shape, so if Appendix C changes and the mapper does not, it says
+so.
+
+What a key would still add is confirmation that the translated schema is accepted. That is a
+smaller and better-defined question than the one that was blocked, and it is the whole of
+what remains for OpenAI.
+
+**The suspect, as it was found.** `openai.rs` has warned in its
 own header that strict structured outputs require every key in `properties` to appear in
 `required`. The shared schema declares eleven properties and three required — `type`, `gist`,
 `status` — so eight are missing, and a strict request would be rejected outright rather than
