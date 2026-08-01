@@ -14,7 +14,13 @@
 
 ## Getting it
 
-**Not on crates.io yet, deliberately.** The format version is `smysl/0.1` and the crate is
+**Not on crates.io yet, deliberately.** What would change that is written down rather than
+left as a feeling: [`Documentation/READINESS.md`](Documentation/READINESS.md) lists seven
+gates, each either done or with a next action attached. The largest is that nobody has yet
+implemented the format from the spec alone, which for an interchange format is the difference
+between a product and a file layout.
+
+ The format version is `smysl/0.1` and the crate is
 `0.6.0`; the library works and the test suite is real, but publishing reserves a name and
 every version number permanently, and this is not something to hand people as production
 software yet. Both names are held back until it is.
