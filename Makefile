@@ -169,7 +169,7 @@ eval-semantic: ## Semantic vs lexical vs hybrid over the shared query set
 		echo "set SMYSL_EMBED_MODEL to a Model2Vec directory — see the comment above this"; \
 		echo "target in the Makefile for one way to obtain one."; exit 2; }
 	@echo "Queries: fixtures/retrieval/queries.tsv — the same set the lexical evaluation uses."
-	SMYSL_EMBED_MODEL=$(SMYSL_EMBED_MODEL) $(CARGO) test -p smysl-embed --features semantic \
+	SMYSL_EMBED_MODEL=$(SMYSL_EMBED_MODEL) $(CARGO) test -p smysl-embed --release \
 		--test evaluation -- --nocapture
 
 eval-live: ## Both eval arms, prose baseline included (needs GEMINI_API_KEY)

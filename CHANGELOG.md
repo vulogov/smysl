@@ -9,7 +9,54 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 0.7.0
 
-Nothing yet. What is queued, in the order I would take it:
+### Added
+
+- **`smysl-embed`: semantic retrieval behind the `Retriever` seam**, off by default under
+  `--features semantic`. Model2Vec static embeddings — a token maps to a vector and a
+  sentence is a pooled lookup, so there is no ONNX Runtime, no downloaded binary and no `ort`
+  release-candidate pin. `model2vec-rs` is taken without `hf-hub`, so nothing here reaches
+  the network: a model is three files the operator already has.
+
+- **`make eval-semantic`**, and one query set instead of two. The twenty queries live in
+  `fixtures/retrieval/queries.tsv` and both evaluations read it, because two scores measured
+  on different questions say nothing about each other.
+
+### Measured
+
+**Semantic retrieval works, and it is worth the model file.** Over the same twenty queries,
+`potion-base-8M`:
+
+| class | engine | recall@5 | MRR | P@1 |
+|---|---|---:|---:|---:|
+| Paraphrase | lexical | 0.75 | 0.41 | **0.12** |
+| Paraphrase | semantic | 0.88 | 0.67 | **0.50** |
+| Identifier | lexical | 1.00 | 1.00 | **1.00** |
+| Identifier | semantic | 1.00 | 0.88 | 0.75 |
+| ALL | lexical | 0.90 | 0.74 | 0.60 |
+| ALL | semantic | 0.95 | 0.84 | 0.75 |
+
+Precision-at-one on paraphrase goes from 0.12 to 0.50 — four times better on the exact metric
+that justified building this. `claim` recall rises 0.67 → 0.83 and its MRR 0.29 → 0.64. The
+prediction that lexical would keep identifiers held: 1.00 against 0.75.
+
+**And the hybrid is worse than semantic alone**, which was not the prediction. 0.78 MRR
+against 0.84, 0.65 P@1 against 0.75. It clears the assertion — it beats lexical — and it
+loses to the thing it is built on top of.
+
+The reason is a design error rather than a tuning problem. `Hybrid` routes by kernel type
+*when the query carries a `kinds` filter*, and merges both engines on rank when it does not.
+No query in the evaluation carries a filter, and few real ones will: a caller who knew which
+kind they wanted would usually not be searching. So the dispatch this was designed around was
+never exercised, and what was measured is the merge — which pulls semantic's good ranks down
+by averaging them with lexical's bad ones.
+
+What the numbers actually argue for: default to semantic, and fall back to lexical for
+queries that *look like identifiers* — detectable from the query itself, which is the
+information available at the time the decision has to be made. Routing on the query rather
+than on a filter the caller probably did not set. Not yet implemented; the measurement came
+first this time, which is the point of having one.
+
+What is queued, in the order I would take it:
 
 - **The semantic retrieval backend**, deferred here from 0.6.0 with a number waiting for it.
   0.5.0 measured where one helps — `claim`, `finding` and `hypothesis`, where a paraphrased
