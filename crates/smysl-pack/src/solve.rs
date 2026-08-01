@@ -752,3 +752,108 @@ fn drop_reason(
         DropReason::Budget
     }
 }
+
+#[cfg(test)]
+mod ordering_tests {
+    use super::*;
+
+    /// `Choice` is ordered by density, then salience, then uid descending, then level
+    /// descending, then index ascending — and the derived `Ord` makes the field order *be*
+    /// that rule. Mutation testing found this untested: `Ordered::eq`, `partial_cmp` and
+    /// `cmp` could each be replaced with a constant and every test still passed.
+    ///
+    /// That is the sharper half of the finding. The type was introduced in 0.6.0 with the
+    /// argument that one implementation of the order "removes the question rather than
+    /// testing around it" — which was right about consistency and wrong about correctness.
+    /// One implementation used by both callers is still an implementation nothing checks.
+    #[test]
+    fn choices_order_by_density_first() {
+        let u = Uid::from_bytes([1; 32]);
+        let lo = Choice::new(1.0, 0.5, u, Lod::L0, 0);
+        let hi = Choice::new(2.0, 0.1, u, Lod::L0, 0);
+        assert!(hi > lo, "a denser candidate wins regardless of salience");
+    }
+
+    #[test]
+    fn salience_breaks_a_density_tie() {
+        let u = Uid::from_bytes([1; 32]);
+        let dull = Choice::new(1.0, 0.1, u, Lod::L0, 0);
+        let keen = Choice::new(1.0, 0.9, u, Lod::L0, 0);
+        assert!(
+            keen > dull,
+            "the salience term never decides in the corpus, so only this says it works"
+        );
+    }
+
+    #[test]
+    fn a_lower_uid_wins_when_density_and_salience_tie() {
+        let low = Choice::new(1.0, 0.5, Uid::from_bytes([1; 32]), Lod::L0, 0);
+        let high = Choice::new(1.0, 0.5, Uid::from_bytes([9; 32]), Lod::L0, 0);
+        assert!(
+            low > high,
+            "uid descends, so the smaller uid is the greater Choice"
+        );
+    }
+
+    #[test]
+    fn an_earlier_candidate_wins_when_everything_else_ties() {
+        let u = Uid::from_bytes([1; 32]);
+        let first = Choice::new(1.0, 0.5, u, Lod::L0, 0);
+        let later = Choice::new(1.0, 0.5, u, Lod::L0, 7);
+        assert!(
+            first > later,
+            "the scan kept the first candidate among equals; the heap must agree"
+        );
+    }
+
+    #[test]
+    fn ordered_compares_by_value_and_not_by_constant() {
+        assert!(Ordered(2.0) > Ordered(1.0));
+        assert!(Ordered(1.0) < Ordered(2.0));
+        assert_eq!(Ordered(1.0), Ordered(1.0));
+        assert_ne!(Ordered(1.0), Ordered(2.0));
+        // `total_cmp` rather than `partial_cmp().unwrap()`: -0.0 and 0.0 are distinct to it,
+        // which is fine, and no input can panic.
+        assert!(Ordered(f64::MAX) > Ordered(0.0));
+    }
+
+    /// `is_optimal` could be replaced with `true`, with `false`, or have its `&&` flipped,
+    /// and nothing noticed — for the function that tells a caller whether their pack is
+    /// provably the best available.
+    #[test]
+    fn optimality_needs_both_exact_mode_and_no_gap() {
+        let mk = |mode, gap| Optimality { mode, gap };
+        // Built by hand rather than by packing something: the question is what
+        // `is_optimal` reads off `info`, and reaching it through a real pack would test the
+        // packer instead.
+        let pack = |o| {
+            let mut info = PackInfo {
+                budget: 0,
+                used: 0,
+                thread: None,
+                dropped: Vec::new(),
+                degraded: Vec::new(),
+                optimality: o,
+                estimator: String::new(),
+                extra: Default::default(),
+            };
+            info.optimality = o;
+            Pack {
+                selection: Selection::new(),
+                info,
+                why: BTreeMap::new(),
+                report: Report::default(),
+            }
+        };
+        assert!(pack(mk(PackMode::Exact, 0.0)).is_optimal());
+        assert!(
+            !pack(mk(PackMode::Greedy, 0.0)).is_optimal(),
+            "a greedy pack with no measured gap is not *proved* optimal"
+        );
+        assert!(
+            !pack(mk(PackMode::Exact, 0.1)).is_optimal(),
+            "exact mode that gave up with a gap has not proved anything"
+        );
+        assert!(!pack(mk(PackMode::Greedy, 0.1)).is_optimal());
+    }
+}
