@@ -7,6 +7,33 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 0.8.0
+
+Nothing yet. What is carried, and what it is waiting on:
+
+- **The quoting coarsening.** A fixture that yields five or six units yields three once each
+  must carry a quotable span. Observed once, never explained — it may be the prompt or it may
+  be inherent to anchoring a unit to text it can quote. One experiment settles it, and the
+  experiment needs a model, which now exists: DeepSeek and Gemini both run the hosted gate.
+  So this is no longer blocked, only undone.
+
+- **Anthropic's mapper is unverified.** OpenAI's is now down to "confirm the translated schema
+  is accepted"; Anthropic has had no equivalent narrowing. It uses `ToolForce` rather than
+  `JsonSchema`, so it has a different set of unknowns and no counted defect yet — which means
+  the first useful step is reading its shape against the documentation the way OpenAI's was,
+  not waiting for a key.
+
+- **Publishing, when it is production software.** Eleven crates or none: the single-crate
+  restructure was abandoned in 0.7.0 and the reasoning is recorded there. The readiness work
+  is done and `cargo publish --dry-run` is clean.
+
+- **`smysl-embed` has no live-gate equivalent.** The semantic evaluation runs from
+  `make eval-semantic` and a model directory, and nothing in CI exercises it. That is the
+  same shape as a fuzz target nobody runs, and the answer is probably a small committed model
+  rather than a download in CI.
+
+---
+
 ## 0.7.0 — 2026-08-01
 
 ### Added

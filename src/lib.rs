@@ -151,7 +151,7 @@ mod tests {
     /// manifest, and the diff will say what you decided.
     #[test]
     fn the_crate_version_is_the_one_we_intend_to_ship() {
-        assert_eq!(VERSION, "0.7.0");
+        assert_eq!(VERSION, "0.8.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two
