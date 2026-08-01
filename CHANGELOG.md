@@ -83,19 +83,25 @@ What is queued, in the order I would take it:
   forward pass, so they reproduce across machines. It dispatches by kernel type rather than
   replacing BM25, which is already perfect on identifiers and on `evidence`.
 
-- **One crate instead of eleven.** Publishing `smysl` alone is impossible while its
-  dependencies are separate crates — cargo needs every non-dev dependency to resolve from the
-  registry, and a path dependency without a version is only allowed for dev-dependencies. So
-  a single published crate means a single crate: `crates/*/src/**` folded into `src/**` as
-  modules.
+- ~~**One crate instead of eleven.**~~ **Abandoned.** The reason to do it was to publish a
+  single crate rather than eleven, and publishing is not happening until this is production
+  software — so the restructure would be paying a cost now for a benefit that has no date.
 
-  Rule B survives that, contrary to what I first assumed. It is already stated about the
-  facade — "with `default-features = false` this crate is a fully synchronous library with no
-  async runtime, no HTTP client, and no argument parser in its dependency tree" — so
-  `check-purity` would test the same property against one crate instead of six. What is
-  genuinely lost is the crate boundary as a compiler-enforced constraint: today `smysl-core`
-  cannot reach `clap` because it does not depend on it, and afterwards that becomes a `#[cfg]`
-  discipline instead.
+  What it would have cost is clearer than when it was proposed. Not rule B, which survives
+  either shape: it is already stated about the facade, so `check-purity` would test the same
+  property against one crate. What it costs is the crate boundary as a *compiler-enforced*
+  constraint. Today `smysl-core` cannot reach `clap` because it does not depend on it, and
+  `smysl-retrieve` is pure because `bm25` is its only dependency — facts the build enforces
+  without anyone remembering to. Afterwards those become `#[cfg]` discipline, and the purity
+  gate would check one tree instead of seven.
+
+  0.6.0 is also an argument against. The dependency-cycle and reserved-filename defects were
+  both found *because* the crates are separate and `cargo publish --dry-run` had something
+  per-crate to check.
+
+  So: eleven crates when publishing happens, or none. If the eleven-crate listing is the real
+  objection, that is a packaging preference to weigh then, against a restructure whose cost
+  is paid in enforcement rather than in lines.
 
 - **Publishing, when it is production software.** Not before. The readiness work is done and
   the dry run is clean; both names are held back on purpose, and the README says so and says
