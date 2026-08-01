@@ -1,0 +1,47 @@
+[package]
+name         = "smysl-embed"
+description  = "Semantic retrieval for a smysl store: static embeddings behind the Retriever seam."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[dependencies]
+smysl-core     = { workspace = true }
+smysl-graph    = { workspace = true }
+smysl-retrieve = { workspace = true }
+
+# Two deliberate departures from the defaults, which are `["onig", "hf-hub"]`.
+#
+# **`fancy-regex` instead of `onig`.** Oniguruma is a C library, and taking the default would
+# have pulled it in — which nothing about the crate's name or description warns you of.
+#
+# **A C++ compiler is still required, and should not be.** Both of model2vec-rs's regex
+# features enable `tokenizers/esaxx_fast`, which is `esaxx-rs/cpp`, which compiles one C++
+# file through `cc`. There is no feature combination of model2vec-rs 0.2.1 that avoids it —
+# omitting both regex features fails to compile.
+#
+# The galling part, on reading where it is used: `esaxx` appears in exactly one place in
+# `tokenizers`, `models/unigram/trainer.rs`, and `tokenizers` already carries a pure-Rust
+# fallback (`suffix_rs`) for when the feature is off. It is for *training* a tokenizer. This
+# crate only ever loads one. So the C++ is dead weight for every use smysl has, and it is
+# present only because model2vec-rs bundles `esaxx_fast` into the same feature as the regex
+# backend.
+#
+# The fix is upstream and small — a feature that selects a regex backend without
+# `esaxx_fast`. A `[patch]` would work here and not for anyone depending on smysl, so it is
+# not the answer. Recorded rather than worked around, because the cost is a build-time
+# toolchain requirement on an optional feature, not a runtime dependency.
+#
+# What is avoided either way is ONNX Runtime: a large prebuilt binary usually fetched at
+# build time, or a very large source build. The claim is "no ONNX, no downloaded binary, no
+# `ort` release-candidate pin" — not "no native code at all".
+#
+# **No `hf-hub`**, so no `ureq`, so no code path here can reach the network. A model is three
+# files the operator already has, or there is no model. That is the same posture the provider
+# crates take, and it is why this lives outside `smysl-retrieve` rather than behind a feature
+# in it: `smysl-retrieve` is under the purity gate, and `model2vec-rs` requires `clap` and
+# `serde_json`, both of which that gate forbids.
+model2vec-rs = { version = "0.2", default-features = false, features = ["fancy-regex"] }

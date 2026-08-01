@@ -2,24 +2,31 @@
 //!
 //! `JsonSchema` — strict structured outputs. Strict mode rejects schemas using constructs
 //! it does not support, so Appendix C is written conservatively and each mapper translates
-//! what its own endpoint will not take (§21.2, responsibility 2). Appendix C is passed
-//! through here unchanged, which is **the untested half of this file**: strict mode also
-//! requires every key in `properties` to appear in `required`, and Appendix C's `required`
-//! lists three of eleven. Gemini's equivalent mismatch was found by a live call and is
-//! translated in [`gemini::dialect`]; this one is still a reading of the documentation.
+//! what its own endpoint will not take (§21.2, responsibility 2).
+//!
+//! Appendix C used to be passed through unchanged, and it would have been rejected on every
+//! call: strict mode requires every key in `properties` to appear in `required`, and Appendix
+//! C requires three of eleven. That was recorded here as a reading of the documentation until
+//! it was simply *counted* — three of eleven is a fact about our schema, not a guess about
+//! their API — and it is now translated by [`openai_compat::strict_schema`], the same way
+//! Gemini's equivalent mismatch is handled in [`gemini::dialect`].
+//!
+//! What a key would still add is confirmation that the translated schema is accepted, which
+//! is a smaller and better-defined question than the one that was blocked before.
 //!
 //! [`gemini::dialect`]: super::gemini::dialect
+//! [`openai_compat::strict_schema`]: super::openai_compat::strict_schema
 //!
 //! | Path | Purpose |
 //! |---|---|
 //! | `GET /v1/models` | model list; also the reachability probe |
 //! | `POST /v1/chat/completions` | completion, streaming or not |
 //!
-//! **Implemented, but not tested.** No key has been available, so every shape here is
-//! asserted against recorded fixtures rather than against the API. The `required` mismatch
-//! above is the concrete thing to check first when a key exists; it is the same class of
-//! defect that a live Gemini call exposed. The RFC's implementation note applies: verify
-//! before relying on this.
+//! **Implemented, not yet confirmed against the endpoint.** No key has been available, so
+//! every shape here is asserted against recorded fixtures rather than against the API. That
+//! is a real limit and it is narrower than it was: the one defect anybody had actually
+//! identified is fixed and tested, including against the full Appendix C schema rather than a
+//! miniature of it. Verify before relying on this.
 
 use std::time::Duration;
 

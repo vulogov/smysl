@@ -94,6 +94,12 @@ pub use smysl_graph::{
 // query. `Retriever` is the seam an impure semantic backend would sit behind.
 pub use smysl_retrieve::{tokenize as retrieve_tokenize, Bm25, Hit, Query, Retriever};
 
+// ---- semantic retrieval (feature-gated) -----------------------------------
+// Impure, and outside the pure crates on purpose: it needs a model, and a model is something
+// outside the format deciding the answer. Same tier as the providers, for the same reason.
+#[cfg(feature = "semantic")]
+pub use smysl_embed::{Hybrid, Model as EmbedModel, Semantic};
+
 // ---- ingest / providers (feature-gated) -----------------------------------
 #[cfg(feature = "ingest")]
 pub use smysl_ingest::ceiling::ceiling;
@@ -145,7 +151,7 @@ mod tests {
     /// manifest, and the diff will say what you decided.
     #[test]
     fn the_crate_version_is_the_one_we_intend_to_ship() {
-        assert_eq!(VERSION, "0.6.0");
+        assert_eq!(VERSION, "0.7.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two

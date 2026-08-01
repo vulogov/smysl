@@ -26,6 +26,138 @@ pub struct Dialect {
 }
 
 /// Build the request body.
+/// Fields OpenAI's Structured Outputs accepts. Everything else is rejected, so this is an
+/// allow-list rather than a list of things to strip — a keyword added to Appendix C later
+/// must be translated deliberately rather than discovered in production. Same reasoning as
+/// Gemini's `OPENAPI_FIELDS`, and the same shape of defect it was written for.
+const STRICT_FIELDS: &[&str] = &[
+    "type",
+    "properties",
+    "required",
+    "additionalProperties",
+    "items",
+    "enum",
+    "anyOf",
+    "description",
+    "title",
+    "$ref",
+    "$defs",
+];
+
+/// Rewrite a schema into the subset strict structured outputs accepts.
+///
+/// Appendix C is written to be conservative and portable, not to be any one vendor's dialect.
+/// Strict mode imposes three things it does not satisfy:
+///
+/// 1. **Every key in `properties` must appear in `required`.** Appendix C declares eleven
+///    properties and requires three, so eight are missing. A strict request carrying it is
+///    rejected outright — a 400 on every ingest call, not a degraded unit.
+/// 2. **Optionality is a nullable type**, not omission from `required`. A field Appendix C
+///    left optional becomes `["string", "null"]`, which says the same thing in the only way
+///    strict mode can hear it.
+/// 3. **`additionalProperties: false` at every object level**, stated rather than implied.
+///
+/// It also rejects `minLength`, `maxLength`, `pattern` and the `allOf`/`if`/`then`
+/// conditionals Appendix C uses to say "measured implies a source". Those are not lost, only
+/// unenforced *by the provider*: `check` applies rule M and the shape rules to whatever comes
+/// back, which is where they were always going to be decided.
+///
+/// Translated at the boundary rather than by changing Appendix C, because the shared schema
+/// is what Gemini and DeepSeek receive and both work with it today. A vendor's requirement
+/// belongs in that vendor's mapper (§21.2, responsibility 2).
+pub(crate) fn strict_schema(schema: &Value) -> Value {
+    let Some(obj) = schema.as_object() else {
+        return schema.clone();
+    };
+    let originally_required: Vec<String> = obj
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut out = serde_json::Map::new();
+    for (k, v) in obj {
+        if !STRICT_FIELDS.contains(&k.as_str()) {
+            continue;
+        }
+        match k.as_str() {
+            "items" => {
+                out.insert(k.clone(), strict_schema(v));
+            }
+            "properties" => {
+                let Some(props) = v.as_object() else {
+                    out.insert(k.clone(), v.clone());
+                    continue;
+                };
+                let translated: serde_json::Map<String, Value> = props
+                    .iter()
+                    .map(|(name, sub)| {
+                        let mut t = strict_schema(sub);
+                        if !originally_required.iter().any(|r| r == name) {
+                            t = nullable(t);
+                        }
+                        (name.clone(), t)
+                    })
+                    .collect();
+                let all: Vec<Value> = translated.keys().map(|n| Value::from(n.clone())).collect();
+                out.insert("properties".into(), Value::Object(translated));
+                out.insert("required".into(), Value::Array(all));
+            }
+            // Already rebuilt from `properties`; copying it through would overwrite the
+            // rebuilt list with the three-of-eleven one this function exists to replace.
+            "required" => {}
+            "anyOf" => {
+                let branches = v
+                    .as_array()
+                    .map(|a| a.iter().map(strict_schema).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                out.insert(k.clone(), Value::Array(branches));
+            }
+            _ => {
+                out.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    if out.contains_key("properties") {
+        out.insert("additionalProperties".into(), Value::Bool(false));
+    }
+    Value::Object(out)
+}
+
+/// Make a translated subschema accept `null` as well.
+///
+/// `{"type": "string"}` becomes `{"type": ["string", "null"]}`. An `enum` gains a `null`
+/// member instead, since strict mode checks the value against the list rather than the type.
+fn nullable(mut schema: Value) -> Value {
+    let Some(obj) = schema.as_object_mut() else {
+        return schema;
+    };
+    if let Some(Value::Array(arr)) = obj.get_mut("enum") {
+        if !arr.iter().any(Value::is_null) {
+            arr.push(Value::Null);
+        }
+        return schema;
+    }
+    match obj.get("type") {
+        Some(Value::String(t)) => {
+            let t = t.clone();
+            obj.insert("type".into(), json!([t, "null"]));
+        }
+        Some(Value::Array(ts)) if !ts.iter().any(|v| v.as_str() == Some("null")) => {
+            let mut ts = ts.clone();
+            ts.push(Value::from("null"));
+            obj.insert("type".into(), Value::Array(ts));
+        }
+        _ => {}
+    }
+    schema
+}
+
 pub fn body(
     req: &Request,
     default_model: &str,
@@ -63,7 +195,11 @@ pub fn body(
                 .map_err(|e| ProviderError::Malformed(format!("schema is not JSON: {e}")))?;
             body["response_format"] = json!({
                 "type": "json_schema",
-                "json_schema": { "name": "smysl_unit", "strict": true, "schema": schema },
+                "json_schema": {
+                    "name": "smysl_unit",
+                    "strict": true,
+                    "schema": strict_schema(&schema),
+                },
             });
         }
         StructuredMode::JsonMode => {
@@ -441,5 +577,197 @@ mod tests {
     #[test]
     fn a_chunk_without_usage_yields_none() {
         assert_eq!(sse_usage(r#"data: {"choices":[]}"#, 0), None);
+    }
+}
+
+#[cfg(test)]
+mod strict_tests {
+    use super::*;
+
+    fn schema() -> Value {
+        serde_json::json!({
+            "type": "object",
+            "required": ["type", "gist"],
+            "properties": {
+                "type":  { "enum": ["claim", "evidence"] },
+                "gist":  { "type": "string", "minLength": 1, "maxLength": 240 },
+                "label": { "type": "string", "pattern": "^[a-z]+/[a-z]+$" },
+                "deps":  { "type": "array", "items": { "type": "string" } },
+                "source": {
+                    "type": "object",
+                    "required": ["kind"],
+                    "properties": {
+                        "kind": { "enum": ["file", "url"] },
+                        "ref":  { "type": "string" }
+                    }
+                }
+            },
+            "allOf": [{ "if": { "required": ["detail"] }, "then": { "required": ["body"] } }]
+        })
+    }
+
+    #[test]
+    fn every_property_becomes_required() {
+        let out = strict_schema(&schema());
+        let req: Vec<&str> = out["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        let props: Vec<&str> = out["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|s| s.as_str())
+            .collect();
+        assert_eq!(
+            req, props,
+            "strict mode requires every property to be listed"
+        );
+        // The nested object too — the rule applies at every level, and a schema that
+        // satisfies it only at the top is rejected just as firmly.
+        let inner = &out["properties"]["source"];
+        assert_eq!(
+            inner["required"].as_array().unwrap().len(),
+            inner["properties"].as_object().unwrap().len()
+        );
+    }
+
+    #[test]
+    fn what_was_optional_becomes_nullable_instead() {
+        let out = strict_schema(&schema());
+        // `label` was optional, so optionality has to be said in the type.
+        assert_eq!(
+            out["properties"]["label"]["type"],
+            serde_json::json!(["string", "null"])
+        );
+        // `gist` was required, so it stays a plain string.
+        assert_eq!(out["properties"]["gist"]["type"], "string");
+        // An optional enum gains a null member rather than a type union, because strict mode
+        // checks the value against the list.
+        let kinds = out["properties"]["source"]["properties"]["ref"]["type"].clone();
+        assert_eq!(kinds, serde_json::json!(["string", "null"]));
+    }
+
+    #[test]
+    fn unsupported_constructs_are_dropped_rather_than_sent() {
+        let out = strict_schema(&schema());
+        assert!(
+            out.get("allOf").is_none(),
+            "strict mode rejects conditionals"
+        );
+        let gist = &out["properties"]["gist"];
+        assert!(gist.get("minLength").is_none() && gist.get("maxLength").is_none());
+        assert!(out["properties"]["label"].get("pattern").is_none());
+    }
+
+    #[test]
+    fn additional_properties_is_stated_at_every_object_level() {
+        let out = strict_schema(&schema());
+        assert_eq!(out["additionalProperties"], false);
+        assert_eq!(out["properties"]["source"]["additionalProperties"], false);
+    }
+
+    #[test]
+    fn arrays_keep_their_item_schema() {
+        let out = strict_schema(&schema());
+        assert_eq!(out["properties"]["deps"]["items"]["type"], "string");
+    }
+
+    /// The transform is a pure function, so two runs give the same bytes — which matters
+    /// because the request is what gets recorded in a ledger and compared across hops.
+    #[test]
+    fn it_is_deterministic() {
+        assert_eq!(
+            serde_json::to_string(&strict_schema(&schema())).unwrap(),
+            serde_json::to_string(&strict_schema(&schema())).unwrap()
+        );
+    }
+}
+
+/// The real Appendix C schema, not a miniature of it.
+///
+/// The tests above use a small schema so a failure names one thing. This one runs the schema
+/// that would actually be sent, because the defect being fixed was *counted* on that schema —
+/// eleven properties, three required — and a transform that satisfies a toy and not the real
+/// one would have fixed nothing.
+///
+/// The schema text is duplicated from `smysl-ingest` rather than imported: this crate does
+/// not depend on that one, and inverting the dependency to reach a string would be a worse
+/// trade than a copy a test can check. If Appendix C changes and this copy does not, the
+/// count assertion below is what says so.
+#[cfg(test)]
+mod appendix_c_tests {
+    use super::*;
+
+    const APPENDIX_C: &str = r#"{
+      "type": "object",
+      "required": ["type", "gist", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "type":    { "enum": ["claim", "evidence"] },
+        "label":   { "type": "string", "pattern": "^[a-z]+/[a-z]+$" },
+        "gist":    { "type": "string", "minLength": 1, "maxLength": 240 },
+        "body":    { "type": "string" },
+        "detail":  { "type": "string" },
+        "status":  { "enum": ["speculative", "derived"] },
+        "source":  { "type": "object", "required": ["kind", "ref"],
+                     "properties": { "kind": { "enum": ["file"] },
+                                     "ref": { "type": "string" },
+                                     "captured": { "type": "string" } } },
+        "quote":   { "type": "string", "minLength": 1, "maxLength": 400 },
+        "deps":    { "type": "array", "items": { "type": "string" } },
+        "grounds": { "type": "array", "items": { "type": "string" } },
+        "payload": { "type": "object" }
+      },
+      "allOf": [
+        { "if": { "properties": { "status": { "enum": ["measured"] } } },
+          "then": { "required": ["source"] } }
+      ]
+    }"#;
+
+    #[test]
+    fn the_real_schema_becomes_strict_legal() {
+        let before: Value = serde_json::from_str(APPENDIX_C).expect("fixture parses");
+        let props = before["properties"].as_object().unwrap().len();
+        let req = before["required"].as_array().unwrap().len();
+        assert_eq!(
+            (props, req),
+            (11, 3),
+            "Appendix C changed shape; this copy needs updating, and so may the transform"
+        );
+
+        let after = strict_schema(&before);
+        let names: Vec<&str> = after["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|s| s.as_str())
+            .collect();
+        let required: Vec<&str> = after["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert_eq!(
+            required, names,
+            "all eleven must be required; this is the defect the transform exists for"
+        );
+        assert_eq!(after["additionalProperties"], false);
+        assert!(after.get("allOf").is_none());
+
+        // The eight that were optional must now say so in their type, or strict mode will
+        // reject a unit that legitimately omits one.
+        for name in [
+            "label", "body", "detail", "source", "quote", "deps", "grounds", "payload",
+        ] {
+            let t = &after["properties"][name];
+            let nullable = t["type"]
+                .as_array()
+                .is_some_and(|a| a.iter().any(|v| v.as_str() == Some("null")));
+            assert!(nullable, "`{name}` was optional and is not nullable: {t}");
+        }
     }
 }

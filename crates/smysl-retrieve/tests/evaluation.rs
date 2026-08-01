@@ -44,140 +44,48 @@ enum Class {
 }
 
 struct Case {
-    fixture: &'static str,
-    query: &'static str,
+    fixture: String,
+    query: String,
     /// The label whose unit should come back first.
-    want: &'static str,
+    want: String,
     class: Class,
 }
 
-const CASES: &[Case] = &[
-    // ---- Echo: the words are there to be found -----------------------------
-    Case {
-        fixture: "F1-incident",
-        query: "pool acquisition wait rose",
-        want: "e/pool-wait",
-        class: Class::Echo,
-    },
-    Case {
-        fixture: "F1-incident",
-        query: "canary configuration regression",
-        want: "e/canary",
-        class: Class::Echo,
-    },
-    Case {
-        fixture: "F1-incident",
-        query: "95th percentile of request latency",
-        want: "d/p95",
-        class: Class::Echo,
-    },
-    Case {
-        fixture: "F2-research",
-        query: "cohort A subjects effect size",
-        want: "e/cohort-a",
-        class: Class::Echo,
-    },
-    Case {
-        fixture: "F2-research",
-        query: "adherence per cent in every dose band",
-        want: "e/adherence-flat",
-        class: Class::Echo,
-    },
-    Case {
-        fixture: "F4-qa",
-        query: "queries per checkout request rose",
-        want: "e/query-count",
-        class: Class::Echo,
-    },
-    Case {
-        fixture: "F5-dataset",
-        query: "trace coverage in all six regions",
-        want: "e/coverage",
-        class: Class::Echo,
-    },
-    Case {
-        fixture: "F5-dataset",
-        query: "order volume by hour of day",
-        want: "t/orders-by-hour",
-        class: Class::Echo,
-    },
-    // ---- Paraphrase: the same meaning, different words ---------------------
-    // If BM25 fails most of these and a semantic backend fixes them, that is the argument
-    // for adding one. If it does not, the argument is not there.
-    Case {
-        fixture: "F1-incident",
-        query: "connection backlog on the european shard",
-        want: "c/pool-saturation",
-        class: Class::Paraphrase,
-    },
-    Case {
-        fixture: "F1-incident",
-        query: "what ultimately caused the slowdown",
-        want: "f/root-cause",
-        class: Class::Paraphrase,
-    },
-    Case {
-        fixture: "F2-research",
-        query: "the result holds in a second independent group",
-        want: "c/replicates",
-        class: Class::Paraphrase,
-    },
-    Case {
-        fixture: "F2-research",
-        query: "more medicine produced more improvement",
-        want: "c/dose-response",
-        class: Class::Paraphrase,
-    },
-    Case {
-        fixture: "F4-qa",
-        query: "the shopping basket code asked the database too often",
-        want: "c/n-plus-one",
-        class: Class::Paraphrase,
-    },
-    Case {
-        fixture: "F4-qa",
-        query: "heavy shopping traffic made it worse but was not to blame",
-        want: "c/load-contribution",
-        class: Class::Paraphrase,
-    },
-    Case {
-        fixture: "F5-dataset",
-        query: "the slowness sits in one place not everywhere",
-        want: "c/tail-is-regional",
-        class: Class::Paraphrase,
-    },
-    Case {
-        fixture: "F5-dataset",
-        query: "could patchy measurement explain the difference",
-        want: "h/sampling-artefact",
-        class: Class::Paraphrase,
-    },
-    // ---- Identifier: names, paths, metrics ---------------------------------
-    Case {
-        fixture: "F1-incident",
-        query: "pool.wait_ms",
-        want: "e/pool-wait",
-        class: Class::Identifier,
-    },
-    Case {
-        fixture: "F4-qa",
-        query: "checkout.p95",
-        want: "e/trace-sample",
-        class: Class::Identifier,
-    },
-    Case {
-        fixture: "F4-qa",
-        query: "db.queries_per_request",
-        want: "e/query-count",
-        class: Class::Identifier,
-    },
-    Case {
-        fixture: "F5-dataset",
-        query: "latency_by_region.csv",
-        want: "t/latency-by-region",
-        class: Class::Identifier,
-    },
-];
+/// The query set, read from `fixtures/retrieval/queries.tsv`.
+///
+/// One source, shared with every other retriever's evaluation. A query set copied into a
+/// second evaluation drifts, and two scores measured on different questions say nothing
+/// about each other — which would defeat the only reason to run a second evaluation.
+fn cases() -> Vec<Case> {
+    let path = "../../fixtures/retrieval/queries.tsv";
+    let src = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let mut out = Vec::new();
+    for (n, line) in src.lines().enumerate() {
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let f: Vec<&str> = line.split('\t').collect();
+        assert_eq!(
+            f.len(),
+            4,
+            "{path}:{}: expected four tab-separated fields",
+            n + 1
+        );
+        out.push(Case {
+            fixture: f[0].to_string(),
+            class: match f[1] {
+                "Echo" => Class::Echo,
+                "Paraphrase" => Class::Paraphrase,
+                "Identifier" => Class::Identifier,
+                other => panic!("{path}:{}: unknown class `{other}`", n + 1),
+            },
+            want: f[2].to_string(),
+            query: f[3].to_string(),
+        });
+    }
+    assert!(!out.is_empty(), "{path} yielded no cases");
+    out
+}
 
 const K: usize = 5;
 
@@ -240,13 +148,14 @@ fn lexical_retrieval_over_the_corpus() {
     let mut overall = Tally::default();
     let mut misses: Vec<String> = Vec::new();
 
-    for case in CASES {
-        let (store, labels) = load(case.fixture);
+    let all = cases();
+    for case in &all {
+        let (store, labels) = load(&case.fixture);
         let want = *labels
-            .get(&Label::new(case.want).expect("label parses"))
+            .get(&Label::new(&case.want).expect("label parses"))
             .unwrap_or_else(|| panic!("{}: no label {}", case.fixture, case.want));
 
-        let hits = Bm25::index(&store).search(&Query::new(case.query, K));
+        let hits = Bm25::index(&store).search(&Query::new(&case.query, K));
         let rr = reciprocal_rank(&hits, &want);
 
         overall.add(rr);
@@ -264,10 +173,7 @@ fn lexical_retrieval_over_the_corpus() {
         }
     }
 
-    println!(
-        "\nBM25 over the corpus — {} queries, top {K}\n",
-        CASES.len()
-    );
+    println!("\nBM25 over the corpus — {} queries, top {K}\n", all.len());
     println!(
         "{:<12} {:>4} {:>10} {:>8} {:>8}",
         "class", "n", "recall@5", "MRR", "P@1"

@@ -7,6 +7,166 @@ and the facade asserts the two are independent.
 
 ---
 
+## 0.7.0 — 2026-08-01
+
+### Added
+
+- **`smysl-embed`: semantic retrieval behind the `Retriever` seam**, off by default under
+  `--features semantic`. Model2Vec static embeddings — a token maps to a vector and a
+  sentence is a pooled lookup, so there is no ONNX Runtime, no downloaded binary and no `ort`
+  release-candidate pin. `model2vec-rs` is taken without `hf-hub`, so nothing here reaches
+  the network: a model is three files the operator already has.
+
+- **`make eval-semantic`**, and one query set instead of two. The twenty queries live in
+  `fixtures/retrieval/queries.tsv` and both evaluations read it, because two scores measured
+  on different questions say nothing about each other.
+
+### Measured
+
+**The hosted provider gate ran against DeepSeek and Gemini**, and the difference between
+structured-output modes turns out to be visible rather than theoretical:
+
+| provider | mode | path | units | calls | degraded | tokens |
+|---|---|---|---:|---:|---:|---:|
+| gemini | `json-schema` | json-ast | 4 | 1 | 0 | 624 |
+| deepseek | `json-mode` | surface | 1 | 3 | 1 | 1572 |
+
+Gemini structurally guarantees the shape, so one call returns four conformant units. DeepSeek
+guarantees only *valid JSON*, not valid-against-this-schema, so it took three calls, produced
+one unit and degraded it under rule I — at two and a half times the tokens. That is the
+`StructuredMode` distinction earning its place in the API: a provider that cannot promise
+conformance is not a slower version of one that can, it is a different pipeline.
+
+**The OpenAI strict-mode defect is fixed**, and it never needed a key. `strict_schema` in
+`openai_compat.rs` translates Appendix C into the subset strict structured outputs accepts:
+every property required, optionality moved from omission into a nullable type,
+`additionalProperties: false` stated at every level, and the `minLength`/`pattern`/`allOf`
+constructs strict mode rejects dropped — unenforced by the provider, still enforced by
+`check`, which is where rule M and the shape rules were always going to decide.
+
+Translated at the boundary rather than by changing Appendix C, because the shared schema is
+what Gemini and DeepSeek receive and both work with it. A vendor's requirement belongs in
+that vendor's mapper. Verified live afterwards: both still run clean.
+
+Tested against the *real* Appendix C rather than a miniature — the defect was counted on that
+schema, so a transform satisfying a toy version would have fixed nothing. The test also
+asserts the eleven-and-three shape, so if Appendix C changes and the mapper does not, it says
+so.
+
+What a key would still add is confirmation that the translated schema is accepted. That is a
+smaller and better-defined question than the one that was blocked, and it is the whole of
+what remains for OpenAI.
+
+**The suspect, as it was found.** `openai.rs` has warned in its
+own header that strict structured outputs require every key in `properties` to appear in
+`required`. The shared schema declares eleven properties and three required — `type`, `gist`,
+`status` — so eight are missing, and a strict request would be rejected outright rather than
+degrading. That is now a fact about our schema rather than a suspicion about their API, and
+it can be fixed and asserted statically: the OpenAI mapper should *transform* the schema into
+strict form rather than passing it through, since making the shared schema strict would change
+what Gemini and DeepSeek receive, and both currently work.
+
+**Semantic retrieval works, and it is worth the model file.** Over the same twenty queries,
+`potion-base-8M`:
+
+| class | engine | recall@5 | MRR | P@1 |
+|---|---|---:|---:|---:|
+| Paraphrase | lexical | 0.75 | 0.41 | **0.12** |
+| Paraphrase | semantic | 0.88 | 0.67 | **0.50** |
+| Identifier | lexical | 1.00 | 1.00 | **1.00** |
+| Identifier | semantic | 1.00 | 0.88 | 0.75 |
+| ALL | lexical | 0.90 | 0.74 | 0.60 |
+| ALL | semantic | 0.95 | 0.84 | 0.75 |
+
+Precision-at-one on paraphrase goes from 0.12 to 0.50 — four times better on the exact metric
+that justified building this. `claim` recall rises 0.67 → 0.83 and its MRR 0.29 → 0.64. The
+prediction that lexical would keep identifiers held: 1.00 against 0.75.
+
+**The first hybrid was worse than semantic alone** — 0.78 MRR against 0.84 — which was not
+the prediction. It cleared its assertion, because that only asked it to beat lexical, and it
+lost to the engine it was built on.
+
+A design error rather than a tuning problem. It routed by kernel type *when the query carried
+a `kinds` filter*, and merged both engines on rank when it did not. No query in the
+evaluation carries a filter and few real ones will — a caller who knew which kind they wanted
+would usually not be searching — so the dispatch it was designed around was never exercised,
+and what got measured was the merge, which pulls good ranks down by averaging them with bad
+ones.
+
+**Rewritten to route on the query, which is the information available when the decision has
+to be made.** An identifier-shaped query — one token carrying a separator, like
+`pool.wait_ms` — goes to lexical; everything else goes to the embedder; an explicit `kinds`
+filter still refines it. There is no merge, and its absence is pinned by a test.
+
+| | recall@5 | MRR | P@1 |
+|---|---:|---:|---:|
+| lexical | 0.90 | 0.74 | 0.60 |
+| semantic | 0.95 | 0.84 | 0.75 |
+| **hybrid** | 0.95 | **0.87** | **0.80** |
+
+It now takes the best of each on every class: perfect on identifiers where lexical is,
+perfect on echo and 0.50 on paraphrase where the embedder is, and `Data` back to 1.00 MRR
+where routing on kind alone had left it at 0.75.
+
+The assertion is now the property that failed rather than the weaker one that passed: routing
+must never lose to *either* engine it routes between. That is the whole promise of dispatch,
+and it is what the first version broke while passing its test.
+
+What is queued, in the order I would take it:
+
+- **The semantic retrieval backend**, deferred here from 0.6.0 with a number waiting for it.
+  0.5.0 measured where one helps — `claim`, `finding` and `hypothesis`, where a paraphrased
+  query ranks the right unit first once in eight — and built the seam it sits behind, so what
+  is left is the work rather than the design: a new impure crate, a model-distribution story,
+  and the evaluation re-run per kernel type to show it *beat* 0.12 rather than merely
+  arrived.
+
+  `model2vec-rs` remains the candidate on unchanged grounds: pure Rust, no ONNX Runtime, no
+  `ort` release-candidate pin, and static embeddings that are a table lookup rather than a
+  forward pass, so they reproduce across machines. It dispatches by kernel type rather than
+  replacing BM25, which is already perfect on identifiers and on `evidence`.
+
+- ~~**One crate instead of eleven.**~~ **Abandoned.** The reason to do it was to publish a
+  single crate rather than eleven, and publishing is not happening until this is production
+  software — so the restructure would be paying a cost now for a benefit that has no date.
+
+  What it would have cost is clearer than when it was proposed. Not rule B, which survives
+  either shape: it is already stated about the facade, so `check-purity` would test the same
+  property against one crate. What it costs is the crate boundary as a *compiler-enforced*
+  constraint. Today `smysl-core` cannot reach `clap` because it does not depend on it, and
+  `smysl-retrieve` is pure because `bm25` is its only dependency — facts the build enforces
+  without anyone remembering to. Afterwards those become `#[cfg]` discipline, and the purity
+  gate would check one tree instead of seven.
+
+  0.6.0 is also an argument against. The dependency-cycle and reserved-filename defects were
+  both found *because* the crates are separate and `cargo publish --dry-run` had something
+  per-crate to check.
+
+  So: eleven crates when publishing happens, or none. If the eleven-crate listing is the real
+  objection, that is a packaging preference to weigh then, against a restructure whose cost
+  is paid in enforcement rather than in lines.
+
+### Documentation
+
+- Everything at 0.7.0, and the semantic backend is taught rather than only shipped. The
+  manual gains "When words are not enough" beside the lexical retrieval section, with the
+  wrong turn kept on the page: the first routing scored worse than the embedder alone and its
+  test passed, because the test only asked it to beat the lexical engine. The rationale says
+  the same thing to a reader deciding whether to adopt any of this.
+
+- **Publishing, when it is production software.** Not before. The readiness work is done and
+  the dry run is clean; both names are held back on purpose, and the README says so and says
+  what to do in the meantime.
+
+- **The quoting coarsening.** A fixture that yields five or six units yields three once each
+  must carry a quotable span. Observed once, never explained. One experiment settles it, and
+  the experiment needs a model.
+
+- **OpenAI and Anthropic mappers**, still blocked on credentials. The risk has grown rather
+  than shrunk since Appendix C gained `relations` and `quote`.
+
+---
+
 ## 0.6.0 — 2026-07-31
 
 ### Added

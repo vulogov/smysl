@@ -238,7 +238,7 @@
     #line(length: 34%, stroke: 0.6pt + ink_accent)
     #v(5mm)
     #text(font: body_family, size: 10pt, style: "italic", fill: ink_smoke,
-      "Vladimir Ulogov · 2026 · smysl 0.6.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
+      "Vladimir Ulogov · 2026 · smysl 0.7.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
   ],
 )
 #v(6mm)
@@ -550,8 +550,20 @@ once in eight. Evidence and data are found reliably because they name concrete
 things; claims are found less reliably because a claim is an interpretation,
 and interpretations get phrased differently by different people.
 
-The honest position is that this is the floor rather than the ceiling, and it
-was built as a seam so the ceiling can be raised without disturbing anything
+The ceiling has since been raised. A semantic backend sits behind the same
+seam, and the numbers say what it bought: on queries phrased differently from
+the text they are looking for, the right unit is now ranked first half the
+time rather than one time in eight. Where a query is a *name* — a metric, a
+path, a symbol — the lexical engine still answers it, perfectly, and the tool
+routes on the shape of the query rather than asking you to choose.
+
+The first version of that routing was worse than either engine alone, and its
+test passed. That is recorded here rather than quietly fixed, because it is the
+same lesson the rest of this document keeps arriving at: a measurement you did
+not take is a decision you did not make.
+
+The honest position is that this is a floor that has been raised once, and it
+was built as a seam so it can be raised again without disturbing anything
 beneath it. What it buys today is that a store stops being opaque, with no
 model, no index on disk, no network call, and the same answer on every machine.
 

@@ -4,7 +4,7 @@
 [`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md), which is deliberately a fraction of this
 one's length: interoperability needs identity, encoding and the rules, not an account of how
 this implementation happens to be built.
-**Describes:** the code at `main`, crate `0.6.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
+**Describes:** the code at `main`, crate `0.7.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
 **Compiled:** 2026-07-30, from SM-P0 through SM-P15, the operational-merit work after it, the
 0.2 cycle (label bindings, comment syntax, forward compatibility), the 0.3 cycle (global
 flags, nesting bounds, packer performance) and the 0.4 cycle (the fuzz backlog: seven
@@ -620,6 +620,48 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
   its marginal cost falls, which happens exactly when something in its obligation is
   selected and therefore already paid for. That non-monotonicity is what made the 0.3.0
   attempt unsound.
+
+### Closed in 0.7
+
+- **Semantic retrieval**, as `smysl-embed`, behind the `Retriever` seam 0.5.0 built and off by
+  default under `--features semantic`. Model2Vec static embeddings: a token maps to a vector
+  and a sentence is a pooled lookup, so there is no ONNX Runtime, no downloaded binary and no
+  `ort` release-candidate pin. `hf-hub` is compiled out, so nothing in it can reach the
+  network — a model is three files the operator already has.
+
+  Measured against the same twenty queries as the lexical evaluation, from one shared file so
+  the tables can be read side by side:
+
+  | engine | recall@5 | MRR | P@1 |
+  |---|---:|---:|---:|
+  | lexical | 0.90 | 0.74 | 0.60 |
+  | semantic | 0.95 | 0.84 | 0.75 |
+  | **hybrid** | 0.95 | **0.87** | **0.80** |
+
+  Precision-at-one on paraphrase went from 0.12 to 0.50, which was the number that justified
+  building it.
+
+  **The first hybrid was worse than semantic alone** — 0.78 MRR against 0.84 — and passed its
+  test, because the test only asked it to beat lexical. It routed by kernel type when a query
+  carried a `kinds` filter and merged both engines when it did not; no real query carries one,
+  so the dispatch was never exercised and the merge averaged good ranks with bad. Rewritten to
+  route on the *query*: identifier-shaped goes to lexical, everything else to the embedder.
+  The assertion is now the property that failed — routing must never lose to either engine it
+  routes between.
+
+- **The OpenAI strict-schema defect**, which never needed the API key it was filed behind.
+  Strict structured outputs require every key in `properties` to appear in `required`;
+  Appendix C declares eleven and requires three, so a strict request was rejected outright
+  rather than degrading. `openai_compat::strict_schema` translates at the boundary — every
+  property required, optionality expressed as a nullable type, `additionalProperties: false`
+  stated, unsupported constructs dropped — because the shared schema is what Gemini and
+  DeepSeek receive and both work with it. Verified live afterwards.
+
+- **The hosted gate ran**, and the structured-output modes are visibly different rather than
+  nominally so: Gemini's `json-schema` returns four conformant units in one call; DeepSeek's
+  `json-mode` guarantees valid JSON but not valid-against-this-schema, so it retried three
+  times, produced one unit, degraded it under rule I, and spent two and a half times the
+  tokens.
 
 ### Closed in 0.6
 

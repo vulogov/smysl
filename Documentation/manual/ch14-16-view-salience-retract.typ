@@ -687,6 +687,52 @@ not the ranking.
   not fit, packing fails rather than quietly dropping what you searched for.
 ]
 
+#subsection("When words are not enough")
+
+Everything above is *lexical*: it matches words. That is why it is perfect on
+`pool.wait_ms` and weak on "why was it slow" — the second shares almost no
+vocabulary with the sentence that answers it.
+
+Since 0.7 there is a second engine. Build with `--features semantic`, give it a
+Model2Vec model directory, and queries that mean the same thing as a gist
+without using its words start finding it:
+
+#dtable(
+  (auto, auto, auto, auto),
+  (
+    ([engine], [recall\@5], [MRR], [first place]),
+    ([lexical], [0.90], [0.74], [0.60]),
+    ([semantic], [0.95], [0.84], [0.75]),
+    ([hybrid], [0.95], [0.87], [0.80]),
+  ),
+)
+
+On paraphrased queries specifically, the right unit is ranked first half the
+time rather than one time in eight.
+
+The hybrid routes on what the *query* looks like: a single token carrying a
+separator is a name, and names go to the lexical engine, which answers them
+perfectly. Anything with a space in it is prose, and prose goes to the
+embedder — including a sentence that happens to mention `pool.wait_ms`, because
+a sentence about a name is still a sentence.
+
+#callout(label: "A wrong turn worth keeping")[
+  The first version routed on the *kernel type* the caller asked for, on the
+  reasoning that the format already records what a unit is. It scored worse
+  than the embedder alone — and its test passed, because the test only asked it
+  to beat the lexical engine.
+
+  The flaw was in when the information arrives. A caller who already knows they
+  want a `claim` is usually not searching; almost every real query carries no
+  filter at all, so the routing never ran and a fallback that merged both
+  engines did. Averaging a good ranking with a bad one gives a middling one.
+
+  The fix was to route on the thing that is always present — the query — and to
+  make the test assert the property that had failed: routing must never lose to
+  either engine it routes between. Both the fix and the test came from running
+  the measurement, which is the only reason either was found.
+]
+
 #callout(label: "What that means for you")[
   Use `--kind` when you know what you are after. Narrowing to `evidence` when
   you want a measurement, or to `question` when you want what was asked, beats
