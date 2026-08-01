@@ -23,6 +23,29 @@ and the facade asserts the two are independent.
 
 ### Measured
 
+**The hosted provider gate ran against DeepSeek and Gemini**, and the difference between
+structured-output modes turns out to be visible rather than theoretical:
+
+| provider | mode | path | units | calls | degraded | tokens |
+|---|---|---|---:|---:|---:|---:|
+| gemini | `json-schema` | json-ast | 4 | 1 | 0 | 624 |
+| deepseek | `json-mode` | surface | 1 | 3 | 1 | 1572 |
+
+Gemini structurally guarantees the shape, so one call returns four conformant units. DeepSeek
+guarantees only *valid JSON*, not valid-against-this-schema, so it took three calls, produced
+one unit and degraded it under rule I — at two and a half times the tokens. That is the
+`StructuredMode` distinction earning its place in the API: a provider that cannot promise
+conformance is not a slower version of one that can, it is a different pipeline.
+
+**The OpenAI strict-mode suspect is confirmed, without a key.** `openai.rs` has warned in its
+own header that strict structured outputs require every key in `properties` to appear in
+`required`. The shared schema declares eleven properties and three required — `type`, `gist`,
+`status` — so eight are missing, and a strict request would be rejected outright rather than
+degrading. That is now a fact about our schema rather than a suspicion about their API, and
+it can be fixed and asserted statically: the OpenAI mapper should *transform* the schema into
+strict form rather than passing it through, since making the shared schema strict would change
+what Gemini and DeepSeek receive, and both currently work.
+
 **Semantic retrieval works, and it is worth the model file.** Over the same twenty queries,
 `potion-base-8M`:
 
