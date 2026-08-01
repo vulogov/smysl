@@ -39,22 +39,35 @@ Precision-at-one on paraphrase goes from 0.12 to 0.50 — four times better on t
 that justified building this. `claim` recall rises 0.67 → 0.83 and its MRR 0.29 → 0.64. The
 prediction that lexical would keep identifiers held: 1.00 against 0.75.
 
-**And the hybrid is worse than semantic alone**, which was not the prediction. 0.78 MRR
-against 0.84, 0.65 P@1 against 0.75. It clears the assertion — it beats lexical — and it
-loses to the thing it is built on top of.
+**The first hybrid was worse than semantic alone** — 0.78 MRR against 0.84 — which was not
+the prediction. It cleared its assertion, because that only asked it to beat lexical, and it
+lost to the engine it was built on.
 
-The reason is a design error rather than a tuning problem. `Hybrid` routes by kernel type
-*when the query carries a `kinds` filter*, and merges both engines on rank when it does not.
-No query in the evaluation carries a filter, and few real ones will: a caller who knew which
-kind they wanted would usually not be searching. So the dispatch this was designed around was
-never exercised, and what was measured is the merge — which pulls semantic's good ranks down
-by averaging them with lexical's bad ones.
+A design error rather than a tuning problem. It routed by kernel type *when the query carried
+a `kinds` filter*, and merged both engines on rank when it did not. No query in the
+evaluation carries a filter and few real ones will — a caller who knew which kind they wanted
+would usually not be searching — so the dispatch it was designed around was never exercised,
+and what got measured was the merge, which pulls good ranks down by averaging them with bad
+ones.
 
-What the numbers actually argue for: default to semantic, and fall back to lexical for
-queries that *look like identifiers* — detectable from the query itself, which is the
-information available at the time the decision has to be made. Routing on the query rather
-than on a filter the caller probably did not set. Not yet implemented; the measurement came
-first this time, which is the point of having one.
+**Rewritten to route on the query, which is the information available when the decision has
+to be made.** An identifier-shaped query — one token carrying a separator, like
+`pool.wait_ms` — goes to lexical; everything else goes to the embedder; an explicit `kinds`
+filter still refines it. There is no merge, and its absence is pinned by a test.
+
+| | recall@5 | MRR | P@1 |
+|---|---:|---:|---:|
+| lexical | 0.90 | 0.74 | 0.60 |
+| semantic | 0.95 | 0.84 | 0.75 |
+| **hybrid** | 0.95 | **0.87** | **0.80** |
+
+It now takes the best of each on every class: perfect on identifiers where lexical is,
+perfect on echo and 0.50 on paraphrase where the embedder is, and `Data` back to 1.00 MRR
+where routing on kind alone had left it at 0.75.
+
+The assertion is now the property that failed rather than the weaker one that passed: routing
+must never lose to *either* engine it routes between. That is the whole promise of dispatch,
+and it is what the first version broke while passing its test.
 
 What is queued, in the order I would take it:
 

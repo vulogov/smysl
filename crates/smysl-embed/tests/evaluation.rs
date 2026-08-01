@@ -235,15 +235,20 @@ fn semantic_against_lexical_over_the_corpus() {
     }
     println!();
 
-    // The one assertion. Not "semantic is better" — that is what the table is for, and
-    // pinning it would freeze in whatever this query set happens to reward. What must hold
-    // is that the thing which would actually ship is not *worse* than the engine it
-    // replaces, because a hybrid that routes badly loses on both halves at once.
+    // The assertion is a property, not a target. Not "semantic wins" — that is what the
+    // table is for, and pinning a number would freeze in whatever this query set rewards.
+    //
+    // What must hold is that routing never loses to the engines it routes *between*. That is
+    // the whole promise of dispatch: send each query to whichever engine is better at it, and
+    // the result cannot be worse than either. The first version of this crate failed exactly
+    // that — 0.78 MRR against pure semantic's 0.84 — while passing a weaker assertion that
+    // only compared it to lexical. This is the assertion that would have caught it.
     let lex = rows["lexical"].overall.mrr();
+    let sem = rows["semantic"].overall.mrr();
     let hyb = rows["hybrid"].overall.mrr();
     assert!(
-        hyb >= lex - 1e-9,
-        "the hybrid ({hyb:.2} MRR) is worse than lexical alone ({lex:.2}); the routing is \
-         costing more than the embedder earns"
+        hyb >= lex - 1e-9 && hyb >= sem - 1e-9,
+        "the hybrid ({hyb:.2} MRR) is worse than an engine it routes between \
+         (lexical {lex:.2}, semantic {sem:.2}); routing is costing more than it earns"
     );
 }

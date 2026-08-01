@@ -228,23 +228,34 @@ impl Retriever for Semantic {
     }
 }
 
-/// Lexical and semantic together, chosen per kernel type rather than blended.
+/// Lexical and semantic together, routed by what the *query* looks like.
 ///
-/// The 0.5.0 measurement is unusually clear about which engine to use where. `evidence` and
-/// `data` scored 1.00 on BM25 and identifiers scored 1.00 with perfect precision, because
-/// those units name concrete things and concrete things are findable by name. `claim` scored
-/// 0.67, and on a paraphrased query the right claim ranked first once in eight, because a
-/// claim is an interpretation and interpretations get worded differently by different people.
+/// # What the measurement changed
 ///
-/// So this dispatches rather than blends. Blending would need a weight, the weight would need
-/// tuning, tuning would need a larger query set than exists, and the result would be worse on
-/// the half that already works — BM25 at 1.00 has nothing to gain from a second opinion and
-/// something to lose. Routing by what a unit *is* uses the structure the format already
-/// carries, which is the whole argument for having kernel types at all.
+/// This dispatched on the query's `kinds` filter until it was scored. The reasoning was that
+/// the format already records what a unit is, so routing on kind uses structure that is
+/// already there. The flaw is in *when* the information is available: a caller who knew which
+/// kind they wanted would usually not be searching, so almost every real query arrives
+/// without a filter — and the fallback for that case merged both engines on rank, which
+/// pulled semantic's good ranks down by averaging them with lexical's bad ones.
 ///
-/// A query with an explicit `kinds` filter is routed by that filter. A query without one runs
-/// both and merges, because the caller has not said what they are looking for and either
-/// engine may be the right one.
+/// Measured over the shared query set with `potion-base-8M`, that hybrid scored 0.78 MRR
+/// against pure semantic's 0.84. It beat lexical, which was all its assertion asked, and lost
+/// to the engine it was built on.
+///
+/// So it routes on the query, which is the one thing always available when the decision has
+/// to be made:
+///
+/// | query | engine | why |
+/// |---|---|---|
+/// | identifier-shaped | lexical | 1.00 precision-at-one against 0.75 |
+/// | anything else | semantic | 0.84 MRR against 0.74, and 0.50 against 0.12 on paraphrase |
+///
+/// An explicit `kinds` filter still refines it: a query restricted entirely to concrete kinds
+/// goes to lexical whatever it looks like, because that is the caller saying so outright.
+///
+/// There is no merge any more. Merging was measurably worse than either engine alone at the
+/// job each is good at, and a second opinion is only worth having when it is sometimes right.
 pub struct Hybrid<L: Retriever, S: Retriever = Semantic> {
     lexical: L,
     semantic: S,
@@ -258,23 +269,43 @@ const INTERPRETIVE: &[KernelType] = &[
     KernelType::Question,
 ];
 
+/// Whether a query is a name rather than a sentence.
+///
+/// `pool.wait_ms`, `checkout.p95`, `db.queries_per_request`, `latency_by_region.csv` — the
+/// shape is one token carrying a separator. Lexical retrieval answers those perfectly and an
+/// embedder does not, because a static model has no vector for a symbol it never saw.
+///
+/// Deliberately narrow: whitespace anywhere means prose, and prose goes to the embedder even
+/// when it mentions an identifier. A sentence *about* `pool.wait_ms` is still a sentence, and
+/// widening this to "contains an identifier" would send paraphrases to the engine that is
+/// worst at them — which is the mistake this whole function exists to correct.
+pub fn looks_like_identifier(query: &str) -> bool {
+    let q = query.trim();
+    !q.is_empty()
+        && !q.chars().any(char::is_whitespace)
+        && q.chars().any(|c| matches!(c, '_' | '.' | '/' | ':' | '-'))
+}
+
 // Generic over *both* sides, with `Semantic` only the default. The routing is the part of
 // this crate with a judgement in it, and tying it to a concrete embedder would have made it
-// testable only where a model file exists — which is nowhere in CI. Two stubs test it in
-// milliseconds instead.
+// testable only where a model file exists — which is nowhere in CI. Stubs test it in
+// milliseconds instead, and that is how the routing above could be rewritten with confidence.
 impl<L: Retriever, S: Retriever> Hybrid<L, S> {
     pub fn new(lexical: L, semantic: S) -> Hybrid<L, S> {
         Hybrid { lexical, semantic }
     }
 
-    /// Which engine a kind should be answered by.
-    ///
-    /// `Question` joins the interpretive set even though 0.5.0 had only one of them, so the
-    /// evidence for it is thin. The reasoning is that a question is phrased by whoever asked
-    /// it and searched for by whoever answers — the vocabulary-mismatch case by construction.
-    /// Recorded as reasoning rather than measurement, so it is clear which it is.
     pub fn is_interpretive(kind: KernelType) -> bool {
         INTERPRETIVE.contains(&kind)
+    }
+
+    /// Which engine answers this query. Exposed so a caller can explain a result, and so the
+    /// decision is testable without running either engine.
+    pub fn routes_to_lexical(query: &Query) -> bool {
+        if looks_like_identifier(&query.text) {
+            return true;
+        }
+        !query.kinds.is_empty() && query.kinds.iter().all(|k| !Self::is_interpretive(*k))
     }
 }
 
@@ -283,47 +314,11 @@ impl<L: Retriever, S: Retriever> Retriever for Hybrid<L, S> {
         if query.limit == 0 {
             return Vec::new();
         }
-
-        // An explicit filter says what the caller wants, so route on it. All-interpretive
-        // goes to the embedder, all-concrete to BM25, and a mixture runs both.
-        if !query.kinds.is_empty() {
-            let interpretive = query.kinds.iter().all(|k| Self::is_interpretive(*k));
-            let concrete = query.kinds.iter().all(|k| !Self::is_interpretive(*k));
-            if interpretive {
-                return self.semantic.search(query);
-            }
-            if concrete {
-                return self.lexical.search(query);
-            }
+        if Self::routes_to_lexical(query) {
+            self.lexical.search(query)
+        } else {
+            self.semantic.search(query)
         }
-
-        // No filter, or a mixed one: run both and merge. Scores are not comparable across
-        // engines — BM25 is unbounded and cosine is in [-1, 1] — so merging on score would
-        // let one engine's scale decide everything. Merge on *rank* instead, keeping each
-        // engine's best where they disagree.
-        let mut merged: BTreeMap<Uid, (usize, f32)> = BTreeMap::new();
-        for (rank, h) in self.lexical.search(query).into_iter().enumerate() {
-            merged.insert(h.uid, (rank, h.score));
-        }
-        for (rank, h) in self.semantic.search(query).into_iter().enumerate() {
-            merged
-                .entry(h.uid)
-                .and_modify(|e| {
-                    if rank < e.0 {
-                        *e = (rank, h.score);
-                    }
-                })
-                .or_insert((rank, h.score));
-        }
-
-        let mut hits: Vec<(usize, Hit)> = merged
-            .into_iter()
-            .map(|(uid, (rank, score))| (rank, Hit { uid, score }))
-            .collect();
-        // Best rank first, ties broken by uid so the result is a function rather than a
-        // preference — the same rule both engines use.
-        hits.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.uid.cmp(&b.1.uid)));
-        hits.into_iter().map(|(_, h)| h).take(query.limit).collect()
     }
 
     fn len(&self) -> usize {
@@ -337,7 +332,6 @@ mod tests {
 
     /// A retriever that returns what it is told to, so routing can be tested without a model.
     struct Stub {
-        name: &'static str,
         hits: Vec<Hit>,
     }
 
@@ -355,9 +349,8 @@ mod tests {
         Uid::from_bytes([n; 32])
     }
 
-    fn stub(name: &'static str, ids: &[u8]) -> Stub {
+    fn stub(ids: &[u8]) -> Stub {
         Stub {
-            name,
             hits: ids
                 .iter()
                 .enumerate()
@@ -370,73 +363,84 @@ mod tests {
     }
 
     #[test]
-    fn an_interpretive_filter_routes_to_the_embedder() {
-        let h = Hybrid::new(stub("lex", &[1, 2]), stub("sem", &[9]));
-        let got = h.search(&Query::new("x", 5).kinds([KernelType::Claim]));
-        assert_eq!(got.len(), 1, "{:?}", h.lexical.name);
+    fn an_identifier_query_goes_to_lexical() {
+        let h = Hybrid::new(stub(&[1]), stub(&[9]));
+        for q in [
+            "pool.wait_ms",
+            "checkout.p95",
+            "db.queries_per_request",
+            "latency_by_region.csv",
+        ] {
+            let got = h.search(&Query::new(q, 5));
+            assert_eq!(
+                got[0].uid,
+                uid(1),
+                "`{q}` is a name, and lexical answers names at 1.00 precision-at-one"
+            );
+        }
+    }
+
+    #[test]
+    fn prose_goes_to_the_embedder_even_when_it_mentions_an_identifier() {
+        let h = Hybrid::new(stub(&[1]), stub(&[9]));
+        let got = h.search(&Query::new("why did pool.wait_ms rise so sharply", 5));
         assert_eq!(
             got[0].uid,
             uid(9),
-            "a claim query should go to the embedder"
+            "a sentence about an identifier is still a sentence; widening the rule to \
+             `contains an identifier` would send paraphrases to the engine worst at them"
         );
     }
 
     #[test]
-    fn a_concrete_filter_routes_to_lexical() {
-        let h = Hybrid::new(stub("lex", &[1, 2]), stub("sem", &[9]));
-        let got = h.search(&Query::new("x", 5).kinds([KernelType::Evidence]));
+    fn a_concrete_kinds_filter_still_routes_to_lexical() {
+        let h = Hybrid::new(stub(&[1]), stub(&[9]));
+        let got = h.search(&Query::new("some prose query", 5).kinds([KernelType::Evidence]));
+        assert_eq!(
+            got[0].uid,
+            uid(1),
+            "an explicit filter is the caller saying outright what they want"
+        );
+    }
+
+    #[test]
+    fn an_interpretive_filter_goes_to_the_embedder() {
+        let h = Hybrid::new(stub(&[1]), stub(&[9]));
+        let got = h.search(&Query::new("some prose query", 5).kinds([KernelType::Claim]));
+        assert_eq!(got[0].uid, uid(9));
+    }
+
+    /// There is no merge, and that is deliberate rather than an omission.
+    ///
+    /// Merging on rank scored 0.78 MRR where pure semantic scored 0.84: averaging a good
+    /// ranking with a bad one gives a middling one. This pins the absence, so restoring a
+    /// merge is a decision someone makes against a number rather than a tidy-looking idea.
+    #[test]
+    fn one_engine_answers_and_the_other_is_not_consulted() {
+        let h = Hybrid::new(stub(&[1, 2]), stub(&[9]));
+        let got = h.search(&Query::new("a prose query with no filter", 5));
         assert_eq!(
             got.iter().map(|x| x.uid).collect::<Vec<_>>(),
-            vec![uid(1), uid(2)],
-            "evidence scored 1.00 on BM25; sending it to an embedder can only lose"
+            vec![uid(9)],
+            "results from both engines means the merge came back"
         );
     }
 
-    /// A mixed filter cannot be answered by one engine, so both run.
     #[test]
-    fn a_mixed_filter_runs_both() {
-        let h = Hybrid::new(stub("lex", &[1]), stub("sem", &[9]));
-        let got = h.search(&Query::new("x", 5).kinds([KernelType::Claim, KernelType::Evidence]));
-        let ids: Vec<_> = got.iter().map(|x| x.uid).collect();
-        assert!(ids.contains(&uid(1)) && ids.contains(&uid(9)), "{ids:?}");
-    }
-
-    /// With no filter the caller has not said what they want, so neither engine is dismissed.
-    #[test]
-    fn no_filter_merges_on_rank_not_score() {
-        // Lexical scores are unbounded and cosine is in [-1, 1]. If this merged on score the
-        // lexical side would win everything regardless of rank, which is the bug the merge is
-        // written to avoid.
-        let lex = Stub {
-            name: "lex",
-            hits: vec![Hit {
-                uid: uid(1),
-                score: 900.0,
-            }],
-        };
-        let sem = Stub {
-            name: "sem",
-            hits: vec![Hit {
-                uid: uid(9),
-                score: 0.8,
-            }],
-        };
-        let got = Hybrid::new(lex, sem).search(&Query::new("x", 5));
-        assert_eq!(
-            got.len(),
-            2,
-            "both engines' top hit should survive a rank merge"
+    fn the_identifier_rule_is_narrow() {
+        assert!(looks_like_identifier("pool.wait_ms"));
+        assert!(looks_like_identifier("a/b"));
+        assert!(!looks_like_identifier("pool wait ms"));
+        assert!(
+            !looks_like_identifier("saturated"),
+            "one bare word is not a name"
         );
-        assert_eq!(
-            got.iter().map(|h| h.uid).collect::<Vec<_>>(),
-            vec![uid(1), uid(9)],
-            "rank 0 from each, tie broken by uid — not by the larger score"
-        );
+        assert!(!looks_like_identifier(""));
     }
 
     #[test]
     fn a_zero_limit_returns_nothing() {
-        let h = Hybrid::new(stub("lex", &[1]), stub("sem", &[9]));
+        let h = Hybrid::new(stub(&[1]), stub(&[9]));
         assert!(h.search(&Query::new("x", 0)).is_empty());
     }
 }
