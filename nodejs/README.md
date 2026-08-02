@@ -20,7 +20,7 @@ would weaken the evidence.
 
 ```sh
 cd nodejs
-npm test          # 38 tests, no install step
+npm test          # 38 tests, no install step, Node 18+
 ```
 
 ## What it verifies
