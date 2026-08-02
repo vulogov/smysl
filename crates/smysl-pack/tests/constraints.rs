@@ -541,7 +541,7 @@ fn verify_reports_a_violation_when_there_is_one() {
 #[test]
 fn verify_notices_a_selection_that_lost_its_closure() {
     let mut rng = Rng(0x2026_0801_0002);
-    for round in 0..40 {
+    for _round in 0..40 {
         let store = generate(&mut rng, 8);
         let s = sal(&store);
         let req = PackRequest::budget(2_000);
