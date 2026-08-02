@@ -7,6 +7,51 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 0.9.0
+
+Nothing yet. What is carried, and what each is actually waiting on:
+
+- **A second implementation of the format.** `READINESS.md` calls this the largest gate and it
+  has not moved: nobody has built against `SMYSL_FORMAT_SPEC.md` alone. The whole proposition
+  is that two implementations agree on what a document says, and that has never been tested by
+  anything except this one. Four cycles of internal verification cannot substitute for it —
+  every place the spec turns out to be insufficient is worth more than another measurement
+  taken here.
+
+  The spec is under 250 lines precisely so this is a weekend rather than a project. A
+  `C-Read` decoder in any other language, and a list of everywhere the spec was silent.
+
+- **The quoting coarsening**, which needs a design decision before it needs a model. There is
+  no flag controlling the quote requirement — `quote` is an optional property in Appendix C
+  and the behaviour comes from the prompt — so the two arms have to be built before they can
+  be compared. An hour if the difference is only in the prompt.
+
+- **Anthropic's mapper**, read against its documentation the way OpenAI's was. That method
+  found a real defect without a key and narrowed OpenAI's remaining risk to "does the endpoint
+  accept the translated schema". Anthropic uses `ToolForce` rather than `JsonSchema`, so it has
+  a different set of unknowns and none of them have been looked at.
+
+- **A format-versioning policy.** `smysl/0.1` has been stable across eight releases, which is a
+  record rather than a commitment. What constitutes a break, and what the deprecation path is,
+  belongs in the spec.
+
+- **An API stability pass.** `Hybrid` changed shape twice inside 0.7. Publishing pins every
+  name permanently, so the facade's `pub use` list wants going through once, asking of each
+  name whether it is contract or an implementation detail that escaped.
+
+- **`merge` and `check` scaling**, the last two pure operations measured only through the
+  command, where parsing dominates. And **`doc-output` covers 46 of 168 blocks** — teaching it
+  to build a chapter's intermediate files would roughly triple that.
+
+- **Mutation testing beyond the packer**, deprioritised rather than dropped. 0.8 found that
+  asking "what does the suite trust?" locates oracles faster than a sweep does, so the next
+  pass should be a targeted audit of `smysl-core`'s codec invariants rather than 1 922 mutants.
+
+- **Publishing**, when the gates above say so. Eleven crates or none; the readiness work is
+  done and the dry run is clean.
+
+---
+
 ## 0.8.0 — 2026-08-02
 
 ### Removed
