@@ -24,7 +24,7 @@ frozen or merely stable-so-far.
 **Next action:** a versioning section in `SMYSL_FORMAT_SPEC.md` saying which changes are
 allowed within a format version and which require a new one.
 
-## 2. A second implementation — *not started, and this is the real gate*
+## 2. A second implementation — *started*
 
 The whole proposition is that two implementations agree on what a document says. That has
 never been tested by anything except this one. `SMYSL_FORMAT_SPEC.md` exists and is under 250
@@ -33,9 +33,18 @@ lines specifically so that it could be, but nobody has written against it.
 Until someone does, "another team can implement this" is a claim, not a fact. For an
 interchange format that is the difference between a product and a file layout.
 
-**Next action:** implement a `C-Read` decoder in another language against the spec alone, and
-record every place the spec was insufficient. A weekend in Python would answer more than
-another cycle of features here.
+**Done for C-Read, in 0.9.0.** `python/` holds an independent implementation written from the
+spec alone, with no dependencies, and it decodes and re-encodes every fixture byte for byte.
+It runs in CI, so the spec cannot drift away from a second reader unnoticed.
+
+It found two places where the spec was insufficient, both now marked in the Python source: it
+does not say that constraint 2 (shortest form) applies to integers and lengths rather than to
+float payloads, and it does not mention major type 6 (tags) at all. Neither is a defect in the
+Rust; both are places a second implementer must guess.
+
+**Next action:** fold those two clarifications into `SMYSL_FORMAT_SPEC.md`, and decide whether
+a class above C-Read is worth implementing. C-Produce would test uid derivation, which is the
+claim the format actually rests on.
 
 ## 3. Public API stability — *not ready*
 

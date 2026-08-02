@@ -31,3 +31,9 @@ target
 # working tree, and `git add -A` swept it into a commit the remote refused.
 *.core
 mutants.out
+
+# Python build artifacts from the conformance implementation.
+python/build/
+python/*.egg-info/
+__pycache__/
+.pytest_cache/

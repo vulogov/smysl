@@ -146,6 +146,23 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --test conformance_fixtures --no-default-features
 
+  # A second implementation, in Python, written from the specification alone. It is the only
+  # check in this repository that the *spec* is sufficient rather than that the Rust is
+  # self-consistent — everything else here would pass just as happily if the spec were blank.
+  #
+  # It targets C-Read, the floor: decode, re-encode byte-identically, preserve unknowns. The
+  # fixtures were produced by the Rust, so a byte-for-byte match is two implementations
+  # agreeing on identity rather than merely both parsing.
+  conformance-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e './python[test]'
+      - run: python -m pytest python/tests -q
+
   # The manual prints 43 replayable command transcripts, and until 0.4 nothing checked that
   # the binary still produced them. A teaching document whose transcripts have quietly
   # drifted is worse than one with none: a reader who types the command and gets something
