@@ -30,6 +30,19 @@ and the facade asserts the two are independent.
 
 ### Fixed
 
+- **Two oracles were never audited**, found by asking of each thing the suite *trusts*: is
+  there a test that it ever says no?
+
+  `satisfies_rule_l` is the second. It is asserted `.is_empty()` in two places and nowhere
+  asserted to report anything, so an oracle returning `vec![]` would satisfy both — and the
+  repair pass those tests exist to check would be unfalsifiable. A thread could come back with
+  holes and every test would agree it had not.
+
+  The hunt also cleared two: `conformance` is tested in both directions with the specific
+  blocking code, and `Query::admits` is exercised both ways through the retrieval filter
+  tests. Four candidates, two gaps, twenty minutes — a better rate than a 1 922-mutant sweep
+  would have given.
+
 - **`verify` was never audited.** It could be replaced with `vec![]` and every test passed —
   four assertions in this repository read `verify(...).is_empty()`, including the C1-C7
   property test and the `pack_constraints` fuzz target, and all four are satisfied by an

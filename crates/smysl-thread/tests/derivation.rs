@@ -16,8 +16,8 @@
 //! corpus and fail in the field.
 
 use smysl_core::{
-    canonical_uid, AgentId, KernelType, Record, RelKind, Relation, Role, SourceKind, SourceRef,
-    Status, ThreadId, ThreadSchema, Uid, UnitCore, UnitCoreBuilder,
+    canonical_uid, AgentId, Hlc, KernelType, Record, RelKind, Relation, Role, SourceKind,
+    SourceRef, Status, Step, Thread, ThreadId, ThreadSchema, Uid, UnitCore, UnitCoreBuilder,
 };
 use smysl_graph::Store;
 use smysl_thread::{definition, derive_thread, satisfies_rule_l, DeriveOptions, DeriveReport};
@@ -364,5 +364,66 @@ fn the_corpus_actually_forces_repairs() {
     assert!(
         repairs > 50,
         "the generated corpus forced only {repairs} repairs, which is too few to trust"
+    );
+}
+
+/// Rule L's oracle must *report* a broken thread, not merely fail to find one.
+///
+/// Found by the oracle hunt that followed `verify`: `satisfies_rule_l` is asserted
+/// `.is_empty()` in two places and nowhere asserted to say anything. An oracle that always
+/// returned `vec![]` would satisfy both, and the repair pass those tests exist to check would
+/// be unfalsifiable — the thread could come back with holes and every test would agree it
+/// did not.
+///
+/// This is the same defect `verify` had in `smysl-pack`, in the sibling position. Both are
+/// what other tests trust rather than what they test.
+#[test]
+fn rule_l_reports_a_step_whose_dependency_is_missing() {
+    // Two units where the second cannot be read without the first.
+    let base = UnitCoreBuilder::new(KernelType::Definition, "the term being used", Status::Cited)
+        .source(SourceRef::new(SourceKind::Doc, "handbook"))
+        .build()
+        .expect("builds");
+    let base_uid = canonical_uid(&base);
+    let leaning = UnitCoreBuilder::new(
+        KernelType::Claim,
+        "a claim that leans on that definition",
+        Status::Speculative,
+    )
+    .deps([base_uid])
+    .build()
+    .expect("builds");
+    let leaning_uid = canonical_uid(&leaning);
+
+    let store = Store::from_records(vec![Record::Unit(base), Record::Unit(leaning)]);
+
+    // A thread holding only the dependent unit. Its dependency is in the store and not in
+    // the thread, which is exactly what rule L forbids.
+    let thread = Thread::new(
+        ThreadId::new("t/broken").unwrap(),
+        ThreadSchema::Brief,
+        AgentId::new("tool:test").unwrap(),
+        "a thread with a hole in it",
+        Hlc::new(0, 0, AgentId::new("tool:test").unwrap()),
+    )
+    .with_steps(vec![Step::new(Role::BottomLine, leaning_uid)]);
+
+    let broken = satisfies_rule_l(&store, &thread);
+    assert_eq!(
+        broken,
+        vec![(leaning_uid, base_uid)],
+        "rule L's oracle did not report a step whose dependency is absent; every \
+         `is_empty()` assertion that trusts it is worth nothing"
+    );
+
+    // And it must stay quiet when the dependency is present, or it would report everything
+    // and be equally useless in the other direction.
+    let whole = thread.clone().with_steps(vec![
+        Step::new(Role::BottomLine, leaning_uid),
+        Step::new(Role::Support, base_uid),
+    ]);
+    assert!(
+        satisfies_rule_l(&store, &whole).is_empty(),
+        "a thread carrying its dependencies must not be reported"
     );
 }
