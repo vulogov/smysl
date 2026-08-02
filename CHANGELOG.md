@@ -9,7 +9,53 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 0.8.0
 
-Nothing yet. What is carried, and what it is waiting on:
+### Removed
+
+- **The local-improvement pass.** Step 3 of §18.3 downgraded the least valuable depth and
+  spent what that freed on breadth. It was measured and it lost: across 28 000 generated
+  packs it changed 26, and **22 of those 26 were worse** by the value function it exists to
+  maximise. Four were better.
+
+  It fired on 0.09% of packs, which is why two earlier measurements read it as harmless
+  rather than harmful. 0.3.0 found that turning it off changed runtime by under 1% and
+  concluded it was not the bottleneck; mutation testing found `improve -> false` survives.
+  Neither could see the packs getting *better* without it.
+
+  Removing it changed **no** recorded selection — the golden file across nine fixtures at six
+  budgets is byte-identical — because the corpus never reaches a case where it fired. That is
+  the same reason it escaped every fixture for eight releases.
+
+  `IMPROVEMENT_PASSES` and `PackRequest::improvement_passes` went with it; a knob for a pass
+  that no longer exists is worse than no knob. 123 lines gone.
+
+### Fixed
+
+- **`verify` was never audited.** It could be replaced with `vec![]` and every test passed —
+  four assertions in this repository read `verify(...).is_empty()`, including the C1-C7
+  property test and the `pack_constraints` fuzz target, and all four are satisfied by an
+  oracle that never says anything. It is not the thing under test; it is what the other tests
+  *trust*. Two tests now audit it, both confirmed to fail against the `vec![]` mutant before
+  being trusted.
+
+### Measured
+
+- **Mutation testing over the packer core.** 49% of viable mutants survived on the
+  best-tested file in the codebase — 11 constraint properties, a golden file, two fuzz
+  targets and a brute-force differential oracle. `Pack::is_optimal` could be replaced with a
+  constant; so could every comparison operator on `Ordered`, the type introduced in 0.6.0
+  with the argument that one implementation of the order "removes the question rather than
+  testing around it". Right about consistency, wrong about correctness.
+
+  After the tests above and the removal below, the interesting residue is gone: 22 of the 46
+  remaining survivors were inside `improve`.
+
+### Added
+
+- **`Documentation/READINESS.md`** — seven gates on publishing, each done or with a next
+  action. "Not production ready" was the answer twice and said nothing about what would
+  change it. The largest gate is that nobody has implemented the format from the spec alone.
+
+What is carried, and what it is waiting on:
 
 - **The quoting coarsening.** A fixture that yields five or six units yields three once each
   must carry a quotable span. Observed once, never explained — it may be the prompt or it may

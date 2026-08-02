@@ -21,7 +21,6 @@ use crate::constraints::{violations, Constraints, Selection, Violation};
 use crate::cost::{available_levels, value, Estimator};
 
 /// Default local-improvement passes (§18.3).
-pub const IMPROVEMENT_PASSES: usize = 8;
 /// Default store size above which exact mode declines to run (§18.3 step 4).
 pub const EXACT_THRESHOLD: usize = 256;
 
@@ -39,7 +38,6 @@ pub struct PackRequest {
     pub max_lod: Option<Lod>,
     /// Restrict packing to these units; empty means the whole store.
     pub scope: BTreeSet<Uid>,
-    pub improvement_passes: usize,
     /// Above this many units, `PackMode::Exact` falls back to greedy and says so
     /// (`SMY-W202`). The problem is NP-hard; an unbounded exact search on a large store
     /// would hang rather than answer.
@@ -56,7 +54,6 @@ impl Default for PackRequest {
             estimator: Estimator::default(),
             max_lod: None,
             scope: BTreeSet::new(),
-            improvement_passes: IMPROVEMENT_PASSES,
             exact_threshold: EXACT_THRESHOLD,
         }
     }
@@ -462,21 +459,17 @@ pub fn pack(
         used += dc;
     }
 
-    // --- 3. local improvement ---------------------------------------------
-    for _ in 0..req.improvement_passes {
-        if !improve(
-            store,
-            &mut selection,
-            &mut used,
-            &local,
-            &scope,
-            &req.estimator,
-            &constraints,
-            cap,
-        ) {
-            break;
-        }
-    }
+    // Step 3 of §18.3 was a local-improvement pass — downgrade the least valuable depth,
+    // spend what that frees on breadth. Removed in 0.8.0 because it was measured and it
+    // lost: over 28 000 generated packs it changed 26, and 22 of those 26 were *worse* by
+    // the value function it exists to maximise. It fired rarely enough (0.09%) to escape
+    // every fixture, which is why two earlier measurements read it as harmless — 0.3.0
+    // found turning it off changed runtime by under 1%, and mutation testing found
+    // `improve -> false` survives. Neither could see that the packs got better.
+
+    // The search that found it lived in `tests/constraints.rs` and went with it: with the
+    // pass gone it would compare two identical configurations, which is the shape of test
+    // this project keeps deleting. The numbers are in the 0.8.0 changelog.
 
     // --- 4. exact refinement (feature `branch-and-bound`) -------------------
     let mut report = Report::new();
@@ -629,110 +622,6 @@ fn weigh(
         val += value(s, *l) - from.map(|f| value(s, f)).unwrap_or(0.0);
     }
     (cost, val)
-}
-
-/// One local-improvement pass (§18.3 step 3).
-///
-/// Only moves that leave C1-C7 intact are kept - every candidate is checked and reverted
-/// if it breaks anything, so an optimisation can never cost correctness.
-#[allow(clippy::too_many_arguments)]
-fn improve(
-    store: &Store,
-    selection: &mut Selection,
-    used: &mut u64,
-    salience: &BTreeMap<Uid, f32>,
-    scope: &[Uid],
-    e: &Estimator,
-    c: &Constraints,
-    cap: impl Fn(Lod) -> Lod,
-) -> bool {
-    // Downgrade-to-admit: free budget from the least valuable depth, then buy breadth.
-    // Deterministic order, so the same graph always tries the same move first.
-    let mut candidates: Vec<(f64, Uid, Lod)> = selection
-        .iter()
-        .filter(|(_, l)| **l > Lod::L0)
-        .filter_map(|(u, l)| {
-            let unit = store.get(u)?;
-            let lower = match *l {
-                Lod::L2 => Lod::L1,
-                _ => Lod::L0,
-            };
-            let freed = e.upgrade(&unit.core, lower, *l);
-            if freed == 0 {
-                return None;
-            }
-            let s = salience.get(u).copied().unwrap_or(0.0);
-            let lost = value(s, *l) - value(s, lower);
-            Some((lost / freed as f64, *u, lower))
-        })
-        .collect();
-    candidates.sort_by(|a, b| {
-        a.0.partial_cmp(&b.0)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(a.1.cmp(&b.1))
-    });
-
-    for (lost_density, uid, lower) in candidates {
-        let Some(unit) = store.get(&uid) else {
-            continue;
-        };
-        let current = selection[&uid];
-        let freed = e.upgrade(&unit.core, lower, current);
-
-        // Is there breadth worth more than the depth being given up?
-        let mut gain: Option<(f64, Uid, Lod, u64, Selection)> = None;
-        for other in scope {
-            if *other == uid {
-                continue;
-            }
-            let Some(o) = store.get(other) else { continue };
-            for level in available_levels(&o.core) {
-                let level = cap(level);
-                if selection.get(other).is_some_and(|l| *l >= level) {
-                    continue;
-                }
-                let d = closure::delta(store, selection, *other, level);
-                if d.is_empty() {
-                    continue;
-                }
-                let (dc, dv) = weigh(store, selection, &d, salience, e);
-                if dc == 0 || dc > freed {
-                    continue;
-                }
-                let density = dv / dc as f64;
-                if density <= lost_density {
-                    continue;
-                }
-                let better = match &gain {
-                    None => true,
-                    Some((bd, bu, bl, _, _)) => {
-                        (density, std::cmp::Reverse(*other), std::cmp::Reverse(level))
-                            > (*bd, std::cmp::Reverse(*bu), std::cmp::Reverse(*bl))
-                    }
-                };
-                if better {
-                    gain = Some((density, *other, level, dc, d));
-                }
-            }
-        }
-
-        let Some((_, _, _, dc, d)) = gain else {
-            continue;
-        };
-
-        let snapshot = selection.clone();
-        selection.insert(uid, lower);
-        for (u, l) in d {
-            raise(selection, u, l);
-        }
-        let new_used = *used - freed + dc;
-        if violations(store, selection, new_used, c).is_empty() {
-            *used = new_used;
-            return true;
-        }
-        *selection = snapshot;
-    }
-    false
 }
 
 /// Why a unit did not make it (§8).
