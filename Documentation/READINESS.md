@@ -37,10 +37,16 @@ interchange format that is the difference between a product and a file layout.
 spec alone, with no dependencies, and it decodes and re-encodes every fixture byte for byte.
 It runs in CI, so the spec cannot drift away from a second reader unnoticed.
 
-It found two places where the spec was insufficient, both now marked in the Python source: it
-does not say that constraint 2 (shortest form) applies to integers and lengths rather than to
-float payloads, and it does not mention major type 6 (tags) at all. Neither is a defect in the
-Rust; both are places a second implementer must guess.
+It found three places where the spec is insufficient, all marked in the Python source:
+constraint 2 (shortest form) does not say it applies to integers and lengths rather than float
+payloads; major type 6 (tags) is not mentioned at all; and constraint 1 says text keys are
+"permitted only inside a payload" without saying what a decoder must do on meeting one at
+kernel level. None is a defect in the Rust; all three are places a second implementer must
+guess.
+
+The suite also records what C-Read *cannot* reach, and the largest entry is §2.3 — status is
+part of identity — because uids need C-Produce. The format's central claim is still untested
+by a second implementation.
 
 **Next action:** fold those two clarifications into `SMYSL_FORMAT_SPEC.md`, and decide whether
 a class above C-Read is worth implementing. C-Produce would test uid derivation, which is the

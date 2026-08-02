@@ -31,7 +31,7 @@ lengths, `null`, binary64 floats, out-of-order and duplicate map keys, tags, flo
 
 ## What writing it found
 
-Two places where the spec was insufficient, both marked `SPEC:` in `smysl/cbor.py`:
+Three places where the spec is insufficient, each marked `SPEC:` where it bites:
 
 1. **Constraint 2 (shortest form) does not say what it applies to.** Read literally it covers
    every head, including major type 7 — where the trailing bytes are a float's payload, so
@@ -44,5 +44,24 @@ Two places where the spec was insufficient, both marked `SPEC:` in `smysl/cbor.p
    that constraint 1 makes the kernel's shape exhaustive — but that is a reading, not
    something the spec states.
 
-Neither is a defect in the Rust. Both are places a second implementer has to guess, which is
+3. **Constraint 1 says what is permitted, not what a decoder must do.** "Integer map keys in
+   the kernel. Text keys are permitted only inside a payload" describes a valid encoder. It
+   does not say whether a decoder meeting a text key at kernel level must reject it
+   (`SMY-E080`) or accept it. This implementation accepts, reading the clause as descriptive
+   — a guess, and marked as one.
+
+None is a defect in the Rust. All three are places a second implementer has to guess, which is
 exactly what this exercise was for.
+
+## Two files, two questions
+
+`test_conformance.py` asks whether this implementation agrees with the Rust: fixtures in,
+byte-identical bytes out. `test_spec.py` asks whether it does what the *document* says,
+section by section, with each test naming its clause. They are not the same question — a
+library can agree with a reference implementation and still not obey the specification, and
+only one of those had ever been tested before this package existed.
+
+`test_spec.py` ends with `test_what_c_read_cannot_check`, which lists the clauses this
+conformance class provably cannot reach and fails if that list is ever silently emptied. The
+most consequential entry is §2.3, *status is part of identity* — the paragraph the whole
+format rests on, and one nothing here can test, because uids need C-Produce.
