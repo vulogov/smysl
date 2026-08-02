@@ -492,3 +492,78 @@ fn caching_never_changes_what_the_greedy_would_have_chosen() {
         }
     }
 }
+
+/// `verify` must *report* a violation, not merely fail to find one.
+///
+/// Found by mutation testing: `verify` could be replaced with `vec![]` and every test in this
+/// file still passed, along with the `pack_constraints` fuzz target. Four assertions in this
+/// repository read `verify(...).is_empty()`, and all four are satisfied by an oracle that
+/// never says anything.
+///
+/// That is the sharpest instance of a pattern this project has hit repeatedly: a check that
+/// passes without covering what it claims. It is worse here than elsewhere, because `verify`
+/// is not the thing under test — it is what the other tests *trust*. An oracle nobody audits
+/// makes every result that depends on it unfalsifiable.
+#[test]
+fn verify_reports_a_violation_when_there_is_one() {
+    let mut rng = Rng(0x2026_0801_0001);
+    let store = generate(&mut rng, 8);
+    let s = sal(&store);
+
+    let req = PackRequest::budget(2_000);
+    let p = pack(&store, &s, &req).expect("no focus, so the floor is empty");
+    assert!(
+        !p.selection.is_empty(),
+        "an empty pack cannot violate anything, so this test would prove nothing"
+    );
+    assert!(
+        verify(&store, &p, &req).is_empty(),
+        "the pack itself is legal"
+    );
+
+    // The same pack, audited against a budget it plainly exceeds. Nothing about the pack
+    // changed; the question asked of it did.
+    let impossible = PackRequest::budget(1);
+    let found = verify(&store, &p, &impossible);
+    assert!(
+        !found.is_empty(),
+        "verify accepted a pack of {} token(s) against a budget of 1 — it is not checking, \
+         and every `is_empty()` assertion that trusts it is worth nothing",
+        p.used()
+    );
+}
+
+/// And it must notice a selection that breaks closure, not only one that breaks a budget.
+///
+/// A pack whose claim has lost its grounds is the failure the constraints exist to prevent:
+/// it fits, it looks complete, and the argument in it has a hole. If `verify` only ever
+/// checked arithmetic, the budget test above would pass and this would not.
+#[test]
+fn verify_notices_a_selection_that_lost_its_closure() {
+    let mut rng = Rng(0x2026_0801_0002);
+    for _round in 0..40 {
+        let store = generate(&mut rng, 8);
+        let s = sal(&store);
+        let req = PackRequest::budget(2_000);
+        let Ok(mut p) = pack(&store, &s, &req) else {
+            continue;
+        };
+        if p.selection.len() < 2 {
+            continue;
+        }
+        // Drop one member. Whichever it was, something else in the pack either grounded on
+        // it or is now unopposed — unless it was a leaf nothing referenced, in which case
+        // this round proves nothing and the next one is tried.
+        let victim = *p.selection.keys().next().expect("non-empty");
+        p.selection.remove(&victim);
+        p.info.used = independent_cost(&store, &p.selection);
+
+        if !verify(&store, &p, &req).is_empty() {
+            return; // reported, as it must be
+        }
+    }
+    panic!(
+        "forty selections were mutilated and `verify` reported nothing about any of them; \
+         it is not checking closure"
+    );
+}

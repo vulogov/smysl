@@ -30,7 +30,7 @@ pub use closure::Reason;
 pub use constraints::{violations, Constraints, Selection, Violation};
 pub use cost::{available_levels, value, Estimator};
 pub use smysl_core::error::PackError;
-pub use solve::{pack, verify, Pack, PackRequest, EXACT_THRESHOLD, IMPROVEMENT_PASSES};
+pub use solve::{pack, verify, Pack, PackRequest, EXACT_THRESHOLD};
 
 /// Identifier of the default cost model, as recorded in every `packinfo` (D-2).
 pub const DEFAULT_ESTIMATOR: &str = "smysl/utf8-div4";

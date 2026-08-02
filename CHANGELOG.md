@@ -7,6 +7,95 @@ and the facade asserts the two are independent.
 
 ---
 
+## 0.8.0 — 2026-08-02
+
+### Removed
+
+- **The local-improvement pass.** Step 3 of §18.3 downgraded the least valuable depth and
+  spent what that freed on breadth. It was measured and it lost: across 28 000 generated
+  packs it changed 26, and **22 of those 26 were worse** by the value function it exists to
+  maximise. Four were better.
+
+  It fired on 0.09% of packs, which is why two earlier measurements read it as harmless
+  rather than harmful. 0.3.0 found that turning it off changed runtime by under 1% and
+  concluded it was not the bottleneck; mutation testing found `improve -> false` survives.
+  Neither could see the packs getting *better* without it.
+
+  Removing it changed **no** recorded selection — the golden file across nine fixtures at six
+  budgets is byte-identical — because the corpus never reaches a case where it fired. That is
+  the same reason it escaped every fixture for eight releases.
+
+  `IMPROVEMENT_PASSES` and `PackRequest::improvement_passes` went with it; a knob for a pass
+  that no longer exists is worse than no knob. 123 lines gone.
+
+### Fixed
+
+- **Two oracles were never audited**, found by asking of each thing the suite *trusts*: is
+  there a test that it ever says no?
+
+  `satisfies_rule_l` is the second. It is asserted `.is_empty()` in two places and nowhere
+  asserted to report anything, so an oracle returning `vec![]` would satisfy both — and the
+  repair pass those tests exist to check would be unfalsifiable. A thread could come back with
+  holes and every test would agree it had not.
+
+  The hunt also cleared two: `conformance` is tested in both directions with the specific
+  blocking code, and `Query::admits` is exercised both ways through the retrieval filter
+  tests. Four candidates, two gaps, twenty minutes — a better rate than a 1 922-mutant sweep
+  would have given.
+
+- **`verify` was never audited.** It could be replaced with `vec![]` and every test passed —
+  four assertions in this repository read `verify(...).is_empty()`, including the C1-C7
+  property test and the `pack_constraints` fuzz target, and all four are satisfied by an
+  oracle that never says anything. It is not the thing under test; it is what the other tests
+  *trust*. Two tests now audit it, both confirmed to fail against the `vec![]` mutant before
+  being trusted.
+
+### Measured
+
+- **Mutation testing over the packer core.** 49% of viable mutants survived on the
+  best-tested file in the codebase — 11 constraint properties, a golden file, two fuzz
+  targets and a brute-force differential oracle. `Pack::is_optimal` could be replaced with a
+  constant; so could every comparison operator on `Ordered`, the type introduced in 0.6.0
+  with the argument that one implementation of the order "removes the question rather than
+  testing around it". Right about consistency, wrong about correctness.
+
+  After the tests above and the removal below, the interesting residue is gone: 22 of the 46
+  remaining survivors were inside `improve`.
+
+### Added
+
+- **`Documentation/READINESS.md`** — seven gates on publishing, each done or with a next
+  action. "Not production ready" was the answer twice and said nothing about what would
+  change it. The largest gate is that nobody has implemented the format from the spec alone.
+
+### Documentation
+
+- Everything at 0.8.0. The manual's packing chapter no longer describes a local-improvement
+  pass, and says why it went. The architecture RFC gains "Closed in 0.8".
+
+What is carried, and what it is waiting on:
+
+- **The quoting coarsening**, which turns out to need a design decision before it needs a
+  model. There is no flag controlling the quote requirement — `quote` is an optional property
+  in Appendix C and the behaviour comes from the prompt — so the two arms have to be
+  constructed before they can be compared. An hour if the difference is only in the prompt.
+- **Anthropic's mapper is unverified.** OpenAI's is now down to "confirm the translated schema
+  is accepted"; Anthropic has had no equivalent narrowing. It uses `ToolForce` rather than
+  `JsonSchema`, so it has a different set of unknowns and no counted defect yet — which means
+  the first useful step is reading its shape against the documentation the way OpenAI's was,
+  not waiting for a key.
+
+- **Publishing, when it is production software.** Eleven crates or none: the single-crate
+  restructure was abandoned in 0.7.0 and the reasoning is recorded there. The readiness work
+  is done and `cargo publish --dry-run` is clean.
+
+- **`smysl-embed` has no live-gate equivalent.** The semantic evaluation runs from
+  `make eval-semantic` and a model directory, and nothing in CI exercises it. That is the
+  same shape as a fuzz target nobody runs, and the answer is probably a small committed model
+  rather than a download in CI.
+
+---
+
 ## 0.7.0 — 2026-08-01
 
 ### Added

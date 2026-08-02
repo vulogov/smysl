@@ -21,7 +21,6 @@ use crate::constraints::{violations, Constraints, Selection, Violation};
 use crate::cost::{available_levels, value, Estimator};
 
 /// Default local-improvement passes (§18.3).
-pub const IMPROVEMENT_PASSES: usize = 8;
 /// Default store size above which exact mode declines to run (§18.3 step 4).
 pub const EXACT_THRESHOLD: usize = 256;
 
@@ -39,7 +38,6 @@ pub struct PackRequest {
     pub max_lod: Option<Lod>,
     /// Restrict packing to these units; empty means the whole store.
     pub scope: BTreeSet<Uid>,
-    pub improvement_passes: usize,
     /// Above this many units, `PackMode::Exact` falls back to greedy and says so
     /// (`SMY-W202`). The problem is NP-hard; an unbounded exact search on a large store
     /// would hang rather than answer.
@@ -56,7 +54,6 @@ impl Default for PackRequest {
             estimator: Estimator::default(),
             max_lod: None,
             scope: BTreeSet::new(),
-            improvement_passes: IMPROVEMENT_PASSES,
             exact_threshold: EXACT_THRESHOLD,
         }
     }
@@ -462,21 +459,17 @@ pub fn pack(
         used += dc;
     }
 
-    // --- 3. local improvement ---------------------------------------------
-    for _ in 0..req.improvement_passes {
-        if !improve(
-            store,
-            &mut selection,
-            &mut used,
-            &local,
-            &scope,
-            &req.estimator,
-            &constraints,
-            cap,
-        ) {
-            break;
-        }
-    }
+    // Step 3 of §18.3 was a local-improvement pass — downgrade the least valuable depth,
+    // spend what that frees on breadth. Removed in 0.8.0 because it was measured and it
+    // lost: over 28 000 generated packs it changed 26, and 22 of those 26 were *worse* by
+    // the value function it exists to maximise. It fired rarely enough (0.09%) to escape
+    // every fixture, which is why two earlier measurements read it as harmless — 0.3.0
+    // found turning it off changed runtime by under 1%, and mutation testing found
+    // `improve -> false` survives. Neither could see that the packs got better.
+
+    // The search that found it lived in `tests/constraints.rs` and went with it: with the
+    // pass gone it would compare two identical configurations, which is the shape of test
+    // this project keeps deleting. The numbers are in the 0.8.0 changelog.
 
     // --- 4. exact refinement (feature `branch-and-bound`) -------------------
     let mut report = Report::new();
@@ -631,110 +624,6 @@ fn weigh(
     (cost, val)
 }
 
-/// One local-improvement pass (§18.3 step 3).
-///
-/// Only moves that leave C1-C7 intact are kept - every candidate is checked and reverted
-/// if it breaks anything, so an optimisation can never cost correctness.
-#[allow(clippy::too_many_arguments)]
-fn improve(
-    store: &Store,
-    selection: &mut Selection,
-    used: &mut u64,
-    salience: &BTreeMap<Uid, f32>,
-    scope: &[Uid],
-    e: &Estimator,
-    c: &Constraints,
-    cap: impl Fn(Lod) -> Lod,
-) -> bool {
-    // Downgrade-to-admit: free budget from the least valuable depth, then buy breadth.
-    // Deterministic order, so the same graph always tries the same move first.
-    let mut candidates: Vec<(f64, Uid, Lod)> = selection
-        .iter()
-        .filter(|(_, l)| **l > Lod::L0)
-        .filter_map(|(u, l)| {
-            let unit = store.get(u)?;
-            let lower = match *l {
-                Lod::L2 => Lod::L1,
-                _ => Lod::L0,
-            };
-            let freed = e.upgrade(&unit.core, lower, *l);
-            if freed == 0 {
-                return None;
-            }
-            let s = salience.get(u).copied().unwrap_or(0.0);
-            let lost = value(s, *l) - value(s, lower);
-            Some((lost / freed as f64, *u, lower))
-        })
-        .collect();
-    candidates.sort_by(|a, b| {
-        a.0.partial_cmp(&b.0)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(a.1.cmp(&b.1))
-    });
-
-    for (lost_density, uid, lower) in candidates {
-        let Some(unit) = store.get(&uid) else {
-            continue;
-        };
-        let current = selection[&uid];
-        let freed = e.upgrade(&unit.core, lower, current);
-
-        // Is there breadth worth more than the depth being given up?
-        let mut gain: Option<(f64, Uid, Lod, u64, Selection)> = None;
-        for other in scope {
-            if *other == uid {
-                continue;
-            }
-            let Some(o) = store.get(other) else { continue };
-            for level in available_levels(&o.core) {
-                let level = cap(level);
-                if selection.get(other).is_some_and(|l| *l >= level) {
-                    continue;
-                }
-                let d = closure::delta(store, selection, *other, level);
-                if d.is_empty() {
-                    continue;
-                }
-                let (dc, dv) = weigh(store, selection, &d, salience, e);
-                if dc == 0 || dc > freed {
-                    continue;
-                }
-                let density = dv / dc as f64;
-                if density <= lost_density {
-                    continue;
-                }
-                let better = match &gain {
-                    None => true,
-                    Some((bd, bu, bl, _, _)) => {
-                        (density, std::cmp::Reverse(*other), std::cmp::Reverse(level))
-                            > (*bd, std::cmp::Reverse(*bu), std::cmp::Reverse(*bl))
-                    }
-                };
-                if better {
-                    gain = Some((density, *other, level, dc, d));
-                }
-            }
-        }
-
-        let Some((_, _, _, dc, d)) = gain else {
-            continue;
-        };
-
-        let snapshot = selection.clone();
-        selection.insert(uid, lower);
-        for (u, l) in d {
-            raise(selection, u, l);
-        }
-        let new_used = *used - freed + dc;
-        if violations(store, selection, new_used, c).is_empty() {
-            *used = new_used;
-            return true;
-        }
-        *selection = snapshot;
-    }
-    false
-}
-
 /// Why a unit did not make it (§8).
 fn drop_reason(
     store: &Store,
@@ -750,5 +639,110 @@ fn drop_reason(
         DropReason::ClosureCost
     } else {
         DropReason::Budget
+    }
+}
+
+#[cfg(test)]
+mod ordering_tests {
+    use super::*;
+
+    /// `Choice` is ordered by density, then salience, then uid descending, then level
+    /// descending, then index ascending — and the derived `Ord` makes the field order *be*
+    /// that rule. Mutation testing found this untested: `Ordered::eq`, `partial_cmp` and
+    /// `cmp` could each be replaced with a constant and every test still passed.
+    ///
+    /// That is the sharper half of the finding. The type was introduced in 0.6.0 with the
+    /// argument that one implementation of the order "removes the question rather than
+    /// testing around it" — which was right about consistency and wrong about correctness.
+    /// One implementation used by both callers is still an implementation nothing checks.
+    #[test]
+    fn choices_order_by_density_first() {
+        let u = Uid::from_bytes([1; 32]);
+        let lo = Choice::new(1.0, 0.5, u, Lod::L0, 0);
+        let hi = Choice::new(2.0, 0.1, u, Lod::L0, 0);
+        assert!(hi > lo, "a denser candidate wins regardless of salience");
+    }
+
+    #[test]
+    fn salience_breaks_a_density_tie() {
+        let u = Uid::from_bytes([1; 32]);
+        let dull = Choice::new(1.0, 0.1, u, Lod::L0, 0);
+        let keen = Choice::new(1.0, 0.9, u, Lod::L0, 0);
+        assert!(
+            keen > dull,
+            "the salience term never decides in the corpus, so only this says it works"
+        );
+    }
+
+    #[test]
+    fn a_lower_uid_wins_when_density_and_salience_tie() {
+        let low = Choice::new(1.0, 0.5, Uid::from_bytes([1; 32]), Lod::L0, 0);
+        let high = Choice::new(1.0, 0.5, Uid::from_bytes([9; 32]), Lod::L0, 0);
+        assert!(
+            low > high,
+            "uid descends, so the smaller uid is the greater Choice"
+        );
+    }
+
+    #[test]
+    fn an_earlier_candidate_wins_when_everything_else_ties() {
+        let u = Uid::from_bytes([1; 32]);
+        let first = Choice::new(1.0, 0.5, u, Lod::L0, 0);
+        let later = Choice::new(1.0, 0.5, u, Lod::L0, 7);
+        assert!(
+            first > later,
+            "the scan kept the first candidate among equals; the heap must agree"
+        );
+    }
+
+    #[test]
+    fn ordered_compares_by_value_and_not_by_constant() {
+        assert!(Ordered(2.0) > Ordered(1.0));
+        assert!(Ordered(1.0) < Ordered(2.0));
+        assert_eq!(Ordered(1.0), Ordered(1.0));
+        assert_ne!(Ordered(1.0), Ordered(2.0));
+        // `total_cmp` rather than `partial_cmp().unwrap()`: -0.0 and 0.0 are distinct to it,
+        // which is fine, and no input can panic.
+        assert!(Ordered(f64::MAX) > Ordered(0.0));
+    }
+
+    /// `is_optimal` could be replaced with `true`, with `false`, or have its `&&` flipped,
+    /// and nothing noticed — for the function that tells a caller whether their pack is
+    /// provably the best available.
+    #[test]
+    fn optimality_needs_both_exact_mode_and_no_gap() {
+        let mk = |mode, gap| Optimality { mode, gap };
+        // Built by hand rather than by packing something: the question is what
+        // `is_optimal` reads off `info`, and reaching it through a real pack would test the
+        // packer instead.
+        let pack = |o| {
+            let mut info = PackInfo {
+                budget: 0,
+                used: 0,
+                thread: None,
+                dropped: Vec::new(),
+                degraded: Vec::new(),
+                optimality: o,
+                estimator: String::new(),
+                extra: Default::default(),
+            };
+            info.optimality = o;
+            Pack {
+                selection: Selection::new(),
+                info,
+                why: BTreeMap::new(),
+                report: Report::default(),
+            }
+        };
+        assert!(pack(mk(PackMode::Exact, 0.0)).is_optimal());
+        assert!(
+            !pack(mk(PackMode::Greedy, 0.0)).is_optimal(),
+            "a greedy pack with no measured gap is not *proved* optimal"
+        );
+        assert!(
+            !pack(mk(PackMode::Exact, 0.1)).is_optimal(),
+            "exact mode that gave up with a gap has not proved anything"
+        );
+        assert!(!pack(mk(PackMode::Greedy, 0.1)).is_optimal());
     }
 }

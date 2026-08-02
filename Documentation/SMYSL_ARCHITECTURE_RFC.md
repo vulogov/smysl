@@ -4,7 +4,7 @@
 [`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md), which is deliberately a fraction of this
 one's length: interoperability needs identity, encoding and the rules, not an account of how
 this implementation happens to be built.
-**Describes:** the code at `main`, crate `0.7.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
+**Describes:** the code at `main`, crate `0.8.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
 **Compiled:** 2026-07-30, from SM-P0 through SM-P15, the operational-merit work after it, the
 0.2 cycle (label bindings, comment syntax, forward compatibility), the 0.3 cycle (global
 flags, nesting bounds, packer performance) and the 0.4 cycle (the fuzz backlog: seven
@@ -588,7 +588,7 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
 
   - **It is worst when packing is easiest.** With a budget that admits everything, `pack` is
     quadratic (3.8x, 4.3x per doubling); with a budget that binds, it is linear (1.9x, 2.0x).
-  - **It is not `improve()`.** Setting `IMPROVEMENT_PASSES` to 0 changes the time by under
+  - **It is not `improve()`.** Setting `IMPROVEMENT_PASSES` to 0 changed the time by under
     1% at 4000 units, so the local-improvement pass — the obvious nested loop, and the first
     thing reading the code suggests — is not the cost.
 
@@ -620,6 +620,37 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
   its marginal cost falls, which happens exactly when something in its obligation is
   selected and therefore already paid for. That non-monotonicity is what made the 0.3.0
   attempt unsound.
+
+### Closed in 0.8
+
+- **The local-improvement pass is gone.** Measured across 28 000 generated packs, it changed
+  26 and made 22 of those *worse* by the value function it existed to maximise. It fired on
+  0.09% of packs, which is why two earlier measurements read it as harmless: 0.3 found that
+  disabling it changed runtime by under 1%, and mutation testing found `improve -> false`
+  survives every test. One was measuring time, the other whether anything noticed — neither
+  asked whether the packs improved without it. Removing it left the golden file
+  byte-identical: nine fixtures, six budgets, not one selection moved.
+
+- **Two oracles were never audited.** `verify` could be replaced with `vec![]` and every test
+  passed, including the C1–C7 property test and the `pack_constraints` fuzz target — four
+  assertions read `verify(...).is_empty()`, all satisfied by an oracle that never speaks.
+  `satisfies_rule_l` had the same defect in the sibling position. Neither is the thing under
+  test; both are what other tests *trust*, which makes everything downstream unfalsifiable.
+
+  Found two ways. Mutation testing over `solve.rs` reported 49% of viable mutants surviving on
+  the best-tested file in the project, and `verify -> vec![]` was among them. The second came
+  from asking directly of each trusted function whether any test makes it say *no* — four
+  candidates, two gaps, twenty minutes. For finding oracles the question beats the sweep;
+  `conformance` and `Query::admits` came back clean.
+
+- **`Documentation/READINESS.md`** — seven gates on publishing, each done or with a next
+  action. Written because "not production ready" had been the answer twice while saying
+  nothing about what would change it. The largest gate is that nobody has implemented the
+  format from the spec alone.
+
+- **The semantic path runs in CI**, against a 4 KB generated model in `fixtures/embed-tiny`
+  rather than a 30 MB download. Before it, that path was exercised only by hand — the shape
+  of defect that let two stack overflows survive to 0.3.
 
 ### Closed in 0.7
 
