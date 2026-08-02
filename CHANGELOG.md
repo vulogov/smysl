@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 0.8.0
+## 0.8.0 — 2026-08-02
 
 ### Removed
 
@@ -68,14 +68,17 @@ and the facade asserts the two are independent.
   action. "Not production ready" was the answer twice and said nothing about what would
   change it. The largest gate is that nobody has implemented the format from the spec alone.
 
+### Documentation
+
+- Everything at 0.8.0. The manual's packing chapter no longer describes a local-improvement
+  pass, and says why it went. The architecture RFC gains "Closed in 0.8".
+
 What is carried, and what it is waiting on:
 
-- **The quoting coarsening.** A fixture that yields five or six units yields three once each
-  must carry a quotable span. Observed once, never explained — it may be the prompt or it may
-  be inherent to anchoring a unit to text it can quote. One experiment settles it, and the
-  experiment needs a model, which now exists: DeepSeek and Gemini both run the hosted gate.
-  So this is no longer blocked, only undone.
-
+- **The quoting coarsening**, which turns out to need a design decision before it needs a
+  model. There is no flag controlling the quote requirement — `quote` is an optional property
+  in Appendix C and the behaviour comes from the prompt — so the two arms have to be
+  constructed before they can be compared. An hour if the difference is only in the prompt.
 - **Anthropic's mapper is unverified.** OpenAI's is now down to "confirm the translated schema
   is accepted"; Anthropic has had no equivalent narrowing. It uses `ToolForce` rather than
   `JsonSchema`, so it has a different set of unknowns and no counted defect yet — which means

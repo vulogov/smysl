@@ -217,10 +217,16 @@ same trade in `--lod`'s other home.
 
 #subsection("Two ways to solve: `--mode greedy` and `--mode exact`")
 
-The default solver is greedy by density with a bounded local-improvement
-pass (`solve.rs`): fast, and for this fixture at this budget, exactly
-as good as anything else could do — but *greedy is not proven optimal, it
-is merely checked afterward*. `--mode exact` asks for a proof instead, by
+The default solver is greedy by density (`solve.rs`): fast, and for this
+fixture at this budget, exactly as good as anything else could do — but
+*greedy is not proven optimal, it is merely checked afterward*.
+
+There used to be a local-improvement pass after it, which downgraded the least
+valuable depth and spent what that freed on breadth. It was removed in 0.8
+because it was finally measured: across 28 000 generated packs it changed 26,
+and 22 of those 26 came out *worse* by the value function it existed to
+maximise. It fired on 0.09% of packs, which is how it survived eight releases
+looking harmless. `--mode exact` asks for a proof instead, by
 branch-and-bound search over closure-complete anchors, pruned against a
 fractional-relaxation upper bound (`exact.rs`). That search is compiled in
 only behind the `exact-pack` feature — the default build does not carry it:
