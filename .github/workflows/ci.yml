@@ -163,6 +163,19 @@ jobs:
       - run: pip install -e './python[test]'
       - run: python -m pytest python/tests -q
 
+  # The same specification, read a third time. Two implementations agreeing could have made
+  # the same guess where the document is silent, so independence is what makes agreement
+  # evidence — this one was written without consulting the Python, and both found the same two
+  # ambiguities.
+  conformance-node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm test --prefix nodejs
+
   # The manual prints 43 replayable command transcripts, and until 0.4 nothing checked that
   # the binary still produced them. A teaching document whose transcripts have quietly
   # drifted is worse than one with none: a reader who types the command and gets something

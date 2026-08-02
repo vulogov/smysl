@@ -12,7 +12,7 @@ import pytest
 
 import smysl
 
-FIXTURES = sorted((Path(__file__).parent / "fixtures").glob("*.cbor"))
+FIXTURES = sorted((Path(__file__).parents[2] / "fixtures" / "wire").glob("*.cbor"))
 
 
 def test_there_are_fixtures_to_read():
@@ -51,7 +51,7 @@ def test_every_record_reencodes_individually(path):
 
 def test_unknown_record_types_survive():
     """Rule X, §5. The forward-compatibility fixture exists to carry one."""
-    path = Path(__file__).parent / "fixtures" / "F9-forward-compat.cbor"
+    path = Path(__file__).parents[2] / "fixtures" / "wire" / "F9-forward-compat.cbor"
     if not path.exists():
         pytest.skip("no forward-compatibility fixture")
     records = smysl.decode_store(path.read_bytes())
@@ -64,7 +64,7 @@ def test_unknown_record_types_survive():
 
 
 def test_a_unit_core_names_its_known_fields():
-    path = Path(__file__).parent / "fixtures" / "F1-incident.cbor"
+    path = Path(__file__).parents[2] / "fixtures" / "wire" / "F1-incident.cbor"
     units = [r for r in smysl.decode_store(path.read_bytes()) if r.code == 1]
     assert units, "the incident fixture should hold units"
     for u in units:

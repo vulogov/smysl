@@ -33,9 +33,14 @@ lines specifically so that it could be, but nobody has written against it.
 Until someone does, "another team can implement this" is a claim, not a fact. For an
 interchange format that is the difference between a product and a file layout.
 
-**Done for C-Read, in 0.9.0.** `python/` holds an independent implementation written from the
-spec alone, with no dependencies, and it decodes and re-encodes every fixture byte for byte.
-It runs in CI, so the spec cannot drift away from a second reader unnoticed.
+**Done for C-Read, in 0.9.0 — twice.** `python/` and `nodejs/` each hold an independent
+implementation written from the spec alone, with no dependencies, and each decodes and
+re-encodes every fixture in `fixtures/wire/` byte for byte. Both run in CI.
+
+Two rather than one on purpose: implementations that agree could have made the same guess
+where the document is silent, so agreement is only evidence when the readings were
+independent. The JavaScript was written without consulting the Python, and both arrived at the
+same two ambiguities — which is the result worth having.
 
 It found three places where the spec is insufficient, all marked in the Python source:
 constraint 2 (shortest form) does not say it applies to integers and lengths rather than float

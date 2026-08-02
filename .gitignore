@@ -37,3 +37,4 @@ python/build/
 python/*.egg-info/
 __pycache__/
 .pytest_cache/
+nodejs/node_modules/
