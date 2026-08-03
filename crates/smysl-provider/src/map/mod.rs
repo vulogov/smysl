@@ -54,6 +54,11 @@ pub mod openai_compat;
 /// the message was self-contradictory and still not obviously a bug in the reporter rather
 /// than the request. `parse` stays as it is, because it genuinely does not know; the layer
 /// that does know corrects it on the way out.
+///
+/// Gated on the mappers that call it. Without that, a build with neither feature has an unused
+/// function and `-D warnings` refuses it — which is how this arrived in CI green on a
+/// `--all-features` machine and red on the `ollama`-only and default-features jobs.
+#[cfg(any(feature = "gemini", feature = "anthropic"))]
 pub(crate) fn report_against(e: ProviderError, cap: usize) -> ProviderError {
     match e {
         ProviderError::ContextExceeded { requested, .. } => ProviderError::ContextExceeded {
@@ -130,7 +135,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "gemini", feature = "anthropic")))]
 mod cap_tests {
     use super::*;
 
