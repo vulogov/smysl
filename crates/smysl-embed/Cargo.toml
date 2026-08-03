@@ -8,6 +8,13 @@ license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
 
+# docs.rs builds with default features unless told otherwise, which for this crate meant
+# publishing a partial API: the feature-gated modules simply were not there. Set on every
+# published crate rather than only the five with features today, so a crate that gains one
+# later does not silently reintroduce the gap.
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
 smysl-core     = { workspace = true }
 smysl-graph    = { workspace = true }

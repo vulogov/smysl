@@ -1,4 +1,4 @@
-//! Turning a [`Run`](crate::Run) into the numbers of §28.
+//! Turning a [`Run`] into the numbers of §28.
 //!
 //! Every measurement carries whether it was *observed* or *not run*. A harness that
 //! reported 0.0 for a metric it never measured would be indistinguishable from one that

@@ -25,6 +25,19 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
+  # What docs.rs will render. Gated because publishing made it consequential: a rustdoc
+  # warning is a broken link on the page strangers read first, and six had accumulated
+  # unnoticed. One of them documented `Usage` as being built through a constructor that does
+  # not exist — the "documentation that matches the binary" defect, surviving because nothing
+  # ever failed on it.
+  doc-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+
   # Feature combinations, because the interesting bugs live in the seams between them.
   test-matrix:
     runs-on: ubuntu-latest

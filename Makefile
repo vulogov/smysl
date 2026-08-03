@@ -84,6 +84,17 @@ fix: fmt ## Format, then apply the clippy fixes that can be applied mechanically
 doc: ## Build API documentation, no dependencies
 	$(CARGO) doc --workspace --all-features --no-deps
 
+# What docs.rs renders, gated the way clippy is.
+#
+# Publishing made this consequential: rustdoc warnings are broken links on a page strangers
+# read first, and six had accumulated unnoticed. One was not cosmetic - `Usage` was
+# documented as being built through `Usage::new`, a constructor that does not exist, which
+# is precisely the "documentation that matches the binary" defect READINESS gate 7 tracks.
+# It survived because nothing ever failed on it.
+doc-gate: ## Rustdoc with warnings denied, as docs.rs would show it
+	RUSTDOCFLAGS="-D warnings" $(CARGO) doc --workspace --all-features --no-deps
+	@echo "doc-gate: no rustdoc warnings"
+
 # The three books in Documentation/ are tracked as PDFs as well as sources, because they
 # are deliverables people are handed rather than artefacts people build. Tracking the
 # output of a build makes it drift, so this target is what keeps the two in step.
@@ -243,7 +254,7 @@ commit: ## Commit with aic and push
 # Everything
 # ---------------------------------------------------------------------------
 
-ci: lint test-matrix gates conformance ## Everything CI runs, bar the jobs needing a server
+ci: lint doc-gate test-matrix gates conformance ## Everything CI runs, bar the jobs needing a server
 	@echo
 	@echo "ci: green."
 	@echo "Not covered here: the ollama job (needs a running server - see make live-ollama)"

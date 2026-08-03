@@ -170,7 +170,7 @@ fn joined(hedge: &str, text: &str) -> String {
 /// Render a store as the prose a baseline pipeline would have carried.
 ///
 /// One unit per paragraph, in the store's own order, with its confidence written out in
-/// words by [`hedge`]. Deliberately plain otherwise: dressing it up would be writing the
+/// words by `hedge`. Deliberately plain otherwise: dressing it up would be writing the
 /// baseline's summary for it, and the comparison is about what summarisation costs rather
 /// than about prose style.
 pub fn to_prose(store: &Store) -> String {
