@@ -14,35 +14,42 @@
 
 ## Getting it
 
-**Not on crates.io yet, deliberately.** What would change that is written down rather than
-left as a feeling: [`Documentation/READINESS.md`](Documentation/READINESS.md) lists seven
-gates, each either done or with a next action attached. The largest is that nobody has yet
-implemented the format from the spec alone, which for an interchange format is the difference
-between a product and a file layout.
-
- The format version is `smysl/0.1` and the crate is
-`0.6.0`; the library works and the test suite is real, but publishing reserves a name and
-every version number permanently, and this is not something to hand people as production
-software yet. Both names are held back until it is.
-
-Until then:
+**On crates.io as of 0.9.0.** Twelve crates: the facade, plus the eleven behind it that exist
+so the compiler can check that the pure set stays pure. The evaluation harness stays
+unpublished — its tests read `fixtures/corpus` from outside its own package root, so a
+published copy would ship tests nobody could run.
 
 ```sh
-git clone https://github.com/vulogov/smysl && cd smysl
-cargo build --release          # the CLI, at target/release/smysl
-cargo build --features tui     # …with the terminal browser as well
+cargo install smysl                       # the CLI
+cargo install smysl --features tui        # …with the terminal browser as well
 ```
 
-As a library, by git dependency:
+As a library:
 
 ```toml
 [dependencies]
-smysl = { git = "https://github.com/vulogov/smysl", tag = "v0.6.0" }
+smysl = "0.9"
 ```
 
 Add `default-features = false` for the pure library: no async runtime, no HTTP client and no
 argument parser in the dependency tree, verified in CI on every push rather than promised
 here.
+
+The format version is `smysl/0.1` and has not moved in nine releases. The crate is `0.9.0`,
+and 0.x is meant literally — [`Documentation/READINESS.md`](Documentation/READINESS.md) lists
+seven gates for what would make this production software, four of which are open, and the
+one about API stability says outright that the facade's surface has not had its pass. What
+closed was the gate that could not be worked around: the format has now been implemented from
+the specification alone, three times, in Python, JavaScript and Go. Until someone outside the
+project had done that, "another team can implement this" was a claim rather than a fact, and
+for an interchange format that is the difference between a product and a file layout.
+
+Building from source:
+
+```sh
+git clone https://github.com/vulogov/smysl && cd smysl
+cargo build --release          # the CLI, at target/release/smysl
+```
 
 ---
 

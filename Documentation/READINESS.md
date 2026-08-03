@@ -2,9 +2,16 @@
 
 **Status:** a checklist, not a promise. Updated when something on it moves.
 
-smysl is not published to crates.io, and the reason given each time has been "not production
-ready". That is a true answer and a useless one, because nothing said what would change it —
-so it could only be deferred, never worked toward. This file says what the gate is.
+smysl was unpublished for eight releases, and the reason given each time was "not production
+ready" — a true answer and a useless one, because nothing said what would change it, so it
+could only be deferred and never worked toward. This file was written to say what the gate is.
+
+**Published as of 0.9.0**, with four of these seven items still open. That is not the list being
+abandoned. Gate 2 was the one that could not be worked around: an interchange format nobody
+outside the project has implemented is a file layout, and publishing it would have meant
+publishing a claim. It is closed three times over. What remains is coverage and polish, and
+0.x is the honest signal for that — the version says the surface can still move, and gate 3
+says exactly where.
 
 Nothing here is a schedule. The point is that each item is either done, or has a next action
 that someone could take.

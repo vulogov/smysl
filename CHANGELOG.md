@@ -7,9 +7,28 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 0.9.0
+## 0.9.0 — 2026-08-02
 
 ### Added
+
+- **Published to crates.io**, as twelve crates rather than one. The facade `smysl` carries the
+  library and the CLI; the eleven behind it are the crate boundaries that enforce rule B, and
+  collapsing them into one would have cost the compiler's ability to check that the pure set
+  stays pure. That was weighed in 0.7 and settled the same way.
+
+  `smysl-eval` stays unpublished, and its reason is mechanical rather than editorial: its
+  tests read `fixtures/corpus` through `../..`, which escapes the package root `cargo package`
+  archives. A published copy would ship tests that cannot run.
+
+  Not because the checklist in `READINESS.md` is finished — it is not. Four of its seven gates
+  are open, and the reasons are written there rather than summarised here. What changed is that
+  gate 2 closed, and gate 2 was the one that could not be worked around: an interchange format
+  nobody outside the project has implemented is a file layout, and publishing it would have
+  been publishing a claim. Three implementations later it is a fact, and the remaining gates
+  are about polish and coverage rather than about whether the thing is real.
+
+  0.x, so semver permits breaking changes, and gate 3 says plainly that the facade's surface
+  has not had its stability pass.
 
 - **Three independent implementations of the wire format** — `python/`, `nodejs/` and `go/`,
   each written from `SMYSL_FORMAT_SPEC.md` and each targeting C-Read: decode, re-encode
