@@ -7,7 +7,20 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 0.10.0
+## 0.10.0 — 2026-08-03
+
+The cycle that closed the two gates that were actually blocking, and found the format's
+central claim resting on one implementation, a nine-release quadratic, and a prompt referring
+to a schema it never sent.
+
+`READINESS.md` gate 2 is closed: §2.3 — *status is part of identity* — is verified by something
+other than the Rust for the first time. Gate 6 is closed, and closing it found `check`
+super-linear. Gate 1 has a policy. Gate 3 has a machine behind it rather than an intention.
+
+Three defects reached content-addressed identity or the wire, none of them suspected
+beforehand, and each was found by checking a thing nobody had checked rather than by following
+a hunch.
+
 
 ### Fixed
 
