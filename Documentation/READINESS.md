@@ -24,7 +24,7 @@ frozen or merely stable-so-far.
 **Next action:** a versioning section in `SMYSL_FORMAT_SPEC.md` saying which changes are
 allowed within a format version and which require a new one.
 
-## 2. A second implementation — *started*
+## 2. A second implementation — *done for C-Read*
 
 The whole proposition is that two implementations agree on what a document says. That has
 never been tested by anything except this one. `SMYSL_FORMAT_SPEC.md` exists and is under 250
@@ -57,9 +57,14 @@ The suite also records what C-Read *cannot* reach, and the largest entry is §2.
 part of identity — because uids need C-Produce. The format's central claim is still untested
 by a second implementation.
 
-**Next action:** fold those two clarifications into `SMYSL_FORMAT_SPEC.md`, and decide whether
-a class above C-Read is worth implementing. C-Produce would test uid derivation, which is the
-claim the format actually rests on.
+All three clarifications are folded into §3 of the spec as of 0.9.0: constraint 1 gained the
+decoder's obligation, constraint 2 is scoped to integers and lengths, and tags are constraint
+8. The Go implementation is the check — written against the revised text, it needed no guesses
+in any of the three.
+
+**Next action:** C-Produce, in one of the three. That means BLAKE3 and canonical unit-core
+encoding, and it is what would test §2.3 — the claim the format actually rests on, and the one
+thing on this list still verified by the Rust alone.
 
 ## 3. Public API stability — *not ready*
 
