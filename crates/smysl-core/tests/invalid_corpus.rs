@@ -47,7 +47,7 @@ fn the_corpus_is_not_empty() {
     // Guards the whole file: a glob that matched nothing would make every other assertion
     // here vacuously true, which is the failure this project keeps finding.
     let n = corpus().len();
-    assert!(n >= 28, "expected the shared corpus, found {n} files");
+    assert!(n >= 29, "expected the shared corpus, found {n} files");
 }
 
 #[test]
@@ -73,6 +73,12 @@ fn the_canonical_counterparts_are_accepted() {
         ("sorted map", vec![0xA2, 0x00, 0x01, 0x01, 0x02]),
         ("composed text", vec![0x62, 0xC3, 0xA9]),
         ("quantised float", vec![0xFA, 0x3F, 0x00, 0x00, 0x00]),
+        // Booleans, which the walker carries for rule X. Mutation testing found the arm
+        // handling them could be deleted with nothing failing: an extension payload holding
+        // `true` would have started being rejected, and the format promises the opposite.
+        ("true", vec![0xF5]),
+        ("false", vec![0xF4]),
+        ("a bool inside a payload map", vec![0xA1, 0x00, 0xF5]),
     ];
     for (what, bytes) in valid {
         assert!(accepts(&bytes), "{what} should be accepted: {bytes:02x?}");
@@ -101,4 +107,28 @@ fn an_extension_payload_cannot_carry_a_non_canonical_encoding() {
         "an unknown key's value was accepted with its map keys out of order; these are two \
          encodings of one unit, and both would reach `hash::uid` as different bytes"
     );
+}
+
+/// A kernel map key above `u16::MAX`, which `Dec::map_key` rejects and nothing exercised.
+///
+/// Found by mutation testing: `if k > u16::MAX as u64` could be weakened to `==` and every
+/// test still passed, so the bound was decoration. A key that large cannot be a kernel field
+/// and must not be silently truncated into one that can.
+#[test]
+fn a_map_key_beyond_u16_is_refused() {
+    // {65536: 0} — the key needs a four-byte argument, which is also its shortest form.
+    let bytes = vec![0xA1, 0x1A, 0x00, 0x01, 0x00, 0x00, 0x00];
+    let mut d = Dec::new(&bytes);
+    assert!(d.map_head().is_ok(), "the map head itself is well formed");
+    assert!(
+        d.map_key(None).is_err(),
+        "a key above u16::MAX was accepted; it cannot name a kernel field"
+    );
+
+    // The control: one inside the range still reads, so the check above is not refusing
+    // everything.
+    let ok = vec![0xA1, 0x19, 0x01, 0x00, 0x00];
+    let mut d = Dec::new(&ok);
+    assert!(d.map_head().is_ok());
+    assert_eq!(d.map_key(None).unwrap(), 256);
 }

@@ -13,6 +13,9 @@ repository.workspace   = true
 # The prose arm needs a model at every hop. A dev-dependency, so the crate itself still
 # links no HTTP client and `Summariser`/`Judge` stay ports rather than provider types.
 smysl-provider = { workspace = true, features = ["gemini", "deepseek"] }
+# The quoting experiment needs the shipped ingest prompt, because the arm under test is
+# *that* prompt minus one paragraph. Reconstructing it here would measure a copy.
+smysl-ingest = { workspace = true }
 
 [dependencies]
 smysl-core  = { workspace = true }

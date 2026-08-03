@@ -1479,6 +1479,7 @@ dependencies = [
  "smysl-check",
  "smysl-core",
  "smysl-graph",
+ "smysl-ingest",
  "smysl-pack",
  "smysl-provider",
 ]

@@ -119,8 +119,21 @@ that a rule nothing enforces is a rule that drifts.
 | openai | **no** | its one identified defect is fixed and tested; acceptance unconfirmed |
 | anthropic | **no** | `ToolForce`; no counted defect yet, and none looked for |
 
-**Next action:** read Anthropic's mapper against the documentation the way OpenAI's was. That
-found a real defect without a key, and it is the cheapest remaining move.
+Anthropic's mapper was read against the documentation in 0.10, the way OpenAI's was, and it
+found one: `caps()` declared `streaming: true` while the mapper implements no `stream`, so it
+inherited the trait default, which refuses. Gemini had the same defect — and Gemini is
+live-tested, which means the live test never exercised streaming either.
+
+The rest of the mapper reads correctly against Anthropic's documentation: `x-api-key` rather
+than a bearer token, the `anthropic-version` header, `system` as a top-level field, a forced
+`tool_choice`, the block-list response with `tool_use.input`, and Anthropic's own
+`usage.input_tokens` names rather than OpenAI's.
+
+That is now twice this method has found a defect without a key. What it still cannot answer for
+either provider is whether the endpoint *accepts* the translated schema.
+
+**Next action:** unchanged — a key, for OpenAI and Anthropic both. Everything reachable by
+reading has been read.
 
 ## 5. A test suite that catches what it claims — *measuring, and now cross-checked*
 
@@ -144,9 +157,22 @@ instead. A shared rejection corpus found it in an hour.
 The lesson generalises past this project: a claim written in prose next to the code is not
 weaker evidence than a test, it is *no* evidence, and it reads exactly like evidence.
 
-**Next action:** targeted mutation testing of `smysl-core` codec invariants — everything
-downstream trusts round-tripping. And, cheaper, a sweep for load-bearing claims made only in
-comments.
+Both next actions ran in 0.10, and both produced findings.
+
+The **comment sweep** — 471 comments make a modal claim; narrowing to claims of
+*comprehensiveness* left 178; the three most load-bearing gave two real corrections and one
+clean result. `Secret`'s "a key never reaches a `Debug` output" was genuinely covered, which is
+recorded here because a sweep that reports only hits is the failure it is looking for.
+
+**Mutation testing of the codec** — 143 viable mutants, **33 survivors, 23%**, against the
+packer's 49% in 0.8. Most survivors are equivalent mutants; three were real gaps and are
+closed. The most instructive is that the *map* arm of `skip_one` could stop bounding its depth
+with nothing failing, because the nesting fixture nested arrays — a bound tested on one shape
+and decorative on the other.
+
+**Next action:** extend the sweep to `smysl-graph` and `smysl-check`, whose claims about
+ordering and rule coverage are the next most load-bearing. Mutation testing of `envelope.rs`
+(1 000 lines, the record codec) has not been run and is the obvious remaining target.
 
 ## 6. Performance characterised — *done, and it found one*
 
@@ -188,8 +214,29 @@ told an implementor outside the crate to build a `Usage` through a constructor t
 exist. `make doc-gate` and a CI job now run rustdoc with `-D warnings`, confirmed to fail
 against a deliberate broken link before being trusted.
 
-**Next action:** teach `verify-doc-output.py` to build a chapter's intermediate files, which
-would roughly triple coverage of the manual.
+**The stated next action here was wrong, and 0.10 measured it.** It read "build a chapter's
+intermediate files, which would roughly triple coverage". Only **8** of the 168 blocks name a
+file an earlier *command* produced. **97** name a file the *prose* asks you to write —
+`first.smy`, `missing-gist.smy` — which is a different problem.
+
+Reconstructing those was attempted and abandoned, which is worth recording rather than
+retrying. The contents are in the manual, so a chapter's directory looks rebuildable; but a
+chapter shows the fix as a *fragment* ("Add the missing grounds:" and the one changed stanza),
+not as the file restated. Splicing a fragment back takes guessing where it goes, and guessing
+wrong makes this script report drift that is not there. A check with false positives is worse
+than no check — this script has a comment saying exactly that, about fifteen phantom mismatches
+that once sat in it unread. Implemented conservatively, the reconstruction ran zero commands:
+every tutorial file is retired by a fragment before the commands that use it.
+
+What it did find is that the coverage number was not deterministic. `merge … -o /tmp/x.cbor`
+was required to exist before running, so a command replayed only if an earlier replay had left
+its output behind: 44 blocks on a clean machine, 46 on a dirty one, with nothing changed.
+Outputs are excluded from that check now, and it reports 45 either way.
+
+**Next action:** if this is worth more, the fix is in the *manual*, not the script — commit the
+tutorial files as fixtures and have the chapters include them, so what the reader copies and
+what the script replays are the same bytes. That is a book change, and the book is the thing
+the coverage is protecting, so it should be a deliberate decision rather than a side effect.
 
 ---
 

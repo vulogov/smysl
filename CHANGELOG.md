@@ -51,6 +51,33 @@ and the facade asserts the two are independent.
 
 ### Fixed
 
+- **Two mappers declared a capability they do not have.** `anthropic` and `gemini` both said
+  `streaming: true` while implementing no `Provider::stream`, so both inherited the trait
+  default — which refuses. A caller that checked the capability before streaming, the only
+  reason a capability struct exists, would have been told yes and then refused.
+
+  Found by reading the Anthropic mapper against Anthropic's documentation with no key, which
+  is the method `READINESS.md` gate 4 recommends and the second real defect it has produced
+  without one. The rest of that mapper reads correctly: `x-api-key` rather than a bearer token,
+  `anthropic-version`, top-level `system`, forced `tool_choice`, the block-list response with
+  `tool_use.input`, and Anthropic's own `usage.input_tokens` names.
+
+  `crates/smysl-provider/tests/capabilities_are_honest.rs` now checks the claim for every
+  mapper: one that declares streaming must at least *attempt* it. Confirmed to fail before
+  being trusted — restoring the declaration names the offending mapper.
+
+  **A second, found while using it:** `ContextExceeded` reports `limit: cfg.max_output`, but
+  the cap a mapper actually sends is `req.max_output` — a different field, defaulting to 1024.
+  Set one and not the other and the error reads "context window exceeded: 1008 > 32768", which
+  is incoherent on its face and blames the wrong number. It cost three runs to see, which is
+  the evidence for how misleading it is. Both `gemini` and `anthropic` construct it this way.
+  Recorded rather than fixed here because the honest repair is to thread the effective cap into
+  `parse`, which touches both mappers and wants its own change.
+
+  Also recorded rather than fixed: the trait default refuses with `StructuredUnsupported`,
+  which names the wrong reason. A `StreamUnsupported` variant needs a diagnostic code and a
+  registry entry, so it is a deliberate change rather than a rename in passing.
+
 - **`topo` was quadratic, and it made `check` super-linear.** The ready set was sorted on
   every iteration of the main loop and then popped with `remove(0)` — two quadratic factors in
   three lines. A `BinaryHeap<Reverse<NodeId>>` pops in the same ascending dense-id order, which
@@ -72,6 +99,46 @@ and the facade asserts the two are independent.
   sorted was to make the order canonical.
 
 ### Added
+
+- **The quoting experiment has two arms.** It was blocked on a design, not a model: the quote
+  requirement is a paragraph in `ingest.content.json`, not a flag, so there was nothing to
+  compare against. `crates/smysl-eval/tests/quoting_live.rs` builds the other arm by locating
+  that paragraph in the shipped prompt and removing it — nothing else changed, because anything
+  wider would measure the rewrite. An offline test asserts the two differ *only* there, and
+  fails rather than silently comparing an arm against itself if the sentence moves.
+
+  "Coarsening" is defined as four counts — units per document, mean gist length, share carrying
+  a body, share carrying grounds or a relation — and deliberately not as quality. Judging would
+  need a judge, the judge would be a model, and 0.8 established that an uncontrolled judge
+  measures its own bias.
+
+  **The pilot does not support a conclusion, and says so.** Over three fixtures on
+  `gemini-3.5-flash-lite`, the between-arm difference is comparable to the run-to-run spread of
+  a single arm — 3.0 against 7.0 units on F4-qa, with the quote arm's own two runs differing by
+  4.0. One fixture produced zero units on one arm, which is a failure rather than a finding.
+  DeepSeek returns nothing usable under `json-mode` at all. The harness prints the spread next
+  to the difference so this cannot be read as a result.
+
+  What it needs to become one: more runs per arm, and the zero-unit cases understood first.
+
+- **Mutation testing over the codec.** 143 viable mutants in `cbor/reader.rs` and
+  `cbor/writer.rs`; **33 survived, 23%** — against 49% for the packer in 0.8, which is the only
+  other figure this project has.
+
+  Most survivors are equivalent mutants and were read as such rather than counted as gaps:
+  `|` and `^` in `Enc::head` are identical when the operands occupy disjoint bits, and `<`
+  versus `<=` in `map_key` is unreachable because the equality case is matched by an earlier
+  arm. Three were real, and all three are closed:
+
+  * The **map** arm of `skip_one` could stop incrementing its depth with nothing failing. The
+    nesting fixture nested arrays, so the map path's bound was decoration — on exactly the
+    shape a hostile document would use. `fixtures/wire/invalid/nesting-too-deep-maps.cbor`.
+  * The arm carrying **booleans** could be deleted. An extension payload holding `true` would
+    have started being rejected, and rule X promises the opposite.
+  * The **`u16::MAX` bound on kernel map keys** could be weakened to `==`.
+
+  Each confirmed to kill its mutant: reintroducing the three fails the suite with the message
+  written for it.
 
 - **C-Produce in `python/`, closing §2.3.** The largest item on `READINESS.md`, and the one the
   format's proposition actually rests on.

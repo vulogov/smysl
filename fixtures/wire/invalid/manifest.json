@@ -137,6 +137,11 @@
       "why": "tag 0 (standard date/time); major type 6 is not part of this format"
     },
     {
+      "file": "nesting-too-deep-maps.cbor",
+      "constraint": 9,
+      "why": "129 nested single-entry maps against a limit of 128"
+    },
+    {
       "file": "nesting-too-deep.cbor",
       "constraint": 9,
       "why": "129 nested arrays against a limit of 128"

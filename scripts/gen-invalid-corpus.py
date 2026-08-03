@@ -138,6 +138,13 @@ def main():
     case("nesting-too-deep", 9,
          "129 nested arrays against a limit of 128",
          bytes([0x81] * 129) + bytes([0x00]))
+    # Maps as well as arrays. Mutation testing found that the map arm's depth increment was
+    # untested: the array fixture alone left `skip_one(depth + 1)` on the map path free to
+    # stop incrementing without any test noticing, which would have removed the bound on
+    # exactly the shape a hostile document would use.
+    case("nesting-too-deep-maps", 9,
+         "129 nested single-entry maps against a limit of 128",
+         bytes([0xA1, 0x00] * 129) + bytes([0x00]))
 
     # -- truncation: not a numbered constraint, but every decoder must refuse ---------------
     case("truncated-text", 0,

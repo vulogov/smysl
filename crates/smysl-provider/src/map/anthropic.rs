@@ -277,7 +277,13 @@ impl Provider for Anthropic {
                 StructuredMode::None => StructuredMode::None,
                 _ => StructuredMode::ToolForce,
             },
-            streaming: true,
+            // False, because this mapper does not implement `Provider::stream` and so
+            // inherits the trait default, which refuses. The trait's own documentation says
+            // `caps` describes what a provider *does*, "which is not always the same thing" —
+            // and this said `true` for as long as the mapper has existed. Nothing in the
+            // library reads the field yet, which is why nothing noticed; `Capabilities` is
+            // public API, so a consumer could.
+            streaming: false,
             usage_reporting: true,
             offline: self.cfg.is_local(),
         }
