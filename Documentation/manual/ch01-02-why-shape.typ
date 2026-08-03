@@ -429,6 +429,10 @@ did this number come from" and get an answer.
    and readable.],
   [The tool judges no truth, resolves no disagreement, writes no prose, and
    cannot reach the network in twenty of its twenty-two commands.],
+  [The wire format has been implemented three more times — in Python, JavaScript
+   and Go, each from the specification alone — and all three decode this one's
+   output byte for byte. `Documentation/READINESS.md` tracks what that does and
+   does not prove.],
 ))
 
 #chapter(number: 2, title: "The Shape of the System, and the Twelve Rules")

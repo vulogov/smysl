@@ -7,6 +7,100 @@ and the facade asserts the two are independent.
 
 ---
 
+## 0.9.0 — 2026-08-02
+
+### Added
+
+- **Published to crates.io**, as twelve crates rather than one. The facade `smysl` carries the
+  library and the CLI; the eleven behind it are the crate boundaries that enforce rule B, and
+  collapsing them into one would have cost the compiler's ability to check that the pure set
+  stays pure. That was weighed in 0.7 and settled the same way.
+
+  `smysl-eval` stays unpublished, and its reason is mechanical rather than editorial: its
+  tests read `fixtures/corpus` through `../..`, which escapes the package root `cargo package`
+  archives. A published copy would ship tests that cannot run.
+
+  Not because the checklist in `READINESS.md` is finished — it is not. Four of its seven gates
+  are open, and the reasons are written there rather than summarised here. What changed is that
+  gate 2 closed, and gate 2 was the one that could not be worked around: an interchange format
+  nobody outside the project has implemented is a file layout, and publishing it would have
+  been publishing a claim. Three implementations later it is a fact, and the remaining gates
+  are about polish and coverage rather than about whether the thing is real.
+
+  0.x, so semver permits breaking changes, and gate 3 says plainly that the facade's surface
+  has not had its stability pass.
+
+- **Three independent implementations of the wire format** — `python/`, `nodejs/` and `go/`,
+  each written from `SMYSL_FORMAT_SPEC.md` and each targeting C-Read: decode, re-encode
+  byte-identically, preserve what is not understood. All three run in CI against fixtures in
+  `fixtures/wire/` that the Rust produced.
+
+  This is the gate `READINESS.md` called the largest. Every other check in this repository
+  would pass just as happily if the specification were blank — they test whether the Rust is
+  self-consistent, and only these test whether the *document* is sufficient.
+
+  More than one on purpose: implementations that agree could have made the same guess where
+  the document is silent, so agreement is evidence only when the readings are independent.
+
+### Changed
+
+- **Three clarifications to §3 of the spec**, which is what writing them produced. Constraint 1
+  said what an encoder may do without saying what a decoder must do. Constraint 2 said "no
+  value encoded in more bytes than it needs" without scoping that to integers and lengths —
+  applied literally to a float head it rejects 1.0, whose payload looks like an over-long
+  encoding of 1 065 353 216. Tags were not mentioned at all, and are now constraint 8.
+
+  Two independent readers hit the same two of the three. The section records that, because
+  their guesses agreeing is fortunate rather than reassuring: a document that told them would
+  have been better than two that happened to concur. The Go implementation, written against
+  the revised text, needed no guesses there — which is the check that the revision worked.
+
+### Documentation
+
+- Everything at 0.9.0. The spec gains a §0 pointing at the three implementations as worked
+  examples. The rationale gains "Can someone else implement it?", which is the question the
+  whole format rests on and could not be answered honestly before. The architecture RFC gains
+  "Closed in 0.9".
+
+What is carried, and what each is actually waiting on:
+
+- **C-Produce, in one of the three.** C-Read does not reach uid derivation, so §2.3 — *status
+  is part of identity*, the paragraph the whole format rests on — is still verified by this
+  implementation alone. All three suites carry a test that fails if that gap is ever quietly
+  dropped from their list. Closing it means BLAKE3 and canonical unit-core encoding, in one
+  language, and it would test the claim the format actually makes.
+
+- **The quoting coarsening**, which needs a design decision before it needs a model. There is
+  no flag controlling the quote requirement — `quote` is an optional property in Appendix C
+  and the behaviour comes from the prompt — so the two arms have to be built before they can
+  be compared. An hour if the difference is only in the prompt.
+
+- **Anthropic's mapper**, read against its documentation the way OpenAI's was. That method
+  found a real defect without a key and narrowed OpenAI's remaining risk to "does the endpoint
+  accept the translated schema". Anthropic uses `ToolForce` rather than `JsonSchema`, so it has
+  a different set of unknowns and none of them have been looked at.
+
+- **A format-versioning policy.** `smysl/0.1` has been stable across eight releases, which is a
+  record rather than a commitment. What constitutes a break, and what the deprecation path is,
+  belongs in the spec.
+
+- **An API stability pass.** `Hybrid` changed shape twice inside 0.7. Publishing pins every
+  name permanently, so the facade's `pub use` list wants going through once, asking of each
+  name whether it is contract or an implementation detail that escaped.
+
+- **`merge` and `check` scaling**, the last two pure operations measured only through the
+  command, where parsing dominates. And **`doc-output` covers 46 of 168 blocks** — teaching it
+  to build a chapter's intermediate files would roughly triple that.
+
+- **Mutation testing beyond the packer**, deprioritised rather than dropped. 0.8 found that
+  asking "what does the suite trust?" locates oracles faster than a sweep does, so the next
+  pass should be a targeted audit of `smysl-core`'s codec invariants rather than 1 922 mutants.
+
+- **Publishing**, when the gates above say so. Eleven crates or none; the readiness work is
+  done and the dry run is clean.
+
+---
+
 ## 0.8.0 — 2026-08-02
 
 ### Removed

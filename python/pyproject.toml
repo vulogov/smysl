@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smysl-conformance"
+version = "0.9.0"
+description = "An independent C-Read implementation of the smysl format, written from the spec"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MPL-2.0" }
+# No dependencies, deliberately. The point is to show the specification is sufficient, and a
+# dependency that did some of the work would weaken that.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+include = ["smysl*"]
