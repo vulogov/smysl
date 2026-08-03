@@ -122,6 +122,12 @@ otherwise two byte strings decode to one record and a uid stops naming exactly o
 4. **Ascending key order**, by integer value in the kernel and by encoded key bytes in a
    payload map.
 5. **No `null` for an absent optional.** Omit the key.
+
+   The qualifier is load bearing. This forbids `null` as a stand-in for an omitted kernel
+   field; it does not forbid an explicit null *inside a payload*, where the value is user data
+   and `{"n": null}` is meant to be distinguishable from `{}`. The two do not collide: a
+   payload is carried in the kernel as a byte string, so a reader walking the kernel never
+   enters it, and a reader that does enter one is reading a document within a document.
 6. **NFC text.** Every text string is Unicode-normalised to NFC before encoding, including
    unknown payload keys and their string values. Normalise *at the encoder*, not only in the
    constructors that happen to be remembered: this implementation asserted the invariant in

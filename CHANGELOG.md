@@ -32,6 +32,18 @@ and the facade asserts the two are independent.
   only ordering covering both. No fixture, golden file or test moved: nothing had depended on
   the leniency, which is exactly why it survived.
 
+- **`SourceRef::reference` was not normalised on construction**, so two unit cores differing
+  only in the Unicode normalisation form of a source reference compared **unequal** while
+  hashing to the **same uid**. Nothing reached the wire wrong — `Enc::text` normalises on the
+  way out, which is the 0.6 fix — but `PartialEq` disagreed with identity, and anything
+  deduplicating by value rather than by uid kept two copies of one unit.
+
+  Found by a sweep for load-bearing claims that exist only in comments. `normalise` said
+  "every text field is normalised exactly once, on construction". Two tests backed it and both
+  used `gist`. `tests/normalisation_scope.rs` now covers all four text fields that reach a uid,
+  with a control, and a test that fails if the encoder-side pass is deleted on the grounds that
+  construction covers it — which it does not, for records outside the unit core.
+
 - **Six rustdoc defects**, one of them substantive: `Usage` was documented as being built
   through `Usage::new`, which does not exist. The constructors are `reported` and `estimated`.
   That paragraph exists to tell an implementor outside this crate how to return a `Usage`, so
@@ -85,6 +97,14 @@ and the facade asserts the two are independent.
   today, so one that gains a feature later cannot reintroduce the gap quietly.
 
 ### Changed
+
+- **`Dec::reject_null`'s claim was narrowed to what is true.** It said "called before every
+  map value, so `null` never reaches a type-specific reader that might tolerate it".
+  `surface::payload::read_value` tolerates it, deliberately: a payload is user data and
+  `{"n": null}` is meant to differ from `{}`. The two rules do not collide, because a payload
+  is carried in the kernel as a byte string and the kernel walker never enters it — but that
+  boundary existed only in a sentence, and the sentence had the scope wrong. Pinned in
+  `tests/null_scope.rs`, and §3 constraint 5 now says its qualifier is load bearing.
 
 - **§3 of the spec gains a scope paragraph.** The constraints already bound payloads through
   constraint 6, so the defect above was an implementation failure rather than a gap — but

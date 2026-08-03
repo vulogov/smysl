@@ -2,11 +2,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use unicode_normalization::UnicodeNormalization;
-
 use crate::error::ShapeError;
 use crate::ids::{Label, SchemaId, Uid};
 use crate::types::epistemics::{SourceRef, Status};
+use crate::types::normalise;
 use crate::types::provenance::Attestation;
 
 /// Unknown map keys read from a record written by a later minor version.
@@ -179,16 +178,6 @@ impl UnitCore {
     /// A gist-only unit - the normal shape of imported summary material (§1.3).
     pub fn is_gist_only(&self) -> bool {
         self.body.is_none() && self.detail.is_none()
-    }
-}
-
-/// Normalise to NFC. Every text field is normalised exactly once, on construction, so
-/// hashing never has to.
-fn normalise(s: &str) -> String {
-    if unicode_normalization::is_nfc(s) {
-        s.to_string()
-    } else {
-        s.nfc().collect()
     }
 }
 

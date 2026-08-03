@@ -249,3 +249,24 @@ mod tests {
         }
     }
 }
+
+/// Normalise to NFC.
+///
+/// Every text field that reaches a hash is normalised here, on construction — the unit core's
+/// `gist`, `body` and `detail`, and a `SourceRef`'s `reference`, which is inside the unit core
+/// and therefore inside the uid.
+///
+/// The encoder normalises too, and that is not redundant. 0.6 found six free-text fields
+/// reaching the encoder unchecked because the invariant lived only in "the constructors that
+/// happen to be remembered", and §3 constraint 6 now says outright to normalise at the
+/// encoder. This is the near side of the same rule: it keeps `PartialEq` agreeing with uid
+/// equality, so two values that are the same unit compare equal in memory as well as hashing
+/// alike. `tests/normalisation_scope.rs` pins both halves.
+pub(crate) fn normalise(s: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    if unicode_normalization::is_nfc(s) {
+        s.to_string()
+    } else {
+        s.nfc().collect()
+    }
+}

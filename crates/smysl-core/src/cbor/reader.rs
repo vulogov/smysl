@@ -301,8 +301,18 @@ impl<'a> Dec<'a> {
         }
     }
 
-    /// Reject `null` where an absent optional belongs (constraint 6). Called before every
-    /// map value, so `null` never reaches a type-specific reader that might tolerate it.
+    /// Reject `null` where an absent optional belongs (constraint 5).
+    ///
+    /// Called before every **kernel** map value, in the one generic loop in `envelope`, so a
+    /// `null` never reaches a type-specific reader there. The scope matters: a payload is
+    /// user data and `surface::payload::read_value` admits `null` deliberately, because an
+    /// explicit null is a value and `{"n": null}` is meant to differ from `{}`. The two rules
+    /// do not collide, because a payload is stored in the unit core as a byte string and this
+    /// walker never enters it.
+    ///
+    /// That boundary used to live only in this comment, and this comment used to say "every
+    /// map value" — which is how the qualifier in constraint 5 gets lost. It is pinned in
+    /// `tests/null_scope.rs` now.
     pub fn reject_null(&self) -> Res<()> {
         if self.peek()? == NULL {
             Err(self.nondet(NonDetReason::NullOptional))
