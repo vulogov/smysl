@@ -637,6 +637,43 @@ separately from the hash so a disagreement localises itself.
 they list what they do not reach — the wording there used to imply the claim went unchecked
 anywhere, which is no longer true.
 
+**`topo` was quadratic, and `check` with it.** Kahn's algorithm here sorted its ready set on
+every iteration and then popped with `remove(0)` — two quadratic factors in three lines, in the
+traversal that thread derivation and rule M's single ordered pass both run over. A min-heap pops
+the smallest dense id in log time, which is the same order, so nothing downstream moved: the
+determinism gate reports `merge`, `derive_thread` and `render` identical across sixteen runs.
+`check` at 16 000 units went from 40.2 ms to 6.6 ms.
+
+Worth recording as an architecture note rather than a bug fix, because of how it survived. The
+order was correct throughout, and the cost was invisible to every test — the suite asks whether
+the answer is right, and nothing asked what it cost. Three of the four operations in the pure
+set were assumed linear; two were not.
+
+**A format-versioning policy**, §8 of the specification. The clause that recurs is §8.3:
+tightening an implementation that was *more permissive than the document* is not a format break,
+because the documents it stops accepting were never conformant. Writing it uncovered that the
+wire carries no version at all — it lives only in surface syntax, the parser validates and
+discards it, and a writer reconstructs the header from its own supported list. Correct by
+coincidence at one entry, and a document that misdescribes itself at two.
+
+### An error the design makes unconstructible
+
+Found in 0.11 by mutation testing, and worth stating as a property rather than a test note.
+
+`SMY-E061` is a cycle in the support graph. The pass detecting it can be deleted outright with
+no test failing — not because the pass is untested, but because **the condition cannot occur**.
+Support edges are `deps` and `grounds`, both read from a `UnitCore`'s own fields; a `Unit` does
+not store a uid, it derives one from that core. Two units naming each other therefore requires
+solving a hash fixpoint.
+
+This is content addressing paying out somewhere the design did not set out to spend it. §2.1
+exists so that a uid names exactly one thing; a side effect is that a whole class of structural
+corruption becomes unrepresentable rather than merely detectable, and the detector for it is
+dead code kept as a backstop.
+
+It stops being dead the moment a relation kind joins `EdgeSet::support()`, because relation
+endpoints are arbitrary and cycle freely. A test now fails at that moment rather than after it.
+
 ### Closed in 0.9
 
 - **Three independent implementations of the wire format**, in `python/`, `nodejs/` and `go/`,

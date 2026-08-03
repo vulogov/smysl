@@ -6,12 +6,19 @@ smysl was unpublished for eight releases, and the reason given each time was "no
 ready" — a true answer and a useless one, because nothing said what would change it, so it
 could only be deferred and never worked toward. This file was written to say what the gate is.
 
-**Published as of 0.9.0**, with four of these seven items still open. That is not the list being
-abandoned. Gate 2 was the one that could not be worked around: an interchange format nobody
-outside the project has implemented is a file layout, and publishing it would have meant
-publishing a claim. It is closed three times over. What remains is coverage and polish, and
-0.x is the honest signal for that — the version says the surface can still move, and gate 3
-says exactly where.
+**Published as of 0.9.0**, with four of these seven items still open. That is not the list
+being abandoned. Gate 2 was the one that could not be worked around: an interchange format
+nobody outside the project has implemented is a file layout, and publishing it would have
+meant publishing a claim. It is closed three times over. What remains is coverage and polish,
+and 0.x is the honest signal for that — the version says the surface can still move, and gate
+3 says exactly where.
+
+**0.10.0 is released and not published**, which is a state worth naming because it is easy to
+read a tag as a publication. `cargo-semver-checks` fetches its baseline from crates.io, so
+`BASELINE` in the Makefile tracks the last *published* version rather than the last tagged
+one; pointing it at 0.10.0 turns all twelve crates into "version not found in registry". The
+consequence that bites is that a breaking change is still measured against 0.9.0, so a repair
+wanting the public surface to move stays parked until 0.10.0 goes up.
 
 Nothing here is a schedule. The point is that each item is either done, or has a next action
 that someone could take.
@@ -33,12 +40,14 @@ allowed within a format version and which require a new one.
 
 ## 2. A second implementation — *done, including the claim that mattered*
 
-The whole proposition is that two implementations agree on what a document says. That has
-never been tested by anything except this one. `SMYSL_FORMAT_SPEC.md` exists and is under 250
-lines specifically so that it could be, but nobody has written against it.
+The whole proposition is that two implementations agree on what a document says, and for eight
+releases that had been tested by nothing except the implementation that wrote the document.
+"Another team can implement this" was a claim rather than a fact, and for an interchange format
+that is the difference between a product and a file layout.
 
-Until someone does, "another team can implement this" is a claim, not a fact. For an
-interchange format that is the difference between a product and a file layout.
+`SMYSL_FORMAT_SPEC.md` is short so that it could be read in an afternoon — under four hundred
+lines, having grown from 250 as implementers found it silent in places. That growth is the
+point rather than a regression: every added clause is somewhere a reader had to guess.
 
 **Done for C-Read, in 0.9.0 — twice.** `python/` and `nodejs/` each hold an independent
 implementation written from the spec alone, with no dependencies, and each decodes and
@@ -177,6 +186,7 @@ Both ran in 0.10 as well, and the numbers are now three points on one curve rath
 | `smysl-pack` core (0.8) | — | **49%** |
 | `cbor/reader.rs` + `writer.rs` | 143 | **23%** |
 | `cbor/envelope.rs` | 115 | **2.6%** |
+| `smysl-check` (0.11) | 143 | **9.1%** |
 
 `envelope.rs` is the best-covered code in the project, and the two survivors that mattered are
 worth more than the rate. An attestation's `sig` could stop decoding and be preserved as an
@@ -190,10 +200,34 @@ The **sweep of `smysl-graph` and `smysl-check`** found the traversal module clai
 uses dense id only to break ties. Four traversals were claimed and two were tested; the two
 that were not had tests that pass on the shape of their fixture rather than on the property.
 
-**Next action:** the sweep's yield is falling — two findings in `smysl-core`, one here, and all
-three were documentation rather than behaviour. That is the signal to stop sweeping and go back
-to mutants, where the remaining untested surface is `smysl-graph` and `smysl-check` themselves,
-neither of which has been measured.
+`smysl-check` produced the most instructive result so far, and it is a **negative** one.
+`support_cycles` — the pass detecting `SMY-E061`, a cycle in the support graph — can be
+replaced with `()` and every test still passes. That reads exactly like the `verify -> vec![]`
+oracle of 0.8, and is a different thing entirely: `EdgeSet::support()` is `{Deps, Grounds}`,
+both derived
+from a `UnitCore`'s own fields, and `Unit` derives its uid rather than storing one, so two units
+naming each other requires solving a hash fixpoint. **No input can reach the loop.** The code is
+unreachable, not untested, and no test could have been written for it.
+
+That distinction is the reason a survivor count is not a finding. Three of the five
+`smysl-check` survivors triaged this way turned out to need work; one was equivalent — a `<`
+that only picks a word *inside* a branch where the two operands cannot be equal — and one was
+unreachable. Reading each one is the whole job; the number is only what points at them.
+
+Also closed there: §7's conformance table had no test at all, so all four `||` in
+`ConformanceClass::forbids` could be flipped to `&&` with nothing failing. That direction of
+error makes every class forbid almost nothing, which reads as "your store is fine at every
+class".
+
+**Next action:** `smysl-graph` — 691 mutants, the largest target left, and the only crate in the
+pure set never measured. It is running in four shards, because two unsharded attempts died
+around 470 mutants while sharing the machine with a build, and a shard that finished stays
+finished.
+
+The comment sweep is retired as a primary instrument. Its yield fell across three crates — two
+findings in `smysl-core`, one in `smysl-graph`, all three documentation rather than behaviour —
+while mutation testing in the same cycles produced defects that reached identity and the wire.
+Sweeping is now what one does to a claim mutation testing has already pointed at.
 
 ## 6. Performance characterised — *done, and it found one*
 
