@@ -142,7 +142,7 @@ def test_constraint_7_binary32_quantised_to_1_1024():
 
 
 def test_constraint_8_nesting_bounded_at_128():
-    assert MAX_NESTING == 128, "§3 constraint 8 names this number"
+    assert MAX_NESTING == 128, "§3 constraint 9 names this number"
     smysl.decode_one(b"\x81" * 100 + b"\x00")
     with pytest.raises(smysl.CborError):
         smysl.decode_one(b"\x81" * 200 + b"\x00")

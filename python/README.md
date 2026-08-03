@@ -31,7 +31,10 @@ lengths, `null`, binary64 floats, out-of-order and duplicate map keys, tags, flo
 
 ## What writing it found
 
-Three places where the spec is insufficient, each marked `SPEC:` where it bites:
+Three places where the spec was insufficient. **All three are folded into the spec as of
+0.9.0** — constraints 1, 2 and 8 of §3 now say what they used to leave to the reader. The
+comments below stay where the holes were, because what a specification failed to say is worth
+keeping once it says it:
 
 1. **Constraint 2 (shortest form) does not say what it applies to.** Read literally it covers
    every head, including major type 7 — where the trailing bytes are a float's payload, so

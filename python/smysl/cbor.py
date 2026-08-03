@@ -16,7 +16,7 @@ from __future__ import annotations
 import struct
 from typing import Any
 
-MAX_NESTING = 128  # §3, constraint 8
+MAX_NESTING = 128  # §3, constraint 9
 
 
 class CborError(ValueError):
@@ -47,12 +47,11 @@ class Decoder:
     def _head(self) -> tuple[int, int, int]:
         """Return ``(major, argument, extra)``, enforcing shortest form (§3, constraint 2).
 
-        SPEC: constraint 2 says "no value encoded in more bytes than it needs" without saying
-        it applies to *integers and lengths* rather than to everything a head can carry. It
-        cannot apply to major type 7, where the trailing bytes are a float's payload and
-        0x3F800000 is 1.0 rather than an over-long encoding of 1 065 353 216. Enforcing it
-        there rejected every fixture, which is how the ambiguity was found. Worth a sentence
-        in the spec.
+        Constraint 2 used to say only "no value encoded in more bytes than it needs", which
+        read literally covers major type 7 — where the trailing bytes are a float's payload
+        and 0x3F800000 is 1.0 rather than an over-long encoding of 1 065 353 216. Enforcing
+        it there rejected every fixture. The spec now scopes the rule to integers and
+        lengths and says so explicitly; this comment records where the hole was.
         """
         b = self._byte()
         major, extra = b >> 5, b & 0x1F
@@ -117,9 +116,9 @@ class Decoder:
             return self._map(arg, depth)
         if major == 7:
             return self._simple(arg, extra)
-        # SPEC: §3 lists no use for major type 6 (tags) and does not say whether a decoder
-        # must reject one. Rejecting, on the grounds that constraint 1 makes the kernel's
-        # shape exhaustive and an unknown tag could carry a second encoding of a value.
+        # §3 constraint 8: no tags. This implementation rejected one before the spec said to,
+        # reasoning that constraint 1 makes the kernel's shape exhaustive — the guess the
+        # clause was written from.
         raise CborError(f"major type {major} is not part of this format")
 
     def _map(self, n: int, depth: int) -> dict[Any, Any]:

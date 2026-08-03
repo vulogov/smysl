@@ -136,7 +136,7 @@ test("§3 constraint 7 requires binary32 quantised to 1/1024", () => {
   assert.throws(() => smysl.decodeOne(hex("fb3ff0000000000000")), smysl.CborError); // binary64
 });
 
-test("§3 constraint 8 bounds nesting at 128", () => {
+test("§3 constraint 9 bounds nesting at 128", () => {
   assert.equal(smysl.MAX_NESTING, 128);
   smysl.decodeOne(Uint8Array.from([...Array(100).fill(0x81), 0x00]));
   assert.throws(

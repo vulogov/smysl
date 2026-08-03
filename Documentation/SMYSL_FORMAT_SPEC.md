@@ -95,7 +95,16 @@ input that violates any of them (`SMY-E080`), rather than accepting and normalis
 otherwise two byte strings decode to one record and a uid stops naming exactly one thing.
 
 1. **Integer map keys** in the kernel. Text keys are permitted only inside a payload (§5).
-2. **Shortest-form integers.** No value encoded in more bytes than it needs.
+
+   This binds an encoder. A decoder that knows it is reading a kernel map MUST reject a text
+   key there; a decoder reading a value without that context — a generic reader, or one
+   already inside a payload — MAY accept either, since it has nothing to check against.
+2. **Shortest-form integers and lengths.** No integer, and no length prefix, encoded in more
+   bytes than it needs.
+
+   This does **not** apply to the payload of a float. `0xFA 3F 80 00 00` is 1.0, not an
+   over-long encoding of 1 065 353 216, and a decoder that enforces shortest form on major
+   type 7 rejects almost every real document.
 3. **Definite lengths.** Indefinite-length arrays, maps, strings and byte strings are
    forbidden.
 4. **Ascending key order**, by integer value in the kernel and by encoded key bytes in a
@@ -108,9 +117,19 @@ otherwise two byte strings decode to one record and a uid stops naming exactly o
    unchecked the whole time. Two of them were found by fuzzing, in separate releases.
 7. **Floats are binary32, quantised to 1/1024.** `round(v · 1024) / 1024`. Non-finite input
    saturates to the largest representable multiple rather than encoding an infinity.
-8. **Nesting is bounded at 128.** Deeper input is rejected. Unbounded recursive descent
+8. **No tags.** Major type 6 does not appear in this format, and a decoder MUST reject one
+   (`SMY-E080`). The kernel's shape is fully described by constraint 1 and §2.2, so a tag
+   could only introduce a second encoding of a value already expressible — which is the thing
+   every constraint here exists to prevent.
+9. **Nesting is bounded at 128.** Deeper input is rejected. Unbounded recursive descent
    aborts the process on hostile input, which is worse than an error because it cannot be
    caught.
+
+Constraints 1, 2 and 8 read as they do because two independent implementations — `python/`
+and `nodejs/`, each written from this document without consulting the other — both had to
+guess here. Rules 2 and 8 caught both of them; rule 1 caught one. Their guesses agreed, which
+is fortunate rather than reassuring: agreement between readers who both had to invent the same
+answer is not the same as a document that told them.
 
 Rule 4 has a consequence worth stating: a payload map is sorted by **encoded key bytes**, not
 by the string's code points, and duplicate keys are collapsed keeping the first.

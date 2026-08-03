@@ -11,8 +11,9 @@ places where a guess was unavoidable are marked `SPEC:` in both. Comparing those
 informative than either agreeing with the Rust.
 
 They found the same two ambiguities independently, which is the useful result: constraint 2
-does not say it applies to integers and lengths rather than float payloads, and major type 6
-(tags) is not mentioned at all. Two readers, one document, the same two holes.
+did not say it applies to integers and lengths rather than float payloads, and major type 6
+(tags) was not mentioned at all. Two readers, one document, the same two holes — **both now
+written into §3**, along with a third that only the Python reader hit.
 
 **Conformance target: C-Read** — decode, re-encode byte-identically, preserve what is not
 understood. No dependencies; `node --test` is built in. A dependency doing part of the work

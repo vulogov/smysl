@@ -11,7 +11,7 @@
 // that quietly accepted a non-shortest integer would let two byte strings mean one record,
 // and a uid would stop naming exactly one thing.
 
-export const MAX_NESTING = 128; // §3, constraint 8
+export const MAX_NESTING = 128; // §3, constraint 9
 
 export class CborError extends Error {
   constructor(message) {
@@ -43,9 +43,9 @@ export class Decoder {
   // Returns { major, arg, extra }. `extra` is kept because major type 7 needs it: there the
   // trailing bytes are a float's payload, not an argument, so constraint 2 cannot apply.
   //
-  // SPEC: §3 constraint 2 says "no value encoded in more bytes than it needs" without saying
-  // it is about integers and lengths. Applied literally to a float head it rejects 1.0,
-  // whose payload 0x3F800000 looks like an over-long encoding of 1065353216.
+  // §3 constraint 2 is scoped to integers and lengths. It used not to be, and applied
+  // literally to a float head it rejects 1.0, whose payload 0x3F800000 looks like an
+  // over-long encoding of 1065353216. Both independent implementations hit this.
   head() {
     const b = this.#byte();
     const major = b >> 5;
@@ -114,9 +114,8 @@ export class Decoder {
       case 7:
         return this.#simple(arg, extra);
       default:
-        // SPEC: §3 lists no use for major type 6 (tags) and does not say whether a decoder
-        // must reject one. Rejecting, since constraint 1 makes the kernel's shape exhaustive
-        // and an unknown tag could carry a second encoding of a value.
+        // §3 constraint 8: no tags. Rejected here before the spec said to, on the reasoning
+        // the clause was eventually written from.
         throw new CborError(`major type ${major} is not part of this format`);
     }
   }
