@@ -1,7 +1,18 @@
 //! Traversal primitives (§16.3).
 //!
-//! Four patterns, one property: every result is a `Vec` in dense-id order, so a caller
-//! never has to sort and a traversal is a pure function of the graph (rule D).
+//! Four patterns, one property: every result is a pure function of the graph and never of the
+//! order records arrived in, so a traversal is reproducible (rule D).
+//!
+//! The *shape* of that order differs, and this sentence used to flatten the difference into
+//! "every result is a `Vec` in dense-id order", which is false of [`topo`] and cannot be true
+//! of it. [`closure`], [`reverse_closure`] and [`rebuttals_of`] return sets, and sort them by
+//! dense id so a caller never has to. [`topo`] returns a *dependency* order — dependencies
+//! before dependents — and uses dense id only to break ties, which is what makes it canonical
+//! without making it sorted.
+//!
+//! Both halves are pinned in `tests/traversal_order.rs`. The overstatement was found by
+//! sweeping this crate for claims of comprehensiveness with nothing beside them, and it is the
+//! kind that reads as a summary and is taken as a guarantee.
 //!
 //! | Function | Used by |
 //! |---|---|

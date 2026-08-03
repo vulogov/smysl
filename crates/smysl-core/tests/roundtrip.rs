@@ -388,6 +388,55 @@ fn every_contention_status_and_detection_kind_round_trips() {
     }
 }
 
+/// The presets are not enough, and mutation testing said so.
+///
+/// `every_granularity_preset_round_trips` iterates three profiles — and all three carry
+/// `l0_max: 30`. Deleting the decoder's `L0_MAX` arm, so the field fell through to `extra` and
+/// the profile took its default, changed nothing any test could see. A loop over variants that
+/// do not vary in the field under test is the shape this project keeps finding.
+#[test]
+fn a_granularity_profile_round_trips_values_no_preset_uses() {
+    let mut g = GranularityProfile::standard();
+    g.l0_max = 47;
+    g.l1_min = 51;
+    g.l1_max = 149;
+    g.profile = "custom".into();
+
+    let v = View::new(ViewId::new("v/x").unwrap(), "i").with_granularity(g.clone());
+    let (back, _) = from_cbor(&to_cbor(&Record::View(v))).unwrap();
+    match back {
+        Record::View(view) => {
+            assert_eq!(view.granularity.l0_max, 47, "l0_max did not survive");
+            assert_eq!(view.granularity.l1_min, 51);
+            assert_eq!(view.granularity.l1_max, 149);
+            assert_eq!(view.granularity, g);
+        }
+        other => panic!("expected a view, got {}", other.type_name()),
+    }
+}
+
+/// `sig` is reserved and unimplemented (N9) — and it decodes, so it is testable, and was not
+/// tested. Deleting its decoder arm sent a signature into `extra`: preserved verbatim, so the
+/// bytes and the uid are unaffected, and `Attestation::sig` silently `None`. Whatever
+/// eventually verifies signatures would have found none and said the record was unsigned.
+#[test]
+fn an_attestation_signature_round_trips_as_a_signature() {
+    let mut a = Attestation::new(uid(7), agent(), Op::Transformed, Rung::Model, hlc());
+    a.sig = Some(vec![0xD9, 0xD2, 0x84, 0x01, 0x02, 0x03]);
+
+    let (back, _) = from_cbor(&to_cbor(&Record::Attestation(a.clone()))).unwrap();
+    match back {
+        Record::Attestation(got) => {
+            assert_eq!(got.sig, a.sig, "the signature must come back as `sig`");
+            assert!(
+                got.extra.is_empty(),
+                "and not as a preserved unknown key, which would read as unsigned"
+            );
+        }
+        other => panic!("expected an attestation, got {}", other.type_name()),
+    }
+}
+
 #[test]
 fn every_granularity_preset_round_trips() {
     for g in [

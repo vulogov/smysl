@@ -439,6 +439,7 @@ impl Provider for Gemini {
             return Err(self.status_error(resp.status, &resp.body));
         }
         self.parse(&resp.body, resp.retries)
+            .map_err(|e| super::report_against(e, req.max_output))
     }
 
     fn count_tokens(&self, text: &str) -> TokenCount {

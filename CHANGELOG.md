@@ -51,6 +51,38 @@ and the facade asserts the two are independent.
 
 ### Fixed
 
+- **`ContextExceeded` reported a limit nobody sent.** A mapper sends `req.max_output`, which
+  `Request::new` defaults to 1024; `parse` has no request and could only quote
+  `cfg.max_output`. Configure the provider and not the call and the error read "context window
+  exceeded: 1008 > 32768" — true to its fields, nonsense to a reader, because the two numbers
+  came from different places. `map::report_against` restates it against the cap actually sent,
+  at the layer that knows it.
+
+  What that does **not** fix is recorded beside it. The first test asserted `requested >=
+  limit`, on the reasoning that a truncation message ought to read as true — and failed on the
+  very numbers that motivated the fix, because Gemini spends reasoning against the same cap and
+  reports it separately. "1008 > 1024" is still a strange sentence; it is no longer a sentence
+  about the wrong number.
+
+- **DeepSeek produced nothing usable, because the prompt referred to a schema it never got.**
+  The template says "matching the supplied schema exactly", and `Ingestor::request` only
+  supplied one where the provider would *enforce* it — sound about the structured channel,
+  wrong about the prompt. Under `json-mode` the model was told to match a document it had never
+  seen, and invented the fields: `quote` where the schema says `gist`, `grounds` as a sentence
+  rather than an array, `U1` where a label belongs. Sixteen diagnostics and no units, every
+  time, which reads as a useless provider rather than a prompt referring to nothing.
+
+  The schema now goes in the prompt when it cannot go in the schema field. That claims no
+  enforcement — `Completion::structured` still comes from the provider. Live on
+  `deepseek-chat`: **0 units and 16 diagnostics became 3 units, 2 relations, 0 diagnostics.**
+
+- **The traversal module claimed an order `topo` does not have.** Its opening sentence said
+  "every result is a `Vec` in dense-id order", and `topo` returns a *dependency* order using
+  dense id only to break ties — canonical without being sorted. A reader taking the summary
+  literally would believe the output is sorted; the first run of the new test reported
+  `[0, 6, 4, 1, 3, 5, 2, 7]`, the function behaving exactly as its own doc says and exactly as
+  the module header denied.
+
 - **Two mappers declared a capability they do not have.** `anthropic` and `gemini` both said
   `streaming: true` while implementing no `Provider::stream`, so both inherited the trait
   default — which refuses. A caller that checked the capability before streaming, the only
@@ -120,6 +152,28 @@ and the facade asserts the two are independent.
   to the difference so this cannot be read as a result.
 
   What it needs to become one: more runs per arm, and the zero-unit cases understood first.
+
+- **Mutation testing over `envelope.rs`** — the record codec, 1 000 lines, previously
+  untouched. 115 viable mutants, **3 survived, 2.6%** — against 23% for `reader.rs`/`writer.rs`
+  and 49% for the packer in 0.8.
+
+  One was equivalent, read rather than assumed: `off < len` to `off <= len` in `from_cbor_seq`
+  does one extra iteration on an empty slice, which returns `Truncated`, which breaks the loop.
+  The other two were real and are closed:
+
+  * An attestation's `sig` could stop decoding and land in `extra` instead. Preserved verbatim,
+    so the bytes and the uid are unaffected — and `Attestation::sig` silently `None`, which
+    whatever eventually verifies signatures would read as unsigned.
+  * `l0_max` could stop decoding and take its default. `every_granularity_preset_round_trips`
+    looks like it covers this and does not: **all three presets carry `l0_max: 30`**. A loop
+    over variants that do not vary in the field under test.
+
+- **Traversal ordering, tested for all four rather than two.** `closure` and `topo` each had a
+  test named for the property; `reverse_closure` asserted a result that is sorted by accident of
+  a chain's shape, and `rebuttals_of` asserted an order its relations had been *inserted* in.
+  Nothing anywhere built one graph two ways, which is what `adjacency.rs`'s "insertion order
+  cannot leak into a traversal" actually claims. Now four insertion orders, six traversals, with
+  controls for both — including one asserting the orderings genuinely differ.
 
 - **Mutation testing over the codec.** 143 viable mutants in `cbor/reader.rs` and
   `cbor/writer.rs`; **33 survived, 23%** — against 49% for the packer in 0.8, which is the only

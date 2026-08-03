@@ -383,10 +383,31 @@ impl<'a> Ingestor<'a> {
             .with_max_output(self.opts.max_output);
         r.temperature = self.opts.temperature;
 
-        // A schema is only worth sending where the provider will enforce it; asking for one
-        // it ignores would let a caller believe the answer was checked when it was not.
-        if path == IngestPath::JsonAst && caps.structured.is_enforced() {
-            r = r.with_schema(caps.structured, schema::batch_schema());
+        // A schema is only worth *sending as a schema* where the provider will enforce it;
+        // asking for one it ignores would let a caller believe the answer was checked when it
+        // was not. That reasoning is right about the structured channel and was wrong about
+        // the prompt: the template says "matching the supplied schema exactly", and under a
+        // non-enforcing mode nothing supplied one. The model was told to match a document it
+        // had never been shown.
+        //
+        // Observed on DeepSeek under `json-mode`: well-formed JSON, every field invented —
+        // `quote` where the schema says `gist`, `grounds` as a sentence rather than an array,
+        // `U1` where a label belongs. Sixteen diagnostics and no units, every time, which read
+        // as "the provider is useless in json-mode" rather than "nobody told it the fields".
+        //
+        // So the schema goes in the only channel a non-enforcing provider has. This does not
+        // claim enforcement: `Completion::structured` still comes from the provider, and a
+        // json-mode answer is still checked by `json_ast::convert` on the way in.
+        if path == IngestPath::JsonAst {
+            if caps.structured.is_enforced() {
+                r = r.with_schema(caps.structured, schema::batch_schema());
+            } else {
+                r = r.with_system(format!(
+                    "{}\n\nThe schema your object must match:\n{}",
+                    template.system,
+                    schema::batch_schema()
+                ));
+            }
         }
         r
     }
@@ -427,5 +448,92 @@ mod tests {
         assert_eq!(o.repair_attempts, DEFAULT_REPAIR_ATTEMPTS);
         assert_eq!(o.path, None, "auto by default");
         assert_eq!(o.temperature, 0.0);
+    }
+
+    /// A provider that will not enforce a schema must still be *told* the schema.
+    ///
+    /// The template says "matching the supplied schema exactly". Until 0.10 nothing supplied
+    /// one unless the provider enforced it, so under `json-mode` the model was asked to match
+    /// a document it had never seen. Observed on DeepSeek: well-formed JSON with every field
+    /// invented, sixteen diagnostics, no units — which reads as a useless provider rather than
+    /// a prompt referring to nothing. With the schema in the prompt the same call yields three
+    /// units, two relations and no diagnostics.
+    mod schema_reaches_the_model {
+        use super::*;
+        use smysl_provider::{Capabilities, Completion, ProviderId, StructuredMode};
+
+        struct Fake(StructuredMode);
+
+        impl Provider for Fake {
+            fn id(&self) -> ProviderId {
+                ProviderId::new("fake").unwrap()
+            }
+            fn caps(&self) -> Capabilities {
+                let mut c = Capabilities::default();
+                c.structured = self.0;
+                c
+            }
+            fn complete(&self, _: &Request) -> Result<Completion, ProviderError> {
+                unreachable!("the request is inspected, never sent")
+            }
+            fn probe(&self) -> Result<smysl_provider::Probe, ProviderError> {
+                unreachable!("not reached; this fake exists to report capabilities")
+            }
+        }
+
+        fn request_for(mode: StructuredMode) -> Request {
+            let reg = Registry::default();
+            let ing = Ingestor::new(&reg, IngestOptions::default());
+            ing.request(
+                &Fake(mode),
+                &prompt::content_ingest_json(),
+                "some text",
+                IngestPath::JsonAst,
+            )
+        }
+
+        #[test]
+        fn an_enforcing_provider_gets_it_as_a_schema() {
+            let r = request_for(StructuredMode::JsonSchema);
+            assert!(
+                r.schema.is_some(),
+                "an enforced schema goes in the schema field"
+            );
+            // A marker of the schema *document*, not of the word "units" — the template
+            // itself says `Return one object: {"units": [...]}`, so the obvious check passes
+            // vacuously in one direction and fails spuriously in the other.
+            assert!(
+                !r.system.contains("\"properties\""),
+                "and not also in the prompt, which would send it twice"
+            );
+        }
+
+        #[test]
+        fn a_non_enforcing_provider_gets_it_in_the_prompt() {
+            let r = request_for(StructuredMode::JsonMode);
+            assert!(
+                r.schema.is_none(),
+                "still not claimed as enforced, because it is not"
+            );
+            assert!(
+                r.system.contains("\"properties\""),
+                "but the field names must reach the model somehow; this is the only channel"
+            );
+        }
+
+        /// The control: the surface path has no schema at all and must not grow one.
+        #[test]
+        fn the_surface_path_is_untouched() {
+            let reg = Registry::default();
+            let ing = Ingestor::new(&reg, IngestOptions::default());
+            let r = ing.request(
+                &Fake(StructuredMode::JsonMode),
+                &prompt::content_ingest_surface(),
+                "some text",
+                IngestPath::Surface,
+            );
+            assert!(r.schema.is_none());
+            assert!(!r.system.contains("\"properties\""));
+        }
     }
 }

@@ -170,9 +170,30 @@ closed. The most instructive is that the *map* arm of `skip_one` could stop boun
 with nothing failing, because the nesting fixture nested arrays — a bound tested on one shape
 and decorative on the other.
 
-**Next action:** extend the sweep to `smysl-graph` and `smysl-check`, whose claims about
-ordering and rule coverage are the next most load-bearing. Mutation testing of `envelope.rs`
-(1 000 lines, the record codec) has not been run and is the obvious remaining target.
+Both ran in 0.10 as well, and the numbers are now three points on one curve rather than one:
+
+| target | viable mutants | survivors |
+|---|---|---|
+| `smysl-pack` core (0.8) | — | **49%** |
+| `cbor/reader.rs` + `writer.rs` | 143 | **23%** |
+| `cbor/envelope.rs` | 115 | **2.6%** |
+
+`envelope.rs` is the best-covered code in the project, and the two survivors that mattered are
+worth more than the rate. An attestation's `sig` could stop decoding and be preserved as an
+unknown key — invisible in the bytes and in the uid, and read as *unsigned* by anything that
+later verifies. And `l0_max` could stop decoding, which
+`every_granularity_preset_round_trips` looks like it covers: **all three presets carry
+`l0_max: 30`**, so the loop varies everything except the field under test.
+
+The **sweep of `smysl-graph` and `smysl-check`** found the traversal module claiming an order
+`topo` does not have — "every result is a `Vec` in dense-id order", when a topological order
+uses dense id only to break ties. Four traversals were claimed and two were tested; the two
+that were not had tests that pass on the shape of their fixture rather than on the property.
+
+**Next action:** the sweep's yield is falling — two findings in `smysl-core`, one here, and all
+three were documentation rather than behaviour. That is the signal to stop sweeping and go back
+to mutants, where the remaining untested surface is `smysl-graph` and `smysl-check` themselves,
+neither of which has been measured.
 
 ## 6. Performance characterised — *done, and it found one*
 
