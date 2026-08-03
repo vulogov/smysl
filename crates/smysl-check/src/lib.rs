@@ -365,6 +365,87 @@ impl core::fmt::Display for ConformanceClass {
     }
 }
 
+/// §7's conformance table, which had no test at all.
+///
+/// Mutation testing in 0.11 flipped every `||` in `ConformanceClass::forbids` to `&&` — four
+/// mutants, all surviving. Nothing anywhere asked what a class forbids, so the table was
+/// whatever the code said and no more.
+///
+/// The property that makes this worth pinning rather than trusting is that the classes are
+/// **not a ladder**. C-Merge adds lifecycle to C-Consume; it does not subsume C-Produce, and a
+/// shape error that blocks producing does not block merging. An `||` quietly becoming `&&`
+/// would make every class forbid almost nothing, which reads as "this store is fine at every
+/// class" — the most dangerous possible direction for this particular answer to be wrong in.
+#[cfg(test)]
+mod conformance_table {
+    use super::*;
+
+    /// One representative per family, named so a failure says which family moved.
+    const STRUCTURAL: Code = Code::E060;
+    const EPISTEMIC: Code = Code::E030;
+    const SHAPE: Code = Code::E020;
+    const LIFECYCLE: Code = Code::E050;
+    const RENDER: Code = Code::E210;
+
+    /// The whole table, written out. Each row is `(class, what it forbids)`; anything absent
+    /// from a row must be permitted at that class.
+    const TABLE: &[(ConformanceClass, &[Code])] = &[
+        (ConformanceClass::Read, &[STRUCTURAL]),
+        (ConformanceClass::Consume, &[STRUCTURAL, EPISTEMIC]),
+        (ConformanceClass::Produce, &[STRUCTURAL, EPISTEMIC, SHAPE]),
+        (ConformanceClass::Merge, &[STRUCTURAL, EPISTEMIC, LIFECYCLE]),
+        (
+            ConformanceClass::Full,
+            &[STRUCTURAL, EPISTEMIC, SHAPE, LIFECYCLE, RENDER],
+        ),
+    ];
+
+    const ALL_FAMILIES: &[Code] = &[STRUCTURAL, EPISTEMIC, SHAPE, LIFECYCLE, RENDER];
+
+    #[test]
+    fn each_class_forbids_exactly_its_row() {
+        for (class, forbidden) in TABLE {
+            for code in ALL_FAMILIES {
+                let want = forbidden.contains(code);
+                assert_eq!(
+                    class.forbids(*code),
+                    want,
+                    "{class:?} and {code:?}: expected forbids = {want}"
+                );
+            }
+        }
+    }
+
+    /// The property the table exists to express, stated separately so it cannot be lost in a
+    /// refactor of the rows above.
+    #[test]
+    fn merge_is_not_produce_and_neither_subsumes_the_other() {
+        assert!(
+            !ConformanceClass::Merge.forbids(SHAPE),
+            "a shape error must not block merging; C-Merge is not above C-Produce"
+        );
+        assert!(
+            !ConformanceClass::Produce.forbids(LIFECYCLE),
+            "a lifecycle error must not block producing; C-Produce is not above C-Merge"
+        );
+        assert!(
+            ConformanceClass::Full.forbids(SHAPE) && ConformanceClass::Full.forbids(LIFECYCLE),
+            "C-Full is the one that is above both"
+        );
+    }
+
+    /// The control. If `forbids` returned `true` for everything the rows above would pass in
+    /// one direction only, and this catches the other.
+    #[test]
+    fn a_class_permits_something() {
+        assert!(!ConformanceClass::Read.forbids(EPISTEMIC));
+        assert!(!ConformanceClass::Read.forbids(RENDER));
+        assert!(!ConformanceClass::Consume.forbids(SHAPE));
+        // And a code in no family at all is forbidden by nobody.
+        assert!(!ConformanceClass::Full.forbids(Code::W010));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -26,6 +26,19 @@ fn dangling(store: &Store, report: &mut Report) {
 /// check is a single pass in topological order over `grounds` (§17), and a cycle there
 /// leaves some units unorderable and therefore unverifiable. Both edge families are
 /// support, and both are fatal.
+///
+/// **Unreachable through this library, and that is a fact rather than a hope.** Mutation
+/// testing in 0.11 replaced this whole function with `()` and every test still passed. The
+/// reason is not a missing test: `EdgeSet::support()` is `{Deps, Grounds}`, both derived from
+/// a `UnitCore`'s own fields; `Unit` stores no uid and derives it from the core; so making two
+/// units name each other requires solving a hash fixpoint. No input reaches the loop below.
+///
+/// The comment here used to say the pass exists "because a store can be assembled from records
+/// that were never hashed together" — which was true of a design where a record carries its
+/// uid, and is not true of this one. It is kept as a backstop against a future
+/// `EdgeSet::support()` that admits a relation kind, because relation endpoints are *not*
+/// content-derived and can cycle freely. `support_is_only_structural_edges` fails the moment
+/// that happens, which is the moment this stops being dead code.
 fn support_cycles(g: &Adjacency, report: &mut Report) {
     for group in cycles(g, &EdgeSet::support()) {
         let members: Vec<_> = group.iter().filter_map(|&n| g.uid(n)).copied().collect();
@@ -238,5 +251,28 @@ mod tests {
     #[test]
     fn an_empty_store_reports_nothing() {
         assert!(check(vec![]).is_empty());
+    }
+
+    /// The tripwire for the paragraph above.
+    ///
+    /// `support_cycles` is unreachable only while every support edge comes from a `UnitCore`'s
+    /// own fields, because those point by content-derived uid and cannot form a loop. Add a
+    /// relation kind to `EdgeSet::support()` — relation endpoints are arbitrary — and cycles
+    /// become constructible, and the pass becomes load-bearing with no test behind it.
+    ///
+    /// So this fails at that moment rather than after it.
+    #[test]
+    fn support_is_only_structural_edges() {
+        use smysl_graph::adjacency::{EdgeKind, EdgeSet};
+        for k in smysl_core::RelKind::KERNEL.iter() {
+            if let Some(edge) = EdgeKind::kernel(k.clone()) {
+                assert!(
+                    !EdgeSet::support().contains(edge),
+                    "{k:?} is now a support edge. Relation endpoints are not content-derived, \
+                     so a support cycle is constructible and `support_cycles` is reachable — \
+                     it needs a test that emits SMY-E061, which nothing has ever done."
+                );
+            }
+        }
     }
 }

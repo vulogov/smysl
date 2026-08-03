@@ -7,6 +7,42 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 0.11.0
+
+### Added
+
+- **Mutation testing of `smysl-check`** — 130 caught, 13 missed of 143 viable, **9.1%**, between
+  the codec's 2.6% and the packer's 49%.
+
+  The headline survivor was `support_cycles`: the whole function could be replaced with `()`
+  and every test still passed. That reads exactly like the `verify -> vec![]` oracle of 0.8, and
+  it is not the same thing. `EdgeSet::support()` is `{Deps, Grounds}`, both derived from a
+  `UnitCore`'s own fields; `Unit` stores no uid and derives it from the core; so two units
+  naming each other requires solving a hash fixpoint. **No input can reach the loop.** The code
+  is unreachable rather than untested, and no test could have been written for it.
+
+  The comment there said the pass exists "because a store can be assembled from records that
+  were never hashed together" — true of a design where a record carries its uid, and not true
+  of this one. Corrected, and `support_is_only_structural_edges` now fails the moment a relation
+  kind joins `EdgeSet::support()`, because relation endpoints are *not* content-derived and can
+  cycle freely. That is the moment the pass stops being dead code and starts needing a test.
+
+- **§7's conformance table has a test**, which it never had. All four `||` in
+  `ConformanceClass::forbids` could be flipped to `&&` with nothing failing, so what each class
+  forbids was whatever the code said and no more. An `||` becoming `&&` makes every class forbid
+  almost nothing — "this store is fine at every class" — which is the worst direction for this
+  particular answer to be wrong in.
+
+  The table is written out row by row, with the property that motivates it stated separately:
+  the classes are **not a ladder**. C-Merge adds lifecycle to C-Consume and does not subsume
+  C-Produce; a shape error blocks producing and not merging. All four mutants confirmed dead.
+
+Carried: the remaining `smysl-check` survivors — boundary comparisons in the granularity and
+epistemics passes, and two match guards in closure and extension — and the `smysl-graph` run,
+still going at 691 mutants.
+
+---
+
 ## 0.10.0 — 2026-08-03
 
 The cycle that closed the two gates that were actually blocking, and found the format's

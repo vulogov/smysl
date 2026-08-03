@@ -98,7 +98,13 @@ doc-gate: ## Rustdoc with warnings denied, as docs.rs would show it
 # The three books in Documentation/ are tracked as PDFs as well as sources, because they
 # are deliverables people are handed rather than artefacts people build. Tracking the
 # output of a build makes it drift, so this target is what keeps the two in step.
-# The last published version, and what is published. Both move at a release cut.
+# The last **published** version, and what is published.
+#
+# Published, not tagged. `cargo-semver-checks` fetches the baseline from crates.io, so this
+# moves when a release is pushed to the registry and not when it is cut — 0.10.0 was tagged and
+# merged without being published, and setting this to it turned every one of the twelve into
+# "crate smysl-core version 0.10.0 not found in registry", which is a red CI job that says
+# nothing about the API.
 BASELINE  := 0.9.0
 PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-render \
              smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl
