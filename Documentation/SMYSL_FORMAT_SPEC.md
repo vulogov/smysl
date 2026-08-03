@@ -2,7 +2,7 @@
 
 **Status:** normative. This document is the contract.
 **Format version:** `smysl/0.1` · **kernel schema:** `smysl.kernel/0.1`
-**Describes:** crate `0.8.0`.
+**Describes:** crate `0.9.0`.
 
 This is the whole of what a second implementation must obey to interoperate. It is
 deliberately short. Everything it does not say is a free choice.
@@ -21,6 +21,18 @@ implementation had to choose something in order to exist, and it chose. Where th
 and RFC SMYSL-1 disagree, this document is correct and the RFC is history.
 
 ---
+
+## 0. Implementations of this document
+
+Three, besides the Rust that defined the format, each written from this document and each
+targeting **C-Read**: `python/`, `nodejs/` and `go/` in this repository. They run in CI against
+fixtures the Rust produced, and a byte-for-byte match is what "two implementations agree" means
+in practice.
+
+They exist because every other check in this repository tests whether the Rust is
+self-consistent, and none of them would notice if this document were blank. If you are
+implementing the format, read them as worked examples — and read their `SPEC:` comments as a
+record of where this document has already been found wanting.
 
 ## 1. What interoperability means here
 

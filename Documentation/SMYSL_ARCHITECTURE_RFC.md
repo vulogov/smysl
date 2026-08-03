@@ -4,7 +4,7 @@
 [`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md), which is deliberately a fraction of this
 one's length: interoperability needs identity, encoding and the rules, not an account of how
 this implementation happens to be built.
-**Describes:** the code at `main`, crate `0.8.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
+**Describes:** the code at `main`, crate `0.9.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
 **Compiled:** 2026-07-30, from SM-P0 through SM-P15, the operational-merit work after it, the
 0.2 cycle (label bindings, comment syntax, forward compatibility), the 0.3 cycle (global
 flags, nesting bounds, packer performance) and the 0.4 cycle (the fuzz backlog: seven
@@ -620,6 +620,41 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
   its marginal cost falls, which happens exactly when something in its obligation is
   selected and therefore already paid for. That non-monotonicity is what made the 0.3.0
   attempt unsound.
+
+### Closed in 0.9
+
+- **Three independent implementations of the wire format**, in `python/`, `nodejs/` and `go/`,
+  each written from `SMYSL_FORMAT_SPEC.md` and each targeting C-Read: decode, re-encode
+  byte-identically, preserve what is not understood. All three run in CI against the same
+  fixtures in `fixtures/wire/`, produced by this implementation.
+
+  This is the gate `READINESS.md` called the largest, and the reason it mattered is worth
+  restating: every other check in this repository would pass just as happily if the
+  specification were blank. They test whether the Rust is self-consistent. Only these test
+  whether the *document* is sufficient.
+
+  More than one on purpose. Implementations that agree could have made the same guess where
+  the document is silent, so agreement is evidence only when the readings are independent. The
+  JavaScript was written without consulting the Python, and both arrived at the same two
+  ambiguities.
+
+- **Three clarifications to §3**, which is what the exercise produced. Constraint 1 said what
+  an encoder may do without saying what a decoder must do; constraint 2 said "no value encoded
+  in more bytes than it needs" without scoping that to integers and lengths, so applied
+  literally to a float head it rejects 1.0; and tags were not mentioned at all. All three are
+  now stated, and the section records that they read as they do because two independent readers
+  both had to invent the same answer — their guesses agreeing is fortunate rather than
+  reassuring.
+
+- **The Go implementation is the first written against the revised document**, which makes it
+  a test of the revision rather than only of the format. It needed no guesses where the earlier
+  two did.
+
+- What remains untested by a second implementation is recorded rather than left silent: C-Read
+  does not reach uid derivation, so §2.3 — *status is part of identity*, the paragraph the
+  whole format rests on — is still verified by this implementation alone. All three suites
+  carry a test that fails if that list is ever quietly emptied. Closing it means C-Produce and
+  BLAKE3.
 
 ### Closed in 0.8
 

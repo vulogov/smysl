@@ -238,7 +238,7 @@
     #line(length: 34%, stroke: 0.6pt + ink_accent)
     #v(5mm)
     #text(font: body_family, size: 10pt, style: "italic", fill: ink_smoke,
-      "Vladimir Ulogov · 2026 · smysl 0.8.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
+      "Vladimir Ulogov · 2026 · smysl 0.9.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
   ],
 )
 #v(6mm)
@@ -585,6 +585,30 @@ argument, cut to a budget, with nothing load-bearing missing.
 That composition is the thing neither half does alone, and it is a fair summary
 of the whole design: the format knows what supports what, so a tool built on it
 can answer a question without quietly dropping the reason the answer holds.
+
+#section("Can someone else implement it?")
+
+That question is the difference between a format and a file layout, and until
+recently the honest answer was "we think so". The specification is under 250
+pages of nothing — about eight pages — and it had been read by exactly one
+implementation, which is also the one that wrote it.
+
+There are now three more, in Python, JavaScript and Go, each written from that
+document and each in this repository. They decode stores the Rust produced and
+re-encode them byte for byte, which is the only test that means anything: two
+implementations that both "parse fine" while disagreeing about bytes disagree
+about *identity*, because a unit's name is a hash of its encoding.
+
+Writing them found three places where the specification was insufficient — not
+wrong, but silent where a reader had to choose. Two independent readers hit the
+same two of them, which is the useful part: one person being confused is a
+person, two arriving at the same hole is a document. All three are now written
+into the spec, and the fourth implementation, read against the corrected text,
+needed no guesses there.
+
+That is what the claim is worth now. Not that the format is easy, but that
+somebody outside this project has done it, three times, and the places they
+stumbled have been fixed.
 
 #section("Where it sits in a pipeline")
 

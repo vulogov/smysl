@@ -9,17 +9,47 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 0.9.0
 
-Nothing yet. What is carried, and what each is actually waiting on:
+### Added
 
-- **A second implementation of the format.** `READINESS.md` calls this the largest gate and it
-  has not moved: nobody has built against `SMYSL_FORMAT_SPEC.md` alone. The whole proposition
-  is that two implementations agree on what a document says, and that has never been tested by
-  anything except this one. Four cycles of internal verification cannot substitute for it —
-  every place the spec turns out to be insufficient is worth more than another measurement
-  taken here.
+- **Three independent implementations of the wire format** — `python/`, `nodejs/` and `go/`,
+  each written from `SMYSL_FORMAT_SPEC.md` and each targeting C-Read: decode, re-encode
+  byte-identically, preserve what is not understood. All three run in CI against fixtures in
+  `fixtures/wire/` that the Rust produced.
 
-  The spec is under 250 lines precisely so this is a weekend rather than a project. A
-  `C-Read` decoder in any other language, and a list of everywhere the spec was silent.
+  This is the gate `READINESS.md` called the largest. Every other check in this repository
+  would pass just as happily if the specification were blank — they test whether the Rust is
+  self-consistent, and only these test whether the *document* is sufficient.
+
+  More than one on purpose: implementations that agree could have made the same guess where
+  the document is silent, so agreement is evidence only when the readings are independent.
+
+### Changed
+
+- **Three clarifications to §3 of the spec**, which is what writing them produced. Constraint 1
+  said what an encoder may do without saying what a decoder must do. Constraint 2 said "no
+  value encoded in more bytes than it needs" without scoping that to integers and lengths —
+  applied literally to a float head it rejects 1.0, whose payload looks like an over-long
+  encoding of 1 065 353 216. Tags were not mentioned at all, and are now constraint 8.
+
+  Two independent readers hit the same two of the three. The section records that, because
+  their guesses agreeing is fortunate rather than reassuring: a document that told them would
+  have been better than two that happened to concur. The Go implementation, written against
+  the revised text, needed no guesses there — which is the check that the revision worked.
+
+### Documentation
+
+- Everything at 0.9.0. The spec gains a §0 pointing at the three implementations as worked
+  examples. The rationale gains "Can someone else implement it?", which is the question the
+  whole format rests on and could not be answered honestly before. The architecture RFC gains
+  "Closed in 0.9".
+
+What is carried, and what each is actually waiting on:
+
+- **C-Produce, in one of the three.** C-Read does not reach uid derivation, so §2.3 — *status
+  is part of identity*, the paragraph the whole format rests on — is still verified by this
+  implementation alone. All three suites carry a test that fails if that gap is ever quietly
+  dropped from their list. Closing it means BLAKE3 and canonical unit-core encoding, in one
+  language, and it would test the claim the format actually makes.
 
 - **The quoting coarsening**, which needs a design decision before it needs a model. There is
   no flag controlling the quote requirement — `quote` is an optional property in Appendix C
