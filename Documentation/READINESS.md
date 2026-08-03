@@ -80,9 +80,18 @@ The facade's surface still churns. `Hybrid` changed shape twice inside 0.7.0, an
 semver on a 0.x crate lets you break things, but the point of publishing is that people build
 on it.
 
+Published as of 0.9.0, which converts this from a precaution into a debt: every name is now
+something people can build against, and the cost of the pass grows with each release it waits.
+
 **Next action:** a pass over the facade's `pub use` list asking, of each name, whether it is
 part of the contract or an implementation detail that escaped. Then `#[non_exhaustive]` where
-that answer is "we will want to add to this".
+that answer is "we will want to add to this" — 110 types already carry it, out of 378 public
+ones across the crates, and nobody has checked that the split is deliberate.
+
+Mechanise it rather than trusting a reading: `cargo public-api` emits the reachable surface,
+which belongs in a golden file the way `golden-packs.txt` records what the packer selects, and
+`cargo-semver-checks` turns an accidental break into a failing job. This project has learned
+that a rule nothing enforces is a rule that drifts.
 
 ## 4. Verified providers — *partial*
 
@@ -97,7 +106,7 @@ that answer is "we will want to add to this".
 **Next action:** read Anthropic's mapper against the documentation the way OpenAI's was. That
 found a real defect without a key, and it is the cheapest remaining move.
 
-## 5. A test suite that catches what it claims — *measuring*
+## 5. A test suite that catches what it claims — *measuring, and now cross-checked*
 
 Seven defects across 0.4–0.7 were the same shape: a check that passed without covering what it
 claimed. Two fuzz-generator vacuities, an exact-pack gate that never reached L2, a decoder
@@ -105,10 +114,23 @@ sweep that never entered the decoder it was written for, a repair of that sweep 
 itself vacuous, a doc-output regex that skipped the transcripts it was handed, and a routing
 test that passed on routing measurably worse than not routing at all.
 
-Each was found by hand. The suite is large and it is not yet known how much of it is load
-bearing.
+0.8 measured it: mutation testing over the packer core — the best-tested file in the project —
+left 49% of viable mutants alive, and two oracles turned out to be replaceable by a stub
+without a single test noticing.
 
-**Next action:** mutation testing, in progress. A survivor rate is the number this item needs.
+0.10 added a defect of the same shape but a different *kind*, and it is the most instructive
+one yet. `skip_item` had a comment asserting that unknown payloads are "parsed strictly, so an
+unknown record cannot smuggle in a non-deterministic encoding". It was false, and had been
+since before the comment was written. No test was vacuous; no oracle was stubbed. The check
+that would have caught it **did not exist**, because the property was asserted in a comment
+instead. A shared rejection corpus found it in an hour.
+
+The lesson generalises past this project: a claim written in prose next to the code is not
+weaker evidence than a test, it is *no* evidence, and it reads exactly like evidence.
+
+**Next action:** targeted mutation testing of `smysl-core` codec invariants — everything
+downstream trusts round-tripping. And, cheaper, a sweep for load-bearing claims made only in
+comments.
 
 ## 6. Performance characterised — *mostly done*
 
@@ -129,8 +151,15 @@ every release cut.
 The manual has been wrong twice in ways that mattered: it described `ui` as a stub for
 several releases, and it stated a body-line limitation that had been fixed.
 
+The API documentation was never checked at all until 0.10, and publishing made that visible:
+docs.rs was rendering a partial crate, because no manifest set `all-features` and the
+feature-gated half simply was not there. Six rustdoc warnings had accumulated, one of which
+told an implementor outside the crate to build a `Usage` through a constructor that does not
+exist. `make doc-gate` and a CI job now run rustdoc with `-D warnings`, confirmed to fail
+against a deliberate broken link before being trusted.
+
 **Next action:** teach `verify-doc-output.py` to build a chapter's intermediate files, which
-would roughly triple coverage.
+would roughly triple coverage of the manual.
 
 ---
 

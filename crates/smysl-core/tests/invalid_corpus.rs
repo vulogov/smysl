@@ -39,7 +39,7 @@ fn corpus() -> Vec<PathBuf> {
 /// valid-looking item and ignored a trailing violation would also be wrong.
 fn accepts(data: &[u8]) -> bool {
     let mut d = Dec::new(data);
-    matches!(d.skip_item(), Ok(_)) && d.remaining() == 0
+    d.skip_item().is_ok() && d.remaining() == 0
 }
 
 #[test]
