@@ -49,7 +49,35 @@ and the facade asserts the two are independent.
   That paragraph exists to tell an implementor outside this crate how to return a `Usage`, so
   it was wrong where being wrong costs something.
 
+### Fixed
+
+- **`topo` was quadratic, and it made `check` super-linear.** The ready set was sorted on
+  every iteration of the main loop and then popped with `remove(0)` — two quadratic factors in
+  three lines. A `BinaryHeap<Reverse<NodeId>>` pops in the same ascending dense-id order, which
+  is the order rule D requires, in log time.
+
+  | | before | after |
+  |---|---|---|
+  | `check`, 16 000 units | 40.24 ms | 6.59 ms |
+  | `check`, ratio per doubling | 3.47 | 2.16 |
+  | `integrity` pass, 8 000 units | 8.62 ms | 0.45 ms |
+  | `integrity`, ratio per doubling | 3.84 | 2.03 |
+
+  Found by finally measuring `check` and `merge` per call rather than through the command,
+  where parsing dominates. `merge` was linear as assumed; `check` was not. `topo` is also used
+  by thread derivation and `relink`, so both get it.
+
+  The determinism gate passes unchanged — `merge`, `derive_thread` and `render` identical
+  across 16 runs — which is the check that matters, because the whole reason the old code
+  sorted was to make the order canonical.
+
 ### Added
+
+- **Scaling measurements for `check` and `merge`** — `crates/smysl-check/tests/scaling.rs` and
+  an addition to `crates/smysl-graph/tests/scaling.rs`, the last two operations in the pure set
+  whose per-call cost had never been characterised. `check` is measured per pass as well as in
+  aggregate, because a total hides one quadratic pass behind nine linear ones — which is
+  exactly what it was doing.
 
 - **A shared rejection corpus** — `fixtures/wire/invalid/`, twenty-eight byte strings that are
   not smysl documents, consumed by all four implementations.

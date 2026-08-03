@@ -132,14 +132,28 @@ weaker evidence than a test, it is *no* evidence, and it reads exactly like evid
 downstream trusts round-tripping. And, cheaper, a sweep for load-bearing claims made only in
 comments.
 
-## 6. Performance characterised — *mostly done*
+## 6. Performance characterised — *done, and it found one*
 
 `pack` is linear when the budget binds as of 0.6 (was quadratic), `salience` is linear and
-measured in isolation. `merge` and `check` have only ever been measured through the command,
-where parsing dominates.
+measured in isolation. `merge` and `check` were the last two measured only *through the
+command*, where parsing dominates and the ratio is a ratio about parsing.
 
-**Next action:** extend `crates/*/tests/scaling.rs` to `merge` and `check`. Low risk, and it
-would close the last "we assume it is linear" in the pure set.
+Measured in 0.10. `merge` was linear as assumed. **`check` was not** — 3.47x per doubling, and
+the per-pass breakdown put it in `integrity` at 3.84x while every other pass sat at 2.0.
+
+The cause was three lines in `topo`: the ready set was sorted on every iteration and then
+popped with `remove(0)`, which is two quadratic factors stacked. A min-heap pops in the same
+ascending dense-id order — the order rule D requires — in log time. `check` at 16 000 units
+went from 40.2 ms to 6.6 ms and the curve straightened to 2.16x. The `integrity` pass alone
+went from 8.62 ms to 0.45 ms at 8 000.
+
+Three of the four operations in the pure set were assumed linear and two of them were not.
+That is the argument for measuring rather than reasoning, and it is now the third time this
+project has made it.
+
+**Next action:** none outstanding. The scaling tests are `#[ignore]`d measurements rather than
+gates, deliberately — timing assertions on shared runners cry wolf — so the standing cost is
+that somebody has to run them. Worth running at a release cut.
 
 ## 7. Documentation that matches the binary — *partial*
 

@@ -285,11 +285,94 @@ bytes is not conformant at any class.
 
 The **crate version and the format version are independent axes**. A crate major bump does
 not imply a format break, and a format break does not require one. `smysl/0.1` has not
-changed across crate versions 0.1 through 0.5, and record type 10 was *added* in 0.2 without
+changed across crate versions 0.1 through 0.9, and record type 10 was *added* in 0.2 without
 a format bump — an older reader preserves it verbatim under rule X, which is exactly what
 rule X is for.
 
 An implementation MUST reject a format version it does not support and MUST NOT guess.
+
+### 8.1 What may change within a format version
+
+Three kinds of change are permitted without a bump, and they are permitted because rule X
+already obliges every reader to cope with them:
+
+- **A new record type code.** Older readers preserve it verbatim and report `SMY-W010`.
+- **A new unit-core key ≥ 9, or a new header key.** Older readers preserve it verbatim.
+- **A new value in an open enumeration** where this document says unknown values are
+  preserved rather than rejected.
+
+The test of "permitted" is mechanical: a reader written against this document at the *older*
+revision must still round-trip a document containing the addition, byte for byte. If it
+cannot, the change is a break however small it looks.
+
+### 8.2 What requires a new format version
+
+- Changing the meaning, type, or key number of anything in §2.2 or §4.
+- Adding a **required** field, or making an optional one required.
+- Removing or renumbering a record type.
+- Any change to §3, because §3 decides which byte strings are documents at all.
+
+A new format version is a new string — `smysl/0.2` — and `FORMAT_VERSIONS_SUPPORTED` is a
+list precisely so an implementation can accept several at once. Readers MUST NOT accept a
+document whose version is absent from their list, and MUST NOT infer compatibility from the
+version *looking* close to one they know.
+
+### 8.3 Tightening an implementation is not a format change
+
+This is the case that actually comes up, and the one most likely to be got wrong.
+
+When an implementation has been *more permissive than this document requires*, correcting it
+is not a format break, because the documents it stops accepting were never conformant. The
+format did not change; an implementation stopped disagreeing with it.
+
+0.5 made a decoder stricter about records it should never have accepted. 0.10 fixed
+`skip_item`, which had been accepting seven classes of §3 violation inside extension payloads
+for nine releases. Neither is a bump. Both are worth a changelog entry loud enough that
+somebody with stored documents can check them, because *in practice* a document that used to
+load may stop loading — and "it was never legal" is true and unhelpful to whoever has one.
+
+The converse also holds, and is the harder discipline: if an implementation is more
+permissive than this document and the permissive behaviour turns out to be *wanted*, the fix
+is to change this document and bump, not to leave the two disagreeing.
+
+### 8.4 Deprecation
+
+Within a format version, nothing is removed. A field that should no longer be written is
+marked deprecated here, writers stop emitting it, and readers keep accepting it — a reader
+that started rejecting a document it used to accept has broken the format for everyone
+holding one, which is the whole hazard content addressing is supposed to avoid.
+
+Removal waits for a format bump. When one happens, implementations SHOULD accept both
+versions for at least one release so that a pipeline with mixed implementations keeps
+working, which is the only condition under which anybody can upgrade at all.
+
+### 8.5 Where the version actually lives
+
+Only in surface syntax, in the `@doc` header. **The wire carries no format version string.**
+
+That is a deliberate consequence of rule X rather than an omission: a CBOR record sequence
+describes itself through its type codes, and a reader meeting a code it does not know
+preserves it verbatim instead of needing a version to tell it to. A version field would let a
+reader refuse a whole document on sight, which is the opposite of what rule X asks for.
+
+It has one consequence worth stating, because it is invisible until it bites. A surface
+parser validates the declared version and then discards it — there is nowhere in the parsed
+result to keep it — so a writer reconstructs the header from its own
+`FORMAT_VERSIONS_SUPPORTED[0]`. While that list has one entry the reconstruction is correct by
+coincidence. The moment it has two, a document declaring the second would be read and written
+back out claiming to be the first. Uids are unaffected, because they are over CBOR and CBOR
+has no version — but the header would lie.
+
+`crates/smysl-core/tests/versioning.rs` fails when the list grows, and says what has to be
+decided first.
+
+### 8.6 Is `smysl/0.1` frozen?
+
+No, and it is not stable-forever either. It is `0.1`: it has held across nine crate releases
+and four independent implementations, which is a record rather than a promise. The `0.` says
+that a break is permitted if this document turns out to be wrong about something load
+bearing. What §8.2 buys is that such a break is *visible* — a new version string, refused by
+old readers rather than silently misread.
 
 ---
 
