@@ -73,6 +73,36 @@ and the facade asserts the two are independent.
 
 ### Added
 
+- **C-Produce in `python/`, closing §2.3.** The largest item on `READINESS.md`, and the one the
+  format's proposition actually rests on.
+
+  C-Read never reaches uid derivation, because reading a document does not require computing
+  one. So three independent implementations round-tripped every fixture byte for byte, in CI,
+  for a full release — while remaining ignorant of what a uid *is*. *Status is part of
+  identity* stayed verified by the Rust alone across nine releases.
+
+  `python/smysl/uid.py` lays out a unit core in canonical form and hashes it with
+  `python/smysl/blake3.py`, ~200 lines written for the purpose. Hand-rolled deliberately: a
+  binding to the same C library the Rust links would have tested two callers of one
+  implementation rather than two implementations. It is slow, which does not matter — it hashes
+  unit cores, and it is checked against fixtures rather than raced.
+
+  Three layers of evidence, because a failure in each means something different. The published
+  BLAKE3 vectors, including the multi-chunk lengths a single-chunk shortcut gets wrong. The
+  canonical bytes, checked *separately* from the uid, so a disagreement says whether the layout
+  or the hash was at fault. Then §2.3 as a property rather than an example.
+
+  The witness is a pair of cores whose every field is identical and whose status differs: one
+  byte apart in the canonical encoding, two unrelated uids. Confirmed capable of failing —
+  dropping `status` from the encoder fails 35 tests, several by name.
+
+  `nodejs/` and `go/` stay at C-Read. Their lists of what they cannot reach still name §2.3,
+  correctly, but the wording implied the claim went unchecked anywhere; that is fixed.
+
+- **`fixtures/wire/uid/cases.json`** — sixteen unit cores with their canonical bytes and uids,
+  emitted by the Rust, covering every status, unicode in both normalisation forms, every
+  optional field present and absent, and a payload.
+
 - **Scaling measurements for `check` and `merge`** — `crates/smysl-check/tests/scaling.rs` and
   an addition to `crates/smysl-graph/tests/scaling.rs`, the last two operations in the pure set
   whose per-call cost had never been characterised. `check` is measured per pass as well as in

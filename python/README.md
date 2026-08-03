@@ -5,11 +5,22 @@ alone, not from the Rust. That is the whole point: the format's proposition is t
 implementations agree on what a document says, and until this existed that had never been
 tested by anything except the implementation that defined it.
 
-**Conformance target: C-Read** — the floor the spec names. Decode, re-encode byte-identically,
-preserve what is not understood. Nothing above it is attempted, because the spec says an
-implementation should declare what it does rather than how complete it is.
+**Conformance target: C-Read and C-Produce.**
 
-No dependencies. A dependency that did some of the work would weaken the evidence.
+C-Read is the floor the spec names: decode, re-encode byte-identically, preserve what is not
+understood.
+
+C-Produce was added in 0.10.0, and it is the one that matters. C-Read never reaches §2.1,
+because reading a document does not require deriving a uid — so three independent readers could
+round-trip every fixture byte for byte while remaining ignorant of what a uid *is*, and §2.3,
+*status is part of identity*, stayed verified by the Rust alone across nine releases. This
+package derives uids now and reproduces the reference implementation's, canonical bytes
+included.
+
+No dependencies, including the hash. BLAKE3 is hand-rolled in `smysl/blake3.py` — a binding to
+the same C library the Rust uses would have tested two callers of one implementation rather
+than two implementations. It is slow, and that does not matter: it hashes unit cores, which are
+kilobytes.
 
 ```sh
 cd python

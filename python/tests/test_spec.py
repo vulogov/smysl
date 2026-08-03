@@ -210,23 +210,31 @@ def test_this_package_declares_only_c_read():
     assert "C-Read" in (Path(__file__).parents[1] / "README.md").read_text()
 
 
-def test_what_c_read_cannot_check():
-    """The clauses this class provably cannot reach, kept as a list rather than a silence.
+def test_what_this_package_still_cannot_check():
+    """The clauses no test here reaches, kept as a list rather than a silence.
 
-    §7 makes C-Read the floor: byte-identical round trip and unknown preservation. It does
-    *not* include producing uids, which is where the format's central claim actually lives —
-    so the most consequential paragraph in the specification, §2.3 'status is part of
-    identity', is untested by anything in this package.
+    This list is shorter than it was. It used to be headed by §2.1 and §2.3, because C-Read
+    does not reach uid derivation — reading a document never requires computing one — and that
+    left *status is part of identity*, the paragraph the whole format rests on, verified by the
+    Rust alone across nine releases and three independent readers.
 
-    Emptying this list should be a decision, not an accident, so the test asserts it is not
-    empty and names what is in it.
+    `test_uid.py` closed it in 0.10.0. This package now derives uids (`smysl/uid.py`, over a
+    hand-rolled BLAKE3) and reproduces every uid in `fixtures/wire/uid/cases.json`, canonical
+    bytes included, so a disagreement says which half was wrong.
+
+    The entry was removed on purpose, and this docstring is the record of that. Emptying the
+    rest should be a decision too.
     """
     unreached = {
-        "§2.1 uid derivation": "needs BLAKE3; C-Produce, not C-Read",
-        "§2.3 status is part of identity": "follows from uid derivation",
-        "§2.1 uid text form, 26–52 base32": "no uid parsing at this class",
+        "§2.1 uid text form, 26–52 base32": "uids are derived here, but never parsed from text",
         "§4 canonical surface form": "surface syntax is not decoded here",
         "§6 rules M, T, L, R, U, I, S, V, D": "semantic; C-Consume and above",
     }
     assert unreached, "if this is ever empty, say which class was implemented instead"
-    assert "§2.3 status is part of identity" in unreached
+    # The tripwire the removed entry left behind: if uid derivation ever regresses out of this
+    # package, the list must gain its entry back rather than the claim quietly going untested.
+    from smysl.uid import UnitCore
+
+    assert UnitCore(schema="claim", gist="g", status=1).uid() != UnitCore(
+        schema="claim", gist="g", status=2
+    ).uid(), "§2.3 is claimed as covered; it must actually be"

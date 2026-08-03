@@ -187,6 +187,10 @@ jobs:
   # It targets C-Read, the floor: decode, re-encode byte-identically, preserve unknowns. The
   # fixtures were produced by the Rust, so a byte-for-byte match is two implementations
   # agreeing on identity rather than merely both parsing.
+  # The only implementation outside the Rust that reaches C-Produce, which is the class that
+  # touches §2.3 — status is part of identity. C-Read never derives a uid, so this is the job
+  # that checks the format's central claim against something other than the implementation
+  # that defined it.
   conformance-python:
     runs-on: ubuntu-latest
     steps:
@@ -196,6 +200,16 @@ jobs:
           python-version: "3.11"
       - run: pip install -e './python[test]'
       - run: python -m pytest python/tests -q
+
+      # The fixtures are committed, so the generator drifting from them would go unnoticed:
+      # `cases.json` would keep passing against a Rust that no longer produces it. Regenerate
+      # and require no diff.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: the uid fixtures still match what the Rust produces
+        run: |
+          cargo test -p smysl-core --test gen_uid_fixtures -- --ignored
+          git diff --exit-code fixtures/wire/uid/
 
   # The same specification, read a third time. Two implementations agreeing could have made
   # the same guess where the document is silent, so independence is what makes agreement

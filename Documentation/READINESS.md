@@ -31,7 +31,7 @@ frozen or merely stable-so-far.
 **Next action:** a versioning section in `SMYSL_FORMAT_SPEC.md` saying which changes are
 allowed within a format version and which require a new one.
 
-## 2. A second implementation — *done for C-Read*
+## 2. A second implementation — *done, including the claim that mattered*
 
 The whole proposition is that two implementations agree on what a document says. That has
 never been tested by anything except this one. `SMYSL_FORMAT_SPEC.md` exists and is under 250
@@ -69,9 +69,25 @@ decoder's obligation, constraint 2 is scoped to integers and lengths, and tags a
 8. The Go implementation is the check — written against the revised text, it needed no guesses
 in any of the three.
 
-**Next action:** C-Produce, in one of the three. That means BLAKE3 and canonical unit-core
-encoding, and it is what would test §2.3 — the claim the format actually rests on, and the one
-thing on this list still verified by the Rust alone.
+**C-Produce reached in 0.10.0, in `python/`.** This is the item that mattered. C-Read never
+touches uid derivation — reading a document does not require computing one — so three
+independent readers round-tripped every fixture byte for byte while remaining ignorant of what
+a uid *is*, and §2.3, *status is part of identity*, stayed verified by the Rust alone across
+nine releases.
+
+`python/smysl/uid.py` lays out a unit core in canonical form and hashes it with a BLAKE3
+hand-rolled in `python/smysl/blake3.py`. Hand-rolled deliberately: a binding to the same C
+library the Rust uses would have tested two callers of one implementation. It passes the
+published BLAKE3 vectors, including the multi-chunk lengths that a single-chunk shortcut would
+get wrong, and reproduces all sixteen uids in `fixtures/wire/uid/cases.json` — canonical bytes
+checked separately from the hash, so a disagreement says which half broke.
+
+The §2.3 witness is a pair whose every field is identical and whose status differs: one byte
+apart in the canonical encoding, two unrelated uids. Verified capable of failing — dropping
+`status` from the encoder fails 35 tests, by name.
+
+**Next action:** none for this gate. `nodejs/` and `go/` remain C-Read, which is a scope
+decision rather than a gap; both say so where they list what they do not reach.
 
 ## 3. Public API stability — *not ready*
 
