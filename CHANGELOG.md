@@ -59,6 +59,26 @@ and the facade asserts the two are independent.
 - **`make doc-gate` and a CI job** running rustdoc with `-D warnings`, the way clippy is
   already gated. Confirmed to fail before being trusted: a deliberate broken link exits 101.
 
+- **The public contract is recorded and enforced** — `tests/public-api.txt` holds the facade's
+  239 exported names, `make api-check` fails when the list moves, and `make semver` reports
+  breakage against the last published version across all twelve crates. Both confirmed to fail
+  first: renaming a re-export trips the golden file, marking a struct `#[non_exhaustive]` trips
+  semver-checks with exit 100.
+
+  Two gates because they catch different things. A rename shows up in the list; adding
+  `#[non_exhaustive]` shows up only in the semver check. Neither alone is the contract.
+
+  The recorded file is the facade rather than every crate: the eleven behind it expand to
+  12 000 lines of simplified surface, and a diff nobody reads is decoration rather than a gate.
+
+  `--release-type patch` is load bearing in the second. Without it, 0.9 → 0.10 on a 0.x crate
+  is a breaking-allowed bump and cargo-semver-checks skips every check — "0 checks: 0 pass,
+  254 skip", printed as a pass. Forcing patch makes the 223 checks run. Found by reading the
+  output of the first green rather than accepting it, which is the habit this project has had
+  to learn twice this cycle.
+
+  Nothing has broken since 0.9.0: 223 checks pass on each of the twelve.
+
 - **`all-features = true` for docs.rs** on all twelve published crates. Publishing had put up a
   partial API — `tui`, `semantic`, both render backends and all five providers were absent
   from the page people read first. Set on every crate rather than the five with features

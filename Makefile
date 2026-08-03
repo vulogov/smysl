@@ -98,6 +98,11 @@ doc-gate: ## Rustdoc with warnings denied, as docs.rs would show it
 # The three books in Documentation/ are tracked as PDFs as well as sources, because they
 # are deliverables people are handed rather than artefacts people build. Tracking the
 # output of a build makes it drift, so this target is what keeps the two in step.
+# The last published version, and what is published. Both move at a release cut.
+BASELINE  := 0.9.0
+PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-render \
+             smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl
+
 DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE SMYSL_RATIONALE_PRESENTATION
 
 #
@@ -116,6 +121,38 @@ docs: ## Rebuild the PDFs in Documentation/ from their typst sources
 # ---------------------------------------------------------------------------
 # The CI jobs, individually
 # ---------------------------------------------------------------------------
+
+# The public contract, and whether it moved.
+#
+# Publishing turned every re-exported name into something people build against. These two
+# targets answer different questions and both are needed: `api-check` says the *list* changed,
+# `semver` says the change was breaking. A rename shows up in the first; adding
+# `#[non_exhaustive]` to a struct shows up only in the second.
+api: ## Regenerate the recorded public surface
+	@command -v cargo-public-api >/dev/null || { echo "cargo install cargo-public-api"; exit 1; }
+	@{ sed -n '1,/^# Regenerate with/p' tests/public-api.txt; \
+	   $(CARGO) public-api --all-features --simplified 2>/dev/null; } > tests/public-api.txt.new
+	@mv tests/public-api.txt.new tests/public-api.txt
+	@echo "api: recorded $$($(CARGO) public-api --all-features --simplified 2>/dev/null | wc -l | tr -d ' ') names"
+
+api-check: ## Fail if the public surface moved without being recorded
+	@command -v cargo-public-api >/dev/null || { echo "cargo install cargo-public-api"; exit 1; }
+	@$(CARGO) public-api --all-features --simplified 2>/dev/null > /tmp/smysl-api-now.txt
+	@grep -v '^#' tests/public-api.txt | grep -v '^$$' > /tmp/smysl-api-was.txt
+	@diff -u /tmp/smysl-api-was.txt /tmp/smysl-api-now.txt \
+	  || { echo "api-check: the public surface moved. If deliberate, run 'make api'."; exit 1; }
+	@echo "api-check: the public surface matches what is recorded"
+
+# `--release-type patch` is load bearing. Without it, 0.9 -> 0.10 on a 0.x crate is a
+# breaking-allowed bump and cargo-semver-checks skips every check: "0 checks: 0 pass, 254
+# skip", reported as a pass. Forcing patch makes the 223 checks actually run. A gate that
+# green-lights by skipping is the failure this project keeps finding.
+semver: ## Report API breakage against the last published version
+	@command -v cargo-semver-checks >/dev/null || { echo "cargo install cargo-semver-checks"; exit 1; }
+	@set -e; for c in $(PUBLISHED); do \
+		$(CARGO) semver-checks check-release --baseline-version $(BASELINE) \
+			--release-type patch -p $$c; \
+	done
 
 lint: ## fmt --check and clippy -D warnings, as CI runs them
 	$(CARGO) fmt --all -- --check
@@ -254,7 +291,7 @@ commit: ## Commit with aic and push
 # Everything
 # ---------------------------------------------------------------------------
 
-ci: lint doc-gate test-matrix gates conformance ## Everything CI runs, bar the jobs needing a server
+ci: lint doc-gate api-check test-matrix gates conformance ## Everything CI runs, bar the jobs needing a server
 	@echo
 	@echo "ci: green."
 	@echo "Not covered here: the ollama job (needs a running server - see make live-ollama)"

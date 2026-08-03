@@ -38,6 +38,27 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 
+  # The public contract. Two jobs' worth of question in one, because they catch different
+  # things: `api-check` says the list of exported names moved, `semver-checks` says the move
+  # was breaking. A rename shows up in the first; marking a struct `#[non_exhaustive]` shows
+  # up only in the second.
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly     # cargo-public-api reads rustdoc JSON
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api,cargo-semver-checks
+      - run: make api-check
+
+      # `--release-type patch` is load bearing. Without it, 0.9 -> 0.10 on a 0.x crate is a
+      # breaking-allowed bump and every check is skipped — "0 checks: 0 pass, 254 skip",
+      # reported as a pass. Forcing patch makes the 223 checks actually run.
+      - name: report API breakage against the last published version
+        run: make semver
+
   # Feature combinations, because the interesting bugs live in the seams between them.
   test-matrix:
     runs-on: ubuntu-latest
