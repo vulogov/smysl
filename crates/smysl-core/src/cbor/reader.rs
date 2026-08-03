@@ -337,8 +337,13 @@ impl<'a> Dec<'a> {
         if b >> 5 == major::SIMPLE {
             return match b {
                 F32_HEAD => {
+                    let at = self.pos;
                     self.pos += 1;
-                    self.take(4)?;
+                    let s = self.take(4)?;
+                    let v = f32::from_be_bytes(s.try_into().expect("4 bytes"));
+                    if !crate::types::is_quantised(v) {
+                        return Err(CodecError::Float { at });
+                    }
                     Ok(())
                 }
                 0xF4 | 0xF5 => {
@@ -351,8 +356,21 @@ impl<'a> Dec<'a> {
         let (m, arg) = self.head()?;
         match m {
             major::UINT | major::NEGINT => Ok(()),
-            major::BYTES | major::TEXT => {
+            major::BYTES => {
                 self.take(arg as usize)?;
+                Ok(())
+            }
+            major::TEXT => {
+                let at = self.pos;
+                let raw = self.take(arg as usize)?;
+                let s =
+                    core::str::from_utf8(raw).map_err(|_| CodecError::MalformedEnvelope { at })?;
+                if !unicode_normalization::is_nfc(s) {
+                    return Err(CodecError::NonDeterministic {
+                        at,
+                        reason: NonDetReason::NonNfcText,
+                    });
+                }
                 Ok(())
             }
             major::ARRAY => {
@@ -362,8 +380,27 @@ impl<'a> Dec<'a> {
                 Ok(())
             }
             major::MAP => {
+                // Compared as *encoded key bytes*, not as decoded values. A payload may key
+                // by text where the kernel keys by integer (constraint 1), and the only
+                // ordering that covers both without knowing which is in use is the one
+                // constraint 4 actually specifies.
+                let buf = self.buf;
+                let mut prev: Option<&[u8]> = None;
                 for _ in 0..arg {
+                    let kstart = self.pos;
                     self.skip_one(depth + 1)?;
+                    let key = &buf[kstart..self.pos];
+                    if let Some(p) = prev {
+                        let reason = match key.cmp(p) {
+                            core::cmp::Ordering::Equal => Some(NonDetReason::DuplicateMapKey),
+                            core::cmp::Ordering::Less => Some(NonDetReason::UnsortedMapKeys),
+                            core::cmp::Ordering::Greater => None,
+                        };
+                        if let Some(reason) = reason {
+                            return Err(CodecError::NonDeterministic { at: kstart, reason });
+                        }
+                    }
+                    prev = Some(key);
                     self.skip_one(depth + 1)?;
                 }
                 Ok(())

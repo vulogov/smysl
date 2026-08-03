@@ -9,7 +9,70 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 0.10.0
 
-Nothing yet. What is carried, and what each is actually waiting on:
+### Fixed
+
+- **An extension payload could carry a non-canonical encoding into a uid.** `Dec::skip_item`
+  is what preserves unknown keys for rule X; its result is stored verbatim in `Extra`;
+  `unit_core_bytes` writes `Extra` into the bytes `hash::uid` hashes. It checked shortest
+  form, definite lengths, nulls, tags and depth — and not map key order, NFC, UTF-8 validity
+  or float quantisation.
+
+  So one logical unit had two encodings and therefore two uids: the same unknown key holding
+  the same two-entry map, written in either key order, was accepted both ways as different
+  bytes. Content-addressed identity is the property the whole format rests on, and this broke
+  it in the one place nothing downstream can notice, because those bytes are deliberately
+  never interpreted.
+
+  The comment directly above the call site said "the payload is still parsed strictly, so an
+  unknown record cannot smuggle in a non-deterministic encoding". It had been there since
+  before it was true.
+
+  `skip_one` now validates text, floats and map keys — the last compared as *encoded key
+  bytes*, since a payload may key by text where the kernel keys by integer, and that is the
+  only ordering covering both. No fixture, golden file or test moved: nothing had depended on
+  the leniency, which is exactly why it survived.
+
+- **Six rustdoc defects**, one of them substantive: `Usage` was documented as being built
+  through `Usage::new`, which does not exist. The constructors are `reported` and `estimated`.
+  That paragraph exists to tell an implementor outside this crate how to return a `Usage`, so
+  it was wrong where being wrong costs something.
+
+### Added
+
+- **A shared rejection corpus** — `fixtures/wire/invalid/`, twenty-eight byte strings that are
+  not smysl documents, consumed by all four implementations.
+
+  0.9 established that four implementations agree on *accepting* four documents. That is the
+  weaker half. Determinism is enforced by refusal: every clause of §3 is a rule about what
+  must be rejected, and if one implementation accepted a non-shortest integer another refused,
+  every suite would stay green while two implementations disagreed about what a smysl document
+  is. Each had been inventing its own invalid inputs — fifteen cases in Python, sixteen in
+  JavaScript, eight in Go, no two the same bytes.
+
+  It found the disagreement immediately, and in the reference implementation: the Rust
+  accepted seven of the twenty-eight that the other three rejected. That is the defect above.
+
+  Every suite pairs the corpus with a **control** — canonical counterparts that must still be
+  accepted — because a decoder that refused everything would pass the corpus while meaning
+  nothing.
+
+- **`make doc-gate` and a CI job** running rustdoc with `-D warnings`, the way clippy is
+  already gated. Confirmed to fail before being trusted: a deliberate broken link exits 101.
+
+- **`all-features = true` for docs.rs** on all twelve published crates. Publishing had put up a
+  partial API — `tui`, `semantic`, both render backends and all five providers were absent
+  from the page people read first. Set on every crate rather than the five with features
+  today, so one that gains a feature later cannot reintroduce the gap quietly.
+
+### Changed
+
+- **§3 of the spec gains a scope paragraph.** The constraints already bound payloads through
+  constraint 6, so the defect above was an implementation failure rather than a gap — but
+  constraint 1's "a generic reader MAY accept either" is the latitude that was over-read. It
+  now says that carve-out is about key *type* alone, and not licence to relax constraints 2
+  through 9 for content merely being passed through.
+
+What is carried, and what each is actually waiting on:
 
 - **An API stability pass**, which 0.9 promoted from an item to the leading one by publishing.
   Every name in the facade's `pub use` list is now something people can build against, and

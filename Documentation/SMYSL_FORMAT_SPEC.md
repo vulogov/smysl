@@ -137,6 +137,12 @@ otherwise two byte strings decode to one record and a uid stops naming exactly o
    aborts the process on hostile input, which is worse than an error because it cannot be
    caught.
 
+The paragraph on scope was added in 0.10.0, after a shared corpus of deliberately invalid
+byte strings (`fixtures/wire/invalid/`) found the four implementations disagreeing about
+seven of them. That exercise is the mirror of the one below: the three outside readers had
+been checked only on what they *accept*, and the disagreement turned out to be in the
+reference implementation rather than in the document.
+
 Constraints 1, 2 and 8 read as they do because two independent implementations — `python/`
 and `nodejs/`, each written from this document without consulting the other — both had to
 guess here. Rules 2 and 8 caught both of them; rule 1 caught one. Their guesses agreed, which
@@ -145,6 +151,19 @@ answer is not the same as a document that told them.
 
 Rule 4 has a consequence worth stating: a payload map is sorted by **encoded key bytes**, not
 by the string's code points, and duplicate keys are collapsed keeping the first.
+
+**Scope.** These constraints bind everywhere in a document, including inside payloads and
+inside the values of keys the reader does not recognise. The latitude in constraint 1 is
+narrow and specific — a reader without kernel context cannot tell whether an integer key is
+*required* there — and it is not licence to relax constraints 2 through 9 for content that is
+merely being passed through.
+
+This is worth saying because preserved bytes are not inert. Rule X requires an unknown key to
+survive verbatim, §2.1 derives a uid by hashing the unit core, and the unit core includes
+those preserved bytes. A reader that skipped an unknown value without checking it would let
+one logical unit have two encodings and therefore two uids, which is precisely what §3 exists
+to prevent — and it would do so in the one place where nothing downstream can notice, because
+the bytes are never interpreted. The reference implementation had this defect until 0.10.0.
 
 ### 3.1 Record framing
 
