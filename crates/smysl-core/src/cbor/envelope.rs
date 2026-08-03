@@ -968,9 +968,14 @@ pub fn from_cbor(bytes: &[u8]) -> Res<(Record, usize)> {
         code::SCHEMA_DECL => Record::SchemaDecl(dec_schema_decl(&mut d)?),
         code::LABEL_BINDING => Record::LabelBinding(dec_label_binding(&mut d)?),
         other => {
-            // `SMY-W014`: preserved verbatim, skipped semantically. The payload is still
-            // parsed strictly, so an unknown record cannot smuggle in a non-deterministic
-            // encoding.
+            // `SMY-W014`: preserved verbatim, skipped semantically. The payload is parsed
+            // strictly, so an unknown record cannot smuggle in a non-deterministic encoding.
+            //
+            // That sentence was here before it was true. Until 0.10 `skip_item` checked
+            // shortest form, definite lengths, nulls, tags and depth, but not map key order,
+            // NFC, UTF-8 validity or float quantisation — and this payload is stored in
+            // `Extra`, which `unit_core_bytes` hashes. Two orderings of one extension map
+            // therefore gave one unit two uids. See `tests/invalid_corpus.rs`.
             let payload = d.skip_item()?.to_vec();
             Record::Unknown {
                 code: other,

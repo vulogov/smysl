@@ -304,7 +304,8 @@ pub struct Completion {
 
 /// Token counts for one call.
 ///
-/// `#[non_exhaustive]`, so it is built through [`Usage::new`] rather than a literal - the
+/// `#[non_exhaustive]`, so it is built through [`Usage::reported`] or [`Usage::estimated`]
+/// rather than a literal - the
 /// `Provider` trait is public and an implementor outside this crate has to be able to
 /// return one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

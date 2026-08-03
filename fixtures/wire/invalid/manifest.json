@@ -1,0 +1,150 @@
+{
+  "purpose": "Byte strings that are not smysl documents. Every implementation must reject every one of them. The `constraint` field is the section-3 clause violated; 0 means malformed input rather than a numbered clause.",
+  "cases": [
+    {
+      "file": "truncated-array.cbor",
+      "constraint": 0,
+      "why": "an array claiming three elements with one present"
+    },
+    {
+      "file": "truncated-text.cbor",
+      "constraint": 0,
+      "why": "a text head claiming four bytes with two present"
+    },
+    {
+      "file": "array-length-not-shortest.cbor",
+      "constraint": 2,
+      "why": "a one-element array with its count in two bytes"
+    },
+    {
+      "file": "int-five-bytes-for-small.cbor",
+      "constraint": 2,
+      "why": "1 encoded in a four-byte argument"
+    },
+    {
+      "file": "int-nine-bytes-for-small.cbor",
+      "constraint": 2,
+      "why": "1 encoded in an eight-byte argument"
+    },
+    {
+      "file": "int-three-bytes-for-one.cbor",
+      "constraint": 2,
+      "why": "1 encoded in a two-byte argument"
+    },
+    {
+      "file": "int-two-bytes-for-one.cbor",
+      "constraint": 2,
+      "why": "1 encoded as 0x18 0x01; it fits in the additional-information field"
+    },
+    {
+      "file": "negint-two-bytes-for-one.cbor",
+      "constraint": 2,
+      "why": "-1 encoded as 0x38 0x00 rather than 0x20"
+    },
+    {
+      "file": "text-length-not-shortest.cbor",
+      "constraint": 2,
+      "why": "the text \"a\" with its length in two bytes"
+    },
+    {
+      "file": "indefinite-array.cbor",
+      "constraint": 3,
+      "why": "indefinite-length array; one value would have two encodings"
+    },
+    {
+      "file": "indefinite-bytes.cbor",
+      "constraint": 3,
+      "why": "chunked byte string"
+    },
+    {
+      "file": "indefinite-map.cbor",
+      "constraint": 3,
+      "why": "indefinite-length map"
+    },
+    {
+      "file": "indefinite-text.cbor",
+      "constraint": 3,
+      "why": "chunked text string"
+    },
+    {
+      "file": "map-keys-duplicate.cbor",
+      "constraint": 4,
+      "why": "the key 0 twice; two encodings of one map, and an ambiguous read"
+    },
+    {
+      "file": "map-keys-unsorted.cbor",
+      "constraint": 4,
+      "why": "keys 1 then 0; ascending by encoded key bytes is required"
+    },
+    {
+      "file": "null-inside-map.cbor",
+      "constraint": 5,
+      "why": "null as a map value"
+    },
+    {
+      "file": "null-value.cbor",
+      "constraint": 5,
+      "why": "null on the wire; an absent optional is omitted instead"
+    },
+    {
+      "file": "undefined-value.cbor",
+      "constraint": 5,
+      "why": "the undefined simple value, which the format does not define"
+    },
+    {
+      "file": "text-invalid-utf8.cbor",
+      "constraint": 6,
+      "why": "a lone continuation byte"
+    },
+    {
+      "file": "text-not-nfc.cbor",
+      "constraint": 6,
+      "why": "e + U+0301 rather than the composed U+00E9; two encodings of one string"
+    },
+    {
+      "file": "float-binary64.cbor",
+      "constraint": 7,
+      "why": "binary64; the format quantises to binary32"
+    },
+    {
+      "file": "float-half.cbor",
+      "constraint": 7,
+      "why": "binary16; not a form this format uses"
+    },
+    {
+      "file": "float-infinity.cbor",
+      "constraint": 7,
+      "why": "infinity is not a finite value"
+    },
+    {
+      "file": "float-nan.cbor",
+      "constraint": 7,
+      "why": "NaN is not a finite value, and has many encodings"
+    },
+    {
+      "file": "float-not-quantised.cbor",
+      "constraint": 7,
+      "why": "0.1 is not a multiple of 1/1024"
+    },
+    {
+      "file": "tag-bignum.cbor",
+      "constraint": 8,
+      "why": "tag 2 (positive bignum)"
+    },
+    {
+      "file": "tag-datetime.cbor",
+      "constraint": 8,
+      "why": "tag 0 (standard date/time); major type 6 is not part of this format"
+    },
+    {
+      "file": "nesting-too-deep-maps.cbor",
+      "constraint": 9,
+      "why": "129 nested single-entry maps against a limit of 128"
+    },
+    {
+      "file": "nesting-too-deep.cbor",
+      "constraint": 9,
+      "why": "129 nested arrays against a limit of 128"
+    }
+  ]
+}

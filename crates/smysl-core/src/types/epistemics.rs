@@ -299,7 +299,10 @@ impl SourceRef {
     pub fn new(kind: SourceKind, reference: impl Into<String>) -> SourceRef {
         SourceRef {
             kind,
-            reference: reference.into(),
+            // NFC here rather than only at the encoder: `reference` sits inside the unit
+            // core, so it is inside the uid, and leaving it verbatim let two values that
+            // hash to one uid compare unequal in memory.
+            reference: crate::types::normalise(&reference.into()),
             captured: None,
         }
     }

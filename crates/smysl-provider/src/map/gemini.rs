@@ -406,7 +406,13 @@ impl Provider for Gemini {
             context_window: self.cfg.context_window,
             max_output: self.cfg.max_output,
             structured: self.cfg.structured,
-            streaming: true,
+            // False, because this mapper does not implement `Provider::stream` and so
+            // inherits the trait default, which refuses. The trait's own documentation says
+            // `caps` describes what a provider *does*, "which is not always the same thing" —
+            // and this said `true` for as long as the mapper has existed. Nothing in the
+            // library reads the field yet, which is why nothing noticed; `Capabilities` is
+            // public API, so a consumer could.
+            streaming: false,
             usage_reporting: true,
             offline: self.cfg.is_local(),
         }
@@ -433,6 +439,7 @@ impl Provider for Gemini {
             return Err(self.status_error(resp.status, &resp.body));
         }
         self.parse(&resp.body, resp.retries)
+            .map_err(|e| super::report_against(e, req.max_output))
     }
 
     fn count_tokens(&self, text: &str) -> TokenCount {

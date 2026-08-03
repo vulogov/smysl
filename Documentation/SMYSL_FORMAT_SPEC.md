@@ -2,7 +2,7 @@
 
 **Status:** normative. This document is the contract.
 **Format version:** `smysl/0.1` · **kernel schema:** `smysl.kernel/0.1`
-**Describes:** crate `0.9.0`.
+**Describes:** crate `0.10.0`.
 
 This is the whole of what a second implementation must obey to interoperate. It is
 deliberately short. Everything it does not say is a free choice.
@@ -24,10 +24,19 @@ and RFC SMYSL-1 disagree, this document is correct and the RFC is history.
 
 ## 0. Implementations of this document
 
-Three, besides the Rust that defined the format, each written from this document and each
-targeting **C-Read**: `python/`, `nodejs/` and `go/` in this repository. They run in CI against
-fixtures the Rust produced, and a byte-for-byte match is what "two implementations agree" means
-in practice.
+Three, besides the Rust that defined the format, each written from this document: `python/`,
+`nodejs/` and `go/` in this repository. All three target **C-Read**; `python/` also reaches
+**C-Produce**. They run in CI against fixtures the Rust produced, and a byte-for-byte match is
+what "two implementations agree" means in practice.
+
+The distinction is worth stating, because it is the difference between two useful things.
+C-Read says a document means the same to two readers. It does **not** reach §2.1 — reading
+never requires deriving a uid — so all three could round-trip every fixture byte for byte while
+remaining ignorant of what a uid is, which is what happened for a full release. §2.3, *status
+is part of identity*, is the paragraph this format rests on, and C-Produce is the lowest class
+that touches it. `python/` derives uids over a BLAKE3 written for the purpose, and reproduces
+the reference implementation's — canonical bytes checked separately from the hash, in
+`fixtures/wire/uid/`.
 
 They exist because every other check in this repository tests whether the Rust is
 self-consistent, and none of them would notice if this document were blank. If you are
@@ -122,6 +131,12 @@ otherwise two byte strings decode to one record and a uid stops naming exactly o
 4. **Ascending key order**, by integer value in the kernel and by encoded key bytes in a
    payload map.
 5. **No `null` for an absent optional.** Omit the key.
+
+   The qualifier is load bearing. This forbids `null` as a stand-in for an omitted kernel
+   field; it does not forbid an explicit null *inside a payload*, where the value is user data
+   and `{"n": null}` is meant to be distinguishable from `{}`. The two do not collide: a
+   payload is carried in the kernel as a byte string, so a reader walking the kernel never
+   enters it, and a reader that does enter one is reading a document within a document.
 6. **NFC text.** Every text string is Unicode-normalised to NFC before encoding, including
    unknown payload keys and their string values. Normalise *at the encoder*, not only in the
    constructors that happen to be remembered: this implementation asserted the invariant in
@@ -137,6 +152,12 @@ otherwise two byte strings decode to one record and a uid stops naming exactly o
    aborts the process on hostile input, which is worse than an error because it cannot be
    caught.
 
+The paragraph on scope was added in 0.10.0, after a shared corpus of deliberately invalid
+byte strings (`fixtures/wire/invalid/`) found the four implementations disagreeing about
+seven of them. That exercise is the mirror of the one below: the three outside readers had
+been checked only on what they *accept*, and the disagreement turned out to be in the
+reference implementation rather than in the document.
+
 Constraints 1, 2 and 8 read as they do because two independent implementations — `python/`
 and `nodejs/`, each written from this document without consulting the other — both had to
 guess here. Rules 2 and 8 caught both of them; rule 1 caught one. Their guesses agreed, which
@@ -145,6 +166,19 @@ answer is not the same as a document that told them.
 
 Rule 4 has a consequence worth stating: a payload map is sorted by **encoded key bytes**, not
 by the string's code points, and duplicate keys are collapsed keeping the first.
+
+**Scope.** These constraints bind everywhere in a document, including inside payloads and
+inside the values of keys the reader does not recognise. The latitude in constraint 1 is
+narrow and specific — a reader without kernel context cannot tell whether an integer key is
+*required* there — and it is not licence to relax constraints 2 through 9 for content that is
+merely being passed through.
+
+This is worth saying because preserved bytes are not inert. Rule X requires an unknown key to
+survive verbatim, §2.1 derives a uid by hashing the unit core, and the unit core includes
+those preserved bytes. A reader that skipped an unknown value without checking it would let
+one logical unit have two encodings and therefore two uids, which is precisely what §3 exists
+to prevent — and it would do so in the one place where nothing downstream can notice, because
+the bytes are never interpreted. The reference implementation had this defect until 0.10.0.
 
 ### 3.1 Record framing
 
@@ -260,11 +294,94 @@ bytes is not conformant at any class.
 
 The **crate version and the format version are independent axes**. A crate major bump does
 not imply a format break, and a format break does not require one. `smysl/0.1` has not
-changed across crate versions 0.1 through 0.5, and record type 10 was *added* in 0.2 without
+changed across crate versions 0.1 through 0.9, and record type 10 was *added* in 0.2 without
 a format bump — an older reader preserves it verbatim under rule X, which is exactly what
 rule X is for.
 
 An implementation MUST reject a format version it does not support and MUST NOT guess.
+
+### 8.1 What may change within a format version
+
+Three kinds of change are permitted without a bump, and they are permitted because rule X
+already obliges every reader to cope with them:
+
+- **A new record type code.** Older readers preserve it verbatim and report `SMY-W010`.
+- **A new unit-core key ≥ 9, or a new header key.** Older readers preserve it verbatim.
+- **A new value in an open enumeration** where this document says unknown values are
+  preserved rather than rejected.
+
+The test of "permitted" is mechanical: a reader written against this document at the *older*
+revision must still round-trip a document containing the addition, byte for byte. If it
+cannot, the change is a break however small it looks.
+
+### 8.2 What requires a new format version
+
+- Changing the meaning, type, or key number of anything in §2.2 or §4.
+- Adding a **required** field, or making an optional one required.
+- Removing or renumbering a record type.
+- Any change to §3, because §3 decides which byte strings are documents at all.
+
+A new format version is a new string — `smysl/0.2` — and `FORMAT_VERSIONS_SUPPORTED` is a
+list precisely so an implementation can accept several at once. Readers MUST NOT accept a
+document whose version is absent from their list, and MUST NOT infer compatibility from the
+version *looking* close to one they know.
+
+### 8.3 Tightening an implementation is not a format change
+
+This is the case that actually comes up, and the one most likely to be got wrong.
+
+When an implementation has been *more permissive than this document requires*, correcting it
+is not a format break, because the documents it stops accepting were never conformant. The
+format did not change; an implementation stopped disagreeing with it.
+
+0.5 made a decoder stricter about records it should never have accepted. 0.10 fixed
+`skip_item`, which had been accepting seven classes of §3 violation inside extension payloads
+for nine releases. Neither is a bump. Both are worth a changelog entry loud enough that
+somebody with stored documents can check them, because *in practice* a document that used to
+load may stop loading — and "it was never legal" is true and unhelpful to whoever has one.
+
+The converse also holds, and is the harder discipline: if an implementation is more
+permissive than this document and the permissive behaviour turns out to be *wanted*, the fix
+is to change this document and bump, not to leave the two disagreeing.
+
+### 8.4 Deprecation
+
+Within a format version, nothing is removed. A field that should no longer be written is
+marked deprecated here, writers stop emitting it, and readers keep accepting it — a reader
+that started rejecting a document it used to accept has broken the format for everyone
+holding one, which is the whole hazard content addressing is supposed to avoid.
+
+Removal waits for a format bump. When one happens, implementations SHOULD accept both
+versions for at least one release so that a pipeline with mixed implementations keeps
+working, which is the only condition under which anybody can upgrade at all.
+
+### 8.5 Where the version actually lives
+
+Only in surface syntax, in the `@doc` header. **The wire carries no format version string.**
+
+That is a deliberate consequence of rule X rather than an omission: a CBOR record sequence
+describes itself through its type codes, and a reader meeting a code it does not know
+preserves it verbatim instead of needing a version to tell it to. A version field would let a
+reader refuse a whole document on sight, which is the opposite of what rule X asks for.
+
+It has one consequence worth stating, because it is invisible until it bites. A surface
+parser validates the declared version and then discards it — there is nowhere in the parsed
+result to keep it — so a writer reconstructs the header from its own
+`FORMAT_VERSIONS_SUPPORTED[0]`. While that list has one entry the reconstruction is correct by
+coincidence. The moment it has two, a document declaring the second would be read and written
+back out claiming to be the first. Uids are unaffected, because they are over CBOR and CBOR
+has no version — but the header would lie.
+
+`crates/smysl-core/tests/versioning.rs` fails when the list grows, and says what has to be
+decided first.
+
+### 8.6 Is `smysl/0.1` frozen?
+
+No, and it is not stable-forever either. It is `0.1`: it has held across nine crate releases
+and four independent implementations, which is a record rather than a promise. The `0.` says
+that a break is permitted if this document turns out to be wrong about something load
+bearing. What §8.2 buys is that such a break is *visible* — a new version string, refused by
+old readers rather than silently misread.
 
 ---
 

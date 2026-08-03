@@ -1,0 +1,261 @@
+{
+  "purpose": "Unit cores, their canonical bytes and their uids, produced by the Rust. A second implementation at C-Produce must reproduce every uid. `core_bytes_hex` is included so a mismatch says whether the encoding or the hash disagreed.",
+  "cases": [
+    {
+      "name": "minimal",
+      "core": {
+        "schema": "claim",
+        "gist": "a minimal claim",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 1,
+        "source": null,
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a30065636c61696d016f61206d696e696d616c20636c61696d0601",
+      "uid_hex": "b881713f530a8eaa700c201d486f78eefdf289e1058339ad92a5385fe82ba02e"
+    },
+    {
+      "name": "status-pair-a",
+      "core": {
+        "schema": "claim",
+        "gist": "the same words either way",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 1,
+        "source": null,
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a30065636c61696d0178197468652073616d6520776f72647320656974686572207761790601",
+      "uid_hex": "afe447af69a71821c3e7deb0476acac5597e72e4ee7d16fbe144fa54fa181117"
+    },
+    {
+      "name": "status-pair-b",
+      "core": {
+        "schema": "claim",
+        "gist": "the same words either way",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": ["0101010101010101010101010101010101010101010101010101010101010101"],
+        "status": 2,
+        "source": null,
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a40065636c61696d0178197468652073616d6520776f72647320656974686572207761790581582001010101010101010101010101010101010101010101010101010101010101010602",
+      "uid_hex": "620dd5d2e93f2d51d35aa05b53408707d277b15b725ec96aff3ddcde75e66b83"
+    },
+    {
+      "name": "with-body",
+      "core": {
+        "schema": "finding",
+        "gist": "a finding with a body",
+        "body": "the body text, which is a separate field",
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 1,
+        "source": null,
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a4006766696e64696e670175612066696e64696e672077697468206120626f647902782874686520626f647920746578742c2077686963682069732061207365706172617465206669656c640601",
+      "uid_hex": "9564f1715466b9711b973eb9754834f1068aa933e6d94aa341fc62fe411712f5"
+    },
+    {
+      "name": "with-detail",
+      "core": {
+        "schema": "finding",
+        "gist": "a finding with detail",
+        "body": "the body text",
+        "detail": "the detail text, longer than the body and pinned at L2",
+        "deps": [],
+        "grounds": [],
+        "status": 1,
+        "source": null,
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a5006766696e64696e670175612066696e64696e6720776974682064657461696c026d74686520626f647920746578740378367468652064657461696c20746578742c206c6f6e676572207468616e2074686520626f647920616e642070696e6e6564206174204c320601",
+      "uid_hex": "e192685a4722b9e705b0d30af9400e6189111c3c37343867eb995da7989ebf8a"
+    },
+    {
+      "name": "with-refs",
+      "core": {
+        "schema": "claim",
+        "gist": "a claim resting on two grounds",
+        "body": null,
+        "detail": null,
+        "deps": ["0303030303030303030303030303030303030303030303030303030303030303", "0707070707070707070707070707070707070707070707070707070707070707"],
+        "grounds": ["0101010101010101010101010101010101010101010101010101010101010101", "0909090909090909090909090909090909090909090909090909090909090909"],
+        "status": 2,
+        "source": null,
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a50065636c61696d01781e6120636c61696d2072657374696e67206f6e2074776f2067726f756e647304825820030303030303030303030303030303030303030303030303030303030303030358200707070707070707070707070707070707070707070707070707070707070707058258200101010101010101010101010101010101010101010101010101010101010101582009090909090909090909090909090909090909090909090909090909090909090602",
+      "uid_hex": "ab2736d86347864fad77e2844a86e4a9c3905237979494bb25a094098700c3a3"
+    },
+    {
+      "name": "with-source",
+      "core": {
+        "schema": "evidence",
+        "gist": "a measurement",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 5,
+        "source": { "kind": 2, "reference": "pool.wait_ms{shard=eu-west}", "captured": null },
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a4006865766964656e6365016d61206d6561737572656d656e74060507a2000201781b706f6f6c2e776169745f6d737b73686172643d65752d776573747d",
+      "uid_hex": "e91474b52cdbb49dc029d4714e3cf10291c688b6c036d1174334c81c08dd37d6"
+    },
+    {
+      "name": "with-captured",
+      "core": {
+        "schema": "evidence",
+        "gist": "a dated measurement",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 5,
+        "source": { "kind": 1, "reference": "analysis/tables/latency.csv", "captured": "2026-06-30" },
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a4006865766964656e6365017361206461746564206d6561737572656d656e74060507a3000101781b616e616c797369732f7461626c65732f6c6174656e63792e637376026a323032362d30362d3330",
+      "uid_hex": "3e3447044c85811591a47fdd2079f7b10d451555327391b1d1cc43db70ed274a"
+    },
+    {
+      "name": "unicode-composed",
+      "core": {
+        "schema": "claim",
+        "gist": "café latency, 中文",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 1,
+        "source": null,
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a30065636c61696d0175636166c3a9206c6174656e63792c20e4b8ade696870601",
+      "uid_hex": "123511750baaeb33c87911f95813f6cfd4d32f4fed34471400e0f2a1e5cb5a1e"
+    },
+    {
+      "name": "unicode-decomposed",
+      "core": {
+        "schema": "claim",
+        "gist": "café latency, 中文",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 1,
+        "source": null,
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a30065636c61696d0175636166c3a9206c6174656e63792c20e4b8ade696870601",
+      "uid_hex": "123511750baaeb33c87911f95813f6cfd4d32f4fed34471400e0f2a1e5cb5a1e"
+    },
+    {
+      "name": "with-payload",
+      "core": {
+        "schema": "observation",
+        "gist": "carries a payload",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 1,
+        "source": null,
+        "payload_hex": "a1616b01"
+      },
+      "core_bytes_hex": "a4006b6f62736572766174696f6e0171636172726965732061207061796c6f616406010844a1616b01",
+      "uid_hex": "11239c9c32b244cd761ad14b788185dd0c71501f0670c6b3c7a472613986e440"
+    },
+    {
+      "name": "status-speculative",
+      "core": {
+        "schema": "claim",
+        "gist": "one gist, six statuses",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 1,
+        "source": null,
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a30065636c61696d01766f6e6520676973742c207369782073746174757365730601",
+      "uid_hex": "f07a96dd28a6b731b8cf4961e18c214ba2ed988c554824f4496a647791572c28"
+    },
+    {
+      "name": "status-inferred",
+      "core": {
+        "schema": "claim",
+        "gist": "one gist, six statuses",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": ["0101010101010101010101010101010101010101010101010101010101010101"],
+        "status": 2,
+        "source": null,
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a40065636c61696d01766f6e6520676973742c207369782073746174757365730581582001010101010101010101010101010101010101010101010101010101010101010602",
+      "uid_hex": "936db219529480dd2c6748beeaa6700637e996d3b62375a4d9a2fce877b176b2"
+    },
+    {
+      "name": "status-derived",
+      "core": {
+        "schema": "claim",
+        "gist": "one gist, six statuses",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": ["0101010101010101010101010101010101010101010101010101010101010101"],
+        "status": 3,
+        "source": null,
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a40065636c61696d01766f6e6520676973742c207369782073746174757365730581582001010101010101010101010101010101010101010101010101010101010101010603",
+      "uid_hex": "0b82bbdcc27e527c1352b6dad5f561dc3f3e792a92a7ca270f4806653df01ce0"
+    },
+    {
+      "name": "status-cited",
+      "core": {
+        "schema": "claim",
+        "gist": "one gist, six statuses",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 4,
+        "source": { "kind": 4, "reference": "a-document", "captured": null },
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a40065636c61696d01766f6e6520676973742c20736978207374617475736573060407a20004016a612d646f63756d656e74",
+      "uid_hex": "66e0cec64ad76773713a75552e31dbc190d6ed7a1949a7aaec88ac3473bc0f32"
+    },
+    {
+      "name": "status-measured",
+      "core": {
+        "schema": "claim",
+        "gist": "one gist, six statuses",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 5,
+        "source": { "kind": 4, "reference": "a-document", "captured": null },
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a40065636c61696d01766f6e6520676973742c20736978207374617475736573060507a20004016a612d646f63756d656e74",
+      "uid_hex": "598424fd4e315379b09c59a31782ec38eebc164a9fda2a7ad9fbe7eee7955191"
+    }
+  ]
+}

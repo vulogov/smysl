@@ -67,8 +67,24 @@ for f in sorted(glob.glob('Documentation/manual/*.typ')):
         cmd = re.sub(r'\s{2,}\(.*\)$', '', cap[2:]).strip()
         cmd = cmd.replace('smysl', SM, 1)
         # Skip anything naming a file the chapter built earlier in its own narrative.
-        paths = [t for t in cmd.split() if ('/' in t and not t.startswith('-')
-                                            and not t.startswith('b3:'))]
+        #
+        # Inputs only. The value after `-o` is a file the command *writes*, and requiring it
+        # to exist made replayability depend on leftovers: `merge … -o /tmp/incident.cbor`
+        # ran only because an earlier replay had created that file, so a clean machine and a
+        # dirty one disagreed about how many blocks were covered. Six commands were in that
+        # state, and the count moved between runs without anything changing.
+        toks = cmd.split()
+        paths = [t for i, t in enumerate(toks)
+                 if '/' in t and not t.startswith('-') and not t.startswith('b3:')
+                 and not (i and toks[i - 1] in ('-o', '--output'))]
+        # An absolute path as an *input* is narrative state, not something this script can
+        # guarantee. It may exist because an earlier replayed command in this very run wrote
+        # it — `merge … -o /tmp/incident.cbor` does — and then the manual's transcript
+        # describes it in a state nobody reproduced: "one byte flipped in the sidecar". The
+        # command then runs and the comparison is meaningless rather than absent.
+        if any(t.startswith('/') for t in paths):
+            skipped += 1
+            continue
         if any(not os.path.exists(t) for t in paths):
             skipped += 1
             continue

@@ -25,6 +25,40 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
+  # What docs.rs will render. Gated because publishing made it consequential: a rustdoc
+  # warning is a broken link on the page strangers read first, and six had accumulated
+  # unnoticed. One of them documented `Usage` as being built through a constructor that does
+  # not exist — the "documentation that matches the binary" defect, surviving because nothing
+  # ever failed on it.
+  doc-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+
+  # The public contract. Two jobs' worth of question in one, because they catch different
+  # things: `api-check` says the list of exported names moved, `semver-checks` says the move
+  # was breaking. A rename shows up in the first; marking a struct `#[non_exhaustive]` shows
+  # up only in the second.
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly     # cargo-public-api reads rustdoc JSON
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api,cargo-semver-checks
+      - run: make api-check
+
+      # `--release-type patch` is load bearing. Without it, 0.9 -> 0.10 on a 0.x crate is a
+      # breaking-allowed bump and every check is skipped — "0 checks: 0 pass, 254 skip",
+      # reported as a pass. Forcing patch makes the 223 checks actually run.
+      - name: report API breakage against the last published version
+        run: make semver
+
   # Feature combinations, because the interesting bugs live in the seams between them.
   test-matrix:
     runs-on: ubuntu-latest
@@ -153,6 +187,10 @@ jobs:
   # It targets C-Read, the floor: decode, re-encode byte-identically, preserve unknowns. The
   # fixtures were produced by the Rust, so a byte-for-byte match is two implementations
   # agreeing on identity rather than merely both parsing.
+  # The only implementation outside the Rust that reaches C-Produce, which is the class that
+  # touches §2.3 — status is part of identity. C-Read never derives a uid, so this is the job
+  # that checks the format's central claim against something other than the implementation
+  # that defined it.
   conformance-python:
     runs-on: ubuntu-latest
     steps:
@@ -162,6 +200,16 @@ jobs:
           python-version: "3.11"
       - run: pip install -e './python[test]'
       - run: python -m pytest python/tests -q
+
+      # The fixtures are committed, so the generator drifting from them would go unnoticed:
+      # `cases.json` would keep passing against a Rust that no longer produces it. Regenerate
+      # and require no diff.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: the uid fixtures still match what the Rust produces
+        run: |
+          cargo test -p smysl-core --test gen_uid_fixtures -- --ignored
+          git diff --exit-code fixtures/wire/uid/
 
   # The same specification, read a third time. Two implementations agreeing could have made
   # the same guess where the document is silent, so independence is what makes agreement

@@ -4,7 +4,7 @@
 [`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md), which is deliberately a fraction of this
 one's length: interoperability needs identity, encoding and the rules, not an account of how
 this implementation happens to be built.
-**Describes:** the code at `main`, crate `0.9.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
+**Describes:** the code at `main`, crate `0.10.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
 **Compiled:** 2026-07-30, from SM-P0 through SM-P15, the operational-merit work after it, the
 0.2 cycle (label bindings, comment syntax, forward compatibility), the 0.3 cycle (global
 flags, nesting bounds, packer performance) and the 0.4 cycle (the fuzz backlog: seven
@@ -620,6 +620,22 @@ F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped b
   its marginal cost falls, which happens exactly when something in its obligation is
   selected and therefore already paid for. That non-monotonicity is what made the 0.3.0
   attempt unsound.
+
+### Closed in 0.10
+
+**§2.3 is verified by a second implementation.** The largest thing 0.9 left open. C-Read does
+not reach uid derivation, so three independent readers agreed on every byte of every fixture
+without ever computing a uid — and *status is part of identity*, the claim the format rests on,
+stayed verified by this implementation alone for nine releases.
+
+`python/` reaches C-Produce as of 0.10: canonical unit-core layout, and BLAKE3 hand-rolled so
+that the evidence is two implementations rather than two callers of one C library. It
+reproduces all sixteen uids in `fixtures/wire/uid/cases.json`, with the canonical bytes checked
+separately from the hash so a disagreement localises itself.
+
+`nodejs/` and `go/` stay at C-Read. That is a scope decision, not a gap, and both say so where
+they list what they do not reach — the wording there used to imply the claim went unchecked
+anywhere, which is no longer true.
 
 ### Closed in 0.9
 

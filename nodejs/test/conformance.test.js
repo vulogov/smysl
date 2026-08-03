@@ -194,9 +194,11 @@ test("§3.1 a truncated trailing record is an error, not a silent truncation", (
 // -- §7  Conformance ----------------------------------------------------------
 
 test("§7 what C-Read provably cannot check, kept as a list", () => {
-  // Emptying this should be a decision, not an accident. The largest entry is §2.3 — status
-  // is part of identity — the paragraph the whole format rests on, which needs uids and
-  // therefore C-Produce.
+  // Emptying this should be a decision, not an accident. §2.3 — status is part of identity —
+  // is still listed because *this* package does not derive uids, not because nobody does:
+  // `python/` reached C-Produce in 0.10.0 and reproduces the Rust's uids, canonical bytes
+  // included. The gap here is this package's scope rather than the format's central claim
+  // going unchecked, which is what this list used to mean.
   const unreached = {
     "§2.1 uid derivation": "needs BLAKE3; C-Produce, not C-Read",
     "§2.3 status is part of identity": "follows from uid derivation",

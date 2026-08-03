@@ -301,8 +301,18 @@ impl<'a> Dec<'a> {
         }
     }
 
-    /// Reject `null` where an absent optional belongs (constraint 6). Called before every
-    /// map value, so `null` never reaches a type-specific reader that might tolerate it.
+    /// Reject `null` where an absent optional belongs (constraint 5).
+    ///
+    /// Called before every **kernel** map value, in the one generic loop in `envelope`, so a
+    /// `null` never reaches a type-specific reader there. The scope matters: a payload is
+    /// user data and `surface::payload::read_value` admits `null` deliberately, because an
+    /// explicit null is a value and `{"n": null}` is meant to differ from `{}`. The two rules
+    /// do not collide, because a payload is stored in the unit core as a byte string and this
+    /// walker never enters it.
+    ///
+    /// That boundary used to live only in this comment, and this comment used to say "every
+    /// map value" — which is how the qualifier in constraint 5 gets lost. It is pinned in
+    /// `tests/null_scope.rs` now.
     pub fn reject_null(&self) -> Res<()> {
         if self.peek()? == NULL {
             Err(self.nondet(NonDetReason::NullOptional))
@@ -337,8 +347,13 @@ impl<'a> Dec<'a> {
         if b >> 5 == major::SIMPLE {
             return match b {
                 F32_HEAD => {
+                    let at = self.pos;
                     self.pos += 1;
-                    self.take(4)?;
+                    let s = self.take(4)?;
+                    let v = f32::from_be_bytes(s.try_into().expect("4 bytes"));
+                    if !crate::types::is_quantised(v) {
+                        return Err(CodecError::Float { at });
+                    }
                     Ok(())
                 }
                 0xF4 | 0xF5 => {
@@ -351,8 +366,21 @@ impl<'a> Dec<'a> {
         let (m, arg) = self.head()?;
         match m {
             major::UINT | major::NEGINT => Ok(()),
-            major::BYTES | major::TEXT => {
+            major::BYTES => {
                 self.take(arg as usize)?;
+                Ok(())
+            }
+            major::TEXT => {
+                let at = self.pos;
+                let raw = self.take(arg as usize)?;
+                let s =
+                    core::str::from_utf8(raw).map_err(|_| CodecError::MalformedEnvelope { at })?;
+                if !unicode_normalization::is_nfc(s) {
+                    return Err(CodecError::NonDeterministic {
+                        at,
+                        reason: NonDetReason::NonNfcText,
+                    });
+                }
                 Ok(())
             }
             major::ARRAY => {
@@ -362,8 +390,27 @@ impl<'a> Dec<'a> {
                 Ok(())
             }
             major::MAP => {
+                // Compared as *encoded key bytes*, not as decoded values. A payload may key
+                // by text where the kernel keys by integer (constraint 1), and the only
+                // ordering that covers both without knowing which is in use is the one
+                // constraint 4 actually specifies.
+                let buf = self.buf;
+                let mut prev: Option<&[u8]> = None;
                 for _ in 0..arg {
+                    let kstart = self.pos;
                     self.skip_one(depth + 1)?;
+                    let key = &buf[kstart..self.pos];
+                    if let Some(p) = prev {
+                        let reason = match key.cmp(p) {
+                            core::cmp::Ordering::Equal => Some(NonDetReason::DuplicateMapKey),
+                            core::cmp::Ordering::Less => Some(NonDetReason::UnsortedMapKeys),
+                            core::cmp::Ordering::Greater => None,
+                        };
+                        if let Some(reason) = reason {
+                            return Err(CodecError::NonDeterministic { at: kstart, reason });
+                        }
+                    }
+                    prev = Some(key);
                     self.skip_one(depth + 1)?;
                 }
                 Ok(())

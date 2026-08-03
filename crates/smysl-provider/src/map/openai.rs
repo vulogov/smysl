@@ -8,14 +8,13 @@
 //! call: strict mode requires every key in `properties` to appear in `required`, and Appendix
 //! C requires three of eleven. That was recorded here as a reading of the documentation until
 //! it was simply *counted* — three of eleven is a fact about our schema, not a guess about
-//! their API — and it is now translated by [`openai_compat::strict_schema`], the same way
+//! their API — and it is now translated by `openai_compat::strict_schema`, the same way
 //! Gemini's equivalent mismatch is handled in [`gemini::dialect`].
 //!
 //! What a key would still add is confirmation that the translated schema is accepted, which
 //! is a smaller and better-defined question than the one that was blocked before.
 //!
 //! [`gemini::dialect`]: super::gemini::dialect
-//! [`openai_compat::strict_schema`]: super::openai_compat::strict_schema
 //!
 //! | Path | Purpose |
 //! |---|---|

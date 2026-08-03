@@ -1,0 +1,54 @@
+# Does the thing on crates.io actually work?
+#
+# Everything in ci.yml tests the working tree. None of it would notice a release that went
+# out broken — a crate whose published manifest omits a file the build needs, a feature that
+# only resolves because a sibling path dependency was present, a version pin that does not
+# exist on the registry. 0.9.0 was verified this way once, by hand, which is the same as not
+# being verified.
+#
+# Deliberately not on every push: it exercises the last *published* version, not the branch,
+# so running it per-commit would report the same answer until the next release.
+name: published
+
+on:
+  schedule:
+    # Weekly. The failure this catches is a release that was already broken when it went out,
+    # so the useful property is that somebody finds out without having to think to look.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  install-from-registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      # No workspace, no path dependencies: resolved entirely from the registry, the way
+      # somebody who has never seen this repository would get it.
+      - name: cargo install smysl
+        run: cargo install smysl --root "$RUNNER_TEMP/install" --no-track
+
+      - name: the binary runs and reports its versions
+        run: |
+          "$RUNNER_TEMP/install/bin/smysl" --version
+          "$RUNNER_TEMP/install/bin/smysl" --version | grep -q "format smysl/0.1"
+
+      # A smoke test rather than a conformance run: the question is whether the published
+      # artefact works at all, and the conformance suites already ask the harder question of
+      # the working tree.
+      - name: it reads a real document
+        run: |
+          "$RUNNER_TEMP/install/bin/smysl" check fixtures/corpus/F1-incident.smy | tee /tmp/out
+          grep -q "0 diagnostic" /tmp/out
+
+      # Rule P: CBOR on a pipe, not prose. A published binary that got this wrong would
+      # corrupt every downstream consumer silently.
+      - name: stdout on a pipe is CBOR
+        run: |
+          "$RUNNER_TEMP/install/bin/smysl" pack fixtures/corpus/F1-incident.smy --budget 400 > /tmp/pack.bin
+          test -s /tmp/pack.bin
+          head -c1 /tmp/pack.bin | xxd -p | grep -qv '^7b'   # not '{' — this is not JSON

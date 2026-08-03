@@ -110,3 +110,34 @@ fn salience_per_call_cost() {
     }
     println!("\n2.0 = linear, 4.0 = quadratic\n");
 }
+
+/// `merge` was the last operation in the pure set never measured apart from the command.
+///
+/// Two stores of `n` units each, overlapping by half: the overlap is what makes the union do
+/// work rather than concatenate, and contention detection runs over the merged set.
+#[test]
+#[ignore = "a measurement, not a gate"]
+fn merge_per_call_cost() {
+    use smysl_graph::merge::{merge, MergeOptions};
+
+    println!("\nmerge of two stores overlapping by half, in process, median of 5\n");
+    println!("{:>7}  {:>10}  {:>8}", "units", "ms", "x per 2x");
+    let mut prev: Option<f64> = None;
+    for n in [1_000usize, 2_000, 4_000, 8_000, 16_000] {
+        // `store` is deterministic in `n`, so the first half of the larger store is exactly
+        // the smaller one — an overlap by content, which is what merge keys on.
+        let left = store(n);
+        let right = store(n / 2);
+        let ms = timed(|| {
+            let mut l = left.clone();
+            let _ = merge(&mut l, &right, MergeOptions::default());
+        });
+        let ratio = match prev {
+            Some(p) if p > 0.0 => format!("{:.2}", ms / p),
+            _ => "-".to_string(),
+        };
+        println!("{n:>7}  {ms:>10.2}  {ratio:>8}");
+        prev = Some(ms);
+    }
+    println!("\n2.0 = linear, 4.0 = quadratic\n");
+}

@@ -31,7 +31,7 @@ frozen or merely stable-so-far.
 **Next action:** a versioning section in `SMYSL_FORMAT_SPEC.md` saying which changes are
 allowed within a format version and which require a new one.
 
-## 2. A second implementation — *done for C-Read*
+## 2. A second implementation — *done, including the claim that mattered*
 
 The whole proposition is that two implementations agree on what a document says. That has
 never been tested by anything except this one. `SMYSL_FORMAT_SPEC.md` exists and is under 250
@@ -69,9 +69,25 @@ decoder's obligation, constraint 2 is scoped to integers and lengths, and tags a
 8. The Go implementation is the check — written against the revised text, it needed no guesses
 in any of the three.
 
-**Next action:** C-Produce, in one of the three. That means BLAKE3 and canonical unit-core
-encoding, and it is what would test §2.3 — the claim the format actually rests on, and the one
-thing on this list still verified by the Rust alone.
+**C-Produce reached in 0.10.0, in `python/`.** This is the item that mattered. C-Read never
+touches uid derivation — reading a document does not require computing one — so three
+independent readers round-tripped every fixture byte for byte while remaining ignorant of what
+a uid *is*, and §2.3, *status is part of identity*, stayed verified by the Rust alone across
+nine releases.
+
+`python/smysl/uid.py` lays out a unit core in canonical form and hashes it with a BLAKE3
+hand-rolled in `python/smysl/blake3.py`. Hand-rolled deliberately: a binding to the same C
+library the Rust uses would have tested two callers of one implementation. It passes the
+published BLAKE3 vectors, including the multi-chunk lengths that a single-chunk shortcut would
+get wrong, and reproduces all sixteen uids in `fixtures/wire/uid/cases.json` — canonical bytes
+checked separately from the hash, so a disagreement says which half broke.
+
+The §2.3 witness is a pair whose every field is identical and whose status differs: one byte
+apart in the canonical encoding, two unrelated uids. Verified capable of failing — dropping
+`status` from the encoder fails 35 tests, by name.
+
+**Next action:** none for this gate. `nodejs/` and `go/` remain C-Read, which is a scope
+decision rather than a gap; both say so where they list what they do not reach.
 
 ## 3. Public API stability — *not ready*
 
@@ -80,9 +96,18 @@ The facade's surface still churns. `Hybrid` changed shape twice inside 0.7.0, an
 semver on a 0.x crate lets you break things, but the point of publishing is that people build
 on it.
 
+Published as of 0.9.0, which converts this from a precaution into a debt: every name is now
+something people can build against, and the cost of the pass grows with each release it waits.
+
 **Next action:** a pass over the facade's `pub use` list asking, of each name, whether it is
 part of the contract or an implementation detail that escaped. Then `#[non_exhaustive]` where
-that answer is "we will want to add to this".
+that answer is "we will want to add to this" — 110 types already carry it, out of 378 public
+ones across the crates, and nobody has checked that the split is deliberate.
+
+Mechanise it rather than trusting a reading: `cargo public-api` emits the reachable surface,
+which belongs in a golden file the way `golden-packs.txt` records what the packer selects, and
+`cargo-semver-checks` turns an accidental break into a failing job. This project has learned
+that a rule nothing enforces is a rule that drifts.
 
 ## 4. Verified providers — *partial*
 
@@ -94,10 +119,23 @@ that answer is "we will want to add to this".
 | openai | **no** | its one identified defect is fixed and tested; acceptance unconfirmed |
 | anthropic | **no** | `ToolForce`; no counted defect yet, and none looked for |
 
-**Next action:** read Anthropic's mapper against the documentation the way OpenAI's was. That
-found a real defect without a key, and it is the cheapest remaining move.
+Anthropic's mapper was read against the documentation in 0.10, the way OpenAI's was, and it
+found one: `caps()` declared `streaming: true` while the mapper implements no `stream`, so it
+inherited the trait default, which refuses. Gemini had the same defect — and Gemini is
+live-tested, which means the live test never exercised streaming either.
 
-## 5. A test suite that catches what it claims — *measuring*
+The rest of the mapper reads correctly against Anthropic's documentation: `x-api-key` rather
+than a bearer token, the `anthropic-version` header, `system` as a top-level field, a forced
+`tool_choice`, the block-list response with `tool_use.input`, and Anthropic's own
+`usage.input_tokens` names rather than OpenAI's.
+
+That is now twice this method has found a defect without a key. What it still cannot answer for
+either provider is whether the endpoint *accepts* the translated schema.
+
+**Next action:** unchanged — a key, for OpenAI and Anthropic both. Everything reachable by
+reading has been read.
+
+## 5. A test suite that catches what it claims — *measuring, and now cross-checked*
 
 Seven defects across 0.4–0.7 were the same shape: a check that passed without covering what it
 claimed. Two fuzz-generator vacuities, an exact-pack gate that never reached L2, a decoder
@@ -105,19 +143,80 @@ sweep that never entered the decoder it was written for, a repair of that sweep 
 itself vacuous, a doc-output regex that skipped the transcripts it was handed, and a routing
 test that passed on routing measurably worse than not routing at all.
 
-Each was found by hand. The suite is large and it is not yet known how much of it is load
-bearing.
+0.8 measured it: mutation testing over the packer core — the best-tested file in the project —
+left 49% of viable mutants alive, and two oracles turned out to be replaceable by a stub
+without a single test noticing.
 
-**Next action:** mutation testing, in progress. A survivor rate is the number this item needs.
+0.10 added a defect of the same shape but a different *kind*, and it is the most instructive
+one yet. `skip_item` had a comment asserting that unknown payloads are "parsed strictly, so an
+unknown record cannot smuggle in a non-deterministic encoding". It was false, and had been
+since before the comment was written. No test was vacuous; no oracle was stubbed. The check
+that would have caught it **did not exist**, because the property was asserted in a comment
+instead. A shared rejection corpus found it in an hour.
 
-## 6. Performance characterised — *mostly done*
+The lesson generalises past this project: a claim written in prose next to the code is not
+weaker evidence than a test, it is *no* evidence, and it reads exactly like evidence.
+
+Both next actions ran in 0.10, and both produced findings.
+
+The **comment sweep** — 471 comments make a modal claim; narrowing to claims of
+*comprehensiveness* left 178; the three most load-bearing gave two real corrections and one
+clean result. `Secret`'s "a key never reaches a `Debug` output" was genuinely covered, which is
+recorded here because a sweep that reports only hits is the failure it is looking for.
+
+**Mutation testing of the codec** — 143 viable mutants, **33 survivors, 23%**, against the
+packer's 49% in 0.8. Most survivors are equivalent mutants; three were real gaps and are
+closed. The most instructive is that the *map* arm of `skip_one` could stop bounding its depth
+with nothing failing, because the nesting fixture nested arrays — a bound tested on one shape
+and decorative on the other.
+
+Both ran in 0.10 as well, and the numbers are now three points on one curve rather than one:
+
+| target | viable mutants | survivors |
+|---|---|---|
+| `smysl-pack` core (0.8) | — | **49%** |
+| `cbor/reader.rs` + `writer.rs` | 143 | **23%** |
+| `cbor/envelope.rs` | 115 | **2.6%** |
+
+`envelope.rs` is the best-covered code in the project, and the two survivors that mattered are
+worth more than the rate. An attestation's `sig` could stop decoding and be preserved as an
+unknown key — invisible in the bytes and in the uid, and read as *unsigned* by anything that
+later verifies. And `l0_max` could stop decoding, which
+`every_granularity_preset_round_trips` looks like it covers: **all three presets carry
+`l0_max: 30`**, so the loop varies everything except the field under test.
+
+The **sweep of `smysl-graph` and `smysl-check`** found the traversal module claiming an order
+`topo` does not have — "every result is a `Vec` in dense-id order", when a topological order
+uses dense id only to break ties. Four traversals were claimed and two were tested; the two
+that were not had tests that pass on the shape of their fixture rather than on the property.
+
+**Next action:** the sweep's yield is falling — two findings in `smysl-core`, one here, and all
+three were documentation rather than behaviour. That is the signal to stop sweeping and go back
+to mutants, where the remaining untested surface is `smysl-graph` and `smysl-check` themselves,
+neither of which has been measured.
+
+## 6. Performance characterised — *done, and it found one*
 
 `pack` is linear when the budget binds as of 0.6 (was quadratic), `salience` is linear and
-measured in isolation. `merge` and `check` have only ever been measured through the command,
-where parsing dominates.
+measured in isolation. `merge` and `check` were the last two measured only *through the
+command*, where parsing dominates and the ratio is a ratio about parsing.
 
-**Next action:** extend `crates/*/tests/scaling.rs` to `merge` and `check`. Low risk, and it
-would close the last "we assume it is linear" in the pure set.
+Measured in 0.10. `merge` was linear as assumed. **`check` was not** — 3.47x per doubling, and
+the per-pass breakdown put it in `integrity` at 3.84x while every other pass sat at 2.0.
+
+The cause was three lines in `topo`: the ready set was sorted on every iteration and then
+popped with `remove(0)`, which is two quadratic factors stacked. A min-heap pops in the same
+ascending dense-id order — the order rule D requires — in log time. `check` at 16 000 units
+went from 40.2 ms to 6.6 ms and the curve straightened to 2.16x. The `integrity` pass alone
+went from 8.62 ms to 0.45 ms at 8 000.
+
+Three of the four operations in the pure set were assumed linear and two of them were not.
+That is the argument for measuring rather than reasoning, and it is now the third time this
+project has made it.
+
+**Next action:** none outstanding. The scaling tests are `#[ignore]`d measurements rather than
+gates, deliberately — timing assertions on shared runners cry wolf — so the standing cost is
+that somebody has to run them. Worth running at a release cut.
 
 ## 7. Documentation that matches the binary — *partial*
 
@@ -129,8 +228,36 @@ every release cut.
 The manual has been wrong twice in ways that mattered: it described `ui` as a stub for
 several releases, and it stated a body-line limitation that had been fixed.
 
-**Next action:** teach `verify-doc-output.py` to build a chapter's intermediate files, which
-would roughly triple coverage.
+The API documentation was never checked at all until 0.10, and publishing made that visible:
+docs.rs was rendering a partial crate, because no manifest set `all-features` and the
+feature-gated half simply was not there. Six rustdoc warnings had accumulated, one of which
+told an implementor outside the crate to build a `Usage` through a constructor that does not
+exist. `make doc-gate` and a CI job now run rustdoc with `-D warnings`, confirmed to fail
+against a deliberate broken link before being trusted.
+
+**The stated next action here was wrong, and 0.10 measured it.** It read "build a chapter's
+intermediate files, which would roughly triple coverage". Only **8** of the 168 blocks name a
+file an earlier *command* produced. **97** name a file the *prose* asks you to write —
+`first.smy`, `missing-gist.smy` — which is a different problem.
+
+Reconstructing those was attempted and abandoned, which is worth recording rather than
+retrying. The contents are in the manual, so a chapter's directory looks rebuildable; but a
+chapter shows the fix as a *fragment* ("Add the missing grounds:" and the one changed stanza),
+not as the file restated. Splicing a fragment back takes guessing where it goes, and guessing
+wrong makes this script report drift that is not there. A check with false positives is worse
+than no check — this script has a comment saying exactly that, about fifteen phantom mismatches
+that once sat in it unread. Implemented conservatively, the reconstruction ran zero commands:
+every tutorial file is retired by a fragment before the commands that use it.
+
+What it did find is that the coverage number was not deterministic. `merge … -o /tmp/x.cbor`
+was required to exist before running, so a command replayed only if an earlier replay had left
+its output behind: 44 blocks on a clean machine, 46 on a dirty one, with nothing changed.
+Outputs are excluded from that check now, and it reports 45 either way.
+
+**Next action:** if this is worth more, the fix is in the *manual*, not the script — commit the
+tutorial files as fixtures and have the chapters include them, so what the reader copies and
+what the script replays are the same bytes. That is a book change, and the book is the thing
+the coverage is protecting, so it should be a deliberate decision rather than a side effect.
 
 ---
 

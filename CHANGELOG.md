@@ -7,6 +7,348 @@ and the facade asserts the two are independent.
 
 ---
 
+## 0.10.0 — 2026-08-03
+
+The cycle that closed the two gates that were actually blocking, and found the format's
+central claim resting on one implementation, a nine-release quadratic, and a prompt referring
+to a schema it never sent.
+
+`READINESS.md` gate 2 is closed: §2.3 — *status is part of identity* — is verified by something
+other than the Rust for the first time. Gate 6 is closed, and closing it found `check`
+super-linear. Gate 1 has a policy. Gate 3 has a machine behind it rather than an intention.
+
+Three defects reached content-addressed identity or the wire, none of them suspected
+beforehand, and each was found by checking a thing nobody had checked rather than by following
+a hunch.
+
+
+### Fixed
+
+- **An extension payload could carry a non-canonical encoding into a uid.** `Dec::skip_item`
+  is what preserves unknown keys for rule X; its result is stored verbatim in `Extra`;
+  `unit_core_bytes` writes `Extra` into the bytes `hash::uid` hashes. It checked shortest
+  form, definite lengths, nulls, tags and depth — and not map key order, NFC, UTF-8 validity
+  or float quantisation.
+
+  So one logical unit had two encodings and therefore two uids: the same unknown key holding
+  the same two-entry map, written in either key order, was accepted both ways as different
+  bytes. Content-addressed identity is the property the whole format rests on, and this broke
+  it in the one place nothing downstream can notice, because those bytes are deliberately
+  never interpreted.
+
+  The comment directly above the call site said "the payload is still parsed strictly, so an
+  unknown record cannot smuggle in a non-deterministic encoding". It had been there since
+  before it was true.
+
+  `skip_one` now validates text, floats and map keys — the last compared as *encoded key
+  bytes*, since a payload may key by text where the kernel keys by integer, and that is the
+  only ordering covering both. No fixture, golden file or test moved: nothing had depended on
+  the leniency, which is exactly why it survived.
+
+- **`SourceRef::reference` was not normalised on construction**, so two unit cores differing
+  only in the Unicode normalisation form of a source reference compared **unequal** while
+  hashing to the **same uid**. Nothing reached the wire wrong — `Enc::text` normalises on the
+  way out, which is the 0.6 fix — but `PartialEq` disagreed with identity, and anything
+  deduplicating by value rather than by uid kept two copies of one unit.
+
+  Found by a sweep for load-bearing claims that exist only in comments. `normalise` said
+  "every text field is normalised exactly once, on construction". Two tests backed it and both
+  used `gist`. `tests/normalisation_scope.rs` now covers all four text fields that reach a uid,
+  with a control, and a test that fails if the encoder-side pass is deleted on the grounds that
+  construction covers it — which it does not, for records outside the unit core.
+
+- **Six rustdoc defects**, one of them substantive: `Usage` was documented as being built
+  through `Usage::new`, which does not exist. The constructors are `reported` and `estimated`.
+  That paragraph exists to tell an implementor outside this crate how to return a `Usage`, so
+  it was wrong where being wrong costs something.
+
+### Fixed
+
+- **`ContextExceeded` reported a limit nobody sent.** A mapper sends `req.max_output`, which
+  `Request::new` defaults to 1024; `parse` has no request and could only quote
+  `cfg.max_output`. Configure the provider and not the call and the error read "context window
+  exceeded: 1008 > 32768" — true to its fields, nonsense to a reader, because the two numbers
+  came from different places. `map::report_against` restates it against the cap actually sent,
+  at the layer that knows it.
+
+  What that does **not** fix is recorded beside it. The first test asserted `requested >=
+  limit`, on the reasoning that a truncation message ought to read as true — and failed on the
+  very numbers that motivated the fix, because Gemini spends reasoning against the same cap and
+  reports it separately. "1008 > 1024" is still a strange sentence; it is no longer a sentence
+  about the wrong number.
+
+- **DeepSeek produced nothing usable, because the prompt referred to a schema it never got.**
+  The template says "matching the supplied schema exactly", and `Ingestor::request` only
+  supplied one where the provider would *enforce* it — sound about the structured channel,
+  wrong about the prompt. Under `json-mode` the model was told to match a document it had never
+  seen, and invented the fields: `quote` where the schema says `gist`, `grounds` as a sentence
+  rather than an array, `U1` where a label belongs. Sixteen diagnostics and no units, every
+  time, which reads as a useless provider rather than a prompt referring to nothing.
+
+  The schema now goes in the prompt when it cannot go in the schema field. That claims no
+  enforcement — `Completion::structured` still comes from the provider. Live on
+  `deepseek-chat`: **0 units and 16 diagnostics became 3 units, 2 relations, 0 diagnostics.**
+
+- **The traversal module claimed an order `topo` does not have.** Its opening sentence said
+  "every result is a `Vec` in dense-id order", and `topo` returns a *dependency* order using
+  dense id only to break ties — canonical without being sorted. A reader taking the summary
+  literally would believe the output is sorted; the first run of the new test reported
+  `[0, 6, 4, 1, 3, 5, 2, 7]`, the function behaving exactly as its own doc says and exactly as
+  the module header denied.
+
+- **Two mappers declared a capability they do not have.** `anthropic` and `gemini` both said
+  `streaming: true` while implementing no `Provider::stream`, so both inherited the trait
+  default — which refuses. A caller that checked the capability before streaming, the only
+  reason a capability struct exists, would have been told yes and then refused.
+
+  Found by reading the Anthropic mapper against Anthropic's documentation with no key, which
+  is the method `READINESS.md` gate 4 recommends and the second real defect it has produced
+  without one. The rest of that mapper reads correctly: `x-api-key` rather than a bearer token,
+  `anthropic-version`, top-level `system`, forced `tool_choice`, the block-list response with
+  `tool_use.input`, and Anthropic's own `usage.input_tokens` names.
+
+  `crates/smysl-provider/tests/capabilities_are_honest.rs` now checks the claim for every
+  mapper: one that declares streaming must at least *attempt* it. Confirmed to fail before
+  being trusted — restoring the declaration names the offending mapper.
+
+  **A second, found while using it:** `ContextExceeded` reports `limit: cfg.max_output`, but
+  the cap a mapper actually sends is `req.max_output` — a different field, defaulting to 1024.
+  Set one and not the other and the error reads "context window exceeded: 1008 > 32768", which
+  is incoherent on its face and blames the wrong number. It cost three runs to see, which is
+  the evidence for how misleading it is. Both `gemini` and `anthropic` construct it this way.
+  Recorded rather than fixed here because the honest repair is to thread the effective cap into
+  `parse`, which touches both mappers and wants its own change.
+
+  Also recorded rather than fixed: the trait default refuses with `StructuredUnsupported`,
+  which names the wrong reason. A `StreamUnsupported` variant needs a diagnostic code and a
+  registry entry, so it is a deliberate change rather than a rename in passing.
+
+- **`topo` was quadratic, and it made `check` super-linear.** The ready set was sorted on
+  every iteration of the main loop and then popped with `remove(0)` — two quadratic factors in
+  three lines. A `BinaryHeap<Reverse<NodeId>>` pops in the same ascending dense-id order, which
+  is the order rule D requires, in log time.
+
+  | | before | after |
+  |---|---|---|
+  | `check`, 16 000 units | 40.24 ms | 6.59 ms |
+  | `check`, ratio per doubling | 3.47 | 2.16 |
+  | `integrity` pass, 8 000 units | 8.62 ms | 0.45 ms |
+  | `integrity`, ratio per doubling | 3.84 | 2.03 |
+
+  Found by finally measuring `check` and `merge` per call rather than through the command,
+  where parsing dominates. `merge` was linear as assumed; `check` was not. `topo` is also used
+  by thread derivation and `relink`, so both get it.
+
+  The determinism gate passes unchanged — `merge`, `derive_thread` and `render` identical
+  across 16 runs — which is the check that matters, because the whole reason the old code
+  sorted was to make the order canonical.
+
+### Added
+
+- **The quoting experiment has two arms.** It was blocked on a design, not a model: the quote
+  requirement is a paragraph in `ingest.content.json`, not a flag, so there was nothing to
+  compare against. `crates/smysl-eval/tests/quoting_live.rs` builds the other arm by locating
+  that paragraph in the shipped prompt and removing it — nothing else changed, because anything
+  wider would measure the rewrite. An offline test asserts the two differ *only* there, and
+  fails rather than silently comparing an arm against itself if the sentence moves.
+
+  "Coarsening" is defined as four counts — units per document, mean gist length, share carrying
+  a body, share carrying grounds or a relation — and deliberately not as quality. Judging would
+  need a judge, the judge would be a model, and 0.8 established that an uncontrolled judge
+  measures its own bias.
+
+  **The pilot does not support a conclusion, and says so.** Over three fixtures on
+  `gemini-3.5-flash-lite`, the between-arm difference is comparable to the run-to-run spread of
+  a single arm — 3.0 against 7.0 units on F4-qa, with the quote arm's own two runs differing by
+  4.0. One fixture produced zero units on one arm, which is a failure rather than a finding.
+  DeepSeek returns nothing usable under `json-mode` at all. The harness prints the spread next
+  to the difference so this cannot be read as a result.
+
+  What it needs to become one: more runs per arm, and the zero-unit cases understood first.
+
+- **Mutation testing over `envelope.rs`** — the record codec, 1 000 lines, previously
+  untouched. 115 viable mutants, **3 survived, 2.6%** — against 23% for `reader.rs`/`writer.rs`
+  and 49% for the packer in 0.8.
+
+  One was equivalent, read rather than assumed: `off < len` to `off <= len` in `from_cbor_seq`
+  does one extra iteration on an empty slice, which returns `Truncated`, which breaks the loop.
+  The other two were real and are closed:
+
+  * An attestation's `sig` could stop decoding and land in `extra` instead. Preserved verbatim,
+    so the bytes and the uid are unaffected — and `Attestation::sig` silently `None`, which
+    whatever eventually verifies signatures would read as unsigned.
+  * `l0_max` could stop decoding and take its default. `every_granularity_preset_round_trips`
+    looks like it covers this and does not: **all three presets carry `l0_max: 30`**. A loop
+    over variants that do not vary in the field under test.
+
+- **Traversal ordering, tested for all four rather than two.** `closure` and `topo` each had a
+  test named for the property; `reverse_closure` asserted a result that is sorted by accident of
+  a chain's shape, and `rebuttals_of` asserted an order its relations had been *inserted* in.
+  Nothing anywhere built one graph two ways, which is what `adjacency.rs`'s "insertion order
+  cannot leak into a traversal" actually claims. Now four insertion orders, six traversals, with
+  controls for both — including one asserting the orderings genuinely differ.
+
+- **Mutation testing over the codec.** 143 viable mutants in `cbor/reader.rs` and
+  `cbor/writer.rs`; **33 survived, 23%** — against 49% for the packer in 0.8, which is the only
+  other figure this project has.
+
+  Most survivors are equivalent mutants and were read as such rather than counted as gaps:
+  `|` and `^` in `Enc::head` are identical when the operands occupy disjoint bits, and `<`
+  versus `<=` in `map_key` is unreachable because the equality case is matched by an earlier
+  arm. Three were real, and all three are closed:
+
+  * The **map** arm of `skip_one` could stop incrementing its depth with nothing failing. The
+    nesting fixture nested arrays, so the map path's bound was decoration — on exactly the
+    shape a hostile document would use. `fixtures/wire/invalid/nesting-too-deep-maps.cbor`.
+  * The arm carrying **booleans** could be deleted. An extension payload holding `true` would
+    have started being rejected, and rule X promises the opposite.
+  * The **`u16::MAX` bound on kernel map keys** could be weakened to `==`.
+
+  Each confirmed to kill its mutant: reintroducing the three fails the suite with the message
+  written for it.
+
+- **C-Produce in `python/`, closing §2.3.** The largest item on `READINESS.md`, and the one the
+  format's proposition actually rests on.
+
+  C-Read never reaches uid derivation, because reading a document does not require computing
+  one. So three independent implementations round-tripped every fixture byte for byte, in CI,
+  for a full release — while remaining ignorant of what a uid *is*. *Status is part of
+  identity* stayed verified by the Rust alone across nine releases.
+
+  `python/smysl/uid.py` lays out a unit core in canonical form and hashes it with
+  `python/smysl/blake3.py`, ~200 lines written for the purpose. Hand-rolled deliberately: a
+  binding to the same C library the Rust links would have tested two callers of one
+  implementation rather than two implementations. It is slow, which does not matter — it hashes
+  unit cores, and it is checked against fixtures rather than raced.
+
+  Three layers of evidence, because a failure in each means something different. The published
+  BLAKE3 vectors, including the multi-chunk lengths a single-chunk shortcut gets wrong. The
+  canonical bytes, checked *separately* from the uid, so a disagreement says whether the layout
+  or the hash was at fault. Then §2.3 as a property rather than an example.
+
+  The witness is a pair of cores whose every field is identical and whose status differs: one
+  byte apart in the canonical encoding, two unrelated uids. Confirmed capable of failing —
+  dropping `status` from the encoder fails 35 tests, several by name.
+
+  `nodejs/` and `go/` stay at C-Read. Their lists of what they cannot reach still name §2.3,
+  correctly, but the wording implied the claim went unchecked anywhere; that is fixed.
+
+- **`fixtures/wire/uid/cases.json`** — sixteen unit cores with their canonical bytes and uids,
+  emitted by the Rust, covering every status, unicode in both normalisation forms, every
+  optional field present and absent, and a payload.
+
+- **Scaling measurements for `check` and `merge`** — `crates/smysl-check/tests/scaling.rs` and
+  an addition to `crates/smysl-graph/tests/scaling.rs`, the last two operations in the pure set
+  whose per-call cost had never been characterised. `check` is measured per pass as well as in
+  aggregate, because a total hides one quadratic pass behind nine linear ones — which is
+  exactly what it was doing.
+
+- **A shared rejection corpus** — `fixtures/wire/invalid/`, twenty-eight byte strings that are
+  not smysl documents, consumed by all four implementations.
+
+  0.9 established that four implementations agree on *accepting* four documents. That is the
+  weaker half. Determinism is enforced by refusal: every clause of §3 is a rule about what
+  must be rejected, and if one implementation accepted a non-shortest integer another refused,
+  every suite would stay green while two implementations disagreed about what a smysl document
+  is. Each had been inventing its own invalid inputs — fifteen cases in Python, sixteen in
+  JavaScript, eight in Go, no two the same bytes.
+
+  It found the disagreement immediately, and in the reference implementation: the Rust
+  accepted seven of the twenty-eight that the other three rejected. That is the defect above.
+
+  Every suite pairs the corpus with a **control** — canonical counterparts that must still be
+  accepted — because a decoder that refused everything would pass the corpus while meaning
+  nothing.
+
+- **`make doc-gate` and a CI job** running rustdoc with `-D warnings`, the way clippy is
+  already gated. Confirmed to fail before being trusted: a deliberate broken link exits 101.
+
+- **The public contract is recorded and enforced** — `tests/public-api.txt` holds the facade's
+  239 exported names, `make api-check` fails when the list moves, and `make semver` reports
+  breakage against the last published version across all twelve crates. Both confirmed to fail
+  first: renaming a re-export trips the golden file, marking a struct `#[non_exhaustive]` trips
+  semver-checks with exit 100.
+
+  Two gates because they catch different things. A rename shows up in the list; adding
+  `#[non_exhaustive]` shows up only in the semver check. Neither alone is the contract.
+
+  The recorded file is the facade rather than every crate: the eleven behind it expand to
+  12 000 lines of simplified surface, and a diff nobody reads is decoration rather than a gate.
+
+  `--release-type patch` is load bearing in the second. Without it, 0.9 → 0.10 on a 0.x crate
+  is a breaking-allowed bump and cargo-semver-checks skips every check — "0 checks: 0 pass,
+  254 skip", printed as a pass. Forcing patch makes the 223 checks run. Found by reading the
+  output of the first green rather than accepting it, which is the habit this project has had
+  to learn twice this cycle.
+
+  Nothing has broken since 0.9.0: 223 checks pass on each of the twelve.
+
+- **`all-features = true` for docs.rs** on all twelve published crates. Publishing had put up a
+  partial API — `tui`, `semantic`, both render backends and all five providers were absent
+  from the page people read first. Set on every crate rather than the five with features
+  today, so one that gains a feature later cannot reintroduce the gap quietly.
+
+### Changed
+
+- **`Dec::reject_null`'s claim was narrowed to what is true.** It said "called before every
+  map value, so `null` never reaches a type-specific reader that might tolerate it".
+  `surface::payload::read_value` tolerates it, deliberately: a payload is user data and
+  `{"n": null}` is meant to differ from `{}`. The two rules do not collide, because a payload
+  is carried in the kernel as a byte string and the kernel walker never enters it — but that
+  boundary existed only in a sentence, and the sentence had the scope wrong. Pinned in
+  `tests/null_scope.rs`, and §3 constraint 5 now says its qualifier is load bearing.
+
+- **§3 of the spec gains a scope paragraph.** The constraints already bound payloads through
+  constraint 6, so the defect above was an implementation failure rather than a gap — but
+  constraint 1's "a generic reader MAY accept either" is the latitude that was over-read. It
+  now says that carve-out is about key *type* alone, and not licence to relax constraints 2
+  through 9 for content merely being passed through.
+
+What is carried, and what each is actually waiting on:
+
+- **An API stability pass**, which 0.9 promoted from an item to the leading one by publishing.
+  Every name in the facade's `pub use` list is now something people can build against, and
+  `Hybrid` changed shape twice inside 0.7. The work is going through that list once and asking
+  of each name whether it is contract or an implementation detail that escaped, then
+  `#[non_exhaustive]` wherever the answer is "we will want to add to this". Cheap now, and
+  expensive in proportion to how many releases it waits.
+
+- **C-Produce, in one of the three implementations.** C-Read does not reach uid derivation, so
+  §2.3 — *status is part of identity*, the paragraph the whole format rests on — is still
+  verified by this implementation alone. All three suites carry a test that fails if that gap
+  is ever quietly dropped from their list. Closing it means BLAKE3 and canonical unit-core
+  encoding in one language, and it would test the claim the format actually makes rather than
+  the claim it is easy to read.
+
+- **A format-versioning policy.** `smysl/0.1` has now been stable across nine releases and is
+  published, which raises the cost of getting this wrong. What constitutes a break, what the
+  deprecation path is, and whether `0.1` is frozen or merely stable-so-far, belongs in the
+  spec — where the three implementations will read it.
+
+- **The quoting coarsening**, still waiting on a design rather than a model. There is no flag
+  controlling the quote requirement — `quote` is an optional property in Appendix C and the
+  behaviour comes from the prompt — so the two arms have to be built before they can be
+  compared. An hour if the difference is only in the prompt.
+
+- **Anthropic's mapper**, read against its documentation the way OpenAI's was. That method
+  found a real defect without a key. Anthropic uses `ToolForce` rather than `JsonSchema`, so
+  its unknowns are different and none have been looked at.
+
+- **`merge` and `check` scaling.** Both have only ever been measured through the command, where
+  parsing dominates. Extending `crates/*/tests/scaling.rs` would close the last "we assume it
+  is linear" in the pure set.
+
+- **doc-output coverage**, 46 of 168 documented command blocks. The rest are skipped because
+  they name files a chapter built earlier in its own narrative; teaching the verifier to build
+  those intermediates would roughly triple it. The manual has been wrong twice in ways that
+  mattered, and both were in the uncovered 122.
+
+- **Targeted mutation testing of `smysl-core` codec invariants.** 0.8 established that asking
+  what the suite *trusts* finds oracles faster than generating mutants does. The codec is the
+  obvious next place to ask it, because everything downstream trusts round-tripping.
+
+---
+
 ## 0.9.0 — 2026-08-02
 
 ### Added

@@ -4,7 +4,8 @@
 //! do not each invent their own mapping and disagree about what a 429 means.
 //!
 //! `RateLimited` retries with exponential backoff and full jitter, capped at three
-//! attempts. Retries are counted in [`Usage::retries`] and never appear in provenance: a
+//! attempts. Retries are counted in [`Usage::retries`](crate::Usage::retries) and never
+//! appear in provenance: a
 //! retry is not a distinct model call for recipe purposes (§21.4).
 //!
 //! **Backpressure is a class, not a status code.** See [`is_backpressure`]: three numbers

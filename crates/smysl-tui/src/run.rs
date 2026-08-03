@@ -5,7 +5,7 @@
 //!
 //! The terminal is *borrowed*, and the borrowing is the delicate part. Raw mode and the
 //! alternate screen are global state on a shared device, so a program that exits without
-//! restoring them leaves the user with a shell that does not echo. [`Guard`] restores on
+//! restoring them leaves the user with a shell that does not echo. `Guard` restores on
 //! drop, which covers the return path, the `?` path, and a panic - the three ways out.
 
 use std::io::{self, Stdout, Write};

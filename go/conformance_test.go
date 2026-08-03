@@ -328,8 +328,11 @@ func TestATruncatedTrailingRecordIsAnError(t *testing.T) {
 // -- §7  Conformance ----------------------------------------------------------
 
 func TestWhatCReadCannotCheck(t *testing.T) {
-	// Kept as a list rather than a silence. The largest entry is §2.3 — status is part of
-	// identity — the paragraph the whole format rests on, which needs uids and so C-Produce.
+	// Kept as a list rather than a silence. §2.3 — status is part of identity — is still on it
+	// because *this* package does not derive uids, not because nobody does: `python/` reached
+	// C-Produce in 0.10.0 and reproduces the Rust's uids, canonical bytes included. So the gap
+	// here is one package's scope rather than the format's central claim going unchecked, which
+	// is what this list used to mean.
 	unreached := map[string]string{
 		"§2.1 uid derivation":                "needs BLAKE3; C-Produce, not C-Read",
 		"§2.3 status is part of identity":    "follows from uid derivation",

@@ -1,7 +1,18 @@
 //! Traversal primitives (§16.3).
 //!
-//! Four patterns, one property: every result is a `Vec` in dense-id order, so a caller
-//! never has to sort and a traversal is a pure function of the graph (rule D).
+//! Four patterns, one property: every result is a pure function of the graph and never of the
+//! order records arrived in, so a traversal is reproducible (rule D).
+//!
+//! The *shape* of that order differs, and this sentence used to flatten the difference into
+//! "every result is a `Vec` in dense-id order", which is false of [`topo`] and cannot be true
+//! of it. [`closure`], [`reverse_closure`] and [`rebuttals_of`] return sets, and sort them by
+//! dense id so a caller never has to. [`topo`] returns a *dependency* order — dependencies
+//! before dependents — and uses dense id only to break ties, which is what makes it canonical
+//! without making it sorted.
+//!
+//! Both halves are pinned in `tests/traversal_order.rs`. The overstatement was found by
+//! sweeping this crate for claims of comprehensiveness with nothing beside them, and it is the
+//! kind that reads as a summary and is taken as a guarantee.
 //!
 //! | Function | Used by |
 //! |---|---|
@@ -11,6 +22,8 @@
 //! | [`rebuttals_of`] | rule R closure in packing |
 
 use crate::adjacency::{Adjacency, EdgeKind, EdgeSet, NodeId};
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 
 /// A reusable visited-set. Traversals in hot paths thread one of these through rather
 /// than allocating a hash set per node (guarantee A6).
@@ -126,15 +139,21 @@ pub fn topo(g: &Adjacency, kinds: &EdgeSet) -> TopoOrder {
     let n = g.len();
     // Out-degree, because an edge points at what a node depends on.
     let mut pending: Vec<usize> = (0..n).map(|i| g.out(i as NodeId, kinds).len()).collect();
-    let mut ready: Vec<NodeId> = (0..n as NodeId)
+    // A min-heap, not a sorted `Vec`.
+    //
+    // The order is the same — ascending dense id, which is what makes this reproducible — but
+    // the previous shape sorted the whole ready set on every iteration and then removed from
+    // the front, which is two quadratic factors in three lines. It made `check` super-linear:
+    // 3.84x per doubling in the integrity pass against 2.0 for every other pass, because
+    // `topo` runs there twice. Measured, not guessed: `crates/smysl-check/tests/scaling.rs`.
+    let mut ready: BinaryHeap<Reverse<NodeId>> = (0..n as NodeId)
         .filter(|&i| pending[i as usize] == 0)
+        .map(Reverse)
         .collect();
     let mut order = Vec::with_capacity(n);
     let mut done = vec![false; n];
 
-    while !ready.is_empty() {
-        ready.sort_unstable();
-        let node = ready.remove(0);
+    while let Some(Reverse(node)) = ready.pop() {
         if done[node as usize] {
             continue;
         }
@@ -144,7 +163,7 @@ pub fn topo(g: &Adjacency, kinds: &EdgeSet) -> TopoOrder {
             let p = &mut pending[dependent as usize];
             *p = p.saturating_sub(1);
             if *p == 0 && !done[dependent as usize] {
-                ready.push(dependent);
+                ready.push(Reverse(dependent));
             }
         }
     }
