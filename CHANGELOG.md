@@ -7,6 +7,53 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 0.10.0
+
+Nothing yet. What is carried, and what each is actually waiting on:
+
+- **An API stability pass**, which 0.9 promoted from an item to the leading one by publishing.
+  Every name in the facade's `pub use` list is now something people can build against, and
+  `Hybrid` changed shape twice inside 0.7. The work is going through that list once and asking
+  of each name whether it is contract or an implementation detail that escaped, then
+  `#[non_exhaustive]` wherever the answer is "we will want to add to this". Cheap now, and
+  expensive in proportion to how many releases it waits.
+
+- **C-Produce, in one of the three implementations.** C-Read does not reach uid derivation, so
+  §2.3 — *status is part of identity*, the paragraph the whole format rests on — is still
+  verified by this implementation alone. All three suites carry a test that fails if that gap
+  is ever quietly dropped from their list. Closing it means BLAKE3 and canonical unit-core
+  encoding in one language, and it would test the claim the format actually makes rather than
+  the claim it is easy to read.
+
+- **A format-versioning policy.** `smysl/0.1` has now been stable across nine releases and is
+  published, which raises the cost of getting this wrong. What constitutes a break, what the
+  deprecation path is, and whether `0.1` is frozen or merely stable-so-far, belongs in the
+  spec — where the three implementations will read it.
+
+- **The quoting coarsening**, still waiting on a design rather than a model. There is no flag
+  controlling the quote requirement — `quote` is an optional property in Appendix C and the
+  behaviour comes from the prompt — so the two arms have to be built before they can be
+  compared. An hour if the difference is only in the prompt.
+
+- **Anthropic's mapper**, read against its documentation the way OpenAI's was. That method
+  found a real defect without a key. Anthropic uses `ToolForce` rather than `JsonSchema`, so
+  its unknowns are different and none have been looked at.
+
+- **`merge` and `check` scaling.** Both have only ever been measured through the command, where
+  parsing dominates. Extending `crates/*/tests/scaling.rs` would close the last "we assume it
+  is linear" in the pure set.
+
+- **doc-output coverage**, 46 of 168 documented command blocks. The rest are skipped because
+  they name files a chapter built earlier in its own narrative; teaching the verifier to build
+  those intermediates would roughly triple it. The manual has been wrong twice in ways that
+  mattered, and both were in the uncovered 122.
+
+- **Targeted mutation testing of `smysl-core` codec invariants.** 0.8 established that asking
+  what the suite *trusts* finds oracles faster than generating mutants does. The codec is the
+  obvious next place to ask it, because everything downstream trusts round-tripping.
+
+---
+
 ## 0.9.0 — 2026-08-02
 
 ### Added
