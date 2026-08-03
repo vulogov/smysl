@@ -37,7 +37,11 @@ interchange format that is the difference between a product and a file layout.
 implementation written from the spec alone, with no dependencies, and each decodes and
 re-encodes every fixture in `fixtures/wire/` byte for byte. Both run in CI.
 
-Two rather than one on purpose: implementations that agree could have made the same guess
+Three as of the same cycle: `go/` is a fourth reading, and the first written against the
+*revised* spec — so it tests the clarifications as well as the format. It needed no guesses
+where the earlier two did, which is the outcome those clauses were written for.
+
+More than one on purpose: implementations that agree could have made the same guess
 where the document is silent, so agreement is only evidence when the readings were
 independent. The JavaScript was written without consulting the Python, and both arrived at the
 same two ambiguities — which is the result worth having.

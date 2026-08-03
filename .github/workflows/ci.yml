@@ -176,6 +176,18 @@ jobs:
           node-version: "20"
       - run: npm test --prefix nodejs
 
+  # The same specification, read a fourth time — and the first reading against the *revised*
+  # document, which makes it a check on the clarifications rather than only on the format.
+  conformance-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - run: go test ./...
+        working-directory: go
+
   # The manual prints 43 replayable command transcripts, and until 0.4 nothing checked that
   # the binary still produced them. A teaching document whose transcripts have quietly
   # drifted is worse than one with none: a reader who types the command and gets something
