@@ -7,6 +7,39 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 0.13.0
+
+Nothing yet. What is carried, and what each is actually waiting on:
+
+- **Publication.** 0.12.0 is an intermediate release, cut and not published on purpose. The
+  cost is specific rather than notional: `SEMVER_BREAKING` still names `smysl-core`,
+  `smysl-graph` and `smysl-provider`, so `make semver` checks nine crates of twelve, and the
+  list grows rather than empties while releases stay unpublished. `BASELINE` is 0.11.0, one
+  release behind — which is tolerable, and was two behind when it parked the `parse` repair
+  for a whole cycle.
+
+- **The CLI's verification is invisible to measurement.** It measured 73.6% survivors, more
+  than twice the worst library crate. That is partly real — `src/main.rs` has four tests across
+  3 600 lines — and partly because `make doc-output`, which replays 46 documented transcripts
+  against the built binary, is a Python script no `cargo test` invokes. Wiring it in as an
+  integration test would turn "partly" into a number, which is the bounded piece of work here
+  with a real answer at the end.
+
+- **`progress.rs`.** 52 survivors in 394 lines, every one an arithmetic operator or a
+  comparison in bar drawing. Twelve tests that check structure and never numbers.
+
+- **doc-output coverage**, 46 of 168. The remaining 97 name files the prose asks the reader to
+  create, and the fix is in the *book*: commit the tutorial files as fixtures so the manual and
+  the verifier read the same bytes. A book change, and so a decision rather than a task.
+
+- **Gate 4 still wants a key**, for acceptance only. Whether an endpoint accepts the translated
+  schema is unreachable by reading — and reading has now found two defects without one.
+
+- **357 recorded survivors**, deliberately unfixed. A measurement is not a to-do list, and the
+  band the library sits in has been yielding about one real gap per crate.
+
+---
+
 ## 0.12.0 — 2026-08-04
 
 The cycle that finished measuring, and found the measurement wanting twice.

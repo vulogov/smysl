@@ -182,8 +182,13 @@ api-check: ## Fail if either recorded surface moved, or if they stop nesting
 # emptied when the breaks it names **reach the registry** — not when they are tagged. That
 # distinction is the same one `BASELINE` turns on: cargo-semver-checks compares against the
 # published version, so a break that is merely released is still a break against the baseline
-# and still needs recording. 0.12.0 is cut and unpublished, so this list stays as it is and
-# empties on publication. Empty is the normal state.
+# and still needs recording. 0.12.0 was cut as an intermediate release and deliberately not
+# published, so this list carries into 0.13 unchanged.
+#
+# It grows rather than empties while releases stay unpublished, and that is the honest signal:
+# each entry is a crate the gate is not checking, so the length of this list is a measure of
+# how much of the API is currently unwatched. Empty is the normal state, and publication is
+# the only thing that reaches it.
 #
 #   smysl-core — the unified error is exported as `AnyError` rather than `Error`. Inside a
 #   crate `Error` is the idiomatic name; through a facade flattening eleven error types into
