@@ -238,7 +238,7 @@
     #line(length: 34%, stroke: 0.6pt + ink_accent)
     #v(5mm)
     #text(font: body_family, size: 10pt, style: "italic", fill: ink_smoke,
-      "Vladimir Ulogov · 2026 · smysl 0.10.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
+      "Vladimir Ulogov · 2026 · smysl 0.11.0 · format smysl/0.1 · kernel smysl.kernel/0.1")
   ],
 )
 #v(6mm)
@@ -589,8 +589,8 @@ can answer a question without quietly dropping the reason the answer holds.
 #section("Can someone else implement it?")
 
 That question is the difference between a format and a file layout, and until
-recently the honest answer was "we think so". The specification is under 250
-pages of nothing — about eight pages — and it had been read by exactly one
+recently the honest answer was "we think so". The specification is under four
+hundred lines — an afternoon's reading — and it had been read by exactly one
 implementation, which is also the one that wrote it.
 
 There are now three more, in Python, JavaScript and Go, each written from that
@@ -606,9 +606,24 @@ person, two arriving at the same hole is a document. All three are now written
 into the spec, and the fourth implementation, read against the corrected text,
 needed no guesses there.
 
+Reading a document is the weaker half, though, and for a full release nobody
+noticed which half had been done. Deriving a unit's name is what the format
+actually rests on — status is part of identity, so promoting a speculation to a
+finding produces a different unit rather than the same one updated — and reading
+a store never requires computing a name at all. Three implementations agreed on
+every byte of every fixture while remaining, in the strictest sense, ignorant of
+what a name *is*.
+
+The Python one derives them now, over a hash written for the purpose rather than
+installed, because a binding to the same C library the reference implementation
+uses would have tested two callers of one thing. It reproduces every name the
+Rust produces. The pair that demonstrates the point differs in one field and one
+byte: the same claim, held as `cited` and as `measured`, and two names with
+nothing in common.
+
 That is what the claim is worth now. Not that the format is easy, but that
-somebody outside this project has done it, three times, and the places they
-stumbled have been fixed.
+somebody outside this project has done it, three times over for reading and once
+for naming, and the places they stumbled have been fixed.
 
 #section("Where it sits in a pipeline")
 

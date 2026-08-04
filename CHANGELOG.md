@@ -7,6 +7,76 @@ and the facade asserts the two are independent.
 
 ---
 
+## 0.11.0 — 2026-08-03
+
+A short cycle, and mostly about how the project measures itself.
+
+`smysl-check` and `smysl-graph` are the last crates in the pure set to be mutation-tested, which
+completes the sweep begun in 0.8. What the two runs actually produced is less a list of gaps
+than two corrections to the instrument: a survivor can be unreachable rather than untested, and
+a survivor rate measures one crate's own suite rather than the workspace. Both were being read
+the other way.
+
+
+### Added
+
+- **Mutation testing of `smysl-check`** — 130 caught, 13 missed of 143 viable, **9.1%**, between
+  the codec's 2.6% and the packer's 49%.
+
+  The headline survivor was `support_cycles`: the whole function could be replaced with `()`
+  and every test still passed. That reads exactly like the `verify -> vec![]` oracle of 0.8, and
+  it is not the same thing. `EdgeSet::support()` is `{Deps, Grounds}`, both derived from a
+  `UnitCore`'s own fields; `Unit` stores no uid and derives it from the core; so two units
+  naming each other requires solving a hash fixpoint. **No input can reach the loop.** The code
+  is unreachable rather than untested, and no test could have been written for it.
+
+  The comment there said the pass exists "because a store can be assembled from records that
+  were never hashed together" — true of a design where a record carries its uid, and not true
+  of this one. Corrected, and `support_is_only_structural_edges` now fails the moment a relation
+  kind joins `EdgeSet::support()`, because relation endpoints are *not* content-derived and can
+  cycle freely. That is the moment the pass stops being dead code and starts needing a test.
+
+- **§7's conformance table has a test**, which it never had. All four `||` in
+  `ConformanceClass::forbids` could be flipped to `&&` with nothing failing, so what each class
+  forbids was whatever the code said and no more. An `||` becoming `&&` makes every class forbid
+  almost nothing — "this store is fine at every class" — which is the worst direction for this
+  particular answer to be wrong in.
+
+  The table is written out row by row, with the property that motivates it stated separately:
+  the classes are **not a ladder**. C-Merge adds lifecycle to C-Consume and does not subsume
+  C-Produce; a shape error blocks producing and not merging. All four mutants confirmed dead.
+
+- **Mutation testing of `smysl-graph`** — 691 mutants in four shards, **94 survivors of 625
+  viable, 15.0%**. Sharded because two unsharded attempts died around 470 while sharing the
+  machine with a build, and a shard that finished stays finished.
+
+### Changed
+
+- **The survivor rates in `READINESS.md` are relabelled**, because four of them were quoted as
+  meaning more than they do. `cargo mutants -p X` runs `cargo test --package=X`, so a function
+  exercised only by a downstream crate is reported as a survivor while being well tested. Every
+  figure measures *"does this crate's own suite cover it"* and not *"is this covered"*.
+
+  `Store::matching_prefix` is the demonstration: replaced with `vec![]` it survives
+  `smysl-graph`'s suite and fails two tests in `smysl-check`'s. It was on the shortlist of
+  things to fix, and it was never a gap.
+
+  The weaker number is still worth having — a crate leaning on a consumer's tests has a hole
+  that opens the moment the consumer changes — but it is the weaker number. The stronger one
+  costs a full workspace run per mutant, which is a day at these counts, so it is spent only on
+  survivors that would otherwise be acted on.
+
+  Re-checked that way, three of `smysl-graph`'s four whole-function survivors are real:
+  `MergeReport::has_contentions` (which `merge --fail-on-contention` reads),
+  `EffectiveStatus::is_retracted` (whether a retraction took), and `TraceKind::follows_parents`
+  (which direction `trace` walks). Tests for those three are carried into 0.12.
+
+Carried: the remaining `smysl-check` survivors — boundary comparisons in the granularity and
+epistemics passes, and two match guards in closure and extension — and the three `smysl-graph`
+gaps above.
+
+---
+
 ## 0.10.0 — 2026-08-03
 
 The cycle that closed the two gates that were actually blocking, and found the format's
