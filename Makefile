@@ -178,9 +178,12 @@ api-check: ## Fail if either recorded surface moved, or if they stop nesting
 # cargo-semver-checks skips all 223 and reports a pass. Sensitivity is the point; the cost is
 # that an intended break also fails.
 #
-# So an intended break is recorded here rather than by loosening the check, and the list must
-# be emptied at each release cut — the breaks it names are then in the version that shipped
-# them. Empty means "nothing is knowingly breaking", which is the normal state.
+# So an intended break is recorded here rather than by loosening the check, and the list is
+# emptied when the breaks it names **reach the registry** — not when they are tagged. That
+# distinction is the same one `BASELINE` turns on: cargo-semver-checks compares against the
+# published version, so a break that is merely released is still a break against the baseline
+# and still needs recording. 0.12.0 is cut and unpublished, so this list stays as it is and
+# empties on publication. Empty is the normal state.
 #
 #   smysl-core — the unified error is exported as `AnyError` rather than `Error`. Inside a
 #   crate `Error` is the idiomatic name; through a facade flattening eleven error types into

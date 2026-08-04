@@ -7,7 +7,15 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 0.12.0
+## 0.12.0 — 2026-08-04
+
+The cycle that finished measuring, and found the measurement wanting twice.
+
+Every crate in the workspace now has a mutation figure, which completes the sweep begun in 0.8.
+Two of the corrections that came out of it are about the instrument rather than the code: a
+survivor can be unreachable rather than untested, and a rate measures one crate's own suite
+rather than the workspace. The quoting experiment closed negative, and closing it needed the
+same discipline — more samples, and a verdict computed rather than eyeballed.
 
 Nothing yet. What is carried, and what each is actually waiting on:
 
@@ -34,10 +42,20 @@ Nothing yet. What is carried, and what each is actually waiting on:
   This unparks the `parse`-signature repair for `ContextExceeded`, which had to be done at the
   call site because the fix is a breaking change and the baseline was two releases stale.
 
-- **The quoting experiment needs runs, not design.** The arms exist and are verified minimal.
-  The pilot's between-arm difference sat inside one arm's own run-to-run spread, one fixture
-  produced zero units on one arm, and DeepSeek returned nothing usable — the last of which is
-  now fixed, so it is worth re-running before designing anything further.
+- ~~The quoting experiment.~~ **Closed, negative.** No detectable effect at n=6, on three
+  fixtures, on two models: the suspicion carried since 0.7 that requiring a quote coarsens
+  extraction has no support. Five of six fixture-model pairs separate on no metric; the one
+  that does is `struct%` on a single DeepSeek fixture, which is what twenty-four comparisons a
+  run produce by chance.
+
+  Getting there took raising the sample from two to six and computing the verdict instead of
+  printing means. Both mattered. At n=2 the difference sat inside one arm's own spread every
+  time — no power, not no effect. And the first verdict tested only unit count while `body%`
+  showed 83 against 0 one column away, which read as a large finding until a second run gave
+  100/17 and 83/83 on the same fixtures. The gaps move more between runs than between arms.
+
+  The harness stays. It is how the question was answered, and the same two arms are what
+  asking it again with more power would need.
 
 - ~~An API stability decision.~~ **Made.** `Documentation/API_CONTRACT.md` classifies the
   surface into contract, seam, and three names that were open — and the crate documentation now
