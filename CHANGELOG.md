@@ -112,9 +112,29 @@ the other way.
   `EffectiveStatus::is_retracted` (whether a retraction took), and `TraceKind::follows_parents`
   (which direction `trace` walks). Tests for those three are carried into 0.12.
 
-Carried: the remaining `smysl-check` survivors — boundary comparisons in the granularity and
-epistemics passes, and two match guards in closure and extension — and the three `smysl-graph`
-gaps above.
+All of `smysl-check`'s survivors are now resolved, and the split is the interesting part:
+**three needed tests, two were equivalent mutants.**
+
+- **Rule M's boundary.** `status > cap` to `>=` passed everything, because every test had a
+  unit comfortably under its cap or clearly over it and none sat exactly on it. The mutant
+  rejects the commonest legal shape there is — a claim held at precisely the strength of what
+  it rests on.
+- **`full` versus `degraded`.** A view's `requires` naming an extension the consumer *does*
+  implement had no test; the unimplemented direction did, and so did an implemented extension
+  arriving as a unit's schema. Forced to `true`, a consumer implementing exactly what a view
+  asks for is told it degrades — which makes §23.1's negotiation pointless, since if meeting
+  the requirement does not earn `full` nothing does.
+- **What counts as a list.** `!n.is_empty() && all_digits(n)` to `||` passed everything. Both
+  halves fail badly: `". foo"` has an empty prefix whose `all()` is vacuously true, and `"One
+  thing. Another"` has a non-empty one — so any prose with two sentences becomes a two-item
+  list, and rule S starts refusing ordinary paragraphs.
+
+The two equivalent ones are worth naming because one of them was on the list to fix. The
+`closure.rs` guard reads `Err(_) if !matching_prefix(&p).is_empty()`, reachable only when
+`resolve_prefix` errs *and* matches exist — which means two or more, which needs a 130-bit
+prefix collision. It is the same unreachability found from the other side in `resolve_prefix`,
+and forcing the guard to `false` changes nothing that can happen. The other is a `<` that only
+picks the word "under" or "over" inside a branch where the two operands cannot be equal.
 
 ---
 

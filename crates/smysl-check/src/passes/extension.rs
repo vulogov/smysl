@@ -266,6 +266,36 @@ mod tests {
         assert!(f.missing.contains(&ext("x.sre/1")));
     }
 
+    /// A view's `requires` naming an extension the consumer *does* implement.
+    ///
+    /// Its neighbour above covers the unimplemented direction, and three other tests cover an
+    /// implemented extension arriving as a *unit's* schema. Nothing covered an implemented one
+    /// arriving through `requires`, so mutation testing in 0.11 could force that guard to
+    /// `true` — every required schema counted missing however well the consumer knew it — and
+    /// no test noticed.
+    ///
+    /// The consequence is the whole `full`/`degraded` distinction of §23.1. A consumer that
+    /// implements exactly what a view asks for would have been told it degrades, which is the
+    /// answer that makes the negotiation pointless: if implementing the requirement does not
+    /// earn `full`, nothing does.
+    #[test]
+    fn a_required_and_implemented_schema_is_full_fidelity() {
+        let view = View::new(ViewId::new("v/x").unwrap(), "i").requiring([ext("x.sre/1")]);
+        let store = Store::from_records(vec![Record::View(view)]);
+        let p = ConsumerProfile::new("sre").implementing([ext("x.sre/1")]);
+        let f = fidelity(&store, &p);
+        assert_eq!(
+            f.overall,
+            Fidelity::Full,
+            "the consumer implements exactly what the view requires"
+        );
+        assert!(
+            f.missing.is_empty(),
+            "and nothing is missing: {:?}",
+            f.missing
+        );
+    }
+
     #[test]
     fn w010_names_the_unit_and_the_schema() {
         let r = check(

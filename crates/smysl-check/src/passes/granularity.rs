@@ -278,4 +278,55 @@ mod tests {
         assert_eq!(r.count(Code::E040), 1);
         assert_eq!(r.count(Code::W041), 1, "it is also far too short");
     }
+
+    /// A numbered list item is a number, a full stop and a space — not any sentence.
+    ///
+    /// `list_items` reads `!n.is_empty() && n.bytes().all(is_ascii_digit)` over the text before
+    /// the first `". "`. Mutation testing in 0.11 flipped that `&&` to `||` with nothing
+    /// failing, and the two failure directions are both bad in the same way: `". foo"` yields an
+    /// empty prefix, whose `all()` is vacuously true, and `"One thing. Another"` yields `"One
+    /// thing"`, which is non-empty. So under `||` any prose with two sentences counts as a list
+    /// of two items, and `multi_assertion` starts telling authors their paragraph is a list.
+    ///
+    /// Rule S admits one assertion per unit, so this decides whether ordinary prose is refused.
+    #[test]
+    fn ordinary_prose_is_not_a_list() {
+        assert_eq!(
+            list_items("The pool saturated. The canary did not. Both were checked."),
+            0,
+            "three sentences on one line were counted as list items"
+        );
+        assert_eq!(
+            list_items("One thing.\nAnother thing.\nA third."),
+            0,
+            "sentences on separate lines are still sentences"
+        );
+        assert_eq!(
+            list_items(". a leading full stop"),
+            0,
+            "an empty prefix is not a number"
+        );
+        assert_eq!(
+            list_items("v1. the first version\n2. the second"),
+            1,
+            "`v1` is not a number; only the genuine `2.` counts"
+        );
+    }
+
+    /// The control. Without it `list_items -> 0` passes every assertion above, and the
+    /// multi-assertion check silently stops firing on real lists.
+    #[test]
+    fn a_real_list_is_counted() {
+        assert_eq!(list_items("- first\n- second\n- third"), 3);
+        assert_eq!(list_items("1. first\n2. second"), 2);
+        assert_eq!(list_items("* starred\n+ plussed"), 2);
+        assert!(
+            multi_assertion("1. first\n2. second").is_some(),
+            "a two-item list is more than one assertion"
+        );
+        assert!(
+            multi_assertion("The pool saturated. The canary did not.").is_none(),
+            "and two sentences are not"
+        );
+    }
 }
