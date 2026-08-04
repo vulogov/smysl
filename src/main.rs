@@ -3506,7 +3506,7 @@ fn cmd_relink(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 /// `computed` rung - the licence, not a decoration.
 #[cfg(feature = "ingest")]
 fn cmd_import(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
-    use smysl_ingest::import::{from_csv, ImportOptions};
+    use smysl::{from_csv, ImportOptions};
 
     let path = m.get_one::<String>("file").expect("required");
     let text = if path == "-" {
@@ -3620,7 +3620,7 @@ fn cmd_ui(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
 
-    match smysl_tui::run(smysl_tui::App::new(store, labels)) {
+    match smysl::tui::run(smysl::tui::App::new(store, labels)) {
         Ok(()) => ExitCode::Success,
         Err(e) => {
             eprintln!("smysl ui: {e}");

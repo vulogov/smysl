@@ -73,6 +73,8 @@ pub use smysl::Hlc
 pub use smysl::HopDiff
 pub use smysl::Hybrid
 pub use smysl::IdError
+pub use smysl::ImportOptions
+pub use smysl::Imported
 pub use smysl::Index
 pub use smysl::IndexError
 pub use smysl::IngestOptions
@@ -214,6 +216,7 @@ pub use smysl::fidelity
 pub use smysl::format_version_supported
 pub use smysl::from_cbor
 pub use smysl::from_cbor_seq
+pub use smysl::from_csv
 pub use smysl::granularity_distribution
 pub use smysl::hash_bytes
 pub use smysl::hop_diff
@@ -245,6 +248,7 @@ pub use smysl::to_cbor_seq
 pub use smysl::tokens
 pub use smysl::topo
 pub use smysl::trace
+pub use smysl::tui
 pub use smysl::unit_core_bytes
 pub use smysl::verify
 pub use smysl::verify_pack

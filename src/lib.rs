@@ -142,6 +142,14 @@ pub use smysl_ingest::{
     attest, stage, AttestOptions, AttestReport, IngestOptions, IngestPath, IngestReport, Ingestor,
     Judgement, Staged, What, DEFAULT_REPAIR_ATTEMPTS,
 };
+// `smysl import` is the only producer of `measured` units and the only unit-producing command
+// that consults no model. Until 0.13 `cmd_import` reached into `smysl_ingest::import` directly
+// and none of these three names was re-exported, so a consumer holding the facade could not do
+// what the command does — a rule A violation that stood because nothing checked rule A.
+// `Imported` is here because it is `from_csv`'s return type: without it the function is
+// callable and its result unnameable.
+#[cfg(feature = "ingest")]
+pub use smysl_ingest::import::{from_csv, ImportOptions, Imported};
 #[cfg(feature = "providers")]
 pub use smysl_provider::usage::{GroupBy, Totals};
 #[cfg(feature = "providers")]
@@ -150,6 +158,15 @@ pub use smysl_provider::{
     LedgerEntry, Message, Probe, Provider, ProviderConfigFile, ProviderError, ProviderId, Registry,
     Request, StreamMsg, StructuredMode, Task, TokenCount, Usage,
 };
+
+/// The terminal browser, whole, under the feature that brings it in.
+///
+/// Re-exported as a module rather than name by name because the browser is one capability with
+/// several entry points — `run`, `App`, `render_to_string` for testing a frame without a
+/// terminal — and picking a few of them would be the same rule A gap in a smaller form. The
+/// `ratatui` and `crossterm` cost stays behind `--features tui`, exactly as before.
+#[cfg(feature = "tui")]
+pub use smysl_tui as tui;
 
 /// The crate version, as a convenience for embedders recording provenance.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -166,6 +183,38 @@ mod tests {
         // nobody can trigger is worse than a missing one, because a reader waits for it.
         assert_eq!(Code::ALL.len(), 51);
         assert_eq!(Code::E030.severity(), Severity::Error);
+    }
+
+    /// Rule A for `smysl import`, expressed as behaviour rather than as a grep.
+    ///
+    /// `cargo xtask check-purity` proves the CLI names no sibling crate. It cannot prove the
+    /// facade can do what the CLI does — a `cmd_import` that stopped importing would satisfy
+    /// it just as well. So this does the import through facade names only, which is what rule
+    /// A actually promises a library consumer.
+    ///
+    /// Written when the gate found `cmd_import` reaching into `smysl_ingest::import` for the
+    /// CSV reader. `Imported` is named deliberately: it is `from_csv`'s return type, and
+    /// re-exporting the function without it would leave the result unnameable.
+    #[cfg(feature = "ingest")]
+    #[test]
+    fn the_import_capability_is_reachable_from_the_facade() {
+        let agent = AgentId::new("tool:test").unwrap();
+        let opts = ImportOptions::new("latency.csv", agent.clone(), Hlc::zero(agent));
+        let out: Imported = from_csv("host,ms\nweb-1,12\nweb-2,31\n", &opts);
+
+        assert_eq!(out.units.len(), 2, "one unit per row");
+        assert!(!out.is_empty());
+        // The attestation is the licence for `measured`, not a decoration — a unit without
+        // one would not be permitted the status at all.
+        assert_eq!(
+            out.attestations.len(),
+            out.units.len(),
+            "every imported unit carries its `op: Imported` attestation"
+        );
+        assert!(
+            out.units.iter().all(|u| u.status == Status::Measured),
+            "import is the only producer of `measured`; that is what it is for"
+        );
     }
 
     #[test]

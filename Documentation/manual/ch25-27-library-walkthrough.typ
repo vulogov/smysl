@@ -177,7 +177,11 @@ Chapter 28 walks through, with nothing beyond `smysl-core`, `smysl-graph`, `smys
 #recap((
   [Rule A is load-bearing, not aspirational: every `cmd_*` function in `src/main.rs` calls
    straight into a facade re-export — `cmd_pack` calls `smysl::pack`, with no private
-   implementation hiding behind it.],
+   implementation hiding behind it. Since 0.13 that is checked rather than asserted:
+   `cargo xtask check-purity` fails if anything under `src/` outside `lib.rs` names a
+   sibling crate. It found two bypasses the first time it ran, which is the honest reason
+   the check exists — `cmd_import` was reaching into `smysl-ingest` for the CSV reader, so
+   a consumer holding the facade could not do what `smysl import` does.],
   [`smysl-core`, `smysl-graph`, `smysl-check`, `smysl-pack`, `smysl-thread`, and
    `smysl-render` are always present; `cli`, `tui`, `providers`, `ingest`, `local`,
    `remote`, the two render backends, `exact-pack`, and `tls-pure` are each opt-in.],

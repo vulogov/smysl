@@ -3,9 +3,24 @@
 **Status:** decided for the three names that were open; the buckets themselves stand as
 written. Anything not settled here is still a proposal.
 
-`tests/public-api.txt` records 239 names and `cargo-semver-checks` stops them moving by
+`tests/public-api.txt` records 243 names and `cargo-semver-checks` stops them moving by
 accident. Neither says which of them anyone *meant*. Gate 3 in `READINESS.md` calls that
 mechanised-but-not-decided, and this file is the decision put in front of whoever makes it.
+
+**Two corrections from the 1.0 measurement**, both in `ROAD_TO_1.0.md` §0.2 and §1.2, because
+they change what this file is describing:
+
+1. **The 243 is an index, not the contract.** `cargo public-api` on the facade returns the
+   same list with or without `--simplified`: cross-crate re-exports are recorded as `pub use`
+   and never expanded. So this file can say `Store` is exported and cannot see one of its
+   methods. `make semver` runs per crate and sees all **12 111 public items** across the
+   eleven libraries — and since they share one version, that larger set is what 1.0 freezes.
+   Which artefact is *the* contract is still to be written down; §1.2 S5 is where.
+2. **The seam is where the choice is.** Splitting the surface by whether an item hangs off a
+   facade-exported type puts ~92% in "methods on things we deliberately export". The
+   discretionary remainder concentrates in `smysl-provider` (26%) and `smysl-ingest` (36%) —
+   which is to say, in bucket 2. The instinct below about *which* surface is unsettled was
+   right; what follows from it is narrowing, not exemption.
 
 The question is not "is this name public" — it is. The question is what a consumer is entitled
 to rely on, because a name in the second or third bucket below is one we would rather be free

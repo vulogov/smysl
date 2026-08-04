@@ -203,7 +203,7 @@ The steps are ordered because each one produces the thing the next needs.
 
 ---
 
-**S1 — give rule A a gate, and watch it fail.**
+**S1 — give rule A a gate, and watch it fail.** ✅ *done in 0.13.0*
 
 Rule A is stated in `src/lib.rs`: *"no CLI capability may be unreachable from here, and no code
 path may be CLI-only."* The manual restates it as a checked fact — *"every `cmd_*` function in
@@ -219,14 +219,27 @@ It is also, today, false. `src/main.rs` names exactly two paths that go around t
   from `smysl-tui`. Arguably presentation rather than capability, but the rule as written does
   not carve that out, so the carve-out should be written down or the re-export added.
 
-The gate is small: an `xtask` check that `src/main.rs` contains no `smysl_[a-z]*::` path.
-Write it, watch it fail on those two, then fix them — re-export `from_csv` and `ImportOptions`
-from the facade, and decide the `smysl-tui` question explicitly.
+The gate is small: an `xtask` check that nothing under `src/` outside `lib.rs` names a sibling
+crate. It went into `xtask/src/purity.rs`, whose first line had claimed rules A and B since it
+was written and checked only B.
 
-This comes first because it is the instrument for everything after it. Narrowing without it is
+It failed on both sites the first time it ran, which is the whole argument for it. The fixes:
+
+- `from_csv`, `ImportOptions` and `Imported` are now facade re-exports. `Imported` is there
+  because it is `from_csv`'s return type — without it the function is callable and its result
+  unnameable, which is a bypass in a subtler form.
+- `smysl-tui` is re-exported whole, as `smysl::tui`, still behind `--features tui`. Name-by-name
+  would have recreated the same gap in miniature: the browser is one capability with several
+  entry points, and `render_to_string` is how you test a frame without a terminal.
+
+The facade went from 239 names to 243; the `--no-default-features` surface is unchanged at 199,
+since both additions are feature-gated.
+
+This came first because it is the instrument for everything after it. Narrowing without it is
 guesswork; with it, "did I take away something the CLI needs" is a command.
 
-**Done when:** the check exists, is in `make ci`, and passes.
+**Done:** the check is in `make ci` via `gates`, it passes, and re-introducing a bypass in a
+different file was confirmed to fail it — a gate nobody has watched fail is not yet a gate.
 
 ---
 
