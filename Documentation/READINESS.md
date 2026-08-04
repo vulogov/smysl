@@ -28,6 +28,12 @@ not found in registry", a red job saying nothing about the API.
 Nothing here is a schedule. The point is that each item is either done, or has a next action
 that someone could take.
 
+**For 1.0 specifically, see [`ROAD_TO_1.0.md`](ROAD_TO_1.0.md).** This file asks whether the
+project is production-ready; that one asks what a version number promising stability would
+commit to, which is a narrower and harder question. The two differ in one place worth knowing
+about: these gates can be *waived* with a reason, and a 1.0 promise cannot — a name either
+moves or it does not.
+
 ---
 
 ## 1. Format stability — *close*
