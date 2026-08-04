@@ -7,6 +7,42 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 0.12.0
+
+Nothing yet. What is carried, and what each is actually waiting on:
+
+- **Three real gaps in `smysl-graph`**, each behind a command a user runs, and each confirmed
+  untested against the *whole* workspace rather than just its own crate.
+  `MergeReport::has_contentions` is what `merge --fail-on-contention` reads;
+  `EffectiveStatus::is_retracted` decides whether a retraction took;
+  `TraceKind::follows_parents` picks a direction for `trace`. All three can be replaced with
+  `true` and nothing anywhere fails. Cheap to close.
+
+- **Four `smysl-check` survivors.** A `>` that should let a unit sit exactly at its weakest
+  ground's cap (rule M's boundary, legal and untested); a guard whose failure makes an ambiguous
+  uid prefix resolve silently instead of being reported, against §1.2's "reported, never guessed
+  at"; a guard that makes every extension schema count as missing even when the consumer
+  understands it, which is the `full`/`degraded` distinction; and a `&&` that lets `. ` count as
+  a numbered list item.
+
+- **Publishing 0.10.0 and 0.11.0.** Both are tagged and merged and neither is on crates.io, so
+  `BASELINE` still points at 0.9.0 and every breaking change is measured against a version two
+  releases old. The `parse`-signature repair that `ContextExceeded` wants is parked behind this.
+
+- **The quoting experiment needs runs, not design.** The arms exist and are verified minimal.
+  The pilot's between-arm difference sat inside one arm's own run-to-run spread, one fixture
+  produced zero units on one arm, and DeepSeek returned nothing usable — the last of which is
+  now fixed, so it is worth re-running before designing anything further.
+
+- **An API stability *decision*.** Gate 3 is mechanised, not decided: the golden file freezes
+  whatever the facade exports without saying which of the 239 names are contract. That is a
+  judgement, and a release is when it wants making.
+
+- **Anthropic and OpenAI still need a key.** Everything reachable by reading has been read —
+  twice now, and it found a defect each time.
+
+---
+
 ## 0.11.0 — 2026-08-03
 
 A short cycle, and mostly about how the project measures itself.
