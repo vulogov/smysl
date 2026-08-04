@@ -17,8 +17,11 @@ and a single-version 1.0 cannot say that about names it exports. The seam is the
 Three things, and it is worth being exact because the rest of this document is downstream of
 them.
 
-1. **No breaking change to any exported name without a 2.0.** All 239 names at
-   `--all-features`, all 199 at `--no-default-features`. Including the seam.
+1. **No breaking change to any exported name without a 2.0.** The facade's golden file lists
+   239 names at `--all-features` and 199 at `--no-default-features`, but the real figure is
+   **12 111 public items across 52 public modules**: the eleven library crates ship at one
+   version, all must be published, and `make semver` already enforces every item in each.
+   §0.2 measures how much of that is a choice — about 8% — and where it sits.
 2. **The format stays readable.** A 1.0 reader reads every document a 1.x writer produces.
 3. **The guarantees hold.** A1–A6 and rules M, T, L, R, U, I, S, V1, V2, X, D, P are part of
    the contract, and A5 already says making an operation non-reproducible is breaking whatever
@@ -31,32 +34,135 @@ that the CLI is beautiful. It commits to not moving.
 
 ## Phase 0 — two decisions
 
-Neither is work. Both block the phases after them, and neither is mine to make.
+Neither is work. Both block the phases after them. The first is settled; the second is not.
 
-### 0.1 The format version
+### 0.1 The format version — **decided: bump, and bump it last**
 
-The crate goes to 1.0. `smysl/0.1` is the wire format, and §8 says the two axes are
-independent — so `smysl 1.0.0` shipping `format smysl/0.1` is *coherent*, and looks odd on a
-title page.
+`smysl/0.1` becomes `smysl/1.0`, after every preparation and migration is complete and
+**before** the source tree goes to 1.0.0. The order is the decision: the format arrives at 1.0
+already supported by everything that reads it, and the crate version follows.
 
-The alternative, bumping to `smysl/1.0`, is not free. §8.2 reserves a format bump for breaks;
-bumping without one means every reader must be taught to accept both strings, and there are
-four of them now — the Rust, `python/`, `nodejs/`, `go/`. It is a compatibility event in
-service of a cosmetic alignment.
+That order exists because a format bump is not a rename. Four implementations read this format
+— the Rust, `python/`, `nodejs/`, `go/` — and §8.2 says a reader MUST reject a version absent
+from its list and MUST NOT infer compatibility from one that looks close. Flip the writer first
+and every other reader refuses the output.
 
-**Recommendation: keep `smysl/0.1`.** The document already explains why the numbers differ,
-and §8.6 exists to be pointed at. Revisit when the format actually changes.
+**The migration, in order:**
 
-### 0.2 What the seam costs
+1. **Readers accept both.** `FORMAT_VERSIONS_SUPPORTED` (`smysl-core/src/lib.rs:43`) becomes
+   `["smysl/0.1", "smysl/1.0"]`, and the same list grows in `python/`, `nodejs/` and `go/`.
+   Nothing writes `smysl/1.0` yet, so nothing breaks — and this step must ship, and be
+   *released*, before step 3, or a 1.0 writer emits documents the field cannot read.
 
-Stabilising bucket 2 means freezing shapes that have moved recently. `Hybrid` changed twice
-inside 0.7. `Retriever` is one cycle old. `ProviderConfig`, `Request`, `Completion`, `Usage`,
-`Capabilities`, `StructuredMode` become permanent.
+   Two tests pin the current list and will need updating with it:
+   `smysl-core/src/lib.rs:74` and `tests/versioning.rs:32`. Both are meant to be updated by
+   hand — they exist so the declared versions cannot drift from the specification unnoticed.
 
-The honest question is not "can we freeze them" — `#[non_exhaustive]` makes most of it
-survivable — but "would we regret the *shape*". A trait with the wrong method set cannot be
-saved by an attribute. Phase 1.2 is where that gets looked at, and if the answer for some type
-is *yes, we would regret it*, then it is better broken now than frozen wrong.
+2. **Fix the writer, which this bump makes urgent.** §8.5 records a trap that is harmless at
+   one supported version and a defect at two: the wire carries no version, a surface parser
+   validates the declared one and *discards* it, and `write_surface`
+   (`smysl-core/src/surface/write.rs:86`) reconstructs the header from
+   `FORMAT_VERSIONS_SUPPORTED[0]`. With two entries a document declaring one version is read
+   and written back declaring the other. Uids are unaffected — they are over CBOR, which
+   carries no version — but the header would lie, and the next reader trusts the header.
+
+   `tests/versioning.rs:54` fails the moment that list grows, deliberately, and says what has
+   to be decided first. This is the moment it was written for. `ParseOutcome` needs to carry
+   the version the document declared, and `write_surface` needs to emit that. Note this is a
+   change to a public type, so it is a `SEMVER_BREAKING` entry — another reason it lands
+   before the cut and not after.
+
+3. **Flip the writer.** `smysl/1.0` becomes the version new documents declare, with `smysl/0.1`
+   still read. Fixtures stay as they are — the point of step 1 is that old documents keep
+   working forever.
+
+4. **Then, and only then, the crate goes to 1.0.0.**
+
+**One thing this does not decide.** `KERNEL_SCHEMA` is `smysl.kernel/0.1` and is a third axis,
+independent of both the format string and the crate version — it names the shape of the kernel
+fields, and §8 keeps it separate on purpose. Bumping it is a *different* migration with
+different consequences, and nothing above requires it. Whether `smysl/1.0` should ship with
+`smysl.kernel/0.1` is a decision to take explicitly rather than by symmetry.
+
+**Also to update:** §8.6 of the format spec currently answers "is `smysl/0.1` frozen?" with
+"no, and it is not stable-forever either", resting on the `0.` prefix. At `smysl/1.0` that
+answer changes, and §8.2's rule — that a version bump signals a break — has to be reconciled
+with a bump that deliberately carries none. The honest wording is that 1.0 marks the format
+*settled*, and that the compatibility event is the readers being taught in step 1.
+
+**Done when:** all four implementations accept both strings, `versioning.rs` passes with two
+entries in the list, a `smysl/0.1` fixture still round-trips byte for byte, and a document
+declaring each version is written back declaring the one it declared.
+
+### 0.2 What freezing the seam costs
+
+**The size of the freeze.** The facade's golden file lists **239 names**. The eleven library
+crates export **12 111 public items across 52 public modules**, and since they share one
+version and all must be published for the facade to resolve, 1.0 freezes the larger number.
+
+That is not a hypothetical. `make semver` already runs `cargo-semver-checks` per crate over
+every published crate, so all 12 111 are enforced as contract today. What 1.0 changes is that
+a break stops being a minor bump and becomes a 2.0.
+
+**A gap worth fixing first.** The two gates measure different things.
+`cargo public-api` on the facade returns 239 items with *or* without `--simplified`, because
+re-exports from other crates are listed as `pub use` and never expanded. So
+`tests/public-api.txt` records that `Store` is exported and cannot see a single one of its
+methods — change `Store::matching_prefix`'s signature and the golden file does not move.
+`make semver` catches it, per crate. The documented contract and the enforced contract are
+therefore not the same set, and before 1.0 they should be, or `API_CONTRACT.md` describes
+something narrower than what the version number promises.
+
+**How much of the freeze is actually a choice.** Splitting the surface by whether an item
+belongs to a type the facade re-exports:
+
+| crate | items | tied to an exported type | discretionary |
+|---|---|---|---|
+| `smysl-core` | 6 125 | 5 825 | 300 (4%) |
+| `smysl-graph` | 2 084 | 2 076 | 8 (0%) |
+| `smysl-provider` | 988 | 727 | **261 (26%)** |
+| `smysl-render` | 907 | 848 | 59 (6%) |
+| `smysl-ingest` | 751 | 476 | **275 (36%)** |
+| `smysl-pack` | 414 | 383 | 31 (7%) |
+| these six | 11 269 | 10 335 | 934 (8%) |
+
+*(The attribution is a name-matching heuristic, so "tied" is over-counted and 8% is a floor.)*
+
+The shape of that table is the answer. Around 92% of the surface is methods and variants on
+types the facade deliberately exports — `Store`, `Doc`, `UnitCore`. Freezing those is not a
+cost to be managed; it is what 1.0 *means*, and no amount of narrowing touches it.
+
+The discretionary remainder concentrates in `smysl-provider` and `smysl-ingest` — which is to
+say, in the seam. `API_CONTRACT.md`'s instinct to treat those crates as a category apart was
+right about *which* surface is unsettled, and wrong only about what follows from it. The seam
+is where nearly all the genuinely optional surface lives, and it is also the part that has
+moved most recently: `Hybrid` changed twice inside 0.7, and `Retriever` is one cycle old.
+
+**The options, then, are narrower than they first look.**
+
+**A — freeze as it stands.** No work. Every mapper struct, every ingest internal, becomes
+contract. The cost is that ordinary refactoring in the two least-settled crates becomes a 2.0;
+given that 0.10 alone changed `skip_one`, `Dec`'s traversal and `SourceRef::new`, that is a
+live constraint rather than a theoretical one.
+
+**B — narrow the seam, not the workspace.** Demote to `pub(crate)` in `smysl-provider::map`
+and `smysl-ingest` what the facade does not reach. Roughly 500 items, in two crates, rather
+than a sweep across 52 modules. It is a breaking change, which is why it belongs before 1.0.
+Rule A is the safety net: `make purity` proves nothing the CLI does becomes unreachable, so
+if narrowing breaks the CLI the narrowing was wrong.
+
+**C — tier the promise in prose.** Keep everything public, mark the rest `#[doc(hidden)]`, say
+only the facade is contract. Cheap, and it reinstates exactly the contradiction that deciding
+"one product" removed: `cargo-semver-checks` does not read intent, so it either flags hidden
+items — noise — or is told to ignore them, at which point the guarantee is a comment.
+
+**Recommendation: B, plus closing the gate gap.** The scope is two crates, and it is the same
+two the seam review in 1.2 has to read anyway — so do them together: decide the shape, then
+decide what stays public. Then regenerate the golden file so the documented surface and the
+enforced surface agree, and 1.0 promises one thing rather than two.
+
+Option A is defensible if the appetite for it is low. It should then be chosen out loud, with
+the maintenance cost named, rather than by leaving 0.2 undecided.
 
 ---
 
