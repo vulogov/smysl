@@ -13,12 +13,17 @@ meant publishing a claim. It is closed three times over. What remains is coverag
 and 0.x is the honest signal for that — the version says the surface can still move, and gate
 3 says exactly where.
 
-**0.10.0 is released and not published**, which is a state worth naming because it is easy to
-read a tag as a publication. `cargo-semver-checks` fetches its baseline from crates.io, so
-`BASELINE` in the Makefile tracks the last *published* version rather than the last tagged
-one; pointing it at 0.10.0 turns all twelve crates into "version not found in registry". The
-consequence that bites is that a breaking change is still measured against 0.9.0, so a repair
-wanting the public surface to move stays parked until 0.10.0 goes up.
+**0.11.0 is published**, and 0.10.0 is not and now never will be — publishing an older version
+after a newer one is possible and perverse, and everything in it is in 0.11.0. Not every tag is
+a publication.
+
+That gap is worth remembering rather than tidying away. `cargo-semver-checks` fetches its
+baseline from crates.io, so `BASELINE` in the Makefile tracks the last *published* version and
+not the last tagged one; it sat at 0.9.0 across two cut-but-unpublished releases, which meant
+every breaking change was being measured against a version two releases old, and the
+`ContextExceeded` repair that wants `parse`'s signature to move was parked behind it. Pointing
+it at an unpublished version does not fail loudly — it turns all twelve crates into "version
+not found in registry", a red job saying nothing about the API.
 
 Nothing here is a schedule. The point is that each item is either done, or has a next action
 that someone could take.

@@ -25,9 +25,14 @@ Nothing yet. What is carried, and what each is actually waiting on:
   understands it, which is the `full`/`degraded` distinction; and a `&&` that lets `. ` count as
   a numbered list item.
 
-- **Publishing 0.10.0 and 0.11.0.** Both are tagged and merged and neither is on crates.io, so
-  `BASELINE` still points at 0.9.0 and every breaking change is measured against a version two
-  releases old. The `parse`-signature repair that `ContextExceeded` wants is parked behind this.
+- ~~Publishing.~~ **Done**: 0.11.0 is on crates.io, twelve crates, and `cargo install smysl`
+  from the registry gives `smysl 0.11.0`. `BASELINE` moved from 0.9.0 to 0.11.0 and
+  `cargo-semver-checks` runs its 223 checks against a real baseline again — 12/12 clean. 0.10.0
+  stays unpublished, because publishing an older version after a newer one is perverse and its
+  contents are all in 0.11.0.
+
+  This unparks the `parse`-signature repair for `ContextExceeded`, which had to be done at the
+  call site because the fix is a breaking change and the baseline was two releases stale.
 
 - **The quoting experiment needs runs, not design.** The arms exist and are verified minimal.
   The pilot's between-arm difference sat inside one arm's own run-to-run spread, one fixture
