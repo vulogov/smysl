@@ -146,8 +146,28 @@ than a bearer token, the `anthropic-version` header, `system` as a top-level fie
 That is now twice this method has found a defect without a key. What it still cannot answer for
 either provider is whether the endpoint *accepts* the translated schema.
 
-**Next action:** unchanged — a key, for OpenAI and Anthropic both. Everything reachable by
-reading has been read.
+**Mutation testing in 0.12 found the gap this gate describes is not the gap it has.** 477
+viable mutants, 31% survivors — the worst of any crate but the packer, and 25 of them on one
+cluster: what a mapper makes of an HTTP failure. `delete match arm 401 | 403`, `replace match
+guard is_backpressure(s) with false`, `replace >= with <` on the `status >= 400` boundary.
+
+The point is *which* providers. Gemini, DeepSeek and Ollama have all been exercised live, and
+the survivors are spread evenly across all five mappers. Live testing verified that a
+**successful** call works; nobody provokes a 401 against a real endpoint, so the failure
+taxonomy went unexercised on the verified providers too. **A key would not have found this.**
+
+That taxonomy decides behaviour rather than wording: `Unauthorized` stops the run,
+`RateLimited` is retried with backoff, `Upstream` may fall through to another provider.
+Misclassify a 429 as a fault and a transient overload ends a pipeline; misclassify a 401 as
+backpressure and the CLI retries a credential that will never work, three times, with jitter.
+
+`tests/status_taxonomy.rs` covers all five at once, with a control that fails a mapper
+returning any single variant for everything. Confirmed against three real survivors in three
+different mappers.
+
+**Next action:** still a key, for acceptance — whether the endpoint takes the translated
+schema is unreachable without one. But the table above is the more honest reading of what
+"verified" has meant here: the happy path, on three of five.
 
 ## 5. A test suite that catches what it claims — *measuring, and now cross-checked*
 
@@ -193,6 +213,7 @@ Both ran in 0.10 as well, and the numbers are now three points on one curve rath
 | `cbor/envelope.rs` | 115 | **2.6%** |
 | `smysl-check` (0.11) | 143 | **9.1%** |
 | `smysl-graph` (0.11) | 625 | **15.0%** |
+| `smysl-provider` (0.12) | 477 | **31.0%** |
 
 **Read these as "does this crate's own suite cover it", not "is this covered".** `cargo mutants
 -p X` runs `cargo test --package=X`, so a function only exercised by a downstream crate is

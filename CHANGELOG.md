@@ -174,6 +174,33 @@ beforehand, and each was found by checking a thing nobody had checked rather tha
 a hunch.
 
 
+### Added
+
+- **Mutation testing of `smysl-provider`** — 477 viable mutants, **148 survivors, 31%**, the
+  worst of any crate but the packer in 0.8. Sharded and run with `--all-features`, which is not
+  optional: `default = []` for that crate, so a default build compiles no mapper at all and the
+  run would have measured the registry while printing a number that looked like the crate.
+
+  25 survivors sit on one cluster — what a mapper makes of an HTTP failure — and **the
+  interesting part is which providers they are spread across.** Gemini, DeepSeek and Ollama
+  have all been exercised live. The survivors are even across all five mappers, because live
+  testing verified that a *successful* call works and nobody provokes a 401 against a real
+  endpoint. A key, which gate 4 has wanted for three cycles, would not have found this.
+
+  `tests/status_taxonomy.rs` covers all five at once: 401 and 403 are `Unauthorized`, 429 and
+  503 are `RateLimited`, and a control fails any mapper returning one variant for everything.
+  Confirmed against three real survivors in three different mappers.
+
+- **Guarantee A2 has a test**, and the one it had said so itself. `runtime.rs` carries the
+  note: *"This test can only observe the flag after other tests have run, so it asserts the
+  weaker, always-true half: once started, it stays started."* An honest account of a real
+  limit — unit tests share a process, so the interesting half is unobservable there — and
+  `is_started -> true` survived because of it.
+
+  An integration test binary is a fresh process. `tests/a2_lazy_runtime.rs` holds exactly one
+  test, deliberately: anything else in the file would start the runtime and destroy the
+  observation.
+
 ### Fixed
 
 - **An extension payload could carry a non-canonical encoding into a uid.** `Dec::skip_item`
