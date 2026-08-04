@@ -214,6 +214,34 @@ Both ran in 0.10 as well, and the numbers are now three points on one curve rath
 | `smysl-check` (0.11) | 143 | **9.1%** |
 | `smysl-graph` (0.11) | 625 | **15.0%** |
 | `smysl-provider` (0.12) | 477 | **31.0%** |
+| `smysl-render` (0.12) | 144 | **12.5%** |
+| `smysl-retrieve` (0.12) | 77 | **15.6%** |
+| `smysl-embed` (0.12) | 59 | **22.0%** |
+| `smysl-thread` (0.12) | 84 | **22.6%** |
+| `smysl-ingest` (0.12) | 337 | **28.8%** |
+| `smysl`, the CLI (0.12) | 269 | **73.6%** |
+
+**Every crate in the workspace is now measured.** The library sits between 2.6% and 31%, in a
+band that has stopped being surprising: most survivors are accessors, display strings and
+equivalent mutants, and each run has turned up a handful of real gaps.
+
+**The CLI is not in that band, and the difference is not an artefact.** 73.6% is more than
+twice the worst library crate. The obvious explanation is the per-crate one — `cargo mutants -p
+smysl` runs `cargo test -p smysl`, and the CLI's principal verification is `make doc-output`,
+a Python script replaying 46 documented transcripts against the built binary, which no cargo
+test invokes. That would make mutation testing structurally blind to it.
+
+It is not the whole explanation. Spot-checking a survivor against *both* — `cargo test -p
+smysl` and `make doc-output` — it survives both. `src/main.rs` has four tests across 3 600
+lines and `src/progress.rs` has twelve across 394, and 52 of the CLI's survivors are in
+`progress.rs` alone: arithmetic and comparisons in bar drawing, where the tests check the
+structure and never the numbers.
+
+**Next action:** not "fix 357 survivors". The band 12–31% has yielded roughly one real gap per
+crate and reading each survivor is the expensive part, so the yield per hour is falling. The
+CLI is the exception worth acting on, and the useful first move there is to make its real
+verification visible to measurement — `doc-output` is the test that covers it, and nothing that
+counts coverage can see it.
 
 **Read these as "does this crate's own suite cover it", not "is this covered".** `cargo mutants
 -p X` runs `cargo test --package=X`, so a function only exercised by a downstream crate is

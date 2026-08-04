@@ -191,6 +191,25 @@ a hunch.
   503 are `RateLimited`, and a control fails any mapper returning one variant for everything.
   Confirmed against three real survivors in three different mappers.
 
+- **The mutation sweep is complete** — every crate in the workspace measured. Six more in
+  0.12: `smysl-render` 12.5%, `smysl-retrieve` 15.6%, `smysl-embed` 22.0%, `smysl-thread`
+  22.6%, `smysl-ingest` 28.8%, and the CLI at **73.6%**.
+
+  `--all-features` throughout, which mattered for two of them: `smysl-ingest` and
+  `smysl-render` are both `default = []`, so a default run compiles almost nothing and reports
+  a rate for a shell of the crate.
+
+  The library lands between 2.6% and 31% and has stopped surprising: mostly accessors, display
+  strings and equivalent mutants, with a handful of real gaps each time. The CLI is more than
+  twice the worst of them, and the tempting explanation — that `cargo test -p smysl` cannot see
+  `make doc-output`, which is a Python script replaying 46 transcripts — is only part of it. A
+  survivor spot-checked against *both* survives both. `src/main.rs` has four tests across 3 600
+  lines; `src/progress.rs` has twelve across 394 and contributes 52 survivors on its own, all
+  arithmetic and comparisons in bar drawing, where the tests check structure and never numbers.
+
+  Recorded rather than fixed. 357 survivors is not a to-do list, and reading each one is the
+  expensive part — the band the library sits in has been yielding about one real gap per crate.
+
 - **Guarantee A2 has a test**, and the one it had said so itself. `runtime.rs` carries the
   note: *"This test can only observe the flag after other tests have run, so it asserts the
   weaker, always-true half: once started, it stays started."* An honest account of a real
