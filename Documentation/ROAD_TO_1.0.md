@@ -145,11 +145,11 @@ contract. The cost is that ordinary refactoring in the two least-settled crates 
 given that 0.10 alone changed `skip_one`, `Dec`'s traversal and `SourceRef::new`, that is a
 live constraint rather than a theoretical one.
 
-**B — narrow the seam, not the workspace.** Demote to `pub(crate)` in `smysl-provider::map`
-and `smysl-ingest` what the facade does not reach. Roughly 500 items, in two crates, rather
-than a sweep across 52 modules. It is a breaking change, which is why it belongs before 1.0.
-Rule A is the safety net: `make purity` proves nothing the CLI does becomes unreachable, so
-if narrowing breaks the CLI the narrowing was wrong.
+**B — narrow the seam, not the workspace.** Demote to `pub(crate)` in `smysl-provider` and
+`smysl-ingest` what the facade does not reach. Roughly 500 items, in two crates, rather than a
+sweep across 52 modules. It is a breaking change, which is why it belongs before 1.0. Rule A
+is what says whether a narrowing went too far — but it has no gate today, so §1.2 builds one
+first. (`make purity` enforces rule B, not rule A.)
 
 **C — tier the promise in prose.** Keep everything public, mark the rest `#[doc(hidden)]`, say
 only the facade is contract. Cheap, and it reinstates exactly the contradiction that deciding
@@ -157,9 +157,9 @@ only the facade is contract. Cheap, and it reinstates exactly the contradiction 
 items — noise — or is told to ignore them, at which point the guarantee is a comment.
 
 **Recommendation: B, plus closing the gate gap.** The scope is two crates, and it is the same
-two the seam review in 1.2 has to read anyway — so do them together: decide the shape, then
-decide what stays public. Then regenerate the golden file so the documented surface and the
-enforced surface agree, and 1.0 promises one thing rather than two.
+two the seam review has to read anyway — so do them together: decide the shape, then decide
+what stays public. Then regenerate the golden file so the documented surface and the enforced
+surface agree, and 1.0 promises one thing rather than two. **§1.2 is that plan.**
 
 Option A is defensible if the appetite for it is low. It should then be chosen out loud, with
 the maintenance cost named, rather than by leaving 0.2 undecided.
@@ -183,21 +183,139 @@ write the reason where the type is. Output: every public type has an answer, and
 
 **Done when:** no public type lacks either the attribute or a sentence saying why it is closed.
 
-### 1.2 The seam review
+### 1.2 The seam: review it, then narrow it
+
+The largest item in the plan, and §0.2 is why: the seam is where almost all of the
+discretionary public surface lives. It is also the surface that has moved most recently, which
+is the same fact from the other side.
+
+**What the facade actually reaches.** Measured, not assumed:
+
+| | modules | reached by the facade | untouched |
+|---|---|---|---|
+| `smysl-ingest` | 13 | `attest`, `stage` (whole); one fn each from `ceiling`, `path`, `recipe` | `chunk`, `import`, `json_ast`, `monotone`, `prompt`, `quote`, `repair`, `schema` |
+| `smysl-provider` | 7 | `config::ProviderConfig`, `map::build`, `usage::{GroupBy, Totals}`, and `registry`'s types via the crate root | `http`, `runtime`, `stream` |
+
+Eleven of twenty modules are exported to nobody in particular. That is the narrowing target,
+and it is a smaller and better-defined job than "audit 52 modules".
+
+The steps are ordered because each one produces the thing the next needs.
+
+---
+
+**S1 — give rule A a gate, and watch it fail.**
+
+Rule A is stated in `src/lib.rs`: *"no CLI capability may be unreachable from here, and no code
+path may be CLI-only."* The manual restates it as a checked fact — *"every `cmd_*` function in
+`src/main.rs` calls straight into a facade re-export"*. Nothing enforces it. `make purity` is
+rule B, a different rule.
+
+It is also, today, false. `src/main.rs` names exactly two paths that go around the facade:
+
+- **`src/main.rs:3509`** — `cmd_import` does `use smysl_ingest::import::{from_csv,
+  ImportOptions}`. `smysl import` is the only producer of `measured` units, and a consumer
+  holding only the facade cannot do what it does.
+- **`src/main.rs:3623`** — `smysl_tui::run` / `smysl_tui::App`; the facade re-exports nothing
+  from `smysl-tui`. Arguably presentation rather than capability, but the rule as written does
+  not carve that out, so the carve-out should be written down or the re-export added.
+
+The gate is small: an `xtask` check that `src/main.rs` contains no `smysl_[a-z]*::` path.
+Write it, watch it fail on those two, then fix them — re-export `from_csv` and `ImportOptions`
+from the facade, and decide the `smysl-tui` question explicitly.
+
+This comes first because it is the instrument for everything after it. Narrowing without it is
+guesswork; with it, "did I take away something the CLI needs" is a command.
+
+**Done when:** the check exists, is in `make ci`, and passes.
+
+---
+
+**S2 — decide what the tests are allowed to see.**
+
+The real cost of narrowing, and the step most likely to be underestimated. Integration tests in
+`tests/` are separate crates: they see `pub`, not `pub(crate)`. Eight files reach into the
+modules S3 and S4 would demote —
+
+`smysl-provider/tests/`: `a2_lazy_runtime.rs`, `status_taxonomy.rs`,
+`capabilities_are_honest.rs`, `ollama_live.rs`, `deepseek_live.rs`;
+`smysl-ingest/tests/`: `gate.rs`, `providers_live.rs`; and the workspace's
+`tests/interactions.rs`.
+
+Three routes, and the choice is per item rather than global:
+
+1. **Move the test inside the crate.** A unit test sees `pub(crate)`, so the item can be
+   demoted. Cheapest where it works — and it does not always work. `a2_lazy_runtime.rs` exists
+   *because* an integration test is a fresh process: it asserts the provider runtime has **not**
+   started, which is unobservable in a unit test where an earlier test has already started it.
+   Its own header says so. Moving that one destroys the guarantee it checks.
+2. **Keep the item public, and record why.** For `runtime::is_started` this is the honest
+   answer: it is public so that A2 can be tested from outside, and that reason belongs next to
+   it. A short list of named exceptions is a contract; an unexamined 12 111 is not.
+3. **A `testing` feature that re-exports internals.** Rejected unless 1 and 2 run out.
+   `cargo-semver-checks` runs `--all-features`, so a feature-gated internal is frozen exactly
+   like a public one — it moves the names without shrinking the promise.
+
+**Done when:** every one of the eight files is on route 1 or route 2, and each route-2 item has
+its reason written where it is declared.
+
+---
+
+**S3 — the shape review, before the visibility change.**
+
+Reading a type for "would we regret this at 2.0" has to happen before deciding it stays public,
+because a type that is wrong should be fixed, not frozen quietly.
 
 `ProviderConfig`, `Request`, `Completion`, `Usage`, `Capabilities`, `StructuredMode`, `Probe`,
 `Provider`, `Registry`; `Bm25`, `Hybrid`, `Semantic`, `Query`, `Hit`, `Retriever`; `Ir`,
 `Profile`, `BuildOptions`.
 
-One concrete defect is already known and belongs here: **`status_error` is a shared contract
-shared by convention.** All five mappers expose `status_error(u16, &str) -> ProviderError` with
-the same signature, and it is an inherent method on each rather than part of the `Provider`
-trait — which is why `tests/status_taxonomy.rs` has to reach for boxed closures to test them
-together. Before 1.0 it should be on the trait, where the compiler enforces the shape a sixth
-mapper must have.
+One defect is already known and belongs here: **`status_error` is a shared contract shared by
+convention.** All five mappers expose `status_error(u16, &str) -> ProviderError` with the same
+signature, as an inherent method rather than part of the `Provider` trait — which is why
+`tests/status_taxonomy.rs` has to build boxed closures to test them together. It should be on
+the trait, where the compiler enforces the shape a sixth mapper must have. Note this cuts
+against S4: a trait method is public by necessity, so this decision comes first.
 
-**Done when:** each seam type has been read once with "would we regret this at 2.0" in mind,
-and the answers are in `API_CONTRACT.md`.
+**Done when:** each type has been read once with that question in mind, and the answers — not
+just the changes — are in `API_CONTRACT.md`.
+
+---
+
+**S4 — narrow, one crate at a time, provider first.**
+
+Provider first because it is smaller, better understood, and its live tests give a second
+signal. For each of the eleven untouched modules: demote to `pub(crate)`, build, and let S1's
+gate and the test suite say what was needed after all. Anything that has to come back comes
+back deliberately, with a reason, as an S2 route-2 exception.
+
+Expect the count to land above zero and well below 934. The measurement's 8% was a floor
+computed by name-matching, and some of those modules will turn out to have a legitimate
+consumer — that is a result, not a failure.
+
+**Done when:** both crates build, `make ci` is green, and every still-public module in them is
+either facade-reachable or a recorded exception.
+
+---
+
+**S5 — make the documented contract equal the enforced one.**
+
+§0.2 found the two gates disagree: `cargo public-api` on the facade returns 239 items with or
+without `--simplified`, because cross-crate re-exports are never expanded, so
+`tests/public-api.txt` cannot see a single method of any type it lists. `make semver` sees all
+of them, per crate.
+
+After S4 the surfaces have moved, so this is the moment to fix it: record per-crate goldens
+alongside the facade's, or state in `API_CONTRACT.md` that the facade file is an index and
+`make semver` is the contract. Either is defensible; having neither written down is not.
+
+**Done when:** `API_CONTRACT.md` says which artefact is the contract, and it is true.
+
+---
+
+**S6 — land it as a break.**
+
+All of S1–S5 goes through `SEMVER_BREAKING`, which then has to be empty again before the cut.
+This is the last cycle in which narrowing is free; after 1.0 every item on this list is a 2.0.
 
 ### 1.3 Empty `SEMVER_BREAKING`
 
@@ -294,7 +412,10 @@ The **format** is arguably ready now: unchanged across twelve releases, a writte
 policy, four independent implementations, and §2.3 verified by something other than the
 implementation that defined it.
 
-The **surface** needs Phase 1 — 72 type decisions and one honest look at the seam.
+The **surface** needs Phase 1 — 72 type decisions, and the seam narrowed from eleven
+unexported modules down to what is actually consumed. That last one starts by giving rule A a
+gate and watching it fail, which is the shape of most of the work here: the checks that would
+have told us were the things missing.
 
 The **evidence** needs Phase 3, and Phase 3 cannot be hurried: it is two quiet cycles, and the
 only way to get them is to have them.
