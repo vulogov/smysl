@@ -133,20 +133,39 @@ docs: ## Rebuild the PDFs in Documentation/ from their typst sources
 # targets answer different questions and both are needed: `api-check` says the *list* changed,
 # `semver` says the change was breaking. A rename shows up in the first; adding
 # `#[non_exhaustive]` to a struct shows up only in the second.
-api: ## Regenerate the recorded public surface
+api: ## Regenerate the recorded public surfaces, both ends
 	@command -v cargo-public-api >/dev/null || { echo "cargo install cargo-public-api"; exit 1; }
 	@{ sed -n '1,/^# Regenerate with/p' tests/public-api.txt; \
 	   $(CARGO) public-api --all-features --simplified 2>/dev/null; } > tests/public-api.txt.new
 	@mv tests/public-api.txt.new tests/public-api.txt
-	@echo "api: recorded $$($(CARGO) public-api --all-features --simplified 2>/dev/null | wc -l | tr -d ' ') names"
+	@{ sed -n '1,/^# Regenerate with/p' tests/public-api-pure.txt; \
+	   $(CARGO) public-api --no-default-features --simplified 2>/dev/null; } > tests/public-api-pure.txt.new
+	@mv tests/public-api-pure.txt.new tests/public-api-pure.txt
+	@echo "api: recorded $$($(CARGO) public-api --all-features --simplified 2>/dev/null | wc -l | tr -d ' ') names at --all-features, $$($(CARGO) public-api --no-default-features --simplified 2>/dev/null | wc -l | tr -d ' ') pure"
 
-api-check: ## Fail if the public surface moved without being recorded
+# Both ends, and the nesting between them.
+#
+# One file was not enough. Recording only `--all-features` freezes the maximum, so a name could
+# stop being reachable on default features while the recorded surface never moved — and the
+# README recommends `default-features = false` for the pure library, which had nothing checking
+# it at all.
+api-check: ## Fail if either recorded surface moved, or if they stop nesting
 	@command -v cargo-public-api >/dev/null || { echo "cargo install cargo-public-api"; exit 1; }
-	@$(CARGO) public-api --all-features --simplified 2>/dev/null > /tmp/smysl-api-now.txt
-	@grep -v '^#' tests/public-api.txt | grep -v '^$$' > /tmp/smysl-api-was.txt
-	@diff -u /tmp/smysl-api-was.txt /tmp/smysl-api-now.txt \
-	  || { echo "api-check: the public surface moved. If deliberate, run 'make api'."; exit 1; }
-	@echo "api-check: the public surface matches what is recorded"
+	@$(CARGO) public-api --all-features --simplified 2>/dev/null > /tmp/smysl-api-all.txt
+	@$(CARGO) public-api --no-default-features --simplified 2>/dev/null > /tmp/smysl-api-pure.txt
+	@$(CARGO) public-api --simplified 2>/dev/null > /tmp/smysl-api-def.txt
+	@grep -v '^#' tests/public-api.txt | grep -v '^$$' > /tmp/smysl-api-all-was.txt
+	@grep -v '^#' tests/public-api-pure.txt | grep -v '^$$' > /tmp/smysl-api-pure-was.txt
+	@diff -u /tmp/smysl-api-all-was.txt /tmp/smysl-api-all.txt \
+	  || { echo "api-check: the --all-features surface moved. If deliberate, run 'make api'."; exit 1; }
+	@diff -u /tmp/smysl-api-pure-was.txt /tmp/smysl-api-pure.txt \
+	  || { echo "api-check: the pure surface moved. If deliberate, run 'make api'."; exit 1; }
+	@sort /tmp/smysl-api-all.txt > /tmp/a.s; sort /tmp/smysl-api-def.txt > /tmp/d.s; sort /tmp/smysl-api-pure.txt > /tmp/p.s
+	@test -z "$$(comm -13 /tmp/a.s /tmp/d.s)" \
+	  || { echo "api-check: default features expose a name --all-features does not"; exit 1; }
+	@test -z "$$(comm -13 /tmp/d.s /tmp/p.s)" \
+	  || { echo "api-check: --no-default-features exposes a name default does not"; exit 1; }
+	@echo "api-check: both surfaces match, and pure <= default <= all-features"
 
 # `--release-type patch` is load bearing. Without it, 0.9 -> 0.10 on a 0.x crate is a
 # breaking-allowed bump and cargo-semver-checks skips every check: "0 checks: 0 pass, 254
