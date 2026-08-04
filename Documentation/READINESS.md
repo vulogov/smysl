@@ -187,6 +187,21 @@ Both ran in 0.10 as well, and the numbers are now three points on one curve rath
 | `cbor/reader.rs` + `writer.rs` | 143 | **23%** |
 | `cbor/envelope.rs` | 115 | **2.6%** |
 | `smysl-check` (0.11) | 143 | **9.1%** |
+| `smysl-graph` (0.11) | 625 | **15.0%** |
+
+**Read these as "does this crate's own suite cover it", not "is this covered".** `cargo mutants
+-p X` runs `cargo test --package=X`, so a function only exercised by a downstream crate is
+reported as a survivor while being perfectly well tested. `Store::matching_prefix` is exactly
+that — replacing it with `vec![]` survives `smysl-graph`'s suite and fails two tests in
+`smysl-check`'s.
+
+The distinction was not noticed for four measurements, and every figure above was quoted as if
+it meant the stronger thing. It is still a number worth having: a crate ought to test its own
+API, and one that leans on a consumer's tests has a coverage hole that moves the moment the
+consumer changes. But it is the weaker claim, and the difference has to be measured rather than
+assumed — `--test-workspace` gives the stronger one at the cost of running the whole suite per
+mutant, which is a day's work at these counts and so is worth spending only on the survivors
+that would otherwise be acted on.
 
 `envelope.rs` is the best-covered code in the project, and the two survivors that mattered are
 worth more than the rate. An attestation's `sig` could stop decoding and be preserved as an
@@ -219,10 +234,17 @@ Also closed there: §7's conformance table had no test at all, so all four `||` 
 error makes every class forbid almost nothing, which reads as "your store is fine at every
 class".
 
-**Next action:** `smysl-graph` — 691 mutants, the largest target left, and the only crate in the
-pure set never measured. It is running in four shards, because two unsharded attempts died
-around 470 mutants while sharing the machine with a build, and a shard that finished stays
-finished.
+`smysl-graph` was measured in 0.11: **94 survivors of 625 viable, 15.0%**, in four shards
+because two unsharded attempts died around 470 mutants while sharing the machine with a build.
+
+Its four whole-function survivors were then re-checked against the *whole workspace*, which is
+the only way to tell "untested" from "untested here". Three survive that too and are real gaps:
+`MergeReport::has_contentions`, which `merge --fail-on-contention` reads; `is_retracted`, which
+decides whether a retraction took; and `TraceKind::follows_parents`, which picks a direction for
+`trace`. The fourth, `Store::matching_prefix`, is caught by `smysl-check` and was never a gap at
+all — which is the whole reason the re-check exists.
+
+**Next action:** tests for those three. They are cheap, and each backs a command a user runs.
 
 The comment sweep is retired as a primary instrument. Its yield fell across three crates — two
 findings in `smysl-core`, one in `smysl-graph`, all three documentation rather than behaviour —
