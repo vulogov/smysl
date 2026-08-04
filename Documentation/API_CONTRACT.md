@@ -1,6 +1,7 @@
-# What the facade promises — a proposal
+# What the facade promises
 
-**Status:** a proposal, not a decision. Nothing here is enforced until someone accepts it.
+**Status:** decided for the three names that were open; the buckets themselves stand as
+written. Anything not settled here is still a proposal.
 
 `tests/public-api.txt` records 239 names and `cargo-semver-checks` stops them moving by
 accident. Neither says which of them anyone *meant*. Gate 3 in `READINESS.md` calls that
@@ -24,7 +25,7 @@ surface depends on what they turned on.
 | identifiers | 8 | `Uid`, `AgentId`, `SchemaId`, `ThreadId`, `ViewId`, `NodeId` |
 | inputs | 11 | `PackRequest`, `CheckOptions`, `MergeOptions`, `IngestOptions` |
 | outputs | 10 | `Report`, `MergeReport`, `ParseOutcome`, `FidelityReport` |
-| errors | 11 | `CodecError`, `ProviderError`, `IntegrityError`, `Error` |
+| errors | 11 | `CodecError`, `ProviderError`, `IntegrityError`, `AnyError` |
 | enumerations | 15 | `Status`, `RelKind`, `SourceKind`, `TraceKind`, `PackMode` |
 | everything else | ~124 | the kernel types, graph types, thread and render types |
 
@@ -68,29 +69,35 @@ Worth keeping public and worth saying we may move.
   `tokenize`). A rename at the facade is a sign the original name was too generic to publish;
   it is not a sign anyone designed the pair.
 
-## Bucket 3 — should not be public
+## Bucket 3 — the three that were open, now decided
 
-**`NodeId`.** `pub type NodeId = u32`, documented as "position in the ascending-uid ordering".
-It is an index into a store's internal layout, it changes when the store changes, and as a
-bare alias it carries no type safety. Every traversal returns `Vec<NodeId>`, so removing it
-means changing those signatures — which is exactly why it should be decided now rather than
-after somebody stores one.
+**`NodeId` is blessed as contract.** It stays a bare `u32` alias, because every traversal
+returns `Vec<NodeId>` and an opaque wrapper buys safety a caller unwraps again immediately.
+The cost is now stated where someone will meet it rather than discovered: a `NodeId` is an
+index and not an identity, stable for one store at one moment, renumbered by any insertion
+because the ordering is by uid and a uid can land anywhere in it. Hold one across a traversal;
+never persist, send, or compare one between stores. The `Uid` is what survives all three.
 
-**The bare `Error`.** Eleven error types are exported and one of them is called `Error`. In a
-facade that is a name nobody can use without aliasing it.
+**The bare `Error` is dropped**, and the type is kept as `AnyError`. It is not a leak — it is
+the unified error, wrapping the other ten and carrying `exit_code()` — so removing it would
+have taken real capability away from an embedder. What was wrong was the *name*: inside
+`smysl-core`, `Error` is idiomatic; through a facade that flattens eleven error types into one
+namespace, `Error` beside `CodecError` and `ParseError` reads as a twelfth sibling rather than
+as the enum that wraps the eleven.
 
-**`unit_core_bytes` and `hash_bytes`.** The first is the hash input of §2.1 and the second is
-BLAKE3 over arbitrary bytes. Both are genuinely useful to an implementer and genuinely
-internal to identity; if they stay, they are contract, and if they are convenience they should
-not be at the top level.
+**`unit_core_bytes` and `hash_bytes` are kept, as contract.** The pair is what a second
+implementation needs to derive a uid: `python/` uses exactly this decomposition, hashing the
+canonical bytes separately from producing them so a disagreement localises to one half. What
+that commits to is the algorithm, and changing the hash moves every uid in existence — which
+makes it a format break under §8.2 rather than an API decision at all.
 
 ---
 
 ## Two things to fix whichever way the buckets fall
 
-**`SalienceRequest` is the only one of eleven input types without `#[non_exhaustive]`.** All
-its fields are `pub`, so adding one is a breaking change and the other ten are protected. This
-is an oversight rather than a decision — ten to one is not a design.
+**`SalienceRequest` was the only one of eleven input types without `#[non_exhaustive]`.**
+Fixed. Adding the marker is itself a break, which is why it is in `SEMVER_BREAKING` — a break
+whose whole purpose is to stop the next addition being one.
 
 **The surface is feature-dependent and the golden file is not.** `tests/public-api.txt` records
 `--all-features`, so a consumer on default features has a different and smaller API than the
@@ -98,13 +105,16 @@ one under version control. Nothing checks the default surface at all.
 
 ---
 
-## What accepting this would change
+## What is done, and what is not
 
-Bucket 1 stays as it is, and `SEMVER_BREAKING` becomes the only way to move it.
+Done: the three bucket-3 decisions, and `SalienceRequest`. All four are breaks, all four are
+recorded in `SEMVER_BREAKING`, and the golden file moved by exactly one line — `Error` became
+`AnyError`, which is the whole visible surface of the change.
 
-Bucket 2 gets said out loud in the crate documentation — that these are a seam rather than a
-promise — so a consumer who builds on them has been told.
+Bucket 2 is now said in `src/lib.rs`, where a consumer reads it rather than only here. Being
+told "this is a seam, not a promise" is the entire value of that bucket; a classification
+nobody outside this file can see is a classification that has not been made.
 
-Bucket 3 is three decisions, each small and each easier now than after a release: hide
-`NodeId` behind an opaque type or accept it as contract, rename or drop the bare `Error`, and
-decide whether the two hash functions are API or convenience.
+Also outstanding: `tests/public-api.txt` records the `--all-features` surface, so a consumer on
+default features has a different and smaller API than the one under version control, and
+nothing checks the default one at all.

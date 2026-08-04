@@ -110,7 +110,12 @@ pub fn recency_at(distance: u32) -> f32 {
 }
 
 /// What to compute salience against.
+///
+/// `#[non_exhaustive]`, like the other ten request and options types. It was the only one
+/// without it, with every field `pub`, which made adding a field here a breaking change while
+/// the same addition anywhere else was not. Ten to one is an oversight rather than a design.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct SalienceRequest {
     pub weights: SalienceWeights,
     /// The personalisation vector: the `question` and `finding` units of the active

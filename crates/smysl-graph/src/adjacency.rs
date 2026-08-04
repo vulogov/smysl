@@ -12,7 +12,20 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::{RelKind, Relation, Uid, Unit};
 
-/// A dense node id. Position in the ascending-uid ordering.
+/// A dense node id: a position in the store's ascending-uid ordering.
+///
+/// **Part of the public contract, deliberately** — every traversal returns `Vec<NodeId>`, and
+/// hiding it behind an opaque type would buy safety a caller has to unwrap again to do
+/// anything useful. The cost of that decision is stated rather than hidden:
+///
+/// A `NodeId` is an index, not an identity. It is stable only for one store at one moment; a
+/// store that gains or loses a unit renumbers everything after the insertion point, because
+/// the ordering is by uid and a uid can land anywhere in it. So a `NodeId` may be held across
+/// a traversal and must not be persisted, sent, or compared between stores. The thing that
+/// survives all three is the `Uid`, which is what `Adjacency::uid` converts to.
+///
+/// It is a bare `u32` alias for the same reason: a newtype would suggest the value means
+/// something on its own, and it does not.
 pub type NodeId = u32;
 
 /// What kind of edge connects two units.

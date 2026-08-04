@@ -39,9 +39,30 @@ Nothing yet. What is carried, and what each is actually waiting on:
   produced zero units on one arm, and DeepSeek returned nothing usable — the last of which is
   now fixed, so it is worth re-running before designing anything further.
 
-- **An API stability *decision*.** Gate 3 is mechanised, not decided: the golden file freezes
-  whatever the facade exports without saying which of the 239 names are contract. That is a
-  judgement, and a release is when it wants making.
+- ~~An API stability decision.~~ **Made.** `Documentation/API_CONTRACT.md` classifies the
+  surface into contract, seam, and three names that were open — and the crate documentation now
+  says the first two out loud, because a classification a consumer cannot see is not one.
+
+  `NodeId` is blessed as contract and stays a bare `u32`: every traversal returns
+  `Vec<NodeId>`, and an opaque wrapper buys safety a caller unwraps again immediately. What
+  blessing it means is that the cost is stated where someone meets it — a `NodeId` is an index,
+  not an identity, renumbered by any insertion, never to be persisted or compared across
+  stores.
+
+  The bare `Error` is dropped and the type kept as `AnyError`. It is not a leak: it is the
+  unified error, wrapping the other ten and carrying `exit_code()`, so deleting it would have
+  cost an embedder real capability. The name was the problem — through a facade flattening
+  eleven error types into one namespace, `Error` beside `CodecError` reads as a twelfth sibling
+  rather than the enum wrapping the eleven.
+
+  `unit_core_bytes` and `hash_bytes` are kept as contract, with what that commits to written
+  down: the algorithm. `python/` derives uids through exactly this decomposition, and changing
+  the hash moves every uid in existence — a format break under §8.2, not an API decision.
+
+  And `SalienceRequest` gained `#[non_exhaustive]`, having been the only one of eleven input
+  types without it. A break whose purpose is to stop the next field addition being one.
+
+  All four are in `SEMVER_BREAKING` with reasons. The golden file moved by one line.
 
 - **Anthropic and OpenAI still need a key.** Everything reachable by reading has been read —
   twice now, and it found a defect each time.

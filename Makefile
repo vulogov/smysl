@@ -163,12 +163,21 @@ api-check: ## Fail if the public surface moved without being recorded
 # be emptied at each release cut — the breaks it names are then in the version that shipped
 # them. Empty means "nothing is knowingly breaking", which is the normal state.
 #
+#   smysl-core — the unified error is exported as `AnyError` rather than `Error`. Inside a
+#   crate `Error` is the idiomatic name; through a facade flattening eleven error types into
+#   one namespace it reads as a twelfth sibling rather than the enum wrapping the other eleven.
+#   The type is unchanged; only the name it is re-exported under moved.
+#
+#   smysl-graph — `SalienceRequest` gained `#[non_exhaustive]`. Technically a break, and the
+#   fix for one: it was the only input type of eleven without it, so adding a field to it was
+#   breaking while the same addition elsewhere was not.
+#
 #   smysl-provider — `Gemini::parse` and `Anthropic::parse` take the request's cap as an
 #   argument. The error they build quotes a limit, and quoting the *configured* one produced
 #   "context window exceeded: 1008 > 32768": true to its fields, nonsense to a reader. Fixed at
 #   the call site in 0.10 because the baseline was two unpublished releases stale and could not
 #   tell a deliberate break from a missing crate. It can now.
-SEMVER_BREAKING := smysl-provider
+SEMVER_BREAKING := smysl-core smysl-graph smysl-provider
 
 semver: ## Report API breakage against the last published version
 	@command -v cargo-semver-checks >/dev/null || { echo "cargo install cargo-semver-checks"; exit 1; }

@@ -18,6 +18,7 @@ pub use smysl::Admission
 pub use smysl::AgentActivity
 pub use smysl::AgentId
 pub use smysl::AgentKind
+pub use smysl::AnyError
 pub use smysl::AppendReport
 pub use smysl::Artifact
 pub use smysl::AttestOptions
@@ -58,7 +59,6 @@ pub use smysl::EdgeSet
 pub use smysl::EffectiveStatus
 pub use smysl::EmbedModel
 pub use smysl::Entry
-pub use smysl::Error
 pub use smysl::Estimator
 pub use smysl::ExitCode
 pub use smysl::Extra
