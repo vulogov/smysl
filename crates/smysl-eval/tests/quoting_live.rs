@@ -190,13 +190,27 @@ fn run_arm(
     mode: StructuredMode,
     cap: usize,
 ) -> Option<Shape> {
-    //  and not just the config: the mapper sends *this* number as the
-    // provider's cap. The config's  is only what the error message quotes, which
-    // is how three runs were spent chasing "context window exceeded: 1008 > 32768".
-    let req = Request::new("", t.render(prose))
+    // `with_max_output` and not just the config: the mapper sends *this* number as the
+    // provider's cap, and the config's is only what the error used to quote — which is how
+    // three runs were spent chasing "context window exceeded: 1008 > 32768".
+    //
+    // The schema goes wherever the provider will read it, exactly as `Ingestor::request` does.
+    // This harness built its own request and so did not inherit that fix, and it showed:
+    // DeepSeek returned zero units on every fixture of every arm, twice, which read as a
+    // useless provider rather than a prompt naming a schema nobody had sent. An experiment
+    // whose control arm is broken measures the breakage.
+    let mut req = Request::new("", t.render(prose))
         .with_max_output(cap)
-        .with_system(&t.system)
-        .with_schema(mode, smysl_ingest::schema::batch_schema());
+        .with_system(&t.system);
+    if mode.is_enforced() {
+        req = req.with_schema(mode, smysl_ingest::schema::batch_schema());
+    } else {
+        req = req.with_system(format!(
+            "{}\n\nThe schema your object must match:\n{}",
+            t.system,
+            smysl_ingest::schema::batch_schema()
+        ));
+    }
     match p.complete(&req) {
         Ok(c) => Some(shape_of(&c.text)),
         Err(e) => {

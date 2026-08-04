@@ -152,12 +152,36 @@ api-check: ## Fail if the public surface moved without being recorded
 # breaking-allowed bump and cargo-semver-checks skips every check: "0 checks: 0 pass, 254
 # skip", reported as a pass. Forcing patch makes the 223 checks actually run. A gate that
 # green-lights by skipping is the failure this project keeps finding.
+# Crates with a **deliberate** break this cycle, and why.
+#
+# `--release-type patch` below forbids any break, which is the sensitive setting and the only
+# one that runs the checks at all — on a 0.x crate the real release type permits breaking, so
+# cargo-semver-checks skips all 223 and reports a pass. Sensitivity is the point; the cost is
+# that an intended break also fails.
+#
+# So an intended break is recorded here rather than by loosening the check, and the list must
+# be emptied at each release cut — the breaks it names are then in the version that shipped
+# them. Empty means "nothing is knowingly breaking", which is the normal state.
+#
+#   smysl-provider — `Gemini::parse` and `Anthropic::parse` take the request's cap as an
+#   argument. The error they build quotes a limit, and quoting the *configured* one produced
+#   "context window exceeded: 1008 > 32768": true to its fields, nonsense to a reader. Fixed at
+#   the call site in 0.10 because the baseline was two unpublished releases stale and could not
+#   tell a deliberate break from a missing crate. It can now.
+SEMVER_BREAKING := smysl-provider
+
 semver: ## Report API breakage against the last published version
 	@command -v cargo-semver-checks >/dev/null || { echo "cargo install cargo-semver-checks"; exit 1; }
 	@set -e; for c in $(PUBLISHED); do \
+		case " $(SEMVER_BREAKING) " in \
+			*" $$c "*) echo "SKIP $$c: a deliberate break this cycle, see SEMVER_BREAKING"; continue;; \
+		esac; \
 		$(CARGO) semver-checks check-release --baseline-version $(BASELINE) \
 			--release-type patch -p $$c; \
 	done
+	@if [ -n "$(SEMVER_BREAKING)" ]; then \
+		echo; echo "note: $(SEMVER_BREAKING) skipped as knowingly breaking; empty SEMVER_BREAKING at the release cut"; \
+	fi
 
 lint: ## fmt --check and clippy -D warnings, as CI runs them
 	$(CARGO) fmt --all -- --check
