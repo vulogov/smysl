@@ -31,6 +31,15 @@ pub fn verify(core: &UnitCore, stored: &Uid) -> Result<(), IntegrityError> {
 }
 
 /// BLAKE3 over arbitrary bytes, for recipe hashing and the index sidecar.
+///
+/// Public contract, along with [`unit_core_bytes`]. The pair is what a second implementation
+/// needs to derive a uid at all — `python/` uses exactly this decomposition, hashing the
+/// canonical bytes separately from producing them, so that a disagreement says which half is
+/// wrong. Keeping them exported is what makes §2.1 reproducible outside this crate rather than
+/// only assertable about it.
+///
+/// What that commits to: the algorithm. Changing the hash changes every uid in existence, so
+/// it is a format break under §8.2 and not an API decision at all.
 pub fn hash_bytes(b: &[u8]) -> [u8; 32] {
     *blake3::hash(b).as_bytes()
 }

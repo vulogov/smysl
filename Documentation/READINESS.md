@@ -13,12 +13,17 @@ meant publishing a claim. It is closed three times over. What remains is coverag
 and 0.x is the honest signal for that — the version says the surface can still move, and gate
 3 says exactly where.
 
-**0.10.0 is released and not published**, which is a state worth naming because it is easy to
-read a tag as a publication. `cargo-semver-checks` fetches its baseline from crates.io, so
-`BASELINE` in the Makefile tracks the last *published* version rather than the last tagged
-one; pointing it at 0.10.0 turns all twelve crates into "version not found in registry". The
-consequence that bites is that a breaking change is still measured against 0.9.0, so a repair
-wanting the public surface to move stays parked until 0.10.0 goes up.
+**0.11.0 is published**, and 0.10.0 is not and now never will be — publishing an older version
+after a newer one is possible and perverse, and everything in it is in 0.11.0. Not every tag is
+a publication.
+
+That gap is worth remembering rather than tidying away. `cargo-semver-checks` fetches its
+baseline from crates.io, so `BASELINE` in the Makefile tracks the last *published* version and
+not the last tagged one; it sat at 0.9.0 across two cut-but-unpublished releases, which meant
+every breaking change was being measured against a version two releases old, and the
+`ContextExceeded` repair that wants `parse`'s signature to move was parked behind it. Pointing
+it at an unpublished version does not fail loudly — it turns all twelve crates into "version
+not found in registry", a red job saying nothing about the API.
 
 Nothing here is a schedule. The point is that each item is either done, or has a next action
 that someone could take.
@@ -141,8 +146,28 @@ than a bearer token, the `anthropic-version` header, `system` as a top-level fie
 That is now twice this method has found a defect without a key. What it still cannot answer for
 either provider is whether the endpoint *accepts* the translated schema.
 
-**Next action:** unchanged — a key, for OpenAI and Anthropic both. Everything reachable by
-reading has been read.
+**Mutation testing in 0.12 found the gap this gate describes is not the gap it has.** 477
+viable mutants, 31% survivors — the worst of any crate but the packer, and 25 of them on one
+cluster: what a mapper makes of an HTTP failure. `delete match arm 401 | 403`, `replace match
+guard is_backpressure(s) with false`, `replace >= with <` on the `status >= 400` boundary.
+
+The point is *which* providers. Gemini, DeepSeek and Ollama have all been exercised live, and
+the survivors are spread evenly across all five mappers. Live testing verified that a
+**successful** call works; nobody provokes a 401 against a real endpoint, so the failure
+taxonomy went unexercised on the verified providers too. **A key would not have found this.**
+
+That taxonomy decides behaviour rather than wording: `Unauthorized` stops the run,
+`RateLimited` is retried with backoff, `Upstream` may fall through to another provider.
+Misclassify a 429 as a fault and a transient overload ends a pipeline; misclassify a 401 as
+backpressure and the CLI retries a credential that will never work, three times, with jitter.
+
+`tests/status_taxonomy.rs` covers all five at once, with a control that fails a mapper
+returning any single variant for everything. Confirmed against three real survivors in three
+different mappers.
+
+**Next action:** still a key, for acceptance — whether the endpoint takes the translated
+schema is unreachable without one. But the table above is the more honest reading of what
+"verified" has meant here: the happy path, on three of five.
 
 ## 5. A test suite that catches what it claims — *measuring, and now cross-checked*
 
@@ -188,6 +213,35 @@ Both ran in 0.10 as well, and the numbers are now three points on one curve rath
 | `cbor/envelope.rs` | 115 | **2.6%** |
 | `smysl-check` (0.11) | 143 | **9.1%** |
 | `smysl-graph` (0.11) | 625 | **15.0%** |
+| `smysl-provider` (0.12) | 477 | **31.0%** |
+| `smysl-render` (0.12) | 144 | **12.5%** |
+| `smysl-retrieve` (0.12) | 77 | **15.6%** |
+| `smysl-embed` (0.12) | 59 | **22.0%** |
+| `smysl-thread` (0.12) | 84 | **22.6%** |
+| `smysl-ingest` (0.12) | 337 | **28.8%** |
+| `smysl`, the CLI (0.12) | 269 | **73.6%** |
+
+**Every crate in the workspace is now measured.** The library sits between 2.6% and 31%, in a
+band that has stopped being surprising: most survivors are accessors, display strings and
+equivalent mutants, and each run has turned up a handful of real gaps.
+
+**The CLI is not in that band, and the difference is not an artefact.** 73.6% is more than
+twice the worst library crate. The obvious explanation is the per-crate one — `cargo mutants -p
+smysl` runs `cargo test -p smysl`, and the CLI's principal verification is `make doc-output`,
+a Python script replaying 46 documented transcripts against the built binary, which no cargo
+test invokes. That would make mutation testing structurally blind to it.
+
+It is not the whole explanation. Spot-checking a survivor against *both* — `cargo test -p
+smysl` and `make doc-output` — it survives both. `src/main.rs` has four tests across 3 600
+lines and `src/progress.rs` has twelve across 394, and 52 of the CLI's survivors are in
+`progress.rs` alone: arithmetic and comparisons in bar drawing, where the tests check the
+structure and never the numbers.
+
+**Next action:** not "fix 357 survivors". The band 12–31% has yielded roughly one real gap per
+crate and reading each survivor is the expensive part, so the yield per hour is falling. The
+CLI is the exception worth acting on, and the useful first move there is to make its real
+verification visible to measurement — `doc-output` is the test that covers it, and nothing that
+counts coverage can see it.
 
 **Read these as "does this crate's own suite cover it", not "is this covered".** `cargo mutants
 -p X` runs `cargo test --package=X`, so a function only exercised by a downstream crate is

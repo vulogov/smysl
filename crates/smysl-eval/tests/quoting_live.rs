@@ -34,10 +34,39 @@
 //! model, and 0.8 established that an uncontrolled judge measures its own bias. These four are
 //! counts, and counts are what a first pass can honestly produce.
 //!
-//! This is a **pilot**, and reports itself as one. Two arms over a handful of documents on one
-//! model is enough to see a large effect and not enough to rule one out. A difference under
-//! the run-to-run spread of a single arm is not a finding, so the harness runs each arm twice
-//! and prints the spread next to the difference.
+//! # Closed, negative
+//!
+//! **No detectable effect**, at n=6, on three fixtures, on two models. The suspicion carried
+//! since 0.7 — that requiring a quote coarsens what a model extracts — has no support. Unit
+//! counts overlap everywhere; so does everything else, in five of six fixture-model pairs.
+//!
+//! The single separation found (`struct%`, DeepSeek on F2) is what chance produces: six pairs
+//! times four metrics is twenty-four comparisons a run, and it appeared in the second run
+//! having been absent from the first.
+//!
+//! Two runs at n=6 are what settled it, and comparing them is the whole lesson. The `body%`
+//! column looked like a large, consistent, cross-model effect in run one — 83 against 0, 100
+//! against 0, 87 against 3 — and in run two the same fixtures gave 100/17, 83/83 and 53/0. The
+//! gaps move more between runs than between arms. Within-run variance swamps the difference,
+//! which is precisely what the range test exists to notice and precisely what reading a
+//! column of means cannot.
+//!
+//! The harness is kept rather than deleted: it is how the question was answered, and the same
+//! two arms would be needed to ask it again with more power or different metrics.
+//!
+//! Sample size is the whole difficulty. The 0.10 pilot ran each arm twice, and the between-arm
+//! difference landed inside one arm's own run-to-run spread on every fixture of every model —
+//! which is not evidence of no effect, it is an absence of power. `SMYSL_QUOTING_RUNS`
+//! controls it, defaulting to six.
+//!
+//! The verdict is computed rather than eyeballed: a metric reports a difference only when the
+//! two arms' ranges do not overlap. That is blunt, and blunt is right here — with samples this
+//! small, anything finer would be arithmetic dressed as inference.
+//!
+//! **All four metrics, not just the unit count.** The first version tested units alone and
+//! printed "no effect visible", which was true of units and false of the run: `body%` stood at
+//! 83 against 0 on the same fixtures and the verdict said nothing, because it was not looking
+//! there.
 
 use std::collections::BTreeSet;
 
@@ -173,6 +202,17 @@ fn provider_for(e: &Endpoint) -> Option<Box<dyn Provider>> {
     smysl_provider::map::build(&cfg).ok()
 }
 
+/// A named way of reading one number off a `Shape`.
+type Metric = (&'static str, fn(&Shape) -> f64);
+
+/// Runs per arm. Six by default; `SMYSL_QUOTING_RUNS` overrides it for a longer look.
+fn runs() -> usize {
+    std::env::var("SMYSL_QUOTING_RUNS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(6)
+}
+
 fn corpus_prose(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/corpus")
@@ -190,13 +230,27 @@ fn run_arm(
     mode: StructuredMode,
     cap: usize,
 ) -> Option<Shape> {
-    //  and not just the config: the mapper sends *this* number as the
-    // provider's cap. The config's  is only what the error message quotes, which
-    // is how three runs were spent chasing "context window exceeded: 1008 > 32768".
-    let req = Request::new("", t.render(prose))
+    // `with_max_output` and not just the config: the mapper sends *this* number as the
+    // provider's cap, and the config's is only what the error used to quote — which is how
+    // three runs were spent chasing "context window exceeded: 1008 > 32768".
+    //
+    // The schema goes wherever the provider will read it, exactly as `Ingestor::request` does.
+    // This harness built its own request and so did not inherit that fix, and it showed:
+    // DeepSeek returned zero units on every fixture of every arm, twice, which read as a
+    // useless provider rather than a prompt naming a schema nobody had sent. An experiment
+    // whose control arm is broken measures the breakage.
+    let mut req = Request::new("", t.render(prose))
         .with_max_output(cap)
-        .with_system(&t.system)
-        .with_schema(mode, smysl_ingest::schema::batch_schema());
+        .with_system(&t.system);
+    if mode.is_enforced() {
+        req = req.with_schema(mode, smysl_ingest::schema::batch_schema());
+    } else {
+        req = req.with_system(format!(
+            "{}\n\nThe schema your object must match:\n{}",
+            t.system,
+            smysl_ingest::schema::batch_schema()
+        ));
+    }
     match p.complete(&req) {
         Ok(c) => Some(shape_of(&c.text)),
         Err(e) => {
@@ -247,12 +301,14 @@ fn quote_requirement_versus_none() {
         );
         for f in FIXTURES {
             let prose = corpus_prose(f);
-            // Twice per arm: the run-to-run spread of one arm is the floor below which a
-            // difference between arms says nothing.
-            let a: Vec<Shape> = (0..2)
+            // `RUNS` per arm. Two was a pilot and could not see past the noise: the
+            // between-arm difference landed inside one arm's own spread every time, which is
+            // not "no effect" but "no power". Six is enough to separate an effect the size of
+            // the spread from the spread itself, and cheap enough to actually run.
+            let a: Vec<Shape> = (0..runs())
                 .filter_map(|_| run_arm(&*p, &with, &prose, e.mode, e.max_output))
                 .collect();
-            let b: Vec<Shape> = (0..2)
+            let b: Vec<Shape> = (0..runs())
                 .filter_map(|_| run_arm(&*p, &without, &prose, e.mode, e.max_output))
                 .collect();
             if a.is_empty() || b.is_empty() {
@@ -274,19 +330,55 @@ fn quote_requirement_versus_none() {
                 m(&a, |s| Shape::pct(s.with_structure, s.units)),
                 m(&b, |s| Shape::pct(s.with_structure, s.units)),
             );
-            let spread = |v: &Vec<Shape>| {
-                let u: Vec<f64> = v.iter().map(|s| s.units as f64).collect();
-                u.iter().cloned().fold(0.0, f64::max) - u.iter().cloned().fold(f64::MAX, f64::min)
-            };
+            // The verdict, stated per fixture rather than left to the reader's eye.
+            //
+            // A difference is reported only when the two arms' unit-count ranges do not
+            // overlap at all. That is a blunt test and deliberately so: with samples this
+            // small anything finer would be arithmetic dressed as inference, and the honest
+            // question is whether the arms are even separable.
+            // All four metrics, not just the unit count.
+            //
+            // The first version of this tested `units` alone and printed "no effect visible",
+            // which was true of units and false of the run: the body column showed 83% against
+            // 0% on the same fixtures, and the verdict line said nothing because it was not
+            // looking there. A check answering a narrower question than its wording implies is
+            // the defect this project keeps finding, and this one was mine.
+            let lo = |u: &[f64]| u.iter().cloned().fold(f64::MAX, f64::min);
+            let hi = |u: &[f64]| u.iter().cloned().fold(f64::MIN, f64::max);
+            let metrics: [Metric; 4] = [
+                ("units", |s| s.units as f64),
+                ("gist", |s| s.mean_gist()),
+                ("body%", |s| Shape::pct(s.with_body, s.units)),
+                ("struct%", |s| Shape::pct(s.with_structure, s.units)),
+            ];
+            let mut verdicts: Vec<String> = Vec::new();
+            for (name, get) in metrics {
+                let ua: Vec<f64> = a.iter().map(get).collect();
+                let ub: Vec<f64> = b.iter().map(get).collect();
+                if hi(&ua) < lo(&ub) || hi(&ub) < lo(&ua) {
+                    verdicts.push(format!(
+                        "{name} SEPARATED (q {:.0}..{:.0} vs - {:.0}..{:.0})",
+                        lo(&ua),
+                        hi(&ua),
+                        lo(&ub),
+                        hi(&ub)
+                    ));
+                }
+            }
             println!(
-                "{:<18} run-to-run spread in unit count: quote {:.1}, no-quote {:.1}",
+                "{:<18} n={}/{}  {}",
                 "",
-                spread(&a),
-                spread(&b)
+                a.len(),
+                b.len(),
+                if verdicts.is_empty() {
+                    "no metric separates at this sample size".to_string()
+                } else {
+                    verdicts.join("; ")
+                }
             );
         }
-        println!("\n(q) = quote required, (-) = quote paragraph removed. A pilot: two runs per");
-        println!("arm. A difference smaller than the spread above is not a finding.");
+        println!("\n(q) = quote required, (-) = quote paragraph removed.");
+        println!("A fixture reports a difference only if the two arms' ranges do not overlap.");
     }
 }
 

@@ -290,4 +290,46 @@ mod tests {
         b.sort();
         assert_eq!(a.diagnostics, b.diagnostics);
     }
+
+    /// Rule M's boundary: *at* the cap is legal, and only *above* it is a violation.
+    ///
+    /// Mutation testing in 0.11 flipped `status > cap` to `status >= cap` with nothing
+    /// failing — every existing test had a unit comfortably under its cap or clearly over it,
+    /// and none sat exactly on it. The mutant rejects the commonest legal shape in the format:
+    /// a claim held at precisely the strength of what it rests on.
+    ///
+    /// Building the fixture took two tries, and both failures are worth the comment. A pair at
+    /// `cited` fails in the *constructor* with `SourceRequired`, never reaching the pass. A
+    /// pair at `speculative` reaches the pass and is skipped, because rule M constrains only
+    /// the statuses that require grounds. So the unit under test must be `derived` or
+    /// `inferred`, and its weakest ground must be too — which needs a chain, not a pair.
+    #[test]
+    fn a_unit_exactly_at_its_weakest_ground_is_legal() {
+        let m = measured("a measurement"); // cap: measured
+        let um = canonical_uid(&m);
+        let mid = grounded("a derivation from it", Status::Derived, vec![um]);
+        let umid = canonical_uid(&mid); // legal: derived < measured
+        let top = grounded("a derivation from that", Status::Derived, vec![umid]);
+
+        let r = check(vec![Record::Unit(m), Record::Unit(mid), Record::Unit(top)]);
+        assert_eq!(
+            r.count(Code::E030),
+            0,
+            "a unit at exactly its ground's status was reported as exceeding it"
+        );
+    }
+
+    /// The control. Without it the test above passes for a pass that reports nothing at all.
+    #[test]
+    fn a_unit_one_step_above_its_weakest_ground_is_not() {
+        let g = speculative("a speculative ground");
+        let ug = canonical_uid(&g);
+        let c = grounded("a claim held too strongly", Status::Inferred, vec![ug]);
+        let r = check(vec![Record::Unit(g), Record::Unit(c)]);
+        assert_eq!(
+            r.count(Code::E030),
+            1,
+            "one step above the cap must still be a violation"
+        );
+    }
 }

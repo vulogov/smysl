@@ -32,13 +32,43 @@
 #![deny(rust_2018_idioms)]
 
 // ---- core: identifiers, kernel types, codec, identity ----------------------
+/// Every error this crate can raise, in one enum, with the CLI's exit code attached.
+///
+/// Exported as `AnyError` rather than `Error`, which is what it is called in `smysl-core`.
+/// Inside a crate that name is idiomatic; through a facade that flattens eleven error types
+/// into one namespace it is not — `Error` sitting beside `CodecError` and `ParseError` reads
+/// as a twelfth sibling rather than as the enum that wraps the other eleven.
+pub use smysl_core::Error as AnyError;
+// What this crate promises, and what it merely exposes.
+//
+// `Documentation/API_CONTRACT.md` has the reasoning; the short version belongs here, because a
+// consumer reads the crate and not the repository.
+//
+// **Contract.** The kernel vocabulary — `Uid`, `UnitCore`, `Status`, `RelKind`, `Record` and
+// their neighbours — and the twelve operations over it: `parse_surface`, `write_surface`,
+// `to_cbor`, `from_cbor`, `canonical_uid`, `check`, `pack`, `merge`, `salience`,
+// `derive_thread`, `trace`, `compact`. Their errors, inputs and outputs go with them. These
+// are the format, three other implementations model them, and guarantee A5 already promises
+// something stronger than semver about the operations: making one non-reproducible is
+// breaking whatever the signature says.
+//
+// **A seam, not a promise.** The provider machinery (`ProviderConfig`, `Request`,
+// `Completion`, `Usage`, `StructuredMode`, `Capabilities`), and render and retrieval (`Bm25`,
+// `Hybrid`, `Semantic`, `EmbedModel`, `Query`, `Hit`, `Retriever`). These are public because
+// the contract needs them, not because anyone designed them to be built on — `Hybrid` changed
+// shape twice inside 0.7 alone. Build on them by all means; expect them to move, and pin a
+// version if that matters.
+//
+// The distinction is not enforced by anything. It is stated so that a consumer who relies on
+// the second group has been told, rather than finding out at an upgrade.
+
 pub use smysl_core::surface;
 pub use smysl_core::surface::{parse_surface, write_surface, ParseOutcome, WriteContext};
 pub use smysl_core::{
     canonical_uid, format_version_supported, from_cbor, from_cbor_seq, hash_bytes, json_escape,
     kernel_major, quantise, to_cbor, to_cbor_seq, tokens, unit_core_bytes, verify, Admission,
     AgentId, AgentKind, Attestation, Code, CodecError, Contention, ContentionId, ContentionStatus,
-    Date, Detected, DetectionKind, Diagnostic, DropReason, Error, ExitCode, Extra, Fidelity,
+    Date, Detected, DetectionKind, Diagnostic, DropReason, ExitCode, Extra, Fidelity,
     GranularityProfile, Group, Hlc, IdError, IntegrityError, KernelType, Label, LabelBinding,
     LangTag, Lod, NonDetReason, Op, Optimality, PackInfo, PackMode, ParseError, Record, RelKind,
     Relation, Report, Role, Rung, SchemaDecl, SchemaId, Severity, ShapeError, SourceKind,
@@ -151,7 +181,7 @@ mod tests {
     /// manifest, and the diff will say what you decided.
     #[test]
     fn the_crate_version_is_the_one_we_intend_to_ship() {
-        assert_eq!(VERSION, "0.11.0");
+        assert_eq!(VERSION, "0.12.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two

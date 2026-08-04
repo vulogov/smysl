@@ -129,7 +129,17 @@ impl Anthropic {
     ///
     /// Reading only the first block would truncate a two-block answer, which is the usual
     /// shape when a model narrates before calling a tool.
-    pub fn parse(&self, raw: &str, retries: u32) -> Result<Completion, ProviderError> {
+    /// Parse a completion, against the cap that was actually sent.
+    ///
+    /// `cap` is the request's `max_output`, not the configuration's. A mapper sends
+    /// `req.max_output` — `Request::new` defaults it to 1024 — and reporting the configured
+    /// number instead produced "context window exceeded: 1008 > 32768": true to its fields and
+    /// nonsense to a reader, because the two came from different places.
+    ///
+    /// 0.10 corrected it at the call site, because widening this signature is a breaking change
+    /// and the semver baseline was two unpublished releases stale. It is a parameter now, which
+    /// is where it belonged: the error is built here, so the number it needs belongs here.
+    pub fn parse(&self, raw: &str, retries: u32, cap: usize) -> Result<Completion, ProviderError> {
         let v: Value = serde_json::from_str(raw)
             .map_err(|e| ProviderError::Malformed(format!("response is not JSON: {e}")))?;
 
@@ -167,7 +177,7 @@ impl Anthropic {
         // whole one.
         if v.get("stop_reason").and_then(Value::as_str) == Some("max_tokens") {
             return Err(ProviderError::ContextExceeded {
-                limit: self.cfg.max_output,
+                limit: cap,
                 requested: text.len(),
             });
         }
@@ -309,8 +319,7 @@ impl Provider for Anthropic {
         if resp.status >= 400 {
             return Err(self.status_error(resp.status, &resp.body));
         }
-        self.parse(&resp.body, resp.retries)
-            .map_err(|e| super::report_against(e, req.max_output))
+        self.parse(&resp.body, resp.retries, req.max_output)
     }
 
     fn count_tokens(&self, text: &str) -> TokenCount {
@@ -410,7 +419,7 @@ mod tests {
         let raw = r#"{"model":"claude-sonnet-5","stop_reason":"end_turn",
             "content":[{"type":"text","text":"first "},{"type":"text","text":"second"}],
             "usage":{"input_tokens":10,"output_tokens":4}}"#;
-        let c = provider().parse(raw, 0).unwrap();
+        let c = provider().parse(raw, 0, cfg().max_output).unwrap();
         assert_eq!(c.text, "first second");
         assert!(!c.structured, "no tool block, so no enforcement happened");
     }
@@ -422,7 +431,7 @@ mod tests {
                        {"type":"tool_use","name":"emit_smysl_units",
                         "input":{"units":[{"type":"claim","gist":"g","status":"speculative"}]}}],
             "usage":{"input_tokens":10,"output_tokens":20}}"#;
-        let c = provider().parse(raw, 0).unwrap();
+        let c = provider().parse(raw, 0, cfg().max_output).unwrap();
         assert!(c.structured, "the tool was used, so structure was enforced");
         assert!(c.text.contains("\"units\""), "{}", c.text);
         assert!(
@@ -435,7 +444,7 @@ mod tests {
     fn a_max_tokens_stop_is_a_context_error() {
         let raw = r#"{"stop_reason":"max_tokens","content":[{"type":"text","text":"half"}]}"#;
         assert!(matches!(
-            provider().parse(raw, 0),
+            provider().parse(raw, 0, cfg().max_output),
             Err(ProviderError::ContextExceeded { .. })
         ));
     }
@@ -444,7 +453,7 @@ mod tests {
     fn usage_comes_from_the_documented_field_names() {
         let raw = r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"x"}],
                       "usage":{"input_tokens":31,"output_tokens":7}}"#;
-        let c = provider().parse(raw, 2).unwrap();
+        let c = provider().parse(raw, 2, cfg().max_output).unwrap();
         assert_eq!(c.usage.input_tokens, 31);
         assert_eq!(c.usage.output_tokens, 7);
         assert!(!c.usage.estimated);

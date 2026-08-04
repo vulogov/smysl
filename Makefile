@@ -101,11 +101,10 @@ doc-gate: ## Rustdoc with warnings denied, as docs.rs would show it
 # The last **published** version, and what is published.
 #
 # Published, not tagged. `cargo-semver-checks` fetches the baseline from crates.io, so this
-# moves when a release is pushed to the registry and not when it is cut — 0.10.0 was tagged and
-# merged without being published, and setting this to it turned every one of the twelve into
-# "crate smysl-core version 0.10.0 not found in registry", which is a red CI job that says
-# nothing about the API.
-BASELINE  := 0.9.0
+# moves when a release reaches the registry and not when it is cut. It sat at 0.9.0 through two
+# cut-but-unpublished releases, which meant every breaking change was measured against a
+# version two releases old; 0.10.0 remains unpublished and 0.11.0 is the baseline now.
+BASELINE  := 0.11.0
 PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-render \
              smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl
 
@@ -134,31 +133,86 @@ docs: ## Rebuild the PDFs in Documentation/ from their typst sources
 # targets answer different questions and both are needed: `api-check` says the *list* changed,
 # `semver` says the change was breaking. A rename shows up in the first; adding
 # `#[non_exhaustive]` to a struct shows up only in the second.
-api: ## Regenerate the recorded public surface
+api: ## Regenerate the recorded public surfaces, both ends
 	@command -v cargo-public-api >/dev/null || { echo "cargo install cargo-public-api"; exit 1; }
 	@{ sed -n '1,/^# Regenerate with/p' tests/public-api.txt; \
 	   $(CARGO) public-api --all-features --simplified 2>/dev/null; } > tests/public-api.txt.new
 	@mv tests/public-api.txt.new tests/public-api.txt
-	@echo "api: recorded $$($(CARGO) public-api --all-features --simplified 2>/dev/null | wc -l | tr -d ' ') names"
+	@{ sed -n '1,/^# Regenerate with/p' tests/public-api-pure.txt; \
+	   $(CARGO) public-api --no-default-features --simplified 2>/dev/null; } > tests/public-api-pure.txt.new
+	@mv tests/public-api-pure.txt.new tests/public-api-pure.txt
+	@echo "api: recorded $$($(CARGO) public-api --all-features --simplified 2>/dev/null | wc -l | tr -d ' ') names at --all-features, $$($(CARGO) public-api --no-default-features --simplified 2>/dev/null | wc -l | tr -d ' ') pure"
 
-api-check: ## Fail if the public surface moved without being recorded
+# Both ends, and the nesting between them.
+#
+# One file was not enough. Recording only `--all-features` freezes the maximum, so a name could
+# stop being reachable on default features while the recorded surface never moved — and the
+# README recommends `default-features = false` for the pure library, which had nothing checking
+# it at all.
+api-check: ## Fail if either recorded surface moved, or if they stop nesting
 	@command -v cargo-public-api >/dev/null || { echo "cargo install cargo-public-api"; exit 1; }
-	@$(CARGO) public-api --all-features --simplified 2>/dev/null > /tmp/smysl-api-now.txt
-	@grep -v '^#' tests/public-api.txt | grep -v '^$$' > /tmp/smysl-api-was.txt
-	@diff -u /tmp/smysl-api-was.txt /tmp/smysl-api-now.txt \
-	  || { echo "api-check: the public surface moved. If deliberate, run 'make api'."; exit 1; }
-	@echo "api-check: the public surface matches what is recorded"
+	@$(CARGO) public-api --all-features --simplified 2>/dev/null > /tmp/smysl-api-all.txt
+	@$(CARGO) public-api --no-default-features --simplified 2>/dev/null > /tmp/smysl-api-pure.txt
+	@$(CARGO) public-api --simplified 2>/dev/null > /tmp/smysl-api-def.txt
+	@grep -v '^#' tests/public-api.txt | grep -v '^$$' > /tmp/smysl-api-all-was.txt
+	@grep -v '^#' tests/public-api-pure.txt | grep -v '^$$' > /tmp/smysl-api-pure-was.txt
+	@diff -u /tmp/smysl-api-all-was.txt /tmp/smysl-api-all.txt \
+	  || { echo "api-check: the --all-features surface moved. If deliberate, run 'make api'."; exit 1; }
+	@diff -u /tmp/smysl-api-pure-was.txt /tmp/smysl-api-pure.txt \
+	  || { echo "api-check: the pure surface moved. If deliberate, run 'make api'."; exit 1; }
+	@sort /tmp/smysl-api-all.txt > /tmp/a.s; sort /tmp/smysl-api-def.txt > /tmp/d.s; sort /tmp/smysl-api-pure.txt > /tmp/p.s
+	@test -z "$$(comm -13 /tmp/a.s /tmp/d.s)" \
+	  || { echo "api-check: default features expose a name --all-features does not"; exit 1; }
+	@test -z "$$(comm -13 /tmp/d.s /tmp/p.s)" \
+	  || { echo "api-check: --no-default-features exposes a name default does not"; exit 1; }
+	@echo "api-check: both surfaces match, and pure <= default <= all-features"
 
 # `--release-type patch` is load bearing. Without it, 0.9 -> 0.10 on a 0.x crate is a
 # breaking-allowed bump and cargo-semver-checks skips every check: "0 checks: 0 pass, 254
 # skip", reported as a pass. Forcing patch makes the 223 checks actually run. A gate that
 # green-lights by skipping is the failure this project keeps finding.
+# Crates with a **deliberate** break this cycle, and why.
+#
+# `--release-type patch` below forbids any break, which is the sensitive setting and the only
+# one that runs the checks at all — on a 0.x crate the real release type permits breaking, so
+# cargo-semver-checks skips all 223 and reports a pass. Sensitivity is the point; the cost is
+# that an intended break also fails.
+#
+# So an intended break is recorded here rather than by loosening the check, and the list is
+# emptied when the breaks it names **reach the registry** — not when they are tagged. That
+# distinction is the same one `BASELINE` turns on: cargo-semver-checks compares against the
+# published version, so a break that is merely released is still a break against the baseline
+# and still needs recording. 0.12.0 is cut and unpublished, so this list stays as it is and
+# empties on publication. Empty is the normal state.
+#
+#   smysl-core — the unified error is exported as `AnyError` rather than `Error`. Inside a
+#   crate `Error` is the idiomatic name; through a facade flattening eleven error types into
+#   one namespace it reads as a twelfth sibling rather than the enum wrapping the other eleven.
+#   The type is unchanged; only the name it is re-exported under moved.
+#
+#   smysl-graph — `SalienceRequest` gained `#[non_exhaustive]`. Technically a break, and the
+#   fix for one: it was the only input type of eleven without it, so adding a field to it was
+#   breaking while the same addition elsewhere was not.
+#
+#   smysl-provider — `Gemini::parse` and `Anthropic::parse` take the request's cap as an
+#   argument. The error they build quotes a limit, and quoting the *configured* one produced
+#   "context window exceeded: 1008 > 32768": true to its fields, nonsense to a reader. Fixed at
+#   the call site in 0.10 because the baseline was two unpublished releases stale and could not
+#   tell a deliberate break from a missing crate. It can now.
+SEMVER_BREAKING := smysl-core smysl-graph smysl-provider
+
 semver: ## Report API breakage against the last published version
 	@command -v cargo-semver-checks >/dev/null || { echo "cargo install cargo-semver-checks"; exit 1; }
 	@set -e; for c in $(PUBLISHED); do \
+		case " $(SEMVER_BREAKING) " in \
+			*" $$c "*) echo "SKIP $$c: a deliberate break this cycle, see SEMVER_BREAKING"; continue;; \
+		esac; \
 		$(CARGO) semver-checks check-release --baseline-version $(BASELINE) \
 			--release-type patch -p $$c; \
 	done
+	@if [ -n "$(SEMVER_BREAKING)" ]; then \
+		echo; echo "note: $(SEMVER_BREAKING) skipped as knowingly breaking; empty SEMVER_BREAKING at the release cut"; \
+	fi
 
 lint: ## fmt --check and clippy -D warnings, as CI runs them
 	$(CARGO) fmt --all -- --check

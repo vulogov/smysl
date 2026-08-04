@@ -7,6 +7,86 @@ and the facade asserts the two are independent.
 
 ---
 
+## 0.12.0 — 2026-08-04
+
+The cycle that finished measuring, and found the measurement wanting twice.
+
+Every crate in the workspace now has a mutation figure, which completes the sweep begun in 0.8.
+Two of the corrections that came out of it are about the instrument rather than the code: a
+survivor can be unreachable rather than untested, and a rate measures one crate's own suite
+rather than the workspace. The quoting experiment closed negative, and closing it needed the
+same discipline — more samples, and a verdict computed rather than eyeballed.
+
+Nothing yet. What is carried, and what each is actually waiting on:
+
+- **Three real gaps in `smysl-graph`**, each behind a command a user runs, and each confirmed
+  untested against the *whole* workspace rather than just its own crate.
+  `MergeReport::has_contentions` is what `merge --fail-on-contention` reads;
+  `EffectiveStatus::is_retracted` decides whether a retraction took;
+  `TraceKind::follows_parents` picks a direction for `trace`. All three can be replaced with
+  `true` and nothing anywhere fails. Cheap to close.
+
+- **Four `smysl-check` survivors.** A `>` that should let a unit sit exactly at its weakest
+  ground's cap (rule M's boundary, legal and untested); a guard whose failure makes an ambiguous
+  uid prefix resolve silently instead of being reported, against §1.2's "reported, never guessed
+  at"; a guard that makes every extension schema count as missing even when the consumer
+  understands it, which is the `full`/`degraded` distinction; and a `&&` that lets `. ` count as
+  a numbered list item.
+
+- ~~Publishing.~~ **Done**: 0.11.0 is on crates.io, twelve crates, and `cargo install smysl`
+  from the registry gives `smysl 0.11.0`. `BASELINE` moved from 0.9.0 to 0.11.0 and
+  `cargo-semver-checks` runs its 223 checks against a real baseline again — 12/12 clean. 0.10.0
+  stays unpublished, because publishing an older version after a newer one is perverse and its
+  contents are all in 0.11.0.
+
+  This unparks the `parse`-signature repair for `ContextExceeded`, which had to be done at the
+  call site because the fix is a breaking change and the baseline was two releases stale.
+
+- ~~The quoting experiment.~~ **Closed, negative.** No detectable effect at n=6, on three
+  fixtures, on two models: the suspicion carried since 0.7 that requiring a quote coarsens
+  extraction has no support. Five of six fixture-model pairs separate on no metric; the one
+  that does is `struct%` on a single DeepSeek fixture, which is what twenty-four comparisons a
+  run produce by chance.
+
+  Getting there took raising the sample from two to six and computing the verdict instead of
+  printing means. Both mattered. At n=2 the difference sat inside one arm's own spread every
+  time — no power, not no effect. And the first verdict tested only unit count while `body%`
+  showed 83 against 0 one column away, which read as a large finding until a second run gave
+  100/17 and 83/83 on the same fixtures. The gaps move more between runs than between arms.
+
+  The harness stays. It is how the question was answered, and the same two arms are what
+  asking it again with more power would need.
+
+- ~~An API stability decision.~~ **Made.** `Documentation/API_CONTRACT.md` classifies the
+  surface into contract, seam, and three names that were open — and the crate documentation now
+  says the first two out loud, because a classification a consumer cannot see is not one.
+
+  `NodeId` is blessed as contract and stays a bare `u32`: every traversal returns
+  `Vec<NodeId>`, and an opaque wrapper buys safety a caller unwraps again immediately. What
+  blessing it means is that the cost is stated where someone meets it — a `NodeId` is an index,
+  not an identity, renumbered by any insertion, never to be persisted or compared across
+  stores.
+
+  The bare `Error` is dropped and the type kept as `AnyError`. It is not a leak: it is the
+  unified error, wrapping the other ten and carrying `exit_code()`, so deleting it would have
+  cost an embedder real capability. The name was the problem — through a facade flattening
+  eleven error types into one namespace, `Error` beside `CodecError` reads as a twelfth sibling
+  rather than the enum wrapping the eleven.
+
+  `unit_core_bytes` and `hash_bytes` are kept as contract, with what that commits to written
+  down: the algorithm. `python/` derives uids through exactly this decomposition, and changing
+  the hash moves every uid in existence — a format break under §8.2, not an API decision.
+
+  And `SalienceRequest` gained `#[non_exhaustive]`, having been the only one of eleven input
+  types without it. A break whose purpose is to stop the next field addition being one.
+
+  All four are in `SEMVER_BREAKING` with reasons. The golden file moved by one line.
+
+- **Anthropic and OpenAI still need a key.** Everything reachable by reading has been read —
+  twice now, and it found a defect each time.
+
+---
+
 ## 0.11.0 — 2026-08-03
 
 A short cycle, and mostly about how the project measures itself.
@@ -71,9 +151,29 @@ the other way.
   `EffectiveStatus::is_retracted` (whether a retraction took), and `TraceKind::follows_parents`
   (which direction `trace` walks). Tests for those three are carried into 0.12.
 
-Carried: the remaining `smysl-check` survivors — boundary comparisons in the granularity and
-epistemics passes, and two match guards in closure and extension — and the three `smysl-graph`
-gaps above.
+All of `smysl-check`'s survivors are now resolved, and the split is the interesting part:
+**three needed tests, two were equivalent mutants.**
+
+- **Rule M's boundary.** `status > cap` to `>=` passed everything, because every test had a
+  unit comfortably under its cap or clearly over it and none sat exactly on it. The mutant
+  rejects the commonest legal shape there is — a claim held at precisely the strength of what
+  it rests on.
+- **`full` versus `degraded`.** A view's `requires` naming an extension the consumer *does*
+  implement had no test; the unimplemented direction did, and so did an implemented extension
+  arriving as a unit's schema. Forced to `true`, a consumer implementing exactly what a view
+  asks for is told it degrades — which makes §23.1's negotiation pointless, since if meeting
+  the requirement does not earn `full` nothing does.
+- **What counts as a list.** `!n.is_empty() && all_digits(n)` to `||` passed everything. Both
+  halves fail badly: `". foo"` has an empty prefix whose `all()` is vacuously true, and `"One
+  thing. Another"` has a non-empty one — so any prose with two sentences becomes a two-item
+  list, and rule S starts refusing ordinary paragraphs.
+
+The two equivalent ones are worth naming because one of them was on the list to fix. The
+`closure.rs` guard reads `Err(_) if !matching_prefix(&p).is_empty()`, reachable only when
+`resolve_prefix` errs *and* matches exist — which means two or more, which needs a 130-bit
+prefix collision. It is the same unreachability found from the other side in `resolve_prefix`,
+and forcing the guard to `false` changes nothing that can happen. The other is a `<` that only
+picks the word "under" or "over" inside a branch where the two operands cannot be equal.
 
 ---
 
@@ -91,6 +191,52 @@ Three defects reached content-addressed identity or the wire, none of them suspe
 beforehand, and each was found by checking a thing nobody had checked rather than by following
 a hunch.
 
+
+### Added
+
+- **Mutation testing of `smysl-provider`** — 477 viable mutants, **148 survivors, 31%**, the
+  worst of any crate but the packer in 0.8. Sharded and run with `--all-features`, which is not
+  optional: `default = []` for that crate, so a default build compiles no mapper at all and the
+  run would have measured the registry while printing a number that looked like the crate.
+
+  25 survivors sit on one cluster — what a mapper makes of an HTTP failure — and **the
+  interesting part is which providers they are spread across.** Gemini, DeepSeek and Ollama
+  have all been exercised live. The survivors are even across all five mappers, because live
+  testing verified that a *successful* call works and nobody provokes a 401 against a real
+  endpoint. A key, which gate 4 has wanted for three cycles, would not have found this.
+
+  `tests/status_taxonomy.rs` covers all five at once: 401 and 403 are `Unauthorized`, 429 and
+  503 are `RateLimited`, and a control fails any mapper returning one variant for everything.
+  Confirmed against three real survivors in three different mappers.
+
+- **The mutation sweep is complete** — every crate in the workspace measured. Six more in
+  0.12: `smysl-render` 12.5%, `smysl-retrieve` 15.6%, `smysl-embed` 22.0%, `smysl-thread`
+  22.6%, `smysl-ingest` 28.8%, and the CLI at **73.6%**.
+
+  `--all-features` throughout, which mattered for two of them: `smysl-ingest` and
+  `smysl-render` are both `default = []`, so a default run compiles almost nothing and reports
+  a rate for a shell of the crate.
+
+  The library lands between 2.6% and 31% and has stopped surprising: mostly accessors, display
+  strings and equivalent mutants, with a handful of real gaps each time. The CLI is more than
+  twice the worst of them, and the tempting explanation — that `cargo test -p smysl` cannot see
+  `make doc-output`, which is a Python script replaying 46 transcripts — is only part of it. A
+  survivor spot-checked against *both* survives both. `src/main.rs` has four tests across 3 600
+  lines; `src/progress.rs` has twelve across 394 and contributes 52 survivors on its own, all
+  arithmetic and comparisons in bar drawing, where the tests check structure and never numbers.
+
+  Recorded rather than fixed. 357 survivors is not a to-do list, and reading each one is the
+  expensive part — the band the library sits in has been yielding about one real gap per crate.
+
+- **Guarantee A2 has a test**, and the one it had said so itself. `runtime.rs` carries the
+  note: *"This test can only observe the flag after other tests have run, so it asserts the
+  weaker, always-true half: once started, it stays started."* An honest account of a real
+  limit — unit tests share a process, so the interesting half is unobservable there — and
+  `is_started -> true` survived because of it.
+
+  An integration test binary is a fresh process. `tests/a2_lazy_runtime.rs` holds exactly one
+  test, deliberately: anything else in the file would start the runtime and destroy the
+  observation.
 
 ### Fixed
 

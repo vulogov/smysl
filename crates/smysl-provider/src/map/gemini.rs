@@ -140,7 +140,17 @@ impl Gemini {
         Ok(body)
     }
 
-    pub fn parse(&self, raw: &str, retries: u32) -> Result<Completion, ProviderError> {
+    /// Parse a completion, against the cap that was actually sent.
+    ///
+    /// `cap` is the request's `max_output`, not the configuration's. A mapper sends
+    /// `req.max_output` — `Request::new` defaults it to 1024 — and reporting the configured
+    /// number instead produced "context window exceeded: 1008 > 32768": true to its fields and
+    /// nonsense to a reader, because the two came from different places.
+    ///
+    /// 0.10 corrected it at the call site, because widening this signature is a breaking change
+    /// and the semver baseline was two unpublished releases stale. It is a parameter now, which
+    /// is where it belonged: the error is built here, so the number it needs belongs here.
+    pub fn parse(&self, raw: &str, retries: u32, cap: usize) -> Result<Completion, ProviderError> {
         let v: Value = serde_json::from_str(raw)
             .map_err(|e| ProviderError::Malformed(format!("response is not JSON: {e}")))?;
 
@@ -197,7 +207,7 @@ impl Gemini {
         // for both halves or it can never finish.
         if reason == "MAX_TOKENS" {
             return Err(ProviderError::ContextExceeded {
-                limit: self.cfg.max_output,
+                limit: cap,
                 requested: output.unwrap_or(smysl_core::tokens(&text) as u64) as usize,
             });
         }
@@ -438,8 +448,7 @@ impl Provider for Gemini {
         if resp.status >= 400 {
             return Err(self.status_error(resp.status, &resp.body));
         }
-        self.parse(&resp.body, resp.retries)
-            .map_err(|e| super::report_against(e, req.max_output))
+        self.parse(&resp.body, resp.retries, req.max_output)
     }
 
     fn count_tokens(&self, text: &str) -> TokenCount {
@@ -592,7 +601,7 @@ mod tests {
             {"text":"first "},{"text":"second"}]}}],
             "usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":5},
             "modelVersion":"gemini-2.5-pro-001"}"#;
-        let c = provider().parse(raw, 0).unwrap();
+        let c = provider().parse(raw, 0, cfg().max_output).unwrap();
         assert_eq!(c.text, "first second");
         assert_eq!(c.model, "gemini-2.5-pro-001");
         assert_eq!(c.usage.input_tokens, 12);
@@ -606,7 +615,7 @@ mod tests {
         let raw = r#"{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"ok"}]}}],
             "usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":1,
                              "thoughtsTokenCount":11,"totalTokenCount":15}}"#;
-        let c = provider().parse(raw, 0).unwrap();
+        let c = provider().parse(raw, 0, cfg().max_output).unwrap();
         assert_eq!(c.usage.output_tokens, 12, "1 answered + 11 thought");
         assert!(!c.usage.estimated);
     }
@@ -616,7 +625,14 @@ mod tests {
     fn an_absent_thought_count_adds_nothing() {
         let raw = r#"{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"ok"}]}}],
             "usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":7}}"#;
-        assert_eq!(provider().parse(raw, 0).unwrap().usage.output_tokens, 7);
+        assert_eq!(
+            provider()
+                .parse(raw, 0, cfg().max_output)
+                .unwrap()
+                .usage
+                .output_tokens,
+            7
+        );
     }
 
     /// A candidate blocked by a safety filter has no parts at all, which is a refusal
@@ -624,7 +640,7 @@ mod tests {
     #[test]
     fn a_blocked_candidate_is_an_error_naming_the_reason() {
         let raw = r#"{"candidates":[{"finishReason":"SAFETY"}]}"#;
-        let e = provider().parse(raw, 0).unwrap_err();
+        let e = provider().parse(raw, 0, cfg().max_output).unwrap_err();
         assert!(e.to_string().contains("SAFETY"), "{e}");
     }
 
@@ -633,7 +649,7 @@ mod tests {
         let raw = r#"{"candidates":[{"finishReason":"MAX_TOKENS",
                        "content":{"parts":[{"text":"half"}]}}]}"#;
         assert!(matches!(
-            provider().parse(raw, 0),
+            provider().parse(raw, 0, cfg().max_output),
             Err(ProviderError::ContextExceeded { .. })
         ));
     }
@@ -649,9 +665,11 @@ mod tests {
                              "thoughtsTokenCount":1468}}"#;
         // The cap these numbers were observed against: the answer was 234 tokens and would
         // have fitted; the reasoning is what did not.
-        let mut c = cfg();
-        c.max_output = 800;
-        match Gemini::new(c).parse(raw, 0) {
+        //
+        // Passed as an argument rather than set on the config, which is the point of the
+        // change: the number the error quotes is now the number the request carried, and a
+        // configured value that the request never used cannot leak into the message.
+        match provider().parse(raw, 0, 800) {
             Err(ProviderError::ContextExceeded { limit, requested }) => {
                 assert_eq!(requested, 1702, "234 answered + 1468 thought");
                 assert_eq!(limit, 800);
