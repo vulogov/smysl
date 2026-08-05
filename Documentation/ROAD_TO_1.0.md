@@ -275,7 +275,7 @@ So the route is uniform, and no test had to move or be weakened:
 | hidden | why it is reachable at all |
 |---|---|
 | `provider::runtime` | A2 — `is_started` asserts the runtime has **not** started, observable only in a fresh process. A unit test cannot see it: inside the crate, something has always started it first, and `runtime.rs`'s own unit test says so. |
-| `provider::stream` | `ollama_live.rs` drives a real streaming response. `StreamMsg` stays contract via the root `pub use`; only the module path went. |
+| `provider::stream` → later narrowed to `Stream` alone | `ollama_live.rs` drives a real streaming response. Hiding the whole module also hid `StreamMsg`, which is contract — see S6. |
 | `provider::map::{anthropic, deepseek, gemini, ollama, openai, openai_compat}` | four tests build the concrete mappers. `build` returns `Box<dyn Provider>`, so no consumer needs them by name. |
 | `ingest::prompt` | `gate.rs` asserts against `FENCE` and `content_ingest_json` themselves; asserting against a copy would test the copy. |
 | `ingest::quote` | `gate.rs` and `interactions.rs` check a quoted body survives the ingest round trip. |
@@ -353,7 +353,7 @@ recorded in `API_CONTRACT.md` rather than fixed in code.
 crate reaches — `ingest::repair` (`tests/gate.rs`) and `ingest::{json_ast, schema}`
 (`smysl-eval`'s `quoting_live.rs`, which sends `batch_schema()` to live providers).
 
-**Result, with S2:** `smysl-provider` 988 → **678**, `smysl-ingest` 751 → **541**. **520 items
+**Result, with S2:** `smysl-provider` 988 → **716**, `smysl-ingest` 751 → **541**. **482 items
 out of the contract** across the two crates, and the facade unchanged at 243 throughout —
 which is the check that says none of it was anything a consumer had. §0.2 put the
 discretionary surface in these two crates at 536 by name-matching; the measurement came in at
@@ -464,15 +464,46 @@ each (`SalienceRequest`, `Hit`), `smysl-provider` and `smysl-ingest` eight each 
 **Done:** `API_CONTRACT.md` says which artefact is the contract for what, and each claim in it
 was measured rather than assumed.
 
-**S6 — land it as a break.**
+**S6 — land it as a break.** ✅ *audited in 0.13.0; emptying the list needs publication*
 
-All of S1–S5 goes through `SEMVER_BREAKING`, which then has to be empty again before the cut.
-This is the last cycle in which narrowing is free; after 1.0 every item on this list is a 2.0.
+All of S1–S5 goes through `SEMVER_BREAKING`, and the list must be empty before the cut. Empty
+is reached only by publishing — a break stops being a break once the version carrying it is the
+baseline — so what S6 can finish now is the other half: **proving the list is complete and
+correct**, with every reported break mapped to a recorded reason and nothing broken that is not
+recorded.
 
-### 1.3 Empty `SEMVER_BREAKING`
+Seven gated crates pass, `smysl-core` among them, which confirms S5's correction that it never
+broke. The five listed report:
 
-Everything Phase 1 breaks goes through the list, and the list must be empty at the 1.0 cut.
-It currently names three crates from 0.12.
+| crate | reported | recorded reason |
+|---|---|---|
+| `smysl-graph` | `SalienceRequest` marked `#[non_exhaustive]` | as recorded |
+| `smysl-retrieve` | `Hit` marked `#[non_exhaustive]` | S3, as recorded |
+| `smysl-provider` | 8 lints: `http` and `map::auth` gone (module, 11 fns, 2 consts, 2 structs); `runtime`, `Stream`, the mappers hidden | S2 and S4, as recorded |
+| `smysl-ingest` | 8 lints: `chunk` and `monotone` gone; `quote`, `prompt`, `repair`, `schema`, `json_ast` hidden | S2 and S4, as recorded |
+| `smysl` | *nothing* — `cargo-semver-checks` cannot see through `pub use` | the `AnyError` rename, caught by `api-check` instead |
+
+**The audit found one thing wrong, and it was mine.** S2 hid the whole `stream` module and
+recorded that *"`StreamMsg` stays contract via the root `pub use`; only the module path went"*.
+Half true. `cargo public-api` agreed — it sees the type through the root re-export and reported
+no change. `cargo-semver-checks` reported `enum_now_doc_hidden` on `StreamMsg`, which is
+removal from the API. The two gates disagreed about one type, and a disagreement between gates
+is the answer being wrong, not a tie.
+
+`StreamMsg` is contract: the facade exports it and `Provider::stream` takes a channel of it.
+Hiding it would have quietly dropped a name from the 243 while the golden file said nothing.
+Now `Stream` alone is hidden and the module is public; `Emitter` went `pub(crate)`. The
+provider surface is 716 rather than 678 — the cost of getting it right — and the count golden
+is what showed the 38-item move.
+
+A cross-check of all 243 facade exports against every `*_missing` and `*_doc_hidden` failure
+found no others. **The lesson generalises: hide the item, not the module, whenever the module
+holds anything the facade exports.**
+
+**Done:** every break is recorded and every recorded break is real. `SEMVER_BREAKING` names
+five crates and empties when 0.13.0 is published, which is a release decision rather than an
+engineering one.
+
 
 ---
 
@@ -564,10 +595,18 @@ The **format** is arguably ready now: unchanged across twelve releases, a writte
 policy, four independent implementations, and §2.3 verified by something other than the
 implementation that defined it.
 
-The **surface** needs Phase 1 — 72 type decisions, and the seam narrowed from eleven
-unexported modules down to what is actually consumed. That last one starts by giving rule A a
-gate and watching it fail, which is the shape of most of the work here: the checks that would
-have told us were the things missing.
+The **surface** is most of the way there. §1.2 is done in 0.13: the seam is narrowed, 482
+items out of the contract with the facade's 243 untouched, the three gates each know what they
+are blind to, and rule A is checked instead of asserted. What remains of Phase 1 is §1.1 — 72
+type decisions, one at a time.
+
+That work found five things nothing was watching, and they are all the same shape. Rule A was
+stated in two places and enforced in none. `split_oversized` was written, tested, and never
+called, while a test asserted the defect it prevents. `status_error` was a contract shared by
+convention. `SEMVER_BREAKING` named a crate that had not broken. `cargo-semver-checks` reported
+no change on the facade for a rename that removed a published name. **In every case the code
+was fine and the check was missing** — which is worth saying plainly, because it is what the
+remaining phases are for and it is not what "make the surface worth freezing" sounds like.
 
 The **evidence** needs Phase 3, and Phase 3 cannot be hurried: it is two quiet cycles, and the
 only way to get them is to have them.

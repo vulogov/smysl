@@ -23,6 +23,17 @@ pub enum StreamMsg {
 }
 
 /// The receiving half, with the draining a synchronous caller actually wants.
+/// Reachable for `tests/ollama_live.rs`, which drives a real streaming response and cannot do
+/// that from inside the crate. Hidden per §1.2 S2; a consumer streams through
+/// `Provider::stream` and never holds this.
+///
+/// Hidden on the type rather than on the module, which is where 0.13 first put it. The module
+/// also holds `StreamMsg`, which *is* contract — the facade exports it and `Provider::stream`
+/// takes a channel of it. Hiding the module hid the enum too: `cargo public-api` still saw it
+/// through the root `pub use` and reported no change, while `cargo-semver-checks` counted
+/// `enum_now_doc_hidden`, which is removal from the API. Two gates disagreeing about one type
+/// is the answer being wrong, and §1.2 S6's audit is what surfaced it.
+#[doc(hidden)]
 pub struct Stream {
     rx: Receiver<StreamMsg>,
     text: String,
@@ -115,7 +126,7 @@ impl Stream {
 }
 
 /// A sender that counts what it emitted, so a mapper does not have to.
-pub struct Emitter {
+pub(crate) struct Emitter {
     tx: Sender<StreamMsg>,
     output_chars: usize,
 }

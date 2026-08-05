@@ -36,10 +36,6 @@ pub mod registry;
 /// because an integration test is a separate crate and sees only `pub`.
 #[doc(hidden)]
 pub mod runtime;
-/// `StreamMsg` is the contract here and is re-exported at the root below; the module path is
-/// not. `Stream` is reachable for `tests/ollama_live.rs`, which drives a real streaming
-/// response and cannot do that from inside the crate.
-#[doc(hidden)]
 pub mod stream;
 pub mod usage;
 

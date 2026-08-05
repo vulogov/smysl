@@ -233,8 +233,8 @@ api-check: ## Fail if either recorded surface moved, or if they stop nesting
 #   produced "context window exceeded: 1008 > 32768" — true to its fields, nonsense to a
 #   reader. Fixed at the call site in 0.10 because the baseline was two unpublished releases
 #   stale and could not tell a deliberate break from a missing crate. It can now.
-#   And in 0.13, S2 and S4 of the road to 1.0: `runtime`, `stream` and the five concrete
-#   mappers are `#[doc(hidden)]`; `http` and `map::auth` are `pub(crate)`. 988 items to 678.
+#   And in 0.13, S2 and S4 of the road to 1.0: `runtime`, `Stream` and the five concrete
+#   mappers are `#[doc(hidden)]`; `http` and `map::auth` are `pub(crate)`. 988 items to 716.
 #
 #   smysl-ingest — S2 and S4: `prompt`, `quote`, `repair`, `json_ast` and `schema` are
 #   `#[doc(hidden)]`; `chunk` and `monotone` are `pub(crate)`. 751 items to 541.
