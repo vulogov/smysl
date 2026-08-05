@@ -12,7 +12,7 @@
 //! | `POST /chat/completions` | completion, streaming or not |
 //!
 //! An OpenAI-compatible shape, so the body and response handling live in
-//! [`super::openai_compat`]; what is here is what DeepSeek does differently.
+//! `super::openai_compat`; what is here is what DeepSeek does differently.
 
 use std::time::Duration;
 

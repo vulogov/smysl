@@ -6,7 +6,7 @@
 //!
 //! Two properties the rest of the crate depends on:
 //!
-//! - **A key never reaches a `Debug` output.** [`Secret`] prints as `***`, so a provider
+//! - **A key never reaches a `Debug` output.** `Secret` prints as `***`, so a provider
 //!   struct can derive `Debug` without a config dump leaking a credential into a log.
 //! - **A missing key is `Unauthorized`, not a panic.** An unconfigured provider is an
 //!   ordinary thing to have in a config file, and `providers --probe` must be able to say
@@ -30,10 +30,6 @@ impl Secret {
     /// The only way to read it. Named so that a use site is greppable.
     pub fn expose(&self) -> &str {
         &self.0
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
     }
 }
 

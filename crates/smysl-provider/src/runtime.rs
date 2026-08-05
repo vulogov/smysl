@@ -50,7 +50,7 @@ fn inner() -> &'static Inner {
 /// Run `job` on the provider thread and wait for its result.
 ///
 /// Blocking is the point: every caller in this workspace is synchronous, and a caller that
-/// wanted concurrency would ask for [`spawn`] instead.
+/// wanted concurrency would ask for `spawn` instead.
 pub fn run<T: Send + 'static>(job: impl FnOnce() -> T + Send + 'static) -> T {
     let (tx, rx) = mpsc::channel();
     submit(move || {

@@ -4,7 +4,7 @@
 //! draft 2020-12 but a different thing wearing its vocabulary: an OpenAPI 3.0 `Schema`
 //! object, whose fields are a fixed proto message. A keyword outside it is not ignored, it
 //! is a 400 naming the field. Appendix C's schema is therefore *translated* here rather
-//! than passed through — see [`dialect`].
+//! than passed through — see `dialect`.
 //!
 //! Four shape differences from every other mapper here, and each one bites a mapper that
 //! assumes otherwise:

@@ -204,10 +204,11 @@ api-check: ## Fail if either recorded surface moved, or if they stop nesting
 #   produced "context window exceeded: 1008 > 32768" — true to its fields, nonsense to a
 #   reader. Fixed at the call site in 0.10 because the baseline was two unpublished releases
 #   stale and could not tell a deliberate break from a missing crate. It can now.
-#   And in 0.13, S2 of the road to 1.0: `runtime`, `stream` and the five concrete mappers are
-#   `#[doc(hidden)]`. 988 public items to 733.
+#   And in 0.13, S2 and S4 of the road to 1.0: `runtime`, `stream` and the five concrete
+#   mappers are `#[doc(hidden)]`; `http` and `map::auth` are `pub(crate)`. 988 items to 678.
 #
-#   smysl-ingest — S2 as well: `prompt` and `quote` are `#[doc(hidden)]`. 751 items to 696.
+#   smysl-ingest — S2 and S4: `prompt`, `quote`, `repair`, `json_ast` and `schema` are
+#   `#[doc(hidden)]`; `chunk` and `monotone` are `pub(crate)`. 751 items to 541.
 #   Both crates keep the items reachable for the integration tests that need them, and
 #   cargo-semver-checks counts hiding as removal from the public API — which is the point, and
 #   is why this is a break rather than a tidy-up. See ROAD_TO_1.0.md §1.2.

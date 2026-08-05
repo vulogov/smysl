@@ -37,6 +37,10 @@ pub struct Chunk {
 }
 
 impl Chunk {
+    /// `#[cfg(test)]` since 0.13: the only callers are this module's tests, and making the
+    /// module `pub(crate)` in §1.2 S4 is what let the compiler say so. Production reads
+    /// `Chunk::text` and counts once, rather than re-counting per chunk.
+    #[cfg(test)]
     pub fn tokens(&self) -> u32 {
         tokens(&self.text)
     }
@@ -68,6 +72,9 @@ impl Window {
         }
     }
 
+    /// A window at a chosen budget. `#[cfg(test)]` since 0.13: production builds windows
+    /// from a provider's context with `for_context`, and only tests pick a raw number.
+    #[cfg(test)]
     pub fn of(budget: u32) -> Window {
         Window {
             budget: budget.max(1),
@@ -75,6 +82,9 @@ impl Window {
         }
     }
 
+    /// `#[cfg(test)]` for the same reason as `of`. Overlap is on for every real ingest —
+    /// it is what makes a claim spanning a chunk boundary visible whole to one chunk.
+    #[cfg(test)]
     pub fn without_overlap(mut self) -> Window {
         self.overlap = false;
         self
@@ -87,6 +97,27 @@ pub fn chunk(input: &str, w: Window) -> Vec<Chunk> {
     if paragraphs.is_empty() {
         return Vec::new();
     }
+
+    // A paragraph larger than the whole window cannot be grouped into anything that fits, so
+    // it is broken before grouping rather than after.
+    //
+    // `split_oversized` was written for this and never called: the grouping loop below starts
+    // a new group when the *next* paragraph would overflow, which does nothing when a single
+    // paragraph is already over budget on its own — it goes into a group regardless. The
+    // function was tested, so its own tests passed; nothing checked that anybody used it.
+    // Found in 0.13 when §1.2 S4 made the module `pub(crate)` and dead-code analysis could
+    // finally see it. One 5 000-token paragraph produced one 5 000-token chunk against a
+    // budget of 50.
+    let paragraphs: Vec<(usize, usize, String)> = paragraphs
+        .into_iter()
+        .flat_map(|(start, end, text)| {
+            if tokens(&text) > w.budget {
+                split_oversized(&text, w.budget, start)
+            } else {
+                vec![(start, end, text)]
+            }
+        })
+        .collect();
 
     // Group paragraphs greedily into windows.
     let mut groups: Vec<Vec<usize>> = Vec::new();
@@ -209,6 +240,64 @@ pub fn split_oversized(text: &str, budget: u32, start: usize) -> Vec<(usize, usi
 mod tests {
     use super::*;
 
+    /// Rule I, at the one input that used to break it.
+    ///
+    /// A paragraph bigger than the entire window is the case `split_oversized` was written
+    /// for, and until 0.13 `chunk` never called it — so a single runaway paragraph produced a
+    /// single chunk many times the budget, which is exactly the "one paragraph fails an
+    /// ingest" that rule I forbids. The function's own tests passed throughout; what was
+    /// missing was a test that anything used it.
+    ///
+    /// Asserted on the output of `chunk` rather than on `split_oversized`, deliberately: a
+    /// test of the helper is what already existed and what already passed.
+    #[test]
+    fn one_runaway_paragraph_is_split_rather_than_sent_whole() {
+        let para = "word ".repeat(4000); // no blank line anywhere: one paragraph
+
+        // Overlap off, so this measures the split and not the deliberate repetition. With it
+        // on a chunk carries its own content plus the previous one's tail, which is by design
+        // — "over-chunking costs tokens, not correctness" — and would put every chunk at
+        // roughly twice the budget whether or not the split worked.
+        let w = Window::of(50).without_overlap();
+        let chunks = chunk(&para, w);
+
+        assert!(
+            chunks.len() > 1,
+            "an oversized paragraph must become several chunks"
+        );
+        for c in &chunks {
+            assert!(
+                c.tokens() <= w.budget,
+                "chunk {} carries {} tokens against a budget of {}",
+                c.index,
+                c.tokens(),
+                w.budget
+            );
+        }
+
+        // With overlap on it must still be bounded, just not by one budget. Two windows, plus
+        // the `\n\n` the pieces are rejoined with — which costs a token, and is why this is
+        // not exactly `2 * budget`.
+        let with_overlap = Window::of(50);
+        for c in chunk(&para, with_overlap) {
+            assert!(
+                c.tokens() <= 2 * with_overlap.budget + 1,
+                "chunk {} carries {} tokens; overlap doubles the budget, it does not lift it",
+                c.index,
+                c.tokens()
+            );
+        }
+
+        // The control: splitting must not lose the text. Token counts are what the budget is
+        // measured in, so compare those rather than bytes, which the rejoining can change.
+        let total: u32 = chunks.iter().map(|c| c.tokens()).sum();
+        assert!(
+            total >= tokens(&para) / 2,
+            "splitting dropped most of the input: {total} tokens out of {}",
+            tokens(&para)
+        );
+    }
+
     fn para(n: usize) -> String {
         (0..n)
             .map(|i| format!("Paragraph {i} says something of moderate length about the matter."))
@@ -309,12 +398,32 @@ mod tests {
         }
     }
 
+    /// Nothing is dropped, which is what this test was always for.
+    ///
+    /// Until 0.13 it also asserted `c.len() == 1` — "one paragraph is one group, however
+    /// large" — which encoded the defect below it as expected behaviour. The test directly
+    /// beneath this one asserts that `split_oversized` breaks such a paragraph up, and quotes
+    /// rule I while doing it. The two contradicted each other and both were green, because
+    /// nothing connected `split_oversized` to `chunk`.
+    ///
+    /// The emission half was the part worth keeping: rule I says an ingest makes progress,
+    /// and a runaway paragraph vanishing would break it just as surely as a refusal.
     #[test]
     fn a_paragraph_larger_than_the_window_is_still_emitted() {
         let huge = "x ".repeat(5000);
         let c = chunk(&huge, Window::of(10));
-        assert_eq!(c.len(), 1, "one paragraph is one group, however large");
-        assert!(!c[0].text.is_empty());
+        assert!(
+            !c.is_empty(),
+            "an oversized paragraph must still be emitted"
+        );
+        assert!(
+            c.iter().all(|k| !k.text.is_empty()),
+            "no chunk may be empty"
+        );
+        assert!(
+            c.len() > 1,
+            "and it is split rather than sent whole: see `chunk`"
+        );
     }
 
     /// Refusing would mean one runaway paragraph could fail an ingest, which rule I

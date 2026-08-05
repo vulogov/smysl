@@ -9,7 +9,7 @@
 //! ingested an hour ago is only checkable once both are in view.
 //!
 //! A unit that overclaims its grounds is **weakened to what they support, and reported** -
-//! see [`crate::monotone`], which carries the reasoning. The same treatment rule T gives an
+//! see the `monotone` module, which carries the reasoning. The same treatment rule T gives an
 //! over-claimed rung ceiling, so the boundary has one rule rather than two. Earlier this
 //! rejected the unit instead, on a reading of §9.1; rejection cascades through everything
 //! grounded on it and loses content that a later merge could have justified, and both

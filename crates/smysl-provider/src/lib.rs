@@ -21,7 +21,10 @@
 #![deny(rust_2018_idioms)]
 
 pub mod config;
-pub mod http;
+// The retry loop, backoff and response envelope. Internal since 0.13 (§1.2 S4): nothing
+// outside this crate has ever named it, and `Provider::complete` is the way a caller reaches
+// an endpoint. `http::status_error` remains the shared fallback every mapper refines.
+pub(crate) mod http;
 pub mod map;
 pub mod registry;
 /// Reachable so that guarantee A2 can be tested from outside, and for no other reason.

@@ -337,7 +337,7 @@ impl Provider for Ollama {
     fn probe(&self) -> Result<Probe, ProviderError> {
         let tags_url = self.url("/api/tags");
         let timeout = Duration::from_secs(5);
-        let tags = crate::runtime::run(move || http::get(&tags_url, timeout));
+        let tags = crate::runtime::run(move || http::get_with(&tags_url, &[], timeout));
 
         let models = match tags {
             Ok(r) if r.status < 400 => Ollama::parse_tags(&r.body)?,

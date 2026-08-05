@@ -23,7 +23,13 @@
 //! verify before relying on them. Endpoints change without notice; the mapper contract does
 //! not.
 
-pub mod auth;
+// Credential handling for the mappers. Internal since 0.13 (§1.2 S4): a consumer supplies a
+// key through `ProviderConfig` and never assembles a header itself.
+//
+// Gated on `tls` rather than `http-client`, which is what the four hosted mappers imply and
+// Ollama does not: a loopback build has a transport and nothing to authenticate to.
+#[cfg(feature = "tls")]
+pub(crate) mod auth;
 
 // The concrete mappers are `#[doc(hidden)]` rather than `pub(crate)`, and the distinction is
 // deliberate. `build` returns `Box<dyn Provider>`, so no consumer needs `Ollama` by name — but

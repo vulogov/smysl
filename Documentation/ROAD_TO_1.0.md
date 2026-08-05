@@ -346,21 +346,80 @@ recorded in `API_CONTRACT.md` rather than fixed in code.
 
 **Done:** each of the seventeen has an answer, and the reasons sit where the types are.
 
-**S4 — narrow, one crate at a time, provider first.**
+**S4 — narrow, one crate at a time, provider first.** ✅ *done in 0.13.0*
 
-Provider first because it is smaller, better understood, and its live tests give a second
-signal. For each of the eleven untouched modules: demote to `pub(crate)`, build, and let S1's
-gate and the test suite say what was needed after all. Anything that has to come back comes
-back deliberately, with a reason, as an S2 route-2 exception.
+`pub(crate)` for what nothing outside reaches: `provider::http`, `map::auth`,
+`ingest::{chunk, monotone}`. `#[doc(hidden)] pub` for three more that only an external *test*
+crate reaches — `ingest::repair` (`tests/gate.rs`) and `ingest::{json_ast, schema}`
+(`smysl-eval`'s `quoting_live.rs`, which sends `batch_schema()` to live providers).
 
-Expect the count to land above zero and well below 934. The measurement's 8% was a floor
-computed by name-matching, and some of those modules will turn out to have a legitimate
-consumer — that is a result, not a failure.
+**Result, with S2:** `smysl-provider` 988 → **678**, `smysl-ingest` 751 → **541**. **520 items
+out of the contract** across the two crates, and the facade unchanged at 243 throughout —
+which is the check that says none of it was anything a consumer had. §0.2 put the
+discretionary surface in these two crates at 536 by name-matching; the measurement came in at
+520, so the estimate held.
 
-**Done when:** both crates build, `make ci` is green, and every still-public module in them is
-either facade-reachable or a recorded exception.
+**A correction worth recording.** The first pass at deciding what was unreached grepped for
+`smysl_ingest::repair` and found nothing — but `tests/gate.rs` imports it as
+`smysl_ingest::{repair, ...}`, which that pattern cannot see. The narrowing therefore broke the
+build, which is how it was caught. A brace-aware re-check moved `repair` to the hidden group
+and found nothing else missed. Searching for a qualified path is not the same as searching for
+a use.
 
----
+**What narrowing found.** Closing a module lets dead-code analysis see inside it for the first
+time. Seven items surfaced, and they were not all the same kind of thing:
+
+- `auth::Secret::is_empty` — no caller anywhere. Deleted. The empty check happens at the call
+  site before a `Secret` is constructed, so the method was redundant by construction too.
+- `repair::Attempted` and its `is_clean` — never *constructed*, anywhere, including tests. The
+  live `is_clean` belongs to `Report`, which is what `check_local` returns. Deleted.
+- `Chunk::tokens`, `Window::of`, `Window::without_overlap` — real API whose only callers are
+  the module's own tests. Marked `#[cfg(test)]` rather than deleted: `Window::of` is the only
+  way to build a window at a chosen budget, and removing it would have cost sixteen tests of
+  real chunking behaviour. `#[cfg(test)]` says what is true and makes the compiler object if
+  production ever needs one.
+- `split_oversized` — **not dead code. A defect.**
+
+**The defect.** `split_oversized` breaks a paragraph too large for any window, and its own
+comment says why: *"Refusing would mean one runaway paragraph could fail an ingest, which rule
+I forbids."* `chunk` never called it. The grouping loop starts a new group when the *next*
+paragraph would overflow, which does nothing about a paragraph already over budget on its own —
+it goes into a group regardless.
+
+Measured: one 5 000-token paragraph produced one 5 000-token chunk against a budget of 50. A
+hundredfold overshoot, sent to the model as a single request.
+
+It survived because the function was tested and its tests passed. Nothing tested that anything
+*used* it — the same shape as rule A in S1, and the second time in this phase that the missing
+check was "is this connected" rather than "is this correct".
+
+Two adjacent tests in the same file had been contradicting each other, both green:
+
+- `a_paragraph_larger_than_the_window_is_still_emitted` asserted `chunk` returns exactly one
+  chunk — *"one paragraph is one group, however large"*.
+- `an_oversized_paragraph_splits_on_lines_then_characters` asserted the opposite of the helper,
+  and quotes rule I in its own doc comment while doing it.
+
+Both passed because one tested `chunk` and the other tested `split_oversized`, and nothing
+joined them. The first had encoded the defect as the expected behaviour; its emission half was
+the part worth keeping, and it now asserts that too.
+
+Now wired in ahead of grouping, with a test asserted on the output of `chunk` rather than on
+the helper, and confirmed to fail without the fix.
+
+**A rustdoc trap, for anyone repeating this.** An intra-doc link inside a module that is
+`pub(crate)` or `#[doc(hidden)]` has no rendered page to point at, so every one of them breaks
+the moment the module closes — nine across the two crates, plus one in the *public* `stage`
+module that pointed into the now-private `monotone`. They become code spans.
+
+Worse, one form does not fail cleanly: a `///` doc comment on a `pub(crate) mod` declaration
+whose module contains a cross-crate link **ICEs rustdoc 1.94.1** — `no resolutions for a doc
+link`, `rustc_metadata/src/rmeta/encoder.rs:2577`. Reported by the compiler as a bug worth
+filing. Plain `//` comments on private module declarations avoid it, and lose nothing: rustdoc
+does not render private items anyway.
+
+**Done:** both crates build with no dead-code warnings, every still-public module is either
+facade-reachable or carries the reason it stayed, and `make ci` is green.
 
 **S5 — make the documented contract equal the enforced one.**
 
