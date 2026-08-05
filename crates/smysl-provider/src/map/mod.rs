@@ -25,17 +25,33 @@
 
 pub mod auth;
 
+// The concrete mappers are `#[doc(hidden)]` rather than `pub(crate)`, and the distinction is
+// deliberate. `build` returns `Box<dyn Provider>`, so no consumer needs `Ollama` by name — but
+// four integration tests construct these types directly, and an integration test is a separate
+// crate that sees `pub` and not `pub(crate)`. Hiding keeps those tests compiling while taking
+// the types out of the contract: `cargo-semver-checks` has a `struct_now_doc_hidden` lint that
+// treats hiding as removal from the public API, and `cargo public-api` drops them too.
+//
+// The tests are worth the arrangement. Mutation testing in 0.12 put 25 survivors on the
+// `status_error` cluster alone, and `capabilities_are_honest` needs the concrete types because
+// what it checks is that each mapper's declared capabilities match what it actually does.
 #[cfg(feature = "anthropic")]
+#[doc(hidden)]
 pub mod anthropic;
 #[cfg(feature = "deepseek")]
+#[doc(hidden)]
 pub mod deepseek;
 #[cfg(feature = "gemini")]
+#[doc(hidden)]
 pub mod gemini;
 #[cfg(feature = "ollama")]
+#[doc(hidden)]
 pub mod ollama;
 #[cfg(feature = "openai")]
+#[doc(hidden)]
 pub mod openai;
 #[cfg(any(feature = "openai", feature = "deepseek"))]
+#[doc(hidden)]
 pub mod openai_compat;
 
 /// Full jitter needs a random number and the pure crates have none. The nanosecond of the

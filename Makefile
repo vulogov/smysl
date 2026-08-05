@@ -199,12 +199,19 @@ api-check: ## Fail if either recorded surface moved, or if they stop nesting
 #   fix for one: it was the only input type of eleven without it, so adding a field to it was
 #   breaking while the same addition elsewhere was not.
 #
-#   smysl-provider — `Gemini::parse` and `Anthropic::parse` take the request's cap as an
-#   argument. The error they build quotes a limit, and quoting the *configured* one produced
-#   "context window exceeded: 1008 > 32768": true to its fields, nonsense to a reader. Fixed at
-#   the call site in 0.10 because the baseline was two unpublished releases stale and could not
-#   tell a deliberate break from a missing crate. It can now.
-SEMVER_BREAKING := smysl-core smysl-graph smysl-provider
+#   smysl-provider — two breaks. `Gemini::parse` and `Anthropic::parse` take the request's cap
+#   as an argument: the error they build quotes a limit, and quoting the *configured* one
+#   produced "context window exceeded: 1008 > 32768" — true to its fields, nonsense to a
+#   reader. Fixed at the call site in 0.10 because the baseline was two unpublished releases
+#   stale and could not tell a deliberate break from a missing crate. It can now.
+#   And in 0.13, S2 of the road to 1.0: `runtime`, `stream` and the five concrete mappers are
+#   `#[doc(hidden)]`. 988 public items to 733.
+#
+#   smysl-ingest — S2 as well: `prompt` and `quote` are `#[doc(hidden)]`. 751 items to 696.
+#   Both crates keep the items reachable for the integration tests that need them, and
+#   cargo-semver-checks counts hiding as removal from the public API — which is the point, and
+#   is why this is a break rather than a tidy-up. See ROAD_TO_1.0.md §1.2.
+SEMVER_BREAKING := smysl-core smysl-graph smysl-provider smysl-ingest
 
 semver: ## Report API breakage against the last published version
 	@command -v cargo-semver-checks >/dev/null || { echo "cargo install cargo-semver-checks"; exit 1; }

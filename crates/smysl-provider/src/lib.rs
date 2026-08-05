@@ -24,7 +24,19 @@ pub mod config;
 pub mod http;
 pub mod map;
 pub mod registry;
+/// Reachable so that guarantee A2 can be tested from outside, and for no other reason.
+///
+/// `is_started` has exactly one external caller — `tests/a2_lazy_runtime.rs` — and that test
+/// cannot become a unit test. It asserts the runtime has **not** started, which is observable
+/// only in a fresh process; inside the crate some earlier unit test has always started it
+/// already, and the unit test in `runtime.rs` says so itself. Hidden rather than `pub(crate)`
+/// because an integration test is a separate crate and sees only `pub`.
+#[doc(hidden)]
 pub mod runtime;
+/// `StreamMsg` is the contract here and is re-exported at the root below; the module path is
+/// not. `Stream` is reachable for `tests/ollama_live.rs`, which drives a real streaming
+/// response and cannot do that from inside the crate.
+#[doc(hidden)]
 pub mod stream;
 pub mod usage;
 

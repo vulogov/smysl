@@ -151,12 +151,21 @@ sweep across 52 modules. It is a breaking change, which is why it belongs before
 is what says whether a narrowing went too far — but it has no gate today, so §1.2 builds one
 first. (`make purity` enforces rule B, not rule A.)
 
-**C — tier the promise in prose.** Keep everything public, mark the rest `#[doc(hidden)]`, say
-only the facade is contract. Cheap, and it reinstates exactly the contradiction that deciding
-"one product" removed: `cargo-semver-checks` does not read intent, so it either flags hidden
-items — noise — or is told to ignore them, at which point the guarantee is a comment.
+**C — `#[doc(hidden)]`.** Keep the items reachable, take them out of the contract.
 
-**Recommendation: B, plus closing the gate gap.** The scope is two crates, and it is the same
+I first wrote this off as prose dressed up as a promise. That was wrong, and measuring settled
+it: `cargo-semver-checks` ships lints named `struct_now_doc_hidden` and
+`pub_module_level_const_now_doc_hidden`, and their description is *"removing it from the
+crate's public API"*. Hiding an item is reported as a **major** break — once, when you hide it
+— and the item is outside the contract from then on. `cargo public-api` drops hidden items too:
+marking one module in `smysl-provider` took its count from 988 to 958.
+
+So C is not a weaker A. It is B's other half: same effect on the contract, but the item stays
+visible to integration tests, which are separate crates and cannot see `pub(crate)`. That
+makes it the right tool for exactly the population §1.2 S2 is about, and `pub(crate)` right for
+everything reached by nothing at all.
+
+**Recommendation: B and C together, plus closing the gate gap.** The scope is two crates, and it is the same
 two the seam review has to read anyway — so do them together: decide the shape, then decide
 what stays public. Then regenerate the golden file so the documented surface and the enforced
 surface agree, and 1.0 promises one thing rather than two. **§1.2 is that plan.**
@@ -243,35 +252,45 @@ different file was confirmed to fail it — a gate nobody has watched fail is no
 
 ---
 
-**S2 — decide what the tests are allowed to see.**
+**S2 — decide what the tests are allowed to see.** ✅ *done in 0.13.0*
 
-The real cost of narrowing, and the step most likely to be underestimated. Integration tests in
-`tests/` are separate crates: they see `pub`, not `pub(crate)`. Eight files reach into the
-modules S3 and S4 would demote —
+Integration tests in `tests/` are separate crates: they see `pub`, not `pub(crate)`. Eight
+files reach into modules the narrowing would otherwise close —
 
 `smysl-provider/tests/`: `a2_lazy_runtime.rs`, `status_taxonomy.rs`,
 `capabilities_are_honest.rs`, `ollama_live.rs`, `deepseek_live.rs`;
 `smysl-ingest/tests/`: `gate.rs`, `providers_live.rs`; and the workspace's
 `tests/interactions.rs`.
 
-Three routes, and the choice is per item rather than global:
+**What changed the answer.** I had planned to route these case by case — move what could move
+inside its crate, keep the rest public with a recorded reason — and had rejected
+`#[doc(hidden)]` on the grounds that `cargo-semver-checks` would either flag hidden items as
+noise or be told to ignore them. Measuring showed the opposite. It has lints named
+`struct_now_doc_hidden` and `pub_module_level_const_now_doc_hidden`, described as *"removing it
+from the crate's public API"*; hiding is a major break, once, and the item is out of the
+contract afterwards. `cargo public-api` drops hidden items as well.
 
-1. **Move the test inside the crate.** A unit test sees `pub(crate)`, so the item can be
-   demoted. Cheapest where it works — and it does not always work. `a2_lazy_runtime.rs` exists
-   *because* an integration test is a fresh process: it asserts the provider runtime has **not**
-   started, which is unobservable in a unit test where an earlier test has already started it.
-   Its own header says so. Moving that one destroys the guarantee it checks.
-2. **Keep the item public, and record why.** For `runtime::is_started` this is the honest
-   answer: it is public so that A2 can be tested from outside, and that reason belongs next to
-   it. A short list of named exceptions is a contract; an unexamined 12 111 is not.
-3. **A `testing` feature that re-exports internals.** Rejected unless 1 and 2 run out.
-   `cargo-semver-checks` runs `--all-features`, so a feature-gated internal is frozen exactly
-   like a public one — it moves the names without shrinking the promise.
+So the route is uniform, and no test had to move or be weakened:
 
-**Done when:** every one of the eight files is on route 1 or route 2, and each route-2 item has
-its reason written where it is declared.
+| hidden | why it is reachable at all |
+|---|---|
+| `provider::runtime` | A2 — `is_started` asserts the runtime has **not** started, observable only in a fresh process. A unit test cannot see it: inside the crate, something has always started it first, and `runtime.rs`'s own unit test says so. |
+| `provider::stream` | `ollama_live.rs` drives a real streaming response. `StreamMsg` stays contract via the root `pub use`; only the module path went. |
+| `provider::map::{anthropic, deepseek, gemini, ollama, openai, openai_compat}` | four tests build the concrete mappers. `build` returns `Box<dyn Provider>`, so no consumer needs them by name. |
+| `ingest::prompt` | `gate.rs` asserts against `FENCE` and `content_ingest_json` themselves; asserting against a copy would test the copy. |
+| `ingest::quote` | `gate.rs` and `interactions.rs` check a quoted body survives the ingest round trip. |
 
----
+**Result:** `smysl-provider` 988 → 733 public items, `smysl-ingest` 751 → 696. **310 items out
+of the contract**, with `map::build`, `StreamMsg` and every facade re-export untouched, and all
+eight test files passing unchanged. Both crates are now in `SEMVER_BREAKING` — hiding is a
+break, which is the whole reason it belongs before 1.0 and not after.
+
+What is left for S4 is the other population: modules no test and no sibling crate reaches, for
+which `pub(crate)` is right rather than hiding — `provider::http`, `map::auth`, and
+`ingest::{chunk, json_ast, monotone, repair, schema}`.
+
+**Done:** every one of the eight files compiles and passes against the narrowed crates, and
+each hidden module carries the reason it stayed reachable.
 
 **S3 — the shape review, before the visibility change.**
 

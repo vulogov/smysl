@@ -19,7 +19,17 @@ pub mod import;
 pub mod json_ast;
 pub mod monotone;
 pub mod path;
+/// Reachable for `tests/gate.rs`, which checks the prompt the ingest path actually sends.
+///
+/// `FENCE` and `content_ingest_json` are what the gate asserts against, and asserting against
+/// a copy of them would test the copy. Hidden rather than `pub(crate)` because an integration
+/// test is a separate crate; hidden rather than left public because no consumer builds our
+/// prompts — `Ingestor` does.
+#[doc(hidden)]
 pub mod prompt;
+/// Reachable for `tests/gate.rs` and the workspace's `tests/interactions.rs`, which check that
+/// a quoted body survives the round trip the ingest path puts it through.
+#[doc(hidden)]
 pub mod quote;
 pub mod recipe;
 pub mod repair;
