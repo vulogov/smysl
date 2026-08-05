@@ -421,20 +421,48 @@ does not render private items anyway.
 **Done:** both crates build with no dead-code warnings, every still-public module is either
 facade-reachable or carries the reason it stayed, and `make ci` is green.
 
-**S5 — make the documented contract equal the enforced one.**
+**S5 — make the documented contract equal the enforced one.** ✅ *done in 0.13.0*
 
-§0.2 found the two gates disagree: `cargo public-api` on the facade returns 239 items with or
-without `--simplified`, because cross-crate re-exports are never expanded, so
-`tests/public-api.txt` cannot see a single method of any type it lists. `make semver` sees all
-of them, per crate.
+§0.2 found the two gates disagreed and assumed the resolution: `make semver` is the real
+contract, `tests/public-api.txt` an index of it. Measuring which gate sees what turned that
+round.
 
-After S4 the surfaces have moved, so this is the moment to fix it: record per-crate goldens
-alongside the facade's, or state in `API_CONTRACT.md` that the facade file is an index and
-`make semver` is the contract. Either is defensible; having neither written down is not.
+**`cargo-semver-checks` has the same blind spot as `cargo public-api`, on the facade.** Run
+against `smysl` it reports *"no semver update required"* for the 0.12 rename of `Error` to
+`AnyError` — although `v0.11.0` exported `smysl::Error` and nothing exports it now. A
+cross-crate re-export is a `pub use` line neither tool expands. **The golden file caught that
+rename; the semver gate did not**, which is the reverse of the assumption.
 
-**Done when:** `API_CONTRACT.md` says which artefact is the contract, and it is true.
+So there are three gates with three jobs, now written down in `API_CONTRACT.md`:
 
----
+| gate | sees | blind to |
+|---|---|---|
+| `tests/public-api.txt` | every name the facade exports | anything behind a name |
+| `make semver` | every item in each library crate, under the real semver rules | the facade |
+| `tests/public-api-counts.txt` — new | a crate's surface changing size | an addition and removal that cancel |
+
+The third is eleven lines, one per library crate. Per-item goldens were considered and
+rejected again for the reason already recorded in `public-api.txt`: the eleven crates expand
+to ~11 600 lines, and a diff nobody reads is decoration. A count is read in five seconds, and
+it covers the one case neither other gate does — a public item added by accident, which is
+nobody's break and therefore nobody's failure. Confirmed by adding one `pub const` to
+`smysl-check` and watching the gate fail with `-242 / +243`.
+
+**`make semver` no longer skips.** A crate in `SEMVER_BREAKING` was `continue`d with a one-line
+SKIP, so a crate with one deliberate break had *nothing* watching it and a second, unintended
+break would ride along invisibly for the rest of the cycle. Those crates now run, ungated, with
+their failures printed to be checked against the reasons recorded beside the list.
+
+**That found a wrong entry on its first run.** `smysl-core` was listed for the `AnyError`
+rename and reported no failures, because it never broke — the type there is still `Error`, and
+the rename is `pub use smysl_core::Error as AnyError` in the facade's `src/lib.rs`. The entry
+names `smysl` now. A skip had been hiding the fact that the list was wrong about which crate.
+
+Everything else matched: `smysl-graph` and `smysl-retrieve` one `struct_marked_non_exhaustive`
+each (`SalienceRequest`, `Hit`), `smysl-provider` and `smysl-ingest` eight each from S2 and S4.
+
+**Done:** `API_CONTRACT.md` says which artefact is the contract for what, and each claim in it
+was measured rather than assumed.
 
 **S6 — land it as a break.**
 

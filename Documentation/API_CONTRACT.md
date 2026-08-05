@@ -7,16 +7,48 @@ written. Anything not settled here is still a proposal.
 accident. Neither says which of them anyone *meant*. Gate 3 in `READINESS.md` calls that
 mechanised-but-not-decided, and this file is the decision put in front of whoever makes it.
 
-**Two corrections from the 1.0 measurement**, both in `ROAD_TO_1.0.md` §0.2 and §1.2, because
-they change what this file is describing:
+## Which artefact is the contract
 
-1. **The 243 is an index, not the contract.** `cargo public-api` on the facade returns the
-   same list with or without `--simplified`: cross-crate re-exports are recorded as `pub use`
-   and never expanded. So this file can say `Store` is exported and cannot see one of its
-   methods. `make semver` runs per crate and sees all **12 111 public items** across the
-   eleven libraries — and since they share one version, that larger set is what 1.0 freezes.
-   Which artefact is *the* contract is still to be written down; §1.2 S5 is where.
-2. **The seam is where the choice is.** Splitting the surface by whether an item hangs off a
+Three, with different jobs, because each has a blind spot another covers. This was written
+down in §1.2 S5 after measuring what each gate actually sees — and the measurement contradicted
+what had been assumed.
+
+| gate | sees | blind to |
+|---|---|---|
+| `tests/public-api.txt` (243 names) | every name the facade exports | anything *behind* a name: methods, signatures, variants |
+| `make semver` | every item in each library crate, methods included, under the real semver rules | the facade — a `pub use` from another crate is a line it cannot expand |
+| `tests/public-api-counts.txt` (11 lines) | a crate's surface changing size | an addition and a removal that cancel |
+
+**The assumption that had to be corrected** is that `make semver` was authoritative and the
+golden file merely an index. It is the other way round for the facade. `cargo-semver-checks`
+run against `smysl` reports *"no semver update required"* for the 0.12 rename of `Error` to
+`AnyError` — although `v0.11.0` exported `smysl::Error` and nothing exports it now. It has the
+same `pub use` blind spot as `cargo public-api`. **The golden file caught that rename; the
+semver gate did not.**
+
+So: for the facade's names, `tests/public-api.txt` is the gate. For everything behind a name,
+`make semver` is. For a public item added to a library crate by accident — nobody's break, so
+nobody's failure — `tests/public-api-counts.txt` is, and nothing else was watching that at all.
+
+Two further things S5 changed, both about `make semver` not running:
+
+- **It no longer skips.** A crate in `SEMVER_BREAKING` used to be `continue`d with a one-line
+  SKIP, so a crate with one deliberate break had *nothing* watching it and a second,
+  unintended break rode along invisibly. Now those crates are run and their failures printed,
+  ungated, to be compared against the reasons recorded beside the list.
+- **That immediately found a wrong entry.** `smysl-core` had been listed for the `AnyError`
+  rename and reported no failures at all, because it never broke: the type there is still
+  `Error`, and the rename is a `pub use ... as` in the facade. The entry now names `smysl`.
+
+**What none of the three covers** is a baseline that has gone stale: `make semver` compares
+against the last *published* version, so a cut-but-unpublished release means every break since
+accumulates against an older baseline. That is recorded beside `BASELINE` in the `Makefile`
+rather than fixed, because publication is the only thing that fixes it.
+
+---
+
+**One more correction from the 1.0 measurement**, in `ROAD_TO_1.0.md` §0.2:
+**The seam is where the choice is.** Splitting the surface by whether an item hangs off a
    facade-exported type puts ~92% in "methods on things we deliberately export". The
    discretionary remainder concentrates in `smysl-provider` (26%) and `smysl-ingest` (36%) —
    which is to say, in bucket 2. The instinct below about *which* surface is unsettled was

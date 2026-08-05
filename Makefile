@@ -108,6 +108,9 @@ BASELINE  := 0.11.0
 PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-render \
              smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl
 
+# The library crates behind the facade: everything published except the facade itself.
+LIBRARIES := $(filter-out smysl,$(PUBLISHED))
+
 DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE SMYSL_RATIONALE_PRESENTATION
 
 #
@@ -141,7 +144,14 @@ api: ## Regenerate the recorded public surfaces, both ends
 	@{ sed -n '1,/^# Regenerate with/p' tests/public-api-pure.txt; \
 	   $(CARGO) public-api --no-default-features --simplified 2>/dev/null; } > tests/public-api-pure.txt.new
 	@mv tests/public-api-pure.txt.new tests/public-api-pure.txt
+	@{ sed -n '1,/^# Regenerate with/p' tests/public-api-counts.txt; \
+	   for c in $(LIBRARIES); do \
+	     printf '%-16s %s\n' "$$c" \
+	       "$$($(CARGO) public-api -p $$c --all-features --simplified 2>/dev/null | wc -l | tr -d ' ')"; \
+	   done; } > tests/public-api-counts.txt.new
+	@mv tests/public-api-counts.txt.new tests/public-api-counts.txt
 	@echo "api: recorded $$($(CARGO) public-api --all-features --simplified 2>/dev/null | wc -l | tr -d ' ') names at --all-features, $$($(CARGO) public-api --no-default-features --simplified 2>/dev/null | wc -l | tr -d ' ') pure"
+	@echo "api: recorded $(words $(LIBRARIES)) per-crate surface counts"
 
 # Both ends, and the nesting between them.
 #
@@ -165,7 +175,14 @@ api-check: ## Fail if either recorded surface moved, or if they stop nesting
 	  || { echo "api-check: default features expose a name --all-features does not"; exit 1; }
 	@test -z "$$(comm -13 /tmp/d.s /tmp/p.s)" \
 	  || { echo "api-check: --no-default-features exposes a name default does not"; exit 1; }
-	@echo "api-check: both surfaces match, and pure <= default <= all-features"
+	@{ for c in $(LIBRARIES); do \
+	     printf '%-16s %s\n' "$$c" \
+	       "$$($(CARGO) public-api -p $$c --all-features --simplified 2>/dev/null | wc -l | tr -d ' ')"; \
+	   done; } > /tmp/smysl-api-counts.txt
+	@grep -v '^#' tests/public-api-counts.txt | grep -v '^$$' > /tmp/smysl-api-counts-was.txt
+	@diff -u /tmp/smysl-api-counts-was.txt /tmp/smysl-api-counts.txt \
+	  || { echo "api-check: a crate's public surface changed size. If deliberate, run 'make api'."; exit 1; }
+	@echo "api-check: both surfaces match, pure <= default <= all-features, and $(words $(LIBRARIES)) crate sizes unmoved"
 
 # `--release-type patch` is load bearing. Without it, 0.9 -> 0.10 on a 0.x crate is a
 # breaking-allowed bump and cargo-semver-checks skips every check: "0 checks: 0 pass, 254
@@ -190,10 +207,22 @@ api-check: ## Fail if either recorded surface moved, or if they stop nesting
 # how much of the API is currently unwatched. Empty is the normal state, and publication is
 # the only thing that reaches it.
 #
-#   smysl-core — the unified error is exported as `AnyError` rather than `Error`. Inside a
-#   crate `Error` is the idiomatic name; through a facade flattening eleven error types into
-#   one namespace it reads as a twelfth sibling rather than the enum wrapping the other eleven.
+#   smysl — the unified error is exported as `AnyError` rather than `Error`. Inside a crate
+#   `Error` is the idiomatic name; through a facade flattening eleven error types into one
+#   namespace it reads as a twelfth sibling rather than the enum wrapping the other eleven.
 #   The type is unchanged; only the name it is re-exported under moved.
+#
+#   This was recorded against `smysl-core` until 0.13, which was wrong twice over, and only
+#   showed up when `make semver` stopped skipping this list and started reporting it.
+#   `smysl-core` reported *no* failures, because it never broke: the type there is still
+#   `Error` and the rename is `pub use smysl_core::Error as AnyError` in the facade's
+#   `src/lib.rs`. The break is the facade's.
+#
+#   And `cargo-semver-checks` cannot see it. Run against `smysl` it reports "no semver update
+#   required", although v0.11.0 exported `smysl::Error` and nothing exports it now — because a
+#   re-export from another crate is a `pub use` line it cannot expand, exactly the blind spot
+#   `tests/public-api.txt` has for methods. What caught this rename was `api-check`, which is
+#   why the two files exist and why neither is redundant.
 #
 #   smysl-graph — `SalienceRequest` gained `#[non_exhaustive]`. Technically a break, and the
 #   fix for one: it was the only input type of eleven without it, so adding a field to it was
@@ -219,19 +248,34 @@ api-check: ## Fail if either recorded surface moved, or if they stop nesting
 #   is a public trait, so `Hit` is a type third parties must construct — `smysl-embed` builds
 #   it at two sites. A retrieval result plausibly grows a field; an exhaustive one could not
 #   gain it after 1.0 without a 2.0.
-SEMVER_BREAKING := smysl-core smysl-graph smysl-provider smysl-ingest smysl-retrieve
+SEMVER_BREAKING := smysl smysl-graph smysl-provider smysl-ingest smysl-retrieve
 
 semver: ## Report API breakage against the last published version
 	@command -v cargo-semver-checks >/dev/null || { echo "cargo install cargo-semver-checks"; exit 1; }
 	@set -e; for c in $(PUBLISHED); do \
 		case " $(SEMVER_BREAKING) " in \
-			*" $$c "*) echo "SKIP $$c: a deliberate break this cycle, see SEMVER_BREAKING"; continue;; \
+			*" $$c "*) continue;; \
 		esac; \
 		$(CARGO) semver-checks check-release --baseline-version $(BASELINE) \
 			--release-type patch -p $$c; \
 	done
+	@# Reported, not gated. Until 0.13 these were `continue`d with a one-line SKIP, which
+	@# meant a crate with one deliberate break had *nothing* watching it — a second,
+	@# unintended break in the same crate rode along invisibly for the rest of the cycle.
+	@# Running them and printing what comes back costs one command and makes the question
+	@# answerable: are these the breaks that were meant?
 	@if [ -n "$(SEMVER_BREAKING)" ]; then \
-		echo; echo "note: $(SEMVER_BREAKING) skipped as knowingly breaking; empty SEMVER_BREAKING at the release cut"; \
+		echo; \
+		echo "=== deliberate breaks this cycle: reported, not gated on ==="; \
+		for c in $(SEMVER_BREAKING); do \
+			echo; echo "--- $$c"; \
+			$(CARGO) semver-checks check-release --baseline-version $(BASELINE) \
+				--release-type patch -p $$c 2>&1 \
+				| grep -E '^--- failure|Summary semver' || true; \
+		done; \
+		echo; \
+		echo "Each must match a reason recorded above SEMVER_BREAKING in this file."; \
+		echo "Empty SEMVER_BREAKING at the release cut."; \
 	fi
 
 lint: ## fmt --check and clippy -D warnings, as CI runs them
