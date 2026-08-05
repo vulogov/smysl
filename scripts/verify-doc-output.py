@@ -30,7 +30,12 @@ import re, subprocess, glob, os, sys
 # failed on `os.chdir` before comparing a single transcript.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
-SM = './target/debug/smysl'
+# The binary under test. Overridable so `tests/doc_output.rs` can point this at the binary
+# cargo just built for it — `CARGO_BIN_EXE_smysl` — rather than at whatever happens to be in
+# target/debug. That distinction is the whole reason the test exists: `cargo-mutants` rebuilds
+# the binary with a mutation applied, and a check that replays a *stale* binary would report
+# every mutant as caught while testing none of them.
+SM = os.environ.get('SMYSL_BIN', './target/debug/smysl')
 
 # #screen(caption: "$ cmd")[ ``` ...output... ``` ]
 # `\"` inside the caption is part of the caption, not its end. The first version stopped at
@@ -74,9 +79,15 @@ for f in sorted(glob.glob('Documentation/manual/*.typ')):
         # dirty one disagreed about how many blocks were covered. Six commands were in that
         # state, and the count moved between runs without anything changing.
         toks = cmd.split()
+        # `i` starts at 1: token 0 is the binary this script was told to run, not an input the
+        # manual named. It matters because `SMYSL_BIN` may be absolute — `tests/doc_output.rs`
+        # passes `CARGO_BIN_EXE_smysl`, which always is — and the absolute-path rule below
+        # would then match the program itself and skip every command in the book. It did:
+        # `ran 0, skipped 168`, reported as a pass, because the test asserted only that the
+        # script had produced a summary line. Both halves are fixed; this is the half in here.
         paths = [t for i, t in enumerate(toks)
-                 if '/' in t and not t.startswith('-') and not t.startswith('b3:')
-                 and not (i and toks[i - 1] in ('-o', '--output'))]
+                 if i and '/' in t and not t.startswith('-') and not t.startswith('b3:')
+                 and not toks[i - 1] in ('-o', '--output')]
         # An absolute path as an *input* is narrative state, not something this script can
         # guarantee. It may exist because an earlier replayed command in this very run wrote
         # it — `merge … -o /tmp/incident.cbor` does — and then the manual's transcript

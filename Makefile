@@ -48,7 +48,7 @@ MATRIX := \
 	--no-default-features@--features@render-typst,render-html
 
 .DEFAULT_GOAL := help
-.PHONY: help all rebuild release test lint clippy fmt fix test-matrix gates purity update seed-fuzz \
+.PHONY: help all rebuild release test lint clippy fmt fix test-matrix gates purity update seed-fuzz fuzz-build \
         determinism conformance eval live-ollama live-hosted doc fuzz clean sweep \
         commit ci toolchain eval-live eval-semantic docs doc-output seed-fuzz fuzz-long
 
@@ -380,6 +380,21 @@ FUZZ_TARGETS := surface cbor merge_algebra pack_constraints pipeline pack_exact
 # A minimised corpus was the obvious alternative and is not viable: `cargo fuzz cmin` takes
 # `cbor` from 6780 inputs to 2093, and 2093 inputs is still 8.2 MB. Seeds stay small on
 # purpose.
+fuzz-build: ## Compile the fuzz targets without running them
+	@# `fuzz/` is its own workspace, so `cargo check --workspace` from the root never
+	@# compiles it and `make ci` never saw it. That is not theoretical: 0.13's
+	@# `#[non_exhaustive]` audit broke `pack_exact.rs`, every local check passed, and CI's
+	@# fuzz job went red on a push that had been verified twice.
+	@#
+	@# Compiling is enough to catch it and costs seconds. *Running* the fuzzers needs
+	@# nightly and a minute per target, which is why that stays its own job.
+	@#
+	@# Not piped through `tail`. A pipeline's exit status is the last command's, so
+	@# `cargo check ... | tail -5` prints the error and returns 0 — a gate that reports a
+	@# failure and passes anyway, which is the exact shape of defect this file keeps finding.
+	cd fuzz && $(CARGO) check --all-targets
+	@echo "fuzz-build: the fuzz targets still compile against the library"
+
 seed-fuzz: ## Copy the repo's own inputs into each fuzz corpus
 	@set -e; for t in $(FUZZ_TARGETS); do \
 		mkdir -p fuzz/corpus/$$t; \
@@ -423,7 +438,7 @@ commit: ## Commit with aic and push
 # Everything
 # ---------------------------------------------------------------------------
 
-ci: lint doc-gate api-check test-matrix gates conformance ## Everything CI runs, bar the jobs needing a server
+ci: lint doc-gate api-check test-matrix gates conformance fuzz-build ## Everything CI runs, bar the jobs needing a server
 	@echo
 	@echo "ci: green."
 	@echo "Not covered here: the ollama job (needs a running server - see make live-ollama)"

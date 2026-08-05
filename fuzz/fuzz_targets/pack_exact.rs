@@ -15,7 +15,7 @@
 //! that coverage feedback picks the graphs.
 
 #![no_main]
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use libfuzzer_sys::fuzz_target;
 use smysl_core::{Lod, PackMode, Uid};
@@ -71,10 +71,11 @@ fn brute_force(
         return None;
     }
 
-    let constraints = Constraints {
-        pinned: BTreeSet::new(),
-        budget,
-    };
+    // `Constraints` is `#[non_exhaustive]` as of 0.13, so it is built from its default and
+    // adjusted. A field added later will not stop this fuzz target compiling, which is the
+    // point of the attribute.
+    let mut constraints = Constraints::default();
+    constraints.budget = budget;
     let mut best = 0.0f64;
     for mut n in 0..total {
         let mut selection = Selection::new();
