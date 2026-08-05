@@ -211,7 +211,14 @@ api-check: ## Fail if either recorded surface moved, or if they stop nesting
 #   Both crates keep the items reachable for the integration tests that need them, and
 #   cargo-semver-checks counts hiding as removal from the public API — which is the point, and
 #   is why this is a break rather than a tidy-up. See ROAD_TO_1.0.md §1.2.
-SEMVER_BREAKING := smysl-core smysl-graph smysl-provider smysl-ingest
+#
+#   smysl-retrieve — S3: `Hit` gained `#[non_exhaustive]` and `Hit::new`. `Query`, three
+#   declarations below it, already had the attribute; `Hit` did not, and the pair face each
+#   other across the same call. It matters more than for most output types because `Retriever`
+#   is a public trait, so `Hit` is a type third parties must construct — `smysl-embed` builds
+#   it at two sites. A retrieval result plausibly grows a field; an exhaustive one could not
+#   gain it after 1.0 without a 2.0.
+SEMVER_BREAKING := smysl-core smysl-graph smysl-provider smysl-ingest smysl-retrieve
 
 semver: ## Report API breakage against the last published version
 	@command -v cargo-semver-checks >/dev/null || { echo "cargo install cargo-semver-checks"; exit 1; }

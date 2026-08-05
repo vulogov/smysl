@@ -26,6 +26,8 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use smysl_core::error::ProviderError;
 
+use super::StatusMapping;
+
 use super::auth::{self, Secret};
 use crate::config::ProviderConfig;
 use crate::http;
@@ -211,24 +213,6 @@ impl Anthropic {
         })
     }
 
-    pub fn status_error(&self, status: u16, body: &str) -> ProviderError {
-        if let Ok(v) = serde_json::from_str::<Value>(body) {
-            if let Some(e) = error_of(&v) {
-                return match status {
-                    401 | 403 => ProviderError::Unauthorized,
-                    // The status decides backpressure, not the envelope. Anthropic's 529 is
-                    // 503 under a number of its own, and an overloaded server is worth
-                    // waiting out rather than reporting as a fault.
-                    s if http::is_backpressure(s) => {
-                        ProviderError::RateLimited { retry_after: None }
-                    }
-                    _ => e,
-                };
-            }
-        }
-        http::status_error(status, body, None)
-    }
-
     pub fn parse_models(raw: &str) -> Result<Vec<String>, ProviderError> {
         let v: Value = serde_json::from_str(raw)
             .map_err(|e| ProviderError::Malformed(format!("models: {e}")))?;
@@ -359,6 +343,26 @@ impl Provider for Anthropic {
             models,
             caps: Some(self.caps()),
         })
+    }
+}
+
+impl StatusMapping for Anthropic {
+    fn status_error(&self, status: u16, body: &str) -> ProviderError {
+        if let Ok(v) = serde_json::from_str::<Value>(body) {
+            if let Some(e) = error_of(&v) {
+                return match status {
+                    401 | 403 => ProviderError::Unauthorized,
+                    // The status decides backpressure, not the envelope. Anthropic's 529 is
+                    // 503 under a number of its own, and an overloaded server is worth
+                    // waiting out rather than reporting as a fault.
+                    s if http::is_backpressure(s) => {
+                        ProviderError::RateLimited { retry_after: None }
+                    }
+                    _ => e,
+                };
+            }
+        }
+        http::status_error(status, body, None)
     }
 }
 

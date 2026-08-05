@@ -19,6 +19,8 @@ use std::time::Duration;
 use serde_json::Value;
 use smysl_core::error::ProviderError;
 
+use super::StatusMapping;
+
 use super::auth::{self, Secret};
 use super::openai_compat::{self, Dialect};
 use crate::config::ProviderConfig;
@@ -79,26 +81,6 @@ impl DeepSeek {
         // that it conforms. Claiming enforcement here is what would make a caller skip the
         // check that catches the difference.
         openai_compat::parse(raw, &self.cfg.model, retries, false)
-    }
-
-    /// Map a status and body onto the vocabulary. The body is the informative half.
-    pub fn status_error(&self, status: u16, body: &str) -> ProviderError {
-        if let Ok(v) = serde_json::from_str::<Value>(body) {
-            if let Some(e) = openai_compat::error_of(&v) {
-                return match (status, e) {
-                    // A 401 is unauthorized whatever the body chose to call it.
-                    (401 | 403, _) => ProviderError::Unauthorized,
-                    // Likewise the status decides backpressure: DeepSeek answers an
-                    // overloaded server with 503 and a body explaining it, and the
-                    // explanation must not cost the response its retry.
-                    (s, _) if http::is_backpressure(s) => {
-                        ProviderError::RateLimited { retry_after: None }
-                    }
-                    (_, mapped) => mapped,
-                };
-            }
-        }
-        http::status_error(status, body, None)
     }
 
     pub fn parse_models(raw: &str) -> Result<Vec<String>, ProviderError> {
@@ -257,6 +239,28 @@ impl Provider for DeepSeek {
             models,
             caps: Some(self.caps()),
         })
+    }
+}
+
+impl StatusMapping for DeepSeek {
+    /// Map a status and body onto the vocabulary. The body is the informative half.
+    fn status_error(&self, status: u16, body: &str) -> ProviderError {
+        if let Ok(v) = serde_json::from_str::<Value>(body) {
+            if let Some(e) = openai_compat::error_of(&v) {
+                return match (status, e) {
+                    // A 401 is unauthorized whatever the body chose to call it.
+                    (401 | 403, _) => ProviderError::Unauthorized,
+                    // Likewise the status decides backpressure: DeepSeek answers an
+                    // overloaded server with 503 and a body explaining it, and the
+                    // explanation must not cost the response its retry.
+                    (s, _) if http::is_backpressure(s) => {
+                        ProviderError::RateLimited { retry_after: None }
+                    }
+                    (_, mapped) => mapped,
+                };
+            }
+        }
+        http::status_error(status, body, None)
     }
 }
 

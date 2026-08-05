@@ -292,26 +292,59 @@ which `pub(crate)` is right rather than hiding — `provider::http`, `map::auth`
 **Done:** every one of the eight files compiles and passes against the narrowed crates, and
 each hidden module carries the reason it stayed reachable.
 
-**S3 — the shape review, before the visibility change.**
+**S3 — the shape review, before the visibility change.** ✅ *done in 0.13.0*
 
-Reading a type for "would we regret this at 2.0" has to happen before deciding it stays public,
-because a type that is wrong should be fixed, not frozen quietly.
+Seventeen seam types read once with "would we regret this at 2.0" in mind. Eleven already
+carried `#[non_exhaustive]`. Four more — `Registry`, `Bm25`, `Semantic`, `Hybrid` — turned out
+not to need it: every field is private, so external code can neither construct them nor match
+them exhaustively. They are closed by encapsulation, which is a better answer than the
+attribute and should be recorded as such rather than counted as a gap.
 
-`ProviderConfig`, `Request`, `Completion`, `Usage`, `Capabilities`, `StructuredMode`, `Probe`,
-`Provider`, `Registry`; `Bm25`, `Hybrid`, `Semantic`, `Query`, `Hit`, `Retriever`; `Ir`,
-`Profile`, `BuildOptions`.
+Two findings had substance.
 
-One defect is already known and belongs here: **`status_error` is a shared contract shared by
-convention.** All five mappers expose `status_error(u16, &str) -> ProviderError` with the same
-signature, as an inherent method rather than part of the `Provider` trait — which is why
-`tests/status_taxonomy.rs` has to build boxed closures to test them together. It should be on
-the trait, where the compiler enforces the shape a sixth mapper must have. Note this cuts
-against S4: a trait method is public by necessity, so this decision comes first.
+**`status_error` does not belong on `Provider` — and the plan was wrong to say it did.**
 
-**Done when:** each type has been read once with that question in mind, and the answers — not
-just the changes — are in `API_CONTRACT.md`.
+The defect was real: five mappers exposed `status_error(&self, u16, &str) -> ProviderError` as
+an inherent method, identical in all five, enforced by nothing, which is why
+`status_taxonomy.rs` had to hold them as boxed closures. §1.2 as first written proposed moving
+it onto the `Provider` trait.
 
----
+Reading the trait says otherwise. **`Provider` names no HTTP anywhere** — not `http`, not
+`status`, not `u16`; it is `id`, `caps`, `complete`, `stream`, `count_tokens`, `probe`. And
+three of its eight implementors speak no HTTP at all: `registry::Mock`, ingest's `Fake`, and
+`gate.rs`'s `Scripted`. Putting an HTTP-shaped method on it would have forced those three to
+implement something meaningless to them, permanently, from 1.0 — the exact regret this step
+exists to find, and it would have been introduced *by* this step.
+
+So the shared shape went onto a new `#[doc(hidden)] pub trait StatusMapping` in
+`smysl-provider::map`, next to the five HTTP mappers, and `Provider` keeps the generality that
+made three non-HTTP implementors possible.
+
+A trait alone still would not have forced anything — a sixth mapper could skip it and compile.
+Every mapper reaches a caller through `build`, so `build` boxes through
+`fn boxed<P: Provider + StatusMapping>`, which turns the convention into a rule: a mapper that
+cannot say what a 401 means does not compile into the registry. Confirmed by removing one
+mapper's impl and watching the compiler name the missing trait.
+
+`status_taxonomy.rs` now holds `Box<dyn StatusMapping>` instead of closures — the simplification
+the file predicted in its own comments.
+
+**`Hit` was exhaustive and should not have been.**
+
+`Query` carries `#[non_exhaustive]`; `Hit`, three declarations above it, did not — two types
+facing each other across the same call, with no reason for the asymmetry. It matters more than
+for most output types because `Retriever` is a public trait anyone may implement, so `Hit` is a
+type third parties must *construct*: `smysl-embed` builds it at two sites today. A retrieval
+result plausibly grows — which field matched, a snippet, an explanation of the score — and an
+exhaustive struct could not gain one after 1.0 without a 2.0. Now `#[non_exhaustive]` with
+`Hit::new(uid, score)`, and `smysl-retrieve` joins `SEMVER_BREAKING`.
+
+**One thing noted and not changed.** `Retriever` is an unsealed public trait, so any method
+added after 1.0 is breaking unless it carries a default — as `is_empty` already does. That is
+inherent to public traits rather than a defect in this one; the discipline it implies is
+recorded in `API_CONTRACT.md` rather than fixed in code.
+
+**Done:** each of the seventeen has an answer, and the reasons sit where the types are.
 
 **S4 — narrow, one crate at a time, provider first.**
 

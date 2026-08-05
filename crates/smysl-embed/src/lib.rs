@@ -209,7 +209,7 @@ impl Retriever for Semantic {
                 // than an unrelated sentence would be", which is not a hit. Zero is excluded
                 // for the same reason lexical excludes it: padding a result to `limit` with
                 // things that do not match reads as a ranking and is not one.
-                (score > 0.0).then_some(Hit { uid: *uid, score })
+                (score > 0.0).then_some(Hit::new(*uid, score))
             })
             .collect();
 
@@ -354,10 +354,7 @@ mod tests {
             hits: ids
                 .iter()
                 .enumerate()
-                .map(|(i, n)| Hit {
-                    uid: uid(*n),
-                    score: 10.0 - i as f32,
-                })
+                .map(|(i, n)| Hit::new(uid(*n), 10.0 - i as f32))
                 .collect(),
         }
     }

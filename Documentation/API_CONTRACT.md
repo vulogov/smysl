@@ -120,6 +120,28 @@ one under version control. Nothing checks the default surface at all.
 
 ---
 
+## Three rules the 1.0 review left behind
+
+Not fixes — standing constraints, recorded because each was learned by nearly getting it wrong.
+
+**A public trait's method set is frozen harder than a struct's fields.** `#[non_exhaustive]`
+lets a struct grow; there is no equivalent for a trait. `Retriever` is unsealed and anyone may
+implement it, so every method added after 1.0 must carry a default or it is a 2.0 — as
+`is_empty` already does and `search` and `len` cannot. The same holds for `Provider`.
+
+**Do not put a transport's vocabulary on an abstraction that has none.** `Provider` names no
+HTTP: not `http`, not `status`, not `u16`. Three of its eight implementors speak no HTTP at
+all. §1.2 S3 came close to moving `status_error(&self, u16, &str)` onto it for the sake of
+enforcing a shared shape, which would have frozen HTTP into a general trait and forced three
+non-HTTP implementors to fake a method. The shape went onto a separate `StatusMapping` instead.
+
+**Enforce shared shapes where construction happens, not where it is declared.** Writing
+`StatusMapping` down did not oblige anyone to implement it; a sixth mapper could still skip it.
+`map::build` boxing through `fn boxed<P: Provider + StatusMapping>` is what makes it a rule,
+because that is the one path every mapper takes to reach a caller.
+
+---
+
 ## What is done, and what is not
 
 Done: the three bucket-3 decisions, and `SalienceRequest`. All four are breaks, all four are

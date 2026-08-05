@@ -110,7 +110,7 @@ impl Retriever for Bm25 {
                 // `limit` with units that do not match, which reads as a ranking and is not
                 // one.
                 let score = self.scorer.score(uid, &q)?;
-                (score > 0.0).then_some(Hit { uid: *uid, score })
+                (score > 0.0).then_some(Hit::new(*uid, score))
             })
             .collect();
 

@@ -70,6 +70,45 @@ use smysl_core::error::ProviderError;
 use crate::config::ProviderConfig;
 use crate::Provider;
 
+/// What every HTTP mapper must make of a failed response.
+///
+/// All five had `status_error(&self, u16, &str) -> ProviderError` as an inherent method with
+/// the same signature, shared by convention and enforced by nothing — which is why
+/// `tests/status_taxonomy.rs` had to build boxed closures to test them together.
+///
+/// The road to 1.0 proposed moving it onto `Provider` instead. Reading it for §1.2 S3 —
+/// "would we regret this shape at 2.0" — said no, and the trait itself is the evidence:
+/// `Provider` names no HTTP anywhere. Not `http`, not `status`, not `u16`. Three of its eight
+/// implementors (`registry::Mock`, ingest's `Fake`, `gate.rs`'s `Scripted`) speak no HTTP at
+/// all, and would have had to implement a method that means nothing to them, permanently,
+/// from 1.0 onward. `status: u16` is HTTP's vocabulary, and `Provider` is not an HTTP
+/// abstraction — `complete`, `stream`, `probe` say nothing about transport.
+///
+/// So the shared shape lives here, where the five HTTP mappers are, and `Provider` keeps the
+/// generality that made three non-HTTP implementors possible in the first place.
+///
+/// `#[doc(hidden)]`, per S2: reachable so `status_taxonomy.rs` can hold the mappers uniformly,
+/// outside the contract because no consumer classifies a response — `complete` does.
+#[doc(hidden)]
+pub trait StatusMapping {
+    /// Turn a failed response into the error taxonomy. The body is the informative half:
+    /// `Unauthorized` stops a run, `RateLimited` is retried with backoff, and `Upstream` may
+    /// fall through to another provider, so getting this wrong is not a cosmetic matter.
+    fn status_error(&self, status: u16, body: &str) -> ProviderError;
+}
+
+/// Box a mapper, requiring it to classify failures as well as make requests.
+///
+/// The bound is the point. `StatusMapping` on its own writes the shared signature down; it
+/// does not make anyone implement it, and a sixth mapper could still be added with no
+/// `status_error` at all and no complaint from the compiler. Every mapper reaches a caller
+/// through `build`, so requiring both here is what turns the convention into a rule: a mapper
+/// that cannot say what a 401 means does not compile into the registry.
+#[cfg(feature = "http-client")]
+fn boxed<P: Provider + StatusMapping + 'static>(p: P) -> Box<dyn Provider> {
+    Box::new(p)
+}
+
 /// Build the provider a configuration names.
 ///
 /// A `kind` no compiled mapper handles is an error rather than a silent omission: a
@@ -78,15 +117,15 @@ use crate::Provider;
 pub fn build(cfg: &ProviderConfig) -> Result<Box<dyn Provider>, ProviderError> {
     match cfg.kind.as_str() {
         #[cfg(feature = "ollama")]
-        "ollama" => Ok(Box::new(ollama::Ollama::new(cfg.clone()))),
+        "ollama" => Ok(boxed(ollama::Ollama::new(cfg.clone()))),
         #[cfg(feature = "deepseek")]
-        "deepseek" => Ok(Box::new(deepseek::DeepSeek::new(cfg.clone()))),
+        "deepseek" => Ok(boxed(deepseek::DeepSeek::new(cfg.clone()))),
         #[cfg(feature = "anthropic")]
-        "anthropic" => Ok(Box::new(anthropic::Anthropic::new(cfg.clone()))),
+        "anthropic" => Ok(boxed(anthropic::Anthropic::new(cfg.clone()))),
         #[cfg(feature = "openai")]
-        "openai" => Ok(Box::new(openai::OpenAi::new(cfg.clone()))),
+        "openai" => Ok(boxed(openai::OpenAi::new(cfg.clone()))),
         #[cfg(feature = "gemini")]
-        "gemini" => Ok(Box::new(gemini::Gemini::new(cfg.clone()))),
+        "gemini" => Ok(boxed(gemini::Gemini::new(cfg.clone()))),
         other => Err(ProviderError::Malformed(format!(
             "provider kind `{other}` is not compiled into this build (have: {})",
             match crate::compiled_mappers().as_slice() {

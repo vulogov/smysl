@@ -32,6 +32,8 @@ use std::time::Duration;
 use serde_json::Value;
 use smysl_core::error::ProviderError;
 
+use super::StatusMapping;
+
 use super::auth::{self, Secret};
 use super::openai_compat::{self, Dialect};
 use crate::config::ProviderConfig;
@@ -89,24 +91,6 @@ impl OpenAi {
     pub fn parse(&self, raw: &str, retries: u32) -> Result<Completion, ProviderError> {
         let enforced = self.cfg.structured == StructuredMode::JsonSchema;
         openai_compat::parse(raw, &self.cfg.model, retries, enforced)
-    }
-
-    pub fn status_error(&self, status: u16, body: &str) -> ProviderError {
-        if let Ok(v) = serde_json::from_str::<Value>(body) {
-            if let Some(e) = openai_compat::error_of(&v) {
-                return match status {
-                    401 | 403 => ProviderError::Unauthorized,
-                    // The status decides backpressure, not the envelope: an overloaded
-                    // endpoint that explains itself must still arrive as something the
-                    // retry layer acts on.
-                    s if http::is_backpressure(s) => {
-                        ProviderError::RateLimited { retry_after: None }
-                    }
-                    _ => e,
-                };
-            }
-        }
-        http::status_error(status, body, None)
     }
 
     pub fn parse_models(raw: &str) -> Result<Vec<String>, ProviderError> {
@@ -261,6 +245,26 @@ impl Provider for OpenAi {
             models,
             caps: Some(self.caps()),
         })
+    }
+}
+
+impl StatusMapping for OpenAi {
+    fn status_error(&self, status: u16, body: &str) -> ProviderError {
+        if let Ok(v) = serde_json::from_str::<Value>(body) {
+            if let Some(e) = openai_compat::error_of(&v) {
+                return match status {
+                    401 | 403 => ProviderError::Unauthorized,
+                    // The status decides backpressure, not the envelope: an overloaded
+                    // endpoint that explains itself must still arrive as something the
+                    // retry layer acts on.
+                    s if http::is_backpressure(s) => {
+                        ProviderError::RateLimited { retry_after: None }
+                    }
+                    _ => e,
+                };
+            }
+        }
+        http::status_error(status, body, None)
     }
 }
 

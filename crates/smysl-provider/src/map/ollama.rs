@@ -20,6 +20,8 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use smysl_core::error::ProviderError;
 
+use super::StatusMapping;
+
 use crate::config::ProviderConfig;
 use crate::http;
 use crate::stream::{Emitter, StreamMsg};
@@ -150,27 +152,6 @@ impl Ollama {
             usage,
             structured: self.cfg.structured.is_enforced(),
         })
-    }
-
-    /// Responsibility 5, for the status path.
-    ///
-    /// Ollama answers a missing model with 404 *and* an explanatory body. Mapping on the
-    /// status alone would call that `Upstream`, which is technically true and useless: a
-    /// missing model is a configuration error, and the difference decides whether a caller
-    /// goes and pulls the model or files a bug about the server.
-    pub fn status_error(&self, status: u16, body: &str) -> ProviderError {
-        // The status decides backpressure before the body gets a say: a loaded Ollama
-        // answers 503 while a model loads, and `classify` would read the explanation as a
-        // fault that nothing retries.
-        if http::is_backpressure(status) {
-            return ProviderError::RateLimited { retry_after: None };
-        }
-        if let Ok(v) = serde_json::from_str::<Value>(body) {
-            if let Some(msg) = v.get("error").and_then(Value::as_str) {
-                return classify(msg);
-            }
-        }
-        http::status_error(status, body, None)
     }
 
     /// Parse `/api/tags` into a model list.
@@ -403,6 +384,29 @@ impl Provider for Ollama {
             caps,
             detail,
         })
+    }
+}
+
+impl StatusMapping for Ollama {
+    /// Responsibility 5, for the status path.
+    ///
+    /// Ollama answers a missing model with 404 *and* an explanatory body. Mapping on the
+    /// status alone would call that `Upstream`, which is technically true and useless: a
+    /// missing model is a configuration error, and the difference decides whether a caller
+    /// goes and pulls the model or files a bug about the server.
+    fn status_error(&self, status: u16, body: &str) -> ProviderError {
+        // The status decides backpressure before the body gets a say: a loaded Ollama
+        // answers 503 while a model loads, and `classify` would read the explanation as a
+        // fault that nothing retries.
+        if http::is_backpressure(status) {
+            return ProviderError::RateLimited { retry_after: None };
+        }
+        if let Ok(v) = serde_json::from_str::<Value>(body) {
+            if let Some(msg) = v.get("error").and_then(Value::as_str) {
+                return classify(msg);
+            }
+        }
+        http::status_error(status, body, None)
     }
 }
 

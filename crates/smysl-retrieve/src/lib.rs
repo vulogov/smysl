@@ -52,12 +52,31 @@ mod lexical;
 pub use lexical::Bm25;
 
 /// One retrieved unit and why it scored.
+///
+/// `#[non_exhaustive]` with a constructor, decided in the §1.2 S3 shape review. `Query`, three
+/// declarations below, already carried the attribute and `Hit` did not — an asymmetry with no
+/// reason behind it, in the pair of types that face each other across the same call.
+///
+/// It matters here more than for most output types because `Retriever` is a public trait that
+/// anyone may implement, so `Hit` is a type third parties have to *construct*: `smysl-embed`
+/// builds it at two sites today. A retrieval result plausibly grows — which field matched, a
+/// snippet, an explanation of the score — and at 1.0 an exhaustive struct could not gain one
+/// without a 2.0.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Hit {
     pub uid: Uid,
     /// Higher is more relevant. Scales differ between implementations, so compare within one
     /// result set and never across two.
     pub score: f32,
+}
+
+impl Hit {
+    /// The two things every hit has. Anything added later gets a setter or a builder, so this
+    /// signature stays the one an implementation of `Retriever` writes.
+    pub fn new(uid: Uid, score: f32) -> Hit {
+        Hit { uid, score }
+    }
 }
 
 /// What to retrieve, and from where.
