@@ -217,6 +217,7 @@ impl fmt::Display for Role {
 
 /// One position in a thread.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub struct Step {
     pub role: Role,
     pub unit: Uid,
@@ -240,6 +241,7 @@ impl Step {
 
 /// A named, ordered, role-annotated walk over the graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Thread {
     pub id: ThreadId,
     pub schema: ThreadSchema,

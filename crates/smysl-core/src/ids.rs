@@ -467,6 +467,7 @@ impl fmt::Display for KernelType {
 /// This is `UnitCore.schema`, key 0 of the hashed record. Extension types carry their
 /// structure in `payload` and MUST NOT alter kernel field semantics.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub enum SchemaId {
     /// A kernel unit type: `claim`, `evidence`, and the rest of §2.1.
     Kernel(KernelType),

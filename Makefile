@@ -248,7 +248,15 @@ api-check: ## Fail if either recorded surface moved, or if they stop nesting
 #   is a public trait, so `Hit` is a type third parties must construct — `smysl-embed` builds
 #   it at two sites. A retrieval result plausibly grows a field; an exhaustive one could not
 #   gain it after 1.0 without a 2.0.
-SEMVER_BREAKING := smysl smysl-graph smysl-provider smysl-ingest smysl-retrieve
+#
+#   smysl-core, smysl-check, smysl-pack, smysl-thread — and more of smysl-graph — §1.1's
+#   `#[non_exhaustive]` audit. 98 public types carried it and 152 do now. Adding it is a
+#   break, and a break whose entire purpose is that the *next* addition is not one: §8 says
+#   the crate and format versions are independent axes, so an exhaustive `UnitCore` would have
+#   made the next format field a crate major. The rule and the six deliberate exceptions are
+#   in Documentation/API_CONTRACT.md.
+SEMVER_BREAKING := smysl smysl-core smysl-graph smysl-check smysl-pack smysl-thread \
+                   smysl-provider smysl-ingest smysl-retrieve
 
 semver: ## Report API breakage against the last published version
 	@command -v cargo-semver-checks >/dev/null || { echo "cargo install cargo-semver-checks"; exit 1; }

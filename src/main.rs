@@ -1211,10 +1211,16 @@ fn read_store(path: &str) -> Result<smysl::ParseOutcome, ExitCode> {
     }
 
     match smysl::from_cbor_seq(&bytes) {
-        Ok((records, _)) => Ok(smysl::ParseOutcome {
-            records,
-            ..Default::default()
-        }),
+        // Built from the default and adjusted: `ParseOutcome` is `#[non_exhaustive]` as of
+        // 0.13, so functional-update syntax is no longer available to a consumer either. The
+        // attribute is deliberate here — §8's migration to `smysl/1.0` has to add a field to
+        // this type to carry the version a document declared, and an exhaustive struct would
+        // have made that a crate major.
+        Ok((records, _)) => {
+            let mut out = smysl::ParseOutcome::default();
+            out.records = records;
+            Ok(out)
+        }
         Err(e) => {
             eprintln!("smysl check: {path}: {e}");
             Err(ExitCode::Failure)
@@ -2270,12 +2276,15 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             eprintln!("smysl salience: --weights takes three or four numbers, c,r,t[,recency]");
             return ExitCode::Usage;
         }
-        req = req.with_weights(SalienceWeights {
-            centrality: parts[0],
-            corroboration: parts[1],
-            role: parts[2],
-            recency: parts.get(3).copied().unwrap_or(0.0),
-        });
+        // Built from the default and adjusted rather than written as a literal:
+        // `SalienceWeights` is `#[non_exhaustive]` as of 0.13, so a fifth term added later
+        // does not stop this compiling — and `--weights` keeps meaning what it meant.
+        let mut w = SalienceWeights::default();
+        w.centrality = parts[0];
+        w.corroboration = parts[1];
+        w.role = parts[2];
+        w.recency = parts.get(3).copied().unwrap_or(0.0);
+        req = req.with_weights(w);
     }
     if let Some(hop) = m.get_one::<u32>("hop") {
         req = req.at_hop(*hop);

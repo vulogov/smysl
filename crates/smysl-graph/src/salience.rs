@@ -37,6 +37,7 @@ pub const CORROBORATION_CAP: usize = 4;
 
 /// The terms' weights (§1.5), plus recency.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct SalienceWeights {
     pub centrality: f32,
     pub corroboration: f32,
@@ -158,6 +159,7 @@ impl SalienceRequest {
 
 /// Why a unit scored what it did - the output of `salience --explain`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct SalienceTerms {
     pub centrality: f32,
     pub corroboration: f32,
@@ -176,6 +178,7 @@ pub struct SalienceTerms {
 
 /// Salience for every unit in a store.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct SalienceReport {
     pub scores: BTreeMap<Uid, f32>,
     pub terms: BTreeMap<Uid, SalienceTerms>,

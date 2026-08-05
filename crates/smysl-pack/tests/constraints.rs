@@ -122,10 +122,10 @@ fn generate(rng: &mut Rng, size: usize) -> Store {
             ContentionId::new(format!("k/c{i}")).unwrap(),
             a,
             vec![a, b],
-            Detected {
-                kind: DetectionKind::SupersessionFork,
-                ts: Hlc::new(0, 0, AgentId::new("tool:test").unwrap()),
-            },
+            Detected::new(
+                DetectionKind::SupersessionFork,
+                Hlc::new(0, 0, AgentId::new("tool:test").unwrap()),
+            ),
         )));
     }
 

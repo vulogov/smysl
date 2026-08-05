@@ -21,6 +21,7 @@ use crate::store::Store;
 
 /// Everything detection needs that is not in the store.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct DetectionContext {
     /// Label bindings per source, for detection (c). Labels have no wire record, so only a
     /// caller that parsed surface text can supply them.
@@ -165,7 +166,7 @@ fn contention(
         .clone()
         .unwrap_or_else(|| Hlc::new(0, 0, merge_agent()));
 
-    Contention::new(id, over, positions, Detected { kind, ts })
+    Contention::new(id, over, positions, Detected::new(kind, ts))
 }
 
 /// The agent a contention is attributed to when the caller supplied no clock. Merge is not

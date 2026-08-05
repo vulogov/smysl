@@ -24,6 +24,7 @@ pub const VERSION: u16 = 1;
 
 /// Where a record lives in the log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
 pub struct Entry {
     pub offset: u64,
     pub len: u32,
@@ -33,6 +34,7 @@ pub struct Entry {
 
 /// The cached per-unit facts that traversals ask for constantly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
 pub struct Cached {
     pub status: Status,
     /// Salience quantised to 1/1024, so the cache is exact rather than approximate.
@@ -41,6 +43,7 @@ pub struct Cached {
 
 /// The derived index.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Index {
     /// Bytes of the log this index describes.
     pub log_len: u64,

@@ -212,11 +212,13 @@ impl fmt::Display for SourceKind {
         f.pad(self.as_str())
     }
 }
-
 /// A calendar date, stored and encoded as `YYYY-MM-DD`.
 ///
 /// Deliberately not a timestamp: `captured` records when a source was observed, and
 /// sub-day precision would invite a wall-clock read into an otherwise pure path (rule D).
+///
+/// **Closed by design** (§1.1 audit, 0.13). Year, month, day. A date does not acquire a
+/// fourth field, and `Date::new` already validates the three it has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Date {
     pub year: u16,
@@ -289,6 +291,7 @@ impl fmt::Display for Date {
 /// reference may assign `measured` (rule T); `ingest` never may, however confidently a
 /// model phrases the claim.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub struct SourceRef {
     pub kind: SourceKind,
     pub reference: String,

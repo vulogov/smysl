@@ -13,11 +13,15 @@ use crate::types::epistemics::Status;
 // ---------------------------------------------------------------------------
 // Hybrid logical clock
 // ---------------------------------------------------------------------------
-
 /// A hybrid logical clock.
 ///
 /// HLCs order supersession chains and thread registers, and nothing else. They MUST NOT
 /// resolve conflicts over content (§5.1) - a later timestamp is not a better claim.
+///
+/// **Closed by design** (§1.1 audit, 0.13). A hybrid logical clock is a wall reading, a
+/// counter to order events inside one millisecond, and the agent that stamped it. There is no
+/// fourth thing an HLC has; `#[non_exhaustive]` would buy a growth path for a shape that
+/// cannot grow, at the cost of `Hlc::new` becoming the only way to write one down.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Hlc {
     pub wall_ms: u64,
@@ -241,6 +245,7 @@ impl fmt::Display for Rung {
 /// Not hashed. Attestations accrete: a unit's identity is fixed by its content, and its
 /// support grows as agents corroborate it.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub struct Attestation {
     pub uid: Uid,
     pub agent: AgentId,

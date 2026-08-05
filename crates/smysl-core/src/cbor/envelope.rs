@@ -791,10 +791,7 @@ fn dec_contention(d: &mut Dec<'_>) -> Res<Contention> {
             }
             let kind = DetectionKind::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(a))?)
                 .ok_or_else(|| bad(a))?;
-            detected = Some(Detected {
-                kind,
-                ts: dec_hlc(d)?,
-            });
+            detected = Some(Detected::new(kind, dec_hlc(d)?));
             Ok(true)
         }
         keys::contention::STATUS => {
@@ -876,10 +873,7 @@ fn dec_packinfo(d: &mut Dec<'_>) -> Res<PackInfo> {
             }
             let mode = PackMode::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(a))?)
                 .ok_or_else(|| bad(a))?;
-            optimality = Some(Optimality {
-                mode,
-                gap: d.f32q()?,
-            });
+            optimality = Some(Optimality::new(mode, d.f32q()?));
             Ok(true)
         }
         keys::packinfo::ESTIMATOR => {

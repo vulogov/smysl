@@ -20,6 +20,7 @@ use crate::types::Record;
 
 /// Everything the writer needs that is not in the records themselves.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct WriteContext {
     /// uid -> label, so references come back out as the names they were authored with.
     pub labels: BTreeMap<Uid, Label>,

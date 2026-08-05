@@ -225,6 +225,7 @@ impl Role {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Message {
     pub role: Role,
     pub content: String,

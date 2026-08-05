@@ -75,9 +75,17 @@ impl fmt::Display for DetectionKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub struct Detected {
     pub kind: DetectionKind,
     pub ts: Hlc,
+}
+
+impl Detected {
+    /// How a contention was found, and when.
+    pub const fn new(kind: DetectionKind, ts: Hlc) -> Detected {
+        Detected { kind, ts }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -130,6 +138,7 @@ impl fmt::Display for ContentionStatus {
 /// both positions as grounds; the renderer surfaces them; rule R pins them into any pack
 /// touching either. Convergence without consensus.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Contention {
     pub id: ContentionId,
     pub over: Uid,
@@ -258,10 +267,18 @@ impl fmt::Display for PackMode {
 
 /// What a pack knows about its own optimality.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct Optimality {
     pub mode: PackMode,
     /// Upper bound on the value left on the table, in `[0,1]`. Zero means proven optimal.
     pub gap: f32,
+}
+
+impl Optimality {
+    /// How the pack was solved, and how much value it may have left behind.
+    pub const fn new(mode: PackMode, gap: f32) -> Optimality {
+        Optimality { mode, gap }
+    }
 }
 
 /// The self-description every pack emits (§8).
@@ -269,6 +286,7 @@ pub struct Optimality {
 /// A pack without a `packinfo` MAY be assumed complete; a pack with one says exactly what
 /// it dropped and why. That is what makes budget truncation auditable rather than silent.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct PackInfo {
     pub budget: u64,
     pub used: u64,
@@ -290,10 +308,7 @@ impl PackInfo {
             thread: None,
             dropped: Vec::new(),
             degraded: Vec::new(),
-            optimality: Optimality {
-                mode: PackMode::Greedy,
-                gap: 0.0,
-            },
+            optimality: Optimality::new(PackMode::Greedy, 0.0),
             estimator: estimator.into(),
             extra: Extra::new(),
         }
@@ -322,6 +337,7 @@ impl PackInfo {
 /// A declaration MUST NOT alter kernel field semantics, weaken rules M/T/L, or introduce
 /// mutability (`SMY-E012`).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SchemaDecl {
     pub id: SchemaId,
     pub version: u32,
@@ -372,6 +388,7 @@ impl SchemaDecl {
 /// could not fire between two CBOR stores, because labels arrived out of band and a CBOR
 /// store had none to offer.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub struct LabelBinding {
     pub label: Label,
     pub uid: Uid,
@@ -399,10 +416,7 @@ mod tests {
     }
 
     fn detected(kind: DetectionKind) -> Detected {
-        Detected {
-            kind,
-            ts: Hlc::zero(AgentId::new("human:v").unwrap()),
-        }
+        Detected::new(kind, Hlc::zero(AgentId::new("human:v").unwrap()))
     }
 
     #[test]

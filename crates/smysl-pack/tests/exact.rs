@@ -10,7 +10,7 @@
 
 #![cfg(feature = "branch-and-bound")]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use smysl_core::{
     canonical_uid, Contention, ContentionId, Detected, DetectionKind, Hlc, KernelType, Lod,
@@ -106,10 +106,10 @@ fn generate(rng: &mut Rng, size: usize) -> Store {
                 ContentionId::new("k/x").unwrap(),
                 a,
                 vec![a, b],
-                Detected {
-                    kind: DetectionKind::SupersessionFork,
-                    ts: Hlc::new(0, 0, smysl_core::AgentId::new("tool:t").unwrap()),
-                },
+                Detected::new(
+                    DetectionKind::SupersessionFork,
+                    Hlc::new(0, 0, smysl_core::AgentId::new("tool:t").unwrap()),
+                ),
             )));
         }
     }
@@ -164,10 +164,11 @@ fn brute_force(
         return None;
     }
 
-    let constraints = Constraints {
-        pinned: BTreeSet::new(),
-        budget,
-    };
+    // `Constraints` is `#[non_exhaustive]` as of 0.13, so it is built from its default and
+    // adjusted rather than written out as a literal — which is the point of the attribute: a
+    // field added later does not stop this compiling.
+    let mut constraints = Constraints::default();
+    constraints.budget = budget;
     let mut best = 0.0f64;
 
     for mut n in 0..total {

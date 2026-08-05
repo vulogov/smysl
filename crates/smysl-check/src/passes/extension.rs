@@ -17,6 +17,7 @@ use smysl_graph::Store;
 
 /// What a consumer implements, for `check --as` (§23.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ConsumerProfile {
     pub name: String,
     /// Extension schemas this consumer understands. The kernel is always implied.
@@ -56,6 +57,7 @@ impl ConsumerProfile {
 
 /// What a consumer gets from a store, per unit and overall.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FidelityReport {
     pub overall: Fidelity,
     /// Units this consumer would read at reduced fidelity, with the schema responsible.

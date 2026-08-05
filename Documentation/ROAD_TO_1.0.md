@@ -179,18 +179,40 @@ the maintenance cost named, rather than by leaving 0.2 undecided.
 
 The engineering core of this plan.
 
-### 1.1 The `#[non_exhaustive]` audit
+### 1.1 The `#[non_exhaustive]` audit ✅ *done in 0.13.0*
 
-**72 of 179 public types do not carry it.** Post-1.0 each one is a type that cannot gain a
-field. That is not "add 72 attributes": it is 72 decisions, and a good number should stay
-exhaustive on purpose — `Hlc`, `Date` and the identifier newtypes have shapes that are complete
-by definition, and forcing callers through a constructor buys nothing.
+The plan said **72 of 179 public types** lack the attribute. That was measured on the facade;
+counted across all eleven library crates and deduplicated by type identity rather than by
+re-export path, it is **191 distinct public types, 98 with the attribute and 93 without**.
 
-The work is to go through them once, deciding *closed by design* or *open for growth*, and to
-write the reason where the type is. Output: every public type has an answer, and
-`API_CONTRACT.md` records the rule rather than the list.
+Of the 93, only 60 were decisions at all. **33 are closed by encapsulation** — 24 structs whose
+fields are all private and 9 newtypes — where the attribute changes nothing, because a caller
+already cannot write a literal or match exhaustively. That distinction came out of S3, where
+`Registry`, `Bm25`, `Semantic` and `Hybrid` turned out to need no attribute for the same reason.
 
-**Done when:** no public type lacks either the attribute or a sentence saying why it is closed.
+**The argument for the attribute is §8, not taste.** The specification says the crate and
+format versions are independent axes, and gives a precedent: *"record type 10 was added in 0.2
+without a format bump"*. An exhaustive `UnitCore` or `Relation` turns the next such addition
+into a crate major, coupling the two axes the specification separates. The clearest case is
+already scheduled — §0.1's migration to `smysl/1.0` must add a field to `ParseOutcome` to carry
+the version a document declared, and exhaustive that is a 2.0.
+
+**54 gained the attribute. Six are closed on purpose**, each saying so where it is declared:
+`Hlc`, `Date`, `Span`, `Spanned`, `HValue`, `Severity` — shapes that are complete rather than
+unfinished. A hybrid logical clock has no fourth component; a byte range is two offsets;
+`HValue`'s variants are the JSON data model's rather than this crate's, and callers match on it
+exhaustively on purpose.
+
+**Cost: four construction sites**, which is the measurement that says the attribute was cheap.
+`Constraints` and `SalienceWeights` are now built from their defaults and adjusted;
+`ParseOutcome` likewise; `Detected::new` and `Optimality::new` were added because those two are
+built at call sites in three other crates. Public types now stand at 152 with the attribute.
+
+Nine of twelve crates are in `SEMVER_BREAKING` as a result. That is what this cycle is for.
+
+**Done:** every public type has an answer — the attribute, a written reason for being closed,
+or no public fields at all. `API_CONTRACT.md` records the rule rather than the list, which is
+what the plan asked for.
 
 ### 1.2 The seam: review it, then narrow it
 

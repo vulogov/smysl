@@ -91,6 +91,7 @@ impl PackRequest {
 
 /// A finished pack.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Pack {
     /// Which units, at what level.
     pub selection: Selection,
@@ -545,10 +546,10 @@ pub fn pack(
             cap,
         )
     };
-    info.optimality = Optimality {
-        mode: req.mode,
-        gap: bound::gap(bound::achieved(&selection, &local), headroom),
-    };
+    info.optimality = Optimality::new(
+        req.mode,
+        bound::gap(bound::achieved(&selection, &local), headroom),
+    );
 
     let _ = in_scope;
     debug_assert!(
@@ -711,21 +712,12 @@ mod ordering_tests {
     /// provably the best available.
     #[test]
     fn optimality_needs_both_exact_mode_and_no_gap() {
-        let mk = |mode, gap| Optimality { mode, gap };
+        let mk = |mode, gap| Optimality::new(mode, gap);
         // Built by hand rather than by packing something: the question is what
         // `is_optimal` reads off `info`, and reaching it through a real pack would test the
         // packer instead.
         let pack = |o| {
-            let mut info = PackInfo {
-                budget: 0,
-                used: 0,
-                thread: None,
-                dropped: Vec::new(),
-                degraded: Vec::new(),
-                optimality: o,
-                estimator: String::new(),
-                extra: Default::default(),
-            };
+            let mut info = PackInfo::new(0, 0, "");
             info.optimality = o;
             Pack {
                 selection: Selection::new(),

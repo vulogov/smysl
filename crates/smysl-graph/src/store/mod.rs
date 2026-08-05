@@ -49,6 +49,7 @@ impl StoreOptions {
 
 /// What happened during `open`.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct OpenReport {
     pub report: Report,
     /// True when the sidecar was missing, stale, or unreadable.
@@ -59,6 +60,7 @@ pub struct OpenReport {
 
 /// What happened during `append`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct AppendReport {
     /// Records that were not already present.
     pub added: usize,

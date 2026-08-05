@@ -115,6 +115,7 @@ fn walk(
 
 /// The result of a topological sort.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TopoOrder {
     /// Nodes in dependency order.
     pub order: Vec<NodeId>,

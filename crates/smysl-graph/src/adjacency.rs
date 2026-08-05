@@ -164,6 +164,7 @@ impl EdgeSet {
 
 /// One outgoing or incoming edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
 pub struct Edge {
     pub kind: EdgeKind,
     pub target: NodeId,

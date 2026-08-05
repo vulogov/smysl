@@ -25,8 +25,10 @@
 use core::fmt;
 
 use crate::diag::Span;
-
 /// A value with the byte range it was parsed from.
+///
+/// **Closed by design** (§1.1 audit, 0.13). A value and where it was written. The pair is
+/// the whole idea; a third field would mean it had stopped being this type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Spanned<T> {
     pub value: T,
@@ -38,8 +40,12 @@ impl<T> Spanned<T> {
         Spanned { value, span }
     }
 }
-
 /// An HJSON value.
+///
+/// **Closed by design** (§1.1 audit, 0.13). These are the JSON data model's types, split
+/// only where smysl needs the distinction (`Int` from `Float`, because §3 quantises one and
+/// not the other). The set is fixed by the format being parsed, not by this crate, so an
+/// exhaustive `match` on it stays correct — and callers do match on it exhaustively.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HValue {
     Null,
@@ -173,6 +179,7 @@ impl HObject {
 
 /// A syntax error, with the byte offset it was found at.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct HError {
     pub at: usize,
     pub message: String,

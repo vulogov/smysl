@@ -60,6 +60,7 @@ impl fmt::Display for Admission {
 /// Granularity constrains *production*, not the store: mixed granularity in a merged
 /// store is legal, not an error (D-5).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct GranularityProfile {
     pub profile: String,
     pub l0_max: u32,
@@ -128,6 +129,7 @@ impl Default for GranularityProfile {
 
 /// A named root set plus the threads published over it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct View {
     pub id: ViewId,
     pub roots: BTreeSet<Uid>,

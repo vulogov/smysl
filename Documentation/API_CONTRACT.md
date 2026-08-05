@@ -152,6 +152,38 @@ one under version control. Nothing checks the default surface at all.
 
 ---
 
+## The `#[non_exhaustive]` rule (§1.1, settled in 0.13)
+
+**191 distinct public types. 152 carry the attribute; 39 do not, and none of those is an
+oversight.** The rule, rather than the list:
+
+1. **A type with no public fields is closed by encapsulation.** The attribute adds nothing — a
+   caller already cannot write a struct literal or match it exhaustively. 24 opaque structs and
+   9 newtypes fall here, and they need no annotation and no note.
+2. **Anything that carries the format is `#[non_exhaustive]`.** §8 says the crate and format
+   versions are independent axes, and gives the precedent: *"record type 10 was added in 0.2
+   without a format bump"*. An exhaustive `UnitCore` or `Relation` would turn the next such
+   addition into a crate major — coupling the two axes the specification separates. This is the
+   argument, not a general preference for the attribute.
+
+   The clearest case is already scheduled: §0.1's migration to `smysl/1.0` has to add a field
+   to `ParseOutcome` to carry the version a document declared. Exhaustive, that is a 2.0.
+3. **Reports, options and errors are `#[non_exhaustive]`.** They exist to grow, and callers
+   read them rather than build them. Where a caller does build one, it gets a constructor or is
+   built from `Default` and adjusted — `Detected::new` and `Optimality::new` were added for
+   exactly that, and `Constraints`, `SalienceWeights` and `ParseOutcome` are now built from
+   their defaults at their four call sites.
+4. **Six types are closed on purpose, and say so where they are declared.** `Hlc`, `Date`,
+   `Span`, `Spanned`, `HValue`, `Severity`. Each is a shape that is complete rather than
+   unfinished: a hybrid logical clock has no fourth component, a byte range is two offsets, and
+   `HValue`'s variants are the JSON data model's rather than this crate's. Callers match on
+   `HValue` and `Severity` exhaustively on purpose.
+
+The test of whether the rule was applied honestly is that it produced both answers. A rule that
+only ever says "add the attribute" is a preference wearing a rule's clothes.
+
+---
+
 ## Three rules the 1.0 review left behind
 
 Not fixes — standing constraints, recorded because each was learned by nearly getting it wrong.
