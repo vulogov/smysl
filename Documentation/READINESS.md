@@ -225,23 +225,31 @@ Both ran in 0.10 as well, and the numbers are now three points on one curve rath
 | `smysl-embed` (0.12) | 59 | **22.0%** |
 | `smysl-thread` (0.12) | 84 | **22.6%** |
 | `smysl-ingest` (0.12) | 337 | **28.8%** |
-| `smysl`, the CLI (0.12) | 269 | **73.6%** |
+| `smysl`, the CLI (0.12, `--all-features`) | 269 | **73.6%** |
+| `smysl`, the CLI (0.13, default features, doc-output wired in) | 268 | **64.2%** |
 
 **Every crate in the workspace is now measured.** The library sits between 2.6% and 31%, in a
 band that has stopped being surprising: most survivors are accessors, display strings and
 equivalent mutants, and each run has turned up a handful of real gaps.
 
-**The CLI is not in that band, and the difference is not an artefact.** 73.6% is more than
-twice the worst library crate. The obvious explanation is the per-crate one — `cargo mutants -p
-smysl` runs `cargo test -p smysl`, and the CLI's principal verification is `make doc-output`,
-a Python script replaying 46 documented transcripts against the built binary, which no cargo
-test invokes. That would make mutation testing structurally blind to it.
+**The CLI is not in that band, and the difference is only partly an artefact.** The obvious
+explanation was the per-crate one — `cargo mutants -p smysl` runs `cargo test -p smysl`, and
+the CLI's principal verification was `make doc-output`, a Python script replaying 46 documented
+transcripts against the built binary, which no cargo test invoked. That made mutation testing
+structurally blind to it.
 
-It is not the whole explanation. Spot-checking a survivor against *both* — `cargo test -p
-smysl` and `make doc-output` — it survives both. `src/main.rs` has four tests across 3 600
-lines and `src/progress.rs` has twelve across 394, and 52 of the CLI's survivors are in
-`progress.rs` alone: arithmetic and comparisons in bar drawing, where the tests check the
-structure and never the numbers.
+**0.13 wired it in and measured both ways** (§1.2's Phase 2.1: two runs, identical default
+features, differing only in whether `tests/doc_output.rs` is present). Without it, **72.0%**;
+with it, **64.2%** — 21 mutants newly caught across nine `cmd_*` functions, none newly missed.
+The 72.0% against the earlier 73.6% also says the original figure was not an artefact of the
+feature set.
+
+So the blindness was real and worth about eight points, and it was not the whole story. 172
+survivors remain: 121 in `src/main.rs`, concentrated in `cmd_providers`, `cmd_fmt` and
+`cmd_merge`, and 51 in `src/progress.rs` — 23 of them in `Bar::draw` alone. `src/main.rs` has
+four tests across 3 600 lines and `src/progress.rs` twelve across 394, and the `progress.rs`
+survivors are arithmetic and comparisons in bar drawing, where the tests check the structure
+and never the numbers. That is unchanged, and it is what Phase 2.2 is for.
 
 **Next action:** not "fix 357 survivors". The band 12–31% has yielded roughly one real gap per
 crate and reading each survivor is the expensive part, so the yield per hour is falling. The

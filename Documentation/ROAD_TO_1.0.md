@@ -534,17 +534,60 @@ engineering one.
 Not "fix everything". These three, because each is a place where the project cannot presently
 say what it knows.
 
-### 2.1 Make the CLI measurable, then measure it
+### 2.1 Make the CLI measurable, then measure it ✅ *done in 0.13.0*
 
-The CLI scored **73.6% mutation survivors**, more than twice the worst library crate. Part of
-that is real — `src/main.rs` has four tests across 3 600 lines — and part is that `make
-doc-output`, which replays 46 documented transcripts against the built binary, is a Python
-script no `cargo test` invokes, so nothing that counts coverage can see it.
+`make doc-output` replays 46 of the manual's 168 documented transcripts against the built
+binary. It has been a good gate since 0.3 — it caught the 34 that went stale when `check`
+changed what it reports — but no `cargo test` invoked it, so nothing that *counts* coverage
+could see it. `tests/doc_output.rs` runs it now, against `CARGO_BIN_EXE_smysl`, which is the
+binary `cargo-mutants` rebuilds with each mutation applied.
 
-Wire `doc-output` in as an integration test, re-run mutation testing on `smysl`, and read the
-new number. **The output of this step is a fact, not a fix.** If the rate collapses, the CLI is
-better tested than it looks and the finding was about measurement. If it barely moves, then
-four tests across 3 600 lines is the whole story and Phase 2.2 gets larger.
+**The measurement was a controlled two-run experiment**, because the 73.6% recorded in 0.12 was
+an `--all-features` run and the new test only compiles under default features — the manual
+documents a default build. Comparing across feature sets would have measured the wrong thing.
+Both runs use default features and differ only in whether the test file is present.
+
+| | mutants | caught | missed | viable | **survivors** |
+|---|---|---|---|---|---|
+| **A** — suite as it was | 302 | 75 | 193 | 268 | **72.0%** |
+| **B** — with the doc-output test | 302 | 96 | 172 | 268 | **64.2%** |
+
+**21 newly caught, 0 newly missed.** A's 72.0% against 0.12's `--all-features` 73.6% says the
+earlier figure was not an artefact of the feature set.
+
+**The answer is neither of the two the plan anticipated.** It expected either a collapse — the
+CLI better tested than it looked, the finding being about measurement — or barely any movement,
+in which case four tests across 3 600 lines was the whole story. 7.8 points is a real
+improvement, the largest single contribution any one test makes to the CLI, and it leaves 172
+survivors. Both readings are partly right: the measurement did understate the CLI, and the CLI
+is still the least-tested thing in the workspace.
+
+What the 21 are is the more useful output. They span nine `cmd_*` functions — `cmd_check`,
+`cmd_diff`, `cmd_trace`, `cmd_retract`, `cmd_pack`, `cmd_salience`, `cmd_thread` — plus `main`,
+`cli` and `load_registry`. One is `replace emit_pack_surface -> String with String::new()`:
+replaying the manual catches an entire output function being emptied, which no other test did.
+
+**Where the remaining 172 sit**, which is Phase 2.2's brief:
+
+| file | survivors | concentration |
+|---|---|---|
+| `src/main.rs` | 121 | `cmd_providers` 12, `cmd_fmt` 12, `cmd_merge` 11, `main` 9, `cli` 8 |
+| `src/progress.rs` | 51 | `Bar::draw` 23 — unchanged, and still arithmetic under twelve tests that check structure and never numbers |
+
+**Two defects found in the wiring, both of the kind this phase keeps producing.**
+
+The first version of `tests/doc_output.rs` **passed while the binary's output was changed**. It
+passes an absolute `CARGO_BIN_EXE_smysl`; the script substitutes that into each command and
+then scans the tokens for absolute *input* paths, which are narrative state it cannot replay —
+so the program itself matched the rule and all 168 transcripts were skipped. It printed
+`ran 0, skipped 168, MISMATCHED 0` and the test asserted only that a summary line existed.
+
+Both halves are fixed: the script skips token 0, and the test asserts `ran >= 40`. **A gate
+that cannot tell "nothing was wrong" from "nothing was checked" is the failure this repository
+keeps rediscovering** — this is the fourth instance in 0.13 alone.
+
+**Done:** the doc-output replay is inside `cargo test`, the number has been read, and the
+control — changing the binary and watching the test fail — was run before trusting it.
 
 ### 2.2 Whatever 2.1 reveals
 
