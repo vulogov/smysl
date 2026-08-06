@@ -731,11 +731,17 @@ Not "no changes" — changes are fine, breaks are not. Concretely:
 
 ### What could make them fail, so it can be planned for rather than discovered
 
-- **The format bump.** §0.1 sequences `smysl/0.1` → `smysl/1.0` *before* the source tree goes
-  to 1.0, and step 2 of that migration changes `ParseOutcome` — a public type. It is a break,
-  and it must therefore land in cycle zero or before the quiet cycles start, not during them.
-  §1.1 made `ParseOutcome` `#[non_exhaustive]` precisely so that adding the field is not one,
-  which is the mitigation already in place.
+- **The format bump — and it turns out this one is safe.** §0.1 sequences `smysl/0.1` →
+  `smysl/1.0` *before* the source tree goes to 1.0, and step 2 of that migration has to carry
+  the declared version through `ParseOutcome` and back out through `write_surface`. That reads
+  like a break and is not one, because §1.1 made both `ParseOutcome` and `WriteContext`
+  `#[non_exhaustive]`: each can gain a field without a major bump, and the version can ride on
+  `WriteContext` rather than changing `write_surface`'s signature.
+
+  Growing `FORMAT_VERSIONS_SUPPORTED` is a const *value* change, not a signature change, so it
+  is not breaking either. **The whole migration can land inside a quiet cycle.** That is a
+  concrete payoff of the audit rather than a hoped-for one, and it is worth checking against
+  `make semver` when the time comes rather than taken on this paragraph's word.
 - **The remaining `cmd_*` work** (§2.2's 109 survivors) touches only the binary, so it cannot
   break a library API. Safe to do during a quiet cycle.
 - **`smysl-eval` and the fuzz targets** are unpublished and outside the gate, so work there is
