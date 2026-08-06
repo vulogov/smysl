@@ -244,12 +244,27 @@ with it, **64.2%** — 21 mutants newly caught across nine `cmd_*` functions, no
 The 72.0% against the earlier 73.6% also says the original figure was not an artefact of the
 feature set.
 
-So the blindness was real and worth about eight points, and it was not the whole story. 172
-survivors remain: 121 in `src/main.rs`, concentrated in `cmd_providers`, `cmd_fmt` and
-`cmd_merge`, and 51 in `src/progress.rs` — 23 of them in `Bar::draw` alone. `src/main.rs` has
-four tests across 3 600 lines and `src/progress.rs` twelve across 394, and the `progress.rs`
-survivors are arithmetic and comparisons in bar drawing, where the tests check the structure
-and never the numbers. That is unchanged, and it is what Phase 2.2 is for.
+So the blindness was real and worth about eight points, and it was not the whole story.
+
+**Phase 2.2 took the 172 down to 110.** `src/progress.rs` went from 51 survivors to **1**, and
+`src/main.rs` from 121 to **109**.
+
+`progress.rs` was not short of tests so much as unobservable: every decision was welded to the
+environment or to `stderr`, and its twelve tests all used `Style::silent()` because nothing
+else was available to them. Splitting the decision from the environment (`Style::decide`), the
+line from the write (`render`), and adding a sink took it to 43 tests that assert numbers. Two
+of the 51 were real defects — a clamp that never clamped, so a bar could print `105/100`, and a
+dead assignment whose arithmetic no test could reach. The single remaining survivor is
+unreachable in-process and says so where it is declared.
+
+`main.rs` gave up its pure helpers — `looks_like_surface`, the path rule shared by
+`project_root` and `project_file`, `read_input`, `finish_over` — plus one *equivalent* mutant
+in `worse` that is now documented rather than merely alive.
+
+The remaining 109 are `cmd_*` bodies: `cmd_providers` 12, `cmd_fmt` 12, `cmd_merge` 11. They
+read a filesystem, build a store and print, so reaching them means driving the binary the way
+`tests/global_flags.rs` does rather than calling a function. That is a body of work in its own
+right, and it is not what 1.0 freezes.
 
 **Next action:** not "fix 357 survivors". The band 12–31% has yielded roughly one real gap per
 crate and reading each survivor is the expensive part, so the yield per hour is falling. The

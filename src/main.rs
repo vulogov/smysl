@@ -2837,13 +2837,23 @@ fn cmd_render(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 /// Where a project's `.smysl/` directory lives: beside the store, or under the cwd.
 #[cfg(feature = "providers")]
 fn project_file(global: &ArgMatches, name: &str) -> std::path::PathBuf {
-    let base = global
-        .get_one::<String>("store")
+    root_beside(global.get_one::<String>("store").map(String::as_str)).join(name)
+}
+
+/// The directory a sidecar belongs in, given `--store`.
+///
+/// Separated from the two helpers that call it because they take an `ArgMatches`, which is
+/// what made the `!` in the filter untestable — two mutants survived on the same expression
+/// in `project_root` and `project_file`. The rule it encodes is small and worth stating: a
+/// store named with no directory part (`smysl --store notes.smy`) has a *parent* of `""`,
+/// which is not the current directory and would put the sidecar at the filesystem root.
+#[cfg(feature = "providers")]
+fn root_beside(store: Option<&str>) -> std::path::PathBuf {
+    store
         .map(std::path::PathBuf::from)
         .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
         .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    base.join(name)
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
 /// Load the provider configuration, falling back to the all-local default.
@@ -3149,12 +3159,7 @@ fn now_millis() -> u64 {
 /// The project root: the directory holding `.smysl/`.
 #[cfg(feature = "providers")]
 fn project_root(global: &ArgMatches) -> std::path::PathBuf {
-    global
-        .get_one::<String>("store")
-        .map(std::path::PathBuf::from)
-        .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
+    root_beside(global.get_one::<String>("store").map(String::as_str))
 }
 
 /// `smysl providers` - what is configured, what is reachable, and what would egress
@@ -3894,5 +3899,108 @@ mod tests {
             );
             assert!(!c.about.is_empty(), "{}: no description", c.name);
         }
+    }
+
+    // ---- the pure helpers, which 0.13's mutation pass found untested -------------------
+    //
+    // `src/main.rs` had four tests across 3,600 lines and 121 survivors. These are the ones
+    // reachable without driving the binary: small functions with a decision in them, where a
+    // mutant changes an answer rather than a side effect.
+
+    /// Which byte streams are read as surface rather than CBOR. Getting this wrong sends a
+    /// CBOR file through the surface parser and reports a syntax error for a valid document.
+    #[test]
+    fn surface_detection_looks_past_blank_lines_and_comments() {
+        assert!(looks_like_surface(b"@doc smysl/0.1\n"));
+        assert!(looks_like_surface(b"\n\n@doc smysl/0.1\n"));
+        assert!(looks_like_surface(b"# a comment\n@doc smysl/0.1\n"));
+        assert!(looks_like_surface(b"// a comment\n@doc smysl/0.1\n"));
+        assert!(looks_like_surface(b"\n#c\n//c\n@doc smysl/0.1\n"));
+
+        // Column 0 only, matching `lex.rs`: "an indented `#` is inside a body or a step,
+        // where it is prose". A heuristic that disagreed with the lexer would classify as
+        // surface a document the surface parser then rejects.
+        assert!(!looks_like_surface(b" # indented\n@doc smysl/0.1\n"));
+
+        // Nothing but comments is a valid, empty surface document.
+        assert!(looks_like_surface(b""));
+        assert!(looks_like_surface(b"# only a comment\n"));
+
+        // The three skip-conditions are separate claims: a line that is *not* blank and not a
+        // comment decides the answer, whatever it is.
+        assert!(!looks_like_surface(b"not a directive\n"));
+        // A comment *after* a non-directive line does not rescue it: the first line that is
+        // neither blank nor a comment is the one that decides.
+        assert!(!looks_like_surface(b"not a directive\n# a comment\n@doc\n"));
+
+        // Invalid UTF-8 is CBOR, not surface.
+        assert!(!looks_like_surface(&[0xff, 0xfe, 0x00]));
+    }
+
+    /// A store named with no directory part has a parent of `""`, which is not the current
+    /// directory — dropping the filter would put every sidecar at the filesystem root.
+    #[cfg(feature = "providers")]
+    #[test]
+    fn a_sidecar_sits_beside_its_store() {
+        assert_eq!(
+            root_beside(Some("notes/store.smy")),
+            std::path::Path::new("notes")
+        );
+        assert_eq!(root_beside(Some("store.smy")), std::path::Path::new("."));
+        assert_eq!(root_beside(None), std::path::Path::new("."));
+        assert_eq!(
+            root_beside(Some("/a/b/store.smy")),
+            std::path::Path::new("/a/b")
+        );
+    }
+
+    /// `-` means stdin and nothing else does. Inverting the test would read stdin for a real
+    /// path and hand `-` to the filesystem.
+    ///
+    /// Reads a fixture rather than a temp file: the first version wrote into a shared
+    /// directory under `TMPDIR` and failed in CI with `NotFound`, which is a test that
+    /// depends on the state of the machine rather than on the code.
+    #[cfg(feature = "ingest")]
+    #[test]
+    fn a_path_that_is_not_a_dash_is_read_from_the_filesystem() {
+        let text = read_input("fixtures/corpus/F1-incident.smy").expect("the fixture is there");
+        assert!(
+            text.starts_with("@doc"),
+            "read something that is not the fixture: {:?}",
+            &text[..text.len().min(40)]
+        );
+    }
+
+    /// A summary over one file is noise; over several it is information. Three mutants sat on
+    /// this one comparison because nothing could see what the bar printed.
+    #[test]
+    fn a_summary_line_appears_only_when_there_was_more_than_one_file() {
+        for (n, expect_message) in [(0usize, false), (1, false), (2, true), (9, true)] {
+            let (bar, buf) = progress::Bar::to_buffer(
+                progress::Style::decide(true, false, false, true),
+                "working",
+                n,
+            );
+            finish_over(bar, n, "checked");
+            let out = buf.lock().unwrap().clone();
+            assert_eq!(
+                out.contains("checked"),
+                expect_message,
+                "n={n} printed {out:?}"
+            );
+        }
+    }
+
+    /// `worse` keeps the higher exit code. Its `>` survives mutation to `>=`, and that is an
+    /// *equivalent* mutant rather than a gap: `ExitCode` is a fieldless enum with distinct
+    /// discriminants, so equal codes are the same variant and returning either is the same
+    /// answer. Recorded here so the survivor is a decision rather than an oversight.
+    #[test]
+    fn the_worse_of_two_exit_codes_is_the_higher_one() {
+        use smysl::ExitCode as E;
+        assert_eq!(worse(E::Success, E::Failure), E::Failure);
+        assert_eq!(worse(E::Failure, E::Success), E::Failure);
+        assert_eq!(worse(E::CheckErrors, E::Usage), E::CheckErrors);
+        assert_eq!(worse(E::Success, E::Success), E::Success);
     }
 }

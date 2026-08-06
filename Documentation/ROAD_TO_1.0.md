@@ -589,12 +589,67 @@ keeps rediscovering** — this is the fourth instance in 0.13 alone.
 **Done:** the doc-output replay is inside `cargo test`, the number has been read, and the
 control — changing the binary and watching the test fail — was run before trusting it.
 
-### 2.2 Whatever 2.1 reveals
+### 2.2 Whatever 2.1 reveals ✅ *done in 0.13.0*
 
-Sized by the answer. `progress.rs` is already known: 52 survivors in 394 lines, every one an
-arithmetic operator or comparison in bar drawing, under twelve tests that check structure and
-never numbers. A wrong percentage is not a correctness defect for the format, but it is on
-screen every time anybody runs the tool.
+2.1 left 172 survivors: 51 in `src/progress.rs`, 121 in `src/main.rs`.
+
+| file | before | after |
+|---|---|---|
+| `src/progress.rs` | 51 | **1** |
+| `src/main.rs` | 121 | **109** |
+
+**`progress.rs`: the cause was not missing tests.** Every decision was welded to the
+environment or to `stderr`, so nothing could be observed. The twelve tests all used
+`Style::silent()` because that was the only thing available to them. Three separations fixed
+it — `Style::decide(tty, quiet, json, no_color)` split from reading `is_terminal()`;
+`render(done, total, label, color) -> (String, usize)` split from writing it; and a `Sink`,
+shared, so `finish` and `abandon` can be tested *taking `self`*, which is how callers use them.
+
+**Two of the 51 were defects rather than untested code.**
+
+`advance` clamped with `(done + n).min(total.max(done + n))`. Since `y.max(x)` is never below
+`x`, that is `x` — a no-op, verified over 200 000 random triples before it was changed. A
+caller that overshot printed `105/100`. The existing test was called
+`advancing_past_the_total_does_not_panic`: it asserted no panic and never looked at the result.
+
+`draw` ended with `self.width = printed.max(self.width.min(printed + pad));` immediately
+followed by `self.width = printed;`. Dead, and the two mutants on its arithmetic survived
+because a discarded value cannot be observed.
+
+Tests went 12 → 43, and the new ones assert numbers: filled cells across the fraction, that
+the recorded width equals the *visible* width with colour on and off — the invariant `clear`
+depends on — and that a tick inside the rate-limit interval does **not** repaint while the last
+step always does.
+
+**The one survivor left is unreachable, not unfixed**, and says so where it is: the `||` in
+`Style::detect` reading `NO_COLOR` only matters when stderr is a terminal, which a test process
+never has. Recorded the way 0.12 recorded `support_cycles`.
+
+**`main.rs`: the pure helpers, which is what is reachable without driving the binary.**
+`looks_like_surface`, `root_beside` (extracted from `project_root` and `project_file`, whose
+shared `!` was untestable behind an `ArgMatches`), `read_input`, `finish_over` — 11 survivors
+killed, and one more explained.
+
+`worse`'s `>` survives mutation to `>=` and is an **equivalent mutant**: `ExitCode` is a
+fieldless enum with distinct discriminants, so equal codes are the same variant and returning
+either is the same answer. Tested anyway, so the survivor is a decision on the record.
+
+**One test found the code right and my expectation wrong**, which is worth keeping. I asserted
+that an indented `#` is a comment; `looks_like_surface` says otherwise, and so does `lex.rs`:
+*"Column 0 only. An indented `#` is inside a body or a step, where it is prose."* A heuristic
+that disagreed with the lexer would classify as surface a document the parser then rejects. The
+test now asserts the rule rather than my guess at it.
+
+**What is left, and why it is a different job.** The remaining 109 are in the `cmd_*` functions
+— `cmd_providers` 12, `cmd_fmt` 12, `cmd_merge` 11, `main` 9, `cli` 8. Those are command bodies
+that read a filesystem, build a store and print; reaching them means driving the binary, as
+`tests/global_flags.rs` does, rather than calling a function. That is a body of work in its own
+right and is not a prerequisite for 1.0 — the format, the library and the gates are what 1.0
+freezes, and the CLI's remaining survivors are display and control flow in a binary that
+`doc_output` now replays 46 documented transcripts against.
+
+**Done:** the two defects are fixed, the tractable survivors are dead, and the ones that remain
+are either recorded as unreachable, recorded as equivalent, or scoped as `cmd_*` work.
 
 ### 2.3 Provider acceptance
 
