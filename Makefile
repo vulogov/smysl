@@ -104,7 +104,7 @@ doc-gate: ## Rustdoc with warnings denied, as docs.rs would show it
 # moves when a release reaches the registry and not when it is cut. It sat at 0.9.0 through two
 # cut-but-unpublished releases, which meant every breaking change was measured against a
 # version two releases old; 0.10.0 remains unpublished and 0.11.0 is the baseline now.
-BASELINE  := 0.11.0
+BASELINE  := 0.13.0
 PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-render \
              smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl
 
@@ -207,56 +207,16 @@ api-check: ## Fail if either recorded surface moved, or if they stop nesting
 # how much of the API is currently unwatched. Empty is the normal state, and publication is
 # the only thing that reaches it.
 #
-#   smysl — the unified error is exported as `AnyError` rather than `Error`. Inside a crate
-#   `Error` is the idiomatic name; through a facade flattening eleven error types into one
-#   namespace it reads as a twelfth sibling rather than the enum wrapping the other eleven.
-#   The type is unchanged; only the name it is re-exported under moved.
+#   **Empty as of 0.13.0's publication, and that is the point.** Nine of twelve crates broke
+#   in 0.13 — the `AnyError` rename in the facade, §1.1's `#[non_exhaustive]` audit across
+#   five crates, `SalienceRequest`, `Hit`, and §1.2's narrowing of `smysl-provider` and
+#   `smysl-ingest`. All nine are now the baseline rather than a pending break, which is what
+#   publishing is for and what 0.10 and 0.11 failed to do for two cycles running.
 #
-#   This was recorded against `smysl-core` until 0.13, which was wrong twice over, and only
-#   showed up when `make semver` stopped skipping this list and started reporting it.
-#   `smysl-core` reported *no* failures, because it never broke: the type there is still
-#   `Error` and the rename is `pub use smysl_core::Error as AnyError` in the facade's
-#   `src/lib.rs`. The break is the facade's.
-#
-#   And `cargo-semver-checks` cannot see it. Run against `smysl` it reports "no semver update
-#   required", although v0.11.0 exported `smysl::Error` and nothing exports it now — because a
-#   re-export from another crate is a `pub use` line it cannot expand, exactly the blind spot
-#   `tests/public-api.txt` has for methods. What caught this rename was `api-check`, which is
-#   why the two files exist and why neither is redundant.
-#
-#   smysl-graph — `SalienceRequest` gained `#[non_exhaustive]`. Technically a break, and the
-#   fix for one: it was the only input type of eleven without it, so adding a field to it was
-#   breaking while the same addition elsewhere was not.
-#
-#   smysl-provider — two breaks. `Gemini::parse` and `Anthropic::parse` take the request's cap
-#   as an argument: the error they build quotes a limit, and quoting the *configured* one
-#   produced "context window exceeded: 1008 > 32768" — true to its fields, nonsense to a
-#   reader. Fixed at the call site in 0.10 because the baseline was two unpublished releases
-#   stale and could not tell a deliberate break from a missing crate. It can now.
-#   And in 0.13, S2 and S4 of the road to 1.0: `runtime`, `Stream` and the five concrete
-#   mappers are `#[doc(hidden)]`; `http` and `map::auth` are `pub(crate)`. 988 items to 716.
-#
-#   smysl-ingest — S2 and S4: `prompt`, `quote`, `repair`, `json_ast` and `schema` are
-#   `#[doc(hidden)]`; `chunk` and `monotone` are `pub(crate)`. 751 items to 541.
-#   Both crates keep the items reachable for the integration tests that need them, and
-#   cargo-semver-checks counts hiding as removal from the public API — which is the point, and
-#   is why this is a break rather than a tidy-up. See ROAD_TO_1.0.md §1.2.
-#
-#   smysl-retrieve — S3: `Hit` gained `#[non_exhaustive]` and `Hit::new`. `Query`, three
-#   declarations below it, already had the attribute; `Hit` did not, and the pair face each
-#   other across the same call. It matters more than for most output types because `Retriever`
-#   is a public trait, so `Hit` is a type third parties must construct — `smysl-embed` builds
-#   it at two sites. A retrieval result plausibly grows a field; an exhaustive one could not
-#   gain it after 1.0 without a 2.0.
-#
-#   smysl-core, smysl-check, smysl-pack, smysl-thread — and more of smysl-graph — §1.1's
-#   `#[non_exhaustive]` audit. 98 public types carried it and 152 do now. Adding it is a
-#   break, and a break whose entire purpose is that the *next* addition is not one: §8 says
-#   the crate and format versions are independent axes, so an exhaustive `UnitCore` would have
-#   made the next format field a crate major. The rule and the six deliberate exceptions are
-#   in Documentation/API_CONTRACT.md.
-SEMVER_BREAKING := smysl smysl-core smysl-graph smysl-check smysl-pack smysl-thread \
-                   smysl-provider smysl-ingest smysl-retrieve
+#   Phase 3 of ROAD_TO_1.0.md starts here: two consecutive cycles that end with this list
+#   empty, both published. This is the first of the two. An entry added below is not a
+#   failure — a deliberate break is allowed — but it restarts the count.
+SEMVER_BREAKING :=
 
 semver: ## Report API breakage against the last published version
 	@command -v cargo-semver-checks >/dev/null || { echo "cargo install cargo-semver-checks"; exit 1; }
