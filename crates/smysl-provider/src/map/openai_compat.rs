@@ -701,31 +701,92 @@ mod strict_tests {
 mod appendix_c_tests {
     use super::*;
 
-    const APPENDIX_C: &str = r#"{
-      "type": "object",
-      "required": ["type", "gist", "status"],
-      "additionalProperties": false,
-      "properties": {
-        "type":    { "enum": ["claim", "evidence"] },
-        "label":   { "type": "string", "pattern": "^[a-z]+/[a-z]+$" },
-        "gist":    { "type": "string", "minLength": 1, "maxLength": 240 },
-        "body":    { "type": "string" },
-        "detail":  { "type": "string" },
-        "status":  { "enum": ["speculative", "derived"] },
-        "source":  { "type": "object", "required": ["kind", "ref"],
-                     "properties": { "kind": { "enum": ["file"] },
-                                     "ref": { "type": "string" },
-                                     "captured": { "type": "string" } } },
-        "quote":   { "type": "string", "minLength": 1, "maxLength": 400 },
-        "deps":    { "type": "array", "items": { "type": "string" } },
-        "grounds": { "type": "array", "items": { "type": "string" } },
-        "payload": { "type": "object" }
-      },
-      "allOf": [
-        { "if": { "properties": { "status": { "enum": ["measured"] } } },
-          "then": { "required": ["source"] } }
-      ]
-    }"#;
+    /// Appendix C, read from the file `smysl-ingest` generates it into.
+    ///
+    /// This was an inline copy until 0.14, and it had drifted: 2 of the 13 kernel types, 2 of
+    /// the 5 statuses, 1 of the 3 conditionals, and a different `label` pattern — while this
+    /// crate's own header documented these tests as running "against the full Appendix C
+    /// schema rather than a miniature of it". It was the miniature, and nothing could have
+    /// noticed, because `smysl-provider` cannot depend on `smysl-ingest` without a cycle.
+    ///
+    /// A file both sides read is the smallest thing that removes the hazard.
+    /// `smysl-ingest`'s `schema_fixture_matches_the_generator` fails if the file goes stale.
+    const APPENDIX_C: &str = include_str!("../../../../fixtures/schema/unit.json");
+
+    /// Strict mode's rules are *recursive*, and the test above only ever checked the root.
+    ///
+    /// OpenAI requires `additionalProperties: false` and every property listed in `required`
+    /// on **every** object in the schema, not just the outermost one. Appendix C has nested
+    /// objects — `source`, `payload`, and the objects inside `deps` and `grounds` — and a
+    /// single one of them missing either property is a rejected call, not a degraded one.
+    ///
+    /// This is what gate 4 in `READINESS.md` can be answered without a key. Live acceptance
+    /// still needs one; whether the schema we send *can* be accepted is a property of the
+    /// translation, and that is checkable here. The same method — reading the documentation
+    /// and counting rather than assuming — has already found two defects in this crate.
+    #[test]
+    fn every_object_in_the_translated_schema_is_strict_legal() {
+        fn walk(node: &Value, path: &str, bad: &mut Vec<String>) {
+            match node {
+                Value::Object(o) => {
+                    let is_object_schema = o.get("type").and_then(Value::as_str) == Some("object")
+                        || o.contains_key("properties");
+                    if is_object_schema {
+                        if o.get("additionalProperties") != Some(&Value::Bool(false)) {
+                            bad.push(format!(
+                                "{path}: additionalProperties is {:?}, must be false",
+                                o.get("additionalProperties")
+                            ));
+                        }
+                        let props: Vec<&str> = o
+                            .get("properties")
+                            .and_then(Value::as_object)
+                            .map(|p| p.keys().map(String::as_str).collect())
+                            .unwrap_or_default();
+                        let req: Vec<&str> = o
+                            .get("required")
+                            .and_then(Value::as_array)
+                            .map(|a| a.iter().filter_map(Value::as_str).collect())
+                            .unwrap_or_default();
+                        let missing: Vec<&&str> =
+                            props.iter().filter(|p| !req.contains(p)).collect();
+                        if !missing.is_empty() {
+                            bad.push(format!("{path}: not in `required`: {missing:?}"));
+                        }
+                    }
+                    for (k, v) in o {
+                        walk(v, &format!("{path}.{k}"), bad);
+                    }
+                }
+                Value::Array(a) => {
+                    for (i, v) in a.iter().enumerate() {
+                        walk(v, &format!("{path}[{i}]"), bad);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let before: Value = serde_json::from_str(APPENDIX_C).expect("fixture parses");
+
+        // The control: the *untranslated* schema must violate the rules, or this test would
+        // pass on a transform that did nothing at all.
+        let mut source_violations = Vec::new();
+        walk(&before, "$", &mut source_violations);
+        assert!(
+            !source_violations.is_empty(),
+            "Appendix C is already strict-legal, so this test cannot show the transform works"
+        );
+
+        let after = strict_schema(&before);
+        let mut bad = Vec::new();
+        walk(&after, "$", &mut bad);
+        assert!(
+            bad.is_empty(),
+            "the translated schema would be rejected by strict mode:\n  {}",
+            bad.join("\n  ")
+        );
+    }
 
     #[test]
     fn the_real_schema_becomes_strict_legal() {
