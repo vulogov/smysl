@@ -145,14 +145,20 @@ rename; the semver gate did not.** So the division is not the obvious one, and
 `API_CONTRACT.md` now states which artefact is authoritative for what.
 
 **Why this is still not ready.** The mechanism is in place and the surface is worth freezing;
-what is missing is a demonstration that it holds still. 0.13 breaks nine of twelve crates —
-deliberately, because it is the last cycle in which narrowing is free — so the two quiet cycles
-Phase 3 asks for have not begun. **The baseline is 0.11.0, with 0.12 and 0.13 both unpublished**,
-which means every break above is currently measured against a version two releases old.
+what is missing is a demonstration that it holds still. 0.13 broke nine of twelve crates —
+deliberately, because it is the last cycle in which narrowing is free — so it is cycle zero
+rather than one of the two Phase 3 asks for.
 
-**Next action:** publish 0.13, then two cycles with `SEMVER_BREAKING` empty at the cut. See
-`ROAD_TO_1.0.md` Phase 3, which lists what could break them and what has already been done to
-stop it.
+**0.13.0 is published**, all twelve crates confirmed on crates.io. `BASELINE` is 0.13.0,
+`SEMVER_BREAKING` is empty for the first time since 0.9, and `make semver` now gates all twelve
+crates and reports "no semver update required" for every one. Through 0.12 and 0.13 it was
+comparing against a version two releases old *and* skipping the crates most likely to move; it
+is watching everything now.
+
+**Next action:** two cycles — 0.14 and 0.15 — with `SEMVER_BREAKING` empty at the cut, both
+published. `ROAD_TO_1.0.md` Phase 3 lists what could break them and what has already been done
+to stop it, including the finding that the `smysl/1.0` format migration is *not* a breaking
+change and can therefore land inside a quiet cycle.
 
 ## 4. Verified providers — *partial*
 

@@ -699,8 +699,25 @@ the last cycle in which narrowing is free. Every entry is a repair or a reductio
 | `smysl-provider` | `Gemini`/`Anthropic::parse` cap argument; §1.2 S2 and S4 |
 | `smysl-ingest` | §1.2 S2 and S4 |
 
-So the two quiet cycles have not begun. **0.13 is cycle zero**, and the clock starts when it is
-published.
+So the two quiet cycles have not begun. **0.13 is cycle zero** — it was cut with nine entries
+on the list, so it is not one of the two.
+
+**0.13.0 is published**, all twelve crates confirmed on crates.io, and that is what starts the
+clock. Three things changed the moment it landed:
+
+- `BASELINE` moved to **0.13.0**. Every break above is now the baseline rather than a pending
+  one, which is precisely what 0.10 and 0.11 failed to do for two cycles running and what left
+  the `parse` repair unmeasured.
+- `SEMVER_BREAKING` is **empty** for the first time since 0.9.
+- `make semver` therefore gates **all twelve crates**, and reports *"no semver update
+  required"* for every one of them. Nothing is skipped, and nothing is merely reported.
+
+That last line is the one worth pausing on. Through 0.12 and 0.13 the gate was comparing
+against a version two releases old and skipping the crates most likely to move. It is now
+watching everything against what is actually on the registry — which is the difference between
+a stillness gate and the appearance of one.
+
+**The two cycles are 0.14 and 0.15.**
 
 ### What 0.13 changed about the gate itself
 
