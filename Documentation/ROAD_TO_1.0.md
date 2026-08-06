@@ -1,8 +1,17 @@
 # The road to 1.0.0
 
-**Status:** a plan, not a schedule. Each phase names what it produces and how you know it is
-done. Nothing here has a date, because the only honest gate on 1.0 is evidence and evidence
-arrives when it arrives.
+**Status after 0.13.0: Phases 0, 1 and 2 are done. Phase 3 has not started, and cannot until
+0.13 is published.** Each phase names what it produces and how you know it is done. Nothing
+here has a date, because the only honest gate on 1.0 is evidence and evidence arrives when it
+arrives.
+
+| phase | | |
+|---|---|---|
+| 0 | two decisions | ✅ both taken |
+| 1 | make the surface worth freezing | ✅ 1.1, 1.2 (S1–S6), 1.3 |
+| 2 | the verification a 1.0 should not ship without | ✅ 2.1, 2.2 — 2.3 needs provider keys |
+| 3 | evidence of stillness | **not started; needs publication** |
+| 4 | the cut | after 3 |
 
 **The decision this rests on:** smysl is one product — format, libraries and CLI — under one
 version. The workspace is not split. That settles a contradiction `API_CONTRACT.md` left open:
@@ -18,10 +27,11 @@ Three things, and it is worth being exact because the rest of this document is d
 them.
 
 1. **No breaking change to any exported name without a 2.0.** The facade's golden file lists
-   239 names at `--all-features` and 199 at `--no-default-features`, but the real figure is
-   **12 111 public items across 52 public modules**: the eleven library crates ship at one
-   version, all must be published, and `make semver` already enforces every item in each.
-   §0.2 measures how much of that is a choice — about 8% — and where it sits.
+   243 names at `--all-features` and 199 at `--no-default-features`, but the real figure is
+   every public item in each of the eleven library crates, which `make semver` enforces
+   individually. **11 643 today**, down from the 12 111 §0.2 measured before §1.2 narrowed the
+   seam. §0.2 is the analysis of how much of that was ever a choice — about 8% — and §1.2 is
+   what was done about it.
 2. **The format stays readable.** A 1.0 reader reads every document a 1.x writer produces.
 3. **The guarantees hold.** A1–A6 and rules M, T, L, R, U, I, S, V1, V2, X, D, P are part of
    the contract, and A5 already says making an operation non-reproducible is breaking whatever
@@ -96,9 +106,12 @@ declaring each version is written back declaring the one it declared.
 
 ### 0.2 What freezing the seam costs
 
-**The size of the freeze.** The facade's golden file lists **239 names**. The eleven library
-crates export **12 111 public items across 52 public modules**, and since they share one
-version and all must be published for the facade to resolve, 1.0 freezes the larger number.
+**The size of the freeze.** *(Measured before §1.2. These are the figures that prompted the
+analysis; after the narrowing it is 11 643 items and 49 top-level public modules.)*
+
+The facade's golden file lists **239 names**. The eleven library crates export **12 111 public
+items across 52 public modules**, and since they share one version and all must be published
+for the facade to resolve, 1.0 freezes the larger number.
 
 That is not a hypothetical. `make semver` already runs `cargo-semver-checks` per crate over
 every published crate, so all 12 111 are enforced as contract today. What 1.0 changes is that
@@ -666,19 +679,70 @@ than gate 4 has implied, and it is still needed.
 
 ## Phase 3 — evidence of stillness
 
-The part that cannot be rushed, and the only real gate.
+The part that cannot be rushed, and the only real gate. Phases 0 to 2 are done; this one has
+not started, and 0.13 is why.
 
 **Two consecutive cycles that end with `SEMVER_BREAKING` empty at the cut, both published.**
 
-Published matters. `cargo-semver-checks` compares against the registry, so an unpublished
-release leaves the baseline stale and the gate measures nothing — 0.10 and 0.11 demonstrated
-exactly that, and it parked the `parse` repair for a whole cycle. A stillness gate that is not
-watching is not evidence.
+### Where it stands
 
-0.12 broke three things. That is not a criticism of 0.12 — each break was a repair — but a
-crate that broke three things last cycle has not yet shown it can go one without.
+**0.13 breaks nine of twelve crates.** That is the largest deliberate break in the project's
+history, and it is the right shape for the cycle *before* 1.0 rather than a setback: this is
+the last cycle in which narrowing is free. Every entry is a repair or a reduction —
 
-**Done when:** two cuts in a row, both on crates.io, both with an empty list.
+| crate | why |
+|---|---|
+| `smysl` | `Error` re-exported as `AnyError` |
+| `smysl-core`, `smysl-check`, `smysl-pack`, `smysl-thread` | §1.1's `#[non_exhaustive]` audit |
+| `smysl-graph` | `SalienceRequest`, plus the audit |
+| `smysl-retrieve` | `Hit` gained the attribute and a constructor |
+| `smysl-provider` | `Gemini`/`Anthropic::parse` cap argument; §1.2 S2 and S4 |
+| `smysl-ingest` | §1.2 S2 and S4 |
+
+So the two quiet cycles have not begun. **0.13 is cycle zero**, and the clock starts when it is
+published.
+
+### What 0.13 changed about the gate itself
+
+Two things, and both matter for whether the coming cycles are evidence or theatre.
+
+**`make semver` no longer skips.** A crate on the list used to be `continue`d, so a crate with
+one deliberate break had nothing watching it and a second, unintended break rode along
+invisibly. §1.2 S5 changed that: listed crates run, ungated, with their failures printed to be
+checked against the recorded reasons. It found a wrong entry on its first run.
+
+**There is a third gate.** `tests/public-api-counts.txt` catches a public item *added* by
+accident, which is nobody's break and so was nobody's failure. During two cycles that are meant
+to be quiet, the thing most likely to go unnoticed is an addition.
+
+### What the two cycles have to survive
+
+Not "no changes" — changes are fine, breaks are not. Concretely:
+
+1. **`SEMVER_BREAKING` empty at both cuts**, with `make semver` green on every published crate
+   rather than skipping any.
+2. **Both published.** `cargo-semver-checks` compares against the registry, so an unpublished
+   release leaves the baseline stale and the gate measures nothing. 0.10 and 0.11 demonstrated
+   exactly that and it parked the `parse` repair for a cycle. **The baseline is still 0.11.0
+   today, with 0.12 and 0.13 both unpublished**, so every break above is currently measured
+   against a version two releases old. Publishing is what resets it.
+3. **The facade golden and the per-crate counts unmoved**, or moved by something typed on
+   purpose.
+
+### What could make them fail, so it can be planned for rather than discovered
+
+- **The format bump.** §0.1 sequences `smysl/0.1` → `smysl/1.0` *before* the source tree goes
+  to 1.0, and step 2 of that migration changes `ParseOutcome` — a public type. It is a break,
+  and it must therefore land in cycle zero or before the quiet cycles start, not during them.
+  §1.1 made `ParseOutcome` `#[non_exhaustive]` precisely so that adding the field is not one,
+  which is the mitigation already in place.
+- **The remaining `cmd_*` work** (§2.2's 109 survivors) touches only the binary, so it cannot
+  break a library API. Safe to do during a quiet cycle.
+- **`smysl-eval` and the fuzz targets** are unpublished and outside the gate, so work there is
+  free.
+
+**Done when:** two cuts in a row, both on crates.io, both with an empty list, and `make semver`
+reporting no failures rather than no checks.
 
 ---
 
@@ -715,18 +779,26 @@ The **format** is arguably ready now: unchanged across twelve releases, a writte
 policy, four independent implementations, and §2.3 verified by something other than the
 implementation that defined it.
 
-The **surface** is most of the way there. §1.2 is done in 0.13: the seam is narrowed, 482
-items out of the contract with the facade's 243 untouched, the three gates each know what they
-are blind to, and rule A is checked instead of asserted. What remains of Phase 1 is §1.1 — 72
-type decisions, one at a time.
+The **surface** is ready. Phase 1 finished in 0.13: 482 items out of the contract with the
+facade's 243 untouched, 152 of 191 public types carrying `#[non_exhaustive]` and the other 39
+each with an answer, three gates that each know what they are blind to, and rule A checked
+instead of asserted.
 
-That work found five things nothing was watching, and they are all the same shape. Rule A was
-stated in two places and enforced in none. `split_oversized` was written, tested, and never
-called, while a test asserted the defect it prevents. `status_error` was a contract shared by
-convention. `SEMVER_BREAKING` named a crate that had not broken. `cargo-semver-checks` reported
-no change on the facade for a rename that removed a published name. **In every case the code
-was fine and the check was missing** — which is worth saying plainly, because it is what the
-remaining phases are for and it is not what "make the surface worth freezing" sounds like.
+The **verification** is as far as it goes without keys. The CLI's survivors went 172 → 110,
+`progress.rs` from 51 to 1, and the manual's 46 replayed transcripts are inside `cargo test`
+where the tool that measures coverage can see them. What is left is `cmd_*` work in the binary
+and §2.3, which needs an OpenAI and an Anthropic key and nothing else.
+
+**What that work actually found is worth stating plainly, because it is not what "make the
+surface worth freezing" sounds like.** Rule A was stated in two places and enforced in none.
+`split_oversized` was written, tested and never called, while a test asserted the defect it
+prevents. `status_error` was a contract shared by convention. `SEMVER_BREAKING` named a crate
+that had not broken. `cargo-semver-checks` reported no change on the facade for a rename that
+removed a published name. A clamp that never clamped. A doc-output test that passed while the
+binary's output was wrong. **In every case but two the code was fine and the check was
+missing** — and the two exceptions had survivors sitting on them for two releases.
 
 The **evidence** needs Phase 3, and Phase 3 cannot be hurried: it is two quiet cycles, and the
-only way to get them is to have them.
+only way to get them is to have them. 0.13 is cycle zero — it breaks nine of twelve crates,
+deliberately, because this is the last cycle in which narrowing is free. **The clock starts
+when it is published**, and publishing is a release decision rather than an engineering one.

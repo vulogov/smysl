@@ -109,25 +109,50 @@ apart in the canonical encoding, two unrelated uids. Verified capable of failing
 **Next action:** none for this gate. `nodejs/` and `go/` remain C-Read, which is a scope
 decision rather than a gap; both say so where they list what they do not reach.
 
-## 3. Public API stability — *not ready*
+## 3. Public API stability — *the mechanism is done; the evidence is not*
 
-The facade's surface still churns. `Hybrid` changed shape twice inside 0.7.0, and
-`smysl-retrieve`'s trait is one cycle old. Publishing pins every name permanently, and
-semver on a 0.x crate lets you break things, but the point of publishing is that people build
-on it.
+This gate asked for four things and 0.13 delivered all four. What it cannot deliver is the only
+thing that counts as evidence, which is time.
 
-Published as of 0.9.0, which converts this from a precaution into a debt: every name is now
-something people can build against, and the cost of the pass grows with each release it waits.
+**What it asked for, and where it landed:**
 
-**Next action:** a pass over the facade's `pub use` list asking, of each name, whether it is
-part of the contract or an implementation detail that escaped. Then `#[non_exhaustive]` where
-that answer is "we will want to add to this" — 110 types already carry it, out of 378 public
-ones across the crates, and nobody has checked that the split is deliberate.
+- *A pass over the facade's `pub use` list, asking of each name whether it is contract or an
+  implementation detail that escaped.* Done — `API_CONTRACT.md`'s three buckets, the three open
+  names decided, and then §1.2 of `ROAD_TO_1.0.md` acting on the answer: **482 public items out
+  of the contract** across `smysl-provider` and `smysl-ingest`, with the facade's 243 names
+  untouched throughout. That last clause is the check that says nothing a consumer had was
+  taken away.
+- *`#[non_exhaustive]` where the answer is "we will want to add to this".* Done — **152 of 191
+  distinct public types carry it**, and each of the other 39 has an answer: 33 are closed by
+  encapsulation (no public fields to add to) and six are closed on purpose and say so where
+  they are declared. The earlier "110 of 378" counted the same type once per re-export path.
+  The argument turned out to be §8's, not taste: the crate and format versions are independent
+  axes, so an exhaustive `UnitCore` would make the next format field a crate major.
+- *A golden file.* Done, and then found insufficient. `tests/public-api.txt` records the
+  facade; `tests/public-api-counts.txt` records each crate's surface *size*, which catches the
+  one thing neither other gate does — a public item added by accident, which is nobody's break
+  and so was nobody's failure.
+- *`cargo-semver-checks` turning an accidental break into a failing job.* Done, and corrected:
+  it used to `continue` past every crate on `SEMVER_BREAKING`, so a crate with one deliberate
+  break had **nothing** watching it. It now runs them ungated and prints what it finds. That
+  change caught a wrong entry on its first run.
 
-Mechanise it rather than trusting a reading: `cargo public-api` emits the reachable surface,
-which belongs in a golden file the way `golden-packs.txt` records what the packer selects, and
-`cargo-semver-checks` turns an accidental break into a failing job. This project has learned
-that a rule nothing enforces is a rule that drifts.
+**The finding that reorders the three gates.** `cargo-semver-checks` cannot see through a
+`pub use` from another crate — the same blind spot `cargo public-api` has. Run against `smysl`
+it reports *"no semver update required"* for 0.12's rename of `Error` to `AnyError`, although
+`v0.11.0` exported `smysl::Error` and nothing exports it now. **The golden file caught that
+rename; the semver gate did not.** So the division is not the obvious one, and
+`API_CONTRACT.md` now states which artefact is authoritative for what.
+
+**Why this is still not ready.** The mechanism is in place and the surface is worth freezing;
+what is missing is a demonstration that it holds still. 0.13 breaks nine of twelve crates —
+deliberately, because it is the last cycle in which narrowing is free — so the two quiet cycles
+Phase 3 asks for have not begun. **The baseline is 0.11.0, with 0.12 and 0.13 both unpublished**,
+which means every break above is currently measured against a version two releases old.
+
+**Next action:** publish 0.13, then two cycles with `SEMVER_BREAKING` empty at the cut. See
+`ROAD_TO_1.0.md` Phase 3, which lists what could break them and what has already been done to
+stop it.
 
 ## 4. Verified providers — *partial*
 
@@ -393,10 +418,44 @@ was required to exist before running, so a command replayed only if an earlier r
 its output behind: 44 blocks on a clean machine, 46 on a dirty one, with nothing changed.
 Outputs are excluded from that check now, and it reports 45 either way.
 
+**0.13 put the replay inside `cargo test`.** `tests/doc_output.rs` runs it against
+`CARGO_BIN_EXE_smysl`, which is the binary `cargo-mutants` rebuilds with each mutation applied.
+That was Phase 2.1's purpose and it moved the CLI's survivor rate from 72.0% to 64.2% — 21
+mutants caught across nine `cmd_*` functions that nothing else reached, including an entire
+output function being replaced by `String::new()`.
+
+Getting it wired in produced the defect worth recording here. **The first version passed while
+the binary's output was changed.** It hands the script an absolute `CARGO_BIN_EXE_smysl`; the
+script substitutes that into each command and then scans the tokens for absolute *input* paths,
+which are narrative state it cannot replay — so the program itself matched the rule and all 168
+blocks were skipped. It printed `ran 0, skipped 168, MISMATCHED 0`, and the test asserted only
+that a summary line existed. It now asserts `ran >= 40`, and the script excludes the program
+from the scan.
+
+**And 0.13 found real drift, in exactly the place this gate predicts.** Three claims in the
+manual had gone stale, all of them in blocks the script *cannot* replay:
+
+- The feature table said `default` turns on `tui`. It does not, and `Cargo.toml`'s own comment
+  says `tui` is "deliberately absent" — so a reader was told a plain `cargo build` gives them
+  the terminal UI when it does not.
+- The `cargo tree --no-default-features` transcript was from 0.1.0 and predated
+  `smysl-retrieve` becoming a plain dependency, so it was missing `bm25`, `fxhash` and
+  `byteorder` entirely.
+- The prose beside it read "the only third-party code in the tree is `blake3` and
+  `unicode-normalization`", which those three crates had made false.
+
+All three are `cargo` transcripts rather than `smysl` ones, which is precisely why the replay
+never saw them. **The 122 skipped blocks are not merely unchecked; they are where drift
+actually accumulates**, and that is now demonstrated rather than assumed.
+
 **Next action:** if this is worth more, the fix is in the *manual*, not the script — commit the
 tutorial files as fixtures and have the chapters include them, so what the reader copies and
 what the script replays are the same bytes. That is a book change, and the book is the thing
 the coverage is protecting, so it should be a deliberate decision rather than a side effect.
+
+A cheaper second action now has evidence behind it: the handful of `cargo` transcripts could be
+regenerated at release time the way `make docs` rebuilds the PDFs. Three of the four defects
+above would have been caught by that alone.
 
 ---
 
