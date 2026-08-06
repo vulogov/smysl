@@ -4,7 +4,7 @@
 //! draft 2020-12 but a different thing wearing its vocabulary: an OpenAPI 3.0 `Schema`
 //! object, whose fields are a fixed proto message. A keyword outside it is not ignored, it
 //! is a 400 naming the field. Appendix C's schema is therefore *translated* here rather
-//! than passed through — see [`dialect`].
+//! than passed through — see `dialect`.
 //!
 //! Four shape differences from every other mapper here, and each one bites a mapper that
 //! assumes otherwise:
@@ -35,6 +35,8 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use smysl_core::error::ProviderError;
+
+use super::StatusMapping;
 
 use super::auth::{self, Secret};
 use crate::config::ProviderConfig;
@@ -237,24 +239,6 @@ impl Gemini {
             usage,
             structured: self.cfg.structured == StructuredMode::JsonSchema,
         })
-    }
-
-    pub fn status_error(&self, status: u16, body: &str) -> ProviderError {
-        if let Ok(v) = serde_json::from_str::<Value>(body) {
-            if let Some(e) = error_of(&v) {
-                return match status {
-                    401 | 403 => ProviderError::Unauthorized,
-                    // The status decides backpressure, not the envelope: a body that says
-                    // "high demand" must not arrive as a plain `Upstream` that nothing
-                    // retries just because it came with an explanation.
-                    s if http::is_backpressure(s) => {
-                        ProviderError::RateLimited { retry_after: None }
-                    }
-                    _ => e,
-                };
-            }
-        }
-        http::status_error(status, body, None)
     }
 
     /// Model names come back fully qualified as `models/gemini-…`; the bare name is what a
@@ -496,6 +480,26 @@ impl Provider for Gemini {
             models,
             caps: Some(self.caps()),
         })
+    }
+}
+
+impl StatusMapping for Gemini {
+    fn status_error(&self, status: u16, body: &str) -> ProviderError {
+        if let Ok(v) = serde_json::from_str::<Value>(body) {
+            if let Some(e) = error_of(&v) {
+                return match status {
+                    401 | 403 => ProviderError::Unauthorized,
+                    // The status decides backpressure, not the envelope: a body that says
+                    // "high demand" must not arrive as a plain `Upstream` that nothing
+                    // retries just because it came with an explanation.
+                    s if http::is_backpressure(s) => {
+                        ProviderError::RateLimited { retry_after: None }
+                    }
+                    _ => e,
+                };
+            }
+        }
+        http::status_error(status, body, None)
     }
 }
 

@@ -14,6 +14,7 @@ use crate::types::unit::Extra;
 /// (`SMY-W013`) - dropping it would break rule X, and refusing it would make a store
 /// unreadable because someone else knew more than you.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub enum RelKind {
     Elaborates,
     Contrasts,
@@ -170,6 +171,7 @@ impl fmt::Display for RelKind {
 /// Relations are immutable, content-addressed, and independently attested, so "agent B
 /// asserted that C rebuts D" is attributable rather than anonymous.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Relation {
     pub kind: RelKind,
     pub from: Uid,

@@ -21,9 +21,20 @@
 #![deny(rust_2018_idioms)]
 
 pub mod config;
-pub mod http;
+// The retry loop, backoff and response envelope. Internal since 0.13 (§1.2 S4): nothing
+// outside this crate has ever named it, and `Provider::complete` is the way a caller reaches
+// an endpoint. `http::status_error` remains the shared fallback every mapper refines.
+pub(crate) mod http;
 pub mod map;
 pub mod registry;
+/// Reachable so that guarantee A2 can be tested from outside, and for no other reason.
+///
+/// `is_started` has exactly one external caller — `tests/a2_lazy_runtime.rs` — and that test
+/// cannot become a unit test. It asserts the runtime has **not** started, which is observable
+/// only in a fresh process; inside the crate some earlier unit test has always started it
+/// already, and the unit test in `runtime.rs` says so itself. Hidden rather than `pub(crate)`
+/// because an integration test is a separate crate and sees only `pub`.
+#[doc(hidden)]
 pub mod runtime;
 pub mod stream;
 pub mod usage;
@@ -214,6 +225,7 @@ impl Role {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Message {
     pub role: Role,
     pub content: String,

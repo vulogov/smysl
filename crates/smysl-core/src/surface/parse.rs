@@ -36,6 +36,7 @@ use crate::types::Record;
 /// a unit's identity (§1.2) - but both are authored in surface syntax, so a round trip
 /// would lose them if the outcome did not carry them.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct ParseOutcome {
     pub view: Option<View>,
     pub records: Vec<Record>,

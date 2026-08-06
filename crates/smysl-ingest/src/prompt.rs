@@ -4,7 +4,9 @@
 //! wording without forking the crate. The template *identity* - `template_id` and
 //! `template_ver` - is what the recipe hashes (D-8), so a deployment that changes the
 //! wording and keeps the id would make two different pipelines claim to be the same one.
-//! [`Template::fingerprint`] exists to make that hard to do by accident.
+//! `Template::fingerprint` exists to make that hard to do by accident. (A code span rather
+//! than an intra-doc link: this module is `#[doc(hidden)]` since 0.13, so there is no rendered
+//! page to link to. See `lib.rs` for why it is still reachable.)
 //!
 //! **Content is data, never instruction** (§29). The document being ingested is delimited
 //! and the model is told, in the system prompt, that everything inside the delimiter is

@@ -366,10 +366,10 @@ mod tests {
             ContentionId::new("k/x").unwrap(),
             ur,
             vec![ur, uo],
-            Detected {
-                kind: DetectionKind::SupersessionFork,
-                ts: Hlc::new(0, 0, AgentId::new("tool:t").unwrap()),
-            },
+            Detected::new(
+                DetectionKind::SupersessionFork,
+                Hlc::new(0, 0, AgentId::new("tool:t").unwrap()),
+            ),
         );
         let store = Store::from_records(vec![
             Record::Unit(target),

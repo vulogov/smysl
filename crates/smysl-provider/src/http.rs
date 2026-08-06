@@ -1,26 +1,30 @@
 //! The HTTP wrapper (§21).
 //!
-//! One place where transport and status errors become [`ProviderError`], so five mappers
+//! One place where transport and status errors become `ProviderError`, so five mappers
 //! do not each invent their own mapping and disagree about what a 429 means.
 //!
 //! `RateLimited` retries with exponential backoff and full jitter, capped at three
-//! attempts. Retries are counted in [`Usage::retries`](crate::Usage::retries) and never
+//! attempts. Retries are counted in `Usage::retries` and never
 //! appear in provenance: a
 //! retry is not a distinct model call for recipe purposes (§21.4).
 //!
-//! **Backpressure is a class, not a status code.** See [`is_backpressure`]: three numbers
+//! **Backpressure is a class, not a status code.** See `is_backpressure`: three numbers
 //! mean "the server said later", and telling them apart matters to nobody downstream.
 
+#[cfg(feature = "http-client")]
 use std::time::Duration;
 
 use smysl_core::error::ProviderError;
 
+#[cfg(feature = "http-client")]
 /// Attempts, not retries: three attempts is two retries (§21.4).
 pub const MAX_ATTEMPTS: u32 = 3;
 
+#[cfg(feature = "http-client")]
 /// The base of the exponential backoff.
 pub const BACKOFF_BASE: Duration = Duration::from_millis(250);
 
+#[cfg(feature = "http-client")]
 /// A completed request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpResponse {
@@ -30,6 +34,7 @@ pub struct HttpResponse {
     pub retries: u32,
 }
 
+#[cfg(feature = "http-client")]
 /// Full jitter over an exponential backoff: `rand(0, base * 2^attempt)`.
 ///
 /// Full jitter rather than a fixed multiplier, because several clients backing off in
@@ -50,6 +55,7 @@ pub const fn is_retryable(e: &ProviderError) -> bool {
     matches!(e, ProviderError::RateLimited { .. })
 }
 
+#[cfg(feature = "http-client")]
 /// The statuses that mean "the server said later", as opposed to "the request was wrong".
 ///
 /// - **429** — too many requests, the classic form.
@@ -67,7 +73,8 @@ pub const fn is_backpressure(status: u16) -> bool {
     matches!(status, 429 | 503 | 529)
 }
 
-/// Map an HTTP status onto a [`ProviderError`].
+#[cfg(feature = "http-client")]
+/// Map an HTTP status onto a `ProviderError`.
 pub fn status_error(status: u16, body: &str, retry_after: Option<Duration>) -> ProviderError {
     match status {
         401 | 403 => ProviderError::Unauthorized,
@@ -82,6 +89,7 @@ pub fn status_error(status: u16, body: &str, retry_after: Option<Duration>) -> P
     }
 }
 
+#[cfg(feature = "http-client")]
 /// Bodies are untrusted input and error messages reach logs, so a multi-megabyte HTML
 /// error page does not become a multi-megabyte diagnostic.
 fn truncate(body: &str) -> String {
@@ -96,6 +104,7 @@ fn truncate(body: &str) -> String {
     format!("{}…", body[..end].trim())
 }
 
+#[cfg(feature = "http-client")]
 /// Parse a `Retry-After` header, which may be seconds or an HTTP date. Only the seconds
 /// form is honoured; a date would need a calendar and the difference is not worth one.
 pub fn parse_retry_after(v: &str) -> Option<Duration> {
@@ -176,13 +185,15 @@ mod client {
         Err(ProviderError::Unreachable)
     }
 
-    /// GET, for probes. Probes never retry: `providers --probe` reports what it found, and
-    /// a probe that waited three seconds to say "unreachable" would be worse at its job.
-    pub fn get(url: &str, timeout: Duration) -> Result<HttpResponse, ProviderError> {
-        get_with(url, &[], timeout)
-    }
-
-    /// GET with headers, for a probe that needs a credential to be told anything.
+    /// GET, for probes, with whatever headers the endpoint needs to say anything.
+    ///
+    /// Probes never retry: `providers --probe` reports what it found, and a probe that waited
+    /// three seconds to say "unreachable" would be worse at its job.
+    ///
+    /// There was a `get(url, timeout)` wrapper over this until 0.13, calling it with no
+    /// headers. It had one caller, behind `#[cfg(feature = "ollama")]`, so making this module
+    /// `pub(crate)` in §1.2 S4 turned it into dead code under `--no-default-features` — which
+    /// `make ci`'s feature matrix caught and a workspace `--all-features` run could not have.
     pub fn get_with(
         url: &str,
         headers: &[(&str, String)],
@@ -219,7 +230,7 @@ mod client {
 }
 
 #[cfg(feature = "http-client")]
-pub use client::{get, get_with, post_json};
+pub use client::{get_with, post_json};
 
 #[cfg(test)]
 mod tests {

@@ -173,10 +173,7 @@ pub(crate) mod fixture {
             ContentionId::new("k/pool-vs-canary").unwrap(),
             uf,
             vec![ur],
-            Detected {
-                kind: DetectionKind::LiveRebuttal,
-                ts: Hlc::zero(agent.clone()),
-            },
+            Detected::new(DetectionKind::LiveRebuttal, Hlc::zero(agent.clone())),
         );
 
         let store = Store::from_records(vec![

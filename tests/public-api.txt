@@ -6,10 +6,23 @@
 # happen. Same idea as `crates/smysl-pack/tests/golden-packs.txt`: the value is not that the
 # contents are right, it is that a diff is a decision.
 #
-# It records the facade rather than every crate. The eleven behind it expand to 12 000 lines
-# of simplified surface, and a diff nobody reads is decoration rather than a gate. What that
-# file would have caught, `cargo-semver-checks` catches properly — it understands the semver
-# rules instead of comparing text.
+# It records the facade rather than every crate. The eleven behind it expand to about 11 600
+# lines of simplified surface, and a diff nobody reads is decoration rather than a gate. That
+# much still holds. What used to follow it did not: "what that file would have caught,
+# `cargo-semver-checks` catches properly".
+#
+# It does not, on the facade. `cargo public-api` returns this same list with or without
+# `--simplified`, because a re-export from another crate is a `pub use` line neither tool can
+# expand — and `cargo-semver-checks` has the identical blind spot. Run against `smysl` it
+# reports "no semver update required" for the 0.12 rename of `Error` to `AnyError`, although
+# v0.11.0 exported `smysl::Error` and nothing exports it now. **This file caught that rename;
+# the semver gate did not.**
+#
+# So the division is the other way round from how it was written. For the facade's *names*,
+# this file is the gate. For everything behind a name — methods, signatures, variants —
+# `make semver` is, because it reads each library crate's own rustdoc rather than the facade's
+# re-exports. `tests/public-api-counts.txt` covers the third case neither sees: a public item
+# added to a library crate by accident, which is nobody's break and so nobody's failure.
 #
 # Regenerate with `make api`. Check with `make api-check`.
 pub mod smysl
@@ -73,6 +86,8 @@ pub use smysl::Hlc
 pub use smysl::HopDiff
 pub use smysl::Hybrid
 pub use smysl::IdError
+pub use smysl::ImportOptions
+pub use smysl::Imported
 pub use smysl::Index
 pub use smysl::IndexError
 pub use smysl::IngestOptions
@@ -214,6 +229,7 @@ pub use smysl::fidelity
 pub use smysl::format_version_supported
 pub use smysl::from_cbor
 pub use smysl::from_cbor_seq
+pub use smysl::from_csv
 pub use smysl::granularity_distribution
 pub use smysl::hash_bytes
 pub use smysl::hop_diff
@@ -245,6 +261,7 @@ pub use smysl::to_cbor_seq
 pub use smysl::tokens
 pub use smysl::topo
 pub use smysl::trace
+pub use smysl::tui
 pub use smysl::unit_core_bytes
 pub use smysl::verify
 pub use smysl::verify_pack

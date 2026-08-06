@@ -81,6 +81,7 @@ impl core::fmt::Display for Violation {
 
 /// Everything the checker needs beyond the store.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct Constraints {
     /// C5: units that must reach L1 - the focus set and whatever a thread pins.
     pub pinned: BTreeSet<Uid>,
@@ -369,10 +370,10 @@ mod tests {
             ContentionId::new("k/x").unwrap(),
             ua,
             vec![ua, ub],
-            Detected {
-                kind: DetectionKind::SupersessionFork,
-                ts: Hlc::new(0, 0, smysl_core::AgentId::new("tool:t").unwrap()),
-            },
+            Detected::new(
+                DetectionKind::SupersessionFork,
+                Hlc::new(0, 0, smysl_core::AgentId::new("tool:t").unwrap()),
+            ),
         );
         let store = Store::from_records(vec![
             Record::Unit(a),
@@ -398,10 +399,10 @@ mod tests {
             ContentionId::new("k/x").unwrap(),
             ua,
             vec![ua, ub],
-            Detected {
-                kind: DetectionKind::SupersessionFork,
-                ts: Hlc::new(0, 0, smysl_core::AgentId::new("tool:t").unwrap()),
-            },
+            Detected::new(
+                DetectionKind::SupersessionFork,
+                Hlc::new(0, 0, smysl_core::AgentId::new("tool:t").unwrap()),
+            ),
         );
         k.status = smysl_core::ContentionStatus::Resolved;
         let store = Store::from_records(vec![

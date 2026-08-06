@@ -54,6 +54,7 @@ impl LineClass {
 
 /// One classified line, with the byte range it occupies excluding its terminator.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct Line<'a> {
     pub class: LineClass,
     pub span: Span,

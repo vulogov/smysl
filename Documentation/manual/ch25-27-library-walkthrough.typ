@@ -68,7 +68,7 @@ and all:
   (auto, 1fr),
   (
     ([Feature], [Turns on]),
-    ([`default`], [`cli`, `tui`, `local`, `render-typst` — what plain `cargo build` gives you: the binary, the terminal UI, local (Ollama) model access, and Typst rendering.]),
+    ([`default`], [`cli`, `local`, `render-typst` — what plain `cargo build` gives you: the binary, local (Ollama) model access, and Typst rendering. *Not* `tui`: `ratatui` and `crossterm` in every default build is a cost an embedder who only calls the library never opted into, so the browser is `--features tui`.]),
     ([`cli`], [`dep:clap`. Without it there is no `[[bin]]` at all — the binary's own manifest entry requires this feature to exist.]),
     ([`tui`], [`dep:smysl-tui`, and `cli` (the TUI is reached through the same binary, so it pulls the parser in too).]),
     ([`providers`], [`dep:smysl-provider` — the provider abstraction: registry, capabilities, ledger. No vendor is wired in by this alone.]),
@@ -96,29 +96,64 @@ faith. Building the facade crate's own library target with every feature off:
 
 #screen(caption: "$ cargo tree --no-default-features -p smysl")[
 ```
-smysl v0.1.0 (/Users/gandalf/Src/smysl)
-├── smysl-check v0.1.0
-│   ├── smysl-core v0.1.0
+smysl v0.13.0
+├── smysl-check v0.13.0
+│   ├── smysl-core v0.13.0
 │   │   ├── blake3 v1.8.5
 │   │   │   ├── arrayref v0.3.9
 │   │   │   ├── arrayvec v0.7.8
 │   │   │   ├── cfg-if v1.0.4
 │   │   │   └── constant_time_eq v0.4.2
+│   │   │   [build-dependencies]
+│   │   │   └── cc v1.4.0
+│   │   │       ├── find-msvc-tools v0.1.9
+│   │   │       └── shlex v2.0.1
 │   │   └── unicode-normalization v0.1.25
 │   │       └── tinyvec v1.12.0
-│   └── smysl-graph v0.1.0
-├── smysl-graph v0.1.0 (*)
-├── smysl-pack v0.1.0
-├── smysl-render v0.1.0
-└── smysl-thread v0.1.0
+│   │           └── tinyvec_macros v0.1.1
+│   └── smysl-graph v0.13.0
+│       └── smysl-core v0.13.0 (*)
+├── smysl-core v0.13.0 (*)
+├── smysl-graph v0.13.0 (*)
+├── smysl-pack v0.13.0
+│   ├── smysl-core v0.13.0 (*)
+│   └── smysl-graph v0.13.0 (*)
+├── smysl-render v0.13.0
+│   ├── smysl-core v0.13.0 (*)
+│   ├── smysl-graph v0.13.0 (*)
+│   └── smysl-thread v0.13.0
+│       ├── smysl-core v0.13.0 (*)
+│       └── smysl-graph v0.13.0 (*)
+├── smysl-retrieve v0.13.0
+│   ├── bm25 v2.3.2
+│   │   └── fxhash v0.2.1
+│   │       └── byteorder v1.5.0
+│   ├── smysl-core v0.13.0 (*)
+│   └── smysl-graph v0.13.0 (*)
+└── smysl-thread v0.13.0 (*)
+[dev-dependencies]
+└── serde_json v1.0.151
+    ├── itoa v1.0.18
+    ├── memchr v2.8.3
+    ├── serde_core v1.0.229
+    └── zmij v1.0.23
 ```
 ]
 
 No `tokio`, no `clap`, no `ureq`, no `crossterm`, no `ratatui` — grep the real output for
-any of them and it comes back empty. The only third-party code in the tree is `blake3`
-(built with `pure`, so no C SIMD backend either — the hash path is Rust all the way down)
-and `unicode-normalization`, which is what NFC-normalises surface text on parse. That is
-the whole dependency graph of a fully synchronous library: no async runtime, no HTTP
+any of them and it comes back empty. That is the point of the flag, and `cargo xtask
+check-purity` fails the build if any of them ever appears.
+
+What *is* there is worth reading. `blake3` hashes, built with `pure` so there is no C SIMD
+backend — the hash path is Rust all the way down. (`cc` appears beneath it under
+`[build-dependencies]`: `blake3` declares it unconditionally, and `pure` is what stops it
+being used.) `unicode-normalization` NFC-normalises surface text on parse. And `bm25`, with
+`fxhash` and `byteorder` behind it, is lexical retrieval — `smysl-retrieve` is a plain
+dependency rather than an optional one, because its default engine is pure: BM25 with
+`default-features = false` brings in no runtime, which is a claim `check-purity` enforces
+rather than asserts.
+
+That is the whole dependency graph of a fully synchronous library: no async runtime, no HTTP
 client, no argument parser, anywhere.
 
 #callout(label: "Checked, not just intended")[
@@ -177,7 +212,11 @@ Chapter 28 walks through, with nothing beyond `smysl-core`, `smysl-graph`, `smys
 #recap((
   [Rule A is load-bearing, not aspirational: every `cmd_*` function in `src/main.rs` calls
    straight into a facade re-export — `cmd_pack` calls `smysl::pack`, with no private
-   implementation hiding behind it.],
+   implementation hiding behind it. Since 0.13 that is checked rather than asserted:
+   `cargo xtask check-purity` fails if anything under `src/` outside `lib.rs` names a
+   sibling crate. It found two bypasses the first time it ran, which is the honest reason
+   the check exists — `cmd_import` was reaching into `smysl-ingest` for the CSV reader, so
+   a consumer holding the facade could not do what `smysl import` does.],
   [`smysl-core`, `smysl-graph`, `smysl-check`, `smysl-pack`, `smysl-thread`, and
    `smysl-render` are always present; `cli`, `tui`, `providers`, `ingest`, `local`,
    `remote`, the two render backends, `exact-pack`, and `tls-pure` are each opt-in.],

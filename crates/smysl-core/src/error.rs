@@ -102,6 +102,7 @@ impl fmt::Display for ExitCode {
 /// Malformed identifier text. Every id newtype validates on construction and is
 /// infallible thereafter, which is what lets the encoder be infallible.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct IdError {
     pub kind: &'static str,
     pub found: String,

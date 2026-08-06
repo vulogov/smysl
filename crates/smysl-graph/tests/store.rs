@@ -82,10 +82,7 @@ fn corpus() -> Vec<Record> {
             ContentionId::new("k/pool").unwrap(),
             c_uid,
             vec![c_uid, r_uid],
-            Detected {
-                kind: DetectionKind::LiveRebuttal,
-                ts: Hlc::new(3, 0, agent()),
-            },
+            Detected::new(DetectionKind::LiveRebuttal, Hlc::new(3, 0, agent())),
         )),
     ]
 }

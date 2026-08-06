@@ -92,20 +92,14 @@ fn corpus() -> Vec<Record> {
         ContentionId::new("k/pool-vs-index").unwrap(),
         uid(1),
         vec![uid(2), uid(3)],
-        Detected {
-            kind: DetectionKind::SupersessionFork,
-            ts: hlc(),
-        },
+        Detected::new(DetectionKind::SupersessionFork, hlc()),
     );
 
     let mut packinfo = PackInfo::new(8_000, 6_142, "smysl/utf8-div4");
     packinfo.thread = Some(ThreadId::new("t/brief").unwrap());
     packinfo.dropped = vec![(uid(4), DropReason::Budget), (uid(5), DropReason::LowValue)];
     packinfo.degraded = vec![(uid(6), Lod::L0)];
-    packinfo.optimality = Optimality {
-        mode: PackMode::Exact,
-        gap: 0.25,
-    };
+    packinfo.optimality = Optimality::new(PackMode::Exact, 0.25);
 
     let mut decl = SchemaDecl::new(SchemaId::parse("x.sre/1").unwrap(), 1);
     decl.types = vec![SchemaId::parse("x.sre/incident").unwrap()];
@@ -379,7 +373,7 @@ fn every_contention_status_and_detection_kind_round_trips() {
                 ContentionId::new("k/x").unwrap(),
                 uid(1),
                 vec![uid(2)],
-                Detected { kind, ts: hlc() },
+                Detected::new(kind, hlc()),
             );
             c.status = status;
             let (back, _) = from_cbor(&to_cbor(&Record::Contention(c.clone()))).unwrap();

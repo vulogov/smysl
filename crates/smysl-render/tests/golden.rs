@@ -90,10 +90,7 @@ fn corpus() -> (Store, Thread) {
             ContentionId::new("k/pool-vs-canary").unwrap(),
             u_pool,
             vec![u_canary],
-            Detected {
-                kind: DetectionKind::LiveRebuttal,
-                ts: Hlc::zero(tool),
-            },
+            Detected::new(DetectionKind::LiveRebuttal, Hlc::zero(tool)),
         )),
     ]);
 

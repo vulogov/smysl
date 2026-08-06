@@ -147,6 +147,7 @@ pub fn report_retractions(store: &Store, policy: RetractionPolicy, report: &mut 
 
 /// What retracting a unit would do, computed without doing it (§23.1 `--dry-run`).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RetractionPlan {
     pub target: Uid,
     /// The retraction itself plus everything it orphans, in ascending uid order.

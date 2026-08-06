@@ -81,6 +81,7 @@ impl DeriveOptions {
 
 /// What derivation did, beyond the thread itself.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct DeriveReport {
     /// Units inserted by coherence repair, with the step that needed them.
     pub repaired: Vec<(Uid, Uid)>,

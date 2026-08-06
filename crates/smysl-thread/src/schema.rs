@@ -58,6 +58,7 @@ pub enum Matcher {
 
 /// One schema's table.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SchemaDef {
     pub schema: ThreadSchema,
     /// Roles in narrative order. A thread reads in this order.

@@ -578,10 +578,10 @@ mod tests {
             ContentionId::new("k/pool-vs-index").unwrap(),
             uo,
             vec![ua, ub],
-            Detected {
-                kind: DetectionKind::LiveRebuttal,
-                ts: Hlc::zero(AgentId::new("tool:t").unwrap()),
-            },
+            Detected::new(
+                DetectionKind::LiveRebuttal,
+                Hlc::zero(AgentId::new("tool:t").unwrap()),
+            ),
         );
         let store = Store::from_records(vec![
             Record::Unit(a),

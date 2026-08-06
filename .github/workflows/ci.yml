@@ -38,10 +38,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 
-  # The public contract. Two jobs' worth of question in one, because they catch different
-  # things: `api-check` says the list of exported names moved, `semver-checks` says the move
-  # was breaking. A rename shows up in the first; marking a struct `#[non_exhaustive]` shows
-  # up only in the second.
+  # The public contract. Three questions in one job, because each gate is blind where another
+  # sees (§1.2 S5, and `Documentation/API_CONTRACT.md` has the table):
+  #
+  #   `api-check`   the facade's list of names moved, and each crate's surface changed size.
+  #   `semver`      the move was breaking, judged per library crate under the real rules.
+  #
+  # A rename shows up in the first; marking a struct `#[non_exhaustive]` only in the second.
+  # And the division is not the obvious one: `cargo-semver-checks` cannot expand a `pub use`
+  # from another crate, so on the *facade* it sees exactly what `cargo public-api` sees. It
+  # reported "no semver update required" for the 0.12 rename of `Error` to `AnyError`. The
+  # golden file is what caught that, which is why neither gate is redundant.
   api:
     runs-on: ubuntu-latest
     steps:

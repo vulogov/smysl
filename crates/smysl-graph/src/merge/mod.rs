@@ -68,6 +68,7 @@ impl MergeOptions {
 
 /// What a merge did.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct MergeReport {
     /// Records that were not already present.
     pub added: usize,

@@ -20,14 +20,16 @@
 
 use smysl_core::error::ProviderError;
 use smysl_provider::config::ProviderConfig;
+use smysl_provider::map::StatusMapping;
 use smysl_provider::{ProviderId, StructuredMode};
 
-/// Every mapper, behind its feature, as a boxed closure over `status_error`.
+/// Every mapper, behind its feature, as a trait object.
 ///
-/// A trait object will not do: `status_error` is an inherent method on each mapper rather than
-/// part of `Provider`, which is itself worth noticing — the shared contract is shared by
-/// convention and nothing enforces the shape.
-type Classify = Box<dyn Fn(u16, &str) -> ProviderError>;
+/// This was a `Box<dyn Fn(u16, &str) -> ProviderError>` until 0.13, because `status_error` was
+/// an inherent method on each mapper and there was no trait to name. The closures were the
+/// visible cost of a contract shared by convention; `StatusMapping` is that contract written
+/// down, so the compiler now checks the shape a sixth mapper must have.
+type Classify = Box<dyn StatusMapping>;
 
 fn cfg(id: &str) -> ProviderConfig {
     let mut c = ProviderConfig::new(ProviderId::new(id).unwrap(), id);
@@ -43,28 +45,42 @@ fn mappers() -> Vec<(&'static str, Classify)> {
 
     #[cfg(feature = "anthropic")]
     {
-        let m = smysl_provider::map::anthropic::Anthropic::new(cfg("anthropic"));
-        v.push(("anthropic", Box::new(move |s, b| m.status_error(s, b))));
+        v.push((
+            "anthropic",
+            Box::new(smysl_provider::map::anthropic::Anthropic::new(cfg(
+                "anthropic",
+            ))),
+        ));
     }
     #[cfg(feature = "openai")]
     {
-        let m = smysl_provider::map::openai::OpenAi::new(cfg("openai"));
-        v.push(("openai", Box::new(move |s, b| m.status_error(s, b))));
+        v.push((
+            "openai",
+            Box::new(smysl_provider::map::openai::OpenAi::new(cfg("openai"))),
+        ));
     }
     #[cfg(feature = "gemini")]
     {
-        let m = smysl_provider::map::gemini::Gemini::new(cfg("gemini"));
-        v.push(("gemini", Box::new(move |s, b| m.status_error(s, b))));
+        v.push((
+            "gemini",
+            Box::new(smysl_provider::map::gemini::Gemini::new(cfg("gemini"))),
+        ));
     }
     #[cfg(feature = "deepseek")]
     {
-        let m = smysl_provider::map::deepseek::DeepSeek::new(cfg("deepseek"));
-        v.push(("deepseek", Box::new(move |s, b| m.status_error(s, b))));
+        v.push((
+            "deepseek",
+            Box::new(smysl_provider::map::deepseek::DeepSeek::new(cfg(
+                "deepseek",
+            ))),
+        ));
     }
     #[cfg(feature = "ollama")]
     {
-        let m = smysl_provider::map::ollama::Ollama::new(cfg("ollama"));
-        v.push(("ollama", Box::new(move |s, b| m.status_error(s, b))));
+        v.push((
+            "ollama",
+            Box::new(smysl_provider::map::ollama::Ollama::new(cfg("ollama"))),
+        ));
     }
     v
 }
@@ -89,7 +105,10 @@ fn a_401_or_403_is_unauthorized_everywhere() {
     for (name, classify) in mappers() {
         for status in [401u16, 403] {
             assert!(
-                matches!(classify(status, ENVELOPE), ProviderError::Unauthorized),
+                matches!(
+                    classify.status_error(status, ENVELOPE),
+                    ProviderError::Unauthorized
+                ),
                 "{name}: {status} must be Unauthorized — retrying a credential that will \
                  never work is the failure this classification prevents"
             );
@@ -105,7 +124,7 @@ fn backpressure_is_rate_limited_everywhere() {
         for status in [429u16, 503] {
             assert!(
                 matches!(
-                    classify(status, ENVELOPE),
+                    classify.status_error(status, ENVELOPE),
                     ProviderError::RateLimited { .. }
                 ),
                 "{name}: {status} must be RateLimited, or a transient overload ends the run"
@@ -122,9 +141,9 @@ fn backpressure_is_rate_limited_everywhere() {
 #[test]
 fn the_three_classes_are_actually_distinguished() {
     for (name, classify) in mappers() {
-        let unauthorized = classify(401, ENVELOPE);
-        let limited = classify(429, ENVELOPE);
-        let other = classify(400, ENVELOPE);
+        let unauthorized = classify.status_error(401, ENVELOPE);
+        let limited = classify.status_error(429, ENVELOPE);
+        let other = classify.status_error(400, ENVELOPE);
 
         assert!(
             !matches!(other, ProviderError::Unauthorized),
@@ -152,7 +171,7 @@ fn the_three_classes_are_actually_distinguished() {
 #[test]
 fn a_500_is_reported_rather_than_swallowed() {
     for (name, classify) in mappers() {
-        let e = classify(500, "not json at all");
+        let e = classify.status_error(500, "not json at all");
         assert!(
             !matches!(e, ProviderError::Unauthorized),
             "{name}: a 500 read as an authentication problem"

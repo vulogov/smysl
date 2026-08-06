@@ -14,15 +14,39 @@
 
 pub mod attest;
 pub mod ceiling;
-pub mod chunk;
+// Splitting a document into model-sized pieces. Internal since 0.13 (§1.2 S4): `Ingestor`
+// chunks as part of the path a caller actually takes.
+pub(crate) mod chunk;
 pub mod import;
+/// Reachable for `smysl-eval`'s `quoting_live.rs`, which drives real models against the
+/// batch shape and needs to parse what comes back the way the ingest path does.
+#[doc(hidden)]
 pub mod json_ast;
-pub mod monotone;
+// Rule M's status ceiling arithmetic. Internal since 0.13 (§1.2 S4): `ceiling` is the
+// facade-exported way to ask the question this answers.
+pub(crate) mod monotone;
 pub mod path;
+/// Reachable for `tests/gate.rs`, which checks the prompt the ingest path actually sends.
+///
+/// `FENCE` and `content_ingest_json` are what the gate asserts against, and asserting against
+/// a copy of them would test the copy. Hidden rather than `pub(crate)` because an integration
+/// test is a separate crate; hidden rather than left public because no consumer builds our
+/// prompts — `Ingestor` does.
+#[doc(hidden)]
 pub mod prompt;
+/// Reachable for `tests/gate.rs` and the workspace's `tests/interactions.rs`, which check that
+/// a quoted body survives the round trip the ingest path puts it through.
+#[doc(hidden)]
 pub mod quote;
 pub mod recipe;
+/// Reachable for `tests/gate.rs`, which drives `check_local` and the degradation path
+/// directly. No consumer runs the re-ask loop itself — `IngestOptions::repair_attempts` is
+/// how a caller sets its budget.
+#[doc(hidden)]
 pub mod repair;
+/// Reachable for `smysl-eval`'s `quoting_live.rs`, which sends `batch_schema()` to live
+/// providers to measure whether they honour it.
+#[doc(hidden)]
 pub mod schema;
 pub mod stage;
 

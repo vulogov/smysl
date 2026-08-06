@@ -21,6 +21,7 @@ pub type Extra = BTreeMap<u16, Vec<u8>>;
 /// deliberately outside it: identity is content, so the same claim from two agents is one
 /// unit with two attestations rather than two units.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub struct UnitCore {
     pub schema: SchemaId,
     /// L0. Required, NFC, interpretable from the L0 of `deps` alone.
@@ -46,6 +47,7 @@ pub struct UnitCore {
 /// shape-valid*, which is what makes encoding and hashing infallible and guarantees one
 /// logical core has exactly one byte encoding.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct UnitCoreBuilder {
     pub schema: SchemaId,
     pub gist: String,
@@ -186,6 +188,7 @@ impl UnitCore {
 /// Only `core` is hashed. `attestations` grow monotonically, `salience` is an authored
 /// override, and `labels` are view-scoped aliases - none of them are identity.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Unit {
     pub core: UnitCore,
     pub attestations: BTreeSet<Attestation>,

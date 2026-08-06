@@ -4,7 +4,7 @@
 [`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md), which is deliberately a fraction of this
 one's length: interoperability needs identity, encoding and the rules, not an account of how
 this implementation happens to be built.
-**Describes:** the code at `main`, crate `0.12.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
+**Describes:** the code at `main`, crate `0.13.0`, format `smysl/0.1`, kernel `smysl.kernel/0.1`.
 **Compiled:** 2026-07-30, from SM-P0 through SM-P15, the operational-merit work after it, the
 0.2 cycle (label bindings, comment syntax, forward compatibility), the 0.3 cycle (global
 flags, nesting bounds, packer performance) and the 0.4 cycle (the fuzz backlog: seven

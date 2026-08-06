@@ -22,9 +22,12 @@ use crate::ids::Uid;
 // ---------------------------------------------------------------------------
 // Severity
 // ---------------------------------------------------------------------------
-
 /// Diagnostic severity. Ordered: `Warn < Error`, so `fail_on(Warn)` is stricter than
 /// `fail_on(Error)`.
+///
+/// **Closed by design** (§1.1 audit, 0.13). Two, and the whole diagnostic model rests on the
+/// split: `Error` blocks, `Warn` does not. A third level would not be a new variant so much as
+/// a different design, and every `match` on this in the workspace is exhaustive on purpose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Severity {
     Warn,
@@ -49,11 +52,14 @@ impl fmt::Display for Severity {
 // ---------------------------------------------------------------------------
 // Byte spans
 // ---------------------------------------------------------------------------
-
 /// A half-open byte range into a surface-syntax source.
 ///
 /// Spans are what let the ingest repair loop (§22.3) resend only the offending region
 /// instead of retrying a whole chunk, so every parse-time diagnostic carries one.
+///
+/// **Closed by design** (§1.1 audit, 0.13). A byte range is two offsets. Anything a
+/// diagnostic wants to say *about* the range belongs on `Diagnostic`, which is
+/// `#[non_exhaustive]` for exactly that reason.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Span {
     pub start: usize,
@@ -263,6 +269,7 @@ impl fmt::Display for Code {
 
 /// What a diagnostic is about: a unit in a store, or a byte range in a source.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub enum Subject {
     /// A byte range in surface text.
     Span(Span),
@@ -274,6 +281,7 @@ pub enum Subject {
 
 /// One diagnostic: a stable code, a severity, what it is about, and an optional fix.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub struct Diagnostic {
     pub code: Code,
     pub severity: Severity,
@@ -362,6 +370,7 @@ impl fmt::Display for Diagnostic {
 /// Check passes never short-circuit, so a report is expected to carry the *full*
 /// diagnostic set: the ingest repair loop (§22.3) needs all of them at once.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Report {
     pub diagnostics: Vec<Diagnostic>,
     pub counts: BTreeMap<Code, usize>,

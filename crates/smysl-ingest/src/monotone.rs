@@ -75,7 +75,7 @@ fn status_of(
 
 /// Re-point references after a transform moved identities.
 ///
-/// Re-exported from [`smysl_graph::relink`], which is where it belongs: rule T's cap, rule
+/// Re-exported from `smysl_graph::relink`, which is where it belongs: rule T's cap, rule
 /// M's weakening and `relink` all need it, and the third copy is the one that proves it is
 /// graph surgery rather than an ingest detail.
 pub use smysl_graph::relink::resettle;

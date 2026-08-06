@@ -24,8 +24,8 @@
 //! ingested an hour ago is not a rule M violation, it is the normal case.
 //!
 //! Rule T *is* checked here, but its diagnostic does not buy a turn: the ceiling is applied
-//! unconditionally in [`convert`], so `SMY-E033` records what a model tried rather than work
-//! outstanding. See [`needs_repair`].
+//! unconditionally in `convert`, so `SMY-E033` records what a model tried rather than work
+//! outstanding. See `needs_repair`.
 
 use smysl_check::{check, CheckOptions, Pass};
 use smysl_core::surface::parse_surface;
@@ -41,28 +41,6 @@ use crate::IngestPath;
 
 /// The payload marker an unrepairable span carries (§22.3).
 pub const UNREPAIRED_KEY: &str = "ingest:unrepaired";
-
-/// What one span's conversion produced.
-#[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
-pub struct Attempted {
-    pub units: Vec<UnitCore>,
-    pub diagnostics: Vec<Diagnostic>,
-    /// How many attempts were spent. Zero means the first answer was already clean.
-    pub attempts: u32,
-    /// True when the span degraded to opaque prose (`SMY-W304`).
-    pub degraded: bool,
-}
-
-impl Attempted {
-    pub fn is_clean(&self) -> bool {
-        !self.degraded
-            && !self
-                .diagnostics
-                .iter()
-                .any(|d| d.severity == Severity::Error)
-    }
-}
 
 /// Convert one model answer into units, checking what can be checked locally.
 ///
@@ -130,7 +108,7 @@ pub fn convert(
 /// re-asking the model would spend a call to remove a remark.
 ///
 /// **`SMY-E033` is the exception**, because rule T already fixed it. The ceiling is applied
-/// unconditionally in [`convert`] and the diagnostic records that a model tried, not that
+/// unconditionally in `convert` and the diagnostic records that a model tried, not that
 /// something is outstanding - so retrying asks the model to solve a problem that no longer
 /// exists, and a model confident enough to claim `measured` once claims it again. Observed
 /// live: three Gemini attempts, three identical `measured` claims, and a chunk of good

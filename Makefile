@@ -48,7 +48,7 @@ MATRIX := \
 	--no-default-features@--features@render-typst,render-html
 
 .DEFAULT_GOAL := help
-.PHONY: help all rebuild release test lint clippy fmt fix test-matrix gates purity update seed-fuzz \
+.PHONY: help all rebuild release test lint clippy fmt fix test-matrix gates purity update seed-fuzz fuzz-build \
         determinism conformance eval live-ollama live-hosted doc fuzz clean sweep \
         commit ci toolchain eval-live eval-semantic docs doc-output seed-fuzz fuzz-long
 
@@ -108,6 +108,9 @@ BASELINE  := 0.11.0
 PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-render \
              smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl
 
+# The library crates behind the facade: everything published except the facade itself.
+LIBRARIES := $(filter-out smysl,$(PUBLISHED))
+
 DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE SMYSL_RATIONALE_PRESENTATION
 
 #
@@ -141,7 +144,14 @@ api: ## Regenerate the recorded public surfaces, both ends
 	@{ sed -n '1,/^# Regenerate with/p' tests/public-api-pure.txt; \
 	   $(CARGO) public-api --no-default-features --simplified 2>/dev/null; } > tests/public-api-pure.txt.new
 	@mv tests/public-api-pure.txt.new tests/public-api-pure.txt
+	@{ sed -n '1,/^# Regenerate with/p' tests/public-api-counts.txt; \
+	   for c in $(LIBRARIES); do \
+	     printf '%-16s %s\n' "$$c" \
+	       "$$($(CARGO) public-api -p $$c --all-features --simplified 2>/dev/null | wc -l | tr -d ' ')"; \
+	   done; } > tests/public-api-counts.txt.new
+	@mv tests/public-api-counts.txt.new tests/public-api-counts.txt
 	@echo "api: recorded $$($(CARGO) public-api --all-features --simplified 2>/dev/null | wc -l | tr -d ' ') names at --all-features, $$($(CARGO) public-api --no-default-features --simplified 2>/dev/null | wc -l | tr -d ' ') pure"
+	@echo "api: recorded $(words $(LIBRARIES)) per-crate surface counts"
 
 # Both ends, and the nesting between them.
 #
@@ -165,7 +175,14 @@ api-check: ## Fail if either recorded surface moved, or if they stop nesting
 	  || { echo "api-check: default features expose a name --all-features does not"; exit 1; }
 	@test -z "$$(comm -13 /tmp/d.s /tmp/p.s)" \
 	  || { echo "api-check: --no-default-features exposes a name default does not"; exit 1; }
-	@echo "api-check: both surfaces match, and pure <= default <= all-features"
+	@{ for c in $(LIBRARIES); do \
+	     printf '%-16s %s\n' "$$c" \
+	       "$$($(CARGO) public-api -p $$c --all-features --simplified 2>/dev/null | wc -l | tr -d ' ')"; \
+	   done; } > /tmp/smysl-api-counts.txt
+	@grep -v '^#' tests/public-api-counts.txt | grep -v '^$$' > /tmp/smysl-api-counts-was.txt
+	@diff -u /tmp/smysl-api-counts-was.txt /tmp/smysl-api-counts.txt \
+	  || { echo "api-check: a crate's public surface changed size. If deliberate, run 'make api'."; exit 1; }
+	@echo "api-check: both surfaces match, pure <= default <= all-features, and $(words $(LIBRARIES)) crate sizes unmoved"
 
 # `--release-type patch` is load bearing. Without it, 0.9 -> 0.10 on a 0.x crate is a
 # breaking-allowed bump and cargo-semver-checks skips every check: "0 checks: 0 pass, 254
@@ -182,36 +199,91 @@ api-check: ## Fail if either recorded surface moved, or if they stop nesting
 # emptied when the breaks it names **reach the registry** — not when they are tagged. That
 # distinction is the same one `BASELINE` turns on: cargo-semver-checks compares against the
 # published version, so a break that is merely released is still a break against the baseline
-# and still needs recording. 0.12.0 is cut and unpublished, so this list stays as it is and
-# empties on publication. Empty is the normal state.
+# and still needs recording. 0.12.0 was cut as an intermediate release and deliberately not
+# published, so this list carries into 0.13 unchanged.
 #
-#   smysl-core — the unified error is exported as `AnyError` rather than `Error`. Inside a
-#   crate `Error` is the idiomatic name; through a facade flattening eleven error types into
-#   one namespace it reads as a twelfth sibling rather than the enum wrapping the other eleven.
+# It grows rather than empties while releases stay unpublished, and that is the honest signal:
+# each entry is a crate the gate is not checking, so the length of this list is a measure of
+# how much of the API is currently unwatched. Empty is the normal state, and publication is
+# the only thing that reaches it.
+#
+#   smysl — the unified error is exported as `AnyError` rather than `Error`. Inside a crate
+#   `Error` is the idiomatic name; through a facade flattening eleven error types into one
+#   namespace it reads as a twelfth sibling rather than the enum wrapping the other eleven.
 #   The type is unchanged; only the name it is re-exported under moved.
+#
+#   This was recorded against `smysl-core` until 0.13, which was wrong twice over, and only
+#   showed up when `make semver` stopped skipping this list and started reporting it.
+#   `smysl-core` reported *no* failures, because it never broke: the type there is still
+#   `Error` and the rename is `pub use smysl_core::Error as AnyError` in the facade's
+#   `src/lib.rs`. The break is the facade's.
+#
+#   And `cargo-semver-checks` cannot see it. Run against `smysl` it reports "no semver update
+#   required", although v0.11.0 exported `smysl::Error` and nothing exports it now — because a
+#   re-export from another crate is a `pub use` line it cannot expand, exactly the blind spot
+#   `tests/public-api.txt` has for methods. What caught this rename was `api-check`, which is
+#   why the two files exist and why neither is redundant.
 #
 #   smysl-graph — `SalienceRequest` gained `#[non_exhaustive]`. Technically a break, and the
 #   fix for one: it was the only input type of eleven without it, so adding a field to it was
 #   breaking while the same addition elsewhere was not.
 #
-#   smysl-provider — `Gemini::parse` and `Anthropic::parse` take the request's cap as an
-#   argument. The error they build quotes a limit, and quoting the *configured* one produced
-#   "context window exceeded: 1008 > 32768": true to its fields, nonsense to a reader. Fixed at
-#   the call site in 0.10 because the baseline was two unpublished releases stale and could not
-#   tell a deliberate break from a missing crate. It can now.
-SEMVER_BREAKING := smysl-core smysl-graph smysl-provider
+#   smysl-provider — two breaks. `Gemini::parse` and `Anthropic::parse` take the request's cap
+#   as an argument: the error they build quotes a limit, and quoting the *configured* one
+#   produced "context window exceeded: 1008 > 32768" — true to its fields, nonsense to a
+#   reader. Fixed at the call site in 0.10 because the baseline was two unpublished releases
+#   stale and could not tell a deliberate break from a missing crate. It can now.
+#   And in 0.13, S2 and S4 of the road to 1.0: `runtime`, `Stream` and the five concrete
+#   mappers are `#[doc(hidden)]`; `http` and `map::auth` are `pub(crate)`. 988 items to 716.
+#
+#   smysl-ingest — S2 and S4: `prompt`, `quote`, `repair`, `json_ast` and `schema` are
+#   `#[doc(hidden)]`; `chunk` and `monotone` are `pub(crate)`. 751 items to 541.
+#   Both crates keep the items reachable for the integration tests that need them, and
+#   cargo-semver-checks counts hiding as removal from the public API — which is the point, and
+#   is why this is a break rather than a tidy-up. See ROAD_TO_1.0.md §1.2.
+#
+#   smysl-retrieve — S3: `Hit` gained `#[non_exhaustive]` and `Hit::new`. `Query`, three
+#   declarations below it, already had the attribute; `Hit` did not, and the pair face each
+#   other across the same call. It matters more than for most output types because `Retriever`
+#   is a public trait, so `Hit` is a type third parties must construct — `smysl-embed` builds
+#   it at two sites. A retrieval result plausibly grows a field; an exhaustive one could not
+#   gain it after 1.0 without a 2.0.
+#
+#   smysl-core, smysl-check, smysl-pack, smysl-thread — and more of smysl-graph — §1.1's
+#   `#[non_exhaustive]` audit. 98 public types carried it and 152 do now. Adding it is a
+#   break, and a break whose entire purpose is that the *next* addition is not one: §8 says
+#   the crate and format versions are independent axes, so an exhaustive `UnitCore` would have
+#   made the next format field a crate major. The rule and the six deliberate exceptions are
+#   in Documentation/API_CONTRACT.md.
+SEMVER_BREAKING := smysl smysl-core smysl-graph smysl-check smysl-pack smysl-thread \
+                   smysl-provider smysl-ingest smysl-retrieve
 
 semver: ## Report API breakage against the last published version
 	@command -v cargo-semver-checks >/dev/null || { echo "cargo install cargo-semver-checks"; exit 1; }
 	@set -e; for c in $(PUBLISHED); do \
 		case " $(SEMVER_BREAKING) " in \
-			*" $$c "*) echo "SKIP $$c: a deliberate break this cycle, see SEMVER_BREAKING"; continue;; \
+			*" $$c "*) continue;; \
 		esac; \
 		$(CARGO) semver-checks check-release --baseline-version $(BASELINE) \
 			--release-type patch -p $$c; \
 	done
+	@# Reported, not gated. Until 0.13 these were `continue`d with a one-line SKIP, which
+	@# meant a crate with one deliberate break had *nothing* watching it — a second,
+	@# unintended break in the same crate rode along invisibly for the rest of the cycle.
+	@# Running them and printing what comes back costs one command and makes the question
+	@# answerable: are these the breaks that were meant?
 	@if [ -n "$(SEMVER_BREAKING)" ]; then \
-		echo; echo "note: $(SEMVER_BREAKING) skipped as knowingly breaking; empty SEMVER_BREAKING at the release cut"; \
+		echo; \
+		echo "=== deliberate breaks this cycle: reported, not gated on ==="; \
+		for c in $(SEMVER_BREAKING); do \
+			echo; echo "--- $$c"; \
+			$(CARGO) semver-checks check-release --baseline-version $(BASELINE) \
+				--release-type patch -p $$c 2>&1 \
+				| grep -E '^--- failure|Summary semver' || true; \
+		done; \
+		echo; \
+		echo "Each must match a reason recorded above SEMVER_BREAKING in this file."; \
+		echo "Empty SEMVER_BREAKING at the release cut."; \
 	fi
 
 lint: ## fmt --check and clippy -D warnings, as CI runs them
@@ -308,6 +380,21 @@ FUZZ_TARGETS := surface cbor merge_algebra pack_constraints pipeline pack_exact
 # A minimised corpus was the obvious alternative and is not viable: `cargo fuzz cmin` takes
 # `cbor` from 6780 inputs to 2093, and 2093 inputs is still 8.2 MB. Seeds stay small on
 # purpose.
+fuzz-build: ## Compile the fuzz targets without running them
+	@# `fuzz/` is its own workspace, so `cargo check --workspace` from the root never
+	@# compiles it and `make ci` never saw it. That is not theoretical: 0.13's
+	@# `#[non_exhaustive]` audit broke `pack_exact.rs`, every local check passed, and CI's
+	@# fuzz job went red on a push that had been verified twice.
+	@#
+	@# Compiling is enough to catch it and costs seconds. *Running* the fuzzers needs
+	@# nightly and a minute per target, which is why that stays its own job.
+	@#
+	@# Not piped through `tail`. A pipeline's exit status is the last command's, so
+	@# `cargo check ... | tail -5` prints the error and returns 0 — a gate that reports a
+	@# failure and passes anyway, which is the exact shape of defect this file keeps finding.
+	cd fuzz && $(CARGO) check --all-targets
+	@echo "fuzz-build: the fuzz targets still compile against the library"
+
 seed-fuzz: ## Copy the repo's own inputs into each fuzz corpus
 	@set -e; for t in $(FUZZ_TARGETS); do \
 		mkdir -p fuzz/corpus/$$t; \
@@ -351,7 +438,7 @@ commit: ## Commit with aic and push
 # Everything
 # ---------------------------------------------------------------------------
 
-ci: lint doc-gate api-check test-matrix gates conformance ## Everything CI runs, bar the jobs needing a server
+ci: lint doc-gate api-check test-matrix gates conformance fuzz-build ## Everything CI runs, bar the jobs needing a server
 	@echo
 	@echo "ci: green."
 	@echo "Not covered here: the ollama job (needs a running server - see make live-ollama)"

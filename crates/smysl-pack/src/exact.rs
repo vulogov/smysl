@@ -32,6 +32,7 @@ pub const NODE_LIMIT: usize = 250_000;
 
 /// What the search found.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Exact {
     pub selection: Selection,
     pub used: u64,

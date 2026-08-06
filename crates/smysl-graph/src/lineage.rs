@@ -88,6 +88,7 @@ impl Via {
 
 /// One step of a lineage walk.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct LineageNode {
     pub uid: Uid,
     /// Steps from the unit the trace started at.
@@ -101,6 +102,7 @@ pub struct LineageNode {
 
 /// Where a unit came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Lineage {
     pub root: Uid,
     pub kind: TraceKind,
@@ -234,6 +236,7 @@ pub fn dependents(store: &Store, uid: Uid) -> Vec<Uid> {
 
 /// What two stores disagree about, by presence.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StoreDiff {
     pub only_in_a: Vec<Uid>,
     pub only_in_b: Vec<Uid>,
@@ -283,6 +286,7 @@ impl RecipeChangeKind {
 
 /// A unit whose provenance conditions moved between hops.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RecipeChange {
     pub uid: Uid,
     pub kind: RecipeChangeKind,
@@ -290,6 +294,7 @@ pub struct RecipeChange {
 
 /// What one agent did across a hop range.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct AgentActivity {
     pub added: usize,
     pub superseded: usize,
@@ -304,6 +309,7 @@ impl AgentActivity {
 
 /// The partition of §16.6.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct HopDiff {
     pub from: u32,
     pub to: u32,

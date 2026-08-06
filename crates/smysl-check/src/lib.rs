@@ -213,6 +213,7 @@ pub fn check(store: &Store, opts: CheckOptions) -> Report {
 /// and R, so a store that violates rule M cannot be consumed at that class however
 /// correct the consumer is.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ConformanceVerdict {
     pub class: ConformanceClass,
     pub passed: bool,
