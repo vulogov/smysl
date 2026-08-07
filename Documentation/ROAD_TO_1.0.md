@@ -59,32 +59,44 @@ and every other reader refuses the output.
 
 **The migration, in order:**
 
-1. **Readers accept both.** `FORMAT_VERSIONS_SUPPORTED` (`smysl-core/src/lib.rs:43`) becomes
-   `["smysl/0.1", "smysl/1.0"]`, and the same list grows in `python/`, `nodejs/` and `go/`.
-   Nothing writes `smysl/1.0` yet, so nothing breaks — and this step must ship, and be
-   *released*, before step 3, or a 1.0 writer emits documents the field cannot read.
+1. **Readers accept both.** ✅ *done in 0.14.0.* `FORMAT_VERSIONS_SUPPORTED` is
+   `["smysl/0.1", "smysl/1.0"]`. Nothing writes `smysl/1.0` yet, so nothing breaks — and this
+   step must be *released* before step 3, or a 1.0 writer emits documents the field cannot
+   read.
 
-   Two tests pin the current list and will need updating with it:
-   `smysl-core/src/lib.rs:74` and `tests/versioning.rs:32`. Both are meant to be updated by
-   hand — they exist so the declared versions cannot drift from the specification unnoticed.
+   **The plan was wrong about the other three implementations.** It said the same list grows in
+   `python/`, `nodejs/` and `go/`. There is no such list: all three read CBOR only, the wire
+   carries no version string (§8.5), and `go/conformance_test.go` says so outright — *"surface
+   syntax is not decoded here"*. Only a surface parser ever sees a `@doc` header, so step 1 is
+   Rust-only and the migration is smaller than it looked.
 
-2. **Fix the writer, which this bump makes urgent.** §8.5 records a trap that is harmless at
-   one supported version and a defect at two: the wire carries no version, a surface parser
-   validates the declared one and *discards* it, and `write_surface`
-   (`smysl-core/src/surface/write.rs:86`) reconstructs the header from
-   `FORMAT_VERSIONS_SUPPORTED[0]`. With two entries a document declaring one version is read
-   and written back declaring the other. Uids are unaffected — they are over CBOR, which
-   carries no version — but the header would lie, and the next reader trusts the header.
+   `FORMAT_VERSION_DEFAULT` is new and separate from `FORMAT_VERSIONS_SUPPORTED[0]`, because
+   the two stopped meaning the same thing the moment the list grew: one is what we *emit*, the
+   other is what we *accept*. Step 3 changes the first and not the second.
 
-   `tests/versioning.rs:54` fails the moment that list grows, deliberately, and says what has
-   to be decided first. This is the moment it was written for. `ParseOutcome` needs to carry
-   the version the document declared, and `write_surface` needs to emit that. Note this is a
-   change to a public type, so it is a `SEMVER_BREAKING` entry — another reason it lands
-   before the cut and not after.
+2. **Fix the writer.** ✅ *done in 0.14.0.* `ParseOutcome` carries the version the document
+   declared, `WriteContext` carries what the header will say, and `write_surface` emits that
+   instead of a build-time constant. `smysl fmt` — the round trip a user runs on purpose —
+   passes one to the other.
 
-3. **Flip the writer.** `smysl/1.0` becomes the version new documents declare, with `smysl/0.1`
-   still read. Fixtures stay as they are — the point of step 1 is that old documents keep
-   working forever.
+   `tests/versioning.rs` fired exactly as intended. It was written in 0.10 to fail the moment
+   the list grew, and it did, along with a sibling test that had picked `smysl/1.0` as its
+   example of an *unknown* version. What stands there now is the property the count was
+   standing in for: a document declaring either supported version comes back declaring the one
+   it declared. Verified by restoring the old writer and watching it report *"a document
+   declaring `smysl/1.0` was rewritten as: @doc smysl/0.1"*.
+
+   **And it was not a breaking change**, which §1.1 is why: both `ParseOutcome` and
+   `WriteContext` are `#[non_exhaustive]`, so each could gain a field without a major bump, and
+   `write_surface`'s signature never moved. `make semver` confirms 12/12 clean.
+
+3. **Flip the writer.** *Not yet — this needs 0.14 published first.* `FORMAT_VERSION_DEFAULT`
+   becomes `smysl/1.0`, with `smysl/0.1` still read. Fixtures stay as they are: the point of
+   step 1 is that old documents keep working forever.
+
+   One line, and the reason it waits a whole release is §8.2. A reader must refuse a version
+   absent from its list, so until 0.14 is on crates.io and in the field, a document declaring
+   `smysl/1.0` is a document most readers reject.
 
 4. **Then, and only then, the crate goes to 1.0.0.**
 

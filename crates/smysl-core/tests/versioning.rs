@@ -1,10 +1,14 @@
 //! §8 of the specification, as far as it can be mechanised.
 //!
 //! Most of a versioning policy is a promise about future behaviour, which no test can check.
-//! Two parts of it are checkable today, and one of them is a trap that is currently harmless.
+//! Two parts of it are checkable today, and the trap this file was written to catch has now
+//! sprung: 0.14 grew `FORMAT_VERSIONS_SUPPORTED` to two entries, and the count assertion that
+//! used to sit here has been replaced by the property it was standing in for.
 
+use smysl_core::surface::{parse_surface, write_surface, WriteContext};
 use smysl_core::{
-    format_version_supported, kernel_major, FORMAT_VERSIONS_SUPPORTED, KERNEL_MAJOR, KERNEL_SCHEMA,
+    format_version_supported, kernel_major, FORMAT_VERSIONS_SUPPORTED, FORMAT_VERSION_DEFAULT,
+    KERNEL_MAJOR, KERNEL_SCHEMA,
 };
 
 /// §8.2: a reader must refuse a version absent from its list, and must not infer
@@ -14,7 +18,7 @@ fn an_unknown_format_version_is_refused_rather_than_guessed_at() {
     assert!(format_version_supported("smysl/0.1"));
     for near_miss in [
         "smysl/0.2",   // the next one
-        "smysl/1.0",   // a major bump
+        "smysl/2.0",   // a major bump
         "smysl/0.1.0", // longer, same numbers
         "smysl/0.10",  // 0.1 is a prefix of this, which is the trap
         "smysl",       // no version at all
@@ -30,7 +34,8 @@ fn an_unknown_format_version_is_refused_rather_than_guessed_at() {
 
 #[test]
 fn the_declared_versions_are_what_the_specification_says() {
-    assert_eq!(FORMAT_VERSIONS_SUPPORTED, &["smysl/0.1"]);
+    assert_eq!(FORMAT_VERSIONS_SUPPORTED, &["smysl/0.1", "smysl/1.0"]);
+    assert_eq!(FORMAT_VERSION_DEFAULT, "smysl/0.1");
     assert_eq!(KERNEL_SCHEMA, "smysl.kernel/0.1");
     assert_eq!(kernel_major(KERNEL_SCHEMA), Some(KERNEL_MAJOR));
 }
@@ -52,12 +57,27 @@ fn the_declared_versions_are_what_the_specification_says() {
 /// document that misdescribes itself.
 #[test]
 fn supporting_a_second_format_version_needs_the_writer_fixed_first() {
-    assert_eq!(
-        FORMAT_VERSIONS_SUPPORTED.len(),
-        1,
-        "FORMAT_VERSIONS_SUPPORTED has grown. Before this is right, `ParseOutcome` needs to \
-         carry the version the document declared and `write_surface` needs to emit that \
-         rather than FORMAT_VERSIONS_SUPPORTED[0] (surface/write.rs). Otherwise a document \
-         declaring the second version is silently rewritten as the first. See §8.2."
-    );
+    // The tripwire fired in 0.14, which is what it was for. What replaced it is the
+    // property it was guarding: a document declaring either supported version must come back
+    // declaring the one it declared. A count cannot say that; a round trip can.
+    for declared in FORMAT_VERSIONS_SUPPORTED {
+        let src = format!(
+            "@doc {declared} {{\n  id: v/round-trip\n  lang: en\n}}\n\n\
+             @claim c/one {{ status: speculative }}\n~ a claim that survives a round trip\n"
+        );
+        let out = parse_surface(&src).unwrap_or_else(|e| panic!("`{declared}` must parse: {e}"));
+        assert_eq!(
+            &out.format_version, declared,
+            "the parser dropped the declared version"
+        );
+
+        let ctx =
+            WriteContext::from_labels(&out.labels).with_format_version(out.format_version.clone());
+        let back = write_surface(out.view.as_ref(), &out.records, &ctx);
+        assert!(
+            back.starts_with(&format!("@doc {declared} ")),
+            "a document declaring `{declared}` was rewritten as: {}",
+            back.lines().next().unwrap_or("")
+        );
+    }
 }

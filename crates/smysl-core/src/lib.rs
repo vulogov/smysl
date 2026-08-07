@@ -40,7 +40,21 @@ pub use types::{
 };
 
 /// Format versions this implementation accepts in a `@doc` header (§11).
-pub const FORMAT_VERSIONS_SUPPORTED: &[&str] = &["smysl/0.1"];
+///
+/// Two, as of 0.14, and the order is load-bearing: `[0]` is what a document declares when
+/// nothing tells the writer otherwise, so **this list grows at the end until the writer is
+/// flipped deliberately**. §0.1 of `ROAD_TO_1.0.md` sequences that: readers learn `smysl/1.0`
+/// and are *released* first, and only a later cycle makes it what new documents say. Flip the
+/// writer before the field has a reader for it and every other implementation refuses the
+/// output — §8.2 requires a reader to reject a version absent from its list rather than guess.
+pub const FORMAT_VERSIONS_SUPPORTED: &[&str] = &["smysl/0.1", "smysl/1.0"];
+
+/// What a document declares when the writer has nothing better to go on.
+///
+/// Separate from `FORMAT_VERSIONS_SUPPORTED[0]` because the two stopped meaning the same thing
+/// the moment the list grew: the first is *what we emit*, the list is *what we accept*. They
+/// are equal today and will not be after the flip.
+pub const FORMAT_VERSION_DEFAULT: &str = FORMAT_VERSIONS_SUPPORTED[0];
 
 /// The kernel schema this implementation implements (§11).
 pub const KERNEL_SCHEMA: &str = "smysl.kernel/0.1";
@@ -71,17 +85,43 @@ mod tests {
 
     #[test]
     fn declares_format_and_kernel_versions() {
-        assert_eq!(FORMAT_VERSIONS_SUPPORTED, &["smysl/0.1"]);
+        assert_eq!(FORMAT_VERSIONS_SUPPORTED, &["smysl/0.1", "smysl/1.0"]);
+        assert_eq!(
+            FORMAT_VERSION_DEFAULT, "smysl/0.1",
+            "the writer has not been flipped yet"
+        );
         assert_eq!(KERNEL_SCHEMA, "smysl.kernel/0.1");
         assert_eq!(kernel_major(KERNEL_SCHEMA), Some(KERNEL_MAJOR));
     }
 
+    /// Accepted is exactly the declared list — no more, and no fewer.
+    ///
+    /// The "no fewer" half is new. This asserted `smysl/0.1` and then three rejections, one of
+    /// which was `smysl/1.0`; when 0.14 added that version the test failed, which was right,
+    /// and it would have kept passing had the list grown by something it did not happen to
+    /// name. Driving it from the list itself makes it grow with the list.
     #[test]
     fn accepts_only_declared_format_versions() {
-        assert!(format_version_supported("smysl/0.1"));
-        assert!(!format_version_supported("smysl/0.2"));
-        assert!(!format_version_supported("smysl/1.0"));
-        assert!(!format_version_supported("smysl"));
+        for v in FORMAT_VERSIONS_SUPPORTED {
+            assert!(
+                format_version_supported(v),
+                "`{v}` is declared but not accepted"
+            );
+        }
+        // Close to a supported version is not supported: §8.2 says refuse rather than infer.
+        for v in [
+            "smysl/0.2",
+            "smysl/2.0",
+            "smysl/1.1",
+            "smysl",
+            "",
+            "SMYSL/0.1",
+        ] {
+            assert!(
+                !format_version_supported(v),
+                "`{v}` is not declared and must not be accepted"
+            );
+        }
     }
 
     #[test]

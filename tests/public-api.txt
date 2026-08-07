@@ -76,6 +76,7 @@ pub use smysl::Estimator
 pub use smysl::ExitCode
 pub use smysl::Extra
 pub use smysl::FORMAT_VERSIONS_SUPPORTED
+pub use smysl::FORMAT_VERSION_DEFAULT
 pub use smysl::Fidelity
 pub use smysl::FidelityReport
 pub use smysl::GranularityProfile

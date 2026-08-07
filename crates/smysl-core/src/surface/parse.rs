@@ -35,9 +35,20 @@ use crate::types::Record;
 /// `labels` and `salience` are here rather than on the records because neither is part of
 /// a unit's identity (§1.2) - but both are authored in surface syntax, so a round trip
 /// would lose them if the outcome did not carry them.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ParseOutcome {
+    /// The format version the document declared.
+    ///
+    /// Kept rather than discarded as of 0.14. §8.5 records why it had to be: the wire carries
+    /// no version, a parser validated the declared one and dropped it, and `write_surface`
+    /// reconstructed the header from the first supported version. With one supported version
+    /// that was correct by coincidence; with two it is a relabelling bug, and a document
+    /// declaring the second would be read and written back claiming to be the first.
+    ///
+    /// `tests/versioning.rs` was written in 0.10 to fail the moment the list grew, which is
+    /// how this field came to exist.
+    pub format_version: String,
     pub view: Option<View>,
     pub records: Vec<Record>,
     pub labels: BTreeMap<Label, Uid>,
@@ -73,6 +84,27 @@ fn unescape_body_line(line: &str) -> std::borrow::Cow<'_, str> {
             std::borrow::Cow::Borrowed(rest)
         }
         _ => std::borrow::Cow::Borrowed(line),
+    }
+}
+
+impl Default for ParseOutcome {
+    /// A parse of nothing declares what this build would write.
+    ///
+    /// Derived `Default` would give `format_version: ""`, which is not a version and would
+    /// reach `write_doc` as an empty `@doc` header. The CBOR path builds a `ParseOutcome`
+    /// this way — the wire has no version to carry — so the honest default is the one this
+    /// build emits, not the absence of one.
+    fn default() -> ParseOutcome {
+        ParseOutcome {
+            format_version: crate::FORMAT_VERSION_DEFAULT.to_string(),
+            view: None,
+            records: Vec::new(),
+            labels: BTreeMap::new(),
+            salience: BTreeMap::new(),
+            diagnostics: Vec::new(),
+            recovered: 0,
+            comments: 0,
+        }
     }
 }
 
@@ -254,6 +286,8 @@ impl<'a> Parser<'a> {
                 found: version.to_string(),
             });
         }
+        // Kept, so a writer can emit what was read rather than what this build prefers.
+        self.out.format_version = version.to_string();
 
         let (mut header, header_span) = match self.header_object(l) {
             Ok(h) => h,

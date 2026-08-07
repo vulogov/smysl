@@ -25,6 +25,12 @@ pub struct WriteContext {
     /// uid -> label, so references come back out as the names they were authored with.
     pub labels: BTreeMap<Uid, Label>,
     pub salience: BTreeMap<Uid, f32>,
+    /// What the `@doc` header will declare.
+    ///
+    /// Defaults to `FORMAT_VERSION_DEFAULT`, which is what a document with no history — one
+    /// built from CBOR, where the wire carries no version — should say. Set it from
+    /// `ParseOutcome::format_version` to re-emit a document as the version it arrived as.
+    pub format_version: String,
 }
 
 impl WriteContext {
@@ -44,7 +50,18 @@ impl WriteContext {
         WriteContext {
             labels: out,
             salience: BTreeMap::new(),
+            format_version: crate::FORMAT_VERSION_DEFAULT.to_string(),
         }
+    }
+
+    /// Emit the version a document declared, rather than the one this build prefers.
+    ///
+    /// A round trip that relabelled a document would be the defect §8.5 describes: content
+    /// unaffected, because uids are over CBOR and CBOR carries no version, but the header
+    /// lying about which version it is — and the next reader trusts the header.
+    pub fn with_format_version(mut self, version: impl Into<String>) -> WriteContext {
+        self.format_version = version.into();
+        self
     }
 
     pub fn with_salience(mut self, salience: BTreeMap<Uid, f32>) -> WriteContext {
@@ -84,7 +101,7 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
 
 fn write_doc(out: &mut String, v: &View, ctx: &WriteContext) {
     out.push_str("@doc ");
-    out.push_str(crate::FORMAT_VERSIONS_SUPPORTED[0]);
+    out.push_str(&ctx.format_version);
     out.push_str(" {\n");
     out.push_str(&format!("  id: {}\n", quoteless_or_quoted(v.id.as_str())));
     if !v.intent.is_empty() {
