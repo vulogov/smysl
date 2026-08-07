@@ -46,7 +46,7 @@ that the CLI is beautiful. It commits to not moving.
 
 Neither is work. Both block the phases after them. The first is settled; the second is not.
 
-### 0.1 The format version — **decided: bump, and bump it last**
+### 0.1 The format version — **done in 0.15.0**
 
 `smysl/0.1` becomes `smysl/1.0`, after every preparation and migration is complete and
 **before** the source tree goes to 1.0.0. The order is the decision: the format arrives at 1.0
@@ -90,15 +90,22 @@ and every other reader refuses the output.
    `WriteContext` are `#[non_exhaustive]`, so each could gain a field without a major bump, and
    `write_surface`'s signature never moved. `make semver` confirms 12/12 clean.
 
-3. **Flip the writer.** *Not yet — this needs 0.14 published first.* `FORMAT_VERSION_DEFAULT`
-   becomes `smysl/1.0`, with `smysl/0.1` still read. Fixtures stay as they are: the point of
-   step 1 is that old documents keep working forever.
+3. **Flip the writer.** ✅ *done in 0.15.0, one release after the readers.*
+   `FORMAT_VERSION_DEFAULT` is `smysl/1.0`. `smysl/0.1` is still read and still round-trips
+   unchanged — the point of step 1 is that old documents keep working forever.
 
-   One line, and the reason it waits a whole release is §8.2. A reader must refuse a version
-   absent from its list, so until 0.14 is on crates.io and in the field, a document declaring
-   `smysl/1.0` is a document most readers reject.
+   One line, and it waited a whole release because of §8.2: a reader must refuse a version
+   absent from its list, so until 0.14 was on crates.io a document declaring `smysl/1.0` was a
+   document most readers reject. 0.14 taught the readers and wrote nothing new; it is
+   published; this became safe.
 
-4. **Then, and only then, the crate goes to 1.0.0.**
+   Verified end to end rather than by unit test alone. A document declaring `smysl/0.1`, run
+   through `smysl fmt`, comes back declaring `smysl/0.1`. The same document bundled to CBOR —
+   where the wire carries no version — and formatted back comes out declaring `smysl/1.0`.
+   Both halves matter: the first is the promise to old documents, the second is the bump.
+
+4. **Then, and only then, the crate goes to 1.0.0.** Still ahead: it needs Phase 3's second
+   quiet cycle, which is 0.15 itself — cut with `SEMVER_BREAKING` empty, and published.
 
 **One thing this does not decide.** `KERNEL_SCHEMA` is `smysl.kernel/0.1` and is a third axis,
 independent of both the format string and the crate version — it names the shape of the kernel
@@ -106,15 +113,21 @@ fields, and §8 keeps it separate on purpose. Bumping it is a *different* migrat
 different consequences, and nothing above requires it. Whether `smysl/1.0` should ship with
 `smysl.kernel/0.1` is a decision to take explicitly rather than by symmetry.
 
-**Also to update:** §8.6 of the format spec currently answers "is `smysl/0.1` frozen?" with
-"no, and it is not stable-forever either", resting on the `0.` prefix. At `smysl/1.0` that
-answer changes, and §8.2's rule — that a version bump signals a break — has to be reconciled
-with a bump that deliberately carries none. The honest wording is that 1.0 marks the format
-*settled*, and that the compatibility event is the readers being taught in step 1.
+**Also updated:** §8.6 of the format spec asked "is `smysl/0.1` frozen?" and answered "no, and
+not stable-forever either", resting on the `0.` prefix. It now asks whether the *format* is
+frozen and answers with the record: unchanged across fourteen crate releases and four
+implementations, which is what `smysl/1.0` reports. §8.2's rule — that a version bump signals
+a break — is reconciled there too: this one carries none, so the version marks the format
+settled rather than changed, and the compatibility event was teaching the readers in step 1.
 
-**Done when:** all four implementations accept both strings, `versioning.rs` passes with two
-entries in the list, a `smysl/0.1` fixture still round-trips byte for byte, and a document
-declaring each version is written back declaring the one it declared.
+**Done.** Readers accept both strings; `versioning.rs` passes with two entries and asserts the
+round-trip property rather than a count; a `smysl/0.1` document still comes back declaring
+`smysl/0.1`; and one with no version to preserve comes out declaring `smysl/1.0`. The three
+outside implementations needed no change at all — they read CBOR, and the wire has no version.
+
+**And it was not a breaking change.** `make semver` is 12/12 clean across both releases that
+carried it, which is what let the whole migration happen inside Phase 3's quiet cycles instead
+of costing one.
 
 ### 0.2 What freezing the seam costs
 

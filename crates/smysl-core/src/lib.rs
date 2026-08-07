@@ -53,8 +53,18 @@ pub const FORMAT_VERSIONS_SUPPORTED: &[&str] = &["smysl/0.1", "smysl/1.0"];
 ///
 /// Separate from `FORMAT_VERSIONS_SUPPORTED[0]` because the two stopped meaning the same thing
 /// the moment the list grew: the first is *what we emit*, the list is *what we accept*. They
-/// are equal today and will not be after the flip.
-pub const FORMAT_VERSION_DEFAULT: &str = FORMAT_VERSIONS_SUPPORTED[0];
+/// were equal in 0.14 and are not now.
+///
+/// **`smysl/1.0` as of 0.15 — step 3 of §0.1's migration, and it waited a release on purpose.**
+/// §8.2 requires a reader to refuse a version absent from its list, so a writer emitting
+/// `smysl/1.0` before a release that reads it is in the field produces documents most readers
+/// reject. 0.14 taught the readers and wrote nothing new; it is on crates.io; this is safe now
+/// and would not have been then.
+///
+/// The bump carries no format change. Nothing in the specification differs between
+/// `smysl/0.1` and `smysl/1.0`, and a document declaring either parses identically — §8.6
+/// records what that means: the version marks the format *settled* rather than changed.
+pub const FORMAT_VERSION_DEFAULT: &str = "smysl/1.0";
 
 /// The kernel schema this implementation implements (§11).
 pub const KERNEL_SCHEMA: &str = "smysl.kernel/0.1";
@@ -86,9 +96,11 @@ mod tests {
     #[test]
     fn declares_format_and_kernel_versions() {
         assert_eq!(FORMAT_VERSIONS_SUPPORTED, &["smysl/0.1", "smysl/1.0"]);
-        assert_eq!(
-            FORMAT_VERSION_DEFAULT, "smysl/0.1",
-            "the writer has not been flipped yet"
+        // Flipped in 0.15, once 0.14 had put a reader for it on the registry.
+        assert_eq!(FORMAT_VERSION_DEFAULT, "smysl/1.0");
+        assert!(
+            FORMAT_VERSIONS_SUPPORTED.contains(&FORMAT_VERSION_DEFAULT),
+            "the version we write must be one we can read"
         );
         assert_eq!(KERNEL_SCHEMA, "smysl.kernel/0.1");
         assert_eq!(kernel_major(KERNEL_SCHEMA), Some(KERNEL_MAJOR));
