@@ -139,7 +139,7 @@
     ])
 
     #place(bottom + center, dy: -13mm,
-      text(size: 12pt, fill: ink_smoke, "Vladimir Ulogov · 2026 · smysl 0.14.0"))
+      text(size: 12pt, fill: ink_smoke, "Vladimir Ulogov · 2026 · smysl 0.15.0"))
   ]
 ]
 
