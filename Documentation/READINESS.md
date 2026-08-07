@@ -6,16 +6,22 @@ smysl was unpublished for eight releases, and the reason given each time was "no
 ready" — a true answer and a useless one, because nothing said what would change it, so it
 could only be deferred and never worked toward. This file was written to say what the gate is.
 
-**Published as of 0.9.0**, with four of these seven items still open. That is not the list
-being abandoned. Gate 2 was the one that could not be worked around: an interchange format
-nobody outside the project has implemented is a file layout, and publishing it would have
-meant publishing a claim. It is closed three times over. What remains is coverage and polish,
-and 0.x is the honest signal for that — the version says the surface can still move, and gate
-3 says exactly where.
+**1.0.0 as of this release, with six of the seven gates closed and one waived.**
 
-**0.11.0 is published**, and 0.10.0 is not and now never will be — publishing an older version
-after a newer one is possible and perverse, and everything in it is in 0.11.0. Not every tag is
-a publication.
+Gate 4 — a live call to OpenAI and Anthropic — is the waiver, and §4 below says what that
+costs rather than burying it. Everything about those two mappers that can be checked without a
+credential has been; what has not is whether the endpoint accepts what we send. Because the
+concrete mappers are `#[doc(hidden)]`, a mapper found wrong can be fixed without a 2.0, which
+is what makes shipping without it defensible rather than optimistic.
+
+Gate 2 was the one that could not be worked around: an interchange format nobody outside the
+project has implemented is a file layout, and publishing it would have meant publishing a
+claim. It is closed three times over — `python/`, `nodejs/` and `go/`.
+
+**0.11.0 was published and 0.10.0 never will be** — publishing an older version after a newer
+one is possible and perverse, and everything in it is in 0.11.0. Not every tag is a
+publication. 0.12.0 went the same way; 0.13, 0.14 and 0.15 were all published, and the last two
+are the two consecutive quiet cycles that Phase 3 of `ROAD_TO_1.0.md` asked for.
 
 That gap is worth remembering rather than tidying away. `cargo-semver-checks` fetches its
 baseline from crates.io, so `BASELINE` in the Makefile tracks the last *published* version and
@@ -166,7 +172,7 @@ The `smysl/1.0` migration turned out not to be a breaking change at all — `Par
 needed. It fitted inside the quiet cycles rather than costing one, which was the open question
 when Phase 3 was written.
 
-## 4. Verified providers — *partial*
+## 4. Verified providers — *waived at 1.0, with the reason and the limit written down*
 
 | provider | live-tested | note |
 |---|---|---|
@@ -219,6 +225,40 @@ Two gaps closed:
 **What is left needs a key and nothing else:** whether OpenAI and Anthropic *accept* a schema
 that is now known to satisfy their documented rules. That is a much narrower question than the
 one this gate started with.
+
+---
+
+### Waived at 1.0.0 — deliberately, and here is the cost
+
+**1.0.0 ships without a live call to OpenAI or Anthropic ever having been made.** No key has
+been available for either, and waiting indefinitely for one is not a plan. Three of the five
+mappers — ollama, deepseek, gemini — have been exercised against real endpoints. Two have not.
+
+Phase 4 of `ROAD_TO_1.0.md` permits a waived gate and forbids an unmentioned one, so:
+
+**What is verified without a key.** Both mappers were read against their vendor's
+documentation, and that reading found two defects: `caps()` declaring `streaming: true` for a
+mapper implementing no `stream`, on both Anthropic *and* Gemini — and Gemini is live-tested,
+which means the live test never exercised streaming either. The strict-mode schema translation
+is checked recursively against OpenAI's documented rules, using the real Appendix C schema
+rather than the reduction it was tested against before 0.14. The failure taxonomy — which
+statuses mean stop, retry, or fall through — is asserted for all five mappers alike.
+
+**What is not.** Whether the endpoint *accepts* what we send. A schema can satisfy every
+documented rule and still be refused for something undocumented; that is exactly what happened
+to Gemini, whose response schema was written as a subset of draft 2020-12 and is not one.
+
+**Why this is a smaller risk at 1.0 than it sounds.** The concrete mappers are
+`#[doc(hidden)]` as of 0.13 — `Anthropic` and `OpenAi` are not in the public API, and `build`
+returns `Box<dyn Provider>`. **A mapper found wrong against a live endpoint can be fixed
+without a breaking change.** 1.0 freezes the provider *abstraction*, which is exercised by
+three live-tested mappers; it does not freeze the two unverified translations.
+
+**How this gets closed.** A key, and one afternoon. If you have an OpenAI or Anthropic key and
+want to help: run `SMYSL_LIVE=1 cargo test -p smysl-provider --features openai` (or
+`anthropic`) with the key in the environment, and open an issue with what came back. A report
+saying "it worked" closes this gate; a report saying it did not is more useful still, and is
+fixable without a 2.0.
 
 **Mutation testing in 0.12 found the gap this gate describes is not the gap it has.** 477
 viable mutants, 31% survivors — the worst of any crate but the packer, and 25 of them on one

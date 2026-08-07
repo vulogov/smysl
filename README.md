@@ -35,14 +35,33 @@ Add `default-features = false` for the pure library: no async runtime, no HTTP c
 argument parser in the dependency tree, verified in CI on every push rather than promised
 here.
 
-The format version is `smysl/0.1` and has not moved in nine releases. The crate is `0.9.0`,
-and 0.x is meant literally — [`Documentation/READINESS.md`](Documentation/READINESS.md) lists
-seven gates for what would make this production software, four of which are open, and the
-one about API stability says outright that the facade's surface has not had its pass. What
-closed was the gate that could not be worked around: the format has now been implemented from
-the specification alone, three times, in Python, JavaScript and Go. Until someone outside the
-project had done that, "another team can implement this" was a claim rather than a fact, and
-for an interchange format that is the difference between a product and a file layout.
+**The crate is `1.0.0` and the format is `smysl/1.0`.** Both are meant literally.
+
+The crate version means the API is frozen: the facade's 244 names and every public item behind
+them move only with a 2.0, enforced per crate by `cargo-semver-checks` on every push rather
+than promised here. Getting there meant taking 482 items *out* of the contract first — the
+provider mappers, the codec internals, the ingest machinery — so that what is frozen is a
+surface somebody chose rather than everything that happened to be `pub`.
+[`Documentation/API_CONTRACT.md`](Documentation/API_CONTRACT.md) is that promise written down.
+
+The format version means something narrower and stronger: **nothing about the format changed.**
+`smysl/0.1` held across fourteen releases and four independent implementations without a
+revision, and `smysl/1.0` reports that record rather than a change. Documents declaring
+`smysl/0.1` are still read, and still round-trip declaring it. What earned the number was the
+gate that could not be worked around — the format has been implemented from the specification
+alone, three times, in Python, JavaScript and Go. Until someone outside the project had done
+that, "another team can implement this" was a claim rather than a fact, and for an interchange
+format that is the difference between a product and a file layout.
+
+**One thing 1.0 does not claim.** Of the five model providers, ollama, DeepSeek and Gemini have
+been exercised against live endpoints; OpenAI and Anthropic have not, because no key has been
+available. Both were read against their vendor documentation — which found two real defects —
+and their schema translation is verified against the documented rules, but nobody has confirmed
+the endpoints *accept* what we send. The concrete mappers are deliberately not part of the
+public API, so if one turns out to be wrong it can be fixed without a 2.0.
+[`READINESS.md`](Documentation/READINESS.md) §4 records this as a waiver rather than a
+closed gate. **If you have an OpenAI or Anthropic key, running those live tests and reporting
+what came back is the single most useful contribution available.**
 
 Building from source:
 

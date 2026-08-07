@@ -1,11 +1,16 @@
 # The road to 1.0.0
 
-**Status after 0.15.0: Phases 0 to 3 are done.**
+**Status: 1.0.0. All four phases are done.**
 
-The format is `smysl/1.0`. The surface is worth freezing and is frozen in practice — two
-consecutive published cycles have ended with `SEMVER_BREAKING` empty. What stands between here
-and 1.0.0 is §2.3: whether OpenAI and Anthropic accept the translated schema, which needs a key
-for each and nothing else.
+The format is `smysl/1.0`. The surface is frozen: 244 facade names and every public item behind
+them move only with a 2.0. Two consecutive published cycles ended with `SEMVER_BREAKING` empty
+before the cut, which was the evidence Phase 3 asked for and the only gate that could not be
+hurried.
+
+One gate is **waived rather than closed**: §2.3, a live call to OpenAI and Anthropic, which
+needs a credential nobody has had. Phase 4 below says what that costs and why the cost is
+smaller than it looks — the concrete mappers are `#[doc(hidden)]`, so a mapper found wrong can
+be repaired without a major version.
 
 Each phase below names what it produced and how you know it is done. Nothing here ever had a
 date, because the only honest gate on 1.0 is evidence, and evidence arrives when it arrives.
@@ -16,7 +21,7 @@ date, because the only honest gate on 1.0 is evidence, and evidence arrives when
 | 1 | make the surface worth freezing | ✅ 1.1, 1.2 (S1–S6), 1.3 |
 | 2 | the verification a 1.0 should not ship without | ✅ 2.1, 2.2 — 2.3 needs provider keys |
 | 3 | evidence of stillness | ✅ 0.14.0 and 0.15.0, both published |
-| 4 | the cut | **the remaining gate is §2.3, which needs provider keys** |
+| 4 | the cut | ✅ **1.0.0**, with gate 4 waived and the reason recorded |
 
 **The decision this rests on:** smysl is one product — format, libraries and CLI — under one
 version. The workspace is not split. That settles a contradiction `API_CONTRACT.md` left open:
@@ -758,13 +763,40 @@ reporting no failures rather than no checks.
 
 ---
 
-## Phase 4 — the cut
+## Phase 4 — the cut ✅ *1.0.0*
 
-1. Phase 0's format decision applied to the title pages and §8.
-2. `READINESS.md`: every gate closed, or explicitly waived with the reason written down. A
-   waived gate is fine; an unmentioned one is not.
-3. `API_CONTRACT.md` promoted from "decided for three names" to the whole surface.
-4. Version to 1.0.0, `BASELINE` to the last published, tag, merge, **publish**.
+1. ✅ Phase 0's format decision applied to the title pages and §8. The format is `smysl/1.0`,
+   the title strings say so, and §8.6 asks whether the *format* is frozen rather than whether
+   `smysl/0.1` is.
+2. ✅ `READINESS.md`: six gates closed, one waived with the reason written down. **Gate 4 is
+   the waiver** — no live call to OpenAI or Anthropic has ever been made, because no key has
+   been available, and waiting indefinitely for one is not a plan.
+3. ✅ `API_CONTRACT.md` promoted from "decided for three names" to the whole surface.
+4. ✅ Version to 1.0.0, `BASELINE` to the last published, tag, merge, publish.
+
+### On shipping 1.0 with gate 4 waived
+
+A waived gate is permitted here and an unmentioned one is not, so: **two of the five provider
+mappers have never spoken to their endpoint.** Everything about them checkable without a
+credential has been checked — read against the vendor documentation, which found two defects;
+the strict-mode schema translation verified recursively against the real Appendix C schema; the
+failure taxonomy asserted for all five alike. What is unverified is whether the endpoint
+*accepts* what we send, and a schema can satisfy every documented rule and still be refused.
+
+**What makes this defensible rather than optimistic is §1.2 S2.** The concrete mappers are
+`#[doc(hidden)]` — `Anthropic` and `OpenAi` are not in the public API, and `build` returns
+`Box<dyn Provider>`. A mapper found wrong against a live endpoint **can be fixed without a
+2.0**. 1.0 freezes the provider *abstraction*, which three live-tested mappers exercise; it
+does not freeze the two unverified translations.
+
+That is a narrowing done for one reason paying off for another, which has happened repeatedly
+in this plan and is worth noticing: the reason the seam was narrowed was that a single-version
+1.0 could not call it "a seam, not a promise". The reason it matters today is that it left room
+to be wrong about something nobody could test.
+
+**If you have a key and want to close it:** run the provider's live tests with the key in the
+environment and open an issue with what came back. "It worked" closes the gate. "It did not" is
+more useful, and is fixable without a major version.
 
 ---
 

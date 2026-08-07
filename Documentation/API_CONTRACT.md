@@ -1,11 +1,32 @@
 # What the facade promises
 
-**Status:** decided for the three names that were open; the buckets themselves stand as
-written. Anything not settled here is still a proposal.
+**Status: this is the contract, as of 1.0.0.** Not a proposal, not a classification awaiting a
+decision — the promise the version number makes. Every name below moves only with a 2.0.
 
-`tests/public-api.txt` records 243 names and `cargo-semver-checks` stops them moving by
-accident. Neither says which of them anyone *meant*. Gate 3 in `READINESS.md` calls that
-mechanised-but-not-decided, and this file is the decision put in front of whoever makes it.
+It was a proposal once. This file was written when `tests/public-api.txt` recorded 243 names
+that `cargo-semver-checks` stopped moving by accident, and neither said which of them anyone
+*meant*. Gate 3 in `READINESS.md` called that mechanised-but-not-decided. What closed the gap
+was §1.2 of `ROAD_TO_1.0.md`, over six steps: rule A given a check, the seam narrowed by 482
+items with the facade's 243 untouched, every seam type read for whether its *shape* would be
+regretted, and three gates that each know what they are blind to.
+
+**What 1.0.0 promises**, precisely:
+
+- **The facade's 244 names at `--all-features`, 200 at `--no-default-features`.** None moves
+  without a 2.0.
+- **Every public item in each of the eleven library crates** — they share one version, all are
+  published, and `make semver` enforces each of them individually. That is the larger and
+  truer figure, and §0.2 of `ROAD_TO_1.0.md` explains why it is the one that binds.
+- **What is *not* promised is equally deliberate.** 482 items were taken out of the contract
+  before the cut, and the concrete provider mappers, the codec internals and the ingest
+  machinery are `#[doc(hidden)]` or `pub(crate)` on purpose. Each carries the reason where it
+  is declared. That is the difference between a surface that is frozen and one that is merely
+  large.
+
+**The two buckets below are settled rather than open.** Bucket 2 said the provider, render and
+retrieval surfaces were "a seam, not a promise". Under one product at one version that could
+not stand, and it does not: the seam was narrowed to what is actually consumed, and what is
+left in it is promised like everything else.
 
 ## Which artefact is the contract
 
