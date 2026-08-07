@@ -104,7 +104,7 @@ doc-gate: ## Rustdoc with warnings denied, as docs.rs would show it
 # moves when a release reaches the registry and not when it is cut. It sat at 0.9.0 through two
 # cut-but-unpublished releases, which meant every breaking change was measured against a
 # version two releases old; 0.10.0 remains unpublished and 0.11.0 is the baseline now.
-BASELINE  := 0.15.0
+BASELINE  := 1.0.0
 PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-render \
              smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl
 
