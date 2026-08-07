@@ -925,7 +925,14 @@ fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             );
         }
 
-        let ctx = WriteContext::from_labels(&out.labels).with_salience(out.salience.clone());
+        // `.with_format_version` is what stops `fmt` relabelling a document. The wire carries
+        // no version, so before 0.14 the writer rebuilt the header from the first supported
+        // version — correct by coincidence while there was only one, and a silent rewrite the
+        // moment there were two. `fmt` is the round trip a user runs on purpose, so it is the
+        // command where that would have bitten first.
+        let ctx = WriteContext::from_labels(&out.labels)
+            .with_salience(out.salience.clone())
+            .with_format_version(out.format_version.clone());
         let formatted = write_surface(out.view.as_ref(), &out.records, &ctx);
 
         // The round trip must not move a uid.

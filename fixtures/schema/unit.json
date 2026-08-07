@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "smysl.kernel/0.1 unit",
+  "type": "object",
+  "required": ["type", "gist", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "enum": ["claim", "evidence", "definition", "question", "hypothesis", "finding", "procedure", "decision", "constraint", "observation", "data", "artifact-ref", "prose"] },
+    "label": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*/[a-z0-9_-]+$" },
+    "gist": { "type": "string", "minLength": 1, "maxLength": 240 },
+    "body": { "type": "string" },
+    "detail": { "type": "string" },
+    "status": { "enum": ["speculative", "inferred", "derived", "cited", "measured"] },
+    "source": {
+      "type": "object",
+      "required": ["kind", "ref"],
+      "properties": {
+        "kind": { "enum": ["url", "file", "metric", "tool", "doc"] },
+        "ref": { "type": "string" },
+        "captured": { "type": "string" }
+      }
+    },
+    "quote": { "type": "string", "minLength": 1, "maxLength": 400 },
+    "deps": { "type": "array", "items": { "type": "string" } },
+    "grounds": { "type": "array", "items": { "type": "string" } },
+    "payload": { "type": "object" }
+  },
+  "allOf": [
+    { "if": { "properties": { "status": { "enum": ["measured", "cited"] } } },
+      "then": { "required": ["source"] } },
+    { "if": { "properties": { "status": { "enum": ["derived", "inferred"] } } },
+      "then": { "required": ["grounds"] } },
+    { "if": { "required": ["detail"] }, "then": { "required": ["body"] } }
+  ]
+}

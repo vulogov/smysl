@@ -73,8 +73,8 @@ pub use smysl_core::{
     LangTag, Lod, NonDetReason, Op, Optimality, PackInfo, PackMode, ParseError, Record, RelKind,
     Relation, Report, Role, Rung, SchemaDecl, SchemaId, Severity, ShapeError, SourceKind,
     SourceRef, Span, Status, Step, Subject, Thread, ThreadId, ThreadSchema, Uid, UidPrefix, Unit,
-    UnitCore, UnitCoreBuilder, View, ViewId, FORMAT_VERSIONS_SUPPORTED, KERNEL_MAJOR,
-    KERNEL_SCHEMA,
+    UnitCore, UnitCoreBuilder, View, ViewId, FORMAT_VERSIONS_SUPPORTED, FORMAT_VERSION_DEFAULT,
+    KERNEL_MAJOR, KERNEL_SCHEMA,
 };
 
 // ---- check ----------------------------------------------------------------
@@ -219,7 +219,19 @@ mod tests {
 
     #[test]
     fn facade_reexports_version_constants() {
-        assert!(format_version_supported(FORMAT_VERSIONS_SUPPORTED[0]));
+        // Every declared version must be accepted, not merely the first. The list grew to two
+        // in 0.14 and an assertion about `[0]` would have kept passing while the second went
+        // unchecked — which is the shape of gap this repository keeps finding.
+        for v in FORMAT_VERSIONS_SUPPORTED {
+            assert!(
+                format_version_supported(v),
+                "`{v}` is declared but not accepted"
+            );
+        }
+        assert!(
+            FORMAT_VERSIONS_SUPPORTED.contains(&FORMAT_VERSION_DEFAULT),
+            "the version we write must be one we can read"
+        );
         assert_eq!(kernel_major(KERNEL_SCHEMA), Some(KERNEL_MAJOR));
     }
 
@@ -230,7 +242,7 @@ mod tests {
     /// manifest, and the diff will say what you decided.
     #[test]
     fn the_crate_version_is_the_one_we_intend_to_ship() {
-        assert_eq!(VERSION, "0.13.0");
+        assert_eq!(VERSION, "0.14.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two

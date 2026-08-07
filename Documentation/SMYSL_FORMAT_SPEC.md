@@ -2,7 +2,7 @@
 
 **Status:** normative. This document is the contract.
 **Format version:** `smysl/0.1` · **kernel schema:** `smysl.kernel/0.1`
-**Describes:** crate `0.13.0`.
+**Describes:** crate `0.14.0`.
 
 This is the whole of what a second implementation must obey to interoperate. It is
 deliberately short. Everything it does not say is a free choice.
@@ -364,24 +364,50 @@ describes itself through its type codes, and a reader meeting a code it does not
 preserves it verbatim instead of needing a version to tell it to. A version field would let a
 reader refuse a whole document on sight, which is the opposite of what rule X asks for.
 
-It has one consequence worth stating, because it is invisible until it bites. A surface
-parser validates the declared version and then discards it — there is nowhere in the parsed
-result to keep it — so a writer reconstructs the header from its own
-`FORMAT_VERSIONS_SUPPORTED[0]`. While that list has one entry the reconstruction is correct by
-coincidence. The moment it has two, a document declaring the second would be read and written
-back out claiming to be the first. Uids are unaffected, because they are over CBOR and CBOR
-has no version — but the header would lie.
+It had one consequence worth stating, because it was invisible until it bit. A surface parser
+validated the declared version and then discarded it — there was nowhere in the parsed result
+to keep it — so a writer reconstructed the header from its own `FORMAT_VERSIONS_SUPPORTED[0]`.
+While that list had one entry the reconstruction was correct by coincidence. The moment it had
+two, a document declaring the second would be read and written back claiming to be the first.
+Uids are unaffected, because they are over CBOR and CBOR has no version — but the header would
+have lied, and the next reader trusts the header.
 
-`crates/smysl-core/tests/versioning.rs` fails when the list grows, and says what has to be
-decided first.
+**Fixed in 0.14, before the list grew rather than after.** `ParseOutcome` carries the version
+the document declared, `WriteContext` carries what the header will say, and `write_surface`
+emits that rather than a build-time constant. `smysl fmt` — the round trip a user runs on
+purpose — passes one to the other.
+
+`crates/smysl-core/tests/versioning.rs` was written in 0.10 to fail the moment the list grew,
+and it did. What stands there now is the property it was standing in for: a document declaring
+either supported version comes back declaring the one it declared. A count cannot say that; a
+round trip can.
+
+**One consequence for other implementations, which is that there is none.** The wire carries no
+version, so an implementation that reads only CBOR — `python/`, `nodejs/` and `go/` all do —
+has no version list to grow and nothing to change. Only a surface parser ever sees a `@doc`
+header. This is worth stating because the migration plan first assumed otherwise.
 
 ### 8.6 Is `smysl/0.1` frozen?
 
-No, and it is not stable-forever either. It is `0.1`: it has held across nine crate releases
-and four independent implementations, which is a record rather than a promise. The `0.` says
-that a break is permitted if this document turns out to be wrong about something load
-bearing. What §8.2 buys is that such a break is *visible* — a new version string, refused by
-old readers rather than silently misread.
+No, and it is not stable-forever either. It is `0.1`: it has held across thirteen crate
+releases and four independent implementations, which is a record rather than a promise. The
+`0.` says that a break is permitted if this document turns out to be wrong about something
+load bearing. What §8.2 buys is that such a break is *visible* — a new version string, refused
+by old readers rather than silently misread.
+
+**`smysl/1.0` is coming, and is not a break.** As of 0.14 readers accept both strings and
+nothing writes the new one. That order is the whole point and §8.2 is why: a reader must
+refuse a version absent from its list, so flipping the writer before the field has a reader
+for it makes every other implementation reject the output. Readers first, released; the writer
+later.
+
+So the bump will carry no format change at all, which sits oddly beside §8.2's rule that a
+version bump signals a break. The honest reading is that `smysl/1.0` marks the format
+*settled* rather than changed, and that the compatibility event was teaching the readers — an
+event that happened quietly, a release before anybody notices the version.
+
+Nothing in this document changes when the writer flips. That is the claim `smysl/1.0` is
+making.
 
 ---
 
