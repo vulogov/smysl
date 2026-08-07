@@ -109,7 +109,7 @@ apart in the canonical encoding, two unrelated uids. Verified capable of failing
 **Next action:** none for this gate. `nodejs/` and `go/` remain C-Read, which is a scope
 decision rather than a gap; both say so where they list what they do not reach.
 
-## 3. Public API stability — *the mechanism is done; the evidence is not*
+## 3. Public API stability — *done: the mechanism, and two published cycles of evidence*
 
 This gate asked for four things and 0.13 delivered all four. What it cannot deliver is the only
 thing that counts as evidence, which is time.
@@ -155,10 +155,16 @@ crates and reports "no semver update required" for every one. Through 0.12 and 0
 comparing against a version two releases old *and* skipping the crates most likely to move; it
 is watching everything now.
 
-**Next action:** two cycles — 0.14 and 0.15 — with `SEMVER_BREAKING` empty at the cut, both
-published. `ROAD_TO_1.0.md` Phase 3 lists what could break them and what has already been done
-to stop it, including the finding that the `smysl/1.0` format migration is *not* a breaking
-change and can therefore land inside a quiet cycle.
+**Done, as of 0.15.0.** 0.14 and 0.15 both ended with `SEMVER_BREAKING` empty at the cut and
+both are published, with `make semver` 12/12 clean against a baseline that is actually on the
+registry. Neither was quiet through inactivity: 0.14 carried the format migration's
+readers-first half and gate 4's keyless half, 0.15 flipped the writer to `smysl/1.0`. Change
+without breakage is the claim, and it is the harder one.
+
+The `smysl/1.0` migration turned out not to be a breaking change at all — `ParseOutcome` and
+`WriteContext` had been made `#[non_exhaustive]` in 0.13, so each could gain the field it
+needed. It fitted inside the quiet cycles rather than costing one, which was the open question
+when Phase 3 was written.
 
 ## 4. Verified providers — *partial*
 
