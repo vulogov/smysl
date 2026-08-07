@@ -1,17 +1,22 @@
 # The road to 1.0.0
 
-**Status after 0.13.0: Phases 0, 1 and 2 are done. Phase 3 has not started, and cannot until
-0.13 is published.** Each phase names what it produces and how you know it is done. Nothing
-here has a date, because the only honest gate on 1.0 is evidence and evidence arrives when it
-arrives.
+**Status after 0.15.0: Phases 0 to 3 are done.**
+
+The format is `smysl/1.0`. The surface is worth freezing and is frozen in practice — two
+consecutive published cycles have ended with `SEMVER_BREAKING` empty. What stands between here
+and 1.0.0 is §2.3: whether OpenAI and Anthropic accept the translated schema, which needs a key
+for each and nothing else.
+
+Each phase below names what it produced and how you know it is done. Nothing here ever had a
+date, because the only honest gate on 1.0 is evidence, and evidence arrives when it arrives.
 
 | phase | | |
 |---|---|---|
 | 0 | two decisions | ✅ both taken |
 | 1 | make the surface worth freezing | ✅ 1.1, 1.2 (S1–S6), 1.3 |
 | 2 | the verification a 1.0 should not ship without | ✅ 2.1, 2.2 — 2.3 needs provider keys |
-| 3 | evidence of stillness | **not started; needs publication** |
-| 4 | the cut | after 3 |
+| 3 | evidence of stillness | ✅ 0.14.0 and 0.15.0, both published |
+| 4 | the cut | **the remaining gate is §2.3, which needs provider keys** |
 
 **The decision this rests on:** smysl is one product — format, libraries and CLI — under one
 version. The workspace is not split. That settles a contradiction `API_CONTRACT.md` left open:
@@ -702,94 +707,53 @@ than gate 4 has implied, and it is still needed.
 
 ---
 
-## Phase 3 — evidence of stillness
+## Phase 3 — evidence of stillness ✅ *satisfied by 0.14.0 and 0.15.0*
 
-The part that cannot be rushed, and the only real gate. Phases 0 to 2 are done; this one has
-not started, and 0.13 is why.
+The part that could not be rushed, and the only real gate. **Two consecutive cycles ended with
+`SEMVER_BREAKING` empty at the cut, and both are published.**
 
-**Two consecutive cycles that end with `SEMVER_BREAKING` empty at the cut, both published.**
+| | `SEMVER_BREAKING` at the cut | `make semver` | published |
+|---|---|---|---|
+| 0.13.0 | nine crates | 12/12 after the fact | yes — *cycle zero* |
+| **0.14.0** | **empty** | **12/12 clean** | **yes** |
+| **0.15.0** | **empty** | **12/12 clean** | **yes** |
 
-### Where it stands
+0.13 was cycle zero: the largest deliberate break in the project's history, and the right shape
+for the cycle before 1.0 because it was the last one in which narrowing was free. The two that
+follow it are the evidence.
 
-**0.13 breaks nine of twelve crates.** That is the largest deliberate break in the project's
-history, and it is the right shape for the cycle *before* 1.0 rather than a setback: this is
-the last cycle in which narrowing is free. Every entry is a repair or a reduction —
+### What the two cycles actually carried
 
-| crate | why |
-|---|---|
-| `smysl` | `Error` re-exported as `AnyError` |
-| `smysl-core`, `smysl-check`, `smysl-pack`, `smysl-thread` | §1.1's `#[non_exhaustive]` audit |
-| `smysl-graph` | `SalienceRequest`, plus the audit |
-| `smysl-retrieve` | `Hit` gained the attribute and a constructor |
-| `smysl-provider` | `Gemini`/`Anthropic::parse` cap argument; §1.2 S2 and S4 |
-| `smysl-ingest` | §1.2 S2 and S4 |
+Not nothing — that would prove only that nobody worked. Both carried real change and neither
+broke anything, which is the harder and more useful claim.
 
-So the two quiet cycles have not begun. **0.13 is cycle zero** — it was cut with nine entries
-on the list, so it is not one of the two.
+**0.14** taught every reader `smysl/1.0` while writing nothing new, stopped `write_surface`
+relabelling documents, and closed the half of gate 4 that never needed a key — finding on the
+way that the schema its strict-mode translation was tested against had 2 of the 13 kernel types
+and 2 of the 5 statuses, while the code documented it as "the full Appendix C schema rather
+than a miniature of it".
 
-**0.13.0 is published**, all twelve crates confirmed on crates.io, and that is what starts the
-clock. Three things changed the moment it landed:
+**0.15** made `smysl/1.0` what new documents declare, one release after the readers, which is
+the ordering §8.2 requires and the reason the flip could not simply be done when it was ready.
 
-- `BASELINE` moved to **0.13.0**. Every break above is now the baseline rather than a pending
-  one, which is precisely what 0.10 and 0.11 failed to do for two cycles running and what left
-  the `parse` repair unmeasured.
-- `SEMVER_BREAKING` is **empty** for the first time since 0.9.
-- `make semver` therefore gates **all twelve crates**, and reports *"no semver update
-  required"* for every one of them. Nothing is skipped, and nothing is merely reported.
+### Why the format migration did not cost a cycle
 
-That last line is the one worth pausing on. Through 0.12 and 0.13 the gate was comparing
-against a version two releases old and skipping the crates most likely to move. It is now
-watching everything against what is actually on the registry — which is the difference between
-a stillness gate and the appearance of one.
+This was the open question when Phase 3 was written, and the answer is §1.1's doing.
+`ParseOutcome` and `WriteContext` were made `#[non_exhaustive]` in 0.13, so each could gain the
+field the migration needed without a major bump, and `write_surface`'s signature never moved.
+`make semver` stayed 12/12 across both releases that carried it.
 
-**The two cycles are 0.14 and 0.15.**
+An audit whose payoff arrives two cycles later, in a form nobody predicted when it was done, is
+the most that can be asked of one.
 
-### What 0.13 changed about the gate itself
+### What the gate is watching now
 
-Two things, and both matter for whether the coming cycles are evidence or theatre.
+`BASELINE` is 0.15.0 — a version that is actually on the registry, which through 0.12 and 0.13
+it was not. `SEMVER_BREAKING` is empty and every one of the twelve crates is checked rather
+than skipped. That is the difference between a stillness gate and the appearance of one, and it
+took 0.13's S5 to notice the difference existed.
 
-**`make semver` no longer skips.** A crate on the list used to be `continue`d, so a crate with
-one deliberate break had nothing watching it and a second, unintended break rode along
-invisibly. §1.2 S5 changed that: listed crates run, ungated, with their failures printed to be
-checked against the recorded reasons. It found a wrong entry on its first run.
-
-**There is a third gate.** `tests/public-api-counts.txt` catches a public item *added* by
-accident, which is nobody's break and so was nobody's failure. During two cycles that are meant
-to be quiet, the thing most likely to go unnoticed is an addition.
-
-### What the two cycles have to survive
-
-Not "no changes" — changes are fine, breaks are not. Concretely:
-
-1. **`SEMVER_BREAKING` empty at both cuts**, with `make semver` green on every published crate
-   rather than skipping any.
-2. **Both published.** `cargo-semver-checks` compares against the registry, so an unpublished
-   release leaves the baseline stale and the gate measures nothing. 0.10 and 0.11 demonstrated
-   exactly that and it parked the `parse` repair for a cycle. **The baseline is still 0.11.0
-   today, with 0.12 and 0.13 both unpublished**, so every break above is currently measured
-   against a version two releases old. Publishing is what resets it.
-3. **The facade golden and the per-crate counts unmoved**, or moved by something typed on
-   purpose.
-
-### What could make them fail, so it can be planned for rather than discovered
-
-- **The format bump — and it turns out this one is safe.** §0.1 sequences `smysl/0.1` →
-  `smysl/1.0` *before* the source tree goes to 1.0, and step 2 of that migration has to carry
-  the declared version through `ParseOutcome` and back out through `write_surface`. That reads
-  like a break and is not one, because §1.1 made both `ParseOutcome` and `WriteContext`
-  `#[non_exhaustive]`: each can gain a field without a major bump, and the version can ride on
-  `WriteContext` rather than changing `write_surface`'s signature.
-
-  Growing `FORMAT_VERSIONS_SUPPORTED` is a const *value* change, not a signature change, so it
-  is not breaking either. **The whole migration can land inside a quiet cycle.** That is a
-  concrete payoff of the audit rather than a hoped-for one, and it is worth checking against
-  `make semver` when the time comes rather than taken on this paragraph's word.
-- **The remaining `cmd_*` work** (§2.2's 109 survivors) touches only the binary, so it cannot
-  break a library API. Safe to do during a quiet cycle.
-- **`smysl-eval` and the fuzz targets** are unpublished and outside the gate, so work there is
-  free.
-
-**Done when:** two cuts in a row, both on crates.io, both with an empty list, and `make semver`
+**Done.** Two cuts in a row, both on crates.io, both with an empty list, and `make semver`
 reporting no failures rather than no checks.
 
 ---
