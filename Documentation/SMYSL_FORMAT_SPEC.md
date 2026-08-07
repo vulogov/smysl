@@ -2,7 +2,7 @@
 
 **Status:** normative. This document is the contract.
 **Format version:** `smysl/0.1` · **kernel schema:** `smysl.kernel/0.1`
-**Describes:** crate `0.13.0`.
+**Describes:** crate `0.14.0`.
 
 This is the whole of what a second implementation must obey to interoperate. It is
 deliberately short. Everything it does not say is a free choice.
