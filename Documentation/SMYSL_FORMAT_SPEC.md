@@ -387,27 +387,35 @@ version, so an implementation that reads only CBOR — `python/`, `nodejs/` and 
 has no version list to grow and nothing to change. Only a surface parser ever sees a `@doc`
 header. This is worth stating because the migration plan first assumed otherwise.
 
-### 8.6 Is `smysl/0.1` frozen?
+### 8.6 Is the format frozen?
 
-No, and it is not stable-forever either. It is `0.1`: it has held across thirteen crate
-releases and four independent implementations, which is a record rather than a promise. The
-`0.` says that a break is permitted if this document turns out to be wrong about something
-load bearing. What §8.2 buys is that such a break is *visible* — a new version string, refused
-by old readers rather than silently misread.
+It was `smysl/0.1` for fourteen crate releases and four independent implementations, unchanged
+throughout. The `0.` said a break was permitted if this document turned out to be wrong about
+something load bearing. It never was, and that record — not a promise — is what `smysl/1.0`
+is reporting.
 
-**`smysl/1.0` is coming, and is not a break.** As of 0.14 readers accept both strings and
-nothing writes the new one. That order is the whole point and §8.2 is why: a reader must
-refuse a version absent from its list, so flipping the writer before the field has a reader
-for it makes every other implementation reject the output. Readers first, released; the writer
-later.
+What §8.2 buys either way is that a break would be *visible*: a new version string, refused by
+old readers rather than silently misread.
 
-So the bump will carry no format change at all, which sits oddly beside §8.2's rule that a
-version bump signals a break. The honest reading is that `smysl/1.0` marks the format
-*settled* rather than changed, and that the compatibility event was teaching the readers — an
-event that happened quietly, a release before anybody notices the version.
+**`smysl/1.0` arrived in 0.15, and is not a break.** 0.14 taught readers to accept both
+strings and wrote nothing new; 0.15 made `smysl/1.0` what new documents declare. That order is
+the whole point and §8.2 is why: a reader must refuse a version absent from its list, so
+flipping the writer before the field has a reader for it makes every other implementation
+reject the output. Readers first, released; the writer a release later.
 
-Nothing in this document changes when the writer flips. That is the claim `smysl/1.0` is
-making.
+`smysl/0.1` is still accepted and always will be. A document declaring it round-trips
+declaring it — the writer emits the version a document *arrived* as, not the version this
+build prefers. Only a document with no version to preserve, which means one built from CBOR,
+gets the new default.
+
+The bump carries no format change at all, which sits oddly beside §8.2's rule that a version
+bump signals a break. The honest reading is that `smysl/1.0` marks the format *settled* rather
+than changed, and that the compatibility event was teaching the readers — an event that
+happened quietly, a release before anybody noticed the version.
+
+**Nothing in this document changed when the writer flipped.** That is the claim `smysl/1.0`
+makes, and it is checkable: the same fixtures parse, the same uids come out, and the
+conformance suite did not move.
 
 ---
 

@@ -35,7 +35,18 @@ fn an_unknown_format_version_is_refused_rather_than_guessed_at() {
 #[test]
 fn the_declared_versions_are_what_the_specification_says() {
     assert_eq!(FORMAT_VERSIONS_SUPPORTED, &["smysl/0.1", "smysl/1.0"]);
-    assert_eq!(FORMAT_VERSION_DEFAULT, "smysl/0.1");
+
+    // `smysl/1.0` as of 0.15. The pin here read `smysl/0.1` through 0.14, deliberately: the
+    // writer must not emit a version until a release that *reads* it is on the registry, and
+    // this line is what made flipping it early a failing test rather than a judgement call.
+    assert_eq!(FORMAT_VERSION_DEFAULT, "smysl/1.0");
+
+    // `smysl/0.1` must stay readable forever. That is the promise step 1 was for, and the
+    // reason old documents keep working is that nothing removed it from the list above.
+    assert!(format_version_supported("smysl/0.1"));
+
+    // The kernel schema is a third axis and did not move with the format version. §8 keeps
+    // them separate, and bumping one because the other moved would be the coupling it forbids.
     assert_eq!(KERNEL_SCHEMA, "smysl.kernel/0.1");
     assert_eq!(kernel_major(KERNEL_SCHEMA), Some(KERNEL_MAJOR));
 }
