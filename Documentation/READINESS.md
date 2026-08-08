@@ -16,7 +16,7 @@ could only be deferred and never worked toward. This file was written to say wha
 | 4 | verified providers | ⚠️ **waived** — OpenAI and Anthropic never called live |
 | 5 | a test suite that catches what it claims | ✅ every crate measured; survivors triaged |
 | 6 | performance characterised | ✅ and it found one |
-| 7 | documentation matches the binary | ◐ 46 of 168 transcripts replayed, in `cargo test` |
+| 7 | documentation matches the binary | ◐ 46 of 168 `smysl` transcripts, plus the `cargo` ones and the feature table |
 
 Gate 7 is honestly partial rather than waived: what it checks, it checks well, and 0.14 proved
 the gap is real by finding three stale claims in exactly the blocks the replay cannot reach.
@@ -277,11 +277,22 @@ returns `Box<dyn Provider>`. **A mapper found wrong against a live endpoint can 
 without a breaking change.** 1.0 freezes the provider *abstraction*, which is exercised by
 three live-tested mappers; it does not freeze the two unverified translations.
 
-**How this gets closed.** A key, and one afternoon. If you have an OpenAI or Anthropic key and
-want to help: run `SMYSL_LIVE=1 cargo test -p smysl-provider --features openai` (or
-`anthropic`) with the key in the environment, and open an issue with what came back. A report
-saying "it worked" closes this gate; a report saying it did not is more useful still, and is
-fixable without a 2.0.
+**1.1 closed the Anthropic half of what is checkable without a key.** OpenAI's strict mode
+restricts the schema, so what was checkable there was the *translation* — done in 0.14.
+Anthropic passes `input_schema` through unchanged, so what is checkable is the envelope around
+it, and the envelope has rules that break silently: a tool name must match
+`^[a-zA-Z0-9_-]{1,64}$`, `input_schema` must be an object schema, and the forced `tool_choice`
+must name the tool that was actually declared. That last one is the easy defect — rename the
+tool, forget the choice, and the request asks the model to call something absent from its own
+list, failing at the one place nobody here can look. All three are asserted now, plus that the
+schema reaching the body is the whole kernel schema rather than a reduction, which is the
+failure 0.14 found on the OpenAI side.
+
+**How the rest gets closed.** A key, and one afternoon. If you have an OpenAI or Anthropic key
+and want to help: run the provider's live tests with the key in the environment and open an
+issue with what came back. A report saying "it worked" closes this gate; a report saying it did
+not is more useful still, and is fixable without a 2.0 because the concrete mappers are not in
+the public API.
 
 **Mutation testing in 0.12 found the gap this gate describes is not the gap it has.** 477
 viable mutants, 31% survivors — the worst of any crate but the packer, and 25 of them on one
@@ -488,7 +499,7 @@ project has made it.
 gates, deliberately — timing assertions on shared runners cry wolf — so the standing cost is
 that somebody has to run them. Worth running at a release cut.
 
-## 7. Documentation that matches the binary — *partial*
+## 7. Documentation that matches the binary — *partial, and the cheap half now gated*
 
 `make doc-output` replays 46 of 168 documented command blocks and gates on them. The other 122
 are skipped, mostly because they name files a chapter built earlier in its own narrative.
@@ -554,14 +565,32 @@ All three are `cargo` transcripts rather than `smysl` ones, which is precisely w
 never saw them. **The 122 skipped blocks are not merely unchecked; they are where drift
 actually accumulates**, and that is now demonstrated rather than assumed.
 
-**Next action:** if this is worth more, the fix is in the *manual*, not the script — commit the
-tutorial files as fixtures and have the chapters include them, so what the reader copies and
-what the script replays are the same bytes. That is a book change, and the book is the thing
-the coverage is protecting, so it should be a deliberate decision rather than a side effect.
+**1.1 took the cheaper action**, which is `make doc-cargo` and is now part of `make ci`.
+`verify-doc-output.py` replays `smysl` commands; these are a different program, so its skip
+rules passed over them and nothing checked them at all. The new script replays the six
+single-command `cargo` transcripts, checks every version string in them against the manifest,
+and compares the one feature table that claims to be "transcribed here exactly" against
+`[features]`.
 
-A cheaper second action now has evidence behind it: the handful of `cargo` transcripts could be
-regenerated at release time the way `make docs` rebuilds the PDFs. Three of the four defects
-above would have been caught by that alone.
+It found drift immediately, which is the argument for it:
+
+- the `cargo build` transcript said `v0.13.0` — **stale again**, one release after being fixed
+  by hand in 0.14. A version number in prose goes stale every release; that is a reason to
+  check it, not to remove it.
+- the `cargo xtask check-purity` transcript claimed 25 crates where there are 31, 6 pure crates
+  where there are 7, 66 source files where there are 71 — and omitted the `rule A` line
+  entirely, so the manual documented a purity gate that had not matched what runs since 0.13.
+- the dependency tree still carried 0.13 versions.
+
+Confirmed by re-introducing 0.14's feature-table defect and watching the check name it.
+Twenty-seven seconds warm, which is what makes it affordable on every push rather than at
+release time only.
+
+**Next action, still open:** if this is worth more, the fix is in the *manual*, not the script —
+commit the tutorial files as fixtures and have the chapters include them, so what the reader
+copies and what the script replays are the same bytes. That is a book change, and the book is
+the thing the coverage is protecting, so it should be a deliberate decision rather than a side
+effect.
 
 ---
 
