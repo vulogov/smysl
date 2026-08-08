@@ -1,6 +1,13 @@
 # The road to 1.0.0
 
-**Status: 1.0.0. All four phases are done.**
+**Status: 1.0.0, released. All four phases are done, and this document is now history.**
+
+It is kept rather than deleted because most of what it records is *why* things are the way they
+are — why the seam is narrow, why `#[non_exhaustive]` is on 152 types and deliberately absent
+from six, why `smysl/1.0` arrived a release after the readers learned it. `API_CONTRACT.md`
+holds the promise; `READINESS.md` holds the gates; this holds the reasoning.
+
+One thing here is still live: **§2.3**, the waived gate, and Phase 4 says what closing it takes.
 
 The format is `smysl/1.0`. The surface is frozen: 244 facade names and every public item behind
 them move only with a 2.0. Two consecutive published cycles ended with `SEMVER_BREAKING` empty

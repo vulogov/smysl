@@ -6,7 +6,20 @@ smysl was unpublished for eight releases, and the reason given each time was "no
 ready" — a true answer and a useless one, because nothing said what would change it, so it
 could only be deferred and never worked toward. This file was written to say what the gate is.
 
-**1.0.0 as of this release, with six of the seven gates closed and one waived.**
+**1.0.0 is released. Five gates closed, one waived, one partial.**
+
+| | gate | |
+|---|---|---|
+| 1 | format stability | ✅ policy written, and exercised by the `smysl/1.0` bump |
+| 2 | a second implementation | ✅ three, from the specification alone |
+| 3 | public API stability | ✅ mechanism, plus two published quiet cycles |
+| 4 | verified providers | ⚠️ **waived** — OpenAI and Anthropic never called live |
+| 5 | a test suite that catches what it claims | ✅ every crate measured; survivors triaged |
+| 6 | performance characterised | ✅ and it found one |
+| 7 | documentation matches the binary | ◐ 46 of 168 transcripts replayed, in `cargo test` |
+
+Gate 7 is honestly partial rather than waived: what it checks, it checks well, and 0.14 proved
+the gap is real by finding three stale claims in exactly the blocks the replay cannot reach.
 
 Gate 4 — a live call to OpenAI and Anthropic — is the waiver, and §4 below says what that
 costs rather than burying it. Everything about those two mappers that can be checked without a
@@ -42,18 +55,28 @@ moves or it does not.
 
 ---
 
-## 1. Format stability — *close*
+## 1. Format stability — *done, and now exercised rather than only written*
 
-`smysl/0.1` has not changed across seven crate releases. Record type 10 was *added* in 0.2
+`smysl/0.1` did not change across fourteen crate releases. Record type 10 was *added* in 0.2
 without a format bump, which rule X is precisely for, and one decoder became stricter in 0.5
-about records it should never have accepted. No encoder's output has moved.
+about records it should never have accepted. No encoder's output ever moved.
 
-That is a good record, and it is not yet a commitment. What is missing is a written policy:
-what constitutes a format break, what the deprecation path is, and whether `smysl/0.1` is
-frozen or merely stable-so-far.
+**The policy this gate asked for exists**, as §8 of `SMYSL_FORMAT_SPEC.md`: §8.1 says what may
+change within a version and gives a mechanical test for it — a reader written against the older
+revision must still round-trip the addition, byte for byte, or it is a break however small it
+looks. §8.2 says what requires a new version and that a reader MUST refuse one it does not
+know rather than infer compatibility. §8.3 distinguishes tightening an implementation from
+changing the format. §8.4 is the deprecation path.
 
-**Next action:** a versioning section in `SMYSL_FORMAT_SPEC.md` saying which changes are
-allowed within a format version and which require a new one.
+**And it has been used.** `smysl/1.0` arrived in 0.15, and the whole of §8 governed how:
+readers learned the new string in 0.14 and were *published* before any writer emitted it,
+because §8.2 makes flipping the order a compatibility break. `smysl/0.1` is still accepted and
+still round-trips declaring itself. The bump carried no format change — the same fixtures
+produce the same uids and the conformance suite did not move — so §8.6 records what the number
+means: the format is settled rather than changed.
+
+A policy that has survived being applied once is worth more than one that has only been
+written, which is why this gate is closed rather than "close".
 
 ## 2. A second implementation — *done, including the claim that mattered*
 
