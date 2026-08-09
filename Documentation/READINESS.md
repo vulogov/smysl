@@ -362,6 +362,35 @@ Both ran in 0.10 as well, and the numbers are now three points on one curve rath
 | `smysl-check` (0.11) | 143 | **9.1%** |
 | `smysl-graph` (0.11) | 625 | **15.0%** |
 | `smysl-provider` (0.12) | 477 | **31.0%** |
+| `smysl-provider` (1.1, re-measured) | 466 | **29.8%** |
+
+**The table above is a set of readings, not a state.** Every rate below `smysl-check` predates
+0.13, and 0.13 changed the code they measure: 482 items left the contract, five crates gained
+`#[non_exhaustive]`, and `smysl-provider` alone gained three test files. Re-measured in 1.1: **29.8%
+of 466 viable, against a recorded 31.0% of 477.** Barely moved, which is itself the finding —
+0.13 added three test files to this crate and took 310 items out of its contract, and the
+survivor rate absorbed all of that as roughly one point.
+
+**The first attempt gave a different answer and it was wrong**, which belongs here rather than
+in a commit message. The run was killed at 324 of 556 mutants; the loop waiting for it timed
+out without its completion sentinel ever appearing, and the partial counters were read as
+final. That produced "26.6%, on a population that fell from 477 to 274" — both halves an
+artefact of stopping early, written into this file and stated aloud before anyone checked
+whether the run had finished. The shards are uneven in difficulty, so a partial run is not a
+sample; the last shard alone held 53 of the 139 survivors.
+
+It is the failure this file spends most of its length describing, committed by the person
+describing it. The lesson is not "be careful": it is that a measurement harness needs a
+completion signal that is *checked*, and that one had a signal nobody read. The re-run is
+sharded, each shard writes a `.done` only after `cargo mutants` prints its own
+"N mutants tested" line, and 4 × 139 = 556 is asserted against the population before the
+arithmetic is believed.
+
+The standing point survives it. A table of measurements taken at different times against
+different code reads as a description of the present, and every rate below `smysl-check`
+predates 0.13 — which moved 482 items out of the contract, put `#[non_exhaustive]` on five
+crates, and gave `smysl-provider` three new test files. The dates in the left column are
+load-bearing.
 | `smysl-render` (0.12) | 144 | **12.5%** |
 | `smysl-retrieve` (0.12) | 77 | **15.6%** |
 | `smysl-embed` (0.12) | 59 | **22.0%** |
@@ -469,7 +498,29 @@ decides whether a retraction took; and `TraceKind::follows_parents`, which picks
 `trace`. The fourth, `Store::matching_prefix`, is caught by `smysl-check` and was never a gap at
 all — which is the whole reason the re-check exists.
 
-**Next action:** tests for those three. They are cheap, and each backs a command a user runs.
+**Done in 0.12**, in `crates/smysl-graph/tests/predicates.rs`. Re-measured in 1.1 and all three
+are killed. This gate carried "next action: tests for those three" for three releases after the
+tests existed, which is its own small lesson: a checklist is only as true as its last reading.
+
+**And the class was not exhausted.** Re-measuring found two more predicates of exactly the same
+shape — `Lineage::is_empty` and `RetractionPlan::is_empty`, each replaceable with `true` and
+nothing failing, each on a path a user takes. A shortlist is what one pass surfaced, not the
+population.
+
+`Lineage::is_empty -> false` is a third case again, and it cannot be killed: `trace` pushes a
+node for the root before anything else, and `Lineage` is `#[non_exhaustive]`, so no lineage is
+ever empty and no consumer can build one that is. The method can only return `false`. Recorded
+as equivalent rather than chased — and worth recording because the first draft of the test
+*did* chase it, asserting `is_empty() == (len() == 0)` on a lineage where both are trivially
+false. That passes under the mutant. It is the same failure this file keeps describing, written
+by the person describing it.
+
+**A real gap found alongside them: the contention-flood cap.** `flooding` decides `SMY-W055`,
+and its one test set `max_contentions_per_agent = Some(0)` — which makes `len > cap` trivially
+true, so "always fire", "always fire one", and `>` loosened to `>=` all pass it unchanged, and
+the count in the message was never read. Three mutants on an anti-abuse diagnostic, alive
+because the threshold was only ever tested at the one value where it is not a threshold. Now
+tested either side of a real cap, with the reported count asserted.
 
 The comment sweep is retired as a primary instrument. Its yield fell across three crates — two
 findings in `smysl-core`, one in `smysl-graph`, all three documentation rather than behaviour —
