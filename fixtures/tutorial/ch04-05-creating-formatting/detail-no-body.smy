@@ -1,0 +1,5 @@
+@claim c/cache-cold { status: speculative }
+~ The checkout price cache looks cold.
+
+--
+A longer breakdown of the eviction timeline.

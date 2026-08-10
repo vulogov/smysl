@@ -1780,18 +1780,27 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         // Only the one view handed to `write_surface` becomes a `@doc` header; the surface
         // grammar has room for at most one per file, so any further view in the store is
         // genuinely dropped and worth counting.
+        //
+        // A label binding is the same mistake the `@doc` header used to be, and it survived
+        // the fix above: `folded` put it in `ctx` a few lines up and `write_surface` renders
+        // it as the name on its unit, so `@claim c/a` reported "1 record(s) have no surface
+        // form" over a document whose output said `@claim c/a`. Asking `ctx` which label it
+        // will actually write is what makes this right rather than restating the rule —
+        // `from_labels` keeps one label per uid, and the loser genuinely is dropped.
         let dropped = records
             .iter()
             .filter(|r| match r {
                 Record::Unit(_) | Record::Relation(_) | Record::Thread(_) => false,
                 Record::View(v) => Some(&v.id) != emitted.as_ref(),
+                Record::LabelBinding(b) => ctx.labels.get(&b.uid) != Some(&b.label),
                 _ => true,
             })
             .count();
         if dropped > 0 {
             eprintln!(
                 "smysl merge: warning: {dropped} record(s) have no surface form and were \
-                 omitted (contentions, attestations); the default CBOR output preserves them"
+                 omitted (contentions, attestations, and any name the grammar has nowhere to \
+                 put); the default CBOR output preserves them"
             );
         }
         write_surface(view.as_ref(), &records, &ctx).into_bytes()
@@ -3763,6 +3772,18 @@ fn main() -> ProcExitCode {
         return ProcExitCode::from(ExitCode::Usage.as_i32() as u8);
     };
 
+    // `==` here survives being mutated to `!=`, and that is *equivalent* rather than untested.
+    //
+    // `cmd` is read in exactly one place — the `_ =>` arm at the bottom of the dispatch, which
+    // no input reaches while every command in `COMMANDS` has an arm above it. Flipping the
+    // comparison selects the wrong `Cmd`, and nothing ever looks at it. The `else` is
+    // unreachable for the same reason from the other side: clap only yields subcommand names
+    // that `cli()` registered, and `cli()` registers exactly `COMMANDS`.
+    //
+    // Recorded the way 0.13 recorded `worse`'s `>=` and 1.1 recorded `Lineage::is_empty`, rather
+    // than answered with a test that cannot distinguish the two programs. What *is* tested is
+    // the property this lookup exists to support: `tests/dispatch.rs` runs all twenty-two
+    // commands and fails if any is unrouted.
     let Some(cmd) = COMMANDS.iter().find(|c| c.name == name) else {
         eprintln!("smysl: unknown command `{name}`");
         return ProcExitCode::from(ExitCode::Usage.as_i32() as u8);

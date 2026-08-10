@@ -233,13 +233,18 @@ jobs:
 
   # The same specification, read a fourth time — and the first reading against the *revised*
   # document, which makes it a check on the clarifications rather than only on the format.
+  #
+  # As of 1.1 it also *produces*: C-Produce, so §2.1 has a third independent derivation and
+  # §2.3 a third witness. That half is what C-Read cannot reach, and it is the half the format
+  # rests on — this job failing on `uid_test.go` means two implementations disagree about what
+  # a unit *is*, not merely about how to spell it.
   conformance-go:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.24"
       - run: go test ./...
         working-directory: go
 

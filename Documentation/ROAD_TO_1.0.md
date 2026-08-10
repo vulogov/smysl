@@ -1,6 +1,13 @@
 # The road to 1.0.0
 
-**Status: 1.0.0. All four phases are done.**
+**Status: 1.0.0, released. All four phases are done, and this document is now history.**
+
+It is kept rather than deleted because most of what it records is *why* things are the way they
+are — why the seam is narrow, why `#[non_exhaustive]` is on 152 types and deliberately absent
+from six, why `smysl/1.0` arrived a release after the readers learned it. `API_CONTRACT.md`
+holds the promise; `READINESS.md` holds the gates; this holds the reasoning.
+
+One thing here is still live: **§2.3**, the waived gate, and Phase 4 says what closing it takes.
 
 The format is `smysl/1.0`. The surface is frozen: 244 facade names and every public item behind
 them move only with a 2.0. Two consecutive published cycles ended with `SEMVER_BREAKING` empty
@@ -807,10 +814,25 @@ more useful, and is fixable without a major version.
 the expensive part. Phase 2.1 is on the list because it produces a *number*; the rest is not,
 because it produces a backlog.
 
+> *Since 1.0:* the CLI half of that backlog was worked after all, because it was the one
+> outlier rather than part of the band. 1.1 closed `cmd_fmt`, `cmd_merge`, `cmd_providers` and
+> the command dispatch, taking `src/main.rs` from 99 survivors of 205 viable to 59 of 207. The
+> dispatch pass found that seven of the twenty-two commands had no test invoking them at all.
+> See `READINESS.md` §5 — including the ways the measurement itself went wrong on the way.
+
 **doc-output at 46 of 168.** The remaining 97 name files the prose asks the reader to create,
 and the fix is in the book: commit the tutorial files as fixtures so the manual and the
 verifier read the same bytes. Worth doing, not worth blocking 1.0 on, and a decision about the
 book rather than a task.
+
+> *Since 1.0:* **78 of 194**, and both numbers moved. The denominator was wrong all along —
+> the block regex could not see twenty-six blocks in chapter 22–24, so every render transcript
+> in the book was unchecked and "168" was never the total. Twenty-two more were skipped as
+> missing files when the token was a label. The `cargo` blocks — a different gap in the same
+> gate, and where all three of 0.14's stale claims lived — are covered by `make doc-cargo`.
+> Twelve tutorial files are committed as fixtures; the other thirty-four have several states
+> per filename or are described rather than printed, and remain a decision about the book.
+> See `READINESS.md` §7 and `fixtures/tutorial/README.md`.
 
 **Feature completeness.** Twenty-two commands, unchanged since `find` in 0.5. 1.0 is a promise
 about stability, not about scope.
@@ -829,9 +851,13 @@ each with an answer, three gates that each know what they are blind to, and rule
 instead of asserted.
 
 The **verification** is as far as it goes without keys. The CLI's survivors went 172 → 110,
-`progress.rs` from 51 to 1, and the manual's 46 replayed transcripts are inside `cargo test`
-where the tool that measures coverage can see them. What is left is `cmd_*` work in the binary
-and §2.3, which needs an OpenAI and an Anthropic key and nothing else.
+`progress.rs` from 51 to 1, and the manual's replayed transcripts are inside `cargo test` where
+the tool that measures coverage can see them. What is left is `cmd_*` work in the binary and
+§2.3, which needs an OpenAI and an Anthropic key and nothing else.
+
+> *Since 1.0:* the `cmd_*` work is done — `src/main.rs` 99 survivors → 59, with the three
+> largest clusters closed and every command's reachability now tested. §2.3 is unchanged and
+> still wants two keys.
 
 **What that work actually found is worth stating plainly, because it is not what "make the
 surface worth freezing" sounds like.** Rule A was stated in two places and enforced in none.

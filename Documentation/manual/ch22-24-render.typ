@@ -748,10 +748,7 @@ not `typst`.
       "marker": "≈",
       "connective": null,
       "text": "The eu-west connection pool is saturated.",
-      "notes": [
-        {"kind": "contention", "text": "k/ccm3actwjjti65famnoe6mapo5d: contested, 2 position(s) on record"},
-        {"kind": "contention", "text": "k/ccm3actwjjti65famnoe6mapo5d: contested, 2 position(s) on record"}
-      ]
+      "notes": [{"kind": "contention", "text": "k/ccm3actwjjti65famnoe6mapo5d: contested, 2 position(s) on record"}, {"kind": "contention", "text": "k/ccm3actwjjti65famnoe6mapo5d: contested, 2 position(s) on record"}]
     },
     {
       "role": "risk",
@@ -761,9 +758,7 @@ not `typst`.
       "marker": "⊢",
       "connective": "On the other hand, ",
       "text": "The canary rules out a pure configuration cause.",
-      "notes": [
-        {"kind": "contention", "text": "k/ccm3actwjjti65famnoe6mapo5d: contested, 2 position(s) on record"}
-      ]
+      "notes": [{"kind": "contention", "text": "k/ccm3actwjjti65famnoe6mapo5d: contested, 2 position(s) on record"}]
     }
   ]
 }

@@ -1,0 +1,2 @@
+@evidence e/cache-miss { status: measured, source: { kind: metric, ref: "cache.miss_rate{svc=checkout}", captured: 2026-07-20 } }
+~ Cache miss rate on checkout rose from 1% to 42% over the same hour.

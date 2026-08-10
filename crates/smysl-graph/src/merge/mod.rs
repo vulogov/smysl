@@ -417,6 +417,71 @@ mod tests {
         assert_eq!(r.report.count(Code::W055), 1);
     }
 
+    /// The cap is a threshold, and a threshold tested only at zero is not tested.
+    ///
+    /// The test above sets `max_contentions_per_agent = Some(0)`, which makes `len > cap`
+    /// trivially true for any contention at all — so `flooding` replaced with "always fire",
+    /// or its `>` loosened to `>=`, passes it unchanged. All three mutants survived, and the
+    /// count in the message was never read either.
+    ///
+    /// Three separate targets, each with a supersession fork, give three contentions to put a
+    /// cap either side of. Six revisions of *one* target give one contention, not six —
+    /// contention is per target — which is what the first draft of this test got wrong.
+    #[test]
+    fn the_contention_cap_is_a_threshold_and_not_a_switch() {
+        fn merged_with_cap(cap: usize) -> Report {
+            let mut records = Vec::new();
+            for t in 0..3u8 {
+                let target = claim(&format!("target {t}"));
+                let ut = canonical_uid(&target);
+                records.push(Record::Unit(target));
+                for i in 0..2u8 {
+                    let r = claim(&format!("target {t} revision {i}"));
+                    let ur = canonical_uid(&r);
+                    records.push(Record::Unit(r));
+                    records.push(Record::Relation(Relation::new(RelKind::Supersedes, ur, ut)));
+                }
+            }
+            let mut left = Store::from_records(records);
+            let mut o = opts();
+            o.max_contentions_per_agent = Some(cap);
+            merge(&mut left, &Store::new(), o).unwrap().report
+        }
+
+        // What the fixture actually produces, read from the warning rather than assumed.
+        let detected: usize = merged_with_cap(0)
+            .iter()
+            .find(|d| d.code == Code::W055)
+            .and_then(|d| d.message.split_whitespace().next()?.parse().ok())
+            .expect("the warning reports how many it saw");
+        assert!(
+            detected > 1,
+            "the fixture must flood by more than one, saw {detected}"
+        );
+
+        // At the cap: not over it, so silent. This is the assertion `Some(0)`, `Some(1)` and
+        // `>=` each fail — none of them can stay quiet.
+        assert_eq!(
+            merged_with_cap(detected).count(Code::W055),
+            0,
+            "a rate exactly at the cap is not over it"
+        );
+        // One below: over it, so reported.
+        assert_eq!(merged_with_cap(detected - 1).count(Code::W055), 1);
+
+        // And the number in the message is the number seen, not the cap and not a constant.
+        let report = merged_with_cap(detected - 1);
+        let msg = &report
+            .iter()
+            .find(|d| d.code == Code::W055)
+            .expect("a message")
+            .message;
+        assert!(
+            msg.starts_with(&format!("{detected} contentions")),
+            "the warning must say how many it saw, not a constant: {msg:?}"
+        );
+    }
+
     #[test]
     fn merging_an_empty_store_changes_nothing() {
         let mut left = Store::from_records(vec![Record::Unit(claim("a"))]);

@@ -2,7 +2,7 @@
 
 **Status:** normative. This document is the contract.
 **Format version:** `smysl/0.1` · **kernel schema:** `smysl.kernel/0.1`
-**Describes:** crate `1.0.0`.
+**Describes:** crate `1.1.0`.
 
 This is the whole of what a second implementation must obey to interoperate. It is
 deliberately short. Everything it does not say is a free choice.
@@ -25,18 +25,23 @@ and RFC SMYSL-1 disagree, this document is correct and the RFC is history.
 ## 0. Implementations of this document
 
 Three, besides the Rust that defined the format, each written from this document: `python/`,
-`nodejs/` and `go/` in this repository. All three target **C-Read**; `python/` also reaches
-**C-Produce**. They run in CI against fixtures the Rust produced, and a byte-for-byte match is
-what "two implementations agree" means in practice.
+`nodejs/` and `go/` in this repository. All three target **C-Read**; `python/` and `go/` also
+reach **C-Produce**. They run in CI against fixtures the Rust produced, and a byte-for-byte
+match is what "two implementations agree" means in practice.
 
 The distinction is worth stating, because it is the difference between two useful things.
 C-Read says a document means the same to two readers. It does **not** reach §2.1 — reading
 never requires deriving a uid — so all three could round-trip every fixture byte for byte while
 remaining ignorant of what a uid is, which is what happened for a full release. §2.3, *status
 is part of identity*, is the paragraph this format rests on, and C-Produce is the lowest class
-that touches it. `python/` derives uids over a BLAKE3 written for the purpose, and reproduces
-the reference implementation's — canonical bytes checked separately from the hash, in
-`fixtures/wire/uid/`.
+that touches it. `python/` and `go/` each derive uids over a BLAKE3 written for the purpose,
+and reproduce the reference implementation's — canonical bytes checked separately from the
+hash, in `fixtures/wire/uid/`. Three independent derivations of §2.1, where there was one until
+0.10 and two until 1.1.
+
+`go/` also implements the *shape* half of C-Produce that §7 names and `python/` does not: it
+refuses to derive a uid for a unit with no gist, with `derived` or `inferred` and no grounds,
+with `measured` or `cited` and no source, or with an authored `unfounded`.
 
 They exist because every other check in this repository tests whether the Rust is
 self-consistent, and none of them would notice if this document were blank. If you are

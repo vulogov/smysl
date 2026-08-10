@@ -7,36 +7,362 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 0.13.0
+## Unreleased — 1.2.0
 
-Nothing yet. What is carried, and what each is actually waiting on:
+Nothing yet. What is carried:
 
-- **Publication.** 0.12.0 is an intermediate release, cut and not published on purpose. The
-  cost is specific rather than notional: `SEMVER_BREAKING` still names `smysl-core`,
-  `smysl-graph` and `smysl-provider`, so `make semver` checks nine crates of twelve, and the
-  list grows rather than empties while releases stay unpublished. `BASELINE` is 0.11.0, one
-  release behind — which is tolerable, and was two behind when it parked the `parse` repair
-  for a whole cycle.
+- **Gate 4 still wants two keys**, and now needs nothing else. Everything reachable by reading
+  has been read, twice, and it found a defect each time. If you have an OpenAI or Anthropic key,
+  running the provider live tests and reporting what came back closes it — and "it did not
+  work" is more useful still, because the concrete mappers are `#[doc(hidden)]` and a wrong one
+  is fixable without a 2.0.
 
-- **The CLI's verification is invisible to measurement.** It measured 73.6% survivors, more
-  than twice the worst library crate. That is partly real — `src/main.rs` has four tests across
-  3 600 lines — and partly because `make doc-output`, which replays 46 documented transcripts
-  against the built binary, is a Python script no `cargo test` invokes. Wiring it in as an
-  integration test would turn "partly" into a number, which is the bounded piece of work here
-  with a real answer at the end.
+- **Gate 7's remaining 57 commands.** 22 tutorial filenames have more than one state — chapter 1
+  creates `first.smy` broken, fixes it, finds it unformatted, then rewrites it in place — so
+  committing any one file makes the other commands naming it report drift that is not there.
+  Splitting them means the chapters naming a different file at each step, which changes what the
+  book teaches. Still a decision about the book rather than a task;
+  `fixtures/tutorial/README.md` records which files are held back and why, so it need not be
+  rediscovered a third time.
 
-- **`progress.rs`.** 52 survivors in 394 lines, every one an arithmetic operator or a
-  comparison in bar drawing. Twelve tests that check structure and never numbers.
+- **59 survivors in `src/main.rs`**, of 207 viable. What remains is `cmd_thread` 6,
+  `cmd_render` 6, and a tail of threes. The three largest clusters and the dispatch are closed;
+  the yield per hour from here is lower than it was.
 
-- **doc-output coverage**, 46 of 168. The remaining 97 name files the prose asks the reader to
-  create, and the fix is in the *book*: commit the tutorial files as fixtures so the manual and
-  the verifier read the same bytes. A book change, and so a decision rather than a task.
+- **`nodejs/` remains C-Read.** A fourth uid derivation would be a third witness for §2.3
+  beyond the Rust — a scope decision rather than a gap, and it says so where it lists what it
+  does not reach.
 
-- **Gate 4 still wants a key**, for acceptance only. Whether an endpoint accepts the translated
-  schema is unreachable by reading — and reading has now found two defects without one.
+---
 
-- **357 recorded survivors**, deliberately unfixed. A measurement is not a to-do list, and the
-  band the library sits in has been yielding about one real gap per crate.
+## 1.1.0 — 2026-08-10
+
+The first cycle after the freeze, spent on the two things 1.0 shipped without: coverage of the
+CLI, and checks over the parts of the documentation nothing replayed.
+
+Nothing here breaks anything. `SEMVER_BREAKING` is empty, `make semver` is 12/12 clean against
+1.0.0, and an entry in that list now means a 2.0 — a different bar from every cycle before it.
+
+**What the cycle actually found is a better summary than what it set out to do.** Four checks
+that could not fail, each discovered by breaking the thing it was supposed to catch:
+
+- a fixture pair documented as the witness for Unicode normalisation, whose two halves were the
+  same string;
+- a replay script blind to twenty-six blocks of its own subject, so every render transcript in
+  the manual had gone unchecked and its denominator was wrong;
+- a test that killed only half the mutants it was written for, because two arms of one
+  dispatch are not the same mutation;
+- and a measurement of the first of those, taken under the wrong build and nearly published as
+  a regression.
+
+None of them was found by reasoning. Each was found by deliberately breaking something and
+watching a green check stay green.
+
+- **`make doc-cargo`**, a new gate. `verify-doc-output.py` replays the manual's `smysl`
+  transcripts and its skip rules pass straight over the `cargo` ones, so nothing had ever
+  checked those — and 0.14 found three stale claims, every one in a block this now covers. One
+  of them had gone stale *again* one release after being fixed by hand. A version number in
+  prose goes stale every release; that is a reason to check it, not to remove it.
+
+- **Gate 4's Anthropic half**, as far as it goes without a key. The same method that found two
+  defects by reading OpenAI's documentation, applied to Anthropic's.
+
+- **`smysl-provider` recalibrated**, and two more predicates closed in `smysl-graph` along with
+  the contention flood cap.
+
+- **The `cmd_*` clusters and the command dispatch closed.** `src/main.rs` went from 99 survivors
+  of 205 viable to **59 of 207** — `cmd_fmt` 12 → 2, `cmd_merge` 11 → 0, `cmd_providers` 12 → 1,
+  and `cli` + `main` 15 → 1 — across four test files that drive the binary. The remaining
+  `cmd_providers` entry is the `#[cfg(not(feature = "providers"))]` stub of the same name, which
+  no build compiles; the remaining dispatch one is equivalent. Both recorded rather than chased.
+
+- **`go/` reaches C-Produce**, so §2.1 has a third independent derivation — the Rust,
+  `python/`, and now Go — where it had one until 0.10 and two until now. §2.3, *status is part
+  of identity*, is the paragraph the format rests on and the one C-Read cannot reach, because
+  reading never requires computing a uid. `go/blake3.go` is hand-rolled for the reason
+  `python/`'s is: a binding to the same C library the reference implementation uses would test
+  two callers of one hash. It also implements the *shape* half of the class that `python/` does
+  not — `Uid` refuses a unit with no gist, `derived`/`inferred` without grounds,
+  `measured`/`cited` without a source, or an authored `unfounded`.
+
+- **A fixture that could not fail, found by writing it.** Removing NFC from the Go encoder
+  failed the property test and left the fixture comparison green — impossible, since the pair
+  `unicode-composed` / `unicode-decomposed` exists to catch precisely that. The generator had
+  been recording each gist *after* `UnitCoreBuilder` normalised it, so both cases carried the
+  same composed string: one input under two names, and every implementation reading the file,
+  `python/` included, was agreeing with itself. It now records the gist as authored, and a
+  reader that skips §3 constraint 6 no longer reproduces the recorded bytes — checked in both
+  languages.
+
+- **Seven of twenty-two commands could have stopped working with the suite still green.**
+  `ingest`, `usage`, `reindex`, `import`, `relink`, `compact` and `ui` had no test that invoked
+  them at all. `tests/dispatch.rs` runs every command and fails if any is unrouted; and because
+  deleting a command's arm in `cli()` strips its *arguments* rather than the command itself, it
+  also compares all 380 arguments against `tests/cli-surface.txt`. That second half was found by
+  deleting an arm and watching the test keep passing.
+
+  Three findings outlast the counts. The first version of `tests/cmd_fmt.rs` **inflated the
+  score by 97 mutants** by depending on repository fixtures: `cargo-mutants` reuses build
+  directories, a mutant that misroutes a write leaves a fixture altered, and a spuriously
+  failing test counts as a catch. A test must not depend on the state of the tree any more than
+  on the state of the machine. Then `merge --format surface` was found warning that a record
+  "has no surface form and was omitted" over output that plainly contained it — a label binding
+  counted as unrepresentable, which is the same mistake the comment above that filter records
+  being fixed once already for the `@doc` header. And the closing measurement was **nearly
+  published as a comparison of two configurations**: an `--all-features` re-run against a
+  default-features baseline read as 99 → 94, and what gave it away was 21 survivors appearing
+  in functions nobody had touched.
+
+What is carried:
+
+- **Gate 4 still wants two keys**, and now needs nothing else. Everything reachable by reading
+  has been read. If you have an OpenAI or Anthropic key, running the provider live tests and
+  reporting what came back closes it — and "it did not work" is more useful still, because the
+  concrete mappers are `#[doc(hidden)]` and a wrong one is fixable without a 2.0.
+
+- **Gate 7's other half: `doc-output` goes from 46 of 168 to 78 of 194.** The denominator
+  moving is the more serious half. The block regex required the code fence on the line *after*
+  `#screen(...)[`, and chapter 22–24 writes it on the same line, so **twenty-six blocks matched
+  nothing at all** — not skipped, which is counted and reported, but invisible. Every render
+  transcript in the book had gone unchecked since the chapter was written, and the "46 of 168"
+  quoted everywhere had the wrong denominator. `verify-doc-cargo.py` got it right, so two
+  scripts scanning one book disagreed about how many blocks are in it.
+
+  Twenty-two more were skipped as naming a missing file when the token was never a file: the
+  path test is "contains a slash" and smysl spells labels `kind/name`, so `--thread t/brief`
+  read as a file. The dot is the discriminator — every file the manual names has an extension.
+
+  That found **one real drift** (a `--target json` transcript hand-wrapped where the renderer
+  emits one line) and two conventions living only in the chapter the script could not see:
+  `exit N`, now checked against the actual exit code rather than compared as text, and
+  `(excerpt)` in a caption, meaning the block is a window onto the output.
+
+- **Tutorial files committed as fixtures**, twelve of them, in `fixtures/tutorial/<chapter>/`.
+  The commands run with their working directory set there, so the page still says
+  `smysl check cycle.smy` and the output still says `cycle.smy: error: …` — nothing a reader
+  types has changed.
+
+  Twelve of forty-six, and the arithmetic is the point. 22 files across 57 commands have more
+  than one state — chapter 1 creates `first.smy` broken, fixes it, finds it unformatted, then
+  rewrites it in place, so four commands name one path and expect four different files.
+  Committing any one makes the other three report drift that is not there. Seven more were
+  extracted and removed because the chapter's transcript refused to reproduce against them: the
+  block before the command is a fragment the reader adds, not the file — the failure the 0.10
+  attempt recorded, met again and this time measured. A fixture must be the bytes its chapter
+  prints, and the script now fails if one is not found verbatim in its chapter.
+
+  That 46 was also briefly "corrected" to 45 in this file and two others. Run outside
+  `make doc-output` the script reads whatever `./target/debug/smysl` happens to be, and an
+  `--all-features` binary left by unrelated work gives a different count. A measurement quoted
+  without its configuration is not a measurement.
+
+- ~~**`doc-output`'s coverage is feature-dependent**, which nothing states.~~ **Answered, and
+  the second half was wrong.** At `--all-features` 21 mutants survive that the default build
+  catches, which is real — but `tests/doc_output.rs` is gated to compile in exactly one of the
+  nine matrix configurations and its header explains why at length: the manual documents a
+  default build, and `exact-pack` makes a correct `SMY-W202` claim read as drift. At
+  `--all-features` the test does not exist rather than being skipped. `cargo test --test
+  doc_output` runs 1 test; with `--all-features`, 0. The design was deliberate and documented;
+  the question came from not having read it.
+
+- **What remains in `src/main.rs`** is `main` and `cli` — subcommand dispatch, where a mutant
+  deletes an arm nothing routes to.
+
+---
+
+## 1.0.0 — 2026-08-07
+
+The API is frozen. The format is `smysl/1.0`. Six of seven readiness gates closed, and the
+seventh waived with the reason written down.
+
+**1.0.0 is API-identical to 0.15.0.** `make semver` 12/12 clean against it, `SEMVER_BREAKING`
+empty — the version number changes and nothing else does, which is the only honest way to arrive
+at a 1.0.
+
+What the number promises: the facade's 244 names at `--all-features` and 200 at
+`--no-default-features`, and every public item in each of the eleven library crates behind them,
+enforced per crate on every push. None moves without a 2.0.
+
+Getting there meant taking 482 items *out* of the contract first, in 0.13. The provider mappers,
+the codec internals and the ingest machinery are `#[doc(hidden)]` or `pub(crate)` on purpose,
+each carrying its reason where it is declared. That is the difference between a surface that is
+frozen and one that is merely large, and it is why `API_CONTRACT.md` can say "this is the
+contract" rather than "this is a proposal".
+
+The format version says something narrower and stronger: **nothing about the format changed**.
+`smysl/0.1` held across fourteen releases and four independent implementations without a
+revision, and `smysl/1.0` reports that record. Documents declaring `smysl/0.1` are still read and
+still round-trip declaring it.
+
+- **Gate 4 is waived, not closed.** Of the five provider mappers, ollama, DeepSeek and Gemini
+  have been exercised against live endpoints; OpenAI and Anthropic have not, because no key has
+  been available and waiting indefinitely for one is not a plan. Everything checkable without a
+  credential has been checked — both read against their vendor documentation, which found two
+  real defects; the strict-mode schema translation verified recursively against the real
+  Appendix C schema; the failure taxonomy asserted for all five alike. What is unverified is
+  whether the endpoint *accepts* what we send.
+
+  That is defensible rather than optimistic for one reason: the concrete mappers are
+  `#[doc(hidden)]`, so `Anthropic` and `OpenAi` are not in the public API and `build` returns
+  `Box<dyn Provider>`. A mapper found wrong against a live endpoint can be fixed without a 2.0.
+  1.0 freezes the provider abstraction, which three live-tested mappers exercise; it does not
+  freeze the two unverified translations.
+
+  The narrowing that makes that true was done for an unrelated reason — a single-version 1.0
+  could not call the seam "a seam, not a promise" — and it is the third time in this plan that a
+  decision paid off somewhere nobody predicted.
+
+- **Contributions wanted.** If you have an OpenAI or Anthropic key, running the provider live
+  tests and reporting what came back is the single most useful thing anyone outside the project
+  can do.
+
+Phases 0 to 4 of `ROAD_TO_1.0.md` are done, including Phase 3's two consecutive published cycles
+that ended with the break list empty — the gate that could not be hurried, and the reason this
+release is evidence rather than an assertion.
+
+---
+
+## 0.15.0 — 2026-08-07
+
+The second of Phase 3's two quiet cycles, and the release that makes the format `smysl/1.0`.
+
+`SEMVER_BREAKING` empty at the cut, `make semver` 12/12 clean against 0.14.0, nothing broken. Two
+consecutive cycles have now ended that way, which is the whole of what Phase 3 asked for.
+
+- **The format is `smysl/1.0`** — step 3 of §0.1, the last of its four. New documents declare it;
+  `smysl/0.1` is still accepted and still round-trips as itself, because the writer emits the
+  version a document *arrived* as. Only a document with no version to preserve — one built from
+  CBOR, where the wire carries none — gets the new default.
+
+  It waited a release on purpose. §8.2 requires a reader to refuse a version absent from its
+  list, so a writer emitting `smysl/1.0` before a release that reads it is in the field produces
+  documents most readers reject. 0.14 taught the readers and wrote nothing new; it was published;
+  0.15 flipped the writer. That ordering was the point of the whole migration and it is the part
+  that could not be rushed.
+
+  Verified against the built binary rather than by unit test alone: a document declaring
+  `smysl/0.1` through `smysl fmt` comes back `@doc smysl/0.1`; the same document bundled to CBOR
+  and formatted back comes out `@doc smysl/1.0`.
+
+- **The bump carries no format change.** Nothing in the specification differs between the two
+  strings; a document declaring either parses identically; the same fixtures produce the same
+  uids and the conformance suite did not move. That is the claim `smysl/1.0` makes — the format
+  is settled rather than changed — and §8.6 now asks "is the format frozen" rather than "is
+  `smysl/0.1` frozen".
+
+- **The kernel schema did not move with it.** §8 keeps the three axes separate, and
+  `versioning.rs` asserts that alongside the flip: bumping one because another moved would be the
+  coupling the specification forbids.
+
+None of it was breaking, which §1.1's audit is why: `ParseOutcome` and `WriteContext` were made
+`#[non_exhaustive]` a cycle earlier, so each could gain the field the migration needed. The whole
+thing fitted inside the quiet cycles instead of costing one — the open question when Phase 3 was
+written.
+
+---
+
+## 0.14.0 — 2026-08-07
+
+The first of Phase 3's two quiet cycles. `SEMVER_BREAKING` empty at the cut, `make semver` 12/12
+clean against 0.13.0, and nothing in this release breaks anything — which is the entire point of
+it. Two pieces of work, both chosen because they could not break an API.
+
+- **The format migration, steps 1 and 2.** Readers accept `smysl/1.0`; nothing writes it yet. The
+  writer no longer relabels: `ParseOutcome` carries the version a document declared,
+  `WriteContext` carries what the header will say, and `write_surface` emits that rather than a
+  build-time constant.
+
+  The tripwire written in 0.10 fired, which is what it was for — along with three sibling tests
+  that had each picked `smysl/1.0` as their example of an *unknown* version. All four are driven
+  by the list now rather than by literals, so they grow with it instead of failing on it. What
+  replaced the tripwire is the property it stood for: a document declaring either supported
+  version comes back declaring the one it declared, verified by restoring the old writer and
+  watching it report that a `smysl/1.0` document had been rewritten as `@doc smysl/0.1`.
+
+  **The plan was wrong about the other three implementations.** It said the version list also
+  grows in `python/`, `nodejs/` and `go/`. There is no such list: all three read CBOR only, the
+  wire carries no version, and `go/conformance_test.go` says so outright. §8.5 records that, and
+  the migration is smaller than it looked.
+
+  And it was not a breaking change, which is §1.1 paying out — the one item Phase 3 worried might
+  force another breaking release before 1.0 does not.
+
+- **Gate 4, without a key.** "Will the endpoint accept our schema" is two questions, and only one
+  needs a key. Whether we satisfy OpenAI's documented strict-mode rules is a property of the
+  translation.
+
+  Two gaps, one worse than it looked. The rules are recursive — every object needs
+  `additionalProperties: false` and full `required`, and Appendix C nests them — and only the
+  root was checked. And **the schema being translated was not the schema**: `smysl-provider`
+  cannot depend on `smysl-ingest` without a cycle, so it kept an inline copy with 2 of the 13
+  kernel types and 2 of the 5 statuses, while `openai.rs` documented these tests as running
+  "against the full Appendix C schema rather than a miniature of it". It was the miniature, and
+  the two definitions had no way to meet. `fixtures/schema/unit.json` is where they meet now. The
+  translation turns out to be correct against the real schema; that had simply never been tested.
+
+Not done: step 3 of the format migration waits for this release to be published, because §8.2
+requires a reader to refuse a version absent from its list.
+
+---
+
+## 0.13.0 — 2026-08-05
+
+The cycle that made the surface worth freezing, and found that in almost every case the code was
+fine and the check was missing.
+
+Phases 0, 1 and 2 of `ROAD_TO_1.0.md` are done. Phase 3 — two quiet published cycles — has not
+started, and this release is what starts the clock. **Nine of twelve crates break**: the largest
+deliberate break in the project's history, and the right shape for the cycle before 1.0, because
+this is the last one in which narrowing is free.
+
+- **The seam is narrowed.** 482 public items out of the contract across `smysl-provider` and
+  `smysl-ingest`, with the facade's 243 names untouched throughout — that last clause being the
+  check that says nothing a consumer had was taken away. Six steps: a gate for rule A, a decision
+  about what tests may see, a shape review, the narrowing itself, a statement of which artefact
+  is the contract, and an audit of every break.
+
+- **The type surface is decided.** 152 of 191 distinct public types carry `#[non_exhaustive]`,
+  and each of the other 39 has an answer — 33 closed by encapsulation, six closed on purpose and
+  saying so where they are declared. The argument turned out to be §8's rather than taste: the
+  crate and format versions are independent axes, so an exhaustive `UnitCore` would make the next
+  format field a crate major. A rule that only ever says "add the attribute" is a preference
+  wearing a rule's clothes; this one produced both answers.
+
+- **The CLI is measurable and measured.** The manual's 46 replayed transcripts are inside
+  `cargo test` now, which moved the survivor rate from 72.0% to 64.2%; then Phase 2.2 took the
+  remaining 172 down to 110, `progress.rs` from 51 to 1.
+
+**What the cycle actually found**, which is not what "make the surface worth freezing" sounds
+like — six checks that could not fail, and three real defects with survivors sitting on them for
+two releases:
+
+- Rule A was stated in two places, enforced in none, and false in two.
+- `split_oversized` was written, tested and never called, while a neighbouring test asserted the
+  defect it prevents — one paragraph produced a chunk a hundred times the budget.
+- `advance` clamped with an expression that is a no-op, so a bar could print `105/100`. Its test
+  asserted no panic and never looked at the result.
+- `draw` assigned `self.width` twice, the first immediately overwritten.
+- `status_error` was a contract shared by convention.
+- `SEMVER_BREAKING` named a crate that had not broken.
+- `cargo-semver-checks` reports no change on the facade for a rename that removed a published
+  name — the golden file caught it and the semver gate did not.
+- A `doc-output` test passed while the binary's output was wrong.
+- The manual promised a default build includes the TUI. It does not.
+
+**Gates added or corrected:** rule A is checked by `xtask` rather than asserted; `make semver`
+reports the deliberately-breaking crates instead of skipping them, which found a wrong entry on
+its first run; `tests/public-api-counts.txt` catches a public item added by accident, which was
+nobody's break and so nobody's failure; and `make fuzz-build` compiles the fuzz targets, which are
+their own workspace and which `make ci` therefore could not see.
+
+Also: **the format migration is not a breaking change**, corrected in this cycle. Phase 3 had
+listed the `smysl/1.0` bump as a break that must land in cycle zero, then in the next sentence
+said §1.1's `#[non_exhaustive]` was the mitigation. Both cannot be true, and checking settles it
+the other way — which removes the one item that looked like it would force another breaking
+release before 1.0.
+
+Not done: §2.3 needs an OpenAI and an Anthropic key; 109 `cmd_*` survivors remain in the binary,
+which cannot break a library API and are safe for a quiet cycle.
 
 ---
 
@@ -50,7 +376,7 @@ survivor can be unreachable rather than untested, and a rate measures one crate'
 rather than the workspace. The quoting experiment closed negative, and closing it needed the
 same discipline — more samples, and a verdict computed rather than eyeballed.
 
-Nothing yet. What is carried, and what each is actually waiting on:
+What it carried, and what each was waiting on:
 
 - **Three real gaps in `smysl-graph`**, each behind a command a user runs, and each confirmed
   untested against the *whole* workspace rather than just its own crate.

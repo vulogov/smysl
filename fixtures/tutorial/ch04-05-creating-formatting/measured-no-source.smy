@@ -1,0 +1,2 @@
+@evidence e/cache-miss { status: measured }
+~ Cache miss rate on checkout rose sharply.

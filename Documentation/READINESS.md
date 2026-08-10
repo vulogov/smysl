@@ -6,7 +6,22 @@ smysl was unpublished for eight releases, and the reason given each time was "no
 ready" — a true answer and a useless one, because nothing said what would change it, so it
 could only be deferred and never worked toward. This file was written to say what the gate is.
 
-**1.0.0 as of this release, with six of the seven gates closed and one waived.**
+**1.0.0 is released. Five gates closed, one waived, one partial.**
+
+| | gate | |
+|---|---|---|
+| 1 | format stability | ✅ policy written, and exercised by the `smysl/1.0` bump |
+| 2 | a second implementation | ✅ three, from the specification alone; two of them derive uids |
+| 3 | public API stability | ✅ mechanism, plus two published quiet cycles |
+| 4 | verified providers | ⚠️ **waived** — OpenAI and Anthropic never called live |
+| 5 | a test suite that catches what it claims | ✅ every crate measured; survivors triaged; the CLI's three largest clusters closed in 1.1 |
+| 6 | performance characterised | ✅ and it found one |
+| 7 | documentation matches the binary | ◐ 78 of 194 `smysl` transcripts, plus the `cargo` ones and the feature table |
+
+Gate 7 is honestly partial rather than waived: what it checks, it checks well, and 0.14 proved
+the gap is real by finding three stale claims in exactly the blocks the replay cannot reach.
+1.1 closed that half with `make doc-cargo` — and it found drift on its first run, including a
+version string that had gone stale *again* one release after being fixed by hand.
 
 Gate 4 — a live call to OpenAI and Anthropic — is the waiver, and §4 below says what that
 costs rather than burying it. Everything about those two mappers that can be checked without a
@@ -42,18 +57,28 @@ moves or it does not.
 
 ---
 
-## 1. Format stability — *close*
+## 1. Format stability — *done, and now exercised rather than only written*
 
-`smysl/0.1` has not changed across seven crate releases. Record type 10 was *added* in 0.2
+`smysl/0.1` did not change across fourteen crate releases. Record type 10 was *added* in 0.2
 without a format bump, which rule X is precisely for, and one decoder became stricter in 0.5
-about records it should never have accepted. No encoder's output has moved.
+about records it should never have accepted. No encoder's output ever moved.
 
-That is a good record, and it is not yet a commitment. What is missing is a written policy:
-what constitutes a format break, what the deprecation path is, and whether `smysl/0.1` is
-frozen or merely stable-so-far.
+**The policy this gate asked for exists**, as §8 of `SMYSL_FORMAT_SPEC.md`: §8.1 says what may
+change within a version and gives a mechanical test for it — a reader written against the older
+revision must still round-trip the addition, byte for byte, or it is a break however small it
+looks. §8.2 says what requires a new version and that a reader MUST refuse one it does not
+know rather than infer compatibility. §8.3 distinguishes tightening an implementation from
+changing the format. §8.4 is the deprecation path.
 
-**Next action:** a versioning section in `SMYSL_FORMAT_SPEC.md` saying which changes are
-allowed within a format version and which require a new one.
+**And it has been used.** `smysl/1.0` arrived in 0.15, and the whole of §8 governed how:
+readers learned the new string in 0.14 and were *published* before any writer emitted it,
+because §8.2 makes flipping the order a compatibility break. `smysl/0.1` is still accepted and
+still round-trips declaring itself. The bump carried no format change — the same fixtures
+produce the same uids and the conformance suite did not move — so §8.6 records what the number
+means: the format is settled rather than changed.
+
+A policy that has survived being applied once is worth more than one that has only been
+written, which is why this gate is closed rather than "close".
 
 ## 2. A second implementation — *done, including the claim that mattered*
 
@@ -87,8 +112,8 @@ kernel level. None is a defect in the Rust; all three are places a second implem
 guess.
 
 The suite also records what C-Read *cannot* reach, and the largest entry is §2.3 — status is
-part of identity — because uids need C-Produce. The format's central claim is still untested
-by a second implementation.
+part of identity — because uids need C-Produce. That was the format's central claim going
+untested by anything but the Rust; `python/` closed it in 0.10 and `go/` in 1.1.
 
 All three clarifications are folded into §3 of the spec as of 0.9.0: constraint 1 gained the
 decoder's obligation, constraint 2 is scoped to integers and lengths, and tags are constraint
@@ -112,8 +137,33 @@ The §2.3 witness is a pair whose every field is identical and whose status diff
 apart in the canonical encoding, two unrelated uids. Verified capable of failing — dropping
 `status` from the encoder fails 35 tests, by name.
 
-**Next action:** none for this gate. `nodejs/` and `go/` remain C-Read, which is a scope
-decision rather than a gap; both say so where they list what they do not reach.
+**C-Produce reached a second time in 1.1, in `go/`.** §2.1 now has three independent
+derivations — the Rust, `python/`, and `go/` — where it had one until 0.10 and two until now.
+`go/blake3.go` is hand-rolled for the same reason `python/`'s is, and passes the published
+vectors including the lengths straddling the 1024-byte chunk boundary; `go/uid.go` reproduces
+all sixteen canonical encodings and all sixteen uids.
+
+It also implements the half of C-Produce that `python/` does not. §7 defines the class as
+"structural + epistemic + *shape*", and the shape clause — a gist present, grounds where
+`derived` or `inferred` demand them, a source where `measured` or `cited` demands one, no
+authored `unfounded` — is enforced by `Validate`, which `Uid` runs first. A malformed unit
+cannot get an identity out of that package.
+
+**And it found a fixture that could not fail.** Removing NFC from the Go encoder failed the
+property test while the fixture comparison stayed green, which the pair
+`unicode-composed` / `unicode-decomposed` exists to prevent. The generator had been recording
+each gist *after* `UnitCoreBuilder` normalised it, so both cases carried the identical composed
+string — one input under two names, in a fixture documented as the witness for §3 constraint 6.
+Every implementation reading it, `python/` included, was agreeing with itself.
+
+`fixtures/wire/uid/cases.json` now records the gist as *authored*, so a reader that skips
+constraint 6 cannot reproduce the recorded bytes. Verified in both directions and in both
+languages: with the repair, removing NFC fails the fixture comparison in Go and in Python; the
+two tests catch different failures, since a *wrong* normalisation still collides both spellings
+and only the fixture knows which bytes are right.
+
+**Next action:** none for this gate. `nodejs/` remains C-Read, which is a scope decision rather
+than a gap; it says so where it lists what it does not reach.
 
 ## 3. Public API stability — *done: the mechanism, and two published cycles of evidence*
 
@@ -254,11 +304,22 @@ returns `Box<dyn Provider>`. **A mapper found wrong against a live endpoint can 
 without a breaking change.** 1.0 freezes the provider *abstraction*, which is exercised by
 three live-tested mappers; it does not freeze the two unverified translations.
 
-**How this gets closed.** A key, and one afternoon. If you have an OpenAI or Anthropic key and
-want to help: run `SMYSL_LIVE=1 cargo test -p smysl-provider --features openai` (or
-`anthropic`) with the key in the environment, and open an issue with what came back. A report
-saying "it worked" closes this gate; a report saying it did not is more useful still, and is
-fixable without a 2.0.
+**1.1 closed the Anthropic half of what is checkable without a key.** OpenAI's strict mode
+restricts the schema, so what was checkable there was the *translation* — done in 0.14.
+Anthropic passes `input_schema` through unchanged, so what is checkable is the envelope around
+it, and the envelope has rules that break silently: a tool name must match
+`^[a-zA-Z0-9_-]{1,64}$`, `input_schema` must be an object schema, and the forced `tool_choice`
+must name the tool that was actually declared. That last one is the easy defect — rename the
+tool, forget the choice, and the request asks the model to call something absent from its own
+list, failing at the one place nobody here can look. All three are asserted now, plus that the
+schema reaching the body is the whole kernel schema rather than a reduction, which is the
+failure 0.14 found on the OpenAI side.
+
+**How the rest gets closed.** A key, and one afternoon. If you have an OpenAI or Anthropic key
+and want to help: run the provider's live tests with the key in the environment and open an
+issue with what came back. A report saying "it worked" closes this gate; a report saying it did
+not is more useful still, and is fixable without a 2.0 because the concrete mappers are not in
+the public API.
 
 **Mutation testing in 0.12 found the gap this gate describes is not the gap it has.** 477
 viable mutants, 31% survivors — the worst of any crate but the packer, and 25 of them on one
@@ -328,6 +389,35 @@ Both ran in 0.10 as well, and the numbers are now three points on one curve rath
 | `smysl-check` (0.11) | 143 | **9.1%** |
 | `smysl-graph` (0.11) | 625 | **15.0%** |
 | `smysl-provider` (0.12) | 477 | **31.0%** |
+| `smysl-provider` (1.1, re-measured) | 466 | **29.8%** |
+
+**The table above is a set of readings, not a state.** Every rate below `smysl-check` predates
+0.13, and 0.13 changed the code they measure: 482 items left the contract, five crates gained
+`#[non_exhaustive]`, and `smysl-provider` alone gained three test files. Re-measured in 1.1: **29.8%
+of 466 viable, against a recorded 31.0% of 477.** Barely moved, which is itself the finding —
+0.13 added three test files to this crate and took 310 items out of its contract, and the
+survivor rate absorbed all of that as roughly one point.
+
+**The first attempt gave a different answer and it was wrong**, which belongs here rather than
+in a commit message. The run was killed at 324 of 556 mutants; the loop waiting for it timed
+out without its completion sentinel ever appearing, and the partial counters were read as
+final. That produced "26.6%, on a population that fell from 477 to 274" — both halves an
+artefact of stopping early, written into this file and stated aloud before anyone checked
+whether the run had finished. The shards are uneven in difficulty, so a partial run is not a
+sample; the last shard alone held 53 of the 139 survivors.
+
+It is the failure this file spends most of its length describing, committed by the person
+describing it. The lesson is not "be careful": it is that a measurement harness needs a
+completion signal that is *checked*, and that one had a signal nobody read. The re-run is
+sharded, each shard writes a `.done` only after `cargo mutants` prints its own
+"N mutants tested" line, and 4 × 139 = 556 is asserted against the population before the
+arithmetic is believed.
+
+The standing point survives it. A table of measurements taken at different times against
+different code reads as a description of the present, and every rate below `smysl-check`
+predates 0.13 — which moved 482 items out of the contract, put `#[non_exhaustive]` on five
+crates, and gave `smysl-provider` three new test files. The dates in the left column are
+load-bearing.
 | `smysl-render` (0.12) | 144 | **12.5%** |
 | `smysl-retrieve` (0.12) | 77 | **15.6%** |
 | `smysl-embed` (0.12) | 59 | **22.0%** |
@@ -335,6 +425,7 @@ Both ran in 0.10 as well, and the numbers are now three points on one curve rath
 | `smysl-ingest` (0.12) | 337 | **28.8%** |
 | `smysl`, the CLI (0.12, `--all-features`) | 269 | **73.6%** |
 | `smysl`, the CLI (0.13, default features, doc-output wired in) | 268 | **64.2%** |
+| `smysl`, the CLI (1.1, re-measured, default features) | 275 | **40.0%** |
 
 **Every crate in the workspace is now measured.** The library sits between 2.6% and 31%, in a
 band that has stopped being surprising: most survivors are accessors, display strings and
@@ -374,11 +465,135 @@ read a filesystem, build a store and print, so reaching them means driving the b
 `tests/global_flags.rs` does rather than calling a function. That is a body of work in its own
 right, and it is not what 1.0 freezes.
 
+**Confirmed by re-measurement in 1.1: 110 survivors, 109 of them in `src/main.rs` and one in
+`src/progress.rs`** — the per-file figures from 2.2, reproduced exactly by a full sharded run.
+The distribution is unchanged too: `cmd_providers` 12, `cmd_fmt` 12, `cmd_merge` 11, `main` 9,
+`cli` 8.
+
+**The rate is a different story, and it corrects a claim made in this file's own voice.** The
+recorded 64.2% was measured in 2.1, *before* 2.2 did the work; the survivor count of 110 was
+measured after. Quoting them together read as though both described the present, and the
+conclusion drawn from that pairing — that the CLI's rate was probably still near 64% — was
+wrong by a whole phase. It is **40.0% of 275 viable**.
+
+That also narrows a generalisation the provider recalibration seemed to support. `smysl-provider`
+moved about one point across 0.13's narrowing and three new test files; the CLI moved
+twenty-four across 2.2. Rates move when work is aimed at survivors and barely otherwise, so
+"rates move slowly" is not a property of the measurement — it is a description of what happens
+when nobody is targeting it.
+
+**The `cmd_*` clusters and the dispatch were then closed, across 1.1.** `src/main.rs` went from
+**99 survivors of 205 viable (48.3%)** to **59 of 207 (28.5%)** — every run file-scoped to
+`src/main.rs`, at default features, and completed.
+
+| pass | survivors | what it reached |
+| --- | --- | --- |
+| 1.1, before | 99 | — |
+| `cmd_fmt`, `cmd_merge`, `cmd_providers` | **73** | three commands' own decisions |
+| `tests/dispatch.rs` | **59** | whether each command is reachable at all |
+
+| function | before | after | where |
+| --- | --- | --- | --- |
+| `cmd_fmt` | 12 | **2** | `tests/cmd_fmt.rs`, 6 tests |
+| `cmd_merge` | 11 | **0** | `tests/cmd_merge.rs`, 7 tests |
+| `cmd_providers` | 12 | **1** | `tests/cmd_providers.rs`, 5 tests |
+| `cli` + `main` | 15 | **1** | `tests/dispatch.rs`, 3 tests |
+
+23 of the first pass's 26 are those three clusters. The other three are `project_file` and one
+dispatch arm each in `main` and `cli`, killed incidentally because a test that runs
+`smysl merge --staged` reaches them; that is what the arithmetic would have missed in either
+direction.
+
+**The dispatch pass is worth stating as a finding rather than a count.** The fifteen were seven
+commands with an arm in each of two places — `ingest`, `usage`, `reindex`, `import`, `relink`,
+`compact` and `ui` — and what that meant is that **seven of twenty-two commands could stop
+working and the suite would stay green**.
+
+Writing the test found that the two arms are not the same mutation, which the first version
+assumed:
+
+- deleting a command's arm in **`main`** removes its *routing*; the subcommand still parses and
+  the router falls through to "not wired in this build". Invoking the command finds it.
+- deleting its arm in **`cli()`** removes its *arguments* and nothing else, because `cli()`
+  registers all twenty-two subcommands from the `COMMANDS` table unconditionally. The command is
+  still there, still routes, still runs — it has simply lost every flag of its own, and invoking
+  it with no arguments notices nothing.
+
+The second was found by deleting an arm and watching the test keep passing, which is the only way
+it could have been found. It needs `tests/cli-surface.txt`, a golden file of all 380 arguments
+across the 22 commands, compared **inside `cargo test`** — a Makefile gate like `api-check` is
+invisible to anything that counts coverage, which is why `doc-output` was wired into the suite in
+0.13.
+
+A second hole appeared the same way. Seven commands take a required argument, so clap rejects the
+bare name before the router runs and a no-argument invocation cannot see whether they are wired.
+Six were covered by other files that exercise them for real; `import` was not, and its mutant
+survived a run of this very test. `minimal_args` supplies what each needs, and the clap refusal
+is now itself a failure — so adding a required argument tomorrow says so rather than quietly
+ceasing to cover the command.
+
+The one survivor is **equivalent**: `COMMANDS.iter().find(|c| c.name == name)` mutated to `!=`
+selects the wrong `Cmd`, and the only field read happens in the `_ =>` arm no input reaches.
+Documented at the site, the way 0.13 recorded `worse`'s `>=`.
+
+`cmd_fmt`'s two are the round-trip guard, which fires only if `write_surface` produces something
+the parser reads back differently; no input a user can supply reaches it. `cmd_providers`'s one
+is **not** a gap either: `src/main.rs:3358` is the `#[cfg(not(feature = "providers"))]` stub of
+the same name, which neither the default build nor `--all-features` compiles. Mutating code the
+build excludes cannot fail a test. It is an artifact of measuring a file that defines one
+function twice, and the honest record of it is here rather than a test written to chase it.
+
+**These figures were nearly published as a comparison of two different configurations**, which
+is the error corrected two paragraphs above this one. The re-measurement was run
+with `--all-features` while the 99 it was being compared against was default features. It read
+as 99 → 94, a nearly-useless change from a day's work — and the tell was that the diff showed
+**21 survivors appearing in functions nobody had touched**, which a real regression in `cmd_merge`
+cannot cause. Re-run at default features it is 99 → 73, with an empty list of new survivors.
+
+The discarded run left one observation worth keeping, and chasing it produced a second correction
+to this file rather than a finding. At `--all-features`, 21 mutants across `cmd_pack`, `cmd_diff`,
+`cmd_check`, `cmd_trace`, `cmd_salience`, `cmd_thread`, `cmd_retract` and `emit_pack_surface`
+survive that the default build catches. This was recorded here as coverage that is
+"feature-dependent in a way nothing states".
+
+**Nothing states it is wrong.** `tests/doc_output.rs` is gated to compile in exactly one of the
+nine matrix configurations — the plain `cargo test --workspace` — and the header of that file
+explains why at length: the manual documents a default-features build, and `exact-pack` compiled
+in makes a correct `SMY-W202` claim read as drift. At `--all-features` the test is not skipped,
+it does not exist, so the 21 mutants only it reaches are unopposed. Confirmed by counting:
+`cargo test --test doc_output` runs 1 test, `cargo test --all-features --test doc_output` runs 0.
+
+So the answer to "why does the CLI measure worse at `--all-features`" is written down in the
+file that causes it, and the question was asked by someone who had not read it. The number is
+real, the design is deliberate, and the only thing that was missing is this paragraph.
+
+Three things came out of that work that are worth more than the counts.
+
+**A defect the mutants only pointed at.** `merge --format surface` counted a label binding as
+having no surface form, so `@claim c/a` warned that one record was "omitted" over output that
+read `@claim c/a`. The comment directly above that filter records the *same* mistake being fixed
+once already, for the `@doc` header — expressible, and blamed on contentions. The count now asks
+`ctx` which label it will write rather than assuming, so a binding that loses the fold still
+counts and one that is rendered does not.
+
+**A test may not assume the feature set it was written under.** `cmd_providers` first configured
+its hosted provider as `anthropic` and passed under `--all-features` and the default build, then
+failed three tests in the matrix entry that has `providers` and ollama but no vendor mappers —
+`providers` alone compiles none. `caps().offline` comes from the *endpoint*, not the vendor, so
+every provider there is now `kind: ollama` and local-versus-hosted is carried by `127.0.0.1`
+versus a public host. That is closer to the rule the code implements, and it does not depend on
+which combination is being built. `cmd_merge` had the same shape: `--staged` needs `ingest`, so
+those three tests carry their own `cfg` and the other four still run in a `cli`-only build.
+
+**A negative assertion on a padded string is a check that stops working silently.** Asserting
+`!stdout.contains("nearby         refused")` ties the test to a column width, and a change to the
+padding makes it pass by never matching. The rows are looked up by id now, and a missing row
+panics rather than satisfying a `!contains`.
+
 **Next action:** not "fix 357 survivors". The band 12–31% has yielded roughly one real gap per
-crate and reading each survivor is the expensive part, so the yield per hour is falling. The
-CLI is the exception worth acting on, and the useful first move there is to make its real
-verification visible to measurement — `doc-output` is the test that covers it, and nothing that
-counts coverage can see it.
+crate and reading each survivor is the expensive part, so the yield per hour is falling. The CLI
+was the exception, and the three clusters that made it one are closed; what remains in
+`src/main.rs` is `main` and `cli`, which are subcommand dispatch.
 
 **Read these as "does this crate's own suite cover it", not "is this covered".** `cargo mutants
 -p X` runs `cargo test --package=X`, so a function only exercised by a downstream crate is
@@ -435,7 +650,29 @@ decides whether a retraction took; and `TraceKind::follows_parents`, which picks
 `trace`. The fourth, `Store::matching_prefix`, is caught by `smysl-check` and was never a gap at
 all — which is the whole reason the re-check exists.
 
-**Next action:** tests for those three. They are cheap, and each backs a command a user runs.
+**Done in 0.12**, in `crates/smysl-graph/tests/predicates.rs`. Re-measured in 1.1 and all three
+are killed. This gate carried "next action: tests for those three" for three releases after the
+tests existed, which is its own small lesson: a checklist is only as true as its last reading.
+
+**And the class was not exhausted.** Re-measuring found two more predicates of exactly the same
+shape — `Lineage::is_empty` and `RetractionPlan::is_empty`, each replaceable with `true` and
+nothing failing, each on a path a user takes. A shortlist is what one pass surfaced, not the
+population.
+
+`Lineage::is_empty -> false` is a third case again, and it cannot be killed: `trace` pushes a
+node for the root before anything else, and `Lineage` is `#[non_exhaustive]`, so no lineage is
+ever empty and no consumer can build one that is. The method can only return `false`. Recorded
+as equivalent rather than chased — and worth recording because the first draft of the test
+*did* chase it, asserting `is_empty() == (len() == 0)` on a lineage where both are trivially
+false. That passes under the mutant. It is the same failure this file keeps describing, written
+by the person describing it.
+
+**A real gap found alongside them: the contention-flood cap.** `flooding` decides `SMY-W055`,
+and its one test set `max_contentions_per_agent = Some(0)` — which makes `len > cap` trivially
+true, so "always fire", "always fire one", and `>` loosened to `>=` all pass it unchanged, and
+the count in the message was never read. Three mutants on an anti-abuse diagnostic, alive
+because the threshold was only ever tested at the one value where it is not a threshold. Now
+tested either side of a real cap, with the reported count asserted.
 
 The comment sweep is retired as a primary instrument. Its yield fell across three crates — two
 findings in `smysl-core`, one in `smysl-graph`, all three documentation rather than behaviour —
@@ -465,12 +702,96 @@ project has made it.
 gates, deliberately — timing assertions on shared runners cry wolf — so the standing cost is
 that somebody has to run them. Worth running at a release cut.
 
-## 7. Documentation that matches the binary — *partial*
+## 7. Documentation that matches the binary — *partial, and the cheap half now gated*
 
-`make doc-output` replays 46 of 168 documented command blocks and gates on them. The other 122
-are skipped, mostly because they name files a chapter built earlier in its own narrative.
-Appendix A, the purity table and the diagnostic registry are cross-checked against the code at
-every release cut.
+`make doc-output` replays **78 of 194** documented command blocks and gates on them; 116 are
+skipped, mostly because they name files a chapter built earlier in its own narrative. Appendix
+A, the purity table and the diagnostic registry are cross-checked against the code at every
+release cut.
+
+**Both of those numbers moved in 1.1, and the denominator moving is the more serious half.**
+It had been quoted as 168 since the script was written. The real figure is 194: the block
+regex required the code fence on the line *after* `#screen(...)[`, and chapter 22–24 writes it
+on the same line throughout, so **twenty-six blocks matched nothing at all**. They were not
+skipped — skipping is counted and reported — they were invisible, and every render transcript
+in the book had gone unchecked since the chapter was written. `verify-doc-cargo.py`, written
+later, got this right; the two scripts scanning one book disagreed about how many blocks are in
+it, which is how it surfaced.
+
+A further twenty-two were skipped as "input file missing" when the token was never a file.
+The path test is "contains a slash", and smysl spells labels `kind/name` — so `--thread
+t/brief`, `--id v/two-roots` and `--tokenizer tiktoken/cl100k` all read as files that do not
+exist. The discriminator is the dot: every file the manual names carries an extension and no
+label does.
+
+Bringing those into view found **one real drift** and two conventions the script had never
+met, because they live only in the chapter it could not see: `exit N` as a trailing line, now
+checked against the actual exit code rather than compared as text; and `(excerpt)` in a
+caption, meaning the block is a window onto the output rather than the whole of it. The drift
+was a `--target json` transcript that had been hand-wrapped, showing `"notes"` across four
+lines where the renderer emits one.
+
+**And the tutorial files are committed, which is gate 7's larger half.** 100 commands name a
+file the *prose* asks the reader to create; twelve of those files are now in
+`fixtures/tutorial/<chapter>/`, and the commands run with their working directory set there —
+so the page still says `smysl check cycle.smy`, the output still says `cycle.smy: error: …`,
+and nothing a reader types has changed.
+
+Twelve of forty-six, not all of them, and the arithmetic is the point:
+
+- **22 files, 57 commands, have more than one state.** Chapter 1 has the reader create
+  `first.smy` broken, fix it, find it unformatted, then rewrite it in place. Four commands name
+  one path and expect four different files; committing any one makes the other three report
+  drift that is not there. Splitting them means the chapters naming a different file at each
+  step, which changes what the book teaches — still a decision about the book.
+- **Seven were extracted and then removed**, because the chapter's own transcript refused to
+  reproduce against them: the fenced block before the command is a *fragment* the reader adds,
+  not the file. This is the failure the 0.10 attempt hit and recorded, met again and this time
+  measured. It is loud rather than subtle — the diagnostics carry byte offsets, so a
+  wrongly-assembled file reports `at 0..125` where the manual says `at 296..416`.
+- **One is described rather than printed** — `bignote.txt`, "a ~7 KB paragraph, repeated".
+
+The rule that holds it together is that a fixture must be the bytes its chapter prints, and
+`verify-doc-output.py` fails if one is not found verbatim in its chapter. Without it, editing
+the page leaves the fixture behind and the script starts measuring its own copy of the book.
+Verified by appending a line to a fixture and watching it fail.
+
+**That number is measured under one specific build, and reading it under another gives a
+different answer** — which was nearly written into this file as drift. Re-checking it in 1.1 by
+running `scripts/verify-doc-output.py` directly produced `ran 45, skipped 123`, and 46 was about
+to be "corrected" to 45 across three documents. The script reads `./target/debug/smysl`, and what
+was on disk was an `--all-features` binary left by unrelated work; `make doc-output` runs a
+default-features `cargo build` first, on purpose, and the script's own docstring says why. Under
+the supported invocation it is 46, twice, with `MISMATCHED 0` — and pointed deliberately at an
+`--all-features` binary it reports `MISMATCHED 1`, the false drift the docstring warns about.
+
+The lesson is not "the number was fine". It is that **a measurement quoted without its
+configuration is not a measurement**, which this file already says about the CLI's survivor rate
+one section up, and which cost a wrong correction here before the check was run the supported
+way. Both times the tell was the same: a number moving for no reason anyone could name.
+
+**`make doc-cargo` closed the other half in 1.1.** `verify-doc-output.py` replays the documented
+`smysl` commands and its skip rules pass straight over the `cargo` ones, which is why every one
+of the three stale claims 0.14 found by hand was in a block it cannot reach. The new gate replays
+the six single-command `cargo` transcripts, checks every version string against the manifest, and
+compares the one feature table that claims to be "transcribed here exactly" against `[features]`.
+It found drift on its first run:
+
+- the `cargo build` transcript said `v0.13.0` — stale *again*, one release after being fixed by
+  hand in 0.14;
+- `cargo xtask check-purity` claimed 25 crates where there are 31, 6 pure crates where there are
+  7, 66 source files where there are 71, and omitted the `rule A` line entirely, so the manual
+  had documented a purity gate that stopped matching what runs when 0.13 added rule A to it;
+- the dependency tree still carried 0.13 versions.
+
+Two design points are worth keeping. Cargo's progress lines are normalised away because they
+vary between two correct runs — which leaves `cargo build` with nothing to compare, its whole
+body being `Compiling` and `Finished`, so the version inside is checked separately against the
+manifest rather than left unchecked. And the feature check is scoped by a marker rather than a
+filename: the manual has more than one feature table and the others are prose, so comparing those
+produced eleven mismatches of which none was a defect. A check that cannot tell "nothing was
+wrong" from "nothing was checked", and a check that cries wolf, fail in opposite directions and
+both teach people to ignore it.
 
 The manual has been wrong twice in ways that mattered: it described `ui` as a stub for
 several releases, and it stated a body-line limitation that had been fixed.
@@ -531,14 +852,32 @@ All three are `cargo` transcripts rather than `smysl` ones, which is precisely w
 never saw them. **The 122 skipped blocks are not merely unchecked; they are where drift
 actually accumulates**, and that is now demonstrated rather than assumed.
 
-**Next action:** if this is worth more, the fix is in the *manual*, not the script — commit the
-tutorial files as fixtures and have the chapters include them, so what the reader copies and
-what the script replays are the same bytes. That is a book change, and the book is the thing
-the coverage is protecting, so it should be a deliberate decision rather than a side effect.
+**1.1 took the cheaper action**, which is `make doc-cargo` and is now part of `make ci`.
+`verify-doc-output.py` replays `smysl` commands; these are a different program, so its skip
+rules passed over them and nothing checked them at all. The new script replays the six
+single-command `cargo` transcripts, checks every version string in them against the manifest,
+and compares the one feature table that claims to be "transcribed here exactly" against
+`[features]`.
 
-A cheaper second action now has evidence behind it: the handful of `cargo` transcripts could be
-regenerated at release time the way `make docs` rebuilds the PDFs. Three of the four defects
-above would have been caught by that alone.
+It found drift immediately, which is the argument for it:
+
+- the `cargo build` transcript said `v0.13.0` — **stale again**, one release after being fixed
+  by hand in 0.14. A version number in prose goes stale every release; that is a reason to
+  check it, not to remove it.
+- the `cargo xtask check-purity` transcript claimed 25 crates where there are 31, 6 pure crates
+  where there are 7, 66 source files where there are 71 — and omitted the `rule A` line
+  entirely, so the manual documented a purity gate that had not matched what runs since 0.13.
+- the dependency tree still carried 0.13 versions.
+
+Confirmed by re-introducing 0.14's feature-table defect and watching the check name it.
+Twenty-seven seconds warm, which is what makes it affordable on every push rather than at
+release time only.
+
+**Next action, still open:** if this is worth more, the fix is in the *manual*, not the script —
+commit the tutorial files as fixtures and have the chapters include them, so what the reader
+copies and what the script replays are the same bytes. That is a book change, and the book is
+the thing the coverage is protecting, so it should be a deliberate decision rather than a side
+effect.
 
 ---
 

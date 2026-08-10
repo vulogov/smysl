@@ -368,6 +368,127 @@ impl StatusMapping for Anthropic {
 
 #[cfg(test)]
 mod tests {
+    /// What Anthropic documents about a tool, checked without a key.
+    ///
+    /// The mirror of `openai_compat::appendix_c_tests`, and a different shape of check because
+    /// the two endpoints are different. OpenAI's strict mode restricts the schema, so what is
+    /// checkable there is the *translation*. Anthropic passes `input_schema` through unchanged,
+    /// so what is checkable here is the envelope around it — and the envelope has rules that
+    /// are easy to break silently.
+    ///
+    /// Gate 4 in `READINESS.md` is waived at 1.0 because no key has ever been available for
+    /// this provider. Everything in this module is what "waived" is allowed to mean: the parts
+    /// that do not need one are checked.
+    mod tool_envelope {
+        use super::*;
+
+        fn schema() -> String {
+            include_str!("../../../../fixtures/schema/unit.json").to_string()
+        }
+
+        fn body_for(mode: StructuredMode) -> Value {
+            let mut cfg = ProviderConfig::new(ProviderId::new("a").unwrap(), "anthropic");
+            cfg.model = "claude-x".into();
+            cfg.endpoint = "http://127.0.0.1:1".into();
+            cfg.structured = mode;
+            let m = Anthropic::new(cfg);
+            let mut req = Request::new("claude-x", "some text");
+            if mode == StructuredMode::ToolForce {
+                req = req.with_schema(mode, schema());
+            }
+            m.body(&req, false).expect("the body builds")
+        }
+
+        /// Anthropic requires a tool name matching `^[a-zA-Z0-9_-]{1,64}$`. Ours is a
+        /// constant, so this can only fail when somebody edits it — which is exactly when a
+        /// silent 400 would be hardest to attribute.
+        #[test]
+        fn the_tool_name_is_one_anthropic_accepts() {
+            assert!(
+                !TOOL_NAME.is_empty() && TOOL_NAME.len() <= 64,
+                "{TOOL_NAME:?}"
+            );
+            assert!(
+                TOOL_NAME
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+                "`{TOOL_NAME}` is not `^[a-zA-Z0-9_-]{{1,64}}$`"
+            );
+        }
+
+        /// The forced choice must name the tool that was declared.
+        ///
+        /// This is the defect the envelope makes easy: rename the tool, forget the choice, and
+        /// the request asks the model to call something that is not in its list. It fails at
+        /// the endpoint, which is the one place nobody here can look.
+        #[test]
+        fn the_forced_choice_names_the_declared_tool() {
+            let body = body_for(StructuredMode::ToolForce);
+            let declared = body["tools"][0]["name"]
+                .as_str()
+                .expect("a tool is declared");
+            assert_eq!(body["tool_choice"]["type"], "tool");
+            assert_eq!(
+                body["tool_choice"]["name"], declared,
+                "the forced choice names a tool that was not declared"
+            );
+            assert_eq!(declared, TOOL_NAME);
+        }
+
+        /// Anthropic requires `input_schema` to be a JSON Schema *object*.
+        ///
+        /// It is passed through unchanged — there is no translation step here, unlike OpenAI —
+        /// so whatever Appendix C says is what the endpoint sees.
+        #[test]
+        fn the_input_schema_is_an_object_schema() {
+            let body = body_for(StructuredMode::ToolForce);
+            let s = &body["tools"][0]["input_schema"];
+            assert_eq!(s["type"], "object", "input_schema must be an object schema");
+            assert!(
+                s["properties"].is_object(),
+                "an object schema needs properties"
+            );
+            assert!(
+                s.get("required").is_some_and(Value::is_array),
+                "the kernel's required fields must survive into the tool schema"
+            );
+        }
+
+        /// The schema sent is the real one, not a reduction of it.
+        ///
+        /// This is the failure 0.14 found on the OpenAI side: the strict translation was
+        /// tested against an inline copy with 2 of the 13 kernel types, while the code
+        /// documented it as the full Appendix C. Here the schema is passed through, so the
+        /// equivalent check is that what goes into the body is what `smysl-ingest` generates.
+        #[test]
+        fn the_schema_sent_is_the_whole_kernel_schema() {
+            let body = body_for(StructuredMode::ToolForce);
+            let sent = &body["tools"][0]["input_schema"];
+            let fixture: Value = serde_json::from_str(&schema()).expect("the fixture parses");
+            assert_eq!(sent, &fixture, "the body altered the schema on its way in");
+
+            let types = sent["properties"]["type"]["enum"]
+                .as_array()
+                .expect("kernel types");
+            assert!(
+                types.len() >= 13,
+                "only {} kernel types reach the endpoint; the format defines more",
+                types.len()
+            );
+        }
+
+        /// No tool block at all when structure was not asked for.
+        ///
+        /// The control: every assertion above is about the shape of a tool request, and all of
+        /// them would pass vacuously against a body that always carried one.
+        #[test]
+        fn no_tool_is_declared_when_none_was_requested() {
+            let body = body_for(StructuredMode::None);
+            assert!(body.get("tools").is_none(), "declared a tool unasked");
+            assert!(body.get("tool_choice").is_none(), "forced a tool unasked");
+        }
+    }
+
     use super::*;
 
     fn cfg() -> ProviderConfig {

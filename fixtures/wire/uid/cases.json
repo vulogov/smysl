@@ -1,5 +1,5 @@
 {
-  "purpose": "Unit cores, their canonical bytes and their uids, produced by the Rust. A second implementation at C-Produce must reproduce every uid. `core_bytes_hex` is included so a mismatch says whether the encoding or the hash disagreed.",
+  "purpose": "Unit cores, their canonical bytes and their uids, produced by the Rust. A second implementation at C-Produce must reproduce every uid. `core_bytes_hex` is included so a mismatch says whether the encoding or the hash disagreed. `gist` is the text as *authored*, not as normalised: `unicode-decomposed` carries e+U+0301 and the recorded bytes are of its NFC form, so a reader that skips §3 constraint 6 cannot reproduce them.",
   "cases": [
     {
       "name": "minimal",
@@ -149,7 +149,7 @@
       "name": "unicode-decomposed",
       "core": {
         "schema": "claim",
-        "gist": "café latency, 中文",
+        "gist": "café latency, 中文",
         "body": null,
         "detail": null,
         "deps": [],

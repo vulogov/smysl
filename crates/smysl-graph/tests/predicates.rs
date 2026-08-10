@@ -17,6 +17,15 @@
 //! reports contention, a store where everything reads as retracted, a trace that always follows
 //! provenance. Each fails safe-looking and loud, which is precisely why nobody would suspect
 //! the test was missing.
+//!
+//! **Two more of the same shape, found in 1.1 by re-measuring rather than by looking.** The
+//! 0.11 sweep produced a shortlist of three and the class was taken as handled; it was not.
+//! `Lineage::is_empty` and `RetractionPlan::is_empty` are the same kind of predicate with the
+//! same absence behind them, and both sit on a path a user takes — `trace` reporting whether
+//! it found any ancestry, and `retract` reporting whether a plan would do anything.
+//!
+//! The lesson is about the sweep rather than the code: a shortlist is what one pass surfaced,
+//! not the population.
 
 use std::collections::BTreeMap;
 
@@ -27,8 +36,8 @@ use smysl_core::{
 use smysl_graph::lineage::{trace, TraceKind};
 use smysl_graph::merge::retraction::effective_status;
 use smysl_graph::merge::{merge, MergeOptions};
-use smysl_graph::RetractionPolicy;
 use smysl_graph::Store;
+use smysl_graph::{RetractionAuthority, RetractionPolicy};
 
 fn agent() -> AgentId {
     AgentId::new("human:alice").unwrap()
@@ -201,4 +210,99 @@ fn the_trace_kinds_walk_different_edges() {
     );
 
     let _ = BTreeMap::<Uid, ()>::new();
+}
+
+// -- Lineage::is_empty --------------------------------------------------------------------
+
+/// A trace that found ancestry — and a note on the case that does not exist.
+///
+/// `Lineage::is_empty` has two mutants and they are not the same kind of thing.
+///
+/// `-> true` is a real gap and this test closes it: a trace that reached two units is not
+/// empty, and nothing said so before.
+///
+/// `-> false` is **equivalent and cannot be killed**, which is worth recording rather than
+/// chasing. `trace` pushes a node for every uid in the frontier and the frontier starts with
+/// the root, so every lineage it returns has at least one node. `Lineage` is
+/// `#[non_exhaustive]` as of §1.1, so no consumer can construct an empty one either. The
+/// method can only ever return `false`, and a test asserting that would be asserting a
+/// tautology — the first draft of this test did exactly that, comparing `is_empty()` against
+/// `len() == 0` on a lineage where both are trivially false, and it passed under the mutant.
+///
+/// Recorded the way 0.13 recorded `worse`'s `>=` and `Style::detect`'s `||`: a survivor no
+/// test can kill is a fact about the code, and pretending otherwise costs more than it buys.
+#[test]
+fn a_lineage_that_found_ancestry_is_not_empty() {
+    let ground = claim("something measured", vec![]);
+    let g = canonical_uid(&ground);
+    let derived = claim("something inferred from it", vec![g]);
+    let d = canonical_uid(&derived);
+    let store = Store::from_records(vec![Record::Unit(ground), Record::Unit(derived)]);
+
+    let found = trace(&store, d, TraceKind::Grounds, None);
+    assert!(
+        !found.is_empty(),
+        "a trace that reached two units is not empty"
+    );
+    assert_eq!(found.len(), 2);
+
+    // Even a root the store has never heard of yields the root itself, which is the whole
+    // reason the empty case is unreachable.
+    let absent = trace(
+        &store,
+        canonical_uid(&claim("never stored", vec![])),
+        TraceKind::Both,
+        None,
+    );
+    assert_eq!(absent.len(), 1, "the root is always reported");
+    assert!(!absent.is_empty());
+}
+
+// -- RetractionPlan::is_empty -------------------------------------------------------------
+
+/// A plan that would remove something, and one that would not.
+///
+/// `retract` reports "nothing to do" from this predicate, so stuck at `true` it would tell a
+/// user their retraction was a no-op while it removed things, and stuck at `false` it would
+/// promise a blast radius that is empty.
+#[test]
+fn a_retraction_plan_is_empty_only_when_nothing_would_go() {
+    let ground = claim("the evidence", vec![]);
+    let g = canonical_uid(&ground);
+    let dependent = claim("a claim resting on it", vec![g]);
+    let d = canonical_uid(&dependent);
+    let store = Store::from_records(vec![Record::Unit(ground), Record::Unit(dependent)]);
+
+    // `Any` rather than the default `Origin`: this fixture carries no attestations, so
+    // origin authority would refuse and the plan would be empty for a reason that has nothing
+    // to do with the predicate under test.
+    let real = smysl_graph::plan_retraction(
+        &store,
+        g,
+        &[agent()],
+        RetractionPolicy::default(),
+        RetractionAuthority::Any,
+    );
+    assert!(
+        !real.is_empty(),
+        "retracting a ground that something rests on is not a no-op"
+    );
+    assert!(
+        real.blast_radius.contains(&d),
+        "the dependent is in the blast radius"
+    );
+
+    // A uid the store does not hold: nothing to retract, so nothing to plan.
+    let nothing = smysl_graph::plan_retraction(
+        &store,
+        canonical_uid(&claim("not in the store", vec![])),
+        &[agent()],
+        RetractionPolicy::default(),
+        RetractionAuthority::Any,
+    );
+    assert!(
+        nothing.is_empty(),
+        "planning a retraction of an absent unit removes nothing"
+    );
+    assert!(nothing.blast_radius.is_empty());
 }

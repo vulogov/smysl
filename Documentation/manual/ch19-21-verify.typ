@@ -1031,9 +1031,10 @@ cannot promise anything about.
 #screen(caption: "$ cargo xtask check-purity")[
 ```
 xtask check-purity (rules A, B)
-  dependency tree (--no-default-features): 25 crates, none forbidden
-  pure crates: 6 checked
-  source scan: 66 files, 7 symbols
+  dependency tree (--no-default-features): 31 crates, none forbidden
+  pure crates: 7 checked
+  source scan: 71 files, 7 symbols
+  rule A: 2 CLI files reach only the facade
 ok
 ```
 ]

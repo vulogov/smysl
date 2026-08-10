@@ -96,9 +96,9 @@ faith. Building the facade crate's own library target with every feature off:
 
 #screen(caption: "$ cargo tree --no-default-features -p smysl")[
 ```
-smysl v0.13.0
-├── smysl-check v0.13.0
-│   ├── smysl-core v0.13.0
+smysl v1.1.0
+├── smysl-check v1.1.0
+│   ├── smysl-core v1.1.0
 │   │   ├── blake3 v1.8.5
 │   │   │   ├── arrayref v0.3.9
 │   │   │   ├── arrayvec v0.7.8
@@ -111,26 +111,26 @@ smysl v0.13.0
 │   │   └── unicode-normalization v0.1.25
 │   │       └── tinyvec v1.12.0
 │   │           └── tinyvec_macros v0.1.1
-│   └── smysl-graph v0.13.0
-│       └── smysl-core v0.13.0 (*)
-├── smysl-core v0.13.0 (*)
-├── smysl-graph v0.13.0 (*)
-├── smysl-pack v0.13.0
-│   ├── smysl-core v0.13.0 (*)
-│   └── smysl-graph v0.13.0 (*)
-├── smysl-render v0.13.0
-│   ├── smysl-core v0.13.0 (*)
-│   ├── smysl-graph v0.13.0 (*)
-│   └── smysl-thread v0.13.0
-│       ├── smysl-core v0.13.0 (*)
-│       └── smysl-graph v0.13.0 (*)
-├── smysl-retrieve v0.13.0
+│   └── smysl-graph v1.1.0
+│       └── smysl-core v1.1.0 (*)
+├── smysl-core v1.1.0 (*)
+├── smysl-graph v1.1.0 (*)
+├── smysl-pack v1.1.0
+│   ├── smysl-core v1.1.0 (*)
+│   └── smysl-graph v1.1.0 (*)
+├── smysl-render v1.1.0
+│   ├── smysl-core v1.1.0 (*)
+│   ├── smysl-graph v1.1.0 (*)
+│   └── smysl-thread v1.1.0
+│       ├── smysl-core v1.1.0 (*)
+│       └── smysl-graph v1.1.0 (*)
+├── smysl-retrieve v1.1.0
 │   ├── bm25 v2.3.2
 │   │   └── fxhash v0.2.1
 │   │       └── byteorder v1.5.0
-│   ├── smysl-core v0.13.0 (*)
-│   └── smysl-graph v0.13.0 (*)
-└── smysl-thread v0.13.0 (*)
+│   ├── smysl-core v1.1.0 (*)
+│   └── smysl-graph v1.1.0 (*)
+└── smysl-thread v1.1.0 (*)
 [dev-dependencies]
 └── serde_json v1.0.151
     ├── itoa v1.0.18

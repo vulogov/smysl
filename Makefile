@@ -50,7 +50,7 @@ MATRIX := \
 .DEFAULT_GOAL := help
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix gates purity update seed-fuzz fuzz-build \
         determinism conformance eval live-ollama live-hosted doc fuzz clean sweep \
-        commit ci toolchain eval-live eval-semantic docs doc-output seed-fuzz fuzz-long
+        commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo seed-fuzz fuzz-long
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -101,15 +101,27 @@ doc-gate: ## Rustdoc with warnings denied, as docs.rs would show it
 # The last **published** version, and what is published.
 #
 # Published, not tagged. `cargo-semver-checks` fetches the baseline from crates.io, so this
-# moves when a release reaches the registry and not when it is cut. It sat at 0.9.0 through two
-# cut-but-unpublished releases, which meant every breaking change was measured against a
-# version two releases old; 0.10.0 remains unpublished and 0.11.0 is the baseline now.
+# moves when a release reaches the registry and not when it is cut.
+#
+# That distinction cost two cycles. It sat at 0.9.0 through 0.10 and 0.11, both cut without
+# being published, so every breaking change was measured against a version two releases old and
+# the `ContextExceeded` repair sat parked behind it. Pointing it at an unpublished version does
+# not fail loudly either — it turns all twelve crates into "version not found in registry", a
+# red job saying nothing about the API. 0.10.0 and 0.12.0 were never published and never will
+# be; everything in them shipped in the release after.
 BASELINE  := 1.0.0
 PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-render \
              smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl
 
 # The library crates behind the facade: everything published except the facade itself.
 LIBRARIES := $(filter-out smysl,$(PUBLISHED))
+
+# The twenty-two subcommands, for `cli-surface`. Written out rather than read from `--help`,
+# for the same reason `tests/dispatch.rs` writes them out: a list derived from the binary
+# shrinks silently when the binary does, and the regenerated golden would then record the
+# absence as if it were the intent.
+COMMAND_NAMES := fmt check pack merge diff trace view bundle thread salience find retract \
+                 render import relink compact ingest attest providers usage reindex ui
 
 DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE SMYSL_RATIONALE_PRESENTATION
 
@@ -136,6 +148,18 @@ docs: ## Rebuild the PDFs in Documentation/ from their typst sources
 # targets answer different questions and both are needed: `api-check` says the *list* changed,
 # `semver` says the change was breaking. A rename shows up in the first; adding
 # `#[non_exhaustive]` to a struct shows up only in the second.
+cli-surface: ## Regenerate tests/cli-surface.txt, the recorded CLI argument surface
+	@$(CARGO) build --quiet
+	@{ sed -n '1,/^# Regenerate with/p' tests/cli-surface.txt; \
+	   for c in $(COMMAND_NAMES); do \
+	     ./target/debug/smysl $$c --help 2>&1 \
+	       | grep -oE "^ +(-[a-zA-Z], )?--[a-z0-9-]+|^ +[<[][A-Z.]+[]>]" \
+	       | sed -E 's/^ +//; s/^-[a-zA-Z], //' \
+	       | while read -r a; do printf '%-10s %s\n' "$$c" "$$a"; done; \
+	   done; } > tests/cli-surface.txt.new
+	@mv tests/cli-surface.txt.new tests/cli-surface.txt
+	@echo "cli-surface: recorded $$(grep -vc '^#' tests/cli-surface.txt) argument(s) across $(words $(COMMAND_NAMES)) commands"
+
 api: ## Regenerate the recorded public surfaces, both ends
 	@command -v cargo-public-api >/dev/null || { echo "cargo install cargo-public-api"; exit 1; }
 	@{ sed -n '1,/^# Regenerate with/p' tests/public-api.txt; \
@@ -190,32 +214,36 @@ api-check: ## Fail if either recorded surface moved, or if they stop nesting
 # green-lights by skipping is the failure this project keeps finding.
 # Crates with a **deliberate** break this cycle, and why.
 #
+# **The meaning of this list changed at 1.0.0. An entry in it now means a 2.0.**
+#
+# Before 1.0 it was a cycle-scoped ledger: a break was allowed, recorded here, and cleared when
+# publication made it the baseline. Nine of twelve crates were in it for 0.13, deliberately,
+# because that was the last cycle in which narrowing was free. Phase 3 of ROAD_TO_1.0.md then
+# asked for two consecutive published cycles with it empty, and 0.14 and 0.15 delivered them.
+#
+# After 1.0 there is no such thing as a break that costs only a cycle. `API_CONTRACT.md` is the
+# promise the version number makes: the facade's names and every public item behind them move
+# only with a major version. So adding a crate below is not paperwork — it is a decision to
+# ship smysl 2.0, and it should be taken that way or not at all.
+#
+# What to do instead, in rough order of preference:
+#
+#   * Add rather than change. Most public types are `#[non_exhaustive]` as of §1.1 precisely so
+#     that a new field is not a break; that audit is what let the `smysl/1.0` format migration
+#     land inside a quiet cycle instead of costing one.
+#   * Deprecate rather than remove. `#[deprecated]` is not a break; deletion is.
+#   * If a thing genuinely should not have been public, note it here and leave it. Hiding an
+#     item is removal as far as cargo-semver-checks is concerned — there are lints named
+#     `struct_now_doc_hidden` and `pub_module_level_const_now_doc_hidden` — so the narrowing
+#     done in §1.2 S2 and S4 is not available any more. It was done before 1.0 for that reason.
+#
 # `--release-type patch` below forbids any break, which is the sensitive setting and the only
-# one that runs the checks at all — on a 0.x crate the real release type permits breaking, so
-# cargo-semver-checks skips all 223 and reports a pass. Sensitivity is the point; the cost is
-# that an intended break also fails.
+# one that ran the checks at all while the crate was 0.x — on a 0.x crate the real release type
+# permits breaking, so cargo-semver-checks skipped all 223 and reported a pass. At 1.x it is
+# still the right setting for a different reason: it makes an accidental break fail the job
+# rather than quietly imply a version bump nobody chose.
 #
-# So an intended break is recorded here rather than by loosening the check, and the list is
-# emptied when the breaks it names **reach the registry** — not when they are tagged. That
-# distinction is the same one `BASELINE` turns on: cargo-semver-checks compares against the
-# published version, so a break that is merely released is still a break against the baseline
-# and still needs recording. 0.12.0 was cut as an intermediate release and deliberately not
-# published, so this list carries into 0.13 unchanged.
-#
-# It grows rather than empties while releases stay unpublished, and that is the honest signal:
-# each entry is a crate the gate is not checking, so the length of this list is a measure of
-# how much of the API is currently unwatched. Empty is the normal state, and publication is
-# the only thing that reaches it.
-#
-#   **Empty as of 0.13.0's publication, and that is the point.** Nine of twelve crates broke
-#   in 0.13 — the `AnyError` rename in the facade, §1.1's `#[non_exhaustive]` audit across
-#   five crates, `SalienceRequest`, `Hit`, and §1.2's narrowing of `smysl-provider` and
-#   `smysl-ingest`. All nine are now the baseline rather than a pending break, which is what
-#   publishing is for and what 0.10 and 0.11 failed to do for two cycles running.
-#
-#   Phase 3 of ROAD_TO_1.0.md starts here: two consecutive cycles that end with this list
-#   empty, both published. This is the first of the two. An entry added below is not a
-#   failure — a deliberate break is allowed — but it restarts the count.
+# Empty is the normal state and now the only comfortable one.
 SEMVER_BREAKING :=
 
 semver: ## Report API breakage against the last published version
@@ -268,6 +296,17 @@ determinism: ## Rule D: pure operations are bit-reproducible
 
 gates: purity determinism ## Both xtask gates
 	@echo "gates: purity and determinism clean"
+
+doc-cargo: ## Replay the manual's `cargo` transcripts and check its feature table
+	@# The blocks `doc-output` cannot reach. It replays `smysl` commands; these are a
+	@# different program, so its skip rules pass over them and nothing checked them at all.
+	@#
+	@# 0.14 found three stale claims in the manual and every one was in a block this covers —
+	@# a `cargo build` transcript from 0.1.0, a dependency tree that predated smysl-retrieve
+	@# becoming a plain dependency, and a feature table claiming `default` turns on `tui`.
+	@# The first had gone stale *again* by 1.1, one release after being fixed by hand, which
+	@# is the argument: a version number in prose drifts every release.
+	python3 scripts/verify-doc-cargo.py
 
 doc-output: ## Replay the manual's documented commands against the real binary
 	@echo "Needs a default-features build: a stale --all-features binary reports false drift."
@@ -398,7 +437,7 @@ commit: ## Commit with aic and push
 # Everything
 # ---------------------------------------------------------------------------
 
-ci: lint doc-gate api-check test-matrix gates conformance fuzz-build ## Everything CI runs, bar the jobs needing a server
+ci: lint doc-gate api-check test-matrix gates conformance fuzz-build doc-cargo ## Everything CI runs, bar the jobs needing a server
 	@echo
 	@echo "ci: green."
 	@echo "Not covered here: the ollama job (needs a running server - see make live-ollama)"

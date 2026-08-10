@@ -1,0 +1,2 @@
+@claim c/cache-cold { status: inferred, grounds: [e/cache-miss] }
+~ The checkout price cache is cold.
