@@ -27,11 +27,18 @@ which is a different bar from every cycle before it.
 - **`smysl-provider` recalibrated**, and two more predicates closed in `smysl-graph` along with
   the contention flood cap.
 
-- **The three `cmd_*` survivor clusters closed.** `src/main.rs` went from 99 survivors of 205
-  viable to 73 of 207 — `cmd_fmt` 12 → 2, `cmd_merge` 11 → 0, `cmd_providers` 12 → 1 — across
-  three test files that drive the binary. The remaining `cmd_providers` entry is the
-  `#[cfg(not(feature = "providers"))]` stub of the same name, which no build compiles; mutating
-  excluded code cannot fail a test, so it is recorded rather than chased.
+- **The `cmd_*` clusters and the command dispatch closed.** `src/main.rs` went from 99 survivors
+  of 205 viable to **59 of 207** — `cmd_fmt` 12 → 2, `cmd_merge` 11 → 0, `cmd_providers` 12 → 1,
+  and `cli` + `main` 15 → 1 — across four test files that drive the binary. The remaining
+  `cmd_providers` entry is the `#[cfg(not(feature = "providers"))]` stub of the same name, which
+  no build compiles; the remaining dispatch one is equivalent. Both recorded rather than chased.
+
+- **Seven of twenty-two commands could have stopped working with the suite still green.**
+  `ingest`, `usage`, `reindex`, `import`, `relink`, `compact` and `ui` had no test that invoked
+  them at all. `tests/dispatch.rs` runs every command and fails if any is unrouted; and because
+  deleting a command's arm in `cli()` strips its *arguments* rather than the command itself, it
+  also compares all 380 arguments against `tests/cli-surface.txt`. That second half was found by
+  deleting an arm and watching the test keep passing.
 
   Three findings outlast the counts. The first version of `tests/cmd_fmt.rs` **inflated the
   score by 97 mutants** by depending on repository fixtures: `cargo-mutants` reuses build
@@ -65,10 +72,14 @@ What is carried:
   reason. A measurement quoted without its configuration is not a measurement, which is the
   second time in one cycle that cost something.
 
-- **`doc-output`'s coverage is feature-dependent**, which nothing states. At `--all-features`,
-  21 mutants in `cmd_pack`, `cmd_diff`, `cmd_check`, `cmd_trace` and `cmd_salience` survive that
-  the default build catches; the transcripts were recorded against a default binary and the
-  script skips what it cannot match. Found while measuring something else, and not chased.
+- ~~**`doc-output`'s coverage is feature-dependent**, which nothing states.~~ **Answered, and
+  the second half was wrong.** At `--all-features` 21 mutants survive that the default build
+  catches, which is real — but `tests/doc_output.rs` is gated to compile in exactly one of the
+  nine matrix configurations and its header explains why at length: the manual documents a
+  default build, and `exact-pack` makes a correct `SMY-W202` claim read as drift. At
+  `--all-features` the test does not exist rather than being skipped. `cargo test --test
+  doc_output` runs 1 test; with `--all-features`, 0. The design was deliberate and documented;
+  the question came from not having read it.
 
 - **What remains in `src/main.rs`** is `main` and `cli` — subcommand dispatch, where a mutant
   deletes an arm nothing routes to.

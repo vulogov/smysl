@@ -457,19 +457,59 @@ twenty-four across 2.2. Rates move when work is aimed at survivors and barely ot
 "rates move slowly" is not a property of the measurement — it is a description of what happens
 when nobody is targeting it.
 
-**The three `cmd_*` clusters were then closed, in three passes over 1.1.** `src/main.rs` went
-from **99 survivors of 205 viable (48.3%)** to **73 of 207 (35.3%)** — 26 killed, none newly
-missed, both runs file-scoped to `src/main.rs` at default features and both completed.
+**The `cmd_*` clusters and the dispatch were then closed, across 1.1.** `src/main.rs` went from
+**99 survivors of 205 viable (48.3%)** to **59 of 207 (28.5%)** — every run file-scoped to
+`src/main.rs`, at default features, and completed.
+
+| pass | survivors | what it reached |
+| --- | --- | --- |
+| 1.1, before | 99 | — |
+| `cmd_fmt`, `cmd_merge`, `cmd_providers` | **73** | three commands' own decisions |
+| `tests/dispatch.rs` | **59** | whether each command is reachable at all |
 
 | function | before | after | where |
 | --- | --- | --- | --- |
 | `cmd_fmt` | 12 | **2** | `tests/cmd_fmt.rs`, 6 tests |
 | `cmd_merge` | 11 | **0** | `tests/cmd_merge.rs`, 7 tests |
 | `cmd_providers` | 12 | **1** | `tests/cmd_providers.rs`, 5 tests |
+| `cli` + `main` | 15 | **1** | `tests/dispatch.rs`, 3 tests |
 
-23 of the 26 are those clusters. The other three are `project_file` and one dispatch arm each in
-`main` and `cli`, killed incidentally because a test that runs `smysl merge --staged` reaches
-them; that is what the arithmetic would have missed in either direction.
+23 of the first pass's 26 are those three clusters. The other three are `project_file` and one
+dispatch arm each in `main` and `cli`, killed incidentally because a test that runs
+`smysl merge --staged` reaches them; that is what the arithmetic would have missed in either
+direction.
+
+**The dispatch pass is worth stating as a finding rather than a count.** The fifteen were seven
+commands with an arm in each of two places — `ingest`, `usage`, `reindex`, `import`, `relink`,
+`compact` and `ui` — and what that meant is that **seven of twenty-two commands could stop
+working and the suite would stay green**.
+
+Writing the test found that the two arms are not the same mutation, which the first version
+assumed:
+
+- deleting a command's arm in **`main`** removes its *routing*; the subcommand still parses and
+  the router falls through to "not wired in this build". Invoking the command finds it.
+- deleting its arm in **`cli()`** removes its *arguments* and nothing else, because `cli()`
+  registers all twenty-two subcommands from the `COMMANDS` table unconditionally. The command is
+  still there, still routes, still runs — it has simply lost every flag of its own, and invoking
+  it with no arguments notices nothing.
+
+The second was found by deleting an arm and watching the test keep passing, which is the only way
+it could have been found. It needs `tests/cli-surface.txt`, a golden file of all 380 arguments
+across the 22 commands, compared **inside `cargo test`** — a Makefile gate like `api-check` is
+invisible to anything that counts coverage, which is why `doc-output` was wired into the suite in
+0.13.
+
+A second hole appeared the same way. Seven commands take a required argument, so clap rejects the
+bare name before the router runs and a no-argument invocation cannot see whether they are wired.
+Six were covered by other files that exercise them for real; `import` was not, and its mutant
+survived a run of this very test. `minimal_args` supplies what each needs, and the clap refusal
+is now itself a failure — so adding a required argument tomorrow says so rather than quietly
+ceasing to cover the command.
+
+The one survivor is **equivalent**: `COMMANDS.iter().find(|c| c.name == name)` mutated to `!=`
+selects the wrong `Cmd`, and the only field read happens in the `_ =>` arm no input reaches.
+Documented at the site, the way 0.13 recorded `worse`'s `>=`.
 
 `cmd_fmt`'s two are the round-trip guard, which fires only if `write_surface` produces something
 the parser reads back differently; no input a user can supply reaches it. `cmd_providers`'s one
@@ -485,11 +525,22 @@ as 99 → 94, a nearly-useless change from a day's work — and the tell was tha
 **21 survivors appearing in functions nobody had touched**, which a real regression in `cmd_merge`
 cannot cause. Re-run at default features it is 99 → 73, with an empty list of new survivors.
 
-The discarded run is still worth one line: at `--all-features`, 21 mutants in `cmd_pack`,
-`cmd_diff`, `cmd_check`, `cmd_trace` and `cmd_salience` survive that the default build catches.
-The most likely reason is `doc-output`, whose transcripts were recorded against a default binary
-and which skips what it cannot match — meaning the CLI's best coverage is feature-dependent in a
-way nothing states. Not chased here, and recorded rather than dropped.
+The discarded run left one observation worth keeping, and chasing it produced a second correction
+to this file rather than a finding. At `--all-features`, 21 mutants across `cmd_pack`, `cmd_diff`,
+`cmd_check`, `cmd_trace`, `cmd_salience`, `cmd_thread`, `cmd_retract` and `emit_pack_surface`
+survive that the default build catches. This was recorded here as coverage that is
+"feature-dependent in a way nothing states".
+
+**Nothing states it is wrong.** `tests/doc_output.rs` is gated to compile in exactly one of the
+nine matrix configurations — the plain `cargo test --workspace` — and the header of that file
+explains why at length: the manual documents a default-features build, and `exact-pack` compiled
+in makes a correct `SMY-W202` claim read as drift. At `--all-features` the test is not skipped,
+it does not exist, so the 21 mutants only it reaches are unopposed. Confirmed by counting:
+`cargo test --test doc_output` runs 1 test, `cargo test --all-features --test doc_output` runs 0.
+
+So the answer to "why does the CLI measure worse at `--all-features`" is written down in the
+file that causes it, and the question was asked by someone who had not read it. The number is
+real, the design is deliberate, and the only thing that was missing is this paragraph.
 
 Three things came out of that work that are worth more than the counts.
 

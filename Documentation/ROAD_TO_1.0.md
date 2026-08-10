@@ -815,9 +815,10 @@ the expensive part. Phase 2.1 is on the list because it produces a *number*; the
 because it produces a backlog.
 
 > *Since 1.0:* the CLI half of that backlog was worked after all, because it was the one
-> outlier rather than part of the band. 1.1 closed `cmd_fmt`, `cmd_merge` and `cmd_providers`,
-> taking `src/main.rs` from 99 survivors of 205 viable to 73 of 207. See `READINESS.md` §5 —
-> including the two ways the measurement itself went wrong on the way.
+> outlier rather than part of the band. 1.1 closed `cmd_fmt`, `cmd_merge`, `cmd_providers` and
+> the command dispatch, taking `src/main.rs` from 99 survivors of 205 viable to 59 of 207. The
+> dispatch pass found that seven of the twenty-two commands had no test invoking them at all.
+> See `READINESS.md` §5 — including the ways the measurement itself went wrong on the way.
 
 **doc-output at 46 of 168.** The remaining 97 name files the prose asks the reader to create,
 and the fix is in the book: commit the tutorial files as fixtures so the manual and the
@@ -852,8 +853,9 @@ The **verification** is as far as it goes without keys. The CLI's survivors went
 the tool that measures coverage can see them. What is left is `cmd_*` work in the binary and
 §2.3, which needs an OpenAI and an Anthropic key and nothing else.
 
-> *Since 1.0:* the `cmd_*` work is done — `src/main.rs` 99 survivors → 73, with the three
-> largest clusters closed. §2.3 is unchanged and still wants two keys.
+> *Since 1.0:* the `cmd_*` work is done — `src/main.rs` 99 survivors → 59, with the three
+> largest clusters closed and every command's reachability now tested. §2.3 is unchanged and
+> still wants two keys.
 
 **What that work actually found is worth stating plainly, because it is not what "make the
 surface worth freezing" sounds like.** Rule A was stated in two places and enforced in none.

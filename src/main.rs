@@ -3772,6 +3772,18 @@ fn main() -> ProcExitCode {
         return ProcExitCode::from(ExitCode::Usage.as_i32() as u8);
     };
 
+    // `==` here survives being mutated to `!=`, and that is *equivalent* rather than untested.
+    //
+    // `cmd` is read in exactly one place — the `_ =>` arm at the bottom of the dispatch, which
+    // no input reaches while every command in `COMMANDS` has an arm above it. Flipping the
+    // comparison selects the wrong `Cmd`, and nothing ever looks at it. The `else` is
+    // unreachable for the same reason from the other side: clap only yields subcommand names
+    // that `cli()` registered, and `cli()` registers exactly `COMMANDS`.
+    //
+    // Recorded the way 0.13 recorded `worse`'s `>=` and 1.1 recorded `Lineage::is_empty`, rather
+    // than answered with a test that cannot distinguish the two programs. What *is* tested is
+    // the property this lookup exists to support: `tests/dispatch.rs` runs all twenty-two
+    // commands and fails if any is unrouted.
     let Some(cmd) = COMMANDS.iter().find(|c| c.name == name) else {
         eprintln!("smysl: unknown command `{name}`");
         return ProcExitCode::from(ExitCode::Usage.as_i32() as u8);

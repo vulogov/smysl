@@ -116,6 +116,13 @@ PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-re
 # The library crates behind the facade: everything published except the facade itself.
 LIBRARIES := $(filter-out smysl,$(PUBLISHED))
 
+# The twenty-two subcommands, for `cli-surface`. Written out rather than read from `--help`,
+# for the same reason `tests/dispatch.rs` writes them out: a list derived from the binary
+# shrinks silently when the binary does, and the regenerated golden would then record the
+# absence as if it were the intent.
+COMMAND_NAMES := fmt check pack merge diff trace view bundle thread salience find retract \
+                 render import relink compact ingest attest providers usage reindex ui
+
 DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE SMYSL_RATIONALE_PRESENTATION
 
 #
@@ -141,6 +148,18 @@ docs: ## Rebuild the PDFs in Documentation/ from their typst sources
 # targets answer different questions and both are needed: `api-check` says the *list* changed,
 # `semver` says the change was breaking. A rename shows up in the first; adding
 # `#[non_exhaustive]` to a struct shows up only in the second.
+cli-surface: ## Regenerate tests/cli-surface.txt, the recorded CLI argument surface
+	@$(CARGO) build --quiet
+	@{ sed -n '1,/^# Regenerate with/p' tests/cli-surface.txt; \
+	   for c in $(COMMAND_NAMES); do \
+	     ./target/debug/smysl $$c --help 2>&1 \
+	       | grep -oE "^ +(-[a-zA-Z], )?--[a-z0-9-]+|^ +[<[][A-Z.]+[]>]" \
+	       | sed -E 's/^ +//; s/^-[a-zA-Z], //' \
+	       | while read -r a; do printf '%-10s %s\n' "$$c" "$$a"; done; \
+	   done; } > tests/cli-surface.txt.new
+	@mv tests/cli-surface.txt.new tests/cli-surface.txt
+	@echo "cli-surface: recorded $$(grep -vc '^#' tests/cli-surface.txt) argument(s) across $(words $(COMMAND_NAMES)) commands"
+
 api: ## Regenerate the recorded public surfaces, both ends
 	@command -v cargo-public-api >/dev/null || { echo "cargo install cargo-public-api"; exit 1; }
 	@{ sed -n '1,/^# Regenerate with/p' tests/public-api.txt; \
