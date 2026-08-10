@@ -398,6 +398,7 @@ load-bearing.
 | `smysl-ingest` (0.12) | 337 | **28.8%** |
 | `smysl`, the CLI (0.12, `--all-features`) | 269 | **73.6%** |
 | `smysl`, the CLI (0.13, default features, doc-output wired in) | 268 | **64.2%** |
+| `smysl`, the CLI (1.1, re-measured, default features) | 275 | **40.0%** |
 
 **Every crate in the workspace is now measured.** The library sits between 2.6% and 31%, in a
 band that has stopped being surprising: most survivors are accessors, display strings and
@@ -436,6 +437,23 @@ The remaining 109 are `cmd_*` bodies: `cmd_providers` 12, `cmd_fmt` 12, `cmd_mer
 read a filesystem, build a store and print, so reaching them means driving the binary the way
 `tests/global_flags.rs` does rather than calling a function. That is a body of work in its own
 right, and it is not what 1.0 freezes.
+
+**Confirmed by re-measurement in 1.1: 110 survivors, 109 of them in `src/main.rs` and one in
+`src/progress.rs`** — the per-file figures from 2.2, reproduced exactly by a full sharded run.
+The distribution is unchanged too: `cmd_providers` 12, `cmd_fmt` 12, `cmd_merge` 11, `main` 9,
+`cli` 8.
+
+**The rate is a different story, and it corrects a claim made in this file's own voice.** The
+recorded 64.2% was measured in 2.1, *before* 2.2 did the work; the survivor count of 110 was
+measured after. Quoting them together read as though both described the present, and the
+conclusion drawn from that pairing — that the CLI's rate was probably still near 64% — was
+wrong by a whole phase. It is **40.0% of 275 viable**.
+
+That also narrows a generalisation the provider recalibration seemed to support. `smysl-provider`
+moved about one point across 0.13's narrowing and three new test files; the CLI moved
+twenty-four across 2.2. Rates move when work is aimed at survivors and barely otherwise, so
+"rates move slowly" is not a property of the measurement — it is a description of what happens
+when nobody is targeting it.
 
 **Next action:** not "fix 357 survivors". The band 12–31% has yielded roughly one real gap per
 crate and reading each survivor is the expensive part, so the yield per hour is falling. The
