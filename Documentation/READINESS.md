@@ -14,12 +14,14 @@ could only be deferred and never worked toward. This file was written to say wha
 | 2 | a second implementation | ✅ three, from the specification alone |
 | 3 | public API stability | ✅ mechanism, plus two published quiet cycles |
 | 4 | verified providers | ⚠️ **waived** — OpenAI and Anthropic never called live |
-| 5 | a test suite that catches what it claims | ✅ every crate measured; survivors triaged |
+| 5 | a test suite that catches what it claims | ✅ every crate measured; survivors triaged; the CLI's three largest clusters closed in 1.1 |
 | 6 | performance characterised | ✅ and it found one |
 | 7 | documentation matches the binary | ◐ 46 of 168 `smysl` transcripts, plus the `cargo` ones and the feature table |
 
 Gate 7 is honestly partial rather than waived: what it checks, it checks well, and 0.14 proved
 the gap is real by finding three stale claims in exactly the blocks the replay cannot reach.
+1.1 closed that half with `make doc-cargo` — and it found drift on its first run, including a
+version string that had gone stale *again* one release after being fixed by hand.
 
 Gate 4 — a live call to OpenAI and Anthropic — is the waiver, and §4 below says what that
 costs rather than burying it. Everything about those two mappers that can be checked without a
@@ -626,10 +628,47 @@ that somebody has to run them. Worth running at a release cut.
 
 ## 7. Documentation that matches the binary — *partial, and the cheap half now gated*
 
-`make doc-output` replays 46 of 168 documented command blocks and gates on them. The other 122
-are skipped, mostly because they name files a chapter built earlier in its own narrative.
-Appendix A, the purity table and the diagnostic registry are cross-checked against the code at
-every release cut.
+`make doc-output` replays **46 of 168** documented command blocks and gates on them; 122 are
+skipped, mostly because they name files a chapter built earlier in its own narrative. Appendix
+A, the purity table and the diagnostic registry are cross-checked against the code at every
+release cut.
+
+**That number is measured under one specific build, and reading it under another gives a
+different answer** — which was nearly written into this file as drift. Re-checking it in 1.1 by
+running `scripts/verify-doc-output.py` directly produced `ran 45, skipped 123`, and 46 was about
+to be "corrected" to 45 across three documents. The script reads `./target/debug/smysl`, and what
+was on disk was an `--all-features` binary left by unrelated work; `make doc-output` runs a
+default-features `cargo build` first, on purpose, and the script's own docstring says why. Under
+the supported invocation it is 46, twice, with `MISMATCHED 0` — and pointed deliberately at an
+`--all-features` binary it reports `MISMATCHED 1`, the false drift the docstring warns about.
+
+The lesson is not "the number was fine". It is that **a measurement quoted without its
+configuration is not a measurement**, which this file already says about the CLI's survivor rate
+one section up, and which cost a wrong correction here before the check was run the supported
+way. Both times the tell was the same: a number moving for no reason anyone could name.
+
+**`make doc-cargo` closed the other half in 1.1.** `verify-doc-output.py` replays the documented
+`smysl` commands and its skip rules pass straight over the `cargo` ones, which is why every one
+of the three stale claims 0.14 found by hand was in a block it cannot reach. The new gate replays
+the six single-command `cargo` transcripts, checks every version string against the manifest, and
+compares the one feature table that claims to be "transcribed here exactly" against `[features]`.
+It found drift on its first run:
+
+- the `cargo build` transcript said `v0.13.0` — stale *again*, one release after being fixed by
+  hand in 0.14;
+- `cargo xtask check-purity` claimed 25 crates where there are 31, 6 pure crates where there are
+  7, 66 source files where there are 71, and omitted the `rule A` line entirely, so the manual
+  had documented a purity gate that stopped matching what runs when 0.13 added rule A to it;
+- the dependency tree still carried 0.13 versions.
+
+Two design points are worth keeping. Cargo's progress lines are normalised away because they
+vary between two correct runs — which leaves `cargo build` with nothing to compare, its whole
+body being `Compiling` and `Finished`, so the version inside is checked separately against the
+manifest rather than left unchecked. And the feature check is scoped by a marker rather than a
+filename: the manual has more than one feature table and the others are prose, so comparing those
+produced eleven mismatches of which none was a defect. A check that cannot tell "nothing was
+wrong" from "nothing was checked", and a check that cries wolf, fail in opposite directions and
+both teach people to ignore it.
 
 The manual has been wrong twice in ways that mattered: it described `ui` as a stub for
 several releases, and it stated a body-line limitation that had been fixed.

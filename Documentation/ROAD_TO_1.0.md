@@ -814,10 +814,22 @@ more useful, and is fixable without a major version.
 the expensive part. Phase 2.1 is on the list because it produces a *number*; the rest is not,
 because it produces a backlog.
 
+> *Since 1.0:* the CLI half of that backlog was worked after all, because it was the one
+> outlier rather than part of the band. 1.1 closed `cmd_fmt`, `cmd_merge` and `cmd_providers`,
+> taking `src/main.rs` from 99 survivors of 205 viable to 73 of 207. See `READINESS.md` §5 —
+> including the two ways the measurement itself went wrong on the way.
+
 **doc-output at 46 of 168.** The remaining 97 name files the prose asks the reader to create,
 and the fix is in the book: commit the tutorial files as fixtures so the manual and the
 verifier read the same bytes. Worth doing, not worth blocking 1.0 on, and a decision about the
 book rather than a task.
+
+> *Since 1.0:* still 46 of 168, re-checked in 1.1 — and the re-check is worth a line, because
+> run outside `make doc-output` it reports 45 and nearly went into three documents as drift. The
+> script reads `./target/debug/smysl` and the target builds default features first, on purpose.
+> The `cargo` blocks — a different gap in the same gate, and where all three of 0.14's stale
+> claims lived — are covered by `make doc-cargo` as of 1.1. The 97 tutorial files remain a
+> decision about the book.
 
 **Feature completeness.** Twenty-two commands, unchanged since `find` in 0.5. 1.0 is a promise
 about stability, not about scope.
@@ -836,9 +848,12 @@ each with an answer, three gates that each know what they are blind to, and rule
 instead of asserted.
 
 The **verification** is as far as it goes without keys. The CLI's survivors went 172 → 110,
-`progress.rs` from 51 to 1, and the manual's 46 replayed transcripts are inside `cargo test`
-where the tool that measures coverage can see them. What is left is `cmd_*` work in the binary
-and §2.3, which needs an OpenAI and an Anthropic key and nothing else.
+`progress.rs` from 51 to 1, and the manual's replayed transcripts are inside `cargo test` where
+the tool that measures coverage can see them. What is left is `cmd_*` work in the binary and
+§2.3, which needs an OpenAI and an Anthropic key and nothing else.
+
+> *Since 1.0:* the `cmd_*` work is done — `src/main.rs` 99 survivors → 73, with the three
+> largest clusters closed. §2.3 is unchanged and still wants two keys.
 
 **What that work actually found is worth stating plainly, because it is not what "make the
 surface worth freezing" sounds like.** Rule A was stated in two places and enforced in none.

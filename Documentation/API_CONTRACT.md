@@ -36,7 +36,7 @@ what had been assumed.
 
 | gate | sees | blind to |
 |---|---|---|
-| `tests/public-api.txt` (243 names) | every name the facade exports | anything *behind* a name: methods, signatures, variants |
+| `tests/public-api.txt` (244 names) | every name the facade exports | anything *behind* a name: methods, signatures, variants |
 | `make semver` | every item in each library crate, methods included, under the real semver rules | the facade — a `pub use` from another crate is a line it cannot expand |
 | `tests/public-api-counts.txt` (11 lines) | a crate's surface changing size | an addition and a removal that cancel |
 

@@ -52,11 +52,18 @@ What is carried:
   reporting what came back closes it — and "it did not work" is more useful still, because the
   concrete mappers are `#[doc(hidden)]` and a wrong one is fixable without a 2.0.
 
-- **Gate 7's other half.** `doc-output` replays 45 of the manual's 168 `smysl` transcripts and
-  skips 123, of which 97 name files the prose asks the reader to create. The fix is in the
+- **Gate 7's other half.** `doc-output` replays 46 of the manual's 168 `smysl` transcripts and
+  skips 122, of which 97 name files the prose asks the reader to create. The fix is in the
   *book* — commit the tutorial files as fixtures so the manual and the verifier read the same
   bytes. A book change, and so a decision rather than a task. The `cargo` blocks, which are the
   other thing the replay never saw, are covered by `make doc-cargo` above.
+
+  That 46 was briefly "corrected" to 45 in this file and two others. Run outside
+  `make doc-output` the script reads whatever `./target/debug/smysl` happens to be, and an
+  `--all-features` binary left by unrelated work gives a different count — and, pointed at one
+  deliberately, one false mismatch. The target builds default features first for exactly that
+  reason. A measurement quoted without its configuration is not a measurement, which is the
+  second time in one cycle that cost something.
 
 - **`doc-output`'s coverage is feature-dependent**, which nothing states. At `--all-features`,
   21 mutants in `cmd_pack`, `cmd_diff`, `cmd_check`, `cmd_trace` and `cmd_salience` survive that
