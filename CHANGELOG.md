@@ -33,6 +33,24 @@ which is a different bar from every cycle before it.
   `cmd_providers` entry is the `#[cfg(not(feature = "providers"))]` stub of the same name, which
   no build compiles; the remaining dispatch one is equivalent. Both recorded rather than chased.
 
+- **`go/` reaches C-Produce**, so §2.1 has a third independent derivation — the Rust,
+  `python/`, and now Go — where it had one until 0.10 and two until now. §2.3, *status is part
+  of identity*, is the paragraph the format rests on and the one C-Read cannot reach, because
+  reading never requires computing a uid. `go/blake3.go` is hand-rolled for the reason
+  `python/`'s is: a binding to the same C library the reference implementation uses would test
+  two callers of one hash. It also implements the *shape* half of the class that `python/` does
+  not — `Uid` refuses a unit with no gist, `derived`/`inferred` without grounds,
+  `measured`/`cited` without a source, or an authored `unfounded`.
+
+- **A fixture that could not fail, found by writing it.** Removing NFC from the Go encoder
+  failed the property test and left the fixture comparison green — impossible, since the pair
+  `unicode-composed` / `unicode-decomposed` exists to catch precisely that. The generator had
+  been recording each gist *after* `UnitCoreBuilder` normalised it, so both cases carried the
+  same composed string: one input under two names, and every implementation reading the file,
+  `python/` included, was agreeing with itself. It now records the gist as authored, and a
+  reader that skips §3 constraint 6 no longer reproduces the recorded bytes — checked in both
+  languages.
+
 - **Seven of twenty-two commands could have stopped working with the suite still green.**
   `ingest`, `usage`, `reindex`, `import`, `relink`, `compact` and `ui` had no test that invoked
   them at all. `tests/dispatch.rs` runs every command and fails if any is unrouted; and because

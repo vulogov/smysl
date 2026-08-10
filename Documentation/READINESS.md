@@ -11,7 +11,7 @@ could only be deferred and never worked toward. This file was written to say wha
 | | gate | |
 |---|---|---|
 | 1 | format stability | ✅ policy written, and exercised by the `smysl/1.0` bump |
-| 2 | a second implementation | ✅ three, from the specification alone |
+| 2 | a second implementation | ✅ three, from the specification alone; two of them derive uids |
 | 3 | public API stability | ✅ mechanism, plus two published quiet cycles |
 | 4 | verified providers | ⚠️ **waived** — OpenAI and Anthropic never called live |
 | 5 | a test suite that catches what it claims | ✅ every crate measured; survivors triaged; the CLI's three largest clusters closed in 1.1 |
@@ -112,8 +112,8 @@ kernel level. None is a defect in the Rust; all three are places a second implem
 guess.
 
 The suite also records what C-Read *cannot* reach, and the largest entry is §2.3 — status is
-part of identity — because uids need C-Produce. The format's central claim is still untested
-by a second implementation.
+part of identity — because uids need C-Produce. That was the format's central claim going
+untested by anything but the Rust; `python/` closed it in 0.10 and `go/` in 1.1.
 
 All three clarifications are folded into §3 of the spec as of 0.9.0: constraint 1 gained the
 decoder's obligation, constraint 2 is scoped to integers and lengths, and tags are constraint
@@ -137,8 +137,33 @@ The §2.3 witness is a pair whose every field is identical and whose status diff
 apart in the canonical encoding, two unrelated uids. Verified capable of failing — dropping
 `status` from the encoder fails 35 tests, by name.
 
-**Next action:** none for this gate. `nodejs/` and `go/` remain C-Read, which is a scope
-decision rather than a gap; both say so where they list what they do not reach.
+**C-Produce reached a second time in 1.1, in `go/`.** §2.1 now has three independent
+derivations — the Rust, `python/`, and `go/` — where it had one until 0.10 and two until now.
+`go/blake3.go` is hand-rolled for the same reason `python/`'s is, and passes the published
+vectors including the lengths straddling the 1024-byte chunk boundary; `go/uid.go` reproduces
+all sixteen canonical encodings and all sixteen uids.
+
+It also implements the half of C-Produce that `python/` does not. §7 defines the class as
+"structural + epistemic + *shape*", and the shape clause — a gist present, grounds where
+`derived` or `inferred` demand them, a source where `measured` or `cited` demands one, no
+authored `unfounded` — is enforced by `Validate`, which `Uid` runs first. A malformed unit
+cannot get an identity out of that package.
+
+**And it found a fixture that could not fail.** Removing NFC from the Go encoder failed the
+property test while the fixture comparison stayed green, which the pair
+`unicode-composed` / `unicode-decomposed` exists to prevent. The generator had been recording
+each gist *after* `UnitCoreBuilder` normalised it, so both cases carried the identical composed
+string — one input under two names, in a fixture documented as the witness for §3 constraint 6.
+Every implementation reading it, `python/` included, was agreeing with itself.
+
+`fixtures/wire/uid/cases.json` now records the gist as *authored*, so a reader that skips
+constraint 6 cannot reproduce the recorded bytes. Verified in both directions and in both
+languages: with the repair, removing NFC fails the fixture comparison in Go and in Python; the
+two tests catch different failures, since a *wrong* normalisation still collides both spellings
+and only the fixture knows which bytes are right.
+
+**Next action:** none for this gate. `nodejs/` remains C-Read, which is a scope decision rather
+than a gap; it says so where it lists what it does not reach.
 
 ## 3. Public API stability — *done: the mechanism, and two published cycles of evidence*
 

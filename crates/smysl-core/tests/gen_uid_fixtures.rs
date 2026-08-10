@@ -36,6 +36,28 @@ fn uid_of(n: u8) -> Uid {
 }
 
 /// A named case and the core it describes. The name is what a failing assertion prints.
+/// The gist a case was *authored* with, where that differs from the one it ends up carrying.
+///
+/// `UnitCoreBuilder` normalises to NFC on construction (§3, constraint 6), so `core.gist` is
+/// always composed by the time it reaches the serialiser. Writing that into the fixture made
+/// `unicode-decomposed` byte-identical to `unicode-composed` — two names for one string, and a
+/// pair documented as the witness for constraint 6 that could not witness anything. Every
+/// implementation reading the file got the same input twice and agreed with itself.
+///
+/// Found from `go/`, when removing normalisation from its encoder failed the property test and
+/// left the fixture comparison green. A fixture that cannot fail is the failure this repository
+/// keeps rediscovering; this is the one place it had hidden.
+///
+/// So the file now carries what a *producer would be handed*, and the recorded bytes stay those
+/// of the normalised core. A reader that skips constraint 6 no longer reproduces them.
+fn authored_gist(name: &str, core: &UnitCore) -> String {
+    match name {
+        // e + U+0301 COMBINING ACUTE ACCENT, which NFC composes to U+00E9.
+        "unicode-decomposed" => "cafe\u{301} latency, \u{4e2d}\u{6587}".to_string(),
+        _ => core.gist.clone(),
+    }
+}
+
 fn cases() -> Vec<(&'static str, UnitCore)> {
     let minimal = UnitCoreBuilder::new(KernelType::Claim, "a minimal claim", Status::Speculative)
         .build()
@@ -223,7 +245,7 @@ fn uids_json(set: &BTreeSet<Uid>) -> String {
 fn emit() {
     let mut out = String::new();
     out.push_str("{\n");
-    out.push_str("  \"purpose\": \"Unit cores, their canonical bytes and their uids, produced by the Rust. A second implementation at C-Produce must reproduce every uid. `core_bytes_hex` is included so a mismatch says whether the encoding or the hash disagreed.\",\n");
+    out.push_str("  \"purpose\": \"Unit cores, their canonical bytes and their uids, produced by the Rust. A second implementation at C-Produce must reproduce every uid. `core_bytes_hex` is included so a mismatch says whether the encoding or the hash disagreed. `gist` is the text as *authored*, not as normalised: `unicode-decomposed` carries e+U+0301 and the recorded bytes are of its NFC form, so a reader that skips §3 constraint 6 cannot reproduce them.\",\n");
     out.push_str("  \"cases\": [\n");
 
     let all = cases();
@@ -237,7 +259,10 @@ fn emit() {
             "        \"schema\": {},\n",
             json_string(core.schema.as_str())
         ));
-        out.push_str(&format!("        \"gist\": {},\n", json_string(&core.gist)));
+        out.push_str(&format!(
+            "        \"gist\": {},\n",
+            json_string(&authored_gist(name, core))
+        ));
         out.push_str(&format!(
             "        \"body\": {},\n",
             core.body
