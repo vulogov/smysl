@@ -1780,18 +1780,27 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         // Only the one view handed to `write_surface` becomes a `@doc` header; the surface
         // grammar has room for at most one per file, so any further view in the store is
         // genuinely dropped and worth counting.
+        //
+        // A label binding is the same mistake the `@doc` header used to be, and it survived
+        // the fix above: `folded` put it in `ctx` a few lines up and `write_surface` renders
+        // it as the name on its unit, so `@claim c/a` reported "1 record(s) have no surface
+        // form" over a document whose output said `@claim c/a`. Asking `ctx` which label it
+        // will actually write is what makes this right rather than restating the rule —
+        // `from_labels` keeps one label per uid, and the loser genuinely is dropped.
         let dropped = records
             .iter()
             .filter(|r| match r {
                 Record::Unit(_) | Record::Relation(_) | Record::Thread(_) => false,
                 Record::View(v) => Some(&v.id) != emitted.as_ref(),
+                Record::LabelBinding(b) => ctx.labels.get(&b.uid) != Some(&b.label),
                 _ => true,
             })
             .count();
         if dropped > 0 {
             eprintln!(
                 "smysl merge: warning: {dropped} record(s) have no surface form and were \
-                 omitted (contentions, attestations); the default CBOR output preserves them"
+                 omitted (contentions, attestations, and any name the grammar has nowhere to \
+                 put); the default CBOR output preserves them"
             );
         }
         write_surface(view.as_ref(), &records, &ctx).into_bytes()

@@ -455,11 +455,67 @@ twenty-four across 2.2. Rates move when work is aimed at survivors and barely ot
 "rates move slowly" is not a property of the measurement — it is a description of what happens
 when nobody is targeting it.
 
+**The three `cmd_*` clusters were then closed, in three passes over 1.1.** `src/main.rs` went
+from **99 survivors of 205 viable (48.3%)** to **73 of 207 (35.3%)** — 26 killed, none newly
+missed, both runs file-scoped to `src/main.rs` at default features and both completed.
+
+| function | before | after | where |
+| --- | --- | --- | --- |
+| `cmd_fmt` | 12 | **2** | `tests/cmd_fmt.rs`, 6 tests |
+| `cmd_merge` | 11 | **0** | `tests/cmd_merge.rs`, 7 tests |
+| `cmd_providers` | 12 | **1** | `tests/cmd_providers.rs`, 5 tests |
+
+23 of the 26 are those clusters. The other three are `project_file` and one dispatch arm each in
+`main` and `cli`, killed incidentally because a test that runs `smysl merge --staged` reaches
+them; that is what the arithmetic would have missed in either direction.
+
+`cmd_fmt`'s two are the round-trip guard, which fires only if `write_surface` produces something
+the parser reads back differently; no input a user can supply reaches it. `cmd_providers`'s one
+is **not** a gap either: `src/main.rs:3358` is the `#[cfg(not(feature = "providers"))]` stub of
+the same name, which neither the default build nor `--all-features` compiles. Mutating code the
+build excludes cannot fail a test. It is an artifact of measuring a file that defines one
+function twice, and the honest record of it is here rather than a test written to chase it.
+
+**These figures were nearly published as a comparison of two different configurations**, which
+is the error corrected two paragraphs above this one. The re-measurement was run
+with `--all-features` while the 99 it was being compared against was default features. It read
+as 99 → 94, a nearly-useless change from a day's work — and the tell was that the diff showed
+**21 survivors appearing in functions nobody had touched**, which a real regression in `cmd_merge`
+cannot cause. Re-run at default features it is 99 → 73, with an empty list of new survivors.
+
+The discarded run is still worth one line: at `--all-features`, 21 mutants in `cmd_pack`,
+`cmd_diff`, `cmd_check`, `cmd_trace` and `cmd_salience` survive that the default build catches.
+The most likely reason is `doc-output`, whose transcripts were recorded against a default binary
+and which skips what it cannot match — meaning the CLI's best coverage is feature-dependent in a
+way nothing states. Not chased here, and recorded rather than dropped.
+
+Three things came out of that work that are worth more than the counts.
+
+**A defect the mutants only pointed at.** `merge --format surface` counted a label binding as
+having no surface form, so `@claim c/a` warned that one record was "omitted" over output that
+read `@claim c/a`. The comment directly above that filter records the *same* mistake being fixed
+once already, for the `@doc` header — expressible, and blamed on contentions. The count now asks
+`ctx` which label it will write rather than assuming, so a binding that loses the fold still
+counts and one that is rendered does not.
+
+**A test may not assume the feature set it was written under.** `cmd_providers` first configured
+its hosted provider as `anthropic` and passed under `--all-features` and the default build, then
+failed three tests in the matrix entry that has `providers` and ollama but no vendor mappers —
+`providers` alone compiles none. `caps().offline` comes from the *endpoint*, not the vendor, so
+every provider there is now `kind: ollama` and local-versus-hosted is carried by `127.0.0.1`
+versus a public host. That is closer to the rule the code implements, and it does not depend on
+which combination is being built. `cmd_merge` had the same shape: `--staged` needs `ingest`, so
+those three tests carry their own `cfg` and the other four still run in a `cli`-only build.
+
+**A negative assertion on a padded string is a check that stops working silently.** Asserting
+`!stdout.contains("nearby         refused")` ties the test to a column width, and a change to the
+padding makes it pass by never matching. The rows are looked up by id now, and a missing row
+panics rather than satisfying a `!contains`.
+
 **Next action:** not "fix 357 survivors". The band 12–31% has yielded roughly one real gap per
-crate and reading each survivor is the expensive part, so the yield per hour is falling. The
-CLI is the exception worth acting on, and the useful first move there is to make its real
-verification visible to measurement — `doc-output` is the test that covers it, and nothing that
-counts coverage can see it.
+crate and reading each survivor is the expensive part, so the yield per hour is falling. The CLI
+was the exception, and the three clusters that made it one are closed; what remains in
+`src/main.rs` is `main` and `cli`, which are subcommand dispatch.
 
 **Read these as "does this crate's own suite cover it", not "is this covered".** `cargo mutants
 -p X` runs `cargo test --package=X`, so a function only exercised by a downstream crate is
