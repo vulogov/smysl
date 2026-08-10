@@ -7,13 +7,56 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.1.0
+## Unreleased — 1.2.0
+
+Nothing yet. What is carried:
+
+- **Gate 4 still wants two keys**, and now needs nothing else. Everything reachable by reading
+  has been read, twice, and it found a defect each time. If you have an OpenAI or Anthropic key,
+  running the provider live tests and reporting what came back closes it — and "it did not
+  work" is more useful still, because the concrete mappers are `#[doc(hidden)]` and a wrong one
+  is fixable without a 2.0.
+
+- **Gate 7's remaining 57 commands.** 22 tutorial filenames have more than one state — chapter 1
+  creates `first.smy` broken, fixes it, finds it unformatted, then rewrites it in place — so
+  committing any one file makes the other commands naming it report drift that is not there.
+  Splitting them means the chapters naming a different file at each step, which changes what the
+  book teaches. Still a decision about the book rather than a task;
+  `fixtures/tutorial/README.md` records which files are held back and why, so it need not be
+  rediscovered a third time.
+
+- **59 survivors in `src/main.rs`**, of 207 viable. What remains is `cmd_thread` 6,
+  `cmd_render` 6, and a tail of threes. The three largest clusters and the dispatch are closed;
+  the yield per hour from here is lower than it was.
+
+- **`nodejs/` remains C-Read.** A fourth uid derivation would be a third witness for §2.3
+  beyond the Rust — a scope decision rather than a gap, and it says so where it lists what it
+  does not reach.
+
+---
+
+## 1.1.0 — 2026-08-10
 
 The first cycle after the freeze, spent on the two things 1.0 shipped without: coverage of the
 CLI, and checks over the parts of the documentation nothing replayed.
 
-Nothing here breaks anything. `SEMVER_BREAKING` is empty and an entry in it now means a 2.0,
-which is a different bar from every cycle before it.
+Nothing here breaks anything. `SEMVER_BREAKING` is empty, `make semver` is 12/12 clean against
+1.0.0, and an entry in that list now means a 2.0 — a different bar from every cycle before it.
+
+**What the cycle actually found is a better summary than what it set out to do.** Four checks
+that could not fail, each discovered by breaking the thing it was supposed to catch:
+
+- a fixture pair documented as the witness for Unicode normalisation, whose two halves were the
+  same string;
+- a replay script blind to twenty-six blocks of its own subject, so every render transcript in
+  the manual had gone unchecked and its denominator was wrong;
+- a test that killed only half the mutants it was written for, because two arms of one
+  dispatch are not the same mutation;
+- and a measurement of the first of those, taken under the wrong build and nearly published as
+  a regression.
+
+None of them was found by reasoning. Each was found by deliberately breaking something and
+watching a green check stay green.
 
 - **`make doc-cargo`**, a new gate. `verify-doc-output.py` replays the manual's `smysl`
   transcripts and its skip rules pass straight over the `cargo` ones, so nothing had ever
