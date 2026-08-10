@@ -1,0 +1,2 @@
+@x.sre/runbook-step rb/rollback { status: cited, source: { kind: doc, ref: "ops-runbook#eu-west-rollback" } }
+~ Roll the eu-west pool config back to the 4.1 settings and re-run the canary.

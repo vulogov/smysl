@@ -16,7 +16,7 @@ could only be deferred and never worked toward. This file was written to say wha
 | 4 | verified providers | ⚠️ **waived** — OpenAI and Anthropic never called live |
 | 5 | a test suite that catches what it claims | ✅ every crate measured; survivors triaged; the CLI's three largest clusters closed in 1.1 |
 | 6 | performance characterised | ✅ and it found one |
-| 7 | documentation matches the binary | ◐ 46 of 168 `smysl` transcripts, plus the `cargo` ones and the feature table |
+| 7 | documentation matches the binary | ◐ 78 of 194 `smysl` transcripts, plus the `cargo` ones and the feature table |
 
 Gate 7 is honestly partial rather than waived: what it checks, it checks well, and 0.14 proved
 the gap is real by finding three stale claims in exactly the blocks the replay cannot reach.
@@ -704,10 +704,57 @@ that somebody has to run them. Worth running at a release cut.
 
 ## 7. Documentation that matches the binary — *partial, and the cheap half now gated*
 
-`make doc-output` replays **46 of 168** documented command blocks and gates on them; 122 are
+`make doc-output` replays **78 of 194** documented command blocks and gates on them; 116 are
 skipped, mostly because they name files a chapter built earlier in its own narrative. Appendix
 A, the purity table and the diagnostic registry are cross-checked against the code at every
 release cut.
+
+**Both of those numbers moved in 1.1, and the denominator moving is the more serious half.**
+It had been quoted as 168 since the script was written. The real figure is 194: the block
+regex required the code fence on the line *after* `#screen(...)[`, and chapter 22–24 writes it
+on the same line throughout, so **twenty-six blocks matched nothing at all**. They were not
+skipped — skipping is counted and reported — they were invisible, and every render transcript
+in the book had gone unchecked since the chapter was written. `verify-doc-cargo.py`, written
+later, got this right; the two scripts scanning one book disagreed about how many blocks are in
+it, which is how it surfaced.
+
+A further twenty-two were skipped as "input file missing" when the token was never a file.
+The path test is "contains a slash", and smysl spells labels `kind/name` — so `--thread
+t/brief`, `--id v/two-roots` and `--tokenizer tiktoken/cl100k` all read as files that do not
+exist. The discriminator is the dot: every file the manual names carries an extension and no
+label does.
+
+Bringing those into view found **one real drift** and two conventions the script had never
+met, because they live only in the chapter it could not see: `exit N` as a trailing line, now
+checked against the actual exit code rather than compared as text; and `(excerpt)` in a
+caption, meaning the block is a window onto the output rather than the whole of it. The drift
+was a `--target json` transcript that had been hand-wrapped, showing `"notes"` across four
+lines where the renderer emits one.
+
+**And the tutorial files are committed, which is gate 7's larger half.** 100 commands name a
+file the *prose* asks the reader to create; twelve of those files are now in
+`fixtures/tutorial/<chapter>/`, and the commands run with their working directory set there —
+so the page still says `smysl check cycle.smy`, the output still says `cycle.smy: error: …`,
+and nothing a reader types has changed.
+
+Twelve of forty-six, not all of them, and the arithmetic is the point:
+
+- **22 files, 57 commands, have more than one state.** Chapter 1 has the reader create
+  `first.smy` broken, fix it, find it unformatted, then rewrite it in place. Four commands name
+  one path and expect four different files; committing any one makes the other three report
+  drift that is not there. Splitting them means the chapters naming a different file at each
+  step, which changes what the book teaches — still a decision about the book.
+- **Seven were extracted and then removed**, because the chapter's own transcript refused to
+  reproduce against them: the fenced block before the command is a *fragment* the reader adds,
+  not the file. This is the failure the 0.10 attempt hit and recorded, met again and this time
+  measured. It is loud rather than subtle — the diagnostics carry byte offsets, so a
+  wrongly-assembled file reports `at 0..125` where the manual says `at 296..416`.
+- **One is described rather than printed** — `bignote.txt`, "a ~7 KB paragraph, repeated".
+
+The rule that holds it together is that a fixture must be the bytes its chapter prints, and
+`verify-doc-output.py` fails if one is not found verbatim in its chapter. Without it, editing
+the page leaves the fixture behind and the script starts measuring its own copy of the book.
+Verified by appending a line to a fixture and watching it fail.
 
 **That number is measured under one specific build, and reading it under another gives a
 different answer** — which was nearly written into this file as drift. Re-checking it in 1.1 by

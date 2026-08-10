@@ -1,0 +1,2 @@
+@claim c/latency-up { status: derived }
+~ Checkout p95 latency rose from 80 ms to 410 ms.

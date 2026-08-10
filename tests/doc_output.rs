@@ -80,10 +80,16 @@ fn the_manual_still_describes_this_binary() {
                 String::from_utf8_lossy(&out.stderr)
             )
         });
+    // The floor is a ratchet, and it was raised from 40 when 1.1 took the count from 46 to 78.
+    // Set just under the real number: high enough that losing a chapter's worth of coverage
+    // fails, low enough that deleting one transcript does not. The three ways coverage has
+    // silently collapsed here were all-or-nothing — an absolute path matching the program, a
+    // block regex that could not see a chapter, a label mistaken for a missing file — so the
+    // gap between 70 and 78 is not where the risk lives.
     assert!(
-        ran >= 40,
-        "the replay covered {ran} transcripts, which is too few to mean anything — 46 of the \
-         manual's 168 are replayable, and a sudden drop means the script stopped matching \
+        ran >= 70,
+        "the replay covered {ran} transcripts, which is too few to mean anything — 78 of the \
+         manual's 194 are replayable, and a sudden drop means the script stopped matching \
          them rather than that the manual got shorter.\nstdout:\n{stdout}"
     );
 

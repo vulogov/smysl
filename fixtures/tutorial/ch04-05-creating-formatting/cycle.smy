@@ -1,0 +1,5 @@
+@claim c/cache-cold { status: inferred, grounds: [c/latency-up] }
+~ The checkout price cache is cold.
+
+@claim c/latency-up { status: inferred, grounds: [c/cache-cold] }
+~ Checkout latency rose because the cache is cold.

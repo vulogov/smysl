@@ -1,0 +1,6 @@
+@thread t/brief { schema: brief, owner: "human:vladimir" }
+~ Checkout latency rose after a cache eviction.
+  bottom-line -> c/cache-cold
+
+@claim c/cache-cold { status: speculative }
+~ The checkout price cache is cold.

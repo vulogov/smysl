@@ -77,18 +77,41 @@ What is carried:
   reporting what came back closes it — and "it did not work" is more useful still, because the
   concrete mappers are `#[doc(hidden)]` and a wrong one is fixable without a 2.0.
 
-- **Gate 7's other half.** `doc-output` replays 46 of the manual's 168 `smysl` transcripts and
-  skips 122, of which 97 name files the prose asks the reader to create. The fix is in the
-  *book* — commit the tutorial files as fixtures so the manual and the verifier read the same
-  bytes. A book change, and so a decision rather than a task. The `cargo` blocks, which are the
-  other thing the replay never saw, are covered by `make doc-cargo` above.
+- **Gate 7's other half: `doc-output` goes from 46 of 168 to 78 of 194.** The denominator
+  moving is the more serious half. The block regex required the code fence on the line *after*
+  `#screen(...)[`, and chapter 22–24 writes it on the same line, so **twenty-six blocks matched
+  nothing at all** — not skipped, which is counted and reported, but invisible. Every render
+  transcript in the book had gone unchecked since the chapter was written, and the "46 of 168"
+  quoted everywhere had the wrong denominator. `verify-doc-cargo.py` got it right, so two
+  scripts scanning one book disagreed about how many blocks are in it.
 
-  That 46 was briefly "corrected" to 45 in this file and two others. Run outside
+  Twenty-two more were skipped as naming a missing file when the token was never a file: the
+  path test is "contains a slash" and smysl spells labels `kind/name`, so `--thread t/brief`
+  read as a file. The dot is the discriminator — every file the manual names has an extension.
+
+  That found **one real drift** (a `--target json` transcript hand-wrapped where the renderer
+  emits one line) and two conventions living only in the chapter the script could not see:
+  `exit N`, now checked against the actual exit code rather than compared as text, and
+  `(excerpt)` in a caption, meaning the block is a window onto the output.
+
+- **Tutorial files committed as fixtures**, twelve of them, in `fixtures/tutorial/<chapter>/`.
+  The commands run with their working directory set there, so the page still says
+  `smysl check cycle.smy` and the output still says `cycle.smy: error: …` — nothing a reader
+  types has changed.
+
+  Twelve of forty-six, and the arithmetic is the point. 22 files across 57 commands have more
+  than one state — chapter 1 creates `first.smy` broken, fixes it, finds it unformatted, then
+  rewrites it in place, so four commands name one path and expect four different files.
+  Committing any one makes the other three report drift that is not there. Seven more were
+  extracted and removed because the chapter's transcript refused to reproduce against them: the
+  block before the command is a fragment the reader adds, not the file — the failure the 0.10
+  attempt recorded, met again and this time measured. A fixture must be the bytes its chapter
+  prints, and the script now fails if one is not found verbatim in its chapter.
+
+  That 46 was also briefly "corrected" to 45 in this file and two others. Run outside
   `make doc-output` the script reads whatever `./target/debug/smysl` happens to be, and an
-  `--all-features` binary left by unrelated work gives a different count — and, pointed at one
-  deliberately, one false mismatch. The target builds default features first for exactly that
-  reason. A measurement quoted without its configuration is not a measurement, which is the
-  second time in one cycle that cost something.
+  `--all-features` binary left by unrelated work gives a different count. A measurement quoted
+  without its configuration is not a measurement.
 
 - ~~**`doc-output`'s coverage is feature-dependent**, which nothing states.~~ **Answered, and
   the second half was wrong.** At `--all-features` 21 mutants survive that the default build

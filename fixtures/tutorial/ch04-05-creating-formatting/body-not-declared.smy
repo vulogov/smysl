@@ -1,0 +1,13 @@
+@evidence e/cache-miss { status: measured, source: { kind: metric, ref: "cache.miss_rate" } }
+~ Cache miss rate on checkout rose sharply.
+
+@evidence e/deploy-clean { status: measured, source: { kind: metric, ref: "canary.p95" } }
+~ The canary deploy shows no regression on its own.
+
+@claim c/cache-cold { status: inferred, grounds: [e/cache-miss] }
+~ The checkout price cache is cold.
+
+The miss-rate curve and the checkout latency curve track each other closely
+enough over the same window that the direction is not seriously in doubt,
+and this reading tracks closely with e/deploy-clean, which this claim never
+listed as a dep or a ground anywhere in its header above.

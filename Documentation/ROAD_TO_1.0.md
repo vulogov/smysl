@@ -825,12 +825,14 @@ and the fix is in the book: commit the tutorial files as fixtures so the manual 
 verifier read the same bytes. Worth doing, not worth blocking 1.0 on, and a decision about the
 book rather than a task.
 
-> *Since 1.0:* still 46 of 168, re-checked in 1.1 — and the re-check is worth a line, because
-> run outside `make doc-output` it reports 45 and nearly went into three documents as drift. The
-> script reads `./target/debug/smysl` and the target builds default features first, on purpose.
-> The `cargo` blocks — a different gap in the same gate, and where all three of 0.14's stale
-> claims lived — are covered by `make doc-cargo` as of 1.1. The 97 tutorial files remain a
-> decision about the book.
+> *Since 1.0:* **78 of 194**, and both numbers moved. The denominator was wrong all along —
+> the block regex could not see twenty-six blocks in chapter 22–24, so every render transcript
+> in the book was unchecked and "168" was never the total. Twenty-two more were skipped as
+> missing files when the token was a label. The `cargo` blocks — a different gap in the same
+> gate, and where all three of 0.14's stale claims lived — are covered by `make doc-cargo`.
+> Twelve tutorial files are committed as fixtures; the other thirty-four have several states
+> per filename or are described rather than printed, and remain a decision about the book.
+> See `READINESS.md` §7 and `fixtures/tutorial/README.md`.
 
 **Feature completeness.** Twenty-two commands, unchanged since `find` in 0.5. 1.0 is a promise
 about stability, not about scope.
