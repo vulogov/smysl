@@ -1,0 +1,38 @@
+{
+  "_purpose": [
+    "Chapter 4 builds one document up under three names. `step1.smy` is printed in full and",
+    "is committed beside this file; `step2.smy` is step1 plus a claim, and `step3.smy` is",
+    "step2 plus a definition with the claim rewritten. Neither of the later two is ever",
+    "printed as a file — the page prints the stanza that was added — so neither can be a",
+    "committed fixture without breaking the rule that a fixture is the bytes the chapter",
+    "prints. They are derived instead, which is a stronger claim: the file a command runs",
+    "against is one the book's own instructions produced.",
+    "",
+    "Anchored by prose, never by content. The edit body is the fenced block following the",
+    "anchor, read out of the chapter at run time, so there is nothing here to go stale."
+  ],
+  "step2.smy": [
+    {
+      "anchor": "Add the claim the evidence is for:",
+      "op": "append",
+      "from": "step1.smy"
+    }
+  ],
+  "step3.smy": [
+    {
+      "anchor": "\"Cold\" needs a fixed meaning before anything downstream leans on the word:",
+      "op": "append",
+      "from": "step2.smy"
+    },
+    {
+      "anchor": "Wire it into the claim as a `deps` entry",
+      "op": "replace-stanza",
+      "match": "@claim c/cache-cold",
+      "_why": [
+        "The claim is not appended a second time — it replaces the one step2 added. The",
+        "chapter says 'wire it into the claim', and appending would leave two stanzas with",
+        "one label, which is a different document and a different diagnostic."
+      ]
+    }
+  ]
+}

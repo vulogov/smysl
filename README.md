@@ -5,7 +5,7 @@
 **One format that both AI systems and people can read, write, and trust.**
 
 [![ci](https://github.com/vulogov/smysl/actions/workflows/ci.yml/badge.svg)](https://github.com/vulogov/smysl/actions/workflows/ci.yml)
-![format](https://img.shields.io/badge/format-smysl%2F0.1-6aa84f)
+![format](https://img.shields.io/badge/format-smysl%2F1.0-6aa84f)
 ![rust](https://img.shields.io/badge/rust-1.79%2B-orange)
 ![unsafe](https://img.shields.io/badge/unsafe-forbidden-success)
 [![licence](https://img.shields.io/badge/licence-MPL--2.0-blue)](LICENSE)
@@ -28,14 +28,14 @@ As a library:
 
 ```toml
 [dependencies]
-smysl = "0.9"
+smysl = "1.2"
 ```
 
 Add `default-features = false` for the pure library: no async runtime, no HTTP client and no
 argument parser in the dependency tree, verified in CI on every push rather than promised
 here.
 
-**The crate is `1.0.0` and the format is `smysl/1.0`.** Both are meant literally.
+**The crate is `1.2.0` and the format is `smysl/1.0`.** Both are meant literally.
 
 The crate version means the API is frozen: the facade's 244 names and every public item behind
 them move only with a 2.0, enforced per crate by `cargo-semver-checks` on every push rather
@@ -52,6 +52,19 @@ gate that could not be worked around — the format has been implemented from th
 alone, three times, in Python, JavaScript and Go. Until someone outside the project had done
 that, "another team can implement this" was a claim rather than a fact, and for an interchange
 format that is the difference between a product and a file layout.
+
+**As of 1.2.0 all three of those implementations derive uids**, which is the claim that matters:
+reading a document never requires computing one, so three independent readers can round-trip
+every fixture byte for byte while remaining ignorant of what identity *is*. §2.3 — *status is
+part of identity* — now has four independent derivations rather than the Rust's alone.
+
+Each reading has found something, which is the argument for the next one. The first two found
+three places the specification was insufficient; the third found a fixture that could not fail;
+the fourth found four facts a producer cannot proceed without that appeared in no section at
+all — including one where the document said the *opposite* of what the encoder does. All are
+folded in, and `make spec-tables` now parses the specification's tables and compares every
+implementation against them, so the next such gap fails a build instead of surviving two
+releases unnoticed.
 
 **One thing 1.0 does not claim.** Of the five model providers, ollama, DeepSeek and Gemini have
 been exercised against live endpoints; OpenAI and Anthropic have not, because no key has been

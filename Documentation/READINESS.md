@@ -11,12 +11,12 @@ could only be deferred and never worked toward. This file was written to say wha
 | | gate | |
 |---|---|---|
 | 1 | format stability | ✅ policy written, and exercised by the `smysl/1.0` bump |
-| 2 | a second implementation | ✅ three, from the specification alone; two of them derive uids |
+| 2 | a second implementation | ✅ three, from the specification alone; all three derive uids |
 | 3 | public API stability | ✅ mechanism, plus two published quiet cycles |
 | 4 | verified providers | ⚠️ **waived** — OpenAI and Anthropic never called live |
 | 5 | a test suite that catches what it claims | ✅ every crate measured; survivors triaged; the CLI's three largest clusters closed in 1.1 |
 | 6 | performance characterised | ✅ and it found one |
-| 7 | documentation matches the binary | ◐ 78 of 194 `smysl` transcripts, plus the `cargo` ones and the feature table |
+| 7 | documentation matches the binary | ◐ 88 of 194 `smysl` transcripts, plus the `cargo` ones and the feature table |
 
 Gate 7 is honestly partial rather than waived: what it checks, it checks well, and 0.14 proved
 the gap is real by finding three stale claims in exactly the blocks the replay cannot reach.
@@ -113,7 +113,8 @@ guess.
 
 The suite also records what C-Read *cannot* reach, and the largest entry is §2.3 — status is
 part of identity — because uids need C-Produce. That was the format's central claim going
-untested by anything but the Rust; `python/` closed it in 0.10 and `go/` in 1.1.
+untested by anything but the Rust; `python/` closed it in 0.10, `go/` in 1.1 and `nodejs/` in
+1.2.
 
 All three clarifications are folded into §3 of the spec as of 0.9.0: constraint 1 gained the
 decoder's obligation, constraint 2 is scoped to integers and lengths, and tags are constraint
@@ -162,8 +163,46 @@ languages: with the repair, removing NFC fails the fixture comparison in Go and 
 two tests catch different failures, since a *wrong* normalisation still collides both spellings
 and only the fixture knows which bytes are right.
 
-**Next action:** none for this gate. `nodejs/` remains C-Read, which is a scope decision rather
-than a gap; it says so where it lists what it does not reach.
+**C-Produce reached a third time in 1.2, in `nodejs/`.** §2.1 now has four independent
+derivations and §2.3 three witnesses beyond the Rust. `nodejs/src/blake3.js` is hand-rolled for
+the reason the other two are, and passes the published vectors including the lengths straddling
+the chunk boundary; `nodejs/src/uid.js` reproduces all sixteen canonical encodings and all
+sixteen uids, and implements §7's shape clause with `uid()` running it first.
+
+**And it found four things §2.2 and §2.1 did not say.** Not silence in the ordinary sense —
+these are four facts a C-Produce implementer cannot proceed without, and every one was
+recoverable only by decoding `core_bytes_hex` in the uid fixtures:
+
+- **§2.2 said the opposite of what the encoder does.** `deps` and `grounds` are listed
+  "required, MAY be empty"; an empty one is *omitted*. A literal reading emits a five-key map
+  where the reference emits three, which is a different uid for every unit that has neither.
+- **The status integers appeared nowhere**, though rule M compares them as integers — so a
+  reader that guessed a different order would derive wrong uids *and* enforce a different
+  monotonicity rule while believing itself conformant.
+- **The `source` map had no key layout**, and `kind` was a second undocumented enum.
+- **The base32 alphabet was unnamed.** This one does not move a uid, but §2.1 obliges a parser
+  to accept 26 to 52 characters, and base32hex was an equally faithful reading of the sentence.
+
+All four are now in the document, at §2.1 and §2.2, and marked `SPEC:` at the point of use.
+
+The finding under the finding is the one worth keeping: **`python/` and `go/` had already
+reached C-Produce through all four gaps without recording that they guessed.** They necessarily
+arrived at the same answers — they reproduce the same bytes — so nothing disagreed and nothing
+was visible. The suite's whole method is that a `SPEC:` mark is the evidence, and two readers
+resolved four ambiguities against a fixture and left no mark. Agreement that comes from reading
+the same fixture is not the independence this gate is measuring; it took a third reading to
+notice that the second and third had not been reading the specification at those four points at
+all.
+
+Each of the eight new invariants was verified capable of failing — status dropped from the
+hashed core, NFC removed from the encoder, empty sets emitted, the source keys shifted, the
+sort dropped, base32hex substituted, `validate` ungated from `uid()`, and the BLAKE3 tree
+ignored. Eight breakages, eight distinct failures, each naming the clause.
+
+**Next action:** none for this gate. C-Consume's rule M is deliberately not implemented in any
+of the three: it constrains a unit against the statuses of its grounds, which a unit core does
+not carry, so it is checkable against a store and not against a unit. A `validate` claiming to
+enforce it would be a check that cannot fail.
 
 ## 3. Public API stability — *done: the mechanism, and two published cycles of evidence*
 
@@ -609,6 +648,53 @@ assumed — `--test-workspace` gives the stronger one at the cost of running the
 mutant, which is a day's work at these counts and so is worth spending only on the survivors
 that would otherwise be acted on.
 
+### 1.2 measured it, on one module: 22% of its survivors were artefacts
+
+Subject: `crates/smysl-graph/src/store/mod.rs` — 152 mutants, 137 viable — chosen because it
+holds `Store::matching_prefix`, the one instance named above, so the run could be checked
+against a known answer rather than only producing a plausible one.
+
+| | survivors | of viable |
+|---|---:|---:|
+| `cargo mutants -p smysl-graph` — the weak claim, how every figure above was produced | 23 | 16.8% |
+| the same mutants, `--test-workspace true` — the strong claim | **18** | **13.1%** |
+
+**Five of twenty-three were never gaps.** They are exercised by a downstream crate and reported
+as survivors because `-p` runs only `smysl-graph`'s own tests:
+
+- `Store::matching_prefix -> vec![]` — the known case, which is what validates the run
+- `delete match arm 1 in Store::resolve_prefix` — the same prefix path
+- `Store::contentions -> Vec::leak(Vec::new())`
+- `delete match arm Record::LabelBinding in Store::emit`
+- `replace == with != in Store::absorb`
+
+So the backlog is **mostly real**: on this module the weak number overstates by about a fifth,
+not by the multiple it might have. A prediction made before the run went the other way and is
+worth recording — six of the 23 were `delete match arm Record::…` in `Store::emit`, and the
+guess was that a crate reading those records back would catch all six. One did.
+
+**One module of one crate.** Whatever this says about the other 357 survivors, it is evidence
+and not a figure, and applying 22% to them would be the same error this file records twice
+already: a number quoted without its configuration.
+
+**`--test-workspace` needs an explicit `--timeout`, and the default silently produces a run
+that is mostly timeouts.** cargo-mutants measured its baseline at *1s of tests*, auto-set the
+timeout to 20s, and then ran each mutant against the 109-second workspace suite. The first
+attempt came back `4 missed, 6 caught, 15 timeouts` — which, read as a result, says nineteen of
+twenty-three survivors were artefacts. It says nothing of the kind; most of those mutants were
+never tested. The tell was the one this file keeps naming: a number that moved for no reason
+anyone could state, and 19 of 23 is not a plausible artefact rate. Re-run with `--timeout 400`
+it is 0 timeouts and the table above.
+
+The costs, since they are the reason this had never been run:
+
+| | package | workspace | ratio |
+|---|---:|---:|---:|
+| cold, build + test | 229s | 1863s | 8× |
+| warm, test only | 7.75s | 109.35s | **14×** |
+
+Run A was 8 minutes for 152 mutants; run B, 12 minutes for 25.
+
 `envelope.rs` is the best-covered code in the project, and the two survivors that mattered are
 worth more than the rate. An attestation's `sig` could stop decoding and be preserved as an
 unknown key — invisible in the bytes and in the uid, and read as *unsigned* by anything that
@@ -704,7 +790,7 @@ that somebody has to run them. Worth running at a release cut.
 
 ## 7. Documentation that matches the binary — *partial, and the cheap half now gated*
 
-`make doc-output` replays **78 of 194** documented command blocks and gates on them; 116 are
+`make doc-output` replays **88 of 194** documented command blocks and gates on them; 105 are
 skipped, mostly because they name files a chapter built earlier in its own narrative. Appendix
 A, the purity table and the diagnostic registry are cross-checked against the code at every
 release cut.
@@ -743,7 +829,8 @@ Twelve of forty-six, not all of them, and the arithmetic is the point:
   `first.smy` broken, fix it, find it unformatted, then rewrite it in place. Four commands name
   one path and expect four different files; committing any one makes the other three report
   drift that is not there. Splitting them means the chapters naming a different file at each
-  step, which changes what the book teaches — still a decision about the book.
+  step, which changes what the book teaches — ~~still a decision about the book~~. **It was
+  not a decision about the book; see 1.2 below.**
 - **Seven were extracted and then removed**, because the chapter's own transcript refused to
   reproduce against them: the fenced block before the command is a *fragment* the reader adds,
   not the file. This is the failure the 0.10 attempt hit and recorded, met again and this time
@@ -755,6 +842,73 @@ The rule that holds it together is that a fixture must be the bytes its chapter 
 `verify-doc-output.py` fails if one is not found verbatim in its chapter. Without it, editing
 the page leaves the fixture behind and the script starts measuring its own copy of the book.
 Verified by appending a line to a fixture and watching it fail.
+
+### 1.2: it was not a decision about the book
+
+The 57 commands were blocked on fixtures being keyed by **filename** when a chapter's state is
+keyed by **position**. And two of chapter 1's four states cannot be committed at all, which is
+what settles it: state 2 is printed as a *fragment* the reader pastes in, state 3 as a *diff*.
+Neither is ever printed as a file, so neither could satisfy the verbatim rule even if somebody
+wanted it to. No arrangement of committed fixtures was ever going to reach them.
+
+So the script now replays a chapter **as a chapter**: a scratch copy of its committed files,
+walked in document order, with `fmt --write` allowed to actually write. A later state is
+*derived rather than recorded*, which is the stronger claim — the file a command runs against
+is one the book's own instructions produced. The scratch copy is also what makes writing safe:
+commands used to run in the fixture folder itself, so one replayed `fmt --write` would have
+rewritten a tracked file on every run.
+
+The reader's hand-edits are the one thing replaying cannot produce, and they are declared in
+`fixtures/tutorial/<chapter>/edits.json` **by prose anchor, never by content** — the edit body
+is the fenced block following the anchor, read out of the chapter at run time. Nothing is
+duplicated, so nothing can go stale: change the page and the anchor stops resolving, which is
+an error rather than a silent pass. An anchor must appear exactly once, and appearing twice
+fails as loudly as appearing never.
+
+**78 → 88 replayed**, with `first.smy`'s whole four-state narrative now running end to end, and
+`step1 → step2 → step3` in chapter 4 — one document under three names, none of the later two
+committable. Three breakages verified: an anchor that stops resolving, a stanza match that
+finds nothing, and a base fixture edited away from its chapter. Each reports the root cause
+*and* the downstream mismatches, in that order.
+
+**And it found real drift, in the chapter with the most at stake.** `beta.smy` in chapter 29 is
+printed in full and its transcript claims `14 records, 5 units`. The document the book prints
+has **four** units; `check` says `12 records, 4 units`. The transcripts in that chapter were
+generated from a `beta.smy` that is not the one the page prints, and it propagates through
+seven transcripts — the contention labels in `merge`, the counts in two `check`s, and **a uid
+the reader is told to type** into `retract`. `alpha.smy` beside it is in sync, contention uid
+included, so this is one document that lost a stanza rather than a chapter that drifted.
+
+It is held back rather than repaired: the missing stanza cannot be reconstructed from the page,
+and guessing one into a published chapter is not a repair. Restoring it makes seven more
+commands replayable at once, the largest single block left.
+
+**Chapter 4 is now exhausted: 17 of its 20 commands.** Working through it found that only one
+of the four remaining files needed a chain at all, and the other three each failed for a
+different and more interesting reason:
+
+- **`checkout.smy` needed nothing.** The chapter prints it in full *after* the command — "The
+  complete file, for reference" — and the first attempt looked only at the block *before*. The
+  assumption was wrong, not the mechanism.
+- **`ticket.smy`** is printed only as `fmt`'s *output*, never as input. That output is a fixed
+  point, so it is committed as the file, and it exercises exactly what the section is about:
+  `ref: 42` unquoted does not re-parse as a string — it is read as a number, leaving the source
+  with no `ref` — so a writer that stopped quoting would fail `fmt`'s own reparse assertion and
+  refuse to write, which is the guard those pages describe.
+- **`batch-a.smy` / `batch-b.smy` would be a check that cannot fail.** They are described rather
+  than printed, and `fmt --write` prints nothing on success — so the expected output is empty
+  and *any* two valid files satisfy it. Skipped for a stronger reason than missing bytes.
+- **`extrel.smy`** is 7 records and 3 units, of which the chapter prints only the one `@rel`
+  line that makes it interesting.
+
+**And a second instance of the `beta.smy` pattern.** `draft.smy`'s transcript shows `fmt --write`
+warning that two comment lines will not survive. Run against the bytes the page prints, `fmt`
+never reaches that warning: the snippet's `@claim c/regression` names `grounds: [e/trace]` and
+nothing defines `e/trace`, so it exits 3 with `SMY-E060` and `SMY-E031`. A reader following the
+page literally gets two errors where the book shows a warning. That transcript, like chapter
+29's, was generated from a fuller document than the page prints — **twice now, in two chapters,
+found only once the files became replayable.** Both are held back rather than repaired, for the
+same reason: the missing stanza is not on the page and inventing one is not a repair.
 
 **That number is measured under one specific build, and reading it under another gives a
 different answer** — which was nearly written into this file as drift. Re-checking it in 1.1 by

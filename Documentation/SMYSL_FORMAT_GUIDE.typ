@@ -178,7 +178,7 @@
     #line(length: 34%, stroke: 0.6pt + ink_accent)
     #v(5mm)
     #text(font: body_family, size: 10pt, style: "italic", fill: ink_smoke,
-      "Vladimir Ulogov · 2026 · smysl 1.1.0 · format smysl/1.0 · kernel smysl.kernel/0.1")
+      "Vladimir Ulogov · 2026 · smysl 1.2.0 · format smysl/1.0 · kernel smysl.kernel/0.1")
   ],
 )
 #v(6mm)

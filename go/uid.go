@@ -49,7 +49,10 @@ const (
 	keyPayload = 8
 )
 
-// The source sub-map, §1.1.
+// The source sub-map, §2.2 key 7. Undocumented until 1.2.0: this layout was recovered from the
+// uid fixtures, and the citation here pointed at a section number the format spec has never
+// had. Both were found by the gate in scripts/verify-spec-tables.py, which is what that gate
+// is for — a citation to a section that does not exist reads as a clause settling the question.
 const (
 	keySourceKind      = 0
 	keySourceReference = 1
@@ -102,7 +105,7 @@ func (s Status) RequiresSource() bool { return s == StatusMeasured || s == Statu
 // to follow from nothing.
 func (s Status) RequiresGrounds() bool { return s == StatusDerived || s == StatusInferred }
 
-// Source is the §1.1 sub-map. Kind is the integer code, not the name.
+// Source is the §2.2 key 7 sub-map. Kind is the integer code, not the name.
 type Source struct {
 	Kind      uint64
 	Reference string

@@ -102,7 +102,7 @@ def _uid_set(uids) -> bytes:
 
 @dataclass
 class Source:
-    """§1.1. `kind` is the integer code, not the name."""
+    """§2.2, key 7. `kind` is the integer code, not the name."""
 
     kind: int
     reference: str

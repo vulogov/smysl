@@ -29,7 +29,18 @@ def test_the_specification_is_where_we_think_it_is():
 # -- §2.2  What is hashed -----------------------------------------------------
 
 def test_unit_core_keys_match_the_table_in_2_2():
-    """The spec's table is normative; this implementation's table must be it, exactly."""
+    """The spec's table is normative; this implementation's table must be it, exactly.
+
+    The expectation below is a *hand-typed copy* of that table, not the table. Nothing here
+    parses the markdown, so editing §2.2 and editing this file are two separate acts and this
+    test cannot notice the first. That was true of every such test in all three implementations
+    and was described in READINESS as the tables being "asserted against the document" — which
+    is not what any of them did.
+
+    `scripts/verify-spec-tables.py` is what ties this copy to the document, and it runs in CI.
+    The copy stays because it is fast and it belongs beside the code; the gate is what makes it
+    a check rather than a duplicate.
+    """
     expected = {
         0: "schema",
         1: "gist",

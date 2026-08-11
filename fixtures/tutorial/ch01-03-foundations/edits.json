@@ -1,0 +1,31 @@
+{
+  "_purpose": [
+    "The reader's hand-edits, which are the one thing replaying the chapter cannot produce.",
+    "",
+    "Anchored by prose, never by content: the edit body is the fenced block that follows the",
+    "anchor, read out of the chapter at run time. That is what stops this file going stale —",
+    "there is nothing here to fall out of step with the page, because the page is where the",
+    "bytes come from. Change the wording and the anchor stops resolving, which is an error.",
+    "",
+    "An anchor must appear exactly once in its chapter. `verify-doc-output.py` fails if it",
+    "appears twice as loudly as if it appears never: an ambiguous anchor would silently pick",
+    "whichever came first."
+  ],
+  "first.smy": [
+    {
+      "anchor": "Add the missing grounds:",
+      "op": "replace-stanza",
+      "match": "@claim c/root-cause",
+      "_why": [
+        "State 2, and it cannot be a committed fixture. The chapter prints only the changed",
+        "@claim stanza, not the whole file — it is a fragment the reader pastes over one they",
+        "already have. A file assembled from it would not be the bytes the chapter prints,",
+        "which is the rule the whole arrangement rests on.",
+        "",
+        "State 3 needs no entry at all: `fmt --write first.smy` produces it, and the chapter",
+        "prints that one as a *diff*. Deriving it by running the command is a stronger claim",
+        "than recording it would have been."
+      ]
+    }
+  ]
+}

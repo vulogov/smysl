@@ -218,10 +218,33 @@ jobs:
           cargo test -p smysl-core --test gen_uid_fixtures -- --ignored
           git diff --exit-code fixtures/wire/uid/
 
+  # Whether what the four implementations agree *on* is written down anywhere.
+  #
+  # Every other conformance job asks whether they agree with each other. In 1.2.0 that turned
+  # out to be a weaker question than it read: three implementations "agreed" about the status
+  # integers, the source sub-map's layout, the kind enum and the base32 alphabet, and all three
+  # had learned them by decoding the same fixture because no section of the spec said. Nothing
+  # disagreed, so nothing failed, for two releases.
+  #
+  # This parses the spec's tables rather than quoting them. Before it existed, every
+  # implementation read SMYSL_FORMAT_SPEC.md only to assert it contained the string
+  # "Deterministic CBOR" — while READINESS reported the §2.2 and §3.1 tables as checked
+  # against the document.
+  spec-tables:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/verify-spec-tables.py
+
   # The same specification, read a third time. Two implementations agreeing could have made
   # the same guess where the document is silent, so independence is what makes agreement
   # evidence — this one was written without consulting the Python, and both found the same two
   # ambiguities.
+  #
+  # As of 1.2 it also *produces*, which makes §2.1 a four-derivation claim and §2.3 a
+  # three-witness one. The reading found four more places §2.2 does not say enough to derive a
+  # uid from — including one where it says the opposite of what the encoder does — all four now
+  # written into the document and marked `SPEC:` in `nodejs/src/uid.js`.
   conformance-node:
     runs-on: ubuntu-latest
     steps:

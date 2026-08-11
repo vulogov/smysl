@@ -1,8 +1,9 @@
 # smysl — normative format specification
 
 **Status:** normative. This document is the contract.
-**Format version:** `smysl/0.1` · **kernel schema:** `smysl.kernel/0.1`
-**Describes:** crate `1.1.0`.
+**Format version:** `smysl/1.0` — `smysl/0.1` is also accepted and always will be (§8.6).
+**Kernel schema:** `smysl.kernel/0.1`.
+**Describes:** crate `1.2.0`.
 
 This is the whole of what a second implementation must obey to interoperate. It is
 deliberately short. Everything it does not say is a free choice.
@@ -25,23 +26,31 @@ and RFC SMYSL-1 disagree, this document is correct and the RFC is history.
 ## 0. Implementations of this document
 
 Three, besides the Rust that defined the format, each written from this document: `python/`,
-`nodejs/` and `go/` in this repository. All three target **C-Read**; `python/` and `go/` also
-reach **C-Produce**. They run in CI against fixtures the Rust produced, and a byte-for-byte
-match is what "two implementations agree" means in practice.
+`nodejs/` and `go/` in this repository. **All three reach C-Produce** as of 1.2.0. They run in
+CI against fixtures the Rust produced, and a byte-for-byte match is what "two implementations
+agree" means in practice.
 
-The distinction is worth stating, because it is the difference between two useful things.
-C-Read says a document means the same to two readers. It does **not** reach §2.1 — reading
-never requires deriving a uid — so all three could round-trip every fixture byte for byte while
-remaining ignorant of what a uid is, which is what happened for a full release. §2.3, *status
-is part of identity*, is the paragraph this format rests on, and C-Produce is the lowest class
-that touches it. `python/` and `go/` each derive uids over a BLAKE3 written for the purpose,
-and reproduce the reference implementation's — canonical bytes checked separately from the
-hash, in `fixtures/wire/uid/`. Three independent derivations of §2.1, where there was one until
-0.10 and two until 1.1.
+The distinction between the classes is worth stating, because it is the difference between two
+useful things. C-Read says a document means the same to two readers. It does **not** reach
+§2.1 — reading never requires deriving a uid — so all three could round-trip every fixture byte
+for byte while remaining ignorant of what a uid is, which is what happened for a full release.
+§2.3, *status is part of identity*, is the paragraph this format rests on, and C-Produce is the
+lowest class that touches it. Each of the three derives uids over a BLAKE3 written for the
+purpose, and reproduces the reference implementation's — canonical bytes checked separately
+from the hash, in `fixtures/wire/uid/`. Four independent derivations of §2.1, where there was
+one until 0.10, two until 1.1 and three until 1.2.
 
-`go/` also implements the *shape* half of C-Produce that §7 names and `python/` does not: it
-refuses to derive a uid for a unit with no gist, with `derived` or `inferred` and no grounds,
-with `measured` or `cited` and no source, or with an authored `unfounded`.
+`go/` and `nodejs/` also implement the *shape* half of C-Produce that §7 names and `python/`
+does not: they refuse to derive a uid for a unit with no gist, with `derived` or `inferred` and
+no grounds, with `measured` or `cited` and no source, or with an authored `unfounded`.
+
+**Each reading has found something, which is the argument for the next one.** The first two
+found three places §3 was insufficient, now constraints 1, 2 and 8. The third found a fixture
+that could not fail. The fourth found four things §2.2 and §2.1 did not say — the status
+integers, the `source` map's layout, the base32 alphabet, and one place the table said the
+*opposite* of what the encoder does — all four now written down, and all four previously
+recoverable only by decoding a fixture. Two implementations had already reached C-Produce
+through those gaps without recording that they had guessed.
 
 They exist because every other check in this repository tests whether the Rust is
 self-consistent, and none of them would notice if this document were blank. If you are
@@ -76,6 +85,13 @@ characters is permitted where a human reads it; a parser MUST accept 26 to 52 ch
 MUST NOT accept fewer. An abbreviated uid is a display convenience and never appears in
 canonical CBOR, which carries the raw 32 bytes.
 
+The base32 is **RFC 4648, lowercased, unpadded** — `abcdefghijklmnopqrstuvwxyz234567`, not
+base32hex — and bits are taken most-significant first, so the 52nd character covers bits
+255–259 and its last four are zero. This does not affect a uid, which travels as raw bytes;
+it is stated because the obligation to accept 26 to 52 characters means nothing between
+implementations that disagree about which thirty-two symbols are meant. base32hex was an
+equally faithful reading of the sentence above until this paragraph existed.
+
 ### 2.2 What is hashed
 
 The **unit core**, and only the unit core: a CBOR map with integer keys, emitted in
@@ -96,6 +112,50 @@ ascending key order, omitting absent optional fields entirely.
 
 An absent optional field MUST be omitted, never encoded as `null`. `deps` and `grounds` are
 **sets**: deduplicated, and sorted by uid bytes.
+
+**An empty `deps` or `grounds` is omitted, exactly as an absent optional is.** "Required, MAY
+be empty" above is a statement about the set, not about the encoding: the key is required to
+*mean* something — the empty set, not "unspecified" — and an empty one is spelled by leaving
+the key out. The `minimal` case in `fixtures/wire/uid/cases.json` is a three-key map over 0, 1
+and 6. This sentence exists because the table without it reads naturally as "the key is always
+present", which is off by two keys and therefore by a whole identity; a fourth implementer read
+it that way in 1.2.
+
+`status` is one of six values, and the integers are **normative** — rule M compares them as
+integers, so an implementation that agreed on the names and not on the order would derive wrong
+uids *and* enforce a different monotonicity rule while believing itself conformant:
+
+| value | status |
+|---:|---|
+| 0 | unfounded |
+| 1 | speculative |
+| 2 | inferred |
+| 3 | derived |
+| 4 | cited |
+| 5 | measured |
+
+`source` (key 7) is a map with integer keys on the same rules as the core:
+
+| key | field | type | presence |
+|---:|---|---|---|
+| 0 | kind | uint | required |
+| 1 | reference | text | required |
+| 2 | captured | text | optional |
+
+and its `kind`:
+
+| value | kind |
+|---:|---|
+| 0 | url |
+| 1 | file |
+| 2 | metric |
+| 3 | tool |
+| 4 | doc |
+
+The three tables above were added in 1.2.0. Until then a C-Produce implementer could recover
+them only by decoding `core_bytes_hex` in the uid fixtures — which is to say the fixtures were
+carrying normative content this document did not admit to having, and two implementations
+reached C-Produce by reading them without either recording that it had to.
 
 ### 2.3 Status is part of identity
 
