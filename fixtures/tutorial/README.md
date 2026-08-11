@@ -11,37 +11,91 @@ measuring its own copy rather than the book — a check that passes against byte
 sees.
 
 Nothing in the manual changed to make this work. The page still says `smysl check cycle.smy`;
-the command runs with its working directory set to the folder holding `cycle.smy`, so the
-diagnostics still print `cycle.smy: error: …` and the transcript compares exactly as written.
-Substituting a path into the command would have changed its output and made every one of these
-transcripts drift on its own filename.
+the command runs with its working directory set to a scratch copy of the folder holding
+`cycle.smy`, so the diagnostics still print `cycle.smy: error: …` and the transcript compares
+exactly as written. Substituting a path into the command would have changed its output and
+made every one of these transcripts drift on its own filename.
+
+## A chapter is a sequence, not a set
+
+1.1 committed twelve files and left 57 commands unreachable, recorded as a decision about the
+book: 22 filenames have **more than one state** — chapter 1 has the reader create `first.smy`
+broken, fix it, find it unformatted, then rewrite it in place — so four commands name one path
+and expect four different files, and committing any one makes the other three report drift
+that is not there. Splitting them would mean the chapters naming a different file at each step,
+which changes what they teach.
+
+**It was not a decision about the book.** It was these fixtures being keyed by filename when a
+chapter's state is keyed by *position*. And two of chapter 1's four states cannot be committed
+at all, which is what makes the point: state 2 is printed as a **fragment** the reader pastes
+in, and state 3 as a **diff**. Neither is ever printed as a file, so neither could satisfy the
+rule above even if somebody wanted it to.
+
+So they are not committed. Since 1.2.0 the script replays a chapter *as a chapter*: a scratch
+copy of the committed files, walked in document order, with `fmt --write` allowed to actually
+write. A later state is **derived rather than recorded**, which is a stronger claim than a
+fixture makes — the file a command runs against is one the book's own instructions produced.
+
+The scratch copy is what makes writing safe. Commands used to run in this folder directly; a
+single replayed `fmt --write` would have rewritten a tracked fixture on every run.
+
+## `edits.json` — the reader's own edits
+
+A hand edit is the one thing replaying a chapter cannot produce, so each chapter that needs one
+carries an `edits.json`. It is **anchored by prose, never by content**: the edit body is the
+fenced block that follows the anchor, read out of the chapter at run time.
+
+```json
+"step2.smy": [
+  { "anchor": "Add the claim the evidence is for:", "op": "append", "from": "step1.smy" }
+]
+```
+
+Nothing is duplicated, so nothing can go stale — change the page and the anchor stops
+resolving, which is an error rather than a silent pass. An anchor must appear **exactly once**;
+appearing twice fails as loudly as appearing never, because an ambiguous anchor would quietly
+pick whichever came first.
+
+Three operations, and `from` for the chapters that build one document up under several names:
+
+| op | what it does |
+|---|---|
+| `append` | add the anchored block to the end of the file |
+| `replace-stanza` | replace the `@…` stanza named by `match` with the anchored block |
+| `from` | seed the file from an earlier one before applying — `step1` → `step2` → `step3` |
+
+Keys beginning `_` are prose. JSON has no comments and these files have to explain themselves.
 
 ## What is not here, and why
 
-Twelve files of the forty-six the manual names. The rest are held back for two reasons, both of
-which produce *false* drift if ignored — and this script's history says a false positive is
-worse than no check.
-
-**A filename with more than one state.** Chapter 1 has the reader create `first.smy` broken,
-fix it, discover it is not canonically formatted, and then rewrite it in place with
-`fmt --write`. Four commands name one path and expect four different files. Committing any one
-of them makes the other three report drift that is not there. 22 files and 57 commands are in
-this position; splitting them would mean the chapters naming a different file at each step,
-which changes what the book teaches — a decision about the book, still open.
+**Twelve of chapter 4's filenames are still fragments.** `checkout.smy`, `draft.smy`,
+`extrel.smy`, `ticket.smy` and others are assembled across several blocks, and the block before
+a command is what the reader *adds*, not the file. Each needs its chapter's narrative read and
+an `edits.json` chain written — mechanical now that the mechanism exists, where before it was
+blocked on a decision nobody could make.
 
 **A file the prose describes rather than prints.** `bignote.txt` is "a ~7 KB paragraph,
 repeated". There is nothing to copy, so there is nothing to commit that is provably the same
 bytes.
 
-Seven more were extracted and then removed because the chapter's own transcript refused to
-reproduce against them — the fenced block before the command turned out to be a *fragment* the
-reader adds, not the file. That failure is loud rather than subtle, which is the useful part:
-the diagnostics carry byte offsets, so a file assembled wrongly reports `at 0..125` where the
-manual says `at 296..416` and the mismatch says exactly what happened.
+**`beta.smy` in chapter 29, and this one is a finding rather than a limitation.** The chapter
+prints it in full and its transcript claims `14 records, 5 units`. The document it prints has
+**four** units, and `check` on it says `12 records, 4 units` — exactly one labelled unit fewer,
+which is two records. The transcripts in that chapter were generated from a `beta.smy` that is
+not the one the book prints, and the difference propagates through seven transcripts, including
+the contention labels in `merge` and **a uid the reader is told to type** into `retract`.
 
-## Regenerating
+`alpha.smy` beside it is in sync: its transcript matches, contention uid included. So this is
+one document that lost a stanza, not a chapter that drifted.
 
-There is no generator. Each file was taken from the fenced block its chapter prints and kept
-only when the chapter's transcript reproduced against it. Adding one is the same procedure:
-copy the block, run `make doc-output`, and keep it only if the count rises and nothing
-mismatches.
+It is held back rather than fixed because the missing stanza cannot be reconstructed from the
+page, and guessing one into a published chapter is not a repair. Restoring it makes seven more
+commands replayable at once, which is the largest single block left.
+
+## Adding one
+
+Copy the block its chapter prints, run `make doc-output`, and keep it only if `ran` rises and
+nothing mismatches. If the command fails on unresolved references, the block was a fragment —
+that is the common case, and `edits.json` is the answer rather than a bigger copy. The
+diagnostics carry byte offsets, so a file assembled wrongly reports `at 0..125` where the manual
+says `at 296..416`, and the mismatch says exactly what happened.

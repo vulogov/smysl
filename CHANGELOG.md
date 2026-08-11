@@ -9,7 +9,151 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.2.0
 
-Nothing yet. What is carried:
+### `nodejs/` reaches C-Produce, and finds four things the spec did not say
+
+§2.1 now has **four independent derivations** — the Rust, `python/`, `go/` and `nodejs/` — and
+§2.3, *status is part of identity*, has three witnesses beyond the reference. `nodejs/` was the
+last of the three outside readers still at C-Read.
+
+`nodejs/src/blake3.js` is a hand-rolled BLAKE3-256, for the reason the other two are: a binding
+to the same C library the Rust calls would test two callers of one implementation. It passes
+the published vectors including 1023/1024/1025/2048/3072, the lengths that straddle the chunk
+boundary and separate a real tree from a single-chunk shortcut. `nodejs/src/uid.js` reproduces
+all sixteen canonical encodings and all sixteen uids in `fixtures/wire/uid/cases.json`, and
+implements §7's *shape* clause with `uid()` running it first — a malformed unit cannot obtain an
+identity from the package, which is what makes the class a claim about emitting.
+
+**The reading found four facts a C-Produce implementer cannot proceed without, none of them in
+the document.** All four are now at §2.1 and §2.2, and marked `SPEC:` at the point of use:
+
+- **§2.2 said the opposite of what the encoder does.** `deps` and `grounds` are listed
+  "required, MAY be empty"; an empty one is *omitted*. Read literally, `minimal` encodes as a
+  five-key map where the reference emits three — a different uid for every unit with neither.
+- **The status integers appeared nowhere.** Rule M compares them as integers, so a reader
+  guessing a different order would derive wrong uids *and* enforce a different monotonicity
+  rule while believing itself conformant.
+- **The `source` map had no key layout**, and `kind` was a second undocumented enum.
+- **The base32 alphabet was unnamed.** It does not move a uid, but §2.1 obliges a parser to
+  accept 26 to 52 characters, and base32hex was an equally faithful reading of the sentence.
+
+Every one was recoverable only by decoding `core_bytes_hex`, which means the fixtures had been
+carrying normative content the specification did not admit to having.
+
+**And the finding under the finding.** `python/` and `go/` had already reached C-Produce through
+all four gaps *without recording that they guessed*. They necessarily arrived at the same
+answers — they reproduce the same bytes — so nothing disagreed and nothing was visible. This
+suite's method is that a `SPEC:` mark is the evidence; two readers resolved four ambiguities
+against a fixture and left no mark, and it took a third reading to notice they had not been
+reading the specification at those points at all. Agreement reached by consulting the same
+fixture is not the independence gate 2 measures.
+
+Eight new invariants, each verified capable of failing before being trusted: status dropped
+from the hashed core, NFC removed from the encoder, empty sets emitted, the source keys
+shifted, the sort dropped, base32hex substituted, `validate` ungated from `uid()`, and the
+BLAKE3 tree ignored. Eight breakages, eight distinct failures, each naming its clause.
+
+`nodejs` goes from 73 tests to 126. One behaviour change outside the new files: the CBOR
+encoder now NFC-normalises text, which §3 constraint 6 asks for by name ("normalise *at the
+encoder*"). It was a no-op for C-Read — the decoder rejects anything not already NFC — and is
+what makes `unicode-decomposed` reproducible.
+
+### `make spec-tables` — whether what the implementations agree *on* is written down
+
+The gate the section above needed and did not have. Every other conformance check asks whether
+the four implementations agree with each other; this one parses the tables in
+`SMYSL_FORMAT_SPEC.md` and compares each implementation's copy against them, in both
+directions. 38 comparisons, its own CI job.
+
+The distinction is *parsed* rather than *quoted*. Until this existed, every implementation read
+the specification file only to assert it contained the string "Deterministic CBOR", and the
+tables in their tests were hand-typed second copies — so editing §2.2 and editing a test were
+two separate acts, and neither could notice the other. **READINESS and `nodejs/README.md` both
+described this as the tables being "asserted against the document."** They now say what it is,
+and the gate is what ties the copies to the page.
+
+It found four things on top of the four it was built for:
+
+- **the masthead had gone stale** — line 4 read `smysl/0.1` while §8.6 of the same document
+  says `smysl/1.0` arrived in 0.15 and is what new documents declare. The normative header
+  named the version the writer stopped defaulting to two releases earlier, and nothing read the
+  masthead at all;
+- **`go/uid.go` cited §1.1 twice** for the source sub-map. There is no §1.1 — §1 has no
+  subsections. A citation to a section that does not exist reads as a clause settling the
+  question;
+- **`python/smysl/uid.py` cited §1.1** for the same thing;
+- **`nodejs/src/uid.js` cited §1.4**, copied from the Rust, where it refers to the architecture
+  RFC rather than to the format spec.
+
+Eight breakages verified, each failing the right check: a status row deleted from the spec, a
+unit-core key renumbered, an undocumented status added to an implementation, a record code
+renumbered, a record renamed, a source key shifted, the masthead reverted, and a phantom
+citation reintroduced.
+
+### Gate 7: 78 → 85 transcripts, and the 57 blocked commands were never a decision about the book
+
+1.1 recorded the remaining commands as blocked on a book decision: 22 filenames have more than
+one state, so committing any one makes the others report drift that is not there. That framing
+was wrong. The fixtures were keyed by **filename** when a chapter's state is keyed by
+**position** — and two of chapter 1's four states cannot be committed under any arrangement,
+which is what settles it: state 2 is printed as a *fragment* the reader pastes in and state 3
+as a *diff*, so neither can ever be "the bytes the chapter prints".
+
+`verify-doc-output.py` now replays a chapter **as a chapter**: a scratch copy of its fixtures,
+walked in document order, with `fmt --write` allowed to write. Later states are *derived rather
+than recorded*, which is the stronger claim. Reader edits — the one thing replaying cannot
+produce — are declared in `edits.json` **by prose anchor, never by content**, so the edit body
+is read out of the chapter at run time and nothing can go stale.
+
+`first.smy`'s four-state narrative now runs end to end, and chapter 4's `step1 → step2 →
+step3` — one document under three names — runs from one committed file. The scratch copy also
+removes a hazard that had never fired: commands used to run in the fixture folder itself, where
+a single replayed `fmt --write` would have rewritten a tracked file.
+
+**And it found real drift where the most is at stake.** `beta.smy` in chapter 29 is printed in
+full and its transcript claims `14 records, 5 units`; the document the book prints has **four**
+units, and `check` says `12 records, 4 units`. Those transcripts were generated from a
+`beta.smy` that is not the one on the page, and it propagates through seven transcripts — two
+`check` counts, the contention labels in `merge`, and **a uid the reader is told to type** into
+`retract`. `alpha.smy` beside it is in sync, contention uid included, so one document lost a
+stanza rather than a chapter drifting.
+
+Held back rather than repaired: the missing stanza cannot be reconstructed from the page, and
+guessing one into a published chapter is not a repair. Restoring it makes seven more commands
+replayable at once, the largest single block left. The rest — `checkout.smy`, `draft.smy`,
+`extrel.smy`, `ticket.smy` — need their narratives read and an `edits.json` chain written,
+which is work rather than a question nobody could answer.
+
+### The mutation figures were the weaker claim, and now one module has both
+
+Every survivor rate in READINESS gate 5 — 357 across eleven crates — comes from
+`cargo mutants -p X`, which runs `cargo test --package=X`. A function exercised only by a
+downstream crate is reported as a survivor while being perfectly well tested. The file has said
+so since 1.1 and also said the figures had been "quoted as if they meant the stronger thing"
+for four measurements. Nobody had measured the difference.
+
+Measured, on `crates/smysl-graph/src/store/mod.rs` — 152 mutants, 137 viable, picked because it
+holds `Store::matching_prefix`, the one instance already named, so the run could be checked
+against a known answer:
+
+| | survivors | of viable |
+|---|---:|---:|
+| per-package, as every published figure was measured | 23 | 16.8% |
+| the same mutants, `--test-workspace` | **18** | **13.1%** |
+
+**Five of twenty-three were never gaps** — `matching_prefix`, `resolve_prefix`, `contentions`,
+`emit`'s `LabelBinding` arm, and one comparison in `absorb`. The backlog is mostly real: on this
+module the weak number overstates by about a fifth. That is one module of one crate, and
+applying the fraction to the other 357 would be the error this repository keeps making — a
+number quoted without its configuration.
+
+**The first attempt at the strong number was invalid and looked like a result.** cargo-mutants
+took its baseline at 1s of tests, auto-set the timeout to 20s, then ran each mutant against the
+109-second workspace suite: `4 missed, 6 caught, 15 timeouts`. Read as a result that says
+nineteen of twenty-three survivors were artefacts. Most of those mutants were never tested. The
+tell was the usual one — 19 of 23 is not a plausible artefact rate, and a number had moved for
+no nameable reason. `--test-workspace` needs an explicit `--timeout`; with it, 0 timeouts.
+
+### What is carried
 
 - **Gate 4 still wants two keys**, and now needs nothing else. Everything reachable by reading
   has been read, twice, and it found a defect each time. If you have an OpenAI or Anthropic key,
@@ -17,21 +161,25 @@ Nothing yet. What is carried:
   work" is more useful still, because the concrete mappers are `#[doc(hidden)]` and a wrong one
   is fixable without a 2.0.
 
-- **Gate 7's remaining 57 commands.** 22 tutorial filenames have more than one state — chapter 1
-  creates `first.smy` broken, fixes it, finds it unformatted, then rewrites it in place — so
-  committing any one file makes the other commands naming it report drift that is not there.
-  Splitting them means the chapters naming a different file at each step, which changes what the
-  book teaches. Still a decision about the book rather than a task;
-  `fixtures/tutorial/README.md` records which files are held back and why, so it need not be
-  rediscovered a third time.
+- **Gate 7's remaining commands**, now 108 skipped rather than 116, and no longer blocked on
+  anything but reading. The largest single block is `beta.smy`'s missing stanza, which is a
+  question for whoever wrote chapter 29; the rest need `edits.json` chains written against
+  chapters whose narratives assemble a file across several blocks.
 
 - **59 survivors in `src/main.rs`**, of 207 viable. What remains is `cmd_thread` 6,
   `cmd_render` 6, and a tail of threes. The three largest clusters and the dispatch are closed;
   the yield per hour from here is lower than it was.
 
-- **`nodejs/` remains C-Read.** A fourth uid derivation would be a third witness for §2.3
-  beyond the Rust — a scope decision rather than a gap, and it says so where it lists what it
-  does not reach.
+- **The other ten crates' survivor rates are still the weak per-package claim.** One module has
+  both numbers now and the artefact there was a fifth; whether that holds anywhere else is
+  unmeasured. `--test-workspace true --timeout 400` is the invocation, at roughly 14× the
+  per-mutant cost.
+
+- **Rule M is implemented by none of the three outside readers**, deliberately. It constrains a
+  unit against the statuses of its grounds, and a unit core carries grounds as uids — so M is
+  checkable against a store and not against a unit, and a `validate` claiming to enforce it
+  would be a check that cannot fail. Reaching C-Consume properly means one of them growing a
+  store, which is a larger scope decision than this cycle took.
 
 ---
 

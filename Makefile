@@ -50,7 +50,7 @@ MATRIX := \
 .DEFAULT_GOAL := help
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix gates purity update seed-fuzz fuzz-build \
         determinism conformance eval live-ollama live-hosted doc fuzz clean sweep \
-        commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo seed-fuzz fuzz-long
+        commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables seed-fuzz fuzz-long
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -308,6 +308,18 @@ doc-cargo: ## Replay the manual's `cargo` transcripts and check its feature tabl
 	@# is the argument: a version number in prose drifts every release.
 	python3 scripts/verify-doc-cargo.py
 
+spec-tables: ## Fail if the format's constants and the document that defines them disagree
+	@# The gate 1.2.0 needed and did not have. Four facts a C-Produce implementer cannot
+	@# proceed without — the status integers, the source sub-map's layout, the kind enum and
+	@# the base32 alphabet — were in no section of the spec, and three implementations
+	@# "agreed" on all four because all three had decoded the same fixture to learn them.
+	@#
+	@# It parses the spec's tables rather than quoting them, which is the distinction that
+	@# matters: until this existed, every implementation read SMYSL_FORMAT_SPEC.md only to
+	@# assert it contained the string "Deterministic CBOR", while READINESS reported the
+	@# §2.2 and §3.1 tables as checked against the document.
+	python3 scripts/verify-spec-tables.py
+
 doc-output: ## Replay the manual's documented commands against the real binary
 	@echo "Needs a default-features build: a stale --all-features binary reports false drift."
 	$(CARGO) build
@@ -437,7 +449,7 @@ commit: ## Commit with aic and push
 # Everything
 # ---------------------------------------------------------------------------
 
-ci: lint doc-gate api-check test-matrix gates conformance fuzz-build doc-cargo ## Everything CI runs, bar the jobs needing a server
+ci: lint doc-gate api-check test-matrix gates conformance fuzz-build doc-cargo spec-tables ## Everything CI runs, bar the jobs needing a server
 	@echo
 	@echo "ci: green."
 	@echo "Not covered here: the ollama job (needs a running server - see make live-ollama)"

@@ -1,0 +1,14 @@
+@doc smysl/0.1 {
+  id: v/first
+  intent: incident-brief
+  lang: en
+  roots: [c/root-cause]
+}
+
+@evidence e/cpu-spike { status: measured, source: { kind: metric, ref: "host.cpu.pct", captured: 2026-07-20 } }
+~ CPU on worker-3 sat above 95 percent for eleven minutes starting at 02:14.
+
+@claim c/root-cause { status: derived }
+~ A stuck cron job pinned worker-3's CPU and starved the request queue.
+
+@rel e/cpu-spike --warrant--> c/root-cause

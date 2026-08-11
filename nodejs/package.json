@@ -1,7 +1,7 @@
 {
   "name": "smysl-conformance",
-  "version": "0.9.0",
-  "description": "An independent C-Read implementation of the smysl format, written from the spec",
+  "version": "1.2.0",
+  "description": "An independent C-Produce implementation of the smysl format, written from the spec",
   "type": "module",
   "main": "src/index.js",
   "exports": {
@@ -12,7 +12,7 @@
   },
   "license": "MPL-2.0",
   "scripts": {
-    "test": "node --test test/conformance.test.js test/invalid.test.js"
+    "test": "node --test test/conformance.test.js test/invalid.test.js test/blake3.test.js test/uid.test.js"
   },
   "files": [
     "src/",

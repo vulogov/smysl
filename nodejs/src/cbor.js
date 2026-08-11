@@ -208,7 +208,17 @@ export class Encoder {
       this.#head(2, v.length);
       this.out.push(...v);
     } else if (typeof v === "string") {
-      const raw = new TextEncoder().encode(v);
+      // §3, constraint 6, and it says where: "Normalise *at the encoder*, not only in the
+      // constructors that happen to be remembered." The clause carries the reference
+      // implementation's account of getting this wrong — the invariant asserted in debug and
+      // trusted in release, six free-text fields reaching the encoder unchecked for six
+      // releases, two of them found only by fuzzing.
+      //
+      // This was a no-op until C-Produce arrived, which is why it was not here: a re-encode
+      // only ever sees text the decoder already rejected unless it was NFC. Authored text has
+      // no such guarantee, and `unicode-decomposed` in fixtures/wire/uid/cases.json is the
+      // case that fails without this line.
+      const raw = new TextEncoder().encode(v.normalize("NFC"));
       this.#head(3, raw.length);
       this.out.push(...raw);
     } else if (Array.isArray(v)) {
