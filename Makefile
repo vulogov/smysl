@@ -109,7 +109,7 @@ doc-gate: ## Rustdoc with warnings denied, as docs.rs would show it
 # not fail loudly either — it turns all twelve crates into "version not found in registry", a
 # red job saying nothing about the API. 0.10.0 and 0.12.0 were never published and never will
 # be; everything in them shipped in the release after.
-BASELINE  := 1.0.0
+BASELINE  := 1.2.0
 PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-render \
              smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl
 

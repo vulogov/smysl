@@ -38,6 +38,12 @@ one is possible and perverse, and everything in it is in 0.11.0. Not every tag i
 publication. 0.12.0 went the same way; 0.13, 0.14 and 0.15 were all published, and the last two
 are the two consecutive quiet cycles that Phase 3 of `ROAD_TO_1.0.md` asked for.
 
+**1.1.0 joined that list, and 1.2.0 is published.** All twelve crates went to crates.io on
+2026-08-11, so the registry reads `1.0.0 → 1.2.0`; everything in 1.1.0 is contained in 1.2.0.
+`BASELINE` moved to 1.2.0 in the same change, which is the whole point of it tracking
+publication rather than tags — it had been measuring against 1.0.0 while two releases went by,
+the exact drift recorded above for 0.9.0.
+
 That gap is worth remembering rather than tidying away. `cargo-semver-checks` fetches its
 baseline from crates.io, so `BASELINE` in the Makefile tracks the last *published* version and
 not the last tagged one; it sat at 0.9.0 across two cut-but-unpublished releases, which meant
