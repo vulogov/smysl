@@ -119,9 +119,22 @@ stanza rather than a chapter drifting.
 
 Held back rather than repaired: the missing stanza cannot be reconstructed from the page, and
 guessing one into a published chapter is not a repair. Restoring it makes seven more commands
-replayable at once, the largest single block left. The rest — `checkout.smy`, `draft.smy`,
-`extrel.smy`, `ticket.smy` — need their narratives read and an `edits.json` chain written,
-which is work rather than a question nobody could answer.
+replayable at once, the largest single block left.
+
+**Chapter 4 finished at 88: 17 of its 20 commands.** Only one of the four remaining files
+needed a chain; the other three each failed differently, and two of those are worth keeping.
+`checkout.smy` needed nothing at all — the chapter prints it in full *after* the command, and
+the first attempt looked only at the block before, so the assumption was wrong rather than the
+mechanism. `batch-a.smy` / `batch-b.smy` would have been **a check that cannot fail**: they are
+described rather than printed, and `fmt --write` prints nothing on success, so the expected
+output is empty and any two valid files satisfy it.
+
+**And `draft.smy` is a second instance of the `beta.smy` pattern.** Its transcript shows
+`fmt --write` warning about comment lines; run against the bytes the page prints, `fmt` never
+reaches that warning, because the snippet names `grounds: [e/trace]` and nothing defines
+`e/trace` — it exits 3 with two errors. A reader following the page literally gets errors where
+the book shows a warning. Two chapters now, both generated from documents fuller than the page
+prints, both invisible until the files became replayable.
 
 ### The mutation figures were the weaker claim, and now one module has both
 

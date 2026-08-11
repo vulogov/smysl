@@ -66,17 +66,49 @@ Three operations, and `from` for the chapters that build one document up under s
 
 Keys beginning `_` are prose. JSON has no comments and these files have to explain themselves.
 
+## Chapter 4 is exhausted: 17 of its 20 commands
+
+Working through it turned up three shapes, only one of which needed an `edits.json` chain:
+
+- **`step2.smy` / `step3.smy`** — the chain. One document under three names, each later state
+  printed only as the stanza that was added.
+- **`checkout.smy`** — needed nothing at all. The chapter prints it in full *after* the command
+  ("The complete file, for reference"), and the first attempt at extracting it looked only at
+  the block *before*. Worth stating because it was the assumption, not the mechanism, that was
+  wrong.
+- **`ticket.smy`** — the chapter prints only `fmt`'s *output*, never the input. That output is a
+  fixed point, so it is committed as the file, and it exercises precisely what the section is
+  about. §4 requires a value that would re-parse as something else to be quoted, and `ref: 42`
+  unquoted does not re-parse as a string at all — it is read as a number, leaving the source
+  with no `ref`, which is `SMY-E001`. So a writer that stopped quoting would not merely print
+  something different; it would fail `fmt`'s own reparse assertion and refuse to write, which
+  is the guard the surrounding pages describe.
+
 ## What is not here, and why
 
-**Twelve of chapter 4's filenames are still fragments.** `checkout.smy`, `draft.smy`,
-`extrel.smy`, `ticket.smy` and others are assembled across several blocks, and the block before
-a command is what the reader *adds*, not the file. Each needs its chapter's narrative read and
-an `edits.json` chain written — mechanical now that the mechanism exists, where before it was
-blocked on a decision nobody could make.
+**`batch-a.smy` / `batch-b.smy` — and this one would be a check that cannot fail.** They are
+described rather than printed ("one with a multi-line header and a quoted date, the other with
+`grounds` and `status` swapped"), and the expected output is **empty**, because `fmt --write`
+prints nothing on success. Any two valid files would satisfy it. Skipping is right here for a
+stronger reason than "the bytes are not available".
+
+**`extrel.smy`** — 7 records, 3 units, and the chapter prints only the one `@rel` line that
+makes it interesting. The three units are never printed as a set.
 
 **A file the prose describes rather than prints.** `bignote.txt` is "a ~7 KB paragraph,
 repeated". There is nothing to copy, so there is nothing to commit that is provably the same
 bytes.
+
+**`draft.smy`, and this is the second instance of a pattern.** The chapter prints the snippet
+that demonstrates comments, then shows `fmt --write draft.smy` warning that two comment lines
+will not survive. Run against the printed bytes, `fmt` never reaches that warning: the snippet's
+`@claim c/regression` has `grounds: [e/trace]` and nothing defines `e/trace`, so it exits 3 with
+`SMY-E060` and `SMY-E031`. That transcript was generated from a fuller `draft.smy` than the page
+prints — the same shape as `beta.smy` in chapter 29, now seen twice.
+
+A reader following the page literally gets two errors where the book shows a warning. Held back
+rather than repaired for the same reason: the missing stanza is not on the page, and inventing
+one is not a repair.
 
 **`beta.smy` in chapter 29, and this one is a finding rather than a limitation.** The chapter
 prints it in full and its transcript claims `14 records, 5 units`. The document it prints has

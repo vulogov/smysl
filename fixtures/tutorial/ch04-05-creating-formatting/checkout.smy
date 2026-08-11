@@ -1,0 +1,20 @@
+@evidence e/cache-miss { status: measured, source: { kind: metric, ref: "cache.miss_rate{svc=checkout}", captured: 2026-07-20 } }
+~ Cache miss rate on checkout rose from 1% to 42% over the same hour.
+
+@evidence e/deploy-clean { status: measured, source: { kind: metric, ref: "deploy.canary_p95", captured: 2026-07-20 } }
+~ The same-hour checkout canary deploy shows no latency regression on its own.
+
+@definition d/cold-cache { status: cited, source: { kind: doc, ref: "sre-handbook#cache-eviction" } }
+~ A cache is "cold" when its hit rate has not yet recovered after an eviction event.
+
+@claim c/cache-cold { status: inferred, grounds: [e/cache-miss], deps: [d/cold-cache] }
+~ The checkout price cache is cold after an eviction, not merely slow.
+
+@claim c/latency-up { status: derived, grounds: [e/cache-miss] }
+~ Checkout p95 latency rose from 80 ms to 410 ms in the same hour.
+
+@claim c/deploy-clean { status: derived, grounds: [e/deploy-clean] }
+~ The canary deploy rules out the new release as the direct cause.
+
+@rel c/cache-cold --causes--> c/latency-up
+@rel c/deploy-clean --rebuts--> c/cache-cold { weight: 0.4 }

@@ -16,7 +16,7 @@ could only be deferred and never worked toward. This file was written to say wha
 | 4 | verified providers | ⚠️ **waived** — OpenAI and Anthropic never called live |
 | 5 | a test suite that catches what it claims | ✅ every crate measured; survivors triaged; the CLI's three largest clusters closed in 1.1 |
 | 6 | performance characterised | ✅ and it found one |
-| 7 | documentation matches the binary | ◐ 85 of 194 `smysl` transcripts, plus the `cargo` ones and the feature table |
+| 7 | documentation matches the binary | ◐ 88 of 194 `smysl` transcripts, plus the `cargo` ones and the feature table |
 
 Gate 7 is honestly partial rather than waived: what it checks, it checks well, and 0.14 proved
 the gap is real by finding three stale claims in exactly the blocks the replay cannot reach.
@@ -790,7 +790,7 @@ that somebody has to run them. Worth running at a release cut.
 
 ## 7. Documentation that matches the binary — *partial, and the cheap half now gated*
 
-`make doc-output` replays **85 of 194** documented command blocks and gates on them; 108 are
+`make doc-output` replays **88 of 194** documented command blocks and gates on them; 105 are
 skipped, mostly because they name files a chapter built earlier in its own narrative. Appendix
 A, the purity table and the diagnostic registry are cross-checked against the code at every
 release cut.
@@ -865,7 +865,7 @@ duplicated, so nothing can go stale: change the page and the anchor stops resolv
 an error rather than a silent pass. An anchor must appear exactly once, and appearing twice
 fails as loudly as appearing never.
 
-**78 → 85 replayed**, with `first.smy`'s whole four-state narrative now running end to end, and
+**78 → 88 replayed**, with `first.smy`'s whole four-state narrative now running end to end, and
 `step1 → step2 → step3` in chapter 4 — one document under three names, none of the later two
 committable. Three breakages verified: an anchor that stops resolving, a stanza match that
 finds nothing, and a base fixture edited away from its chapter. Each reports the root cause
@@ -883,10 +883,32 @@ It is held back rather than repaired: the missing stanza cannot be reconstructed
 and guessing one into a published chapter is not a repair. Restoring it makes seven more
 commands replayable at once, the largest single block left.
 
-**What remains is mechanical rather than blocked.** The rest of chapter 4's filenames —
-`checkout.smy`, `draft.smy`, `extrel.smy`, `ticket.smy` — are assembled across several blocks
-and each needs its chapter's narrative read and an `edits.json` chain written. That is work;
-it is no longer a question nobody could answer.
+**Chapter 4 is now exhausted: 17 of its 20 commands.** Working through it found that only one
+of the four remaining files needed a chain at all, and the other three each failed for a
+different and more interesting reason:
+
+- **`checkout.smy` needed nothing.** The chapter prints it in full *after* the command — "The
+  complete file, for reference" — and the first attempt looked only at the block *before*. The
+  assumption was wrong, not the mechanism.
+- **`ticket.smy`** is printed only as `fmt`'s *output*, never as input. That output is a fixed
+  point, so it is committed as the file, and it exercises exactly what the section is about:
+  `ref: 42` unquoted does not re-parse as a string — it is read as a number, leaving the source
+  with no `ref` — so a writer that stopped quoting would fail `fmt`'s own reparse assertion and
+  refuse to write, which is the guard those pages describe.
+- **`batch-a.smy` / `batch-b.smy` would be a check that cannot fail.** They are described rather
+  than printed, and `fmt --write` prints nothing on success — so the expected output is empty
+  and *any* two valid files satisfy it. Skipped for a stronger reason than missing bytes.
+- **`extrel.smy`** is 7 records and 3 units, of which the chapter prints only the one `@rel`
+  line that makes it interesting.
+
+**And a second instance of the `beta.smy` pattern.** `draft.smy`'s transcript shows `fmt --write`
+warning that two comment lines will not survive. Run against the bytes the page prints, `fmt`
+never reaches that warning: the snippet's `@claim c/regression` names `grounds: [e/trace]` and
+nothing defines `e/trace`, so it exits 3 with `SMY-E060` and `SMY-E031`. A reader following the
+page literally gets two errors where the book shows a warning. That transcript, like chapter
+29's, was generated from a fuller document than the page prints — **twice now, in two chapters,
+found only once the files became replayable.** Both are held back rather than repaired, for the
+same reason: the missing stanza is not on the page and inventing one is not a repair.
 
 **That number is measured under one specific build, and reading it under another gives a
 different answer** — which was nearly written into this file as drift. Re-checking it in 1.1 by
