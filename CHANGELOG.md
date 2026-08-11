@@ -7,7 +7,27 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.2.0
+## Unreleased — 1.3.0
+
+Nothing yet.
+
+---
+
+## 1.2.0 — 2026-08-11
+
+The cycle spent asking one question of every check in the project: **where does its evidence
+actually come from?** The answer was never quite where it was documented to be.
+
+Three implementations "agreed" about four facts because all three had decoded the same fixture.
+Tests said to assert the spec's tables "against the document" read that document only to check
+it contained one string. A gate that had reported on the manual since 0.3 could not see a
+quarter of it. Every mutation-survivor figure was the weaker of two claims, quoted as the
+stronger for four measurements. And the first attempt to measure that difference came back
+`4 missed, 6 caught, 15 timeouts` — which reads as a finding and is an artefact.
+
+Nothing here is a format change. `smysl/1.0` is untouched, the same fixtures produce the same
+uids, and the API surface is unmoved: `cargo-semver-checks` is clean on all twelve crates
+against 1.0.0, and `SEMVER_BREAKING` is empty for the third release running.
 
 ### `nodejs/` reaches C-Produce, and finds four things the spec did not say
 
@@ -174,10 +194,15 @@ no nameable reason. `--test-workspace` needs an explicit `--timeout`; with it, 0
   work" is more useful still, because the concrete mappers are `#[doc(hidden)]` and a wrong one
   is fixable without a 2.0.
 
-- **Gate 7's remaining commands**, now 108 skipped rather than 116, and no longer blocked on
-  anything but reading. The largest single block is `beta.smy`'s missing stanza, which is a
-  question for whoever wrote chapter 29; the rest need `edits.json` chains written against
-  chapters whose narratives assemble a file across several blocks.
+- **Gate 7's remaining commands**, now 105 skipped rather than 116, and no longer blocked on
+  anything but reading. The rest need `edits.json` chains written against chapters whose
+  narratives assemble a file across several blocks.
+
+- **Two missing stanzas, and they are authoring questions rather than engineering ones.**
+  `beta.smy` in chapter 29 unlocks seven commands, `draft.smy` in chapter 4 unlocks one. Both
+  chapters' transcripts were generated from documents fuller than the pages print, and neither
+  stanza is recoverable from the page — so both were held back rather than guessed at. A reader
+  following either page literally gets output the book does not show.
 
 - **59 survivors in `src/main.rs`**, of 207 viable. What remains is `cmd_thread` 6,
   `cmd_render` 6, and a tail of threes. The three largest clusters and the dispatch are closed;
