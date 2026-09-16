@@ -414,8 +414,8 @@ command says so rather than pretending.
 Every diagnostic `smysl` can emit has a stable code, declared once in the `registry!`
 macro invocation in `crates/smysl-core/src/diag.rs` and never reused. The registry is
 single-sourced: wire string, severity, group, and one-line meaning all come from that one
-place, and a workspace test (`registry_matches_appendix_d_size`) asserts the count below
-stays at 49. Codes are grouped exactly as the source groups them; group membership is
+place, and two tests (`the_registry_is_the_size_it_is_meant_to_be` in `smysl-core`, and
+`facade_reexports_the_diagnostic_registry` in the facade) assert the count below stays at 52. Codes are grouped exactly as the source groups them; group membership is
 reporting structure only; it carries no weight on the wire.
 
 #dtable(
@@ -553,6 +553,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W305`], [warning], [Token count estimated rather than provider-reported.]),
     ([`SMY-E307`], [error], [Attributed quote does not occur in the source text.]),
     ([`SMY-W308`], [warning], [Attributed quote occurs only loosely — elided or reworded.]),
+    ([`SMY-W309`], [warning], [A unit's own source was replaced by the caller's, under a source policy that overrides.]),
   ),
 )
 

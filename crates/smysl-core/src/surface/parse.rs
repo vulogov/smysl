@@ -23,7 +23,7 @@ use crate::surface::hjson::{parse_object_prefix, HObject, HValue, Spanned};
 use crate::surface::lex::{arrow_len, find_arrow, lex, Line, LineClass};
 use crate::surface::payload::object_to_payload;
 use crate::types::annex::SchemaDecl;
-use crate::types::epistemics::{Date, SourceKind, SourceRef, Status};
+use crate::types::epistemics::{Date, SourceKind, SourcePolicy, SourceRef, Status};
 use crate::types::provenance::Hlc;
 use crate::types::relation::{RelKind, Relation};
 use crate::types::thread::{Role, Step, Thread, ThreadSchema};
@@ -184,7 +184,29 @@ struct RawView {
 
 /// Parse surface text.
 pub fn parse_surface(src: &str) -> Result<ParseOutcome, ParseError> {
+    parse_surface_with(src, &ParseOptions::default())
+}
+
+/// What a caller can tell the parser that the text itself does not say.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ParseOptions {
+    /// A source to give units, and how it combines with one a record already has. Applied
+    /// before any unit is built, since `source` is inside the uid; see [`SourcePolicy`].
+    pub source: Option<(SourceRef, SourcePolicy)>,
+}
+
+impl ParseOptions {
+    pub fn with_source(mut self, source: SourceRef, policy: SourcePolicy) -> ParseOptions {
+        self.source = Some((source, policy));
+        self
+    }
+}
+
+/// [`parse_surface`], with options.
+pub fn parse_surface_with(src: &str, opts: &ParseOptions) -> Result<ParseOutcome, ParseError> {
     let mut p = Parser {
+        opts: opts.clone(),
         src,
         lines: lex(src),
         i: 0,
@@ -200,6 +222,7 @@ pub fn parse_surface(src: &str) -> Result<ParseOutcome, ParseError> {
 }
 
 struct Parser<'a> {
+    opts: ParseOptions,
     src: &'a str,
     lines: Vec<Line<'a>>,
     i: usize,
@@ -1059,6 +1082,27 @@ impl<'a> Parser<'a> {
     // -----------------------------------------------------------------------
 
     fn finish(mut self) -> ParseOutcome {
+        // A caller's source, applied to raw fields before anything is built or hashed.
+        if let Some((caller, policy)) = self.opts.source.clone() {
+            for u in &mut self.units {
+                let (source, replaced) = policy.apply(&caller, u.source.take());
+                u.source = source;
+                if let Some(old) = replaced {
+                    let name = u
+                        .label
+                        .as_ref()
+                        .map(|l| l.as_str().to_string())
+                        .unwrap_or_else(|| format!("{:?}", u.gist));
+                    self.out
+                        .diagnostics
+                        .push(Diagnostic::at(Code::W309, u.span).with_message(format!(
+                            "`{name}` named its own source `{}`; replaced by `{}`",
+                            old.reference, caller.reference
+                        )));
+                }
+            }
+        }
+
         let index: BTreeMap<Label, usize> = self
             .units
             .iter()
@@ -1356,11 +1400,13 @@ fn resolve(
             Some(uid)
         }
         Err(e) => {
-            diagnostics.push(
-                Diagnostic::at(e.code(), u.span)
-                    .with_subject(Subject::Span(u.span))
-                    .with_message(e.to_string()),
-            );
+            let mut d = Diagnostic::at(e.code(), u.span)
+                .with_subject(Subject::Span(u.span))
+                .with_message(e.to_string());
+            if let Some(s) = e.suggestion() {
+                d = d.with_suggestion(s);
+            }
+            diagnostics.push(d);
             None
         }
     }

@@ -125,3 +125,67 @@ fn a_label_resolves_from_a_cbor_store_through_its_bindings() {
     assert_eq!(a.stdout, b.stdout);
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// A label a merged store binds to two units is refused with exit 5 and both candidates,
+/// by every command, and the uid still works.
+///
+/// A store merged from three extraction runs bound `d/g90ec2f7-1` three times. `trace` and
+/// `retract --dry-run` by that label exited 0 on one of them — the last binding in record order —
+/// so `retract` would have retracted a unit the caller did not choose.
+#[test]
+fn an_ambiguous_label_is_refused_with_exit_5_and_every_candidate() {
+    let dir = std::env::temp_dir().join(format!("smysl-label-ambiguous-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut inputs = Vec::new();
+    for n in 1..=2 {
+        let p = dir.join(format!("run{n}.smy"));
+        std::fs::write(
+            &p,
+            format!("@doc smysl/1.0 {{ id: v/run{n}, intent: rationale, lang: en }}\n\n@decision d/g90ec2f7-1 {{ status: speculative }}\n~ Run {n} worded the decision differently.\n"),
+        )
+        .unwrap();
+        inputs.push(p);
+    }
+    let store = dir.join("runs.cbor");
+    let store_s = store.to_str().unwrap();
+    let made = Command::new(BIN)
+        .arg("merge")
+        .args(&inputs)
+        .args(["-o", store_s])
+        .output()
+        .unwrap();
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+
+    let mut uids = Vec::new();
+    for cmd in COMMANDS {
+        let out = run(&with(&cmd[..cmd.len() - 1], "d/g90ec2f7-1")
+            .into_iter()
+            .chain([store_s])
+            .collect::<Vec<_>>());
+        let err = String::from_utf8_lossy(&out.stderr);
+        let shown = cmd.join(" ");
+        assert_eq!(out.status.code(), Some(5), "{shown}: {err}");
+        assert!(
+            err.contains("Run 1 worded") && err.contains("Run 2 worded"),
+            "{shown}: {err}"
+        );
+        uids = err
+            .split_whitespace()
+            .filter(|w| w.starts_with("b3:"))
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(uids.len(), 2, "{shown}: {err}");
+    }
+
+    let by_uid = run(&["trace", &uids[0], store_s]);
+    assert!(
+        by_uid.status.success(),
+        "{}",
+        String::from_utf8_lossy(&by_uid.stderr)
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}

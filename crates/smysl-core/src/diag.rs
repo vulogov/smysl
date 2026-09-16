@@ -254,6 +254,7 @@ registry! {
         W305 = "SMY-W305", Warn,  "Token count estimated rather than provider-reported";
         E307 = "SMY-E307", Error, "Attributed quote does not occur in the source text";
         W308 = "SMY-W308", Warn,  "Attributed quote occurs only loosely - elided or reworded";
+        W309 = "SMY-W309", Warn,  "A unit's own source was replaced by the caller's (source policy override)";
     }
 }
 
@@ -537,10 +538,11 @@ mod tests {
     /// retired.
     ///
     /// 51 as of 0.6.0: `SMY-W306` was deleted rather than emitted, having described a usage
-    /// threshold that does not exist.
+    /// threshold that does not exist. 52 as of 1.3.0: `SMY-W309`, a caller's source replacing
+    /// the one a unit gave — numbered past `W306`, which stays retired rather than reused.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 51);
+        assert_eq!(Code::ALL.len(), 52);
     }
 
     #[test]

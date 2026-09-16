@@ -87,7 +87,7 @@ up:
 #screen(caption: "$ smysl check mistake1.smy")[
 ```
 mistake1.smy: error: SMY-E060: unresolved reference `e/missing-evidence` (at 351..369)
-mistake1.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 296..416)
+mistake1.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 296..416) [try: name the units it rests on in `grounds`, or lower the status to `speculative`]
 ```
 ]
 
@@ -112,7 +112,7 @@ the source in a moment, and then don't:
 
 #screen(caption: "$ smysl check mistake2.smy")[
 ```
-mistake2.smy: error: SMY-E032: SMY-E032: measured/cited without source (at 108..225)
+mistake2.smy: error: SMY-E032: SMY-E032: measured/cited without source (at 108..225) [try: add a `source` naming the document it came from, or lower the status: `inferred` with grounds, or `speculative` - never raise it]
 ```
 ]
 

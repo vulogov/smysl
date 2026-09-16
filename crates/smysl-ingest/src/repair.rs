@@ -28,7 +28,6 @@
 //! outstanding. See `needs_repair`.
 
 use smysl_check::{check, CheckOptions, Pass};
-use smysl_core::surface::parse_surface;
 use smysl_core::{
     Code, Diagnostic, KernelType, Record, Relation, Report, Rung, Severity, Status, UnitCore,
     UnitCoreBuilder,
@@ -52,14 +51,31 @@ pub fn convert(
     path: IngestPath,
     rung: Rung,
 ) -> (Vec<UnitCore>, Vec<Relation>, Vec<Diagnostic>) {
+    convert_with(answer, path, rung, None)
+}
+
+/// [`convert`], with a caller-supplied source applied on either path before units are built.
+pub fn convert_with(
+    answer: &str,
+    path: IngestPath,
+    rung: Rung,
+    source: Option<&(smysl_core::SourceRef, smysl_core::SourcePolicy)>,
+) -> (Vec<UnitCore>, Vec<Relation>, Vec<Diagnostic>) {
+    let answer = crate::prompt::strip_echo(answer);
     let mut relations = Vec::new();
     let (mut units, mut diagnostics) = match path {
         IngestPath::JsonAst => {
-            let out = json_ast::convert(answer);
+            let out = json_ast::convert_with(answer, source);
             relations = out.relations;
             (out.units, out.diagnostics)
         }
-        IngestPath::Surface => match parse_surface(answer) {
+        IngestPath::Surface => match smysl_core::surface::parse_surface_with(answer, &{
+            let mut o = smysl_core::surface::ParseOptions::default();
+            if let Some((s, p)) = source {
+                o = o.with_source(s.clone(), *p);
+            }
+            o
+        }) {
             Ok(out) => {
                 relations = out
                     .records

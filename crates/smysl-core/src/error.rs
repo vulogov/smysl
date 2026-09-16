@@ -152,6 +152,30 @@ impl ShapeError {
     }
 }
 
+impl ShapeError {
+    /// What to do about it, for the status rules — and only ever toward a *weaker* claim.
+    ///
+    /// Asked to fix `SMY-E032` (`cited` with no source) with no suggestion, Gemini flash-lite
+    /// raised every `cited` to `measured` in 3 of 3 samples: the easiest edit that looks like a
+    /// fix, and the one claim `ingest` must never make. A suggestion that names the weaker
+    /// statuses gives the repair turn a better easy edit.
+    pub const fn suggestion(&self) -> Option<&'static str> {
+        match self {
+            ShapeError::SourceRequired => Some(
+                "add a `source` naming the document it came from, or lower the status: \
+                 `inferred` with grounds, or `speculative` - never raise it",
+            ),
+            ShapeError::GroundsRequired => Some(
+                "name the units it rests on in `grounds`, or lower the status to `speculative`",
+            ),
+            ShapeError::UnfoundedAuthored => {
+                Some("use `speculative`; `unfounded` is reached only by retraction")
+            }
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for ShapeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

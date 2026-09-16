@@ -47,6 +47,14 @@ impl Converted {
 /// Never fails: a batch that is not JSON at all yields diagnostics and no units, which is
 /// what the repair loop needs to hear rather than an error it cannot locate.
 pub fn convert(raw: &str) -> Converted {
+    convert_with(raw, None)
+}
+
+/// [`convert`], with a caller-supplied source applied to each unit before it is built.
+pub fn convert_with(
+    raw: &str,
+    source: Option<&(smysl_core::SourceRef, smysl_core::SourcePolicy)>,
+) -> Converted {
     let mut out = Converted::default();
 
     // A model asked for JSON sometimes wraps it in a fence. Unwrapping is charity, not
@@ -99,7 +107,7 @@ pub fn convert(raw: &str) -> Converted {
             );
             continue;
         };
-        match unit(o, i, &out.labels) {
+        match unit(o, i, &out.labels, source, &mut out.diagnostics) {
             Ok((core, label)) => {
                 let uid = canonical_uid(&core);
                 if let Some(l) = label {
@@ -225,6 +233,8 @@ fn unit(
     o: &HObject,
     index: usize,
     labels: &BTreeMap<Label, Uid>,
+    caller: Option<&(smysl_core::SourceRef, smysl_core::SourcePolicy)>,
+    warnings: &mut Vec<Diagnostic>,
 ) -> Result<(UnitCore, Option<Label>), Vec<Diagnostic>> {
     let mut errors = Vec::new();
     let at = |msg: String| Diagnostic::new(Code::E001).with_message(format!("unit {index}: {msg}"));
@@ -311,6 +321,26 @@ fn unit(
         None => None,
     };
 
+    // The caller's source, before the builder sees any: `source` is inside the uid, and a
+    // `cited` unit without one would fail to build rather than wait to be patched.
+    let source = match caller {
+        Some((c, policy)) => {
+            let (source, replaced) = policy.apply(c, source);
+            if let Some(old) = replaced {
+                let name = label
+                    .as_ref()
+                    .map(|l| l.as_str().to_string())
+                    .unwrap_or_else(|| format!("unit {index}"));
+                warnings.push(Diagnostic::new(Code::W309).with_message(format!(
+                    "`{name}` named its own source `{}`; replaced by `{}`",
+                    old.reference, c.reference
+                )));
+            }
+            source
+        }
+        None => source,
+    };
+
     let (Some(kind), Some(status)) = (kind, status) else {
         return Err(errors);
     };
@@ -354,7 +384,13 @@ fn unit(
         Ok(core) => Ok((core, label)),
         // The builder's shape rules are the structural half of rules M and T, and a model
         // that broke one gets told which, not "invalid".
-        Err(e) => Err(vec![at(e.to_string())]),
+        Err(e) => {
+            let mut d = at(e.to_string());
+            if let Some(s) = e.suggestion() {
+                d = d.with_suggestion(s);
+            }
+            Err(vec![d])
+        }
     }
 }
 

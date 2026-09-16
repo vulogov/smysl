@@ -101,12 +101,89 @@ they allow; one whose views agree is checked exactly as before.
 
 The profile the rationale case needed already existed: `granularity: { profile: fine }`.
 
+### From rust_smysl's library use: six more (R1–R6)
+
+rust_smysl uses smysl as a library to record why code changed, building units itself and
+sending them through `stage::prepare`. Its report came with reproductions and acceptance
+tests; every acceptance test is now in the suite, and each was watched failing first.
+
+**R1 — the repair turn made things worse.** On a real commit with Gemini flash-lite, surface
+ingest degraded in 3 of 3 runs, and replaying the repair turn showed why. The template fenced the
+previous answer with the *input* marker, which the model copied back — 17 bytes that became
+`SMY-E001: stray Text`. It replaced the content system prompt, so the model fixing `cited`
+without a source no longer saw "Never `measured`", and raised every `cited` to `measured`. And
+a degraded chunk reported only the last attempt, hiding the real cause behind the one the repair
+introduced. Now the repair keeps the content prompt (and a caller's override) with the
+correction added; the previous answer has its own marker; a marker or code fence echoed at
+either end of any answer is stripped before parsing; `E031`, `E032` and `E034` carry suggestions
+that only ever lower a status; and a degraded chunk reports every attempt's errors, marked by
+attempt.
+
+**R2 — the surface template had no way to write a source or a quote.** Its only example was
+`@<type> <label> { status: … }`, so flash-lite wrote every record `cited` with no source.
+Version 3 shows a complete header with `source` and `"ingest:quote"` — held as a constant a test
+parses, so the example cannot teach an error — and says what to do without a nameable source.
+One correction to the report: the quote check *already* ran on the surface path. What was
+missing was only the request for a quote, so there was nothing to check.
+
+Not changed: `auto` still takes surface for large inputs. The size rule exists because a
+truncated JSON answer loses a whole batch; `ingest: { path: json-ast }` covers providers where
+surface does badly.
+
+**R3 — a caller supplies the source.** `IngestOptions::with_source(SourceRef, SourcePolicy)`,
+with `FillMissing` and `Override`. Provenance is the one field a model should not invent: models
+wrote `ref: CHANGELOG.md` for a commit message. `source` is inside the uid, and a `cited` unit
+without one fails construction rather than waiting to be patched, so the policy is applied to
+raw fields before any unit is built, on both paths through one shared `SourcePolicy::apply`. An
+override that replaces a model's own source is `SMY-W309`, naming the unit. The recipe records
+source and policy; recipes without one are byte-identical to before. Asserted per path, and each
+path's application was removed in turn to confirm its own case fails.
+
+**R4 — the quote check is public**: `quote_support`, `quote_support_in` (several texts, which one
+matched, `Present` anywhere beating `Loose` anywhere), `QuoteSupport` and `QUOTE_KEY`. Its
+normalisation is now contract, so it is stated on the function and settled first: straight and
+curly, single and double quotation marks are one mark; Markdown `` ` `` and `*` are deleted
+rather than spaced; `_` is kept, because in a code change `foo_bar` and `foobar` are different
+names.
+
+And the frozen definition would have frozen a hole. `Loose` matched a quote word to any later
+source word that contained it or that it contained — stemming in all but name. Against a
+715-word commit message, the invented "Rust was rewritten in Go to match the Python
+implementation." rated `Loose`, a warning, and would have staged. Words are now compared whole
+after removing edge punctuation; the fabrication is `Absent`, honest elisions stay `Loose`, and
+the commit is a fixture in `fixtures/quote/`.
+
+**R5 — an ambiguous label is refused.** A store merged from three extraction runs bound
+`d/g90ec2f7-1` three times, and `trace` and `retract --dry-run` by that label exited 0 on one of
+them — the last binding in record order, because callers built a `BTreeMap` from the bindings.
+`label_bindings` and `resolve_label` in the library; every unit-taking command now exits 5 on
+`Ambiguous`, listing each candidate with its gist, as `relink` does for a fork.
+
+**R6 — dependents over chosen edges, and a retraction report that does not mislead.**
+`dependents_via(store, uid, &EdgeSet)`. Writing it found something rust_smysl's pipeline as
+described would get wrong: **a reverse closure over `{grounds, deps, conditions}` never reaches a
+decision conditioned on a prerequisite.** Support edges are stored from the dependent to what
+it rests on; `p --conditions--> d` is stored from `p` to `d`. So `dependents_via` walks support
+edges inward and relation edges outward, and says which relation kinds that is right for —
+`conditions`, `causes`, `enables`, `warrant`, `backs` — and which it is not. A test asserts the
+plain reverse closure misses the case, so a change of adjacency direction fails loudly.
+
+`retract --dry-run` said "would reach N unit(s), orphaning M", where N was the target plus its
+orphans; retracting one of two prerequisites said "reach 1". It now says "would leave N unit(s)
+unfounded, M of them orphaned", and adds "K more unit(s) rest partly on it and keep other
+support" when there are any; `--json` gains `rest_partly_on`. Nothing pinned the wording
+before except the book; `tests/cmd_retract.rs` does now.
+
+Found on the way: the diagnostic appendix said a test named `registry_matches_appendix_d_size`
+held the registry at 49. No test has that name, and the registry was 51; it is 52 with
+`SMY-W309`, which is numbered past `W306` because retired codes are not reused.
+
 ### Also
 
 - `LineClass::SchemaStart` is the enum's last variant, not beside `ThreadStart`: inserting it
   mid-enum renumbered six published discriminants, which `make semver` reported as a major
   change. Caught before commit.
-- The facade is 245 names: `PromptOverride`.
+- The facade is 254 names; the ten additions are listed in `API_CONTRACT.md`.
 
 ### What is carried
 

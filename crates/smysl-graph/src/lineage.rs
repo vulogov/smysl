@@ -230,6 +230,64 @@ pub fn dependents(store: &Store, uid: Uid) -> Vec<Uid> {
         .collect()
 }
 
+/// Everything that depends on a unit, over the edges the caller chooses.
+///
+/// [`dependents`] walks `deps` and `grounds` only. A producer that links prerequisites by
+/// `conditions` — so a decision's uid does not move when a prerequisite is reworded — needs
+/// those edges followed too, and [`reverse_closure`](crate::traverse::reverse_closure) accepts
+/// any edge set but works in `NodeId`s, which callers are told never to hold past one traversal.
+///
+/// **Direction is not uniform, and that is the reason this exists rather than a note saying
+/// "use `reverse_closure`".** A `grounds` or `deps` edge is stored from the dependent to what it
+/// rests on, so its dependents are *incoming*. A relation `p --conditions--> d` is stored from
+/// `p` to `d`, so `d` — the unit that rests on `p` — is *outgoing*. A reverse closure over
+/// `{grounds, deps, conditions}` therefore never reaches a conditioned decision: it reports
+/// nothing wrong while omitting exactly the dependents the extra edge was added for.
+///
+/// So this walks `deps` and `grounds` against their direction and every **relation** edge in
+/// `edges` along it — treating a relation's target as resting on its source. That is right for
+/// the kinds that state a dependency that way round: `conditions`, `causes`, `enables`,
+/// `warrant` and `backs`. It is wrong for `elaborates` and `exemplifies`, whose *source* rests on
+/// the target, and meaningless for `rebuts`, `contrasts`, `concedes`, `sequences` and the
+/// lifecycle kinds. Choose the edges accordingly; with [`EdgeSet::support`] this is exactly
+/// [`dependents`].
+///
+/// Transitive, in the order first reached, without the unit itself.
+pub fn dependents_via(store: &Store, uid: Uid, edges: &EdgeSet) -> Vec<Uid> {
+    let g = store.adjacency();
+    let Some(start) = g.id(&uid) else {
+        return Vec::new();
+    };
+    let mut seen = vec![false; g.len()];
+    seen[start as usize] = true;
+    let mut stack = vec![start];
+    let mut out = Vec::new();
+    while let Some(n) = stack.pop() {
+        let along_support = g
+            .in_edges(n)
+            .iter()
+            .filter(|e| matches!(e.kind, EdgeKind::Deps | EdgeKind::Grounds));
+        let along_relations = g
+            .out_edges(n)
+            .iter()
+            .filter(|e| !matches!(e.kind, EdgeKind::Deps | EdgeKind::Grounds));
+        for e in along_support.chain(along_relations) {
+            if !edges.contains(e.kind) {
+                continue;
+            }
+            let m = e.target as usize;
+            if m < seen.len() && !seen[m] {
+                seen[m] = true;
+                stack.push(e.target);
+                if let Some(u) = g.uid(e.target) {
+                    out.push(*u);
+                }
+            }
+        }
+    }
+    out
+}
+
 // ---------------------------------------------------------------------------
 // diff between stores
 // ---------------------------------------------------------------------------

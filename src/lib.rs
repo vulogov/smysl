@@ -72,9 +72,9 @@ pub use smysl_core::{
     GranularityProfile, Group, Hlc, IdError, IntegrityError, KernelType, Label, LabelBinding,
     LangTag, Lod, NonDetReason, Op, Optimality, PackInfo, PackMode, ParseError, Record, RelKind,
     Relation, Report, Role, Rung, SchemaDecl, SchemaId, Severity, ShapeError, SourceKind,
-    SourceRef, Span, Status, Step, Subject, Thread, ThreadId, ThreadSchema, Uid, UidPrefix, Unit,
-    UnitCore, UnitCoreBuilder, View, ViewId, FORMAT_VERSIONS_SUPPORTED, FORMAT_VERSION_DEFAULT,
-    KERNEL_MAJOR, KERNEL_SCHEMA,
+    SourcePolicy, SourceRef, Span, Status, Step, Subject, Thread, ThreadId, ThreadSchema, Uid,
+    UidPrefix, Unit, UnitCore, UnitCoreBuilder, View, ViewId, FORMAT_VERSIONS_SUPPORTED,
+    FORMAT_VERSION_DEFAULT, KERNEL_MAJOR, KERNEL_SCHEMA,
 };
 
 // ---- check ----------------------------------------------------------------
@@ -108,14 +108,14 @@ pub use smysl_render::{
 pub use smysl_graph::compact::{compact, Compacted};
 pub use smysl_graph::relink::{relink, Relinked};
 pub use smysl_graph::{
-    closure, cycles, dependents, diff, effective_status, hop_diff, membership, merge,
-    plan_retraction, rebuttals_of, reverse_closure, salience, topo, trace, view_roots, Adjacency,
-    AgentActivity, AppendReport, Cached, DetectionContext, Edge, EdgeKind, EdgeSet,
-    EffectiveStatus, Entry, HopDiff, Index, IndexError, Lineage, LineageNode, MergeError,
-    MergeOptions, MergeReport, NodeId, OpenReport, RecipeChange, RecipeChangeKind,
-    RetractionAuthority, RetractionPlan, RetractionPolicy, SalienceReport, SalienceRequest,
-    SalienceTerms, SalienceWeights, Scratch, Store, StoreDiff, StoreOptions, SupersessionPolicy,
-    TopoOrder, TraceKind, Via,
+    closure, cycles, dependents, dependents_via, diff, effective_status, hop_diff, label_bindings,
+    membership, merge, plan_retraction, rebuttals_of, resolve_label, reverse_closure, salience,
+    topo, trace, view_roots, Adjacency, AgentActivity, AppendReport, Cached, DetectionContext,
+    Edge, EdgeKind, EdgeSet, EffectiveStatus, Entry, HopDiff, Index, IndexError, LabelError,
+    Lineage, LineageNode, MergeError, MergeOptions, MergeReport, NodeId, OpenReport, RecipeChange,
+    RecipeChangeKind, RetractionAuthority, RetractionPlan, RetractionPolicy, SalienceReport,
+    SalienceRequest, SalienceTerms, SalienceWeights, Scratch, Store, StoreDiff, StoreOptions,
+    SupersessionPolicy, TopoOrder, TraceKind, Via,
 };
 
 // ---- retrieve -------------------------------------------------------------
@@ -156,6 +156,14 @@ pub use smysl_ingest::import::{from_csv, ImportOptions, Imported};
 // which this replaces, was documented as a hook to override and could not be.
 #[cfg(feature = "ingest")]
 pub use smysl_ingest::prompt::PromptOverride;
+// The quote check, for a caller that builds units itself and sends them to `stage::prepare`
+// rather than through `Ingestor`. Without it the choice was reimplementing it — a second
+// definition of "loose" and "absent" drifting from the first. Its normalisation is stated in
+// full on `smysl_ingest::quote`, because it is now part of what a minor version may not change.
+#[cfg(feature = "ingest")]
+pub use smysl_ingest::quote::{
+    support as quote_support, support_in as quote_support_in, Support as QuoteSupport, QUOTE_KEY,
+};
 #[cfg(feature = "providers")]
 pub use smysl_provider::usage::{GroupBy, Totals};
 #[cfg(feature = "providers")]
@@ -187,7 +195,8 @@ mod tests {
         // threshold that does not exist and never did, and had sat "documented as
         // unreachable" for two releases — which is a holding pattern, not a decision. A code
         // nobody can trigger is worse than a missing one, because a reader waits for it.
-        assert_eq!(Code::ALL.len(), 51);
+        // 52 as of 1.3.0, with `SMY-W309`.
+        assert_eq!(Code::ALL.len(), 52);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

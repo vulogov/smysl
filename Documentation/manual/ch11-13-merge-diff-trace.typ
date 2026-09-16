@@ -749,6 +749,15 @@ smysl trace: `c/pool-saturated` is a label, and nothing in this store is bound t
 
 Exit code `1`, and the same code from every command that takes a unit.
 
+A label a store binds to *several* units is refused too, and differently. A
+store merged from separate runs can bind one label to more than one unit —
+`merge` reports that as a `label-collision` contention — and the command
+will not pick one. It lists every candidate with its gist and exits `5`,
+the code `merge` and `relink` use for a disagreement the tool declines to
+settle. Name the unit you mean by its uid. Until 1.3 the last binding in
+the store quietly won, and `retract` by such a label retracted a unit
+nobody had chosen.
+
 A store binds one name per uid. If a surface file declared two labels for
 one unit, `check` reports `SMY-W054` and only the canonically first
 survives — so the second name resolves inside that file, and not in a store

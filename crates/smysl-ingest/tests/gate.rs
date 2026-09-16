@@ -1013,3 +1013,347 @@ fn a_malformed_label_repair_carries_the_label_format_and_a_candidate() {
         "the repaired unit was not staged"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The repair turn (R1 from rust_smysl)
+// ---------------------------------------------------------------------------
+
+/// A `cited` record with no source: the E032 that started every failure in R1.
+const CITED_NO_SOURCE: &str =
+    "@claim c/nodejs-c-produce { status: cited }\n~ nodejs reaches C-Produce.\n";
+
+const REPAIRED: &str =
+    "@claim c/nodejs-c-produce { status: speculative }\n~ nodejs reaches C-Produce.\n";
+
+/// The model echoes the marker it was shown around the previous answer, and the answer still
+/// parses. Observed with Gemini flash-lite in 3 of 3 samples: the corrected answer began with
+/// `<<<SMYSL-INPUT>>>`, 17 bytes, which became `SMY-E001: stray Text outside a record (at 0..17)`
+/// and cost the chunk. A boundary that already tolerates CRLF can tolerate an echoed fence.
+#[test]
+fn a_repair_answer_that_echoes_the_marker_still_parses() {
+    let echoed = format!("<<<SMYSL-INPUT>>>\n{REPAIRED}<<<SMYSL-INPUT>>>\n");
+    let (r, _) =
+        registry(Scripted::new(vec![Ok(CITED_NO_SOURCE.to_string()), Ok(echoed)]).unstructured());
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document).with_path(IngestPath::Surface))
+        .ingest(&Store::new(), DOCUMENT)
+        .expect("ingests");
+    assert_eq!(report.degraded, 0, "{:?}", report.diagnostics);
+    assert!(
+        !report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("stray")),
+        "the echoed marker was parsed as text: {:?}",
+        report.diagnostics
+    );
+    assert!(staged.units.iter().any(|u| u.gist.contains("C-Produce")));
+}
+
+/// The repair request still carries the rules the model broke.
+///
+/// The repair template replaced the system prompt, so the model fixing an E032 no longer saw
+/// "Never `measured`" — and in 3 of 3 samples raised every `cited` to `measured`, the easiest
+/// edit that looks like a fix. It also dropped a caller's prompt override.
+#[test]
+fn the_repair_request_keeps_the_content_rules_in_front_of_the_model() {
+    let (r, _, seen) = registry_seeing(
+        Scripted::new(vec![
+            Ok(CITED_NO_SOURCE.to_string()),
+            Ok(REPAIRED.to_string()),
+        ])
+        .unstructured(),
+    );
+    Ingestor::new(&r, opts(Rung::Document).with_path(IngestPath::Surface))
+        .ingest(&Store::new(), DOCUMENT)
+        .expect("ingests");
+    let requests = seen.lock().unwrap();
+    assert_eq!(requests.len(), 2, "one extraction, one repair");
+    let repair = &requests[1];
+    assert!(
+        repair.system.contains("kind/name"),
+        "label format missing from the repair turn"
+    );
+    assert!(
+        repair.system.contains("Never `measured`"),
+        "status rules missing from the repair turn"
+    );
+    let user = &repair.messages.last().unwrap().content;
+    assert!(
+        !user.contains("<<<SMYSL-INPUT>>>"),
+        "the previous answer is fenced with the input marker, which the model copies:\n{user}"
+    );
+    // And the E032 suggestion lowers, never raises.
+    assert!(user.contains("SMY-E032"), "{user}");
+    assert!(
+        user.contains("speculative"),
+        "the suggestion does not offer a lower status:\n{user}"
+    );
+}
+
+/// A degraded chunk reports what went wrong first, not only what the last repair broke.
+#[test]
+fn a_degraded_chunk_reports_every_attempts_errors() {
+    let (r, _) = registry(
+        Scripted::new(vec![
+            Ok(CITED_NO_SOURCE.to_string()),
+            Ok("stray words, not a record\n".to_string()),
+        ])
+        .unstructured(),
+    );
+    let (_, report) = Ingestor::new(&r, opts(Rung::Document).with_path(IngestPath::Surface))
+        .ingest(&Store::new(), DOCUMENT)
+        .expect("ingests");
+    assert_eq!(report.degraded, 1);
+    let e032: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == Code::E032)
+        .collect();
+    assert!(
+        !e032.is_empty(),
+        "the first attempt's cause is gone: {:?}",
+        report.diagnostics
+    );
+    assert!(
+        e032[0].message.contains("attempt 1"),
+        "not marked by attempt: {}",
+        e032[0].message
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The surface template (R2 from rust_smysl)
+// ---------------------------------------------------------------------------
+
+/// The surface template shows how to write a source and a quote.
+///
+/// Version 2 said "a `cited` record needs a source" and gave `@<type> <label> { status: … }` as
+/// its only example, so flash-lite wrote every record `cited` with no source, every record
+/// failed `SMY-E032`, and R1's repair spiral began there.
+#[test]
+fn the_surface_template_shows_a_source_and_a_quote() {
+    let t = smysl_ingest::prompt::content_ingest_surface();
+    assert!(
+        t.system.contains("source: { kind: doc, ref:"),
+        "no source example:\n{}",
+        t.system
+    );
+    assert!(
+        t.system.contains("\"ingest:quote\":"),
+        "no quote example:\n{}",
+        t.system
+    );
+    assert!(
+        t.system.contains("`inferred` with grounds") && t.system.contains("`speculative`"),
+        "no instruction for a record with no nameable source:\n{}",
+        t.system
+    );
+}
+
+/// A surface answer cannot attribute text that is not in the document.
+///
+/// Observed: "blake3.js is a hand-rolled binding to the same C library as Rust", from a commit
+/// saying a binding was *rejected* for exactly that reason. On json-ast a unit carries a quote
+/// the boundary checks; the surface path asked for none, so nothing checked this one.
+#[test]
+fn a_fabricated_quote_on_the_surface_path_is_e307_as_on_json_ast() {
+    let fabricated = "@claim c/shard { status: speculative, \"ingest:quote\": \"The shard was replaced by a new cluster.\" }\n~ The shard was replaced.\n";
+    let genuine = "@claim c/shard { status: speculative, \"ingest:quote\": \"Connection pool wait time rose alongside request latency.\" }\n~ Pool wait rose with latency.\n";
+
+    let (r, _) = registry(Scripted::saying(fabricated).unstructured());
+    let (_, report) = Ingestor::new(&r, opts(Rung::Document).with_path(IngestPath::Surface))
+        .ingest(&Store::new(), DOCUMENT)
+        .expect("ingests");
+    assert!(
+        report.diagnostics.iter().any(|d| d.code == Code::E307),
+        "a fabricated surface quote passed: {:?}",
+        report.diagnostics
+    );
+
+    let (r, _) = registry(Scripted::saying(genuine).unstructured());
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document).with_path(IngestPath::Surface))
+        .ingest(&Store::new(), DOCUMENT)
+        .expect("ingests");
+    assert!(
+        !report.diagnostics.iter().any(|d| d.code == Code::E307),
+        "{:?}",
+        report.diagnostics
+    );
+    assert_eq!(report.degraded, 0);
+    assert!(!staged.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// A caller-supplied source (R3 from rust_smysl)
+// ---------------------------------------------------------------------------
+
+fn commit_source() -> smysl_core::SourceRef {
+    smysl_core::SourceRef::new(smysl_core::SourceKind::Doc, "git:4968383")
+}
+
+/// The same unit on each path: `cited`, and with or without a source of the model's own.
+fn answers(model_source: bool) -> [(IngestPath, String); 2] {
+    let surface_src = if model_source {
+        ", source: { kind: file, ref: \"CHANGELOG.md\" }"
+    } else {
+        ""
+    };
+    let json_src = if model_source {
+        r#","source":{"kind":"file","ref":"CHANGELOG.md"}"#
+    } else {
+        ""
+    };
+    [
+        (
+            IngestPath::Surface,
+            format!(
+                "@claim c/nodejs {{ status: cited{surface_src} }}\n~ nodejs reaches C-Produce.\n"
+            ),
+        ),
+        (
+            IngestPath::JsonAst,
+            format!(
+                r#"{{"units":[{{"type":"claim","label":"c/nodejs","gist":"nodejs reaches C-Produce.","status":"cited"{json_src}}}]}}"#
+            ),
+        ),
+    ]
+}
+
+/// The uid the unit has when authored with the caller's source — what staging must produce.
+fn expected_uid() -> smysl_core::Uid {
+    let core = UnitCore::new({
+        let mut b = smysl_core::UnitCoreBuilder::new(
+            KernelType::Claim,
+            "nodejs reaches C-Produce.",
+            Status::Cited,
+        );
+        b.source = Some(commit_source());
+        b
+    })
+    .unwrap();
+    smysl_core::canonical_uid(&core)
+}
+
+/// `FillMissing`: a `cited` unit the model gave no source stages with the caller's.
+#[test]
+fn a_caller_source_fills_a_missing_one_on_both_paths() {
+    for (path, answer) in answers(false) {
+        let p = if path == IngestPath::Surface {
+            Scripted::saying(&answer).unstructured()
+        } else {
+            Scripted::saying(&answer)
+        };
+        let (r, _) = registry(p);
+        let o = opts(Rung::Document)
+            .with_path(path)
+            .with_source(commit_source(), smysl_ingest::SourcePolicy::FillMissing);
+        let (staged, report) = Ingestor::new(&r, o)
+            .ingest(&Store::new(), DOCUMENT)
+            .unwrap();
+        assert!(
+            !report.diagnostics.iter().any(|d| d.code == Code::E032),
+            "{path}: {:?}",
+            report.diagnostics
+        );
+        assert_eq!(report.degraded, 0, "{path}");
+        let u = staged
+            .units
+            .iter()
+            .find(|u| u.gist.contains("C-Produce"))
+            .expect("staged");
+        assert_eq!(u.status, Status::Cited, "{path}");
+        assert_eq!(u.source.as_ref(), Some(&commit_source()), "{path}");
+        assert_eq!(smysl_core::canonical_uid(u), expected_uid(), "{path}");
+    }
+}
+
+/// `FillMissing` leaves a model's own source alone.
+#[test]
+fn fill_missing_does_not_replace_a_source_the_model_gave() {
+    for (path, answer) in answers(true) {
+        let p = if path == IngestPath::Surface {
+            Scripted::saying(&answer).unstructured()
+        } else {
+            Scripted::saying(&answer)
+        };
+        let (r, _) = registry(p);
+        let o = opts(Rung::Document)
+            .with_path(path)
+            .with_source(commit_source(), smysl_ingest::SourcePolicy::FillMissing);
+        let (staged, _) = Ingestor::new(&r, o)
+            .ingest(&Store::new(), DOCUMENT)
+            .unwrap();
+        let u = staged
+            .units
+            .iter()
+            .find(|u| u.gist.contains("C-Produce"))
+            .unwrap();
+        assert_eq!(
+            u.source.as_ref().unwrap().reference,
+            "CHANGELOG.md",
+            "{path}"
+        );
+    }
+}
+
+/// `Override`: the model's source is replaced, said so by name, and the uid is the caller's.
+///
+/// `source` is inside the uid, so it has to be applied before the unit is built — patched
+/// afterwards, identities would move under the report.
+#[test]
+fn a_caller_source_overrides_the_models_and_says_so() {
+    for (path, answer) in answers(true) {
+        let p = if path == IngestPath::Surface {
+            Scripted::saying(&answer).unstructured()
+        } else {
+            Scripted::saying(&answer)
+        };
+        let (r, _) = registry(p);
+        let o = opts(Rung::Document)
+            .with_path(path)
+            .with_source(commit_source(), smysl_ingest::SourcePolicy::Override);
+        let (staged, report) = Ingestor::new(&r, o)
+            .ingest(&Store::new(), DOCUMENT)
+            .unwrap();
+        let u = staged
+            .units
+            .iter()
+            .find(|u| u.gist.contains("C-Produce"))
+            .unwrap();
+        assert_eq!(u.source.as_ref(), Some(&commit_source()), "{path}");
+        assert_eq!(smysl_core::canonical_uid(u), expected_uid(), "{path}");
+        let w = report
+            .diagnostics
+            .iter()
+            .find(|d| d.code == Code::W309)
+            .unwrap_or_else(|| panic!("{path}: no warning: {:?}", report.diagnostics));
+        assert!(
+            w.message.contains("c/nodejs") && w.message.contains("CHANGELOG.md"),
+            "{path}: {}",
+            w.message
+        );
+    }
+}
+
+/// The source is part of what the model was asked under, so it is part of the recipe.
+#[test]
+fn a_caller_source_changes_the_recipe() {
+    let (_, answer) = answers(false)[1].clone();
+    let run = |o: IngestOptions| {
+        let (r, _) = registry(Scripted::saying(&answer));
+        Ingestor::new(&r, o.with_path(IngestPath::JsonAst))
+            .ingest(&Store::new(), DOCUMENT)
+            .unwrap()
+            .1
+            .recipe
+    };
+    let plain = run(opts(Rung::Document));
+    let filled =
+        run(opts(Rung::Document)
+            .with_source(commit_source(), smysl_ingest::SourcePolicy::FillMissing));
+    let overridden = run(
+        opts(Rung::Document).with_source(commit_source(), smysl_ingest::SourcePolicy::Override)
+    );
+    assert_ne!(plain, filled);
+    assert_ne!(filled, overridden, "the policy is a condition too");
+}

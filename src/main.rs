@@ -1286,33 +1286,67 @@ fn load_store(
     }
 }
 
+/// Why a unit argument names no unit, with the exit code that says so.
+struct Unresolved {
+    code: ExitCode,
+    message: String,
+}
+
+impl std::fmt::Display for Unresolved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
 /// Resolve a unit argument against a store: a uid, its display form, or a label.
 ///
-/// Labels were refused — `smysl trace c/pool-saturation` said "is not a uid", and chapter 13
-/// documented that as a rule, on the reasoning that a label "has no existence at the store
-/// level". That stopped being true when `Record::LabelBinding` put labels on the wire in 0.2:
-/// `load_store` has recovered them from every store since, and handed them to commands that
-/// discarded them. So a caller holding a store full of `m/g532e4d2-2-2` bindings had to find
-/// each uid indirectly, through `salience` or `pack --explain`, to type it back in.
+/// Labels were refused until 1.3 — `smysl trace c/pool-saturation` said "is not a uid" — on the
+/// reasoning that a label "has no existence at the store level", which stopped being true when
+/// `Record::LabelBinding` put labels on the wire in 0.2.
 ///
-/// Unambiguous by construction: a uid is spelled `b3:…` and a label never contains `:`.
+/// A label is resolved by `smysl::resolve_label`, against the store's binding records, and
+/// **refused when it is bound to more than one unit**. The first version of this took a map
+/// built by inserting bindings into a `BTreeMap`, so in a store merged from several extraction
+/// runs the last binding in record order won, silently — and `retract` by that label retracted
+/// a unit the caller had not chosen. Ambiguity exits 5, as `relink` does for a supersession
+/// fork: the same kind of refusal, a tool declining to adjudicate.
 ///
-/// One helper for every command that takes a unit, so `trace`, `retract`, `view`, `pack`,
-/// `salience` and `thread` cannot disagree — `retract` kept its own copy, which is why the
-/// same mistake exited 1 from `trace` and 2 from `retract`.
-fn resolve(
-    store: &Store,
-    labels: &std::collections::BTreeMap<smysl::Label, Uid>,
-    raw: &str,
-) -> Result<Uid, String> {
+/// Unambiguous by construction: a uid is spelled `b3:…` and a label never contains `:`. One
+/// helper for every command that takes a unit, so none can disagree with another.
+fn resolve(store: &Store, raw: &str) -> Result<Uid, Unresolved> {
     if let Ok(label) = smysl::Label::new(raw) {
-        return labels.get(&label).copied().ok_or_else(|| {
-            format!("`{raw}` is a label, and nothing in this store is bound to it")
+        return smysl::resolve_label(store, &label).map_err(|e| match e {
+            smysl::LabelError::Ambiguous(uids) => Unresolved {
+                code: ExitCode::Contentions,
+                message: format!(
+                    "`{raw}` is bound to {} different units; name one by uid:{}",
+                    uids.len(),
+                    uids.iter()
+                        .map(|u| format!(
+                            "\n  {}  {}",
+                            u.canonical(),
+                            store
+                                .get(u)
+                                .map(|x| x.core.gist.as_str())
+                                .unwrap_or("(not in this store)")
+                        ))
+                        .collect::<String>()
+                ),
+            },
+            _ => Unresolved {
+                code: ExitCode::Failure,
+                message: format!("`{raw}` is a label, and nothing in this store is bound to it"),
+            },
         });
     }
-    let prefix =
-        UidPrefix::parse(raw).map_err(|_| format!("`{raw}` is neither a uid nor a label"))?;
-    store.resolve_prefix(&prefix).map_err(|e| e.to_string())
+    let prefix = UidPrefix::parse(raw).map_err(|_| Unresolved {
+        code: ExitCode::Failure,
+        message: format!("`{raw}` is neither a uid nor a label"),
+    })?;
+    store.resolve_prefix(&prefix).map_err(|e| Unresolved {
+        code: ExitCode::Failure,
+        message: e.to_string(),
+    })
 }
 
 /// The store argument, from the subcommand or the global flag.
@@ -1444,22 +1478,18 @@ fn cmd_trace(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eprintln!("smysl trace: no store given");
         return ExitCode::Usage;
     };
-    let (store, labels) = match load_store(&path) {
+    let (store, _) = match load_store(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl trace: {e}");
             return ExitCode::Failure;
         }
     };
-    let target = match resolve(
-        &store,
-        &labels,
-        m.get_one::<String>("uid").expect("required"),
-    ) {
+    let target = match resolve(&store, m.get_one::<String>("uid").expect("required")) {
         Ok(u) => u,
         Err(e) => {
             eprintln!("smysl trace: {e}");
-            return ExitCode::Failure;
+            return e.code;
         }
     };
 
@@ -1532,7 +1562,7 @@ fn cmd_view(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Usage;
     };
     warn_output_is_a_report(global, "view");
-    let (store, labels) = match load_store(&path) {
+    let (store, _) = match load_store(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl view: {e}");
@@ -1544,11 +1574,11 @@ fn cmd_view(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         Some(v) => {
             let mut out = Vec::new();
             for raw in v {
-                match resolve(&store, &labels, raw) {
+                match resolve(&store, raw) {
                     Ok(u) => out.push(u),
                     Err(e) => {
                         eprintln!("smysl view: {e}");
-                        return ExitCode::Failure;
+                        return e.code;
                     }
                 }
             }
@@ -1863,6 +1893,19 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     ExitCode::Success
 }
 
+/// Units that rest on `target` through `grounds` or `deps` and survive its retraction.
+///
+/// The impact a retraction does not show: they keep other support, so they are not unfounded,
+/// but part of what they rest on is gone. Measured over the same edges retraction follows.
+fn partly_resting(store: &Store, target: Uid, unfounded: &[Uid]) -> Vec<Uid> {
+    let mut v: Vec<Uid> = smysl::dependents(store, target)
+        .into_iter()
+        .filter(|u| !unfounded.contains(u))
+        .collect();
+    v.sort();
+    v
+}
+
 /// `smysl retract` - withdraw belief in a unit, blast radius first (§23.1).
 ///
 /// `--dry-run` reports exactly what applying it would reach. Nobody should discover what a
@@ -1879,7 +1922,7 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
     warn_output_is_a_report(global, "retract");
-    let (mut store, labels) = match load_store(&path) {
+    let (mut store, _) = match load_store(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl retract: {e}");
@@ -1888,11 +1931,11 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     };
 
     let raw = m.get_one::<String>("uid").expect("required");
-    let target = match resolve(&store, &labels, raw) {
+    let target = match resolve(&store, raw) {
         Ok(u) => u,
         Err(e) => {
             eprintln!("smysl retract: {e}");
-            return ExitCode::Failure;
+            return e.code;
         }
     };
 
@@ -1912,10 +1955,11 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         // know it was refused, and refusal is reported on stderr in the text form where a
         // machine reading stdout would never see it.
         println!(
-            "{{\"target\":{},\"blast_radius\":[{}],\"orphaned\":[{}],\"authorised\":{},\"refusal\":{}}}",
+            "{{\"target\":{},\"blast_radius\":[{}],\"orphaned\":[{}],\"rest_partly_on\":[{}],\"authorised\":{},\"refusal\":{}}}",
             smysl::json_escape(&target.canonical()),
             uid_array(&plan.blast_radius),
             uid_array(&plan.orphaned),
+            uid_array(&partly_resting(&store, target, &plan.blast_radius)),
             plan.authorised,
             plan.refusal
                 .as_deref()
@@ -1926,13 +1970,24 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             return ExitCode::Success;
         }
     } else {
+        // "would reach N" counted the target itself plus the units left with no support, so
+        // retracting one of a decision's four prerequisites said "reach 1" — true of the
+        // retraction, and read as "nothing depends on this". The first line now says what the
+        // number is; the second says what the number leaves out.
         println!(
-            "{path}: retracting {target} would reach {} unit(s), orphaning {}",
+            "{path}: retracting {target} would leave {} unit(s) unfounded, {} of them orphaned",
             plan.blast_radius.len(),
             plan.orphaned.len()
         );
         for u in &plan.orphaned {
             println!("{path}:   {u} would lose all of its grounds");
+        }
+        let partly = partly_resting(&store, target, &plan.blast_radius);
+        if !partly.is_empty() {
+            println!(
+                "{path}:   {} more unit(s) rest partly on it and keep other support",
+                partly.len()
+            );
         }
     }
 
@@ -1991,11 +2046,11 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if let Some(v) = m.get_many::<String>("focus") {
         let mut focus = Vec::new();
         for raw in v {
-            match resolve(&store, &labels, raw) {
+            match resolve(&store, raw) {
                 Ok(u) => focus.push(u),
                 Err(e) => {
                     eprintln!("smysl pack: {e}");
-                    return ExitCode::Failure;
+                    return e.code;
                 }
             }
         }
@@ -2303,7 +2358,7 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Usage;
     };
     warn_output_is_a_report(global, "salience");
-    let (store, labels) = match load_store(&path) {
+    let (store, _) = match load_store(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl salience: {e}");
@@ -2340,11 +2395,11 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         Some(v) => {
             let mut seed = Vec::new();
             for raw in v {
-                match resolve(&store, &labels, raw) {
+                match resolve(&store, raw) {
                     Ok(u) => seed.push(u),
                     Err(e) => {
                         eprintln!("smysl salience: {e}");
-                        return ExitCode::Failure;
+                        return e.code;
                     }
                 }
             }
@@ -2356,11 +2411,11 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let report = smysl::salience(&store, &req);
 
     if let Some(raw) = m.get_one::<String>("explain") {
-        let uid = match resolve(&store, &labels, raw) {
+        let uid = match resolve(&store, raw) {
             Ok(u) => u,
             Err(e) => {
                 eprintln!("smysl salience: {e}");
-                return ExitCode::Failure;
+                return e.code;
             }
         };
         let Some(t) = report.explain(&uid) else {
@@ -2602,11 +2657,11 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if let Some(v) = m.get_many::<String>("scope") {
         let mut scope = Vec::new();
         for raw in v {
-            match resolve(&store, &labels, raw) {
+            match resolve(&store, raw) {
                 Ok(u) => scope.push(u),
                 Err(e) => {
                     eprintln!("smysl thread: {e}");
-                    return ExitCode::Failure;
+                    return e.code;
                 }
             }
         }

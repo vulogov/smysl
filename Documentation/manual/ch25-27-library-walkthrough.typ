@@ -654,7 +654,7 @@ run before you have even decided who is retracting:
 
 #screen(caption: "$ smysl retract --dry-run b3:cjixk2inyftvxj55d53w2ivxej merged2.cbor")[
 ```
-merged2.cbor: retracting b3:cjixk2inyftvxj55d53w2ivxej would reach 1 unit(s), orphaning 0
+merged2.cbor: retracting b3:cjixk2inyftvxj55d53w2ivxej would leave 1 unit(s) unfounded, 0 of them orphaned
 ```
 ]
 
@@ -665,7 +665,7 @@ safe. Applying it for real, without `--dry-run`, hits something instructive:
 
 #screen(caption: "$ smysl retract b3:cjixk2inyftvxj55d53w2ivxej merged2.cbor")[
 ```
-merged2.cbor: retracting b3:cjixk2inyftvxj55d53w2ivxej would reach 1 unit(s), orphaning 0
+merged2.cbor: retracting b3:cjixk2inyftvxj55d53w2ivxej would leave 1 unit(s) unfounded, 0 of them orphaned
 smysl retract: origin requires 1 distinct agents, got 0
 ```
 ]
@@ -679,7 +679,7 @@ honest way through it:
 
 #screen(caption: "$ smysl retract b3:cjixk2inyftvxj55d53w2ivxej merged2.cbor --as human:oncall --authority any --reason \"rollback confirms 7.1 timeout, not pool exhaustion\"")[
 ```
-merged2.cbor: retracting b3:cjixk2inyftvxj55d53w2ivxej would reach 1 unit(s), orphaning 0
+merged2.cbor: retracting b3:cjixk2inyftvxj55d53w2ivxej would leave 1 unit(s) unfounded, 0 of them orphaned
 merged2.cbor: 1 unit(s) now read as unfounded
 ```
 ]

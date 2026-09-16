@@ -78,6 +78,7 @@ pub use smysl::KERNEL_SCHEMA
 pub use smysl::KernelType
 pub use smysl::Label
 pub use smysl::LabelBinding
+pub use smysl::LabelError
 pub use smysl::LangTag
 pub use smysl::Lineage
 pub use smysl::LineageNode
@@ -136,6 +137,7 @@ pub use smysl::Severity
 pub use smysl::ShapeError
 pub use smysl::Show
 pub use smysl::SourceKind
+pub use smysl::SourcePolicy
 pub use smysl::SourceRef
 pub use smysl::Span
 pub use smysl::Status
@@ -172,6 +174,7 @@ pub use smysl::compact
 pub use smysl::conformance
 pub use smysl::cycles
 pub use smysl::dependents
+pub use smysl::dependents_via
 pub use smysl::derive_thread
 pub use smysl::diff
 pub use smysl::effective_status
@@ -185,6 +188,7 @@ pub use smysl::hash_bytes
 pub use smysl::hop_diff
 pub use smysl::json_escape
 pub use smysl::kernel_major
+pub use smysl::label_bindings
 pub use smysl::membership
 pub use smysl::merge
 pub use smysl::merge
@@ -194,6 +198,7 @@ pub use smysl::plan_retraction
 pub use smysl::quantise
 pub use smysl::rebuttals_of
 pub use smysl::relink
+pub use smysl::resolve_label
 pub use smysl::retrieve_tokenize
 pub use smysl::reverse_closure
 pub use smysl::role_weight

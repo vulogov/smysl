@@ -8,6 +8,6 @@ pub mod write;
 
 pub use hjson::{parse_object, parse_object_prefix, parse_value, HError, HObject, HValue, Spanned};
 pub use lex::{lex, Line, LineClass};
-pub use parse::{parse_surface, ParseOutcome};
+pub use parse::{parse_surface, parse_surface_with, ParseOptions, ParseOutcome};
 pub use payload::{object_to_payload, payload_to_object};
 pub use write::{schema_decl_has_surface_form, write_surface, WriteContext};

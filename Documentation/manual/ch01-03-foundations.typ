@@ -545,7 +545,7 @@ full).
 ```
 first.smy: error: SMY-E060: unresolved reference `c/root-cause` (at 77..89)
 first.smy: error: SMY-E060: unresolved reference `c/root-cause` (at 397..439)
-first.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 284..396)
+first.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 284..396) [try: name the units it rests on in `grounds`, or lower the status to `speculative`]
 ```
 ]
 

@@ -57,6 +57,7 @@ use smysl_graph::Store;
 use smysl_provider::{Provider, ProviderError, Registry, Request, Task, Usage};
 
 pub use attest::{attest, AttestOptions, AttestReport, Judgement, What};
+pub use smysl_core::SourcePolicy;
 pub use stage::{Attest, Staged};
 
 /// Default repair attempts before an unrepairable span degrades to opaque `prose`
@@ -123,6 +124,11 @@ pub struct IngestOptions {
     /// quote check, the same rule T cap, the same staging. That is what distinguishes running an
     /// extraction through `ingest` from running it beside `ingest` in a separate script.
     pub prompt: Option<prompt::PromptOverride>,
+    /// A source for the units, and how it combines with one the model wrote.
+    ///
+    /// For a caller who knows provenance exactly and does not want a model inventing it.
+    /// Applied on both paths before any unit is built; see [`SourcePolicy`]. Part of the recipe.
+    pub source: Option<(smysl_core::SourceRef, SourcePolicy)>,
 }
 
 impl IngestOptions {
@@ -184,6 +190,16 @@ impl IngestOptions {
         self
     }
 
+    /// Give units this source, combined with any the model wrote by `policy`.
+    pub fn with_source(
+        mut self,
+        source: smysl_core::SourceRef,
+        policy: SourcePolicy,
+    ) -> IngestOptions {
+        self.source = Some((source, policy));
+        self
+    }
+
     /// The path the caller asked for, reconciled with the prompt override.
     ///
     /// A schema only has a channel on the json-ast path, so an override that supplies one
@@ -233,6 +249,7 @@ impl Default for IngestOptions {
             max_output: 2048,
             model: String::new(),
             prompt: None,
+            source: None,
         }
     }
 }
@@ -299,6 +316,10 @@ impl<'a> Ingestor<'a> {
             .with_temperature(self.opts.temperature)
             .with_schemas(["smysl.kernel/0.1".to_string()])
             .with_path(choice.path);
+        let conditions = match &self.opts.source {
+            Some((s, policy)) => conditions.with_source(s, *policy),
+            None => conditions,
+        };
 
         let mut report = IngestReport {
             chunks: chunks.len(),
@@ -357,7 +378,12 @@ impl<'a> Ingestor<'a> {
 
         let mut request = self.request(provider, &template, text, path);
         let mut calls = 0usize;
-        let mut last: Vec<Diagnostic> = Vec::new();
+        // Every attempt's errors, marked by attempt. A degraded chunk used to report only the
+        // last attempt's, which shows what the repair broke rather than what the model first
+        // got wrong: flash-lite's `SMY-E032` vanished behind the stray text its own repair
+        // introduced, so the reported cause was one smysl's prompt had caused.
+        let mut history: Vec<Diagnostic> = Vec::new();
+        let attempts = self.opts.repair_attempts as usize + 1;
 
         for attempt in 0..=self.opts.repair_attempts {
             let completion = match provider.complete(&request) {
@@ -382,8 +408,12 @@ impl<'a> Ingestor<'a> {
             usage.estimated |= completion.usage.estimated;
             usage.retries += completion.usage.retries;
 
-            let (units, relations, mut diagnostics) =
-                repair::convert(&completion.text, path, self.opts.rung);
+            let (units, relations, mut diagnostics) = repair::convert_with(
+                &completion.text,
+                path,
+                self.opts.rung,
+                self.opts.source.as_ref(),
+            );
 
             // Check every attributed quote against the text this chunk was drawn from.
             // A quote that is not in the source is a fabricated attribution, and an error -
@@ -407,15 +437,27 @@ impl<'a> Ingestor<'a> {
 
             // An answer with no units and no complaint is still a failure - it just has
             // nothing to say about itself, so the repair turn has to.
-            last = if units.is_empty() && diagnostics.is_empty() {
+            let last = if units.is_empty() && diagnostics.is_empty() {
                 vec![Diagnostic::new(smysl_core::Code::E001)
                     .with_message("the answer contained no units")]
             } else {
                 diagnostics
             };
+            for d in last
+                .iter()
+                .filter(|d| d.severity == smysl_core::Severity::Error)
+            {
+                let mut marked = d.clone();
+                marked.message = format!("attempt {} of {attempts}: {}", attempt + 1, d.message);
+                history.push(marked);
+            }
 
             if attempt < self.opts.repair_attempts {
-                let t = prompt::repair(&completion.text, &repair::render_diagnostics(&last));
+                let t = prompt::repair(
+                    &template,
+                    &completion.text,
+                    &repair::render_diagnostics(&last),
+                );
                 request = self.request(provider, &t, text, path);
             }
         }
@@ -426,13 +468,13 @@ impl<'a> Ingestor<'a> {
             self.opts.rung,
             &format!("{} attempt(s)", self.opts.repair_attempts + 1),
         );
-        last.push(d);
+        history.push(d);
         ChunkOutcome {
             units: vec![core],
             relations: Vec::new(),
             calls,
             degraded: true,
-            diagnostics: last,
+            diagnostics: history,
         }
     }
 

@@ -12,9 +12,12 @@ regretted, and three gates that each know what they are blind to.
 
 **What 1.0.0 promises**, precisely:
 
-- **The facade's 245 names at `--all-features`, 200 at `--no-default-features`.** None moves
-  without a 2.0. It was 244 at 1.0; 1.3 added `PromptOverride` — an addition, which a minor
-  version may make, and the only kind it may.
+- **The facade's 254 names at `--all-features`, 205 at `--no-default-features`.** None moves
+  without a 2.0. It was 244 at 1.0. 1.3 added ten — `PromptOverride`, `SourcePolicy`,
+  `quote_support`, `quote_support_in`, `QuoteSupport`, `QUOTE_KEY`, `label_bindings`,
+  `resolve_label`, `LabelError` and `dependents_via` — additions, which a minor version may
+  make, and the only kind it may. `quote_support` freezes its normalisation with it; the rules
+  are stated on the function.
 - **Every public item in each of the eleven library crates** — they share one version, all are
   published, and `make semver` enforces each of them individually. That is the larger and
   truer figure, and §0.2 of `ROAD_TO_1.0.md` explains why it is the one that binds.
@@ -37,7 +40,7 @@ what had been assumed.
 
 | gate | sees | blind to |
 |---|---|---|
-| `tests/public-api.txt` (245 names) | every name the facade exports | anything *behind* a name: methods, signatures, variants |
+| `tests/public-api.txt` (254 names) | every name the facade exports | anything *behind* a name: methods, signatures, variants |
 | `make semver` | every item in each library crate, methods included, under the real semver rules | the facade — a `pub use` from another crate is a line it cannot expand |
 | `tests/public-api-counts.txt` (11 lines) | a crate's surface changing size | an addition and a removal that cancel |
 
@@ -92,7 +95,7 @@ surface depends on what they turned on.
 |---|---|---|
 | functions | ~55 | `pack`, `merge`, `check`, `parse_surface`, `canonical_uid` |
 | identifiers | 8 | `Uid`, `AgentId`, `SchemaId`, `ThreadId`, `ViewId`, `NodeId` |
-| inputs | 12 | `PackRequest`, `CheckOptions`, `MergeOptions`, `IngestOptions`, `PromptOverride` |
+| inputs | 13 | `PackRequest`, `CheckOptions`, `MergeOptions`, `IngestOptions`, `PromptOverride`, `SourcePolicy` |
 | outputs | 10 | `Report`, `MergeReport`, `ParseOutcome`, `FidelityReport` |
 | errors | 11 | `CodecError`, `ProviderError`, `IntegrityError`, `AnyError` |
 | enumerations | 15 | `Status`, `RelKind`, `SourceKind`, `TraceKind`, `PackMode` |
