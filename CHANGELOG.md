@@ -174,6 +174,23 @@ unfounded, M of them orphaned", and adds "K more unit(s) rest partly on it and k
 support" when there are any; `--json` gains `rest_partly_on`. Nothing pinned the wording
 before except the book; `tests/cmd_retract.rs` does now.
 
+**R1 verified live.** Gemini `gemini-3.5-flash-lite`, surface path, `--rung document`, against
+`git show -s --format='# Commit %h: %s%n%n%b' 4968383` — the input that degraded in 3 of 3 runs
+before. The acceptance asked for units in 2 of 3:
+
+| run | calls | units | degraded | tokens |
+|---|---:|---:|---:|---:|
+| 1 | 1 | 8 | 0 | 2,364 |
+| 2 | 3 | 12 | 0 | 9,372 |
+| 3 | 1 | 8 | 0 | 2,362 |
+
+Run 2 recovered through two repair turns, the path that used to spiral. Every one of the 28
+units carried a source and a quote, every quote was found in the commit, and the blake3 claim
+that R2's replay had inverted was stated correctly in all three runs, quoted verbatim.
+
+Two things the live output showed, carried below: every source was `ref: the input document`,
+and no staged unit had a label.
+
 Found on the way: the diagnostic appendix said a test named `registry_matches_appendix_d_size`
 held the registry at 49. No test has that name, and the registry was 51; it is 52 with
 `SMY-W309`, which is numbered past `W306` because retired codes are not reused.
@@ -187,6 +204,17 @@ held the registry at 49. No test has that name, and the registry was 51; it is 5
 
 ### What is carried
 
+- **Every surface-ingest source reads `ref: the input document`.** All 28 units in the live R1
+  run copied that phrase from the v3 template's example, because the prompt never names the
+  document. Not false, and says nothing — the provenance problem R3 exists for, introduced by
+  R2's example. `smysl ingest FILE` could supply the file as the source with `Override`, or
+  the prompt could name the document; which is a decision about the CLI's default provenance.
+  Library callers using `with_source` are unaffected.
+- **Staged units lose their labels.** `ingest` passes `stage::prepare` an empty label map, so
+  every label a model wrote is dropped, and units merged from `.smysl/staged.smy` cannot be
+  named by label. Present before 1.3; the live run is where it became obvious.
+- **A chunk that recovers reports nothing about what it recovered from.** R1's per-attempt
+  history is printed only for a chunk that degrades; run 2's two failed attempts left no trace.
 - **`ingest --granularity` is only ever hashed into the recipe.** It is never resolved to a
   preset, never validated — `--granularity bogus` is accepted — and does not set the profile
   units are later checked under. Its default, `"standard"`, names no preset at all. Fixing it
