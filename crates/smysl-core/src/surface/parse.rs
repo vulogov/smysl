@@ -22,6 +22,7 @@ use crate::ids::{AgentId, Label, LangTag, SchemaId, ThreadId, Uid, ViewId};
 use crate::surface::hjson::{parse_object_prefix, HObject, HValue, Spanned};
 use crate::surface::lex::{arrow_len, find_arrow, lex, Line, LineClass};
 use crate::surface::payload::object_to_payload;
+use crate::types::annex::SchemaDecl;
 use crate::types::epistemics::{Date, SourceKind, SourceRef, Status};
 use crate::types::provenance::Hlc;
 use crate::types::relation::{RelKind, Relation};
@@ -191,6 +192,7 @@ pub fn parse_surface(src: &str) -> Result<ParseOutcome, ParseError> {
         units: Vec::new(),
         relations: Vec::new(),
         threads: Vec::new(),
+        schemas: Vec::new(),
         view: None,
     };
     p.run()?;
@@ -205,6 +207,7 @@ struct Parser<'a> {
     units: Vec<RawUnit>,
     relations: Vec<RawRelation>,
     threads: Vec<RawThread>,
+    schemas: Vec<SchemaDecl>,
     view: Option<RawView>,
 }
 
@@ -260,6 +263,11 @@ impl<'a> Parser<'a> {
                         self.threads.push(t);
                     }
                 }
+                LineClass::SchemaStart => {
+                    if let Some(d) = self.schema_decl() {
+                        self.schemas.push(d);
+                    }
+                }
                 _ => {
                     self.err(
                         Code::E001,
@@ -271,6 +279,108 @@ impl<'a> Parser<'a> {
             }
         }
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // @schema
+    // -----------------------------------------------------------------------
+
+    /// `@schema <id> { version: N, types: [...], relations: [...] }`, a `SchemaDecl`.
+    ///
+    /// The declaration `check` has always consulted for `SMY-W013` and had no surface spelling,
+    /// so an extension relation written in a `.smy` file warned on every check forever — the
+    /// manual called the undeclared case "the realistic one" for exactly that reason. It is a
+    /// spelling for record type 8, which has been on the wire since 0.1; nothing about the
+    /// encoding changes.
+    ///
+    /// Whether a declaration *redefines* the kernel is `check`'s to report (`SMY-E012`), not the
+    /// parser's: the record is well formed, and refusing it here would hide it from the pass
+    /// that explains what is wrong with it.
+    fn schema_decl(&mut self) -> Option<SchemaDecl> {
+        let l = self.lines[self.i];
+        let rest = l.text.strip_prefix("@schema").unwrap_or("").trim_start();
+        let id_txt = rest
+            .split(|c: char| c.is_whitespace() || c == '{')
+            .next()
+            .unwrap_or("");
+        let Ok(id) = SchemaId::parse(id_txt) else {
+            self.err(
+                Code::E001,
+                l.span,
+                format!(
+                    "`{id_txt}` is not a schema id; a declaration names one, such as `x.code/v1`"
+                ),
+            );
+            self.recover();
+            return None;
+        };
+        let Ok((mut header, header_span)) = self.header_object(l) else {
+            self.recover();
+            return None;
+        };
+        self.advance_past(header_span.end.max(l.span.end));
+
+        let mut decl = SchemaDecl::new(id, 1);
+        if let Some(v) = header.take("version") {
+            match v.value.as_int().and_then(|n| u32::try_from(n).ok()) {
+                Some(n) => decl.version = n,
+                None => {
+                    self.err(Code::E001, v.span, "`version` is a non-negative integer");
+                    return None;
+                }
+            }
+        }
+        if let Some(v) = header.take("types") {
+            decl.types = self.strict_list(&v, "types", |s: &str| SchemaId::parse(s).ok())?;
+        }
+        if let Some(v) = header.take("relations") {
+            decl.relations = self.strict_list(&v, "relations", |s: &str| RelKind::parse(s).ok())?;
+        }
+        // Any other key is an error rather than something to carry or skip. A declaration is
+        // three keys long, and the likeliest stray one is a misspelling — `relation:` for
+        // `relations:` — which, passed over quietly, would leave the kind warning SMY-W013
+        // under a file that visibly declares it: the problem this record exists to solve.
+        if let Some((k, _)) = header.iter().next() {
+            self.err(
+                Code::E001,
+                k.span,
+                format!(
+                    "`@schema` has no key `{}`; it takes `version`, `types` and `relations`",
+                    k.value
+                ),
+            );
+            return None;
+        }
+        Some(decl)
+    }
+
+    /// A list where every item must parse — a declaration that silently lost a relation kind
+    /// would leave that kind warning `SMY-W013` while the file appears to declare it.
+    fn strict_list<T>(
+        &mut self,
+        v: &Spanned<HValue>,
+        key: &str,
+        f: impl Fn(&str) -> Option<T>,
+    ) -> Option<Vec<T>> {
+        let Some(items) = v.value.as_array() else {
+            self.err(Code::E001, v.span, format!("`{key}` must be an array"));
+            return None;
+        };
+        let mut out = Vec::new();
+        for i in items {
+            match i.value.as_str().and_then(&f) {
+                Some(x) => out.push(x),
+                None => {
+                    self.err(
+                        Code::E001,
+                        i.span,
+                        format!("`{key}` has an entry that does not parse"),
+                    );
+                    return None;
+                }
+            }
+        }
+        Some(out)
     }
 
     // -----------------------------------------------------------------------
@@ -421,7 +531,19 @@ impl<'a> Parser<'a> {
             Some(w) => match Label::new(w) {
                 Ok(l) => Some(l),
                 Err(_) => {
-                    self.err(Code::E001, start.span, format!("malformed label `{w}`"));
+                    // The message alone said what was wrong and never what right looks like.
+                    // Surface ingest sends these diagnostics verbatim as the repair turn, so a
+                    // model that wrote `claim-nodejs-c-produce` was told three times that its
+                    // label was malformed and not once that a label is `kind/name`; the chunk
+                    // then degraded to raw prose. The rule and a concrete candidate go in the
+                    // suggestion, which the repair turn carries as `[try: …]`.
+                    let mut d = Diagnostic::at(Code::E001, start.span)
+                        .with_message(format!("malformed label `{w}`"));
+                    d = d.with_suggestion(match suggest_label(w) {
+                        Some(s) => format!("{LABEL_RULE}, e.g. `{s}`"),
+                        None => LABEL_RULE.to_string(),
+                    });
+                    self.out.diagnostics.push(d);
                     self.recover();
                     return None;
                 }
@@ -977,12 +1099,53 @@ impl<'a> Parser<'a> {
         // whichever appeared first in the file disagrees with it and the round trip swaps
         // names. That is this bug exactly, and my first fix reproduced it from the other side.
         let mut by_uid: BTreeMap<Uid, Vec<(Label, Span)>> = BTreeMap::new();
+        // Every name a unit was declared under, survivor or not. `labels` below is what gets
+        // *bound* — one name per uid, so the round trip is a fixed point — and `aliases` is
+        // what references *resolve through*. They were one map, and the difference showed up
+        // as a document that warned `e/two` names `e/one`'s unit (W054) and then failed a
+        // `@rel` naming `e/two` as unresolved (E060): `grounds` and `deps` resolve through
+        // `index`, which had every label, while relations, threads and view roots resolved
+        // through the survivors only. The document is unambiguous about which unit is meant,
+        // so the reference resolves, and the writer spells it with the name that survives.
+        let mut aliases: BTreeMap<Label, Uid> = BTreeMap::new();
+        let mut by_label: BTreeMap<Label, Vec<(Uid, Span)>> = BTreeMap::new();
         for (i, u) in self.units.iter().enumerate() {
             if let (Some(l), Some(uid)) = (&u.label, resolved[i]) {
                 by_uid.entry(uid).or_default().push((l.clone(), u.span));
+                // Last declaration wins, which is what `index` already does for `grounds` and
+                // `deps` — so every kind of reference now agrees on which unit a reused name
+                // means. Before, relations resolved through the survivors map and could pick
+                // a different one of the two.
+                aliases.insert(l.clone(), uid);
+                by_label.entry(l.clone()).or_default().push((uid, u.span));
+            }
+        }
+        // The other half of W054, which its registry entry has always described and nothing
+        // emitted: one name on two *different* units. `merge` reports this across stores as a
+        // `label-collision` contention; within a single document the earlier unit simply lost
+        // its name, silently, and every reference to it went to the later one.
+        for (label, decls) in &by_label {
+            let distinct: BTreeSet<Uid> = decls.iter().map(|(u, _)| *u).collect();
+            if distinct.len() < 2 {
+                continue;
+            }
+            for (_, span) in &decls[..decls.len() - 1] {
+                self.out
+                    .diagnostics
+                    .push(Diagnostic::at(Code::W054, *span).with_message(format!(
+                        "`{label}` is declared again later on a different unit; references \
+                         resolve to the last declaration, and this unit loses the name"
+                    )));
             }
         }
         for (uid, mut names) in by_uid {
+            // Only names this unit still owns. A name reused later on a different unit belongs
+            // to that unit now — references resolve there — so binding it here would have the
+            // writer put the name on a unit no reference points at.
+            names.retain(|(l, _)| aliases.get(l) == Some(&uid));
+            if names.is_empty() {
+                continue;
+            }
             names.sort_by(|a, b| a.0.cmp(&b.0));
             let keeper = names[0].0.clone();
             for (l, span) in names.into_iter().skip(1) {
@@ -1002,7 +1165,7 @@ impl<'a> Parser<'a> {
         let lookup = |r: &Ref, out: &mut ParseOutcome, span: Span| -> Option<Uid> {
             match r {
                 Ref::Uid(u) => Some(*u),
-                Ref::Label(l) => match labels.get(l) {
+                Ref::Label(l) => match aliases.get(l) {
                     Some(u) => Some(*u),
                     None => {
                         out.diagnostics.push(
@@ -1014,6 +1177,13 @@ impl<'a> Parser<'a> {
                 },
             }
         };
+
+        // Declarations first, so a reader of the record stream meets an extension's vocabulary
+        // before the relations that use it. The writer emits them in the same place, which is
+        // what keeps `parse -> write -> parse` a fixed point.
+        for d in std::mem::take(&mut self.schemas) {
+            self.out.records.push(Record::SchemaDecl(d));
+        }
 
         for (i, core) in cores.into_iter().enumerate() {
             if let Some(c) = core {
@@ -1194,4 +1364,37 @@ fn resolve(
             None
         }
     }
+}
+
+/// The label grammar, in words a model or a person can act on.
+const LABEL_RULE: &str = "a label is `kind/name` with exactly one `/`, each side a lowercase \
+                          letter followed by lowercase letters, digits, `-` or `_`";
+
+/// The nearest well-formed label to a malformed one, when there is an obvious one.
+///
+/// Lowercased, anything outside the alphabet turned into `-`, and — when there is no `/` —
+/// the first `-` or `_` becomes the separator, so `claim-nodejs-c-produce` suggests
+/// `claim/nodejs-c-produce`. Only offered if the result actually parses; a suggestion that is
+/// itself malformed would cost the repair turn it was meant to save.
+fn suggest_label(w: &str) -> Option<String> {
+    let lower: String = w
+        .chars()
+        .map(|c| {
+            let c = c.to_ascii_lowercase();
+            if c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '/') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let candidate = match lower.split_once('/') {
+        Some((a, b)) => format!("{a}/{}", b.replace('/', "-")),
+        None => {
+            let at = lower.find(['-', '_'])?;
+            format!("{}/{}", &lower[..at], &lower[at + 1..])
+        }
+    };
+    let candidate = candidate.trim_matches(['-', '_']).to_string();
+    Label::new(&candidate).ok().map(|l| l.into_string())
 }

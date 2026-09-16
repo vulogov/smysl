@@ -178,7 +178,7 @@
     #line(length: 34%, stroke: 0.6pt + ink_accent)
     #v(5mm)
     #text(font: body_family, size: 10pt, style: "italic", fill: ink_smoke,
-      "Vladimir Ulogov · 2026 · smysl 1.2.0 · format smysl/1.0 · kernel smysl.kernel/0.1")
+      "Vladimir Ulogov · 2026 · smysl 1.3.0 · format smysl/1.0 · kernel smysl.kernel/0.1")
   ],
 )
 #v(6mm)
@@ -254,6 +254,7 @@ Four kinds of record are ever hand-authored in surface syntax:
     ([a unit], [`@claim`, `@evidence`, and the other thirteen kernel types — the thing being claimed, cited, or asked.]),
     ([`@rel`], [A typed edge between two units — `causes`, `rebuts`, `warrant`, and eleven more.]),
     ([`@thread`], [A named, ordered, role-annotated walk over units — a brief, a narrative, an analysis.]),
+    ([`@schema`], [A declaration of an extension: the unit types and relation kinds it adds. Rarely needed, and one line when it is.]),
   ),
 )
 
@@ -658,6 +659,17 @@ read as believing, rather than adding a new relationship alongside what was alre
 An unrecognised kind — anything shaped `x.<domain>/<kind>` — is kept and stays routable
 rather than dropped (`SMY-W013`); a reader without the `x.sre` extension treats it as a
 plain `elaborates` edge instead of losing it.
+
+The warning goes away when the file declares the kind it uses:
+
+```
+@schema x.sre/v1 { version: 1, relations: [x.sre/mitigates] }
+```
+
+The declaration travels with the store through `merge` and `fmt`. A misspelled key in it
+is an error rather than something skipped — a `relation:` quietly ignored would leave the
+kind warning under a file that appears to declare it — and declaring a kernel kind such as
+`causes` is `SMY-E012`, because an extension may add but never redefine.
 
 The fourteen kernel kinds, for reference:
 

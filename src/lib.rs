@@ -150,6 +150,12 @@ pub use smysl_ingest::{
 // callable and its result unnameable.
 #[cfg(feature = "ingest")]
 pub use smysl_ingest::import::{from_csv, ImportOptions, Imported};
+// A caller's own extraction prompt and schema. Here rather than left in the hidden `prompt`
+// module because the point of it is library use: a pipeline that wants its own question but
+// the quote check, rule T and staging that `ingest` applies to the answer. `resolve_prompt`,
+// which this replaces, was documented as a hook to override and could not be.
+#[cfg(feature = "ingest")]
+pub use smysl_ingest::prompt::PromptOverride;
 #[cfg(feature = "providers")]
 pub use smysl_provider::usage::{GroupBy, Totals};
 #[cfg(feature = "providers")]
@@ -242,7 +248,7 @@ mod tests {
     /// manifest, and the diff will say what you decided.
     #[test]
     fn the_crate_version_is_the_one_we_intend_to_ship() {
-        assert_eq!(VERSION, "1.2.0");
+        assert_eq!(VERSION, "1.3.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two

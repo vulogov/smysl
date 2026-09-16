@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "properties": {
     "type": { "enum": ["claim", "evidence", "definition", "question", "hypothesis", "finding", "procedure", "decision", "constraint", "observation", "data", "artifact-ref", "prose"] },
-    "label": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*/[a-z0-9_-]+$" },
+    "label": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*/[a-z][a-z0-9_-]*$" },
     "gist": { "type": "string", "minLength": 1, "maxLength": 240 },
     "body": { "type": "string" },
     "detail": { "type": "string" },

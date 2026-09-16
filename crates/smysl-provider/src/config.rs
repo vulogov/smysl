@@ -87,6 +87,20 @@ pub struct Config {
     pub providers: BTreeMap<ProviderId, ProviderConfig>,
     pub routing: BTreeMap<Task, ProviderId>,
     pub fallback: Vec<ProviderId>,
+    /// `ingest: { prompt: "prompts/extract.hjson" }` — a prompt override file for `ingest`,
+    /// relative to the project. Held as a path and read by the caller, so a missing or invalid
+    /// file is reported by the command that would use it rather than by every command that
+    /// loads the configuration.
+    pub ingest_prompt: Option<String>,
+    /// `ingest: { path: json-ast }` — the ingest path to use when `--path` is not given: one of
+    /// `auto`, `surface` or `json-ast`.
+    ///
+    /// For a project whose provider does well on one path and badly on the other. Gemini
+    /// flash-lite on the surface path wrote labels without the `/` and degraded whole commits
+    /// to prose, while the same inputs on json-ast — where the schema's label pattern is enforced
+    /// during decoding — converted cleanly. A flag on every invocation is the wrong place for a
+    /// fact about the project's provider.
+    pub ingest_path: Option<String>,
 }
 
 impl Config {
@@ -179,6 +193,27 @@ impl Config {
             }
         }
 
+        if let Some(ingest) = obj.get("ingest").and_then(|v| v.value.as_object()) {
+            if let Some(p) = ingest.get("prompt") {
+                let path = p.value.as_str().ok_or_else(|| {
+                    ProviderError::Malformed("`ingest.prompt` is a path to a prompt file".into())
+                })?;
+                cfg.ingest_prompt = Some(path.to_string());
+            }
+            if let Some(p) = ingest.get("path") {
+                let path = p.value.as_str().unwrap_or_default();
+                // Checked here, against the literal set, because this crate cannot name
+                // `IngestPath` — ingest depends on the provider, not the other way round. An
+                // unknown value is an error at load rather than a silent `auto`.
+                if !matches!(path, "auto" | "surface" | "json-ast") {
+                    return Err(ProviderError::Malformed(format!(
+                        "`ingest.path` is `{path}`; expected auto, surface or json-ast"
+                    )));
+                }
+                cfg.ingest_path = Some(path.to_string());
+            }
+        }
+
         cfg.validate()?;
         Ok(cfg)
     }
@@ -222,6 +257,8 @@ impl Config {
             providers: BTreeMap::from([(id.clone(), p)]),
             routing: BTreeMap::new(),
             fallback: vec![id.clone()],
+            ingest_prompt: None,
+            ingest_path: None,
         };
         for &t in Task::ALL {
             cfg.routing.insert(t, id.clone());
@@ -394,5 +431,28 @@ mod tests {
     #[test]
     fn the_config_path_is_the_documented_one() {
         assert_eq!(Config::PATH, ".smysl/config.hjson");
+    }
+
+    #[test]
+    fn an_ingest_prompt_is_read_as_a_path_and_nothing_else() {
+        let c = Config::load("{ ingest: { prompt: prompts/extract.hjson } }").unwrap();
+        assert_eq!(c.ingest_prompt.as_deref(), Some("prompts/extract.hjson"));
+        assert_eq!(Config::load("{}").unwrap().ingest_prompt, None);
+        assert!(
+            Config::load("{ ingest: { prompt: 3 } }").is_err(),
+            "a prompt that is not a path is a configuration error, not an absent prompt"
+        );
+    }
+
+    #[test]
+    fn an_ingest_path_is_one_of_three_and_nothing_else() {
+        for p in ["auto", "surface", "json-ast"] {
+            let c = Config::load(&format!("{{ ingest: {{ path: {p} }} }}")).unwrap();
+            assert_eq!(c.ingest_path.as_deref(), Some(p));
+        }
+        assert!(
+            Config::load("{ ingest: { path: json } }").is_err(),
+            "a typo is not `auto`"
+        );
     }
 }

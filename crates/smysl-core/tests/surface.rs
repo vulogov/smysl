@@ -1284,3 +1284,328 @@ fn an_ordinary_backslash_is_left_alone() {
     let once = write_surface(None, &a.records, &ctx);
     assert_eq!(parse_surface(&once).unwrap().records, a.records);
 }
+
+/// A reference through either of a unit's two names resolves.
+///
+/// `SMY-W054` says only one name survives a round trip, and that is still true. What was
+/// wrong is that the parser *forgot the second name one pass later*: `grounds` and `deps`
+/// resolved through every label, while `@rel` endpoints, relation notes, thread steps and
+/// `@doc roots` resolved through the map of survivors only — so the same document warned that
+/// `e/two` names `e/one`'s unit and then failed `SMY-E060` on a `@rel` naming `e/two`.
+///
+/// Found by using smysl as a corpus for another project, where merged stores routinely hold
+/// the same quote under two labels. The document is unambiguous; the reference should resolve
+/// to the one uid, and the writer then spells it with the surviving name.
+#[test]
+fn a_reference_through_a_second_label_resolves_everywhere() {
+    let src = "\
+@doc smysl/1.0 {
+  id: v/alias
+  intent: triage
+  lang: en
+  roots: [c/x, e/two]
+}
+
+@evidence e/one { status: measured, source: { kind: metric, ref: \"m\" } }
+~ The same fact.
+
+@evidence e/two { status: measured, source: { kind: metric, ref: \"m\" } }
+~ The same fact.
+
+@claim c/x { status: derived, grounds: [e/two] }
+~ A claim grounded through the second label.
+
+@rel e/two --backs--> c/x { note: e/two }
+
+@thread t/brief { schema: brief, owner: \"human:a\" }
+~ One step, named through the second label.
+  bottom-line → e/two
+";
+    let a = parse_surface(src).unwrap();
+    let e060: Vec<_> = a
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == smysl_core::Code::E060)
+        .collect();
+    assert!(
+        e060.is_empty(),
+        "a second name must resolve, not dangle: {e060:?}"
+    );
+    assert!(
+        a.diagnostics
+            .iter()
+            .any(|d| d.code == smysl_core::Code::W054),
+        "the round-trip warning is still owed"
+    );
+
+    let one = a.labels[&Label::new("e/one").unwrap()];
+    let rel = a
+        .records
+        .iter()
+        .find_map(|r| match r {
+            Record::Relation(rel) => Some(rel.clone()),
+            _ => None,
+        })
+        .expect("the @rel must be emitted, not dropped");
+    assert_eq!(rel.from, one, "endpoint through the alias");
+    assert_eq!(rel.note, Some(one), "note through the alias");
+    let steps: Vec<smysl_core::Uid> = a
+        .records
+        .iter()
+        .find_map(|r| match r {
+            Record::Thread(t) => Some(t.steps.iter().map(|s| s.unit).collect()),
+            _ => None,
+        })
+        .expect("the thread must be emitted");
+    assert_eq!(steps, vec![one], "thread step through the alias");
+    assert!(
+        a.view
+            .as_ref()
+            .expect("the @doc is a view")
+            .roots
+            .contains(&one),
+        "view root through the alias"
+    );
+
+    // Only the survivor is bound, so the round trip stays a fixed point.
+    assert_eq!(
+        a.labels.keys().map(Label::as_str).collect::<Vec<_>>(),
+        vec!["c/x", "e/one"]
+    );
+    let text = write_surface(
+        a.view.as_ref(),
+        &a.records,
+        &WriteContext::from_labels(&a.labels),
+    );
+    let b = parse_surface(&text).unwrap();
+    assert_eq!(a.records, b.records, "round trip changed the records");
+}
+
+/// One name on two different units is reported, and every reference agrees on its owner.
+///
+/// The other half of `SMY-W054`, described by its registry entry and never emitted. Within a
+/// document the earlier unit lost its name silently. Worse, the parts disagreed about who won:
+/// `grounds` resolved to the last declaration, relations to whichever uid sorted first, and the
+/// writer bound the name by uid order too — so a round trip could move a name between units.
+#[test]
+fn a_name_reused_on_a_different_unit_is_reported_and_resolved_consistently() {
+    // Both declaration orders. Whether the relation and the writer used to agree with `grounds`
+    // depended on how the two uids happen to sort, so a single order passes or fails by the luck
+    // of a hash — the first version of this test passed with the fix removed.
+    let (a_fact, b_fact) = (
+        "@evidence e/same { status: measured, source: { kind: metric, ref: \"a\" } }\n~ First fact.\n",
+        "@evidence e/same { status: measured, source: { kind: metric, ref: \"b\" } }\n~ Second fact.\n",
+    );
+    let tail = "\n@claim c/x { status: derived, grounds: [e/same] }\n~ Grounded through the reused name.\n\n@rel e/same --backs--> c/x\n";
+    for (first, second) in [(a_fact, b_fact), (b_fact, a_fact)] {
+        let src = format!("{first}\n{second}{tail}");
+        let a = parse_surface(&src).unwrap();
+        let w054: Vec<_> = a
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == smysl_core::Code::W054)
+            .collect();
+        assert_eq!(
+            w054.len(),
+            1,
+            "the earlier declaration is the one that loses: {w054:?}"
+        );
+
+        let owner = a.labels[&Label::new("e/same").unwrap()];
+        let (grounds, from) = a.records.iter().fold((None, None), |(g, f), r| match r {
+            Record::Unit(u) if u.gist.starts_with("Grounded") => {
+                (u.grounds.iter().next().copied(), f)
+            }
+            Record::Relation(rel) => (g, Some(rel.from)),
+            _ => (g, f),
+        });
+        assert_eq!(
+            grounds,
+            Some(owner),
+            "grounds resolve to the bound owner\n{src}"
+        );
+        assert_eq!(
+            from,
+            Some(owner),
+            "the @rel resolves to the same owner\n{src}"
+        );
+
+        let text = write_surface(
+            a.view.as_ref(),
+            &a.records,
+            &WriteContext::from_labels(&a.labels),
+        );
+        let b = parse_surface(&text).unwrap();
+        assert_eq!(
+            a.records, b.records,
+            "round trip changed the records\n{src}"
+        );
+        assert_eq!(a.labels, b.labels, "round trip moved the name\n{src}");
+    }
+}
+
+/// A malformed label says what a label is, and offers a candidate when one is obvious.
+///
+/// Surface ingest sends diagnostics back verbatim as the repair turn. A model that wrote
+/// `claim-nodejs-c-produce` was told three times its label was malformed and never what a
+/// label looks like, and the whole chunk degraded to raw prose. The candidate is only offered
+/// when it parses: a malformed suggestion would spend the repair turn it exists to save.
+#[test]
+fn a_malformed_label_suggests_the_rule_and_a_candidate_that_parses() {
+    let cases = [
+        ("claim-nodejs-c-produce", Some("claim/nodejs-c-produce")),
+        ("C/Pool", Some("c/pool")),
+        ("c/x/y", Some("c/x-y")),
+        ("decision_use.json", Some("decision/use-json")),
+        // Nothing obvious: no separator to promote, or a side that cannot start with a letter.
+        ("claim", None),
+        ("c/1x", None),
+    ];
+    for (bad, candidate) in cases {
+        let src = format!("@claim {bad} {{ status: speculative }}\n~ a gist here.\n");
+        let out = parse_surface(&src).unwrap();
+        let d = out
+            .diagnostics
+            .iter()
+            .find(|d| d.code == smysl_core::Code::E001)
+            .unwrap_or_else(|| panic!("`{bad}` was accepted"));
+        let s = d
+            .suggestion
+            .as_deref()
+            .unwrap_or_else(|| panic!("`{bad}`: no suggestion"));
+        assert!(s.contains("kind/name"), "`{bad}`: the rule is missing: {s}");
+        match candidate {
+            Some(c) => {
+                assert!(
+                    s.contains(&format!("`{c}`")),
+                    "`{bad}`: expected `{c}` in: {s}"
+                );
+                Label::new(c).expect("a suggested candidate must itself parse");
+            }
+            None => assert!(!s.contains("e.g."), "`{bad}`: offered a candidate: {s}"),
+        }
+    }
+}
+
+/// `@schema` is a `SchemaDecl`, and a document holding one is a fixed point.
+///
+/// Surface text had no spelling for a declaration until 1.3, so an extension relation in a
+/// `.smy` file could never be declared and warned `SMY-W013` on every check. The record itself
+/// has been type 8 on the wire since 0.1; this is only a way to write it.
+#[test]
+fn a_schema_declaration_parses_writes_and_round_trips() {
+    let src = "\
+@schema x.code/v1 { version: 2, types: [x.code/commit], relations: [x.code/touches, x.code/introduces] }
+
+@claim c/a { status: speculative }
+~ A.
+
+@claim c/b { status: speculative }
+~ B.
+
+@rel c/a --x.code/touches--> c/b
+";
+    let a = parse_surface(src).unwrap();
+    assert!(a.diagnostics.is_empty(), "{:?}", a.diagnostics);
+    let d = a
+        .records
+        .iter()
+        .find_map(|r| match r {
+            Record::SchemaDecl(d) => Some(d.clone()),
+            _ => None,
+        })
+        .expect("no SchemaDecl was emitted");
+    assert_eq!(d.id.as_str(), "x.code/v1");
+    assert_eq!(d.version, 2);
+    assert_eq!(
+        d.relations.iter().map(|r| r.as_str()).collect::<Vec<_>>(),
+        vec!["x.code/touches", "x.code/introduces"],
+        "order as written"
+    );
+    assert_eq!(
+        d.types.iter().map(|t| t.as_str()).collect::<Vec<_>>(),
+        vec!["x.code/commit"]
+    );
+
+    let text = write_surface(
+        a.view.as_ref(),
+        &a.records,
+        &WriteContext::from_labels(&a.labels),
+    );
+    let b = parse_surface(&text).unwrap();
+    assert_eq!(
+        a.records, b.records,
+        "round trip changed the records:\n{text}"
+    );
+    assert_eq!(
+        text,
+        write_surface(
+            b.view.as_ref(),
+            &b.records,
+            &WriteContext::from_labels(&b.labels)
+        )
+    );
+
+    // Written first however the record stream is ordered, or the second pass would move it.
+    let mut shuffled = a.records.clone();
+    shuffled.rotate_left(1);
+    let text2 = write_surface(None, &shuffled, &WriteContext::from_labels(&a.labels));
+    assert!(text2.starts_with("@schema x.code/v1"), "{text2}");
+}
+
+/// Every mistake in a declaration is an error, because every one is silent otherwise.
+///
+/// A misspelled `relation:` passed over would leave the kind warning SMY-W013 under a file that
+/// visibly declares it — the problem the record exists to solve, reintroduced by a typo.
+#[test]
+fn a_schema_declaration_refuses_what_it_would_otherwise_lose() {
+    let refused = [
+        (
+            "a misspelled key",
+            "@schema x.code/v1 { relation: [x.code/touches] }\n",
+        ),
+        (
+            "an id that is not a schema id",
+            "@schema code { relations: [x.code/touches] }\n",
+        ),
+        (
+            "a relation that does not parse",
+            "@schema x.code/v1 { relations: [Not A Kind] }\n",
+        ),
+        (
+            "relations not a list",
+            "@schema x.code/v1 { relations: x.code/touches }\n",
+        ),
+        ("a negative version", "@schema x.code/v1 { version: -1 }\n"),
+    ];
+    for (what, src) in refused {
+        let out = parse_surface(src).unwrap();
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.code == smysl_core::Code::E001),
+            "{what}: accepted: {:?}",
+            out.diagnostics
+        );
+        assert!(
+            !out.records
+                .iter()
+                .any(|r| matches!(r, Record::SchemaDecl(_))),
+            "{what}: a declaration was emitted anyway"
+        );
+    }
+}
+
+/// A declaration surface text cannot hold is left out of the text, not written smaller.
+#[test]
+fn a_schema_declaration_with_a_payload_shape_has_no_surface_form() {
+    let mut d = smysl_core::SchemaDecl::new(smysl_core::SchemaId::parse("x.code/v1").unwrap(), 1);
+    assert!(smysl_core::surface::schema_decl_has_surface_form(&d));
+    d.payload_shape = Some(vec![0xa0]);
+    assert!(!smysl_core::surface::schema_decl_has_surface_form(&d));
+    let text = write_surface(None, &[Record::SchemaDecl(d)], &WriteContext::default());
+    assert!(
+        !text.contains("@schema"),
+        "a declaration was written without its payload shape"
+    );
+}

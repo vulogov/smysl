@@ -29,8 +29,10 @@ struct Scripted {
     caps: Capabilities,
     answers: Mutex<Vec<Result<String, ProviderError>>>,
     calls: Arc<AtomicUsize>,
-    /// Every request the ingestor made, for asserting what was sent.
-    seen: Mutex<Vec<Request>>,
+    /// Every request the ingestor made, for asserting what was sent. Shared, because the
+    /// provider is moved into the registry; a plain `Mutex` recorded requests nobody could
+    /// ever read back.
+    seen: Arc<Mutex<Vec<Request>>>,
 }
 
 impl Scripted {
@@ -44,7 +46,7 @@ impl Scripted {
             caps,
             answers: Mutex::new(answers),
             calls: Arc::new(AtomicUsize::new(0)),
-            seen: Mutex::new(Vec::new()),
+            seen: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -105,6 +107,13 @@ fn registry(p: Scripted) -> (Registry, Arc<AtomicUsize>) {
             .route(Task::ContentIngest, id),
         calls,
     )
+}
+
+/// A registry, plus the requests its provider will receive.
+fn registry_seeing(p: Scripted) -> (Registry, Arc<AtomicUsize>, Arc<Mutex<Vec<Request>>>) {
+    let seen = Arc::clone(&p.seen);
+    let (r, calls) = registry(p);
+    (r, calls, seen)
 }
 
 fn opts(rung: Rung) -> IngestOptions {
@@ -809,4 +818,198 @@ fn an_elided_quote_warns_without_spending_the_budget() {
         "an elision cost a repair turn"
     );
     assert_eq!(staged.len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// A caller's own prompt and schema
+// ---------------------------------------------------------------------------
+
+/// The override is what is sent — and nothing after the model is weakened by it.
+///
+/// This is the whole case for an override over a separate extraction script: the caller
+/// chooses the question, and the answer still meets the quote check, rule T and staging. So
+/// the test scripts an answer that would trip both — a fabricated quote and a laundered
+/// `measured` — and asserts they are still caught under the caller's prompt.
+#[test]
+fn a_prompt_override_is_what_is_sent_and_every_check_after_the_model_still_runs() {
+    let schema = smysl_ingest::schema::batch_schema().replace("unit batch", "decision batch");
+    let override_ = smysl_ingest::prompt::PromptOverride::new("test.extract", 2)
+        .with_system("SYSTEM-OVERRIDE: extract decisions.")
+        .with_user("USER-OVERRIDE\n{input}")
+        .with_schema(schema.clone());
+
+    let answer = r#"{"units":[
+        {"type":"decision","label":"d/pool","gist":"the pool wait rose with latency",
+         "status":"cited","source":{"kind":"doc","ref":"notes"},
+         "quote":"Connection pool wait time rose alongside request latency."},
+        {"type":"evidence","label":"e/made-up","gist":"a quote nobody wrote",
+         "status":"measured","source":{"kind":"metric","ref":"p95"},
+         "quote":"The shard was replaced by a new cluster on Friday."}]}"#;
+
+    // Long enough that `auto` would choose the surface path on size alone — which is the case
+    // the override has to change. With the short DOCUMENT, auto picked json-ast anyway, and the
+    // assertion that the override moved it there passed with that code deleted.
+    let long = format!(
+        "{DOCUMENT}\n\n{}",
+        "Filler that pushes the input past the threshold. ".repeat(200)
+    );
+    assert!(long.len() > smysl_ingest::path::SMALL_OUTPUT_THRESHOLD);
+    let (r, _, seen) = registry_seeing(Scripted::saying(answer).with_context(1 << 20));
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Model).with_prompt(override_.clone()))
+        .ingest(&Store::new(), &long)
+        .expect("a valid override ingests");
+
+    // What was sent.
+    // The extraction request carries the caller's prompt. Later requests are repair turns —
+    // the fabricated quote earns one — and repair is its own template, so they are held only
+    // to the schema, which they must carry: a repair answer is converted exactly as the first
+    // one was, and a repair asked against the kernel's schema would be answering a different
+    // question from the one the caller configured.
+    let requests = seen.lock().unwrap();
+    let first = requests.first().expect("at least one call");
+    assert!(
+        first.system.contains("SYSTEM-OVERRIDE"),
+        "system: {}",
+        first.system
+    );
+    let user = &first.messages.last().expect("a user turn").content;
+    assert!(user.starts_with("USER-OVERRIDE"), "user: {user}");
+    assert!(
+        user.contains("Connection pool wait"),
+        "the document reached the model"
+    );
+    assert!(
+        requests.len() > 1,
+        "the fabricated quote should have cost a repair turn"
+    );
+    for (i, req) in requests.iter().enumerate() {
+        assert_eq!(
+            req.schema.as_deref(),
+            Some(schema.as_str()),
+            "request {i}: the caller's schema"
+        );
+    }
+    drop(requests);
+    assert_eq!(
+        report.path,
+        Some(IngestPath::JsonAst),
+        "a schema only has a channel on json-ast, so auto moves there"
+    );
+
+    // What still ran.
+    assert!(
+        report.diagnostics.iter().any(|d| d.code == Code::E307),
+        "the quote check did not run under the override: {:?}",
+        report.diagnostics
+    );
+    assert!(
+        report.diagnostics.iter().any(|d| d.code == Code::E033),
+        "rule T did not run under the override"
+    );
+    assert!(!staged.is_empty(), "staging produced nothing");
+    for u in &staged.units {
+        assert!(
+            u.status <= Status::Inferred,
+            "{} escaped the model ceiling",
+            u.gist
+        );
+    }
+
+    // And the recipe is not the built-in one's.
+    let (r2, _) = registry(Scripted::saying(answer).with_context(1 << 20));
+    let (_, plain) = Ingestor::new(&r2, opts(Rung::Model).with_path(IngestPath::JsonAst))
+        .ingest(&Store::new(), &long)
+        .unwrap();
+    assert!(report.recipe.is_some());
+    assert_ne!(
+        report.recipe, plain.recipe,
+        "an override must not share the built-in recipe"
+    );
+}
+
+/// A bad override is a configuration mistake, and it costs nothing: no call is made.
+#[test]
+fn a_bad_override_is_refused_before_any_call_is_made() {
+    use smysl_ingest::prompt::PromptOverride;
+    let schema = smysl_ingest::schema::batch_schema();
+    let cases = [
+        (
+            "a reserved id",
+            opts(Rung::Document)
+                .with_prompt(PromptOverride::new("ingest.content.json", 1).with_user("{input}")),
+        ),
+        (
+            "a user prompt without the document",
+            opts(Rung::Document)
+                .with_prompt(PromptOverride::new("x.extract", 1).with_user("Commit:")),
+        ),
+        (
+            "a schema on a forced surface path",
+            opts(Rung::Document)
+                .with_path(IngestPath::Surface)
+                .with_prompt(PromptOverride::new("x.extract", 1).with_schema(schema)),
+        ),
+    ];
+    for (what, o) in cases {
+        let (r, calls) = registry(Scripted::saying("{}"));
+        let out = Ingestor::new(&r, o).ingest(&Store::new(), DOCUMENT);
+        assert!(
+            matches!(out, Err(ProviderError::Malformed(_))),
+            "{what}: {:?}",
+            out.err()
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "{what}: a call was made anyway"
+        );
+    }
+}
+
+/// The repair turn for a malformed label says what a label is.
+///
+/// Observed with Gemini flash-lite on the surface path: labels like `claim-nodejs-c-produce`
+/// failed all three repair attempts and the commit degraded to one prose unit. The template
+/// never said what a label looks like and the diagnostic only said "malformed", so each repair
+/// turn told the model it was wrong and not what right was. This asserts the information now
+/// reaches the model — in the first prompt and in the repair — and that an answer which acts
+/// on it stages instead of degrading. Whether a given model acts on it is `providers_live.rs`.
+#[test]
+fn a_malformed_label_repair_carries_the_label_format_and_a_candidate() {
+    let bad =
+        "@decision claim-nodejs-c-produce { status: speculative }\n~ nodejs reaches C-Produce.\n";
+    let good =
+        "@decision d/nodejs-c-produce { status: speculative }\n~ nodejs reaches C-Produce.\n";
+    let (r, _, seen) = registry_seeing(
+        Scripted::new(vec![Ok(bad.to_string()), Ok(good.to_string())]).unstructured(),
+    );
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document).with_path(IngestPath::Surface))
+        .ingest(&Store::new(), DOCUMENT)
+        .expect("ingests");
+
+    let requests = seen.lock().unwrap();
+    assert_eq!(requests.len(), 2, "one extraction, one repair");
+    assert!(
+        requests[0].system.contains("kind/name"),
+        "the first prompt never says what a label is"
+    );
+    let repair = &requests[1].messages.last().unwrap().content;
+    assert!(
+        repair.contains("kind/name"),
+        "the repair names no format:\n{repair}"
+    );
+    assert!(
+        repair.contains("claim/nodejs-c-produce"),
+        "the repair offers no candidate:\n{repair}"
+    );
+    drop(requests);
+
+    assert_eq!(
+        report.degraded, 0,
+        "an answer that acted on the repair still degraded"
+    );
+    assert!(
+        staged.units.iter().any(|u| u.gist.contains("C-Produce")),
+        "the repaired unit was not staged"
+    );
 }

@@ -322,6 +322,7 @@ changes nothing, because nothing here is hosted to begin with:
 provider     ollama
 egress       no - local
 path         json-ast (default for small enforced ingest)
+prompt       built-in
 rung         document (ceiling cited)
 input        139 bytes, 35 token(s)
 ```
@@ -450,6 +451,7 @@ $ smysl ingest --dry-run --rung document note.txt
 provider     ollama
 egress       no - local
 path         json-ast (default for small enforced ingest)
+prompt       built-in
 rung         document (ceiling cited)
 input        139 bytes, 35 token(s)
 ```
@@ -518,6 +520,7 @@ for exactly that reason:
 provider     ollama
 egress       no - local
 path         surface (output too large to risk truncation)
+prompt       built-in
 rung         document (ceiling cited)
 input        7300 bytes, 1825 token(s)
 ```
@@ -528,6 +531,60 @@ dry-run report always says which reason applied — `caller override`,
 `a structured operation`, `the provider enforces no schema`,
 `output too large to risk truncation`, or the plain default — so you are
 never left guessing why a run took the path it took.
+
+A project whose provider does badly on one path can make the other its
+default rather than typing the flag every time, in `.smysl/config.hjson`:
+
+```
+ingest: { path: json-ast }
+```
+
+`--path` on the command line still wins, including `--path auto`. The
+case that motivated it: a small hosted model on the surface path wrote
+labels like `claim-nodejs-c-produce`, with no `/`, and degraded whole
+documents to prose — while the json-ast path, where the schema's label
+pattern is enforced as the model decodes, converted the same input
+cleanly. Since 1.3 both prompts state the label format and a malformed
+label's repair turn names it with a corrected candidate, so the surface
+path recovers from this far more often; the setting is for the providers
+where it still does not.
+
+#subsection("prompt: asking your own question")
+
+The built-in prompts ask for general-purpose units. A pipeline with a
+narrower job — decisions and their rationale out of a commit, say — can
+supply its own wording and, on the json-ast path, a narrower schema:
+
+```
+{
+  id: myproject.extract-decisions
+  version: 1
+  system_file: extract.system.txt
+  user_file: extract.user.txt
+  schema_file: extract.schema.json
+}
+```
+
+Pass it with `--prompt extract.hjson`, or name it once in the project
+config as `ingest: { prompt: prompts/extract.hjson }`. The texts live in
+files beside it because the HJSON this tool reads has no multi-line
+strings; `user` must contain `{input}`, which is where the document goes.
+
+What an override changes is the question. What it does not change is
+everything after the answer: the same conversion, the same check that
+every `quote` really appears in the document, the same rung ceiling, the
+same staging. That is the reason to run an extraction through `ingest`
+rather than beside it.
+
+Three rules keep it honest. The `id` may not begin with `ingest.`, which
+the built-in prompts own. The recipe records the id with a short hash of
+the texts, so two different prompts under one id and version can never be
+aggregated as one pipeline. And a schema must still describe a `units`
+array — it can narrow what a unit may be, but an answer the converter
+cannot turn into units would degrade every chunk to prose, so that is
+refused when the file is loaded rather than discovered run by run. A
+schema only has a channel on the json-ast path, so supplying one moves
+`auto` there, and combining one with `--path surface` is an error.
 
 #section("A real attempt, and what actually happened")
 

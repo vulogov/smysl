@@ -316,9 +316,10 @@ ingest     --path
 ingest     --repair
 ingest     --strict
 ingest     --offline
+ingest     --prompt
+ingest     --no-color
 ingest     --yes
 ingest     --dry-run
-ingest     --no-color
 ingest     --noprogress
 ingest     --json
 ingest     --quiet

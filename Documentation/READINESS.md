@@ -16,7 +16,7 @@ could only be deferred and never worked toward. This file was written to say wha
 | 4 | verified providers | ⚠️ **waived** — OpenAI and Anthropic never called live |
 | 5 | a test suite that catches what it claims | ✅ every crate measured; survivors triaged; the CLI's three largest clusters closed in 1.1 |
 | 6 | performance characterised | ✅ and it found one |
-| 7 | documentation matches the binary | ◐ 88 of 194 `smysl` transcripts, plus the `cargo` ones and the feature table |
+| 7 | documentation matches the binary | ◐ 89 of 195 `smysl` transcripts, plus the `cargo` ones and the feature table |
 
 Gate 7 is honestly partial rather than waived: what it checks, it checks well, and 0.14 proved
 the gap is real by finding three stale claims in exactly the blocks the replay cannot reach.
@@ -796,7 +796,7 @@ that somebody has to run them. Worth running at a release cut.
 
 ## 7. Documentation that matches the binary — *partial, and the cheap half now gated*
 
-`make doc-output` replays **88 of 194** documented command blocks and gates on them; 105 are
+`make doc-output` replays **89 of 195** documented command blocks and gates on them; 105 are
 skipped, mostly because they name files a chapter built earlier in its own narrative. Appendix
 A, the purity table and the diagnostic registry are cross-checked against the code at every
 release cut.

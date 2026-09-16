@@ -9,7 +9,117 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.3.0
 
-Nothing yet.
+Six gaps found by using smysl as the corpus for another project, where the pipeline writes
+surface text for hundreds of commits, merges the results, and wants to run its own extraction
+through `ingest`. Every one of them was a place where the tool knew something and did not use
+it — a second label, a label binding, a declaration record, a template id, the label grammar —
+which is the same shape as 1.2's findings seen from the consumer's side.
+
+### A reference through a unit's second label resolves (was `SMY-E060`)
+
+`SMY-W054` warns that two labels name one unit and only one survives a round trip. That is
+still true. What was wrong is that the parser then **forgot the second name one pass later**:
+`grounds` and `deps` resolved through every label, while `@rel` endpoints, relation notes,
+thread steps and `@doc roots` resolved through the survivors only. The same document warned
+that `e/two` names `e/one`'s unit and failed a `@rel` naming `e/two` as unresolved. In a merged
+store holding one quote under two labels, that decided whether the edges survived at all.
+
+Found beside it, and fixed: **one label on two different units was silent.** W054's registry
+entry has always described that case and nothing emitted it; the earlier unit lost its name,
+and the parts disagreed about who won — `grounds` took the last declaration, relations and the
+writer's bindings took whichever uid sorted first, so a round trip could move a name between
+units. Now it warns, and every kind of reference agrees on the owner.
+
+### `ingest` takes a caller's own prompt and schema
+
+`resolve_prompt` was documented as "the hook a deployment overrides" and was a free function
+returning its argument, which nothing in Rust can override. It could not have worked through a
+fork either: the recipe hardcoded `"ingest.content.surface"`, version 1, so the documented way
+to distinguish a deployment's wording — change the id or the version — was a change nothing
+read. Replaced by `PromptOverride`, on `IngestOptions::with_prompt`, `smysl ingest --prompt FILE`
+and `ingest: { prompt: … }` in `.smysl/config.hjson`, with texts and schema loadable from files.
+
+What it changes is the question; what it keeps is everything after the answer — the same
+conversion, quote check, rung ceiling and staging, asserted end to end against an answer that
+fabricates a quote and launders `measured`. The recipe now names the template actually sent,
+and an override's id carries a hash of its texts, so two prompts under one id and version can
+never aggregate as one pipeline. A schema must still describe a `units` array, is refused at load
+if it does not, and moves `auto` to json-ast since that is the only path with a channel for it.
+
+Two things found getting there. `--dry-run` computed the path from `--path` alone and would have
+reported `surface` for a run that goes json-ast. And the first version documented `'''` blocks
+for inline prompts, which the HJSON reader has never accepted; the unit test used a one-line
+string, and only running the command against a real file found it.
+
+### Surface ingest tells the model what a label is
+
+Gemini flash-lite on the surface path wrote labels like `claim-nodejs-c-produce`, failed all
+three repair attempts, and degraded whole commits to one prose unit, while `--path json-ast`
+worked. The asymmetry has a precise cause: the json-ast schema carries a label `pattern` an
+enforcing provider applies while decoding, and the surface template showed `@<type> <label>`
+without ever saying what a label looks like. The repair turn only said "malformed".
+
+Both content templates now state the format (version 2 — and the recipe now reads the version),
+and a malformed label's diagnostic carries the rule and a corrected candidate into the repair
+turn: `[try: a label is `kind/name` …, e.g. `claim/nodejs-c-produce`]`. A project can also make
+json-ast its default with `ingest: { path: json-ast }`. And the schema's pattern admitted
+`c/1x`, which the parser rejects, so an enforcing provider could emit a label conversion would
+then refuse; it now matches the parser.
+
+### Commands that take a unit accept its label
+
+`trace`, `retract`, `pack --focus/--seed`, `view --roots`, `salience --seed/--explain` and
+`thread --scope`. Chapter 13 documented the refusal as a rule — a label "has no existence at the
+store level" — which stopped being true when `LabelBinding` put labels on the wire in 0.2.
+`load_store` recovered them from every store and five of six commands discarded them. The label
+and its uid are now the same argument, asserted as identical output byte for byte, from `.smy`
+and from `.cbor`. `retract` had its own copy of the resolution and exited 2 where `trace` exited
+1 for the same mistake; they share one now.
+
+### `@schema` declares an extension in surface text
+
+`check` has always consulted `SchemaDecl` for `SMY-W013`, and surface text had no way to write
+one — the manual called an undeclared extension relation "the realistic case" for that reason,
+so a `.smy` file using `--x.code/touches-->` warned on every check forever.
+`@schema x.code/v1 { version: 1, relations: [x.code/touches] }` is record type 8, on the wire
+since 0.1; nothing about the encoding changes. It survives `fmt`, `merge` and CBOR round trips.
+A misspelled key is an error, because a `relation:` passed over quietly would leave the kind
+warning under a file that visibly declares it.
+
+**The one compatibility cost:** `schema` is now a reserved surface word, as `doc`, `rel` and
+`thread` are. A 1.2 reader rejects a `.smy` file that uses `@schema`; the CBOR form of the same
+store reads everywhere, since the record is not new.
+
+### A merged store is checked against every profile in it, not the first view's id
+
+`check` judged every unit by `store.views().next()` — the view whose id sorts first. In a store
+merged from rationale documents written under `fine` (20..60 tokens) and others under `default`
+(40..120), every rationale warned `SMY-W041`; renaming the default document from `v/other` to
+`v/zzz` made the warnings disappear with no unit changed. With no record of which document
+produced which unit, a store whose views disagree is now checked against the widest envelope
+they allow; one whose views agree is checked exactly as before.
+
+The profile the rationale case needed already existed: `granularity: { profile: fine }`.
+
+### Also
+
+- `LineClass::SchemaStart` is the enum's last variant, not beside `ThreadStart`: inserting it
+  mid-enum renumbered six published discriminants, which `make semver` reported as a major
+  change. Caught before commit.
+- The facade is 245 names: `PromptOverride`.
+
+### What is carried
+
+- **`ingest --granularity` is only ever hashed into the recipe.** It is never resolved to a
+  preset, never validated — `--granularity bogus` is accepted — and does not set the profile
+  units are later checked under. Its default, `"standard"`, names no preset at all. Fixing it
+  moves recipe hashes, so it wants its own decision rather than riding along here.
+- **Every config error reads "malformed provider response"**, including a misspelled
+  `ingest.path`, because `Config::load` reports through `ProviderError::Malformed`.
+- **`smysl-provider`'s own lib tests do not compile at default features** (35 errors in
+  `http.rs`), a combination CI never builds. Present before this cycle.
+- **Whether flash-lite now converges on the surface path** is a live question this cycle could
+  not answer offline. What is tested is that the label format and a candidate reach the model.
 
 ---
 

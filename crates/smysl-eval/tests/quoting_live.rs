@@ -135,7 +135,7 @@ fn without_quote_requirement() -> Template {
     // is `#[non_exhaustive]`, and more to the point a literal would drift from the thing under
     // test the moment a field is added to it.
     let mut t = base;
-    t.id = "eval.ingest.content.json.noquote";
+    t.id = "eval.ingest.content.json.noquote".to_string();
     t.system = system;
     t
 }

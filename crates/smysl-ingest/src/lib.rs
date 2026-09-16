@@ -117,6 +117,12 @@ pub struct IngestOptions {
     pub max_output: usize,
     /// The model to ask for. Empty means the provider's configured default.
     pub model: String,
+    /// The caller's own prompt and schema, in place of the built-in ones.
+    ///
+    /// Everything downstream of the model is unchanged by it: the same conversion, the same
+    /// quote check, the same rule T cap, the same staging. That is what distinguishes running an
+    /// extraction through `ingest` from running it beside `ingest` in a separate script.
+    pub prompt: Option<prompt::PromptOverride>,
 }
 
 impl IngestOptions {
@@ -170,6 +176,43 @@ impl IngestOptions {
         self.granularity = g.into();
         self
     }
+
+    /// Ask with the caller's prompt and, optionally, a narrower schema. Validated by
+    /// [`Ingestor::ingest`] before any call is made.
+    pub fn with_prompt(mut self, p: prompt::PromptOverride) -> IngestOptions {
+        self.prompt = Some(p);
+        self
+    }
+
+    /// The path the caller asked for, reconciled with the prompt override.
+    ///
+    /// A schema only has a channel on the json-ast path, so an override that supplies one
+    /// moves `auto` there. Forcing `surface` alongside it is refused rather than quietly
+    /// dropping the schema: a caller who wrote one believes answers are held to it.
+    ///
+    /// Public so that `--dry-run` reports the path the run will take. It computed the path from
+    /// `path` directly, which with a schema-bearing override would say `surface` for a run that
+    /// goes json-ast — and "what would be sent" is the only question `--dry-run` answers.
+    ///
+    /// The error is a `String` rather than a `ProviderError` because it is the caller's
+    /// configuration that is wrong, not a provider's answer. It was a `ProviderError::Malformed`
+    /// first, and the CLI duly printed "malformed provider response" and exited 6, the code for
+    /// a provider failure, for a mistake in a file the caller wrote.
+    pub fn requested_path(&self) -> Result<Option<IngestPath>, String> {
+        let Some(o) = &self.prompt else {
+            return Ok(self.path);
+        };
+        o.validate().map_err(|e| format!("`{}`: {e}", o.id))?;
+        match (o.schema.is_some(), self.path) {
+            (true, Some(IngestPath::Surface)) => Err(format!(
+                "`{}` supplies a schema, which the surface path has no way to send; use the \
+                 json-ast path or drop the schema",
+                o.id
+            )),
+            (true, None) => Ok(Some(IngestPath::JsonAst)),
+            (_, p) => Ok(p),
+        }
+    }
 }
 
 impl Default for IngestOptions {
@@ -189,6 +232,7 @@ impl Default for IngestOptions {
             temperature: 0.0,
             max_output: 2048,
             model: String::new(),
+            prompt: None,
         }
     }
 }
@@ -232,25 +276,29 @@ impl<'a> Ingestor<'a> {
         store: &Store,
         input: &str,
     ) -> Result<(Staged, IngestReport), ProviderError> {
+        // A bad override is a configuration mistake, and it is reported before egress rather
+        // than spent chunk by chunk as degraded spans.
+        let requested = self
+            .opts
+            .requested_path()
+            .map_err(|e| ProviderError::Malformed(format!("prompt override {e}")))?;
         let provider = self.registry.for_task(Task::ContentIngest)?;
         let caps = provider.caps();
 
-        let choice = path::choose(&caps, Task::ContentIngest, input.len(), self.opts.path);
+        let choice = path::choose(&caps, Task::ContentIngest, input.len(), requested);
         let window = chunk::Window::for_context(caps.context_window, self.opts.max_output);
         let chunks = chunk::chunk(input, window);
 
-        let conditions = recipe::Conditions::new(
-            match choice.path {
-                IngestPath::Surface => "ingest.content.surface",
-                IngestPath::JsonAst => "ingest.content.json",
-            },
-            1,
-        )
-        .with_provider(provider.id().to_string(), &self.opts.model)
-        .with_granularity(&self.opts.granularity)
-        .with_temperature(self.opts.temperature)
-        .with_schemas(["smysl.kernel/0.1".to_string()])
-        .with_path(choice.path);
+        // The recipe names the template that is actually sent. It used to hardcode the
+        // built-in id at version 1, which made the documented way to distinguish a deployment's
+        // wording — change the id or the version — a change nothing read.
+        let template = self.template_for(choice.path);
+        let conditions = recipe::Conditions::new(template.id.clone(), template.version)
+            .with_provider(provider.id().to_string(), &self.opts.model)
+            .with_granularity(&self.opts.granularity)
+            .with_temperature(self.opts.temperature)
+            .with_schemas(["smysl.kernel/0.1".to_string()])
+            .with_path(choice.path);
 
         let mut report = IngestReport {
             chunks: chunks.len(),
@@ -305,10 +353,7 @@ impl<'a> Ingestor<'a> {
         text: &str,
         usage: &mut Usage,
     ) -> ChunkOutcome {
-        let template = prompt::resolve_prompt(match path {
-            IngestPath::Surface => prompt::content_ingest_surface(),
-            IngestPath::JsonAst => prompt::content_ingest_json(),
-        });
+        let template = self.template_for(path);
 
         let mut request = self.request(provider, &template, text, path);
         let mut calls = 0usize;
@@ -370,10 +415,7 @@ impl<'a> Ingestor<'a> {
             };
 
             if attempt < self.opts.repair_attempts {
-                let t = prompt::resolve_prompt(prompt::repair(
-                    &completion.text,
-                    &repair::render_diagnostics(&last),
-                ));
+                let t = prompt::repair(&completion.text, &repair::render_diagnostics(&last));
                 request = self.request(provider, &t, text, path);
             }
         }
@@ -392,6 +434,27 @@ impl<'a> Ingestor<'a> {
             degraded: true,
             diagnostics: last,
         }
+    }
+
+    /// The content template for a path, with the caller's override applied.
+    fn template_for(&self, path: IngestPath) -> prompt::Template {
+        let base = match path {
+            IngestPath::Surface => prompt::content_ingest_surface(),
+            IngestPath::JsonAst => prompt::content_ingest_json(),
+        };
+        match &self.opts.prompt {
+            Some(o) => o.apply(base),
+            None => base,
+        }
+    }
+
+    /// The batch schema sent on the json-ast path: the caller's, or the kernel's.
+    fn batch_schema(&self) -> String {
+        self.opts
+            .prompt
+            .as_ref()
+            .and_then(|o| o.schema.clone())
+            .unwrap_or_else(schema::batch_schema)
     }
 
     fn request(
@@ -423,13 +486,13 @@ impl<'a> Ingestor<'a> {
         // claim enforcement: `Completion::structured` still comes from the provider, and a
         // json-mode answer is still checked by `json_ast::convert` on the way in.
         if path == IngestPath::JsonAst {
+            let schema = self.batch_schema();
             if caps.structured.is_enforced() {
-                r = r.with_schema(caps.structured, schema::batch_schema());
+                r = r.with_schema(caps.structured, schema);
             } else {
                 r = r.with_system(format!(
                     "{}\n\nThe schema your object must match:\n{}",
-                    template.system,
-                    schema::batch_schema()
+                    template.system, schema
                 ));
             }
         }

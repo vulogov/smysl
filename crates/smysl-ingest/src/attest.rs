@@ -68,7 +68,7 @@ impl What {
             }
         };
         Template {
-            id: "attest",
+            id: "attest".to_string(),
             version: 1,
             system: format!(
                 "You judge one smysl unit and answer with a single word: YES or NO, then a \
@@ -192,7 +192,7 @@ pub fn attest(
     opts: &AttestOptions,
 ) -> Result<AttestReport, ProviderError> {
     let provider = registry.for_task(Task::Attest)?;
-    let template = crate::prompt::resolve_prompt(opts.what.template());
+    let template = opts.what.template();
 
     let mut report = AttestReport::default();
     let candidates: Vec<(&Uid, &UnitCore)> = store

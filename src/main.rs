@@ -674,6 +674,12 @@ fn cli() -> Command {
                         .help("Repair attempts before a span degrades to opaque prose"),
                 )
                 .arg(
+                    Arg::new("prompt")
+                        .long("prompt")
+                        .value_name("FILE")
+                        .help("Prompt override (HJSON: id, version, system, user, schema); beats `ingest.prompt` in the config"),
+                )
+                .arg(
                     Arg::new("yes")
                         .long("yes")
                         .help("Commit the staged batch instead of exiting 10")
@@ -1280,9 +1286,32 @@ fn load_store(
     }
 }
 
-/// Resolve a uid argument against a store, accepting the display form.
-fn resolve(store: &Store, raw: &str) -> Result<Uid, String> {
-    let prefix = UidPrefix::parse(raw).map_err(|_| format!("`{raw}` is not a uid"))?;
+/// Resolve a unit argument against a store: a uid, its display form, or a label.
+///
+/// Labels were refused — `smysl trace c/pool-saturation` said "is not a uid", and chapter 13
+/// documented that as a rule, on the reasoning that a label "has no existence at the store
+/// level". That stopped being true when `Record::LabelBinding` put labels on the wire in 0.2:
+/// `load_store` has recovered them from every store since, and handed them to commands that
+/// discarded them. So a caller holding a store full of `m/g532e4d2-2-2` bindings had to find
+/// each uid indirectly, through `salience` or `pack --explain`, to type it back in.
+///
+/// Unambiguous by construction: a uid is spelled `b3:…` and a label never contains `:`.
+///
+/// One helper for every command that takes a unit, so `trace`, `retract`, `view`, `pack`,
+/// `salience` and `thread` cannot disagree — `retract` kept its own copy, which is why the
+/// same mistake exited 1 from `trace` and 2 from `retract`.
+fn resolve(
+    store: &Store,
+    labels: &std::collections::BTreeMap<smysl::Label, Uid>,
+    raw: &str,
+) -> Result<Uid, String> {
+    if let Ok(label) = smysl::Label::new(raw) {
+        return labels.get(&label).copied().ok_or_else(|| {
+            format!("`{raw}` is a label, and nothing in this store is bound to it")
+        });
+    }
+    let prefix =
+        UidPrefix::parse(raw).map_err(|_| format!("`{raw}` is neither a uid nor a label"))?;
     store.resolve_prefix(&prefix).map_err(|e| e.to_string())
 }
 
@@ -1415,14 +1444,18 @@ fn cmd_trace(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eprintln!("smysl trace: no store given");
         return ExitCode::Usage;
     };
-    let (store, _) = match load_store(&path) {
+    let (store, labels) = match load_store(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl trace: {e}");
             return ExitCode::Failure;
         }
     };
-    let target = match resolve(&store, m.get_one::<String>("uid").expect("required")) {
+    let target = match resolve(
+        &store,
+        &labels,
+        m.get_one::<String>("uid").expect("required"),
+    ) {
         Ok(u) => u,
         Err(e) => {
             eprintln!("smysl trace: {e}");
@@ -1499,7 +1532,7 @@ fn cmd_view(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Usage;
     };
     warn_output_is_a_report(global, "view");
-    let (store, _) = match load_store(&path) {
+    let (store, labels) = match load_store(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl view: {e}");
@@ -1511,7 +1544,7 @@ fn cmd_view(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         Some(v) => {
             let mut out = Vec::new();
             for raw in v {
-                match resolve(&store, raw) {
+                match resolve(&store, &labels, raw) {
                     Ok(u) => out.push(u),
                     Err(e) => {
                         eprintln!("smysl view: {e}");
@@ -1793,6 +1826,8 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 Record::Unit(_) | Record::Relation(_) | Record::Thread(_) => false,
                 Record::View(v) => Some(&v.id) != emitted.as_ref(),
                 Record::LabelBinding(b) => ctx.labels.get(&b.uid) != Some(&b.label),
+                // Spelled `@schema` since 1.3, unless it carries what surface text cannot.
+                Record::SchemaDecl(d) => !smysl::surface::schema_decl_has_surface_form(d),
                 _ => true,
             })
             .count();
@@ -1844,7 +1879,7 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
     warn_output_is_a_report(global, "retract");
-    let (mut store, _) = match load_store(&path) {
+    let (mut store, labels) = match load_store(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl retract: {e}");
@@ -1853,15 +1888,11 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     };
 
     let raw = m.get_one::<String>("uid").expect("required");
-    let target = match UidPrefix::parse(raw).ok().map(|p| store.resolve_prefix(&p)) {
-        Some(Ok(u)) => u,
-        Some(Err(e)) => {
+    let target = match resolve(&store, &labels, raw) {
+        Ok(u) => u,
+        Err(e) => {
             eprintln!("smysl retract: {e}");
             return ExitCode::Failure;
-        }
-        None => {
-            eprintln!("smysl retract: `{raw}` is not a uid");
-            return ExitCode::Usage;
         }
     };
 
@@ -1960,7 +1991,7 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if let Some(v) = m.get_many::<String>("focus") {
         let mut focus = Vec::new();
         for raw in v {
-            match resolve(&store, raw) {
+            match resolve(&store, &labels, raw) {
                 Ok(u) => focus.push(u),
                 Err(e) => {
                     eprintln!("smysl pack: {e}");
@@ -2272,7 +2303,7 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Usage;
     };
     warn_output_is_a_report(global, "salience");
-    let (store, _) = match load_store(&path) {
+    let (store, labels) = match load_store(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl salience: {e}");
@@ -2309,7 +2340,7 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         Some(v) => {
             let mut seed = Vec::new();
             for raw in v {
-                match resolve(&store, raw) {
+                match resolve(&store, &labels, raw) {
                     Ok(u) => seed.push(u),
                     Err(e) => {
                         eprintln!("smysl salience: {e}");
@@ -2325,7 +2356,7 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let report = smysl::salience(&store, &req);
 
     if let Some(raw) = m.get_one::<String>("explain") {
-        let uid = match resolve(&store, raw) {
+        let uid = match resolve(&store, &labels, raw) {
             Ok(u) => u,
             Err(e) => {
                 eprintln!("smysl salience: {e}");
@@ -2571,7 +2602,7 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if let Some(v) = m.get_many::<String>("scope") {
         let mut scope = Vec::new();
         for raw in v {
-            match resolve(&store, raw) {
+            match resolve(&store, &labels, raw) {
                 Ok(u) => scope.push(u),
                 Err(e) => {
                     eprintln!("smysl thread: {e}");
@@ -2872,18 +2903,43 @@ fn root_beside(store: Option<&str>) -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
-/// Load the provider configuration, falling back to the all-local default.
+/// The project configuration, or the all-local default when there is none.
 #[cfg(feature = "providers")]
-fn load_registry(global: &ArgMatches) -> Result<smysl::Registry, String> {
+fn load_config(global: &ArgMatches) -> Result<smysl::ProviderConfigFile, String> {
     let path = project_file(global, smysl::ProviderConfigFile::PATH);
-    let cfg = match std::fs::read_to_string(&path) {
+    match std::fs::read_to_string(&path) {
         Ok(src) => {
-            smysl::ProviderConfigFile::load(&src).map_err(|e| format!("{}: {e}", path.display()))?
+            smysl::ProviderConfigFile::load(&src).map_err(|e| format!("{}: {e}", path.display()))
         }
         // A default that reached a hosted provider would mean a first run egressing
         // content nobody asked to send, so the default is entirely local.
-        Err(_) => smysl::ProviderConfigFile::local_default(),
+        Err(_) => Ok(smysl::ProviderConfigFile::local_default()),
+    }
+}
+
+/// The prompt override for `ingest`: `--prompt`, else `ingest.prompt` from the config.
+///
+/// A config path is relative to the project, like every other sidecar; a flag is relative to
+/// where the command was typed, like every other argument.
+#[cfg(feature = "ingest")]
+fn load_prompt(
+    m: &ArgMatches,
+    global: &ArgMatches,
+) -> Result<Option<smysl::PromptOverride>, String> {
+    let path = match m.get_one::<String>("prompt") {
+        Some(p) => std::path::PathBuf::from(p),
+        None => match load_config(global)?.ingest_prompt {
+            Some(p) => project_file(global, &p),
+            None => return Ok(None),
+        },
     };
+    smysl::PromptOverride::load_file(&path).map(Some)
+}
+
+/// Load the provider configuration, falling back to the all-local default.
+#[cfg(feature = "providers")]
+fn load_registry(global: &ArgMatches) -> Result<smysl::Registry, String> {
+    let cfg = load_config(global)?;
 
     let mut r = smysl::Registry::new().offline(global.get_flag("offline"));
     for p in cfg.providers.values() {
@@ -2951,14 +3007,38 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if let Some(g) = m.get_one::<String>("granularity") {
         opts = opts.with_granularity(g);
     }
-    if let Some(p) = m.get_one::<String>("path") {
-        if let Some(p) = smysl::IngestPath::parse(p) {
-            opts = opts.with_path(p);
-        }
+    // `--path`, else `ingest.path` from the config. `auto` in either means no override.
+    let path_arg = match m.get_one::<String>("path") {
+        Some(p) => Some(p.clone()),
+        None => match load_config(global) {
+            Ok(cfg) => cfg.ingest_path,
+            Err(e) => {
+                eprintln!("smysl ingest: {e}");
+                return ExitCode::Failure;
+            }
+        },
+    };
+    if let Some(p) = path_arg.as_deref().and_then(smysl::IngestPath::parse) {
+        opts = opts.with_path(p);
     }
     if let Some(n) = m.get_one::<String>("repair").and_then(|s| s.parse().ok()) {
         opts = opts.with_repair_attempts(n);
     }
+    match load_prompt(m, global) {
+        Ok(Some(p)) => opts = opts.with_prompt(p),
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!("smysl ingest: prompt override: {e}");
+            return ExitCode::Failure;
+        }
+    }
+    let requested = match opts.requested_path() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("smysl ingest: prompt override {e}");
+            return ExitCode::Failure;
+        }
+    };
 
     // `--dry-run` answers the question a caller most wants answered *before* egress: what
     // would be sent, and to whom. It makes no call, which is the whole point.
@@ -2972,7 +3052,7 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         };
         let caps = provider.caps();
         let choice =
-            smysl::choose_ingest_path(&caps, smysl::Task::ContentIngest, input.len(), opts.path);
+            smysl::choose_ingest_path(&caps, smysl::Task::ContentIngest, input.len(), requested);
         println!("provider     {}", provider.id());
         println!(
             "egress       {}",
@@ -2982,7 +3062,29 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 "YES - leaves the machine"
             }
         );
-        println!("path         {} ({})", choice.path, choice.reason.as_str());
+        // When the prompt's schema moved `auto`, the choice reads as a caller override — which
+        // is true of the code path and false of the caller, who typed no `--path`.
+        if requested != opts.path {
+            println!(
+                "path         {} (the prompt override supplies a schema)",
+                choice.path
+            );
+        } else {
+            println!("path         {} ({})", choice.path, choice.reason.as_str());
+        }
+        match &opts.prompt {
+            Some(p) => println!(
+                "prompt       {} v{}{}",
+                p.id,
+                p.version,
+                if p.schema.is_some() {
+                    ", own schema"
+                } else {
+                    ""
+                }
+            ),
+            None => println!("prompt       built-in"),
+        }
         println!("rung         {rung} (ceiling {})", smysl::ceiling(rung));
         println!(
             "input        {} bytes, {} token(s)",

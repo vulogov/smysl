@@ -133,6 +133,7 @@ pub use smysl::Pass
 pub use smysl::Person
 pub use smysl::Probe
 pub use smysl::Profile
+pub use smysl::PromptOverride
 pub use smysl::Provenance
 pub use smysl::Provider
 pub use smysl::ProviderConfig

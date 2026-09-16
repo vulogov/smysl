@@ -33,7 +33,7 @@ pub fn unit_schema() -> String {
   "additionalProperties": false,
   "properties": {{
     "type": {{ "enum": [{types}] }},
-    "label": {{ "type": "string", "pattern": "^[a-z][a-z0-9_-]*/[a-z0-9_-]+$" }},
+    "label": {{ "type": "string", "pattern": "^[a-z][a-z0-9_-]*/[a-z][a-z0-9_-]*$" }},
     "gist": {{ "type": "string", "minLength": 1, "maxLength": {gist_max} }},
     "body": {{ "type": "string" }},
     "detail": {{ "type": "string" }},
