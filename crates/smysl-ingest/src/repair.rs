@@ -27,6 +27,8 @@
 //! unconditionally in `convert`, so `SMY-E033` records what a model tried rather than work
 //! outstanding. See `needs_repair`.
 
+use std::collections::BTreeMap;
+
 use smysl_check::{check, CheckOptions, Pass};
 use smysl_core::{
     Code, Diagnostic, KernelType, Record, Relation, Report, Rung, Severity, Status, UnitCore,
@@ -61,12 +63,34 @@ pub fn convert_with(
     rung: Rung,
     source: Option<&(smysl_core::SourceRef, smysl_core::SourcePolicy)>,
 ) -> (Vec<UnitCore>, Vec<Relation>, Vec<Diagnostic>) {
+    let (units, relations, diagnostics, _) = convert_labelled(answer, path, rung, source);
+    (units, relations, diagnostics)
+}
+
+/// [`convert_with`], and the labels the answer gave its units, following rule T's cap.
+///
+/// The labels used to stop here: nothing downstream received them, so every staged unit was
+/// unnamed. They are remapped through the cap because capping a status moves a uid, and a label
+/// left on the old one would name a unit that is not in the batch.
+pub fn convert_labelled(
+    answer: &str,
+    path: IngestPath,
+    rung: Rung,
+    source: Option<&(smysl_core::SourceRef, smysl_core::SourcePolicy)>,
+) -> (
+    Vec<UnitCore>,
+    Vec<Relation>,
+    Vec<Diagnostic>,
+    BTreeMap<smysl_core::Label, smysl_core::Uid>,
+) {
     let answer = crate::prompt::strip_echo(answer);
+    let mut labels = BTreeMap::new();
     let mut relations = Vec::new();
     let (mut units, mut diagnostics) = match path {
         IngestPath::JsonAst => {
             let out = json_ast::convert_with(answer, source);
             relations = out.relations;
+            labels = out.labels;
             (out.units, out.diagnostics)
         }
         IngestPath::Surface => match smysl_core::surface::parse_surface_with(answer, &{
@@ -85,6 +109,7 @@ pub fn convert_with(
                         _ => None,
                     })
                     .collect();
+                labels = out.labels.clone();
                 (
                     out.units().cloned().collect::<Vec<_>>(),
                     out.diagnostics.clone(),
@@ -113,9 +138,13 @@ pub fn convert_with(
     // The cap moves identities, so everything pointing at a capped unit has to follow it.
     // Latent until relations existed: a `grounds` entry naming a unit rule T then lowered
     // was already dangling, and only showed up as an `SMY-E060` at staging.
-    let (capped, relations, _) = crate::monotone::resettle(&before, capped, relations);
+    let (capped, relations, remap) = crate::monotone::resettle(&before, capped, relations);
+    let labels = labels
+        .into_iter()
+        .map(|(l, u)| (l, remap.get(&u).copied().unwrap_or(u)))
+        .collect();
 
-    (capped, relations, diagnostics)
+    (capped, relations, diagnostics, labels)
 }
 
 /// Whether a set of diagnostics is worth spending a repair attempt on.

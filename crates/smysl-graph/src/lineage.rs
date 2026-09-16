@@ -249,8 +249,8 @@ pub fn dependents(store: &Store, uid: Uid) -> Vec<Uid> {
 /// the kinds that state a dependency that way round: `conditions`, `causes`, `enables`,
 /// `warrant` and `backs`. It is wrong for `elaborates` and `exemplifies`, whose *source* rests on
 /// the target, and meaningless for `rebuts`, `contrasts`, `concedes`, `sequences` and the
-/// lifecycle kinds. Choose the edges accordingly; with [`EdgeSet::support`] this is exactly
-/// [`dependents`].
+/// lifecycle kinds. [`EdgeSet::dependency`] is exactly the right-way-round set, and the one to
+/// use unless you mean something narrower; with [`EdgeSet::support`] this is [`dependents`].
 ///
 /// Transitive, in the order first reached, without the unit itself.
 pub fn dependents_via(store: &Store, uid: Uid, edges: &EdgeSet) -> Vec<Uid> {

@@ -323,6 +323,7 @@ provider     ollama
 egress       no - local
 path         json-ast (default for small enforced ingest)
 prompt       built-in
+source       file:note.txt (fill-missing)
 rung         document (ceiling cited)
 input        139 bytes, 35 token(s)
 ```
@@ -452,6 +453,7 @@ provider     ollama
 egress       no - local
 path         json-ast (default for small enforced ingest)
 prompt       built-in
+source       file:note.txt (fill-missing)
 rung         document (ceiling cited)
 input        139 bytes, 35 token(s)
 ```
@@ -521,6 +523,7 @@ provider     ollama
 egress       no - local
 path         surface (output too large to risk truncation)
 prompt       built-in
+source       file:bignote.txt (fill-missing)
 rung         document (ceiling cited)
 input        7300 bytes, 1825 token(s)
 ```
@@ -548,6 +551,17 @@ cleanly. Since 1.3 both prompts state the label format and a malformed
 label's repair turn names it with a corrected candidate, so the surface
 path recovers from this far more often; the setting is for the providers
 where it still does not.
+
+#subsection("source: where the units came from")
+
+A named file is its units' source: `source       file:note.txt
+(fill-missing)` in the dry run. The model is not asked for provenance,
+because it cannot know what the document is called — asked anyway, a small
+model wrote the example's placeholder into every unit it produced. It names
+a source only where the document itself attributes a statement to somewhere
+else, a URL or a paper, and `fill-missing` keeps that one. Standard input
+names nothing, so its units get no source from the tool, and a unit with
+none cannot be `cited`.
 
 #subsection("prompt: asking your own question")
 
@@ -703,9 +717,17 @@ first-class, not workarounds:
     ([Do nothing yet], [Staged file sits at `.smysl/staged.smy`; exit stays `10`], [You want to read it, maybe in an editor, before deciding — the default, and the safest one]),
     ([`smysl merge --staged`], [Commits the staged records into a real store, via the ordinary merge join (Chapter 13)], [You've reviewed it — by eye, by `check`, or both — and it's ready to become part of the document]),
     ([`ingest --yes`], [Same staging happens, but `ingest` itself exits `0` — "staged and confirmed" — instead of `10`], [You've decided in advance that this class of ingest doesn't need a pause — a script that already trusts this recipe and provider]),
-    ([`rm .smysl/staged.smy`], [Discards the batch outright; nothing was ever in your real store to undo], [The proposal isn't worth keeping — maybe the whole run degraded, maybe you changed your mind]),
+    ([`rm .smysl/staged.*`], [Discards the batch outright — the text you review and its provenance sidecar; nothing was ever in your real store to undo], [The proposal isn't worth keeping — maybe the whole run degraded, maybe you changed your mind]),
   ),
 )
+
+Beside `staged.smy` sits `staged.cbor`, which you do not need to read. The
+text file has no way to say who produced a unit, so the sidecar carries each
+unit's attestation — agent, rung, recipe — and `merge --staged` attaches it
+only to a unit the text still holds unchanged. Edit a unit before merging and
+it commits without the tool's attestation, which is the truth: the tool did
+not write what you wrote. Until 1.3 the sidecar did not exist, and every
+ingested unit reached the store with no attestation at all.
 
 One nuance worth being exact about: `--yes` changes `ingest`'s *exit code and
 message*, not what happens to the file. The batch is still written to
@@ -833,7 +855,7 @@ never a failed run.
    provider, or a span that exhausts its repair budget, degrades to an
    opaque `prose` unit rather than failing the whole run.],
   [Exit `10` has three legitimate responses: leave it staged and look at it,
-   `smysl merge --staged` once it's reviewed, or `rm .smysl/staged.smy` to
+   `smysl merge --staged` once it's reviewed, or `rm .smysl/staged.*` to
    discard it — `--yes` only changes which of the first two happens by
    default, not whether staging itself happened.],
 ))

@@ -332,6 +332,7 @@ impl<'a> Ingestor<'a> {
 
         let mut units: Vec<UnitCore> = Vec::new();
         let mut relations: Vec<Relation> = Vec::new();
+        let mut labels: BTreeMap<Label, Uid> = BTreeMap::new();
         for piece in &chunks {
             let out = self.one_chunk(provider, choice.path, &piece.text, &mut report.usage);
             report.calls += out.calls;
@@ -339,6 +340,25 @@ impl<'a> Ingestor<'a> {
             report.diagnostics.extend(out.diagnostics);
             units.extend(out.units);
             relations.extend(out.relations);
+            // A model names units per chunk and cannot see the others, so two chunks can use one
+            // label for different units. The first keeps it, and the collision is reported
+            // rather than resolved by whichever chunk came last.
+            for (label, uid) in out.labels {
+                match labels.get(&label) {
+                    Some(existing) if *existing != uid => {
+                        report.diagnostics.push(
+                            Diagnostic::on(smysl_core::Code::W054, uid).with_message(format!(
+                                "`{label}` was given to a different unit in an earlier chunk; \
+                                 this one is staged without a name"
+                            )),
+                        );
+                    }
+                    Some(_) => {}
+                    None => {
+                        labels.insert(label, uid);
+                    }
+                }
+            }
         }
 
         // Chunk-boundary duplication self-heals: two chunks that produced the same claim
@@ -354,7 +374,6 @@ impl<'a> Ingestor<'a> {
         .at_hop(self.opts.hop)
         .with_recipe(conditions.recipe(), conditions.family());
 
-        let labels: BTreeMap<Label, Uid> = BTreeMap::new();
         // Edges duplicated across chunk boundaries collapse the same way units do: the
         // endpoints are content-addressed, so the same edge twice is the same edge.
         relations.sort_by_key(|r| (r.kind.as_str().to_string(), r.from, r.to));
@@ -396,6 +415,7 @@ impl<'a> Ingestor<'a> {
                     return ChunkOutcome {
                         units: vec![core],
                         relations: Vec::new(),
+                        labels: BTreeMap::new(),
                         calls,
                         degraded: true,
                         diagnostics: vec![d],
@@ -408,7 +428,7 @@ impl<'a> Ingestor<'a> {
             usage.estimated |= completion.usage.estimated;
             usage.retries += completion.usage.retries;
 
-            let (units, relations, mut diagnostics) = repair::convert_with(
+            let (units, relations, mut diagnostics, labels) = repair::convert_labelled(
                 &completion.text,
                 path,
                 self.opts.rung,
@@ -429,6 +449,7 @@ impl<'a> Ingestor<'a> {
                 return ChunkOutcome {
                     units,
                     relations,
+                    labels,
                     calls,
                     degraded: false,
                     diagnostics,
@@ -472,6 +493,7 @@ impl<'a> Ingestor<'a> {
         ChunkOutcome {
             units: vec![core],
             relations: Vec::new(),
+            labels: BTreeMap::new(),
             calls,
             degraded: true,
             diagnostics: history,
@@ -480,9 +502,13 @@ impl<'a> Ingestor<'a> {
 
     /// The content template for a path, with the caller's override applied.
     fn template_for(&self, path: IngestPath) -> prompt::Template {
-        let base = match path {
-            IngestPath::Surface => prompt::content_ingest_surface(),
-            IngestPath::JsonAst => prompt::content_ingest_json(),
+        // A caller-supplied source gets the templates that do not ask the model for provenance.
+        let sourced = self.opts.source.is_some();
+        let base = match (path, sourced) {
+            (IngestPath::Surface, false) => prompt::content_ingest_surface(),
+            (IngestPath::Surface, true) => prompt::content_ingest_surface_sourced(),
+            (IngestPath::JsonAst, false) => prompt::content_ingest_json(),
+            (IngestPath::JsonAst, true) => prompt::content_ingest_json_sourced(),
         };
         match &self.opts.prompt {
             Some(o) => o.apply(base),
@@ -496,7 +522,7 @@ impl<'a> Ingestor<'a> {
             .prompt
             .as_ref()
             .and_then(|o| o.schema.clone())
-            .unwrap_or_else(schema::batch_schema)
+            .unwrap_or_else(|| schema::batch_schema_with(self.opts.source.is_some()))
     }
 
     fn request(
@@ -545,6 +571,7 @@ impl<'a> Ingestor<'a> {
 struct ChunkOutcome {
     units: Vec<UnitCore>,
     relations: Vec<Relation>,
+    labels: BTreeMap<Label, Uid>,
     calls: usize,
     degraded: bool,
     diagnostics: Vec<Diagnostic>,

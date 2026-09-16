@@ -76,45 +76,86 @@ lowercase letters, digits, `-` or `_` - for example `c/pool-exhausted`, `d/use-j
 ///
 /// Held as a constant so a test can parse it. An example a model is told to copy and that the
 /// parser then rejects would be the template teaching the error it exists to prevent.
+///
+/// The `ref` is a placeholder in angle brackets rather than a plausible value. Version 3's
+/// example read `ref: "the input document"`, and in the live R1 run every one of 28 units carried
+/// exactly that: a model that cannot know the document's name copies the example's.
 pub const SURFACE_EXAMPLE: &str = "\
-@claim c/pool-exhausted { status: cited, source: { kind: doc, ref: \"the input document\" }, \"ingest:quote\": \"pool wait rose to 1.9 s\" }
+@claim c/pool-exhausted { status: cited, source: { kind: doc, ref: \"<a URL, file or title the document names>\" }, \"ingest:quote\": \"pool wait rose to 1.9 s\" }
 ~ The connection pool was exhausted at the peak.
 
 @claim c/rollback-fixed-it { status: inferred, grounds: [c/pool-exhausted], \"ingest:quote\": \"p99 returned to baseline\" }
 ~ Rolling back returned latency to normal.";
 
+/// The same records for a caller who supplies the source: no `source` to copy.
+pub const SURFACE_EXAMPLE_SOURCED: &str = "\
+@claim c/pool-exhausted { status: cited, \"ingest:quote\": \"pool wait rose to 1.9 s\" }
+~ The connection pool was exhausted at the peak.
+
+@claim c/rollback-fixed-it { status: inferred, grounds: [c/pool-exhausted], \"ingest:quote\": \"p99 returned to baseline\" }
+~ Rolling back returned latency to normal.";
+
+const STATUS_RULES: &str = "\
+Types: claim, evidence, definition, question, hypothesis, finding, procedure, decision, \
+constraint, observation, data, artifact-ref, prose.\n\
+Statuses: cited, derived, inferred, speculative. Never `measured` - only an instrument may assign \
+that. Never `unfounded`. A `derived` or `inferred` record needs `grounds` naming earlier labels. \
+When unsure, use `speculative` and no grounds: a weaker status that holds is worth more than a \
+stronger one that does not.";
+
+const QUOTE_RULE: &str = "\
+Give each record an \"ingest:quote\": the span of the document it came from, copied exactly. The \
+quote is checked against the document, so a quote that is not in it is worse than none - omit it \
+if you cannot copy one.";
+
 /// Surface-path content ingest.
 ///
-/// Version 3 shows a whole header — a `source` and an `"ingest:quote"` — and says what to do
-/// with a record whose source cannot be named. Version 2 said "a `cited` record needs a source"
-/// with `@<type> <label> {{ status: <status> }}` as its only example, so a model had no way to
-/// write one: flash-lite made every record `cited` with no source, every record failed
-/// `SMY-E032`, and the repair spiral began there. It also asked for no quote, so on this path
-/// nothing checked a unit against the document — the check ran, with nothing to check.
-///
-/// Version 2 stated the label format; see `LABEL_FORMAT`.
+/// Version 4 replaces the example's plausible `ref` with a placeholder — version 3's was copied
+/// into every unit of a live run — and says to name a source only when the document names one.
+/// Version 3 added the complete header with a `source` and an `"ingest:quote"`; version 2 stated
+/// the label format (`LABEL_FORMAT`).
 pub fn content_ingest_surface() -> Template {
     Template {
         id: "ingest.content.surface".to_string(),
-        version: 3,
+        version: 4,
         system: format!(
             "You convert documents into smysl surface records. {UNTRUSTED}\n\n\
              Emit only records, no commentary. One record per claim, a header line and then a \
              one-sentence gist under 240 characters:\n\n\
              {SURFACE_EXAMPLE}\n\n\
              {LABEL_FORMAT}\n\n\
-             Types: claim, evidence, definition, question, hypothesis, finding, procedure, \
-             decision, constraint, observation, data, artifact-ref, prose.\n\
-             Statuses: cited, derived, inferred, speculative. Never `measured` - only an \
-             instrument may assign that. Never `unfounded`.\n\
-             A `cited` record needs a `source` naming where it came from, written as in the \
-             example. Without a source you can name, use `inferred` with grounds or \
-             `speculative` - never `cited`. A `derived` or `inferred` record needs `grounds` \
-             naming earlier labels. When unsure, use `speculative` and no grounds: a weaker \
-             status that holds is worth more than a stronger one that does not.\n\
-             Give each record an \"ingest:quote\": the span of the document it came from, copied \
-             exactly. The quote is checked against the document, so a quote that is not in it \
-             is worse than none - omit it if you cannot copy one."
+             {STATUS_RULES}\n\
+             A `cited` record needs a `source`: a URL, file or title that the document itself \
+             names as where the statement came from. Never invent one, and never copy the \
+             placeholder in the example. Without a source the document names, use `inferred` \
+             with grounds or `speculative` - never `cited`.\n\
+             {QUOTE_RULE}"
+        ),
+        user: format!("{FENCE}\n{{input}}\n{FENCE}"),
+    }
+}
+
+/// Surface-path content ingest when the caller supplies the source.
+///
+/// Where each record came from is recorded by the caller, so the model is told not to write
+/// provenance at all — except where the document itself attributes a statement to somewhere
+/// else, which the caller cannot know and the source policy then keeps.
+pub fn content_ingest_surface_sourced() -> Template {
+    Template {
+        id: "ingest.content.surface.sourced".to_string(),
+        version: 1,
+        system: format!(
+            "You convert documents into smysl surface records. {UNTRUSTED}\n\n\
+             Emit only records, no commentary. One record per claim, a header line and then a \
+             one-sentence gist under 240 characters:\n\n\
+             {SURFACE_EXAMPLE_SOURCED}\n\n\
+             {LABEL_FORMAT}\n\n\
+             {STATUS_RULES}\n\
+             Where the document came from is recorded for you, so do not write a `source`. A \
+             statement the document quotes or states is `cited` without one. Write a `source` \
+             only when the document itself attributes a statement to somewhere else - a URL, a \
+             file, a paper - and then name exactly what it names.\n\
+             {QUOTE_RULE}"
         ),
         user: format!("{FENCE}\n{{input}}\n{FENCE}"),
     }
@@ -147,6 +188,28 @@ pub fn content_ingest_json() -> Template {
              by `label`."
         ),
         user: format!("{FENCE}\n{{input}}\n{FENCE}"),
+    }
+}
+
+/// JSON-AST content ingest when the caller supplies the source.
+///
+/// Sent with a batch schema that does not require a `source` for `cited`
+/// (`schema::batch_schema_with(true)`): with the requirement in place an enforcing provider makes
+/// the model write one whatever the prompt says, and the source policy would keep the invention.
+pub fn content_ingest_json_sourced() -> Template {
+    let base = content_ingest_json();
+    Template {
+        id: "ingest.content.json.sourced".to_string(),
+        version: 1,
+        system: format!(
+            "{}\n\
+             Where the document came from is recorded for you, so do not write a `source`. A \
+             statement the document quotes or states is `cited` without one. Write a `source` \
+             only when the document itself attributes a statement to somewhere else - a URL, a \
+             file, a paper - and then name exactly what it names.",
+            base.system
+        ),
+        user: base.user,
     }
 }
 
@@ -488,7 +551,9 @@ mod tests {
     fn all() -> Vec<Template> {
         vec![
             content_ingest_surface(),
+            content_ingest_surface_sourced(),
             content_ingest_json(),
+            content_ingest_json_sourced(),
             relation_extraction(),
             repair(&content_ingest_surface(), "prev", "SMY-E001: something"),
         ]
@@ -645,6 +710,44 @@ mod tests {
             );
         }
         assert!(content_ingest_surface().system.contains(SURFACE_EXAMPLE));
+
+        // Valid only with the caller's source, which is the point of it — parsed as ingest will.
+        let opts = smysl_core::surface::ParseOptions::default().with_source(
+            smysl_core::SourceRef::new(smysl_core::SourceKind::File, "commit.md"),
+            smysl_core::SourcePolicy::FillMissing,
+        );
+        let sourced = smysl_core::surface::parse_surface_with(SURFACE_EXAMPLE_SOURCED, &opts)
+            .expect("parses");
+        assert!(sourced.diagnostics.is_empty(), "{:?}", sourced.diagnostics);
+        assert!(
+            !SURFACE_EXAMPLE_SOURCED.contains("source:"),
+            "the sourced example offers a source to copy"
+        );
+        assert!(content_ingest_surface_sourced()
+            .system
+            .contains(SURFACE_EXAMPLE_SOURCED));
+    }
+
+    /// No template offers a plausible provenance value a model could copy into every unit.
+    ///
+    /// Version 3's example said `ref: "the input document"`, and a live run's 28 units all said it.
+    #[test]
+    fn no_template_offers_a_copyable_reference() {
+        for t in [
+            content_ingest_surface(),
+            content_ingest_surface_sourced(),
+            content_ingest_json(),
+            content_ingest_json_sourced(),
+        ] {
+            assert!(!t.system.contains("the input document"), "{}", t.id);
+            for line in t.system.lines().filter(|l| l.contains("ref:")) {
+                assert!(
+                    line.contains("ref: \"<"),
+                    "{}: a `ref` that is not a placeholder: {line}",
+                    t.id
+                );
+            }
+        }
     }
 
     fn batch() -> String {

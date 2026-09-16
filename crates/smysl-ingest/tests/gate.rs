@@ -1357,3 +1357,140 @@ fn a_caller_source_changes_the_recipe() {
     assert_ne!(plain, filled);
     assert_ne!(filled, overridden, "the policy is a condition too");
 }
+
+// ---------------------------------------------------------------------------
+// Labels survive staging
+// ---------------------------------------------------------------------------
+
+/// The labels a model wrote reach the staged batch, and follow their units when rule T moves them.
+///
+/// `ingest` passed `stage::prepare` an empty label map, so every staged unit was unnamed: the
+/// live R1 run staged 28 units and none had a label. 1.3 lets commands take a label, and that did
+/// not work for anything that came through `ingest`.
+#[test]
+fn a_models_labels_are_staged_on_both_paths_and_follow_the_cap() {
+    let answers = [
+        (
+            IngestPath::Surface,
+            "@claim c/pool { status: speculative }\n~ The pool saturated.\n\n\
+             @evidence e/p95 { status: measured, source: { kind: metric, ref: \"p95\" } }\n~ p95 rose to 410ms.\n"
+                .to_string(),
+        ),
+        (
+            IngestPath::JsonAst,
+            r#"{"units":[
+                {"type":"claim","label":"c/pool","gist":"The pool saturated.","status":"speculative"},
+                {"type":"evidence","label":"e/p95","gist":"p95 rose to 410ms.","status":"measured","source":{"kind":"metric","ref":"p95"}}]}"#
+                .to_string(),
+        ),
+    ];
+    for (path, answer) in answers {
+        let p = if path == IngestPath::Surface {
+            Scripted::saying(&answer).unstructured()
+        } else {
+            Scripted::saying(&answer)
+        };
+        let (r, _) = registry(p);
+        let (staged, _) = Ingestor::new(&r, opts(Rung::Document).with_path(path))
+            .ingest(&Store::new(), DOCUMENT)
+            .unwrap();
+        let names: Vec<&str> = staged.labels.keys().map(|l| l.as_str()).collect();
+        assert_eq!(names, vec!["c/pool", "e/p95"], "{path}");
+        for (label, uid) in &staged.labels {
+            assert!(
+                staged.units.iter().any(|u| smysl_core::canonical_uid(u) == *uid),
+                "{path}: `{label}` names a uid no staged unit has — the cap moved it and the label stayed"
+            );
+        }
+        assert!(
+            staged.to_surface().contains("@evidence e/p95"),
+            "{path}: the staged file drops the name"
+        );
+    }
+}
+
+/// Two chunks that give one label to different units: the first keeps it, and it is said.
+///
+/// A model names units per chunk and cannot see the others. Resolving by the last chunk would
+/// move a name silently, which is the label ambiguity R5 refuses at the command line.
+#[test]
+fn a_label_reused_across_chunks_stays_with_the_first_unit_and_is_reported() {
+    let long = (0..30)
+        .map(|i| format!("Paragraph {i} of a document long enough to chunk several times over."))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let first = r#"{"units":[{"type":"claim","label":"c/x","gist":"the first chunk's claim","status":"speculative"}]}"#;
+    let later = r#"{"units":[{"type":"claim","label":"c/x","gist":"a later chunk's different claim","status":"speculative"}]}"#;
+    let mut answers = vec![Ok(first.to_string())];
+    answers.extend((0..40).map(|_| Ok(later.to_string())));
+    let (r, _) = registry(Scripted::new(answers).with_context(1400));
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document).with_max_output(64))
+        .ingest(&Store::new(), &long)
+        .unwrap();
+    assert!(report.chunks > 1, "the fixture must actually chunk");
+
+    let owner = staged.labels[&smysl_core::Label::new("c/x").unwrap()];
+    let owner_unit = staged
+        .units
+        .iter()
+        .find(|u| smysl_core::canonical_uid(u) == owner)
+        .unwrap();
+    assert_eq!(owner_unit.gist, "the first chunk's claim");
+    assert!(
+        report.diagnostics.iter().any(|d| d.code == Code::W054),
+        "the collision was not reported: {:?}",
+        report.diagnostics
+    );
+}
+
+/// With a caller-supplied source the model is not asked for provenance, on either path, and the
+/// json-ast schema does not force it to write one.
+///
+/// Appendix C's schema requires a `source` for `cited`, and an enforcing provider applies that
+/// while decoding. With it in place a model must write a source it cannot know, and the policy's
+/// `FillMissing` keeps the invention — the live R1 run's `ref: the input document` by another route.
+#[test]
+fn a_caller_source_selects_the_sourced_template_and_schema() {
+    for path in [IngestPath::Surface, IngestPath::JsonAst] {
+        let p = if path == IngestPath::Surface {
+            Scripted::saying(REPAIRED).unstructured()
+        } else {
+            Scripted::saying(r#"{"units":[]}"#)
+        };
+        let (r, _, seen) = registry_seeing(p);
+        let o = opts(Rung::Document)
+            .with_path(path)
+            .with_source(commit_source(), smysl_ingest::SourcePolicy::FillMissing);
+        let (_, report) = Ingestor::new(&r, o)
+            .ingest(&Store::new(), DOCUMENT)
+            .unwrap();
+        let req = &seen.lock().unwrap()[0];
+        assert!(
+            req.system
+                .contains("recorded for you, so do not write a `source`"),
+            "{path}: {}",
+            req.system
+        );
+        if path == IngestPath::JsonAst {
+            let schema = req.schema.as_deref().expect("an enforced schema");
+            assert!(
+                !schema.contains(r#""enum": ["measured", "cited"]"#),
+                "{path}: the schema still requires a source for cited"
+            );
+        }
+        assert_ne!(report.recipe, None);
+    }
+
+    // And without one, the unsourced template and the full schema, as before.
+    let (r, _, seen) = registry_seeing(Scripted::saying(r#"{"units":[]}"#));
+    Ingestor::new(&r, opts(Rung::Document).with_path(IngestPath::JsonAst))
+        .ingest(&Store::new(), DOCUMENT)
+        .unwrap();
+    let req = &seen.lock().unwrap()[0];
+    assert!(!req.system.contains("recorded for you"));
+    assert!(req
+        .schema
+        .as_deref()
+        .unwrap()
+        .contains(r#""enum": ["measured", "cited"]"#));
+}

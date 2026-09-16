@@ -3079,6 +3079,16 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if let Some(n) = m.get_one::<String>("repair").and_then(|s| s.parse().ok()) {
         opts = opts.with_repair_attempts(n);
     }
+    // A named file is its units' source. The model cannot know what the document is called, and
+    // asked to cite it wrote `the input document` on every unit of a live run — the placeholder
+    // from its template. `FillMissing`, not `Override`: a source the document itself names, a URL
+    // or a paper it quotes, is the model's to keep. Standard input names nothing, so it gets none.
+    if source != "-" {
+        opts = opts.with_source(
+            smysl::SourceRef::new(smysl::SourceKind::File, source.clone()),
+            smysl::SourcePolicy::FillMissing,
+        );
+    }
     match load_prompt(m, global) {
         Ok(Some(p)) => opts = opts.with_prompt(p),
         Ok(None) => {}
@@ -3139,6 +3149,15 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 }
             ),
             None => println!("prompt       built-in"),
+        }
+        match &opts.source {
+            Some((s, policy)) => println!(
+                "source       {}:{} ({})",
+                s.kind.as_str(),
+                s.reference,
+                policy.as_str()
+            ),
+            None => println!("source       none - the model names any it can"),
         }
         println!("rung         {rung} (ceiling {})", smysl::ceiling(rung));
         println!(

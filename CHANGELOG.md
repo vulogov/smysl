@@ -191,6 +191,64 @@ that R2's replay had inverted was stated correctly in all three runs, quoted ver
 Two things the live output showed, carried below: every source was `ref: the input document`,
 and no staged unit had a label.
 
+**Before the cut: provenance, labels and a dependency preset.** The live R1 run showed two
+things wrong with its own success, and both are fixed.
+
+Every source read `ref: the input document`, copied from the v3 template's example by a model
+that cannot know what the document is called. `smysl ingest FILE` now supplies the file as the
+source with `FillMissing`, so a source the document itself names — a URL, a paper — is kept.
+With a caller source the model gets `ingest.content.surface.sourced` or
+`ingest.content.json.sourced`, which tell it provenance is recorded for it, and on json-ast a
+schema without Appendix C's `cited → source` requirement — which an enforcing provider applies
+while decoding, forcing a model to invent one that `FillMissing` would then keep. Without a
+caller source (standard input) the surface template's example `ref` is a placeholder in angle
+brackets, and a test holds every template to that. `unit_schema()` is byte-identical; the variant
+is `unit_schema_with`.
+
+Staged units had no labels: `ingest` gave `stage::prepare` an empty map. The converter's labels
+now reach staging, remapped when rule T's cap moves a uid, and a label two chunks give to
+different units stays with the first, reported as `SMY-W054`.
+
+`EdgeSet::dependency()` is the right-way-round set for `dependents_via`: `deps`, `grounds`,
+`conditions`, `causes`, `enables`, `warrant`, `backs`. `quote_support` keeps `_` as content.
+
+Rerun live, three times per path, same commit:
+
+| run | calls | units | degraded | every unit labelled | every source `file:commit-4968383.md` |
+|---|---:|---:|---:|:-:|:-:|
+| surface 1 | 1 | 8 | 0 | yes | yes |
+| surface 2 | 3 | 16 | 0 | yes | yes |
+| surface 3 | 3 | 1 | **1** | — | — |
+| json-ast 1 | 0 | 1 | **1** | — | — |
+| json-ast 2 | 1 | 11 | 0 | yes | yes |
+| json-ast 3 | 1 | 12 | 0 | yes | yes |
+
+The two degraded runs failed for reasons these changes did not introduce and the live run is the
+first to show; they are carried below. json-ast 1 hit Gemini's `MAX_TOKENS` at the 2,048-token
+output cap. Surface 3 had one gist at 31 tokens against a limit of 30, which three repairs did not
+shorten — and R1's per-attempt history is what made that visible.
+
+**Checked against rust_smysl's verification design, and three more closed.** A fact-to-claim
+verifier needs to follow its own edges, stage its own declarations, and know who produced what.
+
+- **An extension kind can be named.** `Adjacency::edge_kind(&RelKind)` resolves kernel and
+  extension kinds; only `extension_name(id)` existed, and extension ids are interned per store,
+  so `dependents_via` over `x.verify/supports` needed a scan of the intern table.
+  `EdgeSet::with` adds such a kind to a preset.
+- **A batch stages with its declarations.** `stage::prepare_declared` takes the `SchemaDecl`s a
+  batch depends on; `prepare` had no place for one, so a library caller's batch warned
+  `SMY-W013` unless the declaration was appended to the store outside staging.
+- **Staged attestations reach the store.** Committing a real live batch found 9 units, 9 label
+  bindings and **0 attestations**: the staged file is surface text, which cannot spell one, and
+  `merge --staged` read the batch back from it. Every unit ever committed that way had no agent,
+  rung or recipe — nothing for rule T to read, nothing for `trace --agents` to show, and an
+  `origin` retraction that refuses everyone. The batch is now also written to
+  `.smysl/staged.cbor`, and `read` attaches each attestation only to a unit the reviewed text
+  still holds unchanged: a unit a reviewer edited commits unattested, because the tool did not
+  write it. Verified live — 10 staged units, 10 attestations, `trace --agents` names
+  `tool:smysl-ingest`. The round-trip test had counted units and never asked; its first
+  replacement passed with the edited-unit rule removed, and was tightened until it did not.
+
 Found on the way: the diagnostic appendix said a test named `registry_matches_appendix_d_size`
 held the registry at 49. No test has that name, and the registry was 51; it is 52 with
 `SMY-W309`, which is numbered past `W306` because retired codes are not reused.
@@ -204,15 +262,34 @@ held the registry at 49. No test has that name, and the registry was 51; it is 5
 
 ### What is carried
 
-- **Every surface-ingest source reads `ref: the input document`.** All 28 units in the live R1
-  run copied that phrase from the v3 template's example, because the prompt never names the
-  document. Not false, and says nothing — the provenance problem R3 exists for, introduced by
-  R2's example. `smysl ingest FILE` could supply the file as the source with `Override`, or
-  the prompt could name the document; which is a decision about the CLI's default provenance.
-  Library callers using `with_source` are unaffected.
-- **Staged units lose their labels.** `ingest` passes `stage::prepare` an empty label map, so
-  every label a model wrote is dropped, and units merged from `.smysl/staged.smy` cannot be
-  named by label. Present before 1.3; the live run is where it became obvious.
+- **Review cannot close what verification opens.** Checked against rust_smysl's design, where a
+  contradicted claim goes to review and is never retracted automatically:
+  - a `rebuts` edge alone is never a contention — detection needs both units in one thread — so
+    nothing lists a bare contradiction for review;
+  - there is no way to withdraw an edge (retraction targets units, and relations have no uid),
+    and `ContentionStatus::Resolved` is set only in tests;
+  - retracting the rebutting unit does not release the claim: pack still pins it as `C3`,
+    verified. §6 requires a selection to carry a claim's **live** rebuttals and never defines
+    live, and merge and pack use the word differently.
+  These need format decisions — what makes a rebuttal live, how an edge is withdrawn, how a
+  contention is resolved — so they are for 1.4, starting from the specification.
+- **An edge cannot record who asserted it.** `Relation.attestations` exists in memory, but the
+  relation body's wire keys are 0–4 and none carries it, the decoder sets it empty, and an
+  attestation record cannot target a relation because relations have no uid. A model-matched
+  `supports` or `rebuts` edge is indistinguishable from a human's. A new relation key is a
+  format addition §8.1 permits; it is a decision, and not taken here.
+- **`ingest` always asks for 2,048 output tokens.** `cmd_ingest` never sets `max_output`, and a
+  provider's configured `max_output` does not reach it. A json-ast answer of about a dozen units
+  sits right at that cap: one live run of three was cut off at `MAX_TOKENS` and degraded. The
+  `ingest: { path: json-ast }` advice in this release is only as good as that cap.
+- **A provider error that happens after the call is reported as no call.** The truncated run
+  above said `0 call(s), 0 token(s)` and was billed. And its message, "context window exceeded:
+  2032 > 2048", is false as written — the mapper's own comment records fixing the same shape once.
+- **One unit can degrade a whole chunk.** A gist one token over `l0_max` cost a live run all 16 of
+  its otherwise valid units, because rule I degrades the span, not the unit. A model cannot count
+  tokens the way the estimator does, so three repair turns did not help.
+- **`strip_echo` removes frame lines, not prose preambles.** A repair answer that opened with a
+  27-byte sentence was still `stray Text`.
 - **A chunk that recovers reports nothing about what it recovered from.** R1's per-attempt
   history is printed only for a chunk that degrades; run 2's two failed attempts left no trace.
 - **`ingest --granularity` is only ever hashed into the recipe.** It is never resolved to a

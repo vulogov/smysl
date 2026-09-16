@@ -91,3 +91,92 @@ fn a_plain_reverse_closure_over_the_same_edges_misses_it() {
         "if this now finds it, the adjacency changed direction and dependents_via must follow"
     );
 }
+
+/// The preset follows the dependency-bearing relations and nothing else.
+#[test]
+fn the_dependency_preset_is_the_right_way_round() {
+    let src = "\
+@claim p/base { status: speculative }
+~ A prerequisite.
+
+@decision d/conditioned { status: speculative }
+~ Conditioned on the prerequisite.
+
+@claim c/detail { status: speculative }
+~ An elaboration of the prerequisite.
+
+@claim c/objection { status: speculative }
+~ An objection to the prerequisite.
+
+@rel p/base --conditions--> d/conditioned
+@rel c/detail --elaborates--> p/base
+@rel c/objection --rebuts--> p/base
+";
+    let out = parse_surface(src).unwrap();
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let uid = |l: &str| out.labels[&Label::new(l).unwrap()];
+    let store = Store::from_records(out.records.clone());
+
+    let deps = dependents_via(&store, uid("p/base"), &EdgeSet::dependency());
+    assert_eq!(
+        deps,
+        vec![uid("d/conditioned")],
+        "only the conditioned decision rests on it"
+    );
+    assert!(EdgeSet::dependency().contains(EdgeKind::Grounds));
+    assert!(!EdgeSet::dependency().contains(EdgeKind::kernel(RelKind::Elaborates).unwrap()));
+    assert!(!EdgeSet::dependency().contains(EdgeKind::kernel(RelKind::Rebuts).unwrap()));
+}
+
+/// An extension kind can be named, in whichever store holds it, and followed.
+///
+/// Extension edge kinds are interned per store, and only `extension_name(id)` existed — there was
+/// no way from `x.verify/supports` to the `EdgeKind` that `dependents_via` needs. Two stores give
+/// the same kind different ids here on purpose, so a lookup that ignored the store would fail one.
+#[test]
+fn an_extension_kind_is_named_per_store_and_followed() {
+    let supports = RelKind::parse("x.verify/supports").unwrap();
+    let base = "@claim c/claim { status: speculative }\n~ A claim.\n\n\
+                @evidence e/fact { status: speculative }\n~ A fact from the code.\n\n\
+                @rel e/fact --x.verify/supports--> c/claim\n";
+    // `x.aaa/first` sorts before `x.verify/supports`, moving its intern id in the second store.
+    let with_another = format!(
+        "{base}\n@claim c/other {{ status: speculative }}\n~ Another.\n\n@rel e/fact --x.aaa/first--> c/other\n"
+    );
+    let mut ids = Vec::new();
+    for src in [base.to_string(), with_another] {
+        let out = parse_surface(&src).unwrap();
+        let uid = |l: &str| out.labels[&Label::new(l).unwrap()];
+        let store = Store::from_records(out.records.clone());
+        let kind = store
+            .adjacency()
+            .edge_kind(&supports)
+            .expect("the store holds this kind");
+        ids.push(kind);
+        let deps = dependents_via(&store, uid("e/fact"), &EdgeSet::dependency().with(kind));
+        assert!(
+            deps.contains(&uid("c/claim")),
+            "the supported claim is a dependent of the fact"
+        );
+        assert!(
+            src == base || !deps.contains(&uid("c/other")),
+            "an unchosen extension was followed"
+        );
+    }
+    assert_ne!(
+        ids[0], ids[1],
+        "the fixture must give the kind different ids in the two stores"
+    );
+
+    let (store, _) = setup();
+    assert_eq!(
+        store.adjacency().edge_kind(&supports),
+        None,
+        "a store without the kind has no id for it"
+    );
+    assert_eq!(
+        store.adjacency().edge_kind(&RelKind::Conditions),
+        EdgeKind::kernel(RelKind::Conditions),
+        "kernel kinds resolve as before"
+    );
+}
