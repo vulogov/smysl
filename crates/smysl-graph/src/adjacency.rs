@@ -202,6 +202,16 @@ impl EdgeSet {
         self
     }
 
+    /// Every kind either set holds (1.5). A preset plus an extension kind is the common case, and
+    /// `with` takes one kind at a time.
+    pub fn union(mut self, other: &EdgeSet) -> EdgeSet {
+        if other.all {
+            return EdgeSet::all();
+        }
+        self.kinds.extend(other.kinds.iter().copied());
+        self
+    }
+
     pub fn contains(&self, k: EdgeKind) -> bool {
         self.all || self.kinds.contains(&k)
     }

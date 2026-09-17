@@ -87,6 +87,7 @@ These apply to every subcommand, in any position on the command line.
     ([Flag], [Value], [Meaning]),
     ([`--budget`], [`N` (required)], [Token budget, counted with the recorded estimator.]),
     ([`--focus`], [`UID` (repeatable)], [Units that must reach L1; packing fails if they cannot.]),
+    ([`--support`], [`KINDS`], [Carry what a selected unit rests on over these edges (C8): a preset — `premises`, `dependency`, `support` — or relation kinds, comma-separated.]),
     ([`--lod`], [`auto|L0|L1|L2`], [Cap every unit at this level.]),
     ([`--explain`], [—], [Say which constraint put each unit in.]),
     ([`--tokenizer`], [`ID`], [Cost model; recorded in the packinfo either way (D-2).]),
@@ -142,6 +143,7 @@ These apply to every subcommand, in any position on the command line.
     ([`--parents`], [—], [Causal: attestation parents and supersession.]),
     ([`--grounds`], [—], [Evidential: grounds and deps (the default).]),
     ([`--both`], [—], [Both walks at once.]),
+    ([`--via`], [`KINDS`], [Walk what a unit rests on over these edges instead: the same presets and kinds `pack --support` takes.]),
     ([`--agents`], [—], [Name the agents behind each step.]),
     ([`PATH`], [positional], [Store to trace within.]),
   ),
@@ -305,6 +307,8 @@ the contention's id (exit 2).
   (
     ([Flag], [Value], [Meaning]),
     ([`--all`], [—], [Include items already resolved.]),
+    ([`--confirm`], [`KINDS`], [Also list edges of these relation kinds until somebody attests them (comma-separated) — for a tool that proposes edges a person is expected to stand behind.]),
+    ([`--confirmed-by`], [`KIND`], [Whose attestation confirms one: `human` (the default), `model` or `tool`.]),
     ([`PATH`], [positional], [Store to review.]),
   ),
 )

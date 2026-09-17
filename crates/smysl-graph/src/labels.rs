@@ -11,7 +11,7 @@
 //! with `SMY-W054` — so a store built from one parse never binds a label twice. This is for
 //! stores that were merged.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use smysl_core::{Label, Record, Uid};
@@ -54,6 +54,42 @@ pub fn label_bindings(store: &Store, label: &Label) -> Vec<Uid> {
         })
         .collect::<BTreeSet<_>>()
         .into_iter()
+        .collect()
+}
+
+/// Every label this store binds to a uid, sorted and without repeats (1.5).
+///
+/// The other direction, and the one anything that *prints* a store needs: a report names
+/// `p/g90ec2f781421-4-1`, not `b3:xkcd…`. Until now a consumer kept its own map, filled as it
+/// staged, and a store read back from disk had none without walking every record — which is what
+/// this does once, rather than each caller writing it again.
+///
+/// A unit may carry more than one label: identity is content, so two declarations with the same
+/// gist, status and grounds are one unit under two names.
+pub fn labels_of(store: &Store, uid: &Uid) -> Vec<Label> {
+    store
+        .iter()
+        .filter_map(|r| match r {
+            Record::LabelBinding(b) if &b.uid == uid => Some(b.label.clone()),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// Every binding in the store, uid to labels, in one pass (1.5).
+///
+/// For a printer that needs them all: one walk of the log rather than one per unit.
+pub fn label_index(store: &Store) -> BTreeMap<Uid, Vec<Label>> {
+    let mut out: BTreeMap<Uid, BTreeSet<Label>> = BTreeMap::new();
+    for r in store.iter() {
+        if let Record::LabelBinding(b) = r {
+            out.entry(b.uid).or_default().insert(b.label.clone());
+        }
+    }
+    out.into_iter()
+        .map(|(u, labels)| (u, labels.into_iter().collect()))
         .collect()
 }
 

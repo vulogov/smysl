@@ -9,7 +9,71 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.5.0
 
-Nothing shipped yet. What this cycle starts from, carried from 1.4.0 (details there):
+### Reading a corpus whose dependencies are edges
+
+Four additions for a producer that keeps a dependency **outside** a unit's identity on purpose.
+rust_smysl links a prerequisite to a decision with `conditions` so that rewording the prerequisite
+does not move the uid of every decision resting on it — and `deps` and `grounds`, the two things
+packing and tracing read, are inside the unit and therefore inside its uid. The consequence was
+quiet: a packed decision arrived without the prerequisite it rests on, and `trace` could not walk
+to it.
+
+- **C8, the eighth packing constraint.** `PackRequest::resting_on(EdgeSet)` and
+  `smysl pack --support premises` carry what a selected unit rests on, at L1+ as C1 and C2 do,
+  reported by `--explain` as `C8 support of …` and checked by `verify`. Off unless asked for, so
+  C1–C7 are exactly what they were.
+- **`rests_on` and `trace_via`** — `dependents_via` the other way round, flat and by depth. The
+  CLI is `smysl trace --via premises`, which shows what a pack will carry before packing it.
+  `EdgeSet::union` composes a preset with an extension kind.
+- **A review queue that includes edges awaiting confirmation.** `review_with(store,
+  &ReviewOptions::confirming([RelKind::Backs, …]))` and `smysl review --confirm backs` list every
+  edge of the named kinds until an agent of the accepted kind (`--confirmed-by`, a person by
+  default) attests it, or it is withdrawn. A model attesting its own proposal is not a review.
+- **Staging attested per record.** `stage::prepare_attested` takes an `Attesting`, so a batch whose
+  units came from one agent and whose edges came from another — a model linking a test to the claim
+  it verifies — records who asserted each. `Attest` implements it and answers the same for
+  everything, which is what `prepare_declared` passes.
+- **Who stands behind a unit or an edge.** `Store::attestations_of`, `attested_by` and
+  `agreement(uid, n)` answer for either without the caller knowing which it holds — what a policy
+  counts when it raises a status only after two independent runs agree.
+
+### rust_smysl's 1.5 requests: R16–R20
+
+Five, all from building `cargo smysl check` — given a diff and the corpus, report the recorded
+decisions a change contradicts. Each was a workaround that got more expensive as a corpus grew.
+
+- **R16 — retrieval restricted to a candidate set.** `Query::within(uids)`, applied before the
+  limit, honoured by both retrievers. `kinds` cannot separate what a caller may act on from what it
+  may not — a rejected alternative and a recorded consequence are both `Claim` — so `check` asked
+  for 200 hits and filtered afterwards, which over a whole history fills the top with ineligible
+  units and never surfaces the eligible ones. Scoring is untouched: IDF still comes from the whole
+  index, so a restriction cannot re-weight terms.
+- **R17 — uid to label.** `labels_of(store, uid)` and `label_index(store)`. The store answered
+  label → uid only, so anything that *prints* a corpus kept its own map, filled as it staged, and a
+  store read back from disk had none without walking every record.
+- **R18 — where a quote matched.** `quote_support_span` and `quote_support_in_span` return the byte
+  range in the source, under the same normalisation, so a finding can cite a line instead of the
+  caller re-implementing the match with weaker rules. The verdict is `support`'s exactly — one
+  comparison, asserted over a matrix of quotes and sources. Normalisation deletes characters and
+  collapses whitespace, so the mapping back is recorded as it happens rather than recomputed.
+- **R19 — optional suffix folding.** `Tokenizer::folding()` with `Bm25::index_with`, off by
+  default: `s`, `es`, `ed`, `ing`, `ly` and a trailing `e`, emitted *beside* the term so an exact
+  identifier match still scores. `require`, `required`, `requires` and `requiring` meet at one stem;
+  `class` keeps its `s`. With it off, scores are what they were.
+- **R20 — units by source prefix.** `Store::units_with_source_prefix`, for a producer that anchors
+  units to `path@sha` and asks per file a diff touches.
+
+### Also
+
+- **`make doc-output` no longer depends on whether a model is running.** `ingest` and `attest` are
+  the two commands that consult one, and the book's transcripts were taken with none reachable; on
+  a machine running ollama the same commands succeed and the gate reported drift that was a
+  property of the machine. They are skipped unless `SMYSL_DOC_MODEL` says otherwise. Found when a
+  local ollama turned a green gate red without a line of the binary changing.
+
+### Carried from 1.4.0
+
+What this cycle started from (details in 1.4.0):
 
 - **Withdrawing `retracts` and `supersedes`**, and **reopening a resolved item**.
 - **`ingest --granularity` choosing the profile units are checked under.**

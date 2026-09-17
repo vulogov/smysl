@@ -282,6 +282,14 @@ for f in sorted(glob.glob('Documentation/manual/*.typ')):
         if 'built with' in cap:
             skipped += 1
             continue
+        # `ingest` and `attest` are the two commands that consult a model, so what they print
+        # depends on whether a provider answers — and the transcripts in the book were taken with
+        # none reachable. On a machine running ollama the same command succeeds and the comparison
+        # reports drift that is a property of the machine, not of the binary. Skipped unless
+        # SMYSL_DOC_MODEL is set, which is how a run that *means* to exercise a provider asks.
+        if re.match(r'^\$ smysl (ingest|attest)\b', cap) and not os.environ.get('SMYSL_DOC_MODEL'):
+            skipped += 1
+            continue
         # Captions carry human annotations like "(--grounds is the default)"; strip them.
         cmd = re.sub(r'\s{2,}\(.*\)$', '', cap[2:]).strip()
         cmd = cmd.replace('smysl', SM, 1)

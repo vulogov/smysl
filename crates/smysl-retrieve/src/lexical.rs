@@ -17,11 +17,11 @@ use crate::{candidates, indexable, Hit, Query, Retriever};
 
 /// Our tokeniser, wrapping [`crate::tokenize`] for `bm25`.
 #[derive(Clone, Default)]
-struct SmyslTokenizer;
+struct SmyslTokenizer(crate::tokenize::Tokenizer);
 
 impl Tokenizer for SmyslTokenizer {
     fn tokenize(&self, input: &str) -> Vec<String> {
-        crate::tokenize::tokenize(input)
+        self.0.terms(input)
     }
 }
 
@@ -66,6 +66,16 @@ impl Bm25 {
     /// document frequencies meaningful: a term common in *this* store is uninformative in
     /// this store, whatever it is worth elsewhere.
     pub fn index(store: &Store) -> Bm25 {
+        Bm25::index_with(store, crate::tokenize::Tokenizer::plain())
+    }
+
+    /// [`Bm25::index`] with a chosen tokeniser (1.5).
+    ///
+    /// `Tokenizer::folding()` folds common English suffixes, so a query saying `required` retrieves
+    /// a unit saying `require`. Off by default: the fold helps prose and hurts identifiers, and
+    /// turning it on moves every score in the index, so it is the caller's decision and not a
+    /// silent improvement.
+    pub fn index_with(store: &Store, tokenizer: crate::tokenize::Tokenizer) -> Bm25 {
         let facts = candidates(store);
 
         // Deterministic order: `facts` is a BTreeMap, so the corpus is built in uid order on
@@ -78,7 +88,8 @@ impl Bm25 {
 
         let corpus: Vec<&str> = docs.iter().map(|(_, t)| t.as_str()).collect();
         let embedder: Embedder<u32, SmyslTokenizer> =
-            EmbedderBuilder::with_tokenizer_and_fit_to_corpus(SmyslTokenizer, &corpus).build();
+            EmbedderBuilder::with_tokenizer_and_fit_to_corpus(SmyslTokenizer(tokenizer), &corpus)
+                .build();
 
         let mut scorer = Scorer::<Uid>::new();
         for (uid, text) in &docs {
@@ -103,7 +114,7 @@ impl Retriever for Bm25 {
         let mut hits: Vec<Hit> = self
             .facts
             .iter()
-            .filter(|(_, (kind, status))| query.admits(*kind, *status))
+            .filter(|(uid, (kind, status))| query.admits_unit(uid, *kind, *status))
             .filter_map(|(uid, _)| {
                 // `None` means the uid was never indexed; a zero score means no query term
                 // occurs in it. Both are excluded, because returning them pads the result to

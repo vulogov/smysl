@@ -109,20 +109,23 @@ pub use smysl_graph::compact::{compact, Compacted};
 pub use smysl_graph::relink::{relink, Relinked};
 pub use smysl_graph::{
     closure, cycles, dependents, dependents_via, diff, effective_status, hop_diff, label_bindings,
-    membership, merge, plan_retraction, rebuttals_of, resolve_label, reverse_closure, review,
-    salience, topo, trace, view_roots, Adjacency, AgentActivity, AppendReport, Cached,
-    DetectionContext, Edge, EdgeKind, EdgeSet, EffectiveStatus, Entry, HopDiff, Index, IndexError,
-    LabelError, Lineage, LineageNode, MergeError, MergeOptions, MergeReport, NodeId, OpenReport,
-    RecipeChange, RecipeChangeKind, RetractionAuthority, RetractionPlan, RetractionPolicy,
-    ReviewItem, ReviewSubject, SalienceReport, SalienceRequest, SalienceTerms, SalienceWeights,
-    Scratch, Store, StoreDiff, StoreOptions, SupersessionPolicy, TopoOrder, TraceKind, Via,
+    label_index, labels_of, membership, merge, plan_retraction, rebuttals_of, resolve_label,
+    rests_on, reverse_closure, review, review_with, salience, topo, trace, trace_via, view_roots,
+    Adjacency, AgentActivity, AppendReport, Cached, DetectionContext, Edge, EdgeKind, EdgeSet,
+    EffectiveStatus, Entry, HopDiff, Index, IndexError, LabelError, Lineage, LineageNode,
+    MergeError, MergeOptions, MergeReport, NodeId, OpenReport, RecipeChange, RecipeChangeKind,
+    RetractionAuthority, RetractionPlan, RetractionPolicy, ReviewItem, ReviewOptions,
+    ReviewSubject, SalienceReport, SalienceRequest, SalienceTerms, SalienceWeights, Scratch, Store,
+    StoreDiff, StoreOptions, SupersessionPolicy, TopoOrder, TraceKind, Via,
 };
 
 // ---- retrieve -------------------------------------------------------------
 // Pure, and deliberately so: the default engine is BM25 with one transitive dependency, no
 // model and no runtime, so retrieval is a bit-reproducible function of the store and the
 // query. `Retriever` is the seam an impure semantic backend would sit behind.
-pub use smysl_retrieve::{tokenize as retrieve_tokenize, Bm25, Hit, Query, Retriever};
+pub use smysl_retrieve::{
+    fold_suffix, tokenize as retrieve_tokenize, Bm25, Hit, Query, Retriever, Tokenizer,
+};
 
 // ---- semantic retrieval (feature-gated) -----------------------------------
 // Impure, and outside the pure crates on purpose: it needs a model, and a model is something
@@ -143,7 +146,7 @@ pub use smysl_ingest::{
     Judgement, What, DEFAULT_REPAIR_ATTEMPTS,
 };
 #[cfg(feature = "stage")]
-pub use smysl_ingest::{stage, Staged};
+pub use smysl_ingest::{stage, Attesting, Staged};
 // `smysl import` is the only producer of `measured` units and the only unit-producing command
 // that consults no model. Until 0.13 `cmd_import` reached into `smysl_ingest::import` directly
 // and none of these three names was re-exported, so a consumer holding the facade could not do
@@ -164,7 +167,9 @@ pub use smysl_ingest::prompt::PromptOverride;
 // full on `smysl_core::quote`, because it is now part of what a minor version may not change.
 // Ungated since 1.3: it does no I/O, so it lives in core and needs no feature.
 pub use smysl_core::quote::{
-    support as quote_support, support_in as quote_support_in, Support as QuoteSupport, QUOTE_KEY,
+    support as quote_support, support_in as quote_support_in,
+    support_in_span as quote_support_in_span, support_span as quote_support_span,
+    Support as QuoteSupport, QUOTE_KEY,
 };
 #[cfg(feature = "providers")]
 pub use smysl_provider::usage::{GroupBy, Totals};

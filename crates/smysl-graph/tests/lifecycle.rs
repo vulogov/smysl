@@ -361,3 +361,92 @@ fn withdrawals_and_resolutions_are_in_the_converged_state() {
 
     assert!(!a.converged_with(&Store::from_records(records)));
 }
+
+/// Who stands behind something, unit or edge, and how many distinct agents (1.5).
+///
+/// A policy that raises a status only when two independent runs agree counts exactly this, and
+/// until now had to know whether it held a unit or an edge to ask.
+#[test]
+fn agreement_counts_distinct_agents_for_a_unit_or_an_edge() {
+    let (records, uc, _, edge) = rebutted();
+    let attest = |uid: Uid, who: &str, ms: u64| {
+        let a = AgentId::new(who).unwrap();
+        Record::Attestation(Attestation::new(
+            uid,
+            a.clone(),
+            Op::Imported,
+            Rung::Model,
+            at(ms, a),
+        ))
+    };
+    let mut all = records;
+    all.extend([
+        attest(uc, "model:run-one", 1),
+        attest(uc, "model:run-one", 2), // the same agent again is the same agent
+        attest(edge.uid(), "model:linker", 3),
+        attest(edge.uid(), "human:reviewer", 4),
+    ]);
+    let s = Store::from_records(all);
+
+    assert_eq!(s.attested_by(&uc).len(), 1, "one agent, twice");
+    assert!(s.agreement(&uc, 1) && !s.agreement(&uc, 2));
+
+    let on_edge = s.attested_by(&edge.uid());
+    assert_eq!(on_edge.len(), 2);
+    assert!(s.agreement(&edge.uid(), 2), "two runs agree about the edge");
+    assert!(on_edge
+        .iter()
+        .any(|a| a.kind() == smysl_core::AgentKind::Human));
+    assert_eq!(s.attestations_of(&edge.uid()).len(), 2);
+
+    // Something the store does not hold has nobody behind it, rather than a panic.
+    assert!(s.attested_by(&Uid::from_bytes([9; 32])).is_empty());
+}
+
+/// R20 (1.5): the units anchored to a file, without scanning the store per diff.
+#[test]
+fn units_by_source_prefix_agree_with_a_full_scan() {
+    use smysl_core::{SourceKind, SourceRef, Status, UnitCoreBuilder};
+    let anchored = |gist: &str, reference: &str| {
+        UnitCoreBuilder::new(KernelType::Claim, gist, Status::Cited)
+            .source(SourceRef::new(SourceKind::File, reference))
+            .build()
+            .unwrap()
+    };
+    let a = anchored("the router dispatches", "src/main.rs@90ec2f781421");
+    let b = anchored("the router was renamed", "src/main.rs@4968383");
+    let c = anchored(
+        "the store appends",
+        "crates/smysl-graph/src/store/mod.rs@4968383",
+    );
+    let plain = claim("a unit with no source at all");
+    let (ua, ub) = (canonical_uid(&a), canonical_uid(&b));
+    let store = Store::from_records(vec![
+        Record::Unit(a),
+        Record::Unit(b),
+        Record::Unit(c),
+        Record::Unit(plain),
+    ]);
+
+    let mut want = vec![ua, ub];
+    want.sort();
+    assert_eq!(store.units_with_source_prefix("src/main.rs"), want);
+    assert_eq!(
+        store.units_with_source_prefix("src/main.rs@4968383").len(),
+        1
+    );
+    assert!(store.units_with_source_prefix("nothing/here").is_empty());
+
+    // The same answer a caller's own scan would give, including units without a source.
+    let scanned: Vec<Uid> = store
+        .units()
+        .filter(|(_, u)| {
+            u.core
+                .source
+                .as_ref()
+                .is_some_and(|s| s.reference.starts_with("src/"))
+        })
+        .map(|(uid, _)| *uid)
+        .collect();
+    assert_eq!(store.units_with_source_prefix("src/"), scanned);
+}

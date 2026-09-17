@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 
 use smysl_core::{Lod, Uid};
-use smysl_graph::Store;
+use smysl_graph::{EdgeSet, Store};
 
 use crate::constraints::{warrants_of, Selection};
 
@@ -20,6 +20,17 @@ use crate::constraints::{warrants_of, Selection};
 /// Includes `(uid, level)` itself. Levels already met by `selected` are still reported, so
 /// a caller can see the whole obligation; use [`delta`] for what it would actually cost.
 pub fn required(store: &Store, uid: Uid, level: Lod) -> Selection {
+    required_via(store, uid, level, &EdgeSet::of([]))
+}
+
+/// [`required`], also pulling in what a unit rests on over `support` (1.5).
+///
+/// `deps` and `grounds` are inside a unit, so C1 and C2 need no help. A producer that links a
+/// prerequisite by `conditions` — so that rewording it does not move the uid of every decision
+/// resting on it — states the dependency in a relation instead, and nothing reading `grounds`
+/// alone can see it: the decision packed without the prerequisite it rests on. `support` is that
+/// caller's edge set, `EdgeSet::premises()` normally, and it binds at L1+ as C1 and C2 do.
+pub fn required_via(store: &Store, uid: Uid, level: Lod, support: &EdgeSet) -> Selection {
     let mut need: Selection = Selection::new();
     let mut work: Vec<(Uid, Lod)> = vec![(uid, level)];
 
@@ -47,6 +58,10 @@ pub fn required(store: &Store, uid: Uid, level: Lod) -> Selection {
             // C6: the inferential licence travels with the inference.
             for w in warrants_of(store, &x) {
                 work.push((w, Lod::L0));
+            }
+            // C8: what the caller says this unit rests on, over edges the format does not hash.
+            for s in store.supports_of(&x, support) {
+                work.push((s, Lod::L0));
             }
         }
 
@@ -81,6 +96,17 @@ pub fn delta(store: &Store, selected: &Selection, uid: Uid, level: Lod) -> Selec
     keep_shortfall(required(store, uid, level), selected)
 }
 
+/// [`delta`] over a caller's support edges (1.5).
+pub fn delta_via(
+    store: &Store,
+    selected: &Selection,
+    uid: Uid,
+    level: Lod,
+    support: &EdgeSet,
+) -> Selection {
+    keep_shortfall(required_via(store, uid, level, support), selected)
+}
+
 /// The part of an obligation a selection has not met yet.
 ///
 /// Split out of [`delta`] so a caller holding a memoised `required` can reuse it — see
@@ -107,6 +133,8 @@ pub fn keep_shortfall(need: Selection, selected: &Selection) -> Selection {
 #[derive(Default)]
 pub struct Needs {
     cache: BTreeMap<(Uid, Lod), Selection>,
+    /// Fixed for the life of the memo, so it is not part of the key.
+    support: EdgeSet,
 }
 
 impl Needs {
@@ -114,11 +142,19 @@ impl Needs {
         Needs::default()
     }
 
+    /// A memo whose obligations include what a unit rests on over these edges (1.5).
+    pub fn with_support(support: EdgeSet) -> Needs {
+        Needs {
+            cache: BTreeMap::new(),
+            support,
+        }
+    }
+
     /// The obligation for `(uid, level)`, walking the graph at most once per pair.
     pub fn required(&mut self, store: &Store, uid: Uid, level: Lod) -> &Selection {
         self.cache
             .entry((uid, level))
-            .or_insert_with(|| required(store, uid, level))
+            .or_insert_with(|| required_via(store, uid, level, &self.support))
     }
 
     /// What `(uid, level)` would still cost against `selected`.
@@ -168,6 +204,9 @@ pub enum Reason {
     WarrantOf(Uid),
     /// It earned its place on value per token.
     Density,
+    /// What something at L1+ rests on, over the caller's support edges (C8, 1.5). Last, for the
+    /// same reason `Violation::Support` is.
+    SupportOf(Uid),
 }
 
 impl Reason {
@@ -178,6 +217,7 @@ impl Reason {
             Reason::Contests(_) => "C4",
             Reason::DepOf(_) => "C1",
             Reason::GroundOf(_) => "C2",
+            Reason::SupportOf(_) => "C8",
             Reason::WarrantOf(_) => "C6",
             Reason::Density => "-",
         }
@@ -198,6 +238,7 @@ impl core::fmt::Display for Reason {
             Reason::Contests(u) => write!(f, "contests {u}"),
             Reason::DepOf(u) => write!(f, "dep of {u}"),
             Reason::GroundOf(u) => write!(f, "ground of {u}"),
+            Reason::SupportOf(u) => write!(f, "support of {u}"),
             Reason::WarrantOf(u) => write!(f, "warrant of {u}"),
             Reason::Density => f.write_str("earned on density"),
         }
@@ -206,8 +247,18 @@ impl core::fmt::Display for Reason {
 
 /// Attribute each unit a closure pulled in to the unit that pulled it.
 pub fn reasons(store: &Store, uid: Uid, level: Lod) -> BTreeMap<Uid, Reason> {
+    reasons_via(store, uid, level, &EdgeSet::of([]))
+}
+
+/// [`reasons`] over a caller's support edges (1.5).
+pub fn reasons_via(
+    store: &Store,
+    uid: Uid,
+    level: Lod,
+    support: &EdgeSet,
+) -> BTreeMap<Uid, Reason> {
     let mut out = BTreeMap::new();
-    let need = required(store, uid, level);
+    let need = required_via(store, uid, level, support);
 
     for (x, lx) in &need {
         if *x == uid {
@@ -234,6 +285,10 @@ pub fn reasons(store: &Store, uid: Uid, level: Lod) -> BTreeMap<Uid, Reason> {
                 }
                 if warrants_of(store, holder).contains(x) {
                     reason = Some(Reason::WarrantOf(*holder));
+                    break;
+                }
+                if store.supports_of(holder, support).contains(x) {
+                    reason = Some(Reason::SupportOf(*holder));
                     break;
                 }
             }
