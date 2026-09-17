@@ -72,7 +72,8 @@ and all:
     ([`cli`], [`dep:clap`. Without it there is no `[[bin]]` at all — the binary's own manifest entry requires this feature to exist.]),
     ([`tui`], [`dep:smysl-tui`, and `cli` (the TUI is reached through the same binary, so it pulls the parser in too).]),
     ([`providers`], [`dep:smysl-provider` — the provider abstraction: registry, capabilities, ledger. No vendor is wired in by this alone.]),
-    ([`ingest`], [`dep:smysl-ingest`, and `providers` (ingest always needs a provider to call, so the dependency is unconditional).]),
+    ([`stage`], [`dep:smysl-ingest`, without the ingest crate's model feature — staging, the rung ceiling, recipes and CSV import, for a program that builds its own units. No `smysl-provider` in the tree. Since 1.3.]),
+    ([`ingest`], [`stage`, `providers` and `smysl-ingest/model` — `Ingestor` and `attest`, which call a model. Until 1.3 this was the only way to get staging, and it brought the provider layer along.]),
     ([`local`], [`ingest`, plus `smysl-provider/ollama` and `smysl-ingest/ollama` — everything `ingest` and `attest` need, wired to a local Ollama server that never leaves the machine.]),
     ([`remote`], [`ingest`, plus `smysl-provider/{anthropic,openai,gemini,deepseek}` and the matching `smysl-ingest/*` features — the four hosted providers, on both the calling side and the ingest-specific side.]),
     ([`render-typst`], [`smysl-render/typst` — the backend behind `render --target typst`.]),
@@ -96,9 +97,9 @@ faith. Building the facade crate's own library target with every feature off:
 
 #screen(caption: "$ cargo tree --no-default-features -p smysl")[
 ```
-smysl v1.2.0
-├── smysl-check v1.2.0
-│   ├── smysl-core v1.2.0
+smysl v1.3.0
+├── smysl-check v1.3.0
+│   ├── smysl-core v1.3.0
 │   │   ├── blake3 v1.8.5
 │   │   │   ├── arrayref v0.3.9
 │   │   │   ├── arrayvec v0.7.8
@@ -111,26 +112,26 @@ smysl v1.2.0
 │   │   └── unicode-normalization v0.1.25
 │   │       └── tinyvec v1.12.0
 │   │           └── tinyvec_macros v0.1.1
-│   └── smysl-graph v1.2.0
-│       └── smysl-core v1.2.0 (*)
-├── smysl-core v1.2.0 (*)
-├── smysl-graph v1.2.0 (*)
-├── smysl-pack v1.2.0
-│   ├── smysl-core v1.2.0 (*)
-│   └── smysl-graph v1.2.0 (*)
-├── smysl-render v1.2.0
-│   ├── smysl-core v1.2.0 (*)
-│   ├── smysl-graph v1.2.0 (*)
-│   └── smysl-thread v1.2.0
-│       ├── smysl-core v1.2.0 (*)
-│       └── smysl-graph v1.2.0 (*)
-├── smysl-retrieve v1.2.0
+│   └── smysl-graph v1.3.0
+│       └── smysl-core v1.3.0 (*)
+├── smysl-core v1.3.0 (*)
+├── smysl-graph v1.3.0 (*)
+├── smysl-pack v1.3.0
+│   ├── smysl-core v1.3.0 (*)
+│   └── smysl-graph v1.3.0 (*)
+├── smysl-render v1.3.0
+│   ├── smysl-core v1.3.0 (*)
+│   ├── smysl-graph v1.3.0 (*)
+│   └── smysl-thread v1.3.0
+│       ├── smysl-core v1.3.0 (*)
+│       └── smysl-graph v1.3.0 (*)
+├── smysl-retrieve v1.3.0
 │   ├── bm25 v2.3.2
 │   │   └── fxhash v0.2.1
 │   │       └── byteorder v1.5.0
-│   ├── smysl-core v1.2.0 (*)
-│   └── smysl-graph v1.2.0 (*)
-└── smysl-thread v1.2.0 (*)
+│   ├── smysl-core v1.3.0 (*)
+│   └── smysl-graph v1.3.0 (*)
+└── smysl-thread v1.3.0 (*)
 [dev-dependencies]
 └── serde_json v1.0.151
     ├── itoa v1.0.18
@@ -374,6 +375,113 @@ stack.
   facade rather than only inspecting its dependency graph.
 ]
 
+#section("Building units yourself, and staging them without a model")
+
+`smysl ingest` asks a model to propose units. A program that already knows what it wants to
+record — a tool reading a commit and its diff, say — builds the units itself and still wants
+everything that happens *after* the model: the quote check, the rung ceiling, rule M, and a
+staged batch a person can review. Since 1.3 that is the `stage` feature, and it compiles no
+provider layer at all:
+
+```toml
+smysl = { version = "1.3", default-features = false, features = ["stage"] }
+```
+
+```rust
+use smysl::stage::{self, Attest};
+use smysl::{
+    canonical_uid, dependents_via, quote_support_in, resolve_label, AgentId, EdgeSet, Hlc,
+    KernelType, Label, QuoteSupport, RelKind, Relation, Rung, Severity, SourceKind, SourceRef,
+    Status, Store, UnitCoreBuilder,
+};
+use std::collections::BTreeMap;
+
+let message = "Use BLAKE3 for uids.\n\nSHA-256 was too slow on large stores.";
+let diff = "+blake3 = \"1\"";
+
+// Check the evidence first, against every text the change is evidenced by.
+let quote = "SHA-256 was too slow on large stores";
+let (support, from) = quote_support_in(quote, &[("message", message), ("diff", diff)]);
+assert_eq!(support, QuoteSupport::Present);
+assert_eq!(from, Some("message"));
+
+// The tool, not a model, knows where this came from.
+let source = SourceRef::new(SourceKind::Doc, "git:4968383");
+let prerequisite = UnitCoreBuilder::new(
+    KernelType::Claim,
+    "SHA-256 was too slow on large stores",
+    Status::Cited,
+)
+.source(source.clone())
+.build()
+.unwrap();
+let decision = UnitCoreBuilder::new(KernelType::Decision, "use BLAKE3 for uids", Status::Cited)
+    .source(source)
+    .build()
+    .unwrap();
+let (p, d) = (canonical_uid(&prerequisite), canonical_uid(&decision));
+
+// `conditions`, so rewording the prerequisite never moves the decision's uid.
+let relations = vec![Relation::new(RelKind::Conditions, p, d)];
+let labels = BTreeMap::from([
+    (Label::new("c/sha-slow").unwrap(), p),
+    (Label::new("d/blake3").unwrap(), d),
+]);
+
+let agent = AgentId::new("tool:rust-smysl").unwrap();
+let attest = Attest::new(agent.clone(), Rung::Document, Hlc::zero(agent));
+let staged = stage::prepare(
+    &Store::new(),
+    vec![prerequisite, decision],
+    relations,
+    labels,
+    &attest,
+);
+assert!(staged.report.fail_on(Severity::Error).is_ok());
+
+// The staged batch is records; a store built from them resolves its labels.
+let store = Store::from_records(staged.records());
+let blake3 = resolve_label(&store, &Label::new("d/blake3").unwrap()).unwrap();
+assert_eq!(blake3, d);
+
+// What loses a premise if the prerequisite turns out to be false.
+assert_eq!(dependents_via(&store, p, &EdgeSet::premises()), vec![d]);
+```
+
+Four things in it are 1.3 additions, each for a reason a real caller found.
+
+`quote_support_in` checks one quote against several texts and says which one matched —
+`Present` in the diff beats `Loose` in the message, whatever order they are listed in. It is
+the same check `ingest` applies, with its normalisation written into the contract, so a
+caller never keeps a second definition of "loose". It says the evidence *exists*; it does not
+say the unit agrees with it — a gist that contradicts its own verbatim quote passes, and
+deciding that is a judgement for `attest` or a reviewer.
+
+`stage::prepare` applies the rung ceiling (`Rung::Document` allows at most `cited`) and rule
+M, and attests every unit to the agent you name. `stage::prepare_declared` does the same with
+the `SchemaDecl`s an extension relation needs. `staged.records()` includes the label bindings,
+so the store built from it resolves `d/blake3`; `resolve_label` refuses a label bound to two
+units rather than picking one.
+
+`dependents_via` walks uids rather than `NodeId`s, over the edges you choose.
+`EdgeSet::premises()` is `deps`, `grounds` and `conditions` — which conclusions lose a
+premise. `EdgeSet::dependency()` adds `causes`, `enables`, `warrant` and `backs`, which makes
+every effect a dependent of its cause; that is the right set for "what breaks" and the wrong
+one for an evidence audit.
+
+A caller that does want a model but knows the provenance itself passes it with
+`IngestOptions::with_source(SourceRef, SourcePolicy)`: `FillMissing` gives units the model left
+unsourced this source, `Override` replaces the model's and warns `SMY-W309`. It is applied
+before any uid is computed, since `source` is inside identity. And
+`IngestOptions::with_prompt(PromptOverride)` replaces the question while keeping every check
+applied to the answer.
+
+#callout(label: "How this was verified")[
+  The code above is `tests/manual_stage_example.rs`, extracted from it rather than typed
+  here, and it runs in CI under `--no-default-features --features stage`: the same build that
+  proves `smysl-provider` is absent from the tree.
+]
+
 #whatsnext[
   You have now seen every operation this book covers from both sides: the CLI, which
   parses a command line and prints a report, and the library underneath it, which takes
@@ -433,6 +541,9 @@ stack.
    calls, not a wrapper around the binary.],
   [Both examples in this chapter were compiled and run for real, against the facade, with
    `--no-default-features` — not printed from memory.],
+  [The `stage` feature is staging, the rung ceiling, rule M and the quote check with no
+   provider layer; `staged.records()` carries label bindings, and `dependents_via` with
+   `EdgeSet::premises()` answers which conclusions lose a premise.],
 ))
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -654,7 +765,7 @@ run before you have even decided who is retracting:
 
 #screen(caption: "$ smysl retract --dry-run b3:cjixk2inyftvxj55d53w2ivxej merged2.cbor")[
 ```
-merged2.cbor: retracting b3:cjixk2inyftvxj55d53w2ivxej would reach 1 unit(s), orphaning 0
+merged2.cbor: retracting b3:cjixk2inyftvxj55d53w2ivxej would leave 1 unit(s) unfounded, 0 of them orphaned
 ```
 ]
 
@@ -665,7 +776,7 @@ safe. Applying it for real, without `--dry-run`, hits something instructive:
 
 #screen(caption: "$ smysl retract b3:cjixk2inyftvxj55d53w2ivxej merged2.cbor")[
 ```
-merged2.cbor: retracting b3:cjixk2inyftvxj55d53w2ivxej would reach 1 unit(s), orphaning 0
+merged2.cbor: retracting b3:cjixk2inyftvxj55d53w2ivxej would leave 1 unit(s) unfounded, 0 of them orphaned
 smysl retract: origin requires 1 distinct agents, got 0
 ```
 ]
@@ -679,7 +790,7 @@ honest way through it:
 
 #screen(caption: "$ smysl retract b3:cjixk2inyftvxj55d53w2ivxej merged2.cbor --as human:oncall --authority any --reason \"rollback confirms 7.1 timeout, not pool exhaustion\"")[
 ```
-merged2.cbor: retracting b3:cjixk2inyftvxj55d53w2ivxej would reach 1 unit(s), orphaning 0
+merged2.cbor: retracting b3:cjixk2inyftvxj55d53w2ivxej would leave 1 unit(s) unfounded, 0 of them orphaned
 merged2.cbor: 1 unit(s) now read as unfounded
 ```
 ]

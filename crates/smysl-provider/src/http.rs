@@ -234,6 +234,9 @@ pub use client::{get_with, post_json};
 
 #[cfg(test)]
 mod tests {
+    // Everything past the first test exercises the retry machinery, which exists only with
+    // `http-client`. Ungated, `cargo test -p smysl-provider` at default features did not
+    // compile — 35 errors — and no CI row ran it there.
     use super::*;
 
     #[test]
@@ -259,6 +262,7 @@ mod tests {
 
     /// Three numbers, one meaning. 503 is Google's "high demand" and 529 is Anthropic's
     /// overloaded; both are the server saying later, not the request being wrong.
+    #[cfg(feature = "http-client")]
     #[test]
     fn backpressure_is_a_class_of_three_statuses() {
         for s in [429, 503, 529] {
@@ -272,6 +276,7 @@ mod tests {
 
     /// Waiting 250ms does not fix a bug on the far side, and retrying would turn one
     /// failure into three.
+    #[cfg(feature = "http-client")]
     #[test]
     fn a_server_fault_is_not_backpressure() {
         for s in [400, 404, 413, 500, 502, 504] {
@@ -280,6 +285,7 @@ mod tests {
         assert!(!is_retryable(&status_error(500, "boom", None)));
     }
 
+    #[cfg(feature = "http-client")]
     #[test]
     fn statuses_map_onto_the_error_vocabulary() {
         assert_eq!(status_error(401, "", None), ProviderError::Unauthorized);
@@ -298,6 +304,7 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "http-client")]
     #[test]
     fn a_retry_after_header_reaches_the_error() {
         let e = status_error(429, "", parse_retry_after("30"));
@@ -310,12 +317,14 @@ mod tests {
     }
 
     /// Only the seconds form is honoured; a date would need a calendar.
+    #[cfg(feature = "http-client")]
     #[test]
     fn an_http_date_retry_after_is_ignored_rather_than_guessed() {
         assert_eq!(parse_retry_after("Wed, 21 Oct 2026 07:28:00 GMT"), None);
         assert_eq!(parse_retry_after(" 12 "), Some(Duration::from_secs(12)));
     }
 
+    #[cfg(feature = "http-client")]
     #[test]
     fn backoff_grows_exponentially() {
         let full = |a| backoff(a, 1.0);
@@ -327,6 +336,7 @@ mod tests {
 
     /// Full jitter, not a fixed multiplier: several clients backing off in lockstep would
     /// produce another herd at every step.
+    #[cfg(feature = "http-client")]
     #[test]
     fn jitter_spans_the_whole_interval() {
         assert_eq!(backoff(3, 0.0), Duration::ZERO);
@@ -334,18 +344,21 @@ mod tests {
         assert_eq!(backoff(3, 0.5), BACKOFF_BASE * 4);
     }
 
+    #[cfg(feature = "http-client")]
     #[test]
     fn jitter_outside_the_unit_interval_is_clamped_rather_than_trusted() {
         assert_eq!(backoff(2, 5.0), backoff(2, 1.0));
         assert_eq!(backoff(2, -1.0), Duration::ZERO);
     }
 
+    #[cfg(feature = "http-client")]
     #[test]
     fn backoff_does_not_overflow_on_a_silly_attempt_count() {
         assert!(backoff(u32::MAX, 1.0) > Duration::ZERO);
     }
 
     /// Error messages reach logs, and a provider's error page is untrusted input.
+    #[cfg(feature = "http-client")]
     #[test]
     fn a_huge_error_body_is_truncated() {
         let e = status_error(500, &"x".repeat(10_000), None);
@@ -358,6 +371,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "http-client")]
     #[test]
     fn truncation_lands_on_a_character_boundary() {
         let body = "é".repeat(1000);
@@ -368,6 +382,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "http-client")]
     #[test]
     fn three_attempts_is_two_retries() {
         assert_eq!(MAX_ATTEMPTS, 3);
@@ -465,6 +480,7 @@ mod tests {
         }
 
         /// The change this test exists for: 503 is waited out rather than surfaced.
+        #[cfg(feature = "http-client")]
         #[test]
         fn a_503_is_retried_and_the_recovery_is_returned() {
             let r = post(&serve(vec![503, 503, 200]));
@@ -472,6 +488,7 @@ mod tests {
             assert_eq!(r.retries, 2, "two 503s were waited out");
         }
 
+        #[cfg(feature = "http-client")]
         #[test]
         fn a_429_is_retried_as_it_always_was() {
             let r = post(&serve(vec![429, 200]));
@@ -480,6 +497,7 @@ mod tests {
         }
 
         /// Anthropic's overloaded, which is 503 under a number of its own.
+        #[cfg(feature = "http-client")]
         #[test]
         fn a_529_is_retried() {
             let r = post(&serve(vec![529, 200]));
@@ -489,6 +507,7 @@ mod tests {
 
         /// Backpressure that never lets up is reported, not retried forever - and the body
         /// survives, because responsibility 5 needs it.
+        #[cfg(feature = "http-client")]
         #[test]
         fn backpressure_that_never_lets_up_is_returned_after_three_attempts() {
             let r = post(&serve(vec![503, 503, 503]));
@@ -498,6 +517,7 @@ mod tests {
         }
 
         /// A fault is not backpressure: one attempt, no wait.
+        #[cfg(feature = "http-client")]
         #[test]
         fn a_500_is_returned_on_the_first_attempt() {
             let r = post(&serve(vec![500, 200]));

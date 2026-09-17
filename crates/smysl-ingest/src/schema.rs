@@ -24,6 +24,25 @@ use smysl_core::{KernelType, RelKind, SourceKind, Status};
 
 /// The unit schema (Appendix C).
 pub fn unit_schema() -> String {
+    unit_schema_with(false)
+}
+
+/// The unit schema, without the requirement that `measured` and `cited` carry a `source` when
+/// the caller supplies one.
+///
+/// Appendix C requires a source for those statuses, and an enforcing provider applies that
+/// while decoding — so with the requirement in place a model *must* write a source, and one
+/// that cannot know the document's name invents it. Every unit of the live R1 run was sourced
+/// to `the input document`. When the caller supplies provenance, the requirement is the
+/// caller's to meet, and the schema must not force the model to meet it first.
+pub fn unit_schema_with(source_supplied: bool) -> String {
+    let source_rule = if source_supplied {
+        ""
+    } else {
+        r#"
+    { "if": { "properties": { "status": { "enum": ["measured", "cited"] } } },
+      "then": { "required": ["source"] } },"#
+    };
     format!(
         r#"{{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -33,7 +52,7 @@ pub fn unit_schema() -> String {
   "additionalProperties": false,
   "properties": {{
     "type": {{ "enum": [{types}] }},
-    "label": {{ "type": "string", "pattern": "^[a-z][a-z0-9_-]*/[a-z0-9_-]+$" }},
+    "label": {{ "type": "string", "pattern": "^[a-z][a-z0-9_-]*/[a-z][a-z0-9_-]*$" }},
     "gist": {{ "type": "string", "minLength": 1, "maxLength": {gist_max} }},
     "body": {{ "type": "string" }},
     "detail": {{ "type": "string" }},
@@ -52,9 +71,7 @@ pub fn unit_schema() -> String {
     "grounds": {{ "type": "array", "items": {{ "type": "string" }} }},
     "payload": {{ "type": "object" }}
   }},
-  "allOf": [
-    {{ "if": {{ "properties": {{ "status": {{ "enum": ["measured", "cited"] }} }} }},
-      "then": {{ "required": ["source"] }} }},
+  "allOf": [{source_rule}
     {{ "if": {{ "properties": {{ "status": {{ "enum": ["derived", "inferred"] }} }} }},
       "then": {{ "required": ["grounds"] }} }},
     {{ "if": {{ "required": ["detail"] }}, "then": {{ "required": ["body"] }} }}
@@ -64,6 +81,7 @@ pub fn unit_schema() -> String {
         statuses = quoted(authorable_statuses()),
         source_kinds = quoted(SourceKind::ALL.iter().map(|k| k.as_str().to_string())),
         gist_max = GIST_MAX_CHARS,
+        source_rule = source_rule,
     )
 }
 
@@ -94,6 +112,11 @@ pub fn relation_schema() -> String {
 
 /// A batch of units and the edges between them, which is what an ingest call asks for.
 pub fn batch_schema() -> String {
+    batch_schema_with(false)
+}
+
+/// [`batch_schema`], with the unit schema of [`unit_schema_with`].
+pub fn batch_schema_with(source_supplied: bool) -> String {
     format!(
         r#"{{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -106,7 +129,7 @@ pub fn batch_schema() -> String {
     "relations": {{ "type": "array", "items": {relation} }}
   }}
 }}"#,
-        unit = indent(&unit_schema()),
+        unit = indent(&unit_schema_with(source_supplied)),
         relation = indent(&relation_schema()),
     )
 }
@@ -124,9 +147,14 @@ pub fn authorable_relations() -> Vec<String> {
         .collect()
 }
 
-/// Appendix C's gist bound. Characters, not tokens: a JSON Schema cannot count tokens, and
-/// a bound the model can actually respect is worth more than an exact one it cannot.
-pub const GIST_MAX_CHARS: usize = 240;
+/// The gist bound, in characters: `l0_max` (30 tokens) at the estimator's four bytes a token.
+///
+/// Characters, not tokens: a JSON Schema cannot count tokens, and a bound the model can
+/// actually respect is worth more than an exact one it cannot. It was 240 until 1.3 — twice
+/// what `SMY-E022` allows — so an enforcing provider held the model to a bound the check then
+/// refused. Exact for ASCII; a gist in a script of multi-byte characters can still fit this
+/// and fail the check, which `repair::salvage` confines to its own unit.
+pub const GIST_MAX_CHARS: usize = 120;
 
 /// Kernel types a model may author.
 ///
@@ -269,9 +297,16 @@ mod tests {
     }
 
     #[test]
-    fn the_gist_bound_is_appendix_cs() {
-        assert_eq!(GIST_MAX_CHARS, 240);
-        assert!(unit_schema().contains("\"maxLength\": 240"));
+    fn the_gist_bound_is_the_checks() {
+        let l0 = smysl_core::GranularityProfile::default().l0_max as usize;
+        assert_eq!(GIST_MAX_CHARS, l0 * 4, "l0_max at four bytes a token");
+        let at_bound = "x".repeat(GIST_MAX_CHARS);
+        assert_eq!(
+            smysl_core::tokens(&at_bound) as usize,
+            l0,
+            "the longest gist passes"
+        );
+        assert!(unit_schema().contains("\"maxLength\": 120"));
     }
 
     /// A conservative core, not an intersection - no provider dialect reached here takes

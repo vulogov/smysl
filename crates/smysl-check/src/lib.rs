@@ -170,6 +170,51 @@ impl CheckOptions {
     }
 }
 
+/// The profile a store's units are checked against when the caller names none.
+///
+/// It was `store.views().next()` — the view whose id sorts first. In a store merged from
+/// documents produced under different profiles, that judged every unit by whichever document
+/// happened to have the alphabetically smallest `id`: rationale units written under `fine`
+/// (bodies 20..60 tokens) warned `SMY-W041` as "under the default range 40..120" because
+/// another document in the merge was called `v/other`, and renaming it `v/zzz` made the
+/// warnings disappear. Nothing about the units had changed.
+///
+/// A store records no link from a unit to the document that produced it, so there is no
+/// right profile to pick per unit — and D-5 says mixed granularity in one store is legal. When
+/// the views agree, their profile is used, as before. When they disagree, units are checked
+/// against the widest envelope any of them allows: the largest `l0_max`, the smallest
+/// `l1_min`, the largest `l1_max`, and `topical` admission if any view uses it. A unit outside
+/// that is outside every profile present, which is a warning worth having; a unit inside it is
+/// not flagged on the strength of a sort order.
+fn store_granularity(store: &Store) -> GranularityProfile {
+    let mut distinct: Vec<&GranularityProfile> = Vec::new();
+    for v in store.views() {
+        if !distinct.contains(&&v.granularity) {
+            distinct.push(&v.granularity);
+        }
+    }
+    match distinct.as_slice() {
+        [] => GranularityProfile::default(),
+        [only] => (*only).clone(),
+        many => {
+            let mut g = (*many[0]).clone();
+            let mut names: Vec<&str> = many.iter().map(|p| p.profile.as_str()).collect();
+            names.sort_unstable();
+            names.dedup();
+            g.profile = format!("widest of {}", names.join(", "));
+            for p in &many[1..] {
+                g.l0_max = g.l0_max.max(p.l0_max);
+                g.l1_min = g.l1_min.min(p.l1_min);
+                g.l1_max = g.l1_max.max(p.l1_max);
+                if p.admission == smysl_core::Admission::Topical {
+                    g.admission = smysl_core::Admission::Topical;
+                }
+            }
+            g
+        }
+    }
+}
+
 /// Run the pipeline.
 ///
 /// Never short-circuits: every requested pass runs, whatever the earlier ones found.
@@ -177,8 +222,7 @@ pub fn check(store: &Store, opts: CheckOptions) -> Report {
     let granularity = opts
         .granularity
         .clone()
-        .or_else(|| store.views().next().map(|v| v.granularity.clone()))
-        .unwrap_or_default();
+        .unwrap_or_else(|| store_granularity(store));
 
     let mut report = Report::new();
     if opts.runs(Pass::Integrity) {

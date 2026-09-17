@@ -278,7 +278,7 @@ detail if there was never an ordinary account to extend.
 
 #screen(caption: "$ smysl check derived-empty-grounds.smy")[
 ```
-derived-empty-grounds.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 0..89)
+derived-empty-grounds.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 0..89) [try: name the units it rests on in `grounds`, or lower the status to `speculative`]
 ```
 ]
 
@@ -302,7 +302,7 @@ nothing grounds it yet.
 
 #screen(caption: "$ smysl check measured-no-source.smy")[
 ```
-measured-no-source.smy: error: SMY-E032: SMY-E032: measured/cited without source (at 0..87)
+measured-no-source.smy: error: SMY-E032: SMY-E032: measured/cited without source (at 0..87) [try: add a `source` naming the document it came from, or lower the status: `inferred` with grounds, or `speculative` - never raise it]
 ```
 ]
 
@@ -328,7 +328,7 @@ from the start — this is what skipping it looks like.
 
 #screen(caption: "$ smysl check unfounded-authored.smy")[
 ```
-unfounded-authored.smy: error: SMY-E034: SMY-E034: unfounded authored (at 0..77)
+unfounded-authored.smy: error: SMY-E034: SMY-E034: unfounded authored (at 0..77) [try: use `speculative`; `unfounded` is reached only by retraction]
 ```
 ]
 
@@ -412,7 +412,7 @@ that was never passed to `check` alongside this one.
 #screen(caption: "$ smysl check dangling-label.smy")[
 ```
 dangling-label.smy: error: SMY-E060: unresolved reference `e/cache-miss` (at 50..62)
-dangling-label.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 0..101)
+dangling-label.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 0..101) [try: name the units it rests on in `grounds`, or lower the status to `speculative`]
 ```
 ]
 
@@ -446,10 +446,10 @@ labels to `check` together.
 ```
 cycle.smy: error: SMY-E061: cycle in deps or grounds; the back edge is dropped (at 0..102)
 cycle.smy: error: SMY-E061: cycle in deps or grounds; the back edge is dropped (at 103..219)
-cycle.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 0..102)
-cycle.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 0..102)
-cycle.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 103..219)
-cycle.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 103..219)
+cycle.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 0..102) [try: name the units it rests on in `grounds`, or lower the status to `speculative`]
+cycle.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 0..102) [try: name the units it rests on in `grounds`, or lower the status to `speculative`]
+cycle.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 103..219) [try: name the units it rests on in `grounds`, or lower the status to `speculative`]
+cycle.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 103..219) [try: name the units it rests on in `grounds`, or lower the status to `speculative`]
 ```
 ]
 

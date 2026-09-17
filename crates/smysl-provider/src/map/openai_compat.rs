@@ -241,9 +241,14 @@ pub fn parse(
         .and_then(Value::as_str)
         == Some("length")
     {
-        return Err(ProviderError::ContextExceeded {
-            limit: 0,
-            requested: text.len(),
+        // The request's cap is not in the response, and `requested` was `text.len()` — bytes,
+        // printed against a limit of 0.
+        return Err(ProviderError::Truncated {
+            limit: None,
+            used: v
+                .pointer("/usage/completion_tokens")
+                .and_then(Value::as_u64)
+                .map(|o| o as usize),
         });
     }
 
@@ -464,11 +469,11 @@ mod tests {
     /// A truncated answer is worse than none: the caller would parse a half-finished unit
     /// as a whole one.
     #[test]
-    fn a_length_stop_is_a_context_error_not_a_completion() {
+    fn a_length_stop_is_a_truncation_not_a_completion() {
         let raw = r#"{"choices":[{"message":{"content":"half a un"},"finish_reason":"length"}]}"#;
         assert!(matches!(
             parse(raw, "m", 0, false),
-            Err(ProviderError::ContextExceeded { .. })
+            Err(ProviderError::Truncated { .. })
         ));
     }
 
@@ -590,7 +595,7 @@ mod strict_tests {
             "required": ["type", "gist"],
             "properties": {
                 "type":  { "enum": ["claim", "evidence"] },
-                "gist":  { "type": "string", "minLength": 1, "maxLength": 240 },
+                "gist":  { "type": "string", "minLength": 1, "maxLength": 120 },
                 "label": { "type": "string", "pattern": "^[a-z]+/[a-z]+$" },
                 "deps":  { "type": "array", "items": { "type": "string" } },
                 "source": {

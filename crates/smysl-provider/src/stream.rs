@@ -7,7 +7,9 @@
 //! The channel is the contract. What produces the messages - a blocking read loop today,
 //! a future tomorrow - is behind it.
 
-use std::sync::mpsc::{Receiver, Sender, TryRecvError};
+#[cfg(any(feature = "ollama", feature = "openai", feature = "deepseek", test))]
+use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, TryRecvError};
 
 use smysl_core::error::ProviderError;
 
@@ -126,11 +128,18 @@ impl Stream {
 }
 
 /// A sender that counts what it emitted, so a mapper does not have to.
+///
+/// Only the streaming mappers use it, so it compiles only with them. Ungated, a build with no
+/// streaming mapper — `--no-default-features --features ingest`, which a crate that builds its
+/// own units and never calls a model wants — failed under `-D warnings` on dead code here, and
+/// CI never built that combination to see it.
+#[cfg(any(feature = "ollama", feature = "openai", feature = "deepseek", test))]
 pub(crate) struct Emitter {
     tx: Sender<StreamMsg>,
     output_chars: usize,
 }
 
+#[cfg(any(feature = "ollama", feature = "openai", feature = "deepseek", test))]
 impl Emitter {
     pub fn new(tx: Sender<StreamMsg>) -> Emitter {
         Emitter {

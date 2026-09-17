@@ -70,23 +70,16 @@ it in*, not just which rule fired:
 `fixtures/corpus/F1-incident.smy` is the postmortem fixture used throughout
 this book: eight units arguing that a saturated connection pool in `eu-west`
 caused an auth-latency regression, with one canary reading that complicates
-the story. `c/pool-saturation` is the contested claim, and its uid — a real,
-resolved content hash, not a label — is what `--focus` takes:
+the story. `c/pool-saturation` is the contested claim, and `--focus` takes
+it by uid or by label:
 
 #callout(label: "Note")[
-  `--focus`, `--seed`, and similar flags take a *uid*, never a label. Labels
-  are a surface-file convenience for the person writing the `.smy` file; a
-  uid is the only identifier the store actually resolves. Passing a label
-  fails cleanly rather than silently doing the wrong thing:
-
-  #screen(caption: "$ smysl pack --budget 200 --focus c/pool-saturation fixtures/corpus/F1-incident.smy")[
-```
-smysl pack: `c/pool-saturation` is not a uid
-```
-  ]
-
-  Mine the real uid from `thread --show` (Chapter 20 covers it directly) or
-  `salience`, then pass that instead.
+  `--focus` and `--seed` accept a label as well as a uid. The store keeps
+  every label its source declared, as a binding from name to uid, and the
+  label is resolved to that uid before anything is packed — so the same
+  command with `--focus c/pool-saturation` produces exactly the output
+  below. Until 1.3 a label here failed with "is not a uid". A label the
+  store does not bind is still refused by name rather than guessed at.
 ]
 
 #screen(caption: "$ smysl --format surface pack --budget 200 --explain --focus b3:cvhirtgs2mpvli2ethhyeo32uf fixtures/corpus/F1-incident.smy")[

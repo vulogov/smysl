@@ -72,9 +72,9 @@ pub use smysl_core::{
     GranularityProfile, Group, Hlc, IdError, IntegrityError, KernelType, Label, LabelBinding,
     LangTag, Lod, NonDetReason, Op, Optimality, PackInfo, PackMode, ParseError, Record, RelKind,
     Relation, Report, Role, Rung, SchemaDecl, SchemaId, Severity, ShapeError, SourceKind,
-    SourceRef, Span, Status, Step, Subject, Thread, ThreadId, ThreadSchema, Uid, UidPrefix, Unit,
-    UnitCore, UnitCoreBuilder, View, ViewId, FORMAT_VERSIONS_SUPPORTED, FORMAT_VERSION_DEFAULT,
-    KERNEL_MAJOR, KERNEL_SCHEMA,
+    SourcePolicy, SourceRef, Span, Status, Step, Subject, Thread, ThreadId, ThreadSchema, Uid,
+    UidPrefix, Unit, UnitCore, UnitCoreBuilder, View, ViewId, FORMAT_VERSIONS_SUPPORTED,
+    FORMAT_VERSION_DEFAULT, KERNEL_MAJOR, KERNEL_SCHEMA,
 };
 
 // ---- check ----------------------------------------------------------------
@@ -108,14 +108,14 @@ pub use smysl_render::{
 pub use smysl_graph::compact::{compact, Compacted};
 pub use smysl_graph::relink::{relink, Relinked};
 pub use smysl_graph::{
-    closure, cycles, dependents, diff, effective_status, hop_diff, membership, merge,
-    plan_retraction, rebuttals_of, reverse_closure, salience, topo, trace, view_roots, Adjacency,
-    AgentActivity, AppendReport, Cached, DetectionContext, Edge, EdgeKind, EdgeSet,
-    EffectiveStatus, Entry, HopDiff, Index, IndexError, Lineage, LineageNode, MergeError,
-    MergeOptions, MergeReport, NodeId, OpenReport, RecipeChange, RecipeChangeKind,
-    RetractionAuthority, RetractionPlan, RetractionPolicy, SalienceReport, SalienceRequest,
-    SalienceTerms, SalienceWeights, Scratch, Store, StoreDiff, StoreOptions, SupersessionPolicy,
-    TopoOrder, TraceKind, Via,
+    closure, cycles, dependents, dependents_via, diff, effective_status, hop_diff, label_bindings,
+    membership, merge, plan_retraction, rebuttals_of, resolve_label, reverse_closure, salience,
+    topo, trace, view_roots, Adjacency, AgentActivity, AppendReport, Cached, DetectionContext,
+    Edge, EdgeKind, EdgeSet, EffectiveStatus, Entry, HopDiff, Index, IndexError, LabelError,
+    Lineage, LineageNode, MergeError, MergeOptions, MergeReport, NodeId, OpenReport, RecipeChange,
+    RecipeChangeKind, RetractionAuthority, RetractionPlan, RetractionPolicy, SalienceReport,
+    SalienceRequest, SalienceTerms, SalienceWeights, Scratch, Store, StoreDiff, StoreOptions,
+    SupersessionPolicy, TopoOrder, TraceKind, Via,
 };
 
 // ---- retrieve -------------------------------------------------------------
@@ -131,25 +131,41 @@ pub use smysl_retrieve::{tokenize as retrieve_tokenize, Bm25, Hit, Query, Retrie
 pub use smysl_embed::{Hybrid, Model as EmbedModel, Semantic};
 
 // ---- ingest / providers (feature-gated) -----------------------------------
-#[cfg(feature = "ingest")]
+#[cfg(feature = "stage")]
 pub use smysl_ingest::ceiling::ceiling;
 #[cfg(feature = "ingest")]
 pub use smysl_ingest::path::choose as choose_ingest_path;
-#[cfg(feature = "ingest")]
+#[cfg(feature = "stage")]
 pub use smysl_ingest::recipe::short as recipe_short;
 #[cfg(feature = "ingest")]
 pub use smysl_ingest::{
-    attest, stage, AttestOptions, AttestReport, IngestOptions, IngestPath, IngestReport, Ingestor,
-    Judgement, Staged, What, DEFAULT_REPAIR_ATTEMPTS,
+    attest, AttestOptions, AttestReport, IngestOptions, IngestPath, IngestReport, Ingestor,
+    Judgement, What, DEFAULT_REPAIR_ATTEMPTS,
 };
+#[cfg(feature = "stage")]
+pub use smysl_ingest::{stage, Staged};
 // `smysl import` is the only producer of `measured` units and the only unit-producing command
 // that consults no model. Until 0.13 `cmd_import` reached into `smysl_ingest::import` directly
 // and none of these three names was re-exported, so a consumer holding the facade could not do
 // what the command does — a rule A violation that stood because nothing checked rule A.
 // `Imported` is here because it is `from_csv`'s return type: without it the function is
 // callable and its result unnameable.
-#[cfg(feature = "ingest")]
+#[cfg(feature = "stage")]
 pub use smysl_ingest::import::{from_csv, ImportOptions, Imported};
+// A caller's own extraction prompt and schema. Here rather than left in the hidden `prompt`
+// module because the point of it is library use: a pipeline that wants its own question but
+// the quote check, rule T and staging that `ingest` applies to the answer. `resolve_prompt`,
+// which this replaces, was documented as a hook to override and could not be.
+#[cfg(feature = "ingest")]
+pub use smysl_ingest::prompt::PromptOverride;
+// The quote check, for a caller that builds units itself and sends them to `stage::prepare`
+// rather than through `Ingestor`. Without it the choice was reimplementing it — a second
+// definition of "loose" and "absent" drifting from the first. Its normalisation is stated in
+// full on `smysl_core::quote`, because it is now part of what a minor version may not change.
+// Ungated since 1.3: it does no I/O, so it lives in core and needs no feature.
+pub use smysl_core::quote::{
+    support as quote_support, support_in as quote_support_in, Support as QuoteSupport, QUOTE_KEY,
+};
 #[cfg(feature = "providers")]
 pub use smysl_provider::usage::{GroupBy, Totals};
 #[cfg(feature = "providers")]
@@ -181,7 +197,8 @@ mod tests {
         // threshold that does not exist and never did, and had sat "documented as
         // unreachable" for two releases — which is a holding pattern, not a decision. A code
         // nobody can trigger is worse than a missing one, because a reader waits for it.
-        assert_eq!(Code::ALL.len(), 51);
+        // 52 as of 1.3.0, with `SMY-W309`.
+        assert_eq!(Code::ALL.len(), 52);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 
@@ -195,7 +212,7 @@ mod tests {
     /// Written when the gate found `cmd_import` reaching into `smysl_ingest::import` for the
     /// CSV reader. `Imported` is named deliberately: it is `from_csv`'s return type, and
     /// re-exporting the function without it would leave the result unnameable.
-    #[cfg(feature = "ingest")]
+    #[cfg(feature = "stage")]
     #[test]
     fn the_import_capability_is_reachable_from_the_facade() {
         let agent = AgentId::new("tool:test").unwrap();
@@ -242,7 +259,7 @@ mod tests {
     /// manifest, and the diff will say what you decided.
     #[test]
     fn the_crate_version_is_the_one_we_intend_to_ship() {
-        assert_eq!(VERSION, "1.2.0");
+        assert_eq!(VERSION, "1.3.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two

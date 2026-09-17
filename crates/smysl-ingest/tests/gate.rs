@@ -29,8 +29,10 @@ struct Scripted {
     caps: Capabilities,
     answers: Mutex<Vec<Result<String, ProviderError>>>,
     calls: Arc<AtomicUsize>,
-    /// Every request the ingestor made, for asserting what was sent.
-    seen: Mutex<Vec<Request>>,
+    /// Every request the ingestor made, for asserting what was sent. Shared, because the
+    /// provider is moved into the registry; a plain `Mutex` recorded requests nobody could
+    /// ever read back.
+    seen: Arc<Mutex<Vec<Request>>>,
 }
 
 impl Scripted {
@@ -44,7 +46,7 @@ impl Scripted {
             caps,
             answers: Mutex::new(answers),
             calls: Arc::new(AtomicUsize::new(0)),
-            seen: Mutex::new(Vec::new()),
+            seen: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -105,6 +107,13 @@ fn registry(p: Scripted) -> (Registry, Arc<AtomicUsize>) {
             .route(Task::ContentIngest, id),
         calls,
     )
+}
+
+/// A registry, plus the requests its provider will receive.
+fn registry_seeing(p: Scripted) -> (Registry, Arc<AtomicUsize>, Arc<Mutex<Vec<Request>>>) {
+    let seen = Arc::clone(&p.seen);
+    let (r, calls) = registry(p);
+    (r, calls, seen)
 }
 
 fn opts(rung: Rung) -> IngestOptions {
@@ -271,6 +280,41 @@ fn a_provider_failure_degrades_without_spending_the_repair_budget() {
     assert!(!staged.is_empty());
     assert_eq!(report.degraded, report.chunks);
     assert_eq!(calls.load(Ordering::SeqCst), report.chunks, "one call each");
+}
+
+/// An answer cut off at the output limit was billed, and was reported as `0 call(s), 0
+/// token(s)` with "context window exceeded: 2032 > 2048". It is a call, its output tokens
+/// count, and the message names the limit that stopped it. An unreachable provider is still
+/// no call.
+#[test]
+fn an_error_the_provider_returned_is_a_call_and_says_which_limit() {
+    let truncated = ProviderError::Truncated {
+        limit: Some(2048),
+        used: Some(2032),
+    };
+    let (r, _) = registry(Scripted::new(vec![Err(truncated); 8]));
+    let (_, report) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), "one paragraph")
+        .expect("rule I");
+    assert_eq!(report.calls, 1);
+    assert_eq!(report.usage.output_tokens, 2032);
+    let w304 = report
+        .diagnostics
+        .iter()
+        .find(|d| d.code == Code::W304)
+        .expect("degraded");
+    assert!(
+        w304.message.contains("output limit of 2048"),
+        "{}",
+        w304.message
+    );
+    assert!(!w304.message.contains("context window"), "{}", w304.message);
+
+    let (r, _) = registry(Scripted::new(vec![Err(ProviderError::Unreachable); 8]));
+    let (_, report) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), "one paragraph")
+        .expect("rule I");
+    assert_eq!(report.calls, 0, "nothing reached a provider");
 }
 
 /// The repair loop is a loop: an answer that fixes itself on the second turn is accepted,
@@ -809,4 +853,862 @@ fn an_elided_quote_warns_without_spending_the_budget() {
         "an elision cost a repair turn"
     );
     assert_eq!(staged.len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// A caller's own prompt and schema
+// ---------------------------------------------------------------------------
+
+/// The override is what is sent — and nothing after the model is weakened by it.
+///
+/// This is the whole case for an override over a separate extraction script: the caller
+/// chooses the question, and the answer still meets the quote check, rule T and staging. So
+/// the test scripts an answer that would trip both — a fabricated quote and a laundered
+/// `measured` — and asserts they are still caught under the caller's prompt.
+#[test]
+fn a_prompt_override_is_what_is_sent_and_every_check_after_the_model_still_runs() {
+    let schema = smysl_ingest::schema::batch_schema().replace("unit batch", "decision batch");
+    let override_ = smysl_ingest::prompt::PromptOverride::new("test.extract", 2)
+        .with_system("SYSTEM-OVERRIDE: extract decisions.")
+        .with_user("USER-OVERRIDE\n{input}")
+        .with_schema(schema.clone());
+
+    let answer = r#"{"units":[
+        {"type":"decision","label":"d/pool","gist":"the pool wait rose with latency",
+         "status":"cited","source":{"kind":"doc","ref":"notes"},
+         "quote":"Connection pool wait time rose alongside request latency."},
+        {"type":"evidence","label":"e/made-up","gist":"a quote nobody wrote",
+         "status":"measured","source":{"kind":"metric","ref":"p95"},
+         "quote":"The shard was replaced by a new cluster on Friday."}]}"#;
+
+    // Long enough that `auto` would choose the surface path on size alone — which is the case
+    // the override has to change. With the short DOCUMENT, auto picked json-ast anyway, and the
+    // assertion that the override moved it there passed with that code deleted.
+    let long = format!(
+        "{DOCUMENT}\n\n{}",
+        "Filler that pushes the input past the threshold. ".repeat(200)
+    );
+    assert!(long.len() > smysl_ingest::path::SMALL_OUTPUT_THRESHOLD);
+    let (r, _, seen) = registry_seeing(Scripted::saying(answer).with_context(1 << 20));
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Model).with_prompt(override_.clone()))
+        .ingest(&Store::new(), &long)
+        .expect("a valid override ingests");
+
+    // What was sent.
+    // The extraction request carries the caller's prompt. Later requests are repair turns —
+    // the fabricated quote earns one — and repair is its own template, so they are held only
+    // to the schema, which they must carry: a repair answer is converted exactly as the first
+    // one was, and a repair asked against the kernel's schema would be answering a different
+    // question from the one the caller configured.
+    let requests = seen.lock().unwrap();
+    let first = requests.first().expect("at least one call");
+    assert!(
+        first.system.contains("SYSTEM-OVERRIDE"),
+        "system: {}",
+        first.system
+    );
+    let user = &first.messages.last().expect("a user turn").content;
+    assert!(user.starts_with("USER-OVERRIDE"), "user: {user}");
+    assert!(
+        user.contains("Connection pool wait"),
+        "the document reached the model"
+    );
+    assert!(
+        requests.len() > 1,
+        "the fabricated quote should have cost a repair turn"
+    );
+    for (i, req) in requests.iter().enumerate() {
+        assert_eq!(
+            req.schema.as_deref(),
+            Some(schema.as_str()),
+            "request {i}: the caller's schema"
+        );
+    }
+    drop(requests);
+    assert_eq!(
+        report.path,
+        Some(IngestPath::JsonAst),
+        "a schema only has a channel on json-ast, so auto moves there"
+    );
+
+    // What still ran.
+    assert!(
+        report.diagnostics.iter().any(|d| d.code == Code::E307),
+        "the quote check did not run under the override: {:?}",
+        report.diagnostics
+    );
+    assert!(
+        report.diagnostics.iter().any(|d| d.code == Code::E033),
+        "rule T did not run under the override"
+    );
+    assert!(!staged.is_empty(), "staging produced nothing");
+    for u in &staged.units {
+        assert!(
+            u.status <= Status::Inferred,
+            "{} escaped the model ceiling",
+            u.gist
+        );
+    }
+
+    // And the recipe is not the built-in one's.
+    let (r2, _) = registry(Scripted::saying(answer).with_context(1 << 20));
+    let (_, plain) = Ingestor::new(&r2, opts(Rung::Model).with_path(IngestPath::JsonAst))
+        .ingest(&Store::new(), &long)
+        .unwrap();
+    assert!(report.recipe.is_some());
+    assert_ne!(
+        report.recipe, plain.recipe,
+        "an override must not share the built-in recipe"
+    );
+}
+
+/// Ingest asks for what the provider is configured to produce. It asked for 2,048 always, and a
+/// live json-ast answer of a dozen units was cut off at `MAX_TOKENS` under a configuration that
+/// allowed 8,192.
+#[test]
+fn ingest_asks_for_the_providers_configured_output() {
+    let answer =
+        r#"{"units":[{"type":"claim","gist":"the pool saturated","status":"speculative"}]}"#;
+    let sent = |configured: usize, o: IngestOptions| {
+        let mut p = Scripted::saying(answer);
+        p.caps.max_output = configured;
+        let (r, _, seen) = registry_seeing(p);
+        Ingestor::new(&r, o)
+            .ingest(&Store::new(), "one paragraph")
+            .unwrap();
+        let n = seen.lock().unwrap()[0].max_output;
+        n
+    };
+    assert_eq!(sent(8192, opts(Rung::Document)), 8192, "the configuration");
+    assert_eq!(
+        sent(1024, opts(Rung::Document)),
+        smysl_ingest::DEFAULT_MAX_OUTPUT,
+        "never less than before"
+    );
+    assert_eq!(
+        sent(8192, opts(Rung::Document).with_max_output(512)),
+        512,
+        "a caller's own budget as given"
+    );
+}
+
+/// A bad override is a configuration mistake, and it costs nothing: no call is made.
+#[test]
+fn a_bad_override_is_refused_before_any_call_is_made() {
+    use smysl_ingest::prompt::PromptOverride;
+    let schema = smysl_ingest::schema::batch_schema();
+    let cases = [
+        (
+            "a reserved id",
+            opts(Rung::Document)
+                .with_prompt(PromptOverride::new("ingest.content.json", 1).with_user("{input}")),
+        ),
+        (
+            "a user prompt without the document",
+            opts(Rung::Document)
+                .with_prompt(PromptOverride::new("x.extract", 1).with_user("Commit:")),
+        ),
+        (
+            "a schema on a forced surface path",
+            opts(Rung::Document)
+                .with_path(IngestPath::Surface)
+                .with_prompt(PromptOverride::new("x.extract", 1).with_schema(schema)),
+        ),
+    ];
+    for (what, o) in cases {
+        let (r, calls) = registry(Scripted::saying("{}"));
+        let out = Ingestor::new(&r, o).ingest(&Store::new(), DOCUMENT);
+        assert!(
+            matches!(out, Err(ProviderError::Config(_))),
+            "{what}: {:?}",
+            out.err()
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "{what}: a call was made anyway"
+        );
+    }
+}
+
+/// `--granularity` names a preset or is refused, before a call. It was only ever hashed into
+/// the recipe, so `bogus` ran and produced a recipe no real run shared.
+#[test]
+fn an_unknown_granularity_is_refused_and_a_preset_keeps_its_recipe() {
+    let (r, calls) = registry(Scripted::saying("{}"));
+    let out = Ingestor::new(&r, opts(Rung::Document).with_granularity("bogus"))
+        .ingest(&Store::new(), DOCUMENT);
+    match out {
+        Err(ProviderError::Config(m)) => assert!(m.contains("`bogus`"), "{m}"),
+        other => panic!("{:?}", other.err()),
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    // The default is still `standard`, still accepted, and still hashed as written: a
+    // recipe recorded before this check is the recipe the same run records now.
+    let answer =
+        r#"{"units":[{"type":"claim","gist":"the pool saturated","status":"speculative"}]}"#;
+    let recipe = |g: &str| {
+        let (r, _) = registry(Scripted::saying(answer));
+        let (_, report) = Ingestor::new(&r, opts(Rung::Document).with_granularity(g))
+            .ingest(&Store::new(), DOCUMENT)
+            .expect(g);
+        report.recipe.expect("a recipe")
+    };
+    assert_eq!(IngestOptions::default().granularity, "standard");
+    let (r, _) = registry(Scripted::saying(answer));
+    let (_, default_run) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), DOCUMENT)
+        .unwrap();
+    assert_eq!(default_run.recipe, Some(recipe("standard")));
+    assert_ne!(recipe("standard"), recipe("default"), "hashed as written");
+    for g in ["coarse", "fine"] {
+        recipe(g);
+    }
+    assert_eq!(
+        opts(Rung::Document)
+            .with_granularity("standard")
+            .granularity_profile(),
+        Ok(smysl_core::GranularityProfile::standard())
+    );
+}
+
+/// The repair turn for a malformed label says what a label is.
+///
+/// Observed with Gemini flash-lite on the surface path: labels like `claim-nodejs-c-produce`
+/// failed all three repair attempts and the commit degraded to one prose unit. The template
+/// never said what a label looks like and the diagnostic only said "malformed", so each repair
+/// turn told the model it was wrong and not what right was. This asserts the information now
+/// reaches the model — in the first prompt and in the repair — and that an answer which acts
+/// on it stages instead of degrading. Whether a given model acts on it is `providers_live.rs`.
+#[test]
+fn a_malformed_label_repair_carries_the_label_format_and_a_candidate() {
+    let bad =
+        "@decision claim-nodejs-c-produce { status: speculative }\n~ nodejs reaches C-Produce.\n";
+    let good =
+        "@decision d/nodejs-c-produce { status: speculative }\n~ nodejs reaches C-Produce.\n";
+    let (r, _, seen) = registry_seeing(
+        Scripted::new(vec![Ok(bad.to_string()), Ok(good.to_string())]).unstructured(),
+    );
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document).with_path(IngestPath::Surface))
+        .ingest(&Store::new(), DOCUMENT)
+        .expect("ingests");
+
+    let requests = seen.lock().unwrap();
+    assert_eq!(requests.len(), 2, "one extraction, one repair");
+    assert!(
+        requests[0].system.contains("kind/name"),
+        "the first prompt never says what a label is"
+    );
+    let repair = &requests[1].messages.last().unwrap().content;
+    assert!(
+        repair.contains("kind/name"),
+        "the repair names no format:\n{repair}"
+    );
+    assert!(
+        repair.contains("claim/nodejs-c-produce"),
+        "the repair offers no candidate:\n{repair}"
+    );
+    drop(requests);
+
+    assert_eq!(
+        report.degraded, 0,
+        "an answer that acted on the repair still degraded"
+    );
+    assert!(
+        staged.units.iter().any(|u| u.gist.contains("C-Produce")),
+        "the repaired unit was not staged"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The repair turn (R1 from rust_smysl)
+// ---------------------------------------------------------------------------
+
+/// A `cited` record with no source: the E032 that started every failure in R1.
+const CITED_NO_SOURCE: &str =
+    "@claim c/nodejs-c-produce { status: cited }\n~ nodejs reaches C-Produce.\n";
+
+const REPAIRED: &str =
+    "@claim c/nodejs-c-produce { status: speculative }\n~ nodejs reaches C-Produce.\n";
+
+/// The model echoes the marker it was shown around the previous answer, and the answer still
+/// parses. Observed with Gemini flash-lite in 3 of 3 samples: the corrected answer began with
+/// `<<<SMYSL-INPUT>>>`, 17 bytes, which became `SMY-E001: stray Text outside a record (at 0..17)`
+/// and cost the chunk. A boundary that already tolerates CRLF can tolerate an echoed fence.
+#[test]
+fn a_repair_answer_that_echoes_the_marker_still_parses() {
+    let echoed = format!("<<<SMYSL-INPUT>>>\n{REPAIRED}<<<SMYSL-INPUT>>>\n");
+    let (r, _) =
+        registry(Scripted::new(vec![Ok(CITED_NO_SOURCE.to_string()), Ok(echoed)]).unstructured());
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document).with_path(IngestPath::Surface))
+        .ingest(&Store::new(), DOCUMENT)
+        .expect("ingests");
+    assert_eq!(report.degraded, 0, "{:?}", report.diagnostics);
+    assert!(
+        !report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("stray")),
+        "the echoed marker was parsed as text: {:?}",
+        report.diagnostics
+    );
+    assert!(staged.units.iter().any(|u| u.gist.contains("C-Produce")));
+}
+
+/// The repair request still carries the rules the model broke.
+///
+/// The repair template replaced the system prompt, so the model fixing an E032 no longer saw
+/// "Never `measured`" — and in 3 of 3 samples raised every `cited` to `measured`, the easiest
+/// edit that looks like a fix. It also dropped a caller's prompt override.
+#[test]
+fn the_repair_request_keeps_the_content_rules_in_front_of_the_model() {
+    let (r, _, seen) = registry_seeing(
+        Scripted::new(vec![
+            Ok(CITED_NO_SOURCE.to_string()),
+            Ok(REPAIRED.to_string()),
+        ])
+        .unstructured(),
+    );
+    Ingestor::new(&r, opts(Rung::Document).with_path(IngestPath::Surface))
+        .ingest(&Store::new(), DOCUMENT)
+        .expect("ingests");
+    let requests = seen.lock().unwrap();
+    assert_eq!(requests.len(), 2, "one extraction, one repair");
+    let repair = &requests[1];
+    assert!(
+        repair.system.contains("kind/name"),
+        "label format missing from the repair turn"
+    );
+    assert!(
+        repair.system.contains("Never `measured`"),
+        "status rules missing from the repair turn"
+    );
+    let user = &repair.messages.last().unwrap().content;
+    assert!(
+        !user.contains("<<<SMYSL-INPUT>>>"),
+        "the previous answer is fenced with the input marker, which the model copies:\n{user}"
+    );
+    // And the E032 suggestion lowers, never raises.
+    assert!(user.contains("SMY-E032"), "{user}");
+    assert!(
+        user.contains("speculative"),
+        "the suggestion does not offer a lower status:\n{user}"
+    );
+}
+
+/// A degraded chunk reports what went wrong first, not only what the last repair broke.
+#[test]
+fn a_degraded_chunk_reports_every_attempts_errors() {
+    let (r, _) = registry(
+        Scripted::new(vec![
+            Ok(CITED_NO_SOURCE.to_string()),
+            Ok("stray words, not a record\n".to_string()),
+        ])
+        .unstructured(),
+    );
+    let (_, report) = Ingestor::new(&r, opts(Rung::Document).with_path(IngestPath::Surface))
+        .ingest(&Store::new(), DOCUMENT)
+        .expect("ingests");
+    assert_eq!(report.degraded, 1);
+    let e032: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == Code::E032)
+        .collect();
+    assert!(
+        !e032.is_empty(),
+        "the first attempt's cause is gone: {:?}",
+        report.diagnostics
+    );
+    assert!(
+        e032[0].message.contains("attempt 1"),
+        "not marked by attempt: {}",
+        e032[0].message
+    );
+}
+
+const LONG_GIST: &str = "the connection pool on the eu-west shard saturated on Thursday \
+    afternoon because the retry storm from the payment service held every connection open far \
+    longer than the configured idle timeout allowed and nothing shed load";
+
+/// An answer whose only defect is one over-long gist, repeated through every repair turn.
+fn long_gist_answer() -> String {
+    format!(
+        r#"{{"units":[
+            {{"type":"observation","label":"o/latency","gist":"p95 rose to 410ms",
+              "status":"speculative"}},
+            {{"type":"claim","label":"c/pool","gist":"{LONG_GIST}","status":"speculative"}},
+            {{"type":"claim","label":"c/fix","gist":"raising the pool size would help",
+              "status":"speculative","grounds":["c/pool"]}},
+            {{"type":"claim","label":"c/canary","gist":"the canary shard stayed clean",
+              "status":"speculative"}}],
+          "relations":[
+            {{"kind":"causes","from":"c/pool","to":"o/latency"}},
+            {{"kind":"rebuts","from":"c/canary","to":"o/latency"}}]}}"#
+    )
+}
+
+/// One gist a few tokens over `l0_max` cost a live run all 16 of its valid units: rule I
+/// degraded the span, and a model cannot count tokens the way the estimator does, so three
+/// repair turns did not help. The defect is the unit's own, so the unit degrades — with what
+/// rests on it — and its siblings are staged as written.
+#[test]
+fn an_over_long_gist_degrades_its_unit_and_keeps_the_siblings() {
+    let (r, calls, seen) = registry_seeing(Scripted::saying(&long_gist_answer()));
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), "one paragraph")
+        .expect("ingests");
+
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        3,
+        "the repair budget was spent"
+    );
+    assert_eq!(
+        report.degraded, 2,
+        "the long unit and the unit grounded on it"
+    );
+
+    let gists: Vec<&str> = staged.units.iter().map(|u| u.gist.as_str()).collect();
+    assert!(gists.contains(&"p95 rose to 410ms"), "{gists:?}");
+    assert!(
+        gists.contains(&"the canary shard stayed clean"),
+        "{gists:?}"
+    );
+    let prose: Vec<_> = staged
+        .units
+        .iter()
+        .filter(|u| repair::is_unrepaired(u))
+        .collect();
+    assert_eq!(prose.len(), 2, "{gists:?}");
+    for u in &prose {
+        assert_eq!(u.schema.kernel(), Some(KernelType::Prose));
+    }
+    assert!(
+        prose.iter().any(|u| u.body.as_deref() == Some(LONG_GIST)),
+        "the long gist is kept verbatim in its prose unit"
+    );
+
+    // The edge from the degraded unit is gone, the edge between kept units is not.
+    assert_eq!(staged.relations.len(), 1);
+    assert_eq!(staged.relations[0].kind.as_str(), "rebuts");
+    let names: Vec<String> = staged.labels.keys().map(|l| l.to_string()).collect();
+    assert_eq!(names, ["c/canary", "o/latency"]);
+
+    assert_eq!(
+        report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == Code::W304)
+            .count(),
+        2
+    );
+    assert!(
+        staged.report.fail_on(Severity::Error).is_ok(),
+        "{:?}",
+        staged.report
+    );
+
+    // The repair turn said by how much: the count and the limit, not only "too long".
+    let requests = seen.lock().unwrap();
+    let repair = &requests[1].messages.last().unwrap().content;
+    assert!(
+        repair.contains("SMY-E022") && repair.contains("allows 30"),
+        "{repair}"
+    );
+}
+
+/// Salvage is for defects that belong to one unit. Beside anything else — here a `cited`
+/// unit with no source — the answer is not trusted piecemeal and the span degrades whole.
+#[test]
+fn an_over_long_gist_beside_another_error_still_degrades_the_chunk() {
+    let answer = format!(
+        r#"{{"units":[
+            {{"type":"claim","label":"c/pool","gist":"{LONG_GIST}","status":"speculative"}},
+            {{"type":"claim","label":"c/cited","gist":"the pool saturated","status":"cited"}},
+            {{"type":"claim","label":"c/canary","gist":"the canary shard stayed clean",
+              "status":"speculative"}}]}}"#
+    );
+    let (r, _) = registry(Scripted::saying(&answer));
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), "one paragraph")
+        .expect("ingests");
+    assert_eq!(report.degraded, 1);
+    assert_eq!(staged.units.len(), 1);
+    assert!(repair::is_unrepaired(&staged.units[0]));
+}
+
+// ---------------------------------------------------------------------------
+// The surface template (R2 from rust_smysl)
+// ---------------------------------------------------------------------------
+
+/// The surface template shows how to write a source and a quote.
+///
+/// Version 2 said "a `cited` record needs a source" and gave `@<type> <label> { status: … }` as
+/// its only example, so flash-lite wrote every record `cited` with no source, every record
+/// failed `SMY-E032`, and R1's repair spiral began there.
+#[test]
+fn the_surface_template_shows_a_source_and_a_quote() {
+    let t = smysl_ingest::prompt::content_ingest_surface();
+    assert!(
+        t.system.contains("source: { kind: doc, ref:"),
+        "no source example:\n{}",
+        t.system
+    );
+    assert!(
+        t.system.contains("\"ingest:quote\":"),
+        "no quote example:\n{}",
+        t.system
+    );
+    assert!(
+        t.system.contains("`inferred` with grounds") && t.system.contains("`speculative`"),
+        "no instruction for a record with no nameable source:\n{}",
+        t.system
+    );
+}
+
+/// A surface answer cannot attribute text that is not in the document.
+///
+/// Observed: "blake3.js is a hand-rolled binding to the same C library as Rust", from a commit
+/// saying a binding was *rejected* for exactly that reason. On json-ast a unit carries a quote
+/// the boundary checks; the surface path asked for none, so nothing checked this one.
+#[test]
+fn a_fabricated_quote_on_the_surface_path_is_e307_as_on_json_ast() {
+    let fabricated = "@claim c/shard { status: speculative, \"ingest:quote\": \"The shard was replaced by a new cluster.\" }\n~ The shard was replaced.\n";
+    let genuine = "@claim c/shard { status: speculative, \"ingest:quote\": \"Connection pool wait time rose alongside request latency.\" }\n~ Pool wait rose with latency.\n";
+
+    let (r, _) = registry(Scripted::saying(fabricated).unstructured());
+    let (_, report) = Ingestor::new(&r, opts(Rung::Document).with_path(IngestPath::Surface))
+        .ingest(&Store::new(), DOCUMENT)
+        .expect("ingests");
+    assert!(
+        report.diagnostics.iter().any(|d| d.code == Code::E307),
+        "a fabricated surface quote passed: {:?}",
+        report.diagnostics
+    );
+
+    let (r, _) = registry(Scripted::saying(genuine).unstructured());
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document).with_path(IngestPath::Surface))
+        .ingest(&Store::new(), DOCUMENT)
+        .expect("ingests");
+    assert!(
+        !report.diagnostics.iter().any(|d| d.code == Code::E307),
+        "{:?}",
+        report.diagnostics
+    );
+    assert_eq!(report.degraded, 0);
+    assert!(!staged.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// A caller-supplied source (R3 from rust_smysl)
+// ---------------------------------------------------------------------------
+
+fn commit_source() -> smysl_core::SourceRef {
+    smysl_core::SourceRef::new(smysl_core::SourceKind::Doc, "git:4968383")
+}
+
+/// The same unit on each path: `cited`, and with or without a source of the model's own.
+fn answers(model_source: bool) -> [(IngestPath, String); 2] {
+    let surface_src = if model_source {
+        ", source: { kind: file, ref: \"CHANGELOG.md\" }"
+    } else {
+        ""
+    };
+    let json_src = if model_source {
+        r#","source":{"kind":"file","ref":"CHANGELOG.md"}"#
+    } else {
+        ""
+    };
+    [
+        (
+            IngestPath::Surface,
+            format!(
+                "@claim c/nodejs {{ status: cited{surface_src} }}\n~ nodejs reaches C-Produce.\n"
+            ),
+        ),
+        (
+            IngestPath::JsonAst,
+            format!(
+                r#"{{"units":[{{"type":"claim","label":"c/nodejs","gist":"nodejs reaches C-Produce.","status":"cited"{json_src}}}]}}"#
+            ),
+        ),
+    ]
+}
+
+/// The uid the unit has when authored with the caller's source — what staging must produce.
+fn expected_uid() -> smysl_core::Uid {
+    let core = UnitCore::new({
+        let mut b = smysl_core::UnitCoreBuilder::new(
+            KernelType::Claim,
+            "nodejs reaches C-Produce.",
+            Status::Cited,
+        );
+        b.source = Some(commit_source());
+        b
+    })
+    .unwrap();
+    smysl_core::canonical_uid(&core)
+}
+
+/// `FillMissing`: a `cited` unit the model gave no source stages with the caller's.
+#[test]
+fn a_caller_source_fills_a_missing_one_on_both_paths() {
+    for (path, answer) in answers(false) {
+        let p = if path == IngestPath::Surface {
+            Scripted::saying(&answer).unstructured()
+        } else {
+            Scripted::saying(&answer)
+        };
+        let (r, _) = registry(p);
+        let o = opts(Rung::Document)
+            .with_path(path)
+            .with_source(commit_source(), smysl_ingest::SourcePolicy::FillMissing);
+        let (staged, report) = Ingestor::new(&r, o)
+            .ingest(&Store::new(), DOCUMENT)
+            .unwrap();
+        assert!(
+            !report.diagnostics.iter().any(|d| d.code == Code::E032),
+            "{path}: {:?}",
+            report.diagnostics
+        );
+        assert_eq!(report.degraded, 0, "{path}");
+        let u = staged
+            .units
+            .iter()
+            .find(|u| u.gist.contains("C-Produce"))
+            .expect("staged");
+        assert_eq!(u.status, Status::Cited, "{path}");
+        assert_eq!(u.source.as_ref(), Some(&commit_source()), "{path}");
+        assert_eq!(smysl_core::canonical_uid(u), expected_uid(), "{path}");
+    }
+}
+
+/// `FillMissing` leaves a model's own source alone.
+#[test]
+fn fill_missing_does_not_replace_a_source_the_model_gave() {
+    for (path, answer) in answers(true) {
+        let p = if path == IngestPath::Surface {
+            Scripted::saying(&answer).unstructured()
+        } else {
+            Scripted::saying(&answer)
+        };
+        let (r, _) = registry(p);
+        let o = opts(Rung::Document)
+            .with_path(path)
+            .with_source(commit_source(), smysl_ingest::SourcePolicy::FillMissing);
+        let (staged, _) = Ingestor::new(&r, o)
+            .ingest(&Store::new(), DOCUMENT)
+            .unwrap();
+        let u = staged
+            .units
+            .iter()
+            .find(|u| u.gist.contains("C-Produce"))
+            .unwrap();
+        assert_eq!(
+            u.source.as_ref().unwrap().reference,
+            "CHANGELOG.md",
+            "{path}"
+        );
+    }
+}
+
+/// `Override`: the model's source is replaced, said so by name, and the uid is the caller's.
+///
+/// `source` is inside the uid, so it has to be applied before the unit is built — patched
+/// afterwards, identities would move under the report.
+#[test]
+fn a_caller_source_overrides_the_models_and_says_so() {
+    for (path, answer) in answers(true) {
+        let p = if path == IngestPath::Surface {
+            Scripted::saying(&answer).unstructured()
+        } else {
+            Scripted::saying(&answer)
+        };
+        let (r, _) = registry(p);
+        let o = opts(Rung::Document)
+            .with_path(path)
+            .with_source(commit_source(), smysl_ingest::SourcePolicy::Override);
+        let (staged, report) = Ingestor::new(&r, o)
+            .ingest(&Store::new(), DOCUMENT)
+            .unwrap();
+        let u = staged
+            .units
+            .iter()
+            .find(|u| u.gist.contains("C-Produce"))
+            .unwrap();
+        assert_eq!(u.source.as_ref(), Some(&commit_source()), "{path}");
+        assert_eq!(smysl_core::canonical_uid(u), expected_uid(), "{path}");
+        let w = report
+            .diagnostics
+            .iter()
+            .find(|d| d.code == Code::W309)
+            .unwrap_or_else(|| panic!("{path}: no warning: {:?}", report.diagnostics));
+        assert!(
+            w.message.contains("c/nodejs") && w.message.contains("CHANGELOG.md"),
+            "{path}: {}",
+            w.message
+        );
+    }
+}
+
+/// The source is part of what the model was asked under, so it is part of the recipe.
+#[test]
+fn a_caller_source_changes_the_recipe() {
+    let (_, answer) = answers(false)[1].clone();
+    let run = |o: IngestOptions| {
+        let (r, _) = registry(Scripted::saying(&answer));
+        Ingestor::new(&r, o.with_path(IngestPath::JsonAst))
+            .ingest(&Store::new(), DOCUMENT)
+            .unwrap()
+            .1
+            .recipe
+    };
+    let plain = run(opts(Rung::Document));
+    let filled =
+        run(opts(Rung::Document)
+            .with_source(commit_source(), smysl_ingest::SourcePolicy::FillMissing));
+    let overridden = run(
+        opts(Rung::Document).with_source(commit_source(), smysl_ingest::SourcePolicy::Override)
+    );
+    assert_ne!(plain, filled);
+    assert_ne!(filled, overridden, "the policy is a condition too");
+}
+
+// ---------------------------------------------------------------------------
+// Labels survive staging
+// ---------------------------------------------------------------------------
+
+/// The labels a model wrote reach the staged batch, and follow their units when rule T moves them.
+///
+/// `ingest` passed `stage::prepare` an empty label map, so every staged unit was unnamed: the
+/// live R1 run staged 28 units and none had a label. 1.3 lets commands take a label, and that did
+/// not work for anything that came through `ingest`.
+#[test]
+fn a_models_labels_are_staged_on_both_paths_and_follow_the_cap() {
+    let answers = [
+        (
+            IngestPath::Surface,
+            "@claim c/pool { status: speculative }\n~ The pool saturated.\n\n\
+             @evidence e/p95 { status: measured, source: { kind: metric, ref: \"p95\" } }\n~ p95 rose to 410ms.\n"
+                .to_string(),
+        ),
+        (
+            IngestPath::JsonAst,
+            r#"{"units":[
+                {"type":"claim","label":"c/pool","gist":"The pool saturated.","status":"speculative"},
+                {"type":"evidence","label":"e/p95","gist":"p95 rose to 410ms.","status":"measured","source":{"kind":"metric","ref":"p95"}}]}"#
+                .to_string(),
+        ),
+    ];
+    for (path, answer) in answers {
+        let p = if path == IngestPath::Surface {
+            Scripted::saying(&answer).unstructured()
+        } else {
+            Scripted::saying(&answer)
+        };
+        let (r, _) = registry(p);
+        let (staged, _) = Ingestor::new(&r, opts(Rung::Document).with_path(path))
+            .ingest(&Store::new(), DOCUMENT)
+            .unwrap();
+        let names: Vec<&str> = staged.labels.keys().map(|l| l.as_str()).collect();
+        assert_eq!(names, vec!["c/pool", "e/p95"], "{path}");
+        for (label, uid) in &staged.labels {
+            assert!(
+                staged.units.iter().any(|u| smysl_core::canonical_uid(u) == *uid),
+                "{path}: `{label}` names a uid no staged unit has — the cap moved it and the label stayed"
+            );
+        }
+        assert!(
+            staged.to_surface().contains("@evidence e/p95"),
+            "{path}: the staged file drops the name"
+        );
+    }
+}
+
+/// Two chunks that give one label to different units: the first keeps it, and it is said.
+///
+/// A model names units per chunk and cannot see the others. Resolving by the last chunk would
+/// move a name silently, which is the label ambiguity R5 refuses at the command line.
+#[test]
+fn a_label_reused_across_chunks_stays_with_the_first_unit_and_is_reported() {
+    let long = (0..30)
+        .map(|i| format!("Paragraph {i} of a document long enough to chunk several times over."))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let first = r#"{"units":[{"type":"claim","label":"c/x","gist":"the first chunk's claim","status":"speculative"}]}"#;
+    let later = r#"{"units":[{"type":"claim","label":"c/x","gist":"a later chunk's different claim","status":"speculative"}]}"#;
+    let mut answers = vec![Ok(first.to_string())];
+    answers.extend((0..40).map(|_| Ok(later.to_string())));
+    let (r, _) = registry(Scripted::new(answers).with_context(1400));
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document).with_max_output(64))
+        .ingest(&Store::new(), &long)
+        .unwrap();
+    assert!(report.chunks > 1, "the fixture must actually chunk");
+
+    let owner = staged.labels[&smysl_core::Label::new("c/x").unwrap()];
+    let owner_unit = staged
+        .units
+        .iter()
+        .find(|u| smysl_core::canonical_uid(u) == owner)
+        .unwrap();
+    assert_eq!(owner_unit.gist, "the first chunk's claim");
+    assert!(
+        report.diagnostics.iter().any(|d| d.code == Code::W054),
+        "the collision was not reported: {:?}",
+        report.diagnostics
+    );
+}
+
+/// With a caller-supplied source the model is not asked for provenance, on either path, and the
+/// json-ast schema does not force it to write one.
+///
+/// Appendix C's schema requires a `source` for `cited`, and an enforcing provider applies that
+/// while decoding. With it in place a model must write a source it cannot know, and the policy's
+/// `FillMissing` keeps the invention — the live R1 run's `ref: the input document` by another route.
+#[test]
+fn a_caller_source_selects_the_sourced_template_and_schema() {
+    for path in [IngestPath::Surface, IngestPath::JsonAst] {
+        let p = if path == IngestPath::Surface {
+            Scripted::saying(REPAIRED).unstructured()
+        } else {
+            Scripted::saying(r#"{"units":[]}"#)
+        };
+        let (r, _, seen) = registry_seeing(p);
+        let o = opts(Rung::Document)
+            .with_path(path)
+            .with_source(commit_source(), smysl_ingest::SourcePolicy::FillMissing);
+        let (_, report) = Ingestor::new(&r, o)
+            .ingest(&Store::new(), DOCUMENT)
+            .unwrap();
+        let req = &seen.lock().unwrap()[0];
+        assert!(
+            req.system
+                .contains("recorded for you, so do not write a `source`"),
+            "{path}: {}",
+            req.system
+        );
+        if path == IngestPath::JsonAst {
+            let schema = req.schema.as_deref().expect("an enforced schema");
+            assert!(
+                !schema.contains(r#""enum": ["measured", "cited"]"#),
+                "{path}: the schema still requires a source for cited"
+            );
+        }
+        assert_ne!(report.recipe, None);
+    }
+
+    // And without one, the unsourced template and the full schema, as before.
+    let (r, _, seen) = registry_seeing(Scripted::saying(r#"{"units":[]}"#));
+    Ingestor::new(&r, opts(Rung::Document).with_path(IngestPath::JsonAst))
+        .ingest(&Store::new(), DOCUMENT)
+        .unwrap();
+    let req = &seen.lock().unwrap()[0];
+    assert!(!req.system.contains("recorded for you"));
+    assert!(req
+        .schema
+        .as_deref()
+        .unwrap()
+        .contains(r#""enum": ["measured", "cited"]"#));
 }

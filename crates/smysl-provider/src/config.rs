@@ -87,6 +87,20 @@ pub struct Config {
     pub providers: BTreeMap<ProviderId, ProviderConfig>,
     pub routing: BTreeMap<Task, ProviderId>,
     pub fallback: Vec<ProviderId>,
+    /// `ingest: { prompt: "prompts/extract.hjson" }` — a prompt override file for `ingest`,
+    /// relative to the project. Held as a path and read by the caller, so a missing or invalid
+    /// file is reported by the command that would use it rather than by every command that
+    /// loads the configuration.
+    pub ingest_prompt: Option<String>,
+    /// `ingest: { path: json-ast }` — the ingest path to use when `--path` is not given: one of
+    /// `auto`, `surface` or `json-ast`.
+    ///
+    /// For a project whose provider does well on one path and badly on the other. Gemini
+    /// flash-lite on the surface path wrote labels without the `/` and degraded whole commits
+    /// to prose, while the same inputs on json-ast — where the schema's label pattern is enforced
+    /// during decoding — converted cleanly. A flag on every invocation is the wrong place for a
+    /// fact about the project's provider.
+    pub ingest_path: Option<String>,
 }
 
 impl Config {
@@ -94,7 +108,7 @@ impl Config {
     pub fn load(src: &str) -> Result<Config, ProviderError> {
         let brace = src.find('{').unwrap_or(0);
         let obj = parse_object_prefix(&src[brace..], 0)
-            .map_err(|e| ProviderError::Malformed(format!("config: {e}")))?
+            .map_err(|e| ProviderError::Config(format!("config: {e}")))?
             .value;
 
         let mut cfg = Config::default();
@@ -102,10 +116,10 @@ impl Config {
         if let Some(ps) = obj.get("providers").and_then(|v| v.value.as_object()) {
             for (name, body) in ps.iter() {
                 let id = ProviderId::new(name.value.clone()).ok_or_else(|| {
-                    ProviderError::Malformed(format!("`{}` is not a provider id", name.value))
+                    ProviderError::Config(format!("`{}` is not a provider id", name.value))
                 })?;
                 let o = body.value.as_object().ok_or_else(|| {
-                    ProviderError::Malformed(format!("provider {id} is not an object"))
+                    ProviderError::Config(format!("provider {id} is not an object"))
                 })?;
 
                 let kind = o
@@ -132,7 +146,7 @@ impl Config {
                 }
                 if let Some(v) = o.get("structured").and_then(|v| v.value.as_str()) {
                     p.structured = structured(v).ok_or_else(|| {
-                        ProviderError::Malformed(format!("`{v}` is not a structured mode"))
+                        ProviderError::Config(format!("`{v}` is not a structured mode"))
                     })?;
                 }
                 if let Some(v) = o.get("api_key_env").and_then(|v| v.value.as_str()) {
@@ -145,7 +159,7 @@ impl Config {
                 // error rather than a warning that a hurried reader would scroll past.
                 for forbidden in ["api_key", "key", "token", "secret", "password"] {
                     if o.contains(forbidden) {
-                        return Err(ProviderError::Malformed(format!(
+                        return Err(ProviderError::Config(format!(
                             "provider {id} has a `{forbidden}` field; use api_key_env or \
                              api_key_cmd - a config file must be safe to commit"
                         )));
@@ -159,11 +173,11 @@ impl Config {
         if let Some(r) = obj.get("routing").and_then(|v| v.value.as_object()) {
             for (task, target) in r.iter() {
                 let t = Task::parse(&task.value).ok_or_else(|| {
-                    ProviderError::Malformed(format!("`{}` is not a task", task.value))
+                    ProviderError::Config(format!("`{}` is not a task", task.value))
                 })?;
                 let name = target.value.as_str().unwrap_or_default();
                 let id = ProviderId::new(name).ok_or_else(|| {
-                    ProviderError::Malformed(format!("`{name}` is not a provider id"))
+                    ProviderError::Config(format!("`{name}` is not a provider id"))
                 })?;
                 cfg.routing.insert(t, id);
             }
@@ -173,9 +187,30 @@ impl Config {
             for item in f {
                 let name = item.value.as_str().unwrap_or_default();
                 let id = ProviderId::new(name).ok_or_else(|| {
-                    ProviderError::Malformed(format!("`{name}` is not a provider id"))
+                    ProviderError::Config(format!("`{name}` is not a provider id"))
                 })?;
                 cfg.fallback.push(id);
+            }
+        }
+
+        if let Some(ingest) = obj.get("ingest").and_then(|v| v.value.as_object()) {
+            if let Some(p) = ingest.get("prompt") {
+                let path = p.value.as_str().ok_or_else(|| {
+                    ProviderError::Config("`ingest.prompt` is a path to a prompt file".into())
+                })?;
+                cfg.ingest_prompt = Some(path.to_string());
+            }
+            if let Some(p) = ingest.get("path") {
+                let path = p.value.as_str().unwrap_or_default();
+                // Checked here, against the literal set, because this crate cannot name
+                // `IngestPath` — ingest depends on the provider, not the other way round. An
+                // unknown value is an error at load rather than a silent `auto`.
+                if !matches!(path, "auto" | "surface" | "json-ast") {
+                    return Err(ProviderError::Config(format!(
+                        "`ingest.path` is `{path}`; expected auto, surface or json-ast"
+                    )));
+                }
+                cfg.ingest_path = Some(path.to_string());
             }
         }
 
@@ -190,14 +225,14 @@ impl Config {
     pub fn validate(&self) -> Result<(), ProviderError> {
         for (task, id) in &self.routing {
             if !self.providers.contains_key(id) {
-                return Err(ProviderError::Malformed(format!(
+                return Err(ProviderError::Config(format!(
                     "routing sends {task} to `{id}`, which is not configured"
                 )));
             }
         }
         for id in &self.fallback {
             if !self.providers.contains_key(id) {
-                return Err(ProviderError::Malformed(format!(
+                return Err(ProviderError::Config(format!(
                     "fallback names `{id}`, which is not configured"
                 )));
             }
@@ -222,6 +257,8 @@ impl Config {
             providers: BTreeMap::from([(id.clone(), p)]),
             routing: BTreeMap::new(),
             fallback: vec![id.clone()],
+            ingest_prompt: None,
+            ingest_path: None,
         };
         for &t in Task::ALL {
             cfg.routing.insert(t, id.clone());
@@ -363,6 +400,20 @@ mod tests {
         assert!(Config::load(src).is_err());
     }
 
+    /// A mistake in the file is the caller's, and says so. These were `Malformed` until 1.3,
+    /// which prints "malformed provider response" for a call that was never made.
+    #[test]
+    fn a_config_mistake_is_reported_as_configuration() {
+        for src in [
+            "{ providers: ",
+            "{ providers: { a: { structured: telepathy } } }",
+        ] {
+            let e = Config::load(src).unwrap_err();
+            assert!(matches!(e, ProviderError::Config(_)), "{src}: {e:?}");
+            assert!(e.to_string().starts_with("provider configuration: "), "{e}");
+        }
+    }
+
     #[test]
     fn malformed_source_is_an_error_not_a_panic() {
         assert!(Config::load("{ providers: ").is_err());
@@ -394,5 +445,28 @@ mod tests {
     #[test]
     fn the_config_path_is_the_documented_one() {
         assert_eq!(Config::PATH, ".smysl/config.hjson");
+    }
+
+    #[test]
+    fn an_ingest_prompt_is_read_as_a_path_and_nothing_else() {
+        let c = Config::load("{ ingest: { prompt: prompts/extract.hjson } }").unwrap();
+        assert_eq!(c.ingest_prompt.as_deref(), Some("prompts/extract.hjson"));
+        assert_eq!(Config::load("{}").unwrap().ingest_prompt, None);
+        assert!(
+            Config::load("{ ingest: { prompt: 3 } }").is_err(),
+            "a prompt that is not a path is a configuration error, not an absent prompt"
+        );
+    }
+
+    #[test]
+    fn an_ingest_path_is_one_of_three_and_nothing_else() {
+        for p in ["auto", "surface", "json-ast"] {
+            let c = Config::load(&format!("{{ ingest: {{ path: {p} }} }}")).unwrap();
+            assert_eq!(c.ingest_path.as_deref(), Some(p));
+        }
+        assert!(
+            Config::load("{ ingest: { path: json } }").is_err(),
+            "a typo is not `auto`"
+        );
     }
 }

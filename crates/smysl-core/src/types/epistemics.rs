@@ -298,6 +298,53 @@ pub struct SourceRef {
     pub captured: Option<Date>,
 }
 
+/// How a caller-supplied source combines with one a unit already has.
+///
+/// For a producer that knows provenance exactly — a commit sha, a file at a sha — while the
+/// model writing units does not. Models observed writing `ref: CHANGELOG.md` for a commit message,
+/// or `ref: commit` with no sha: provenance is the one field a model should never invent.
+///
+/// Applied to a unit's raw fields **before it is built**, because `source` is inside the uid.
+/// A `cited` unit with no source does not exist to be patched — it fails construction — and a
+/// source patched on afterwards would move identities under a report that already named them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SourcePolicy {
+    /// Units given no source get the caller's; a source already present is kept.
+    FillMissing,
+    /// Every unit gets the caller's. A different source already present is replaced, and the
+    /// replacement is reported: a model naming another document than the one it was given is
+    /// worth knowing about.
+    Override,
+}
+
+impl SourcePolicy {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            SourcePolicy::FillMissing => "fill-missing",
+            SourcePolicy::Override => "override",
+        }
+    }
+
+    /// The source a unit ends up with, and the one it replaced if it replaced a different one.
+    ///
+    /// One definition, called by both ingest paths, so the surface parser and the JSON
+    /// converter cannot disagree about what a policy means.
+    pub fn apply(
+        self,
+        caller: &SourceRef,
+        own: Option<SourceRef>,
+    ) -> (Option<SourceRef>, Option<SourceRef>) {
+        match (self, own) {
+            (SourcePolicy::FillMissing, Some(own)) => (Some(own), None),
+            (SourcePolicy::Override, Some(own)) if &own != caller => {
+                (Some(caller.clone()), Some(own))
+            }
+            _ => (Some(caller.clone()), None),
+        }
+    }
+}
+
 impl SourceRef {
     pub fn new(kind: SourceKind, reference: impl Into<String>) -> SourceRef {
         SourceRef {

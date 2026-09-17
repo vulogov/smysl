@@ -208,9 +208,9 @@ impl Gemini {
         // answer tokens on a three-sentence fixture: a thinking model needs the cap sized
         // for both halves or it can never finish.
         if reason == "MAX_TOKENS" {
-            return Err(ProviderError::ContextExceeded {
-                limit: cap,
-                requested: output.unwrap_or(smysl_core::tokens(&text) as u64) as usize,
+            return Err(ProviderError::Truncated {
+                limit: Some(cap),
+                used: output.map(|o| o as usize),
             });
         }
 
@@ -649,12 +649,12 @@ mod tests {
     }
 
     #[test]
-    fn a_max_tokens_finish_is_a_context_error() {
+    fn a_max_tokens_finish_is_a_truncation() {
         let raw = r#"{"candidates":[{"finishReason":"MAX_TOKENS",
                        "content":{"parts":[{"text":"half"}]}}]}"#;
         assert!(matches!(
             provider().parse(raw, 0, cfg().max_output),
-            Err(ProviderError::ContextExceeded { .. })
+            Err(ProviderError::Truncated { .. })
         ));
     }
 
@@ -674,10 +674,9 @@ mod tests {
         // change: the number the error quotes is now the number the request carried, and a
         // configured value that the request never used cannot leak into the message.
         match provider().parse(raw, 0, 800) {
-            Err(ProviderError::ContextExceeded { limit, requested }) => {
-                assert_eq!(requested, 1702, "234 answered + 1468 thought");
-                assert_eq!(limit, 800);
-                assert!(requested > limit, "the message must read as true");
+            Err(ProviderError::Truncated { limit, used }) => {
+                assert_eq!(used, Some(1702), "234 answered + 1468 thought");
+                assert_eq!(limit, Some(800));
             }
             other => panic!("{other:?}"),
         }
@@ -818,14 +817,14 @@ mod tests {
             "type": "object",
             "required": ["gist"],
             "properties": {
-                "gist": { "type": "string", "minLength": 1, "maxLength": 240,
+                "gist": { "type": "string", "minLength": 1, "maxLength": 120,
                           "pattern": "^[a-z]+$" }
             }
         }));
         assert_eq!(s["required"][0], "gist");
         let gist = &s["properties"]["gist"];
         assert_eq!(gist["minLength"], 1);
-        assert_eq!(gist["maxLength"], 240);
+        assert_eq!(gist["maxLength"], 120);
         assert_eq!(gist["pattern"], "^[a-z]+$");
     }
 

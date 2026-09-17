@@ -84,6 +84,16 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
     if let Some(v) = view {
         write_doc(&mut out, v, ctx);
     }
+    // Declarations before everything else, wherever they sit in the record stream — the
+    // parser emits them first, and a writer that followed record order instead would move them
+    // on the second pass and break the fixed point.
+    for r in records {
+        if let Record::SchemaDecl(d) = r {
+            if schema_decl_has_surface_form(d) {
+                write_schema_decl(&mut out, d);
+            }
+        }
+    }
     for r in records {
         match r {
             Record::Unit(u) => write_unit(&mut out, u, ctx),
@@ -97,6 +107,33 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
         out.pop();
     }
     out
+}
+
+/// Whether a declaration can be spelled `@schema` without losing anything.
+///
+/// `payload_shape` is opaque CBOR and `extra` holds keys a later version added; surface text
+/// has no place for either, so a declaration carrying them stays CBOR-only and is counted with
+/// the other records a surface rendering cannot hold, rather than written back smaller than it
+/// was read.
+pub fn schema_decl_has_surface_form(d: &crate::types::annex::SchemaDecl) -> bool {
+    d.payload_shape.is_none() && d.extra.is_empty()
+}
+
+fn write_schema_decl(out: &mut String, d: &crate::types::annex::SchemaDecl) {
+    out.push_str(&format!(
+        "@schema {} {{ version: {}",
+        d.id.as_str(),
+        d.version
+    ));
+    if !d.types.is_empty() {
+        let ts: Vec<&str> = d.types.iter().map(|t| t.as_str()).collect();
+        out.push_str(&format!(", types: [{}]", ts.join(", ")));
+    }
+    if !d.relations.is_empty() {
+        let rs: Vec<&str> = d.relations.iter().map(|r| r.as_str()).collect();
+        out.push_str(&format!(", relations: [{}]", rs.join(", ")));
+    }
+    out.push_str(" }\n\n");
 }
 
 fn write_doc(out: &mut String, v: &View, ctx: &WriteContext) {

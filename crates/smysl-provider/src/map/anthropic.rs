@@ -178,9 +178,13 @@ impl Anthropic {
         // `max_tokens` means the answer was cut off, which the caller must not parse as a
         // whole one.
         if v.get("stop_reason").and_then(Value::as_str) == Some("max_tokens") {
-            return Err(ProviderError::ContextExceeded {
-                limit: cap,
-                requested: text.len(),
+            // `requested` was `text.len()`, bytes against a token cap.
+            return Err(ProviderError::Truncated {
+                limit: Some(cap),
+                used: v
+                    .pointer("/usage/output_tokens")
+                    .and_then(Value::as_u64)
+                    .map(|o| o as usize),
             });
         }
 
@@ -566,12 +570,16 @@ mod tests {
     }
 
     #[test]
-    fn a_max_tokens_stop_is_a_context_error() {
-        let raw = r#"{"stop_reason":"max_tokens","content":[{"type":"text","text":"half"}]}"#;
-        assert!(matches!(
-            provider().parse(raw, 0, cfg().max_output),
-            Err(ProviderError::ContextExceeded { .. })
-        ));
+    fn a_max_tokens_stop_is_a_truncation() {
+        let raw = r#"{"stop_reason":"max_tokens","content":[{"type":"text","text":"half"}],
+                      "usage":{"input_tokens":10,"output_tokens":321}}"#;
+        assert_eq!(
+            provider().parse(raw, 0, 512).unwrap_err(),
+            ProviderError::Truncated {
+                limit: Some(512),
+                used: Some(321)
+            }
+        );
     }
 
     #[test]

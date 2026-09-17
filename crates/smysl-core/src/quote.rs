@@ -1,5 +1,11 @@
 //! Attributing a unit to the text it came from, and **checking the attribution**.
 //!
+//! In `smysl-core` since 1.3, having started in `smysl-ingest`. It does no I/O and needs no
+//! model, and a caller that builds units itself — reading a commit and its diff, say — needs the
+//! check without linking the provider layer that `smysl-ingest` depends on. `smysl_ingest::quote`
+//! re-exports this module, so the old paths still resolve, and the facade exports its names
+//! without any feature.
+//!
 //! A `source` names a document. It cannot name a passage, so a reviewer asking "which
 //! sentence produced this claim?" has nowhere to go — and verifying a unit against its
 //! source is most of what review actually is.
@@ -20,8 +26,16 @@
 //!   refusing: models elide, and refusing would spend a repair turn on a habit.
 //! - **Absent** (`SMY-E307`). The words are not there in that order. Nothing in the source
 //!   supports the attribution, which is a fabrication rather than a formatting difference.
+//!
+//! **What it does not check: that the unit says what its quote says.** `Present` means the
+//! quote is in the source, nothing more. A unit whose summary reads "p95 fell to 120ms" and
+//! whose quote is "p95 rose to 410ms" passes — the quote is verbatim, and the contradiction is
+//! between the unit and its own evidence, which no string comparison can see. Deciding that
+//! a gist follows from a passage is a judgement; `attest` asks a model for it, and a reviewer
+//! is the other way. Treat `Present` as "the evidence exists", never as "the claim is
+//! supported".
 
-use smysl_core::{canonical_uid, Code, Diagnostic, UnitCore};
+use crate::{canonical_uid, Code, Diagnostic, UnitCore};
 
 /// The payload key a quote travels under.
 ///
@@ -42,17 +56,32 @@ pub enum Support {
 
 /// Collapse the differences a model will introduce without meaning anything by them.
 ///
-/// Case, runs of whitespace, and the punctuation a model silently prettifies: curly quotes
-/// for straight ones, en and em dashes for hyphens. Deliberately **not** stemming or
-/// synonyms — those would make a reworded claim look attributed, which is exactly the thing
-/// this exists to catch.
+/// This is part of the public contract since 1.3 (`smysl::quote_support`), so the rules are
+/// stated exactly:
+///
+/// - **case** is folded;
+/// - **runs of whitespace**, including a non-breaking space, are one space;
+/// - **quotation marks are one mark**: straight and curly, single and double. A model that
+///   quotes `'Deterministic CBOR'` from `"Deterministic CBOR"` changed style, not content;
+/// - **dashes are hyphens**: en, em, figure and minus;
+/// - **Markdown code and emphasis markers are deleted**: `` ` `` and `*`. They render as the
+///   words they surround, and a quote copies the rendering. Deleted rather than replaced by a
+///   space, because `` `smysl`, `` must become `smysl,` — a space would make it `smysl ,` and
+///   break the very match this allows;
+/// - **an underscore is kept.** In a code change `foo_bar` and `foobar` are different names;
+///   treating `_` as emphasis would call a quote of one an attribution to the other.
+///
+/// Deliberately **not** stemming or synonyms — those would make a reworded claim look
+/// attributed, which is exactly the thing this exists to catch.
 fn normalise(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut space = false;
     for c in s.chars() {
         let c = match c {
-            '\u{2018}' | '\u{2019}' | '\u{201B}' => '\'',
-            '\u{201C}' | '\u{201D}' | '\u{201F}' => '"',
+            '`' | '*' => continue,
+            '\u{2018}' | '\u{2019}' | '\u{201B}' | '\u{201C}' | '\u{201D}' | '\u{201F}' | '\'' => {
+                '"'
+            }
             '\u{2010}'..='\u{2015}' | '\u{2212}' => '-',
             '\u{00A0}' => ' ',
             other => other,
@@ -82,11 +111,24 @@ fn is_elision(token: &str) -> bool {
             .all(|c| matches!(c, '.' | '\u{2026}' | '[' | ']'))
 }
 
+/// A word with the punctuation at its edges removed: `saturated,` and `(saturated` are
+/// `saturated`. Inner punctuation stays — `c-produce`, `blake3.js` and `2026-07-22` are words.
+fn bare(word: &str) -> &str {
+    word.trim_matches(|c: char| !c.is_alphanumeric())
+}
+
 /// Whether `needle`'s words appear in `haystack` in order, allowing gaps.
 ///
 /// The elision case: a model quoting "the pool saturated … which the canary contradicts"
 /// has attributed honestly and dropped a clause. A subsequence check catches that while
 /// still refusing a quote whose words are simply not there.
+///
+/// **Words are compared whole**, after [`bare`]. They used to match any source word that
+/// contained them or that they contained, which is stemming in all but name: against a
+/// 715-word commit message, the invented "Rust was rewritten in Go to match the Python
+/// implementation." rated `Loose` — a warning that stages — because every word of it found some
+/// short word of the message inside it. Edge punctuation was the reason for the looseness, and
+/// stripping it is the narrow fix for that reason.
 fn words_in_order(needle: &str, haystack: &str) -> bool {
     let words: Vec<&str> = needle
         .split_whitespace()
@@ -97,13 +139,26 @@ fn words_in_order(needle: &str, haystack: &str) -> bool {
     if words.is_empty() {
         return false;
     }
-    let mut hay = haystack.split_whitespace();
+    let mut hay = haystack.split_whitespace().map(bare);
     words
         .into_iter()
-        .all(|w| hay.any(|h| h.contains(w) || w.contains(h)))
+        .map(bare)
+        .filter(|w| !w.is_empty())
+        .all(|w| hay.any(|h| h == w))
 }
 
 /// How well the source supports a quote.
+///
+/// Part of the public contract as `smysl::quote_support`. Both texts are normalised first —
+/// case folded; whitespace runs collapsed; straight and curly, single and double quotation marks
+/// treated as one mark; dashes as hyphens; Markdown `` ` `` and `*` deleted; `_` kept — and then:
+///
+/// - [`Support::Present`] if the normalised quote occurs contiguously in the normalised source;
+/// - [`Support::Loose`] if its words occur in order with gaps, compared whole after removing the
+///   punctuation at each word's edges, and ignoring `...`/`…` elision markers;
+/// - [`Support::Absent`] otherwise, and always for a quote with no words.
+///
+/// No stemming and no synonyms: a reworded claim is not an attributed one.
 pub fn support(quote: &str, source: &str) -> Support {
     let q = normalise(quote);
     if q.is_empty() {
@@ -119,10 +174,32 @@ pub fn support(quote: &str, source: &str) -> Support {
     Support::Absent
 }
 
+/// How well any of several sources supports a quote, and which one.
+///
+/// A code change is evidenced by several texts — a commit message and a diff per file — and a
+/// caller wants to know which one a quote came from. `Present` anywhere beats `Loose` anywhere,
+/// whatever order the sources are listed in: a verbatim match in the diff is the attribution,
+/// not a loose one in the message that happened to be listed first. Between sources of equal
+/// support, the first listed wins.
+pub fn support_in<'a>(quote: &str, sources: &[(&'a str, &str)]) -> (Support, Option<&'a str>) {
+    let mut loose = None;
+    for (name, text) in sources {
+        match support(quote, text) {
+            Support::Present => return (Support::Present, Some(name)),
+            Support::Loose if loose.is_none() => loose = Some(*name),
+            _ => {}
+        }
+    }
+    match loose {
+        Some(name) => (Support::Loose, Some(name)),
+        None => (Support::Absent, None),
+    }
+}
+
 /// The quote a unit attributes itself to, if it declared one.
 pub fn quote_of(core: &UnitCore) -> Option<String> {
     let payload = core.payload.as_deref()?;
-    let object = smysl_core::surface::payload::payload_to_object(payload).ok()?;
+    let object = crate::surface::payload::payload_to_object(payload).ok()?;
     object
         .get(QUOTE_KEY)
         .and_then(|v| v.value.as_str())
@@ -175,7 +252,7 @@ fn clip(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smysl_core::{KernelType, Status, UnitCoreBuilder};
+    use crate::{KernelType, Status, UnitCoreBuilder};
 
     const SOURCE: &str = "On Thursday the eu-west shard slowed: p95 request latency rose \
                           from 180ms to 410ms. Connection pool wait time rose alongside it.";
@@ -253,16 +330,16 @@ mod tests {
     fn quoted(gist: &str, quote: Option<&str>) -> UnitCore {
         let mut b = UnitCoreBuilder::new(KernelType::Claim, gist, Status::Speculative);
         if let Some(q) = quote {
-            let mut o = smysl_core::surface::hjson::HObject::default();
-            let span = smysl_core::Span::new(0, 0);
+            let mut o = crate::surface::hjson::HObject::default();
+            let span = crate::Span::new(0, 0);
             o.insert(
-                smysl_core::surface::hjson::Spanned::new(QUOTE_KEY.to_string(), span),
-                smysl_core::surface::hjson::Spanned::new(
-                    smysl_core::surface::hjson::HValue::Str(q.to_string()),
+                crate::surface::hjson::Spanned::new(QUOTE_KEY.to_string(), span),
+                crate::surface::hjson::Spanned::new(
+                    crate::surface::hjson::HValue::Str(q.to_string()),
                     span,
                 ),
             );
-            if let Some(p) = smysl_core::surface::payload::object_to_payload(&o) {
+            if let Some(p) = crate::surface::payload::object_to_payload(&o) {
                 b = b.payload(p);
             }
         }
@@ -293,6 +370,104 @@ mod tests {
     }
 
     /// Untrusted input reaches logs.
+    /// The three false "absent" results rust_smysl's prototype met on real commits.
+    ///
+    /// Markdown markup is presentation, like curly quotes: `**nodejs/**` and `` `smysl` `` render
+    /// as the words. Deleted rather than replaced by spaces — the prototype replaced them, and
+    /// `` `smysl`, `` became `smysl ,`, which broke a match it should have made.
+    #[test]
+    fn markdown_markup_and_quote_style_are_typography() {
+        for (quote, source) in [
+            ("'Deterministic CBOR'", "\"Deterministic CBOR\""),
+            ("smysl, the CLI", "`smysl`, the CLI"),
+            ("nodejs/ reaches C-Produce", "**nodejs/** reaches C-Produce"),
+            ("nodejs/ reaches C-Produce", "*nodejs/* reaches C-Produce"),
+        ] {
+            assert_eq!(
+                support(quote, source),
+                Support::Present,
+                "{quote:?} in {source:?}"
+            );
+        }
+    }
+
+    /// An underscore is content. In a code change `foo_bar` and `foobar` are different names,
+    /// and deleting `_` as emphasis would call a quote of the one an attribution to the other.
+    #[test]
+    fn an_underscore_is_content_not_emphasis() {
+        assert_ne!(support("foobar is set", "foo_bar is set"), Support::Present);
+    }
+
+    /// A sentence nobody wrote is absent from a long document, not loosely present in it.
+    ///
+    /// Words used to match any later source word that contained them or that they contained —
+    /// stemming in effect, which this module says it does not do. Against a 715-word commit
+    /// message, "Rust was rewritten in Go to match the Python implementation." rated `Loose`, a
+    /// warning, and would have staged: every word found some short source word inside it.
+    #[test]
+    fn a_fabrication_made_of_common_words_is_absent_from_a_long_document() {
+        let commit = include_str!("../../../fixtures/quote/commit-4968383.md");
+        for invented in [
+            "Rust was rewritten in Go to match the Python implementation.",
+            "blake3.js is a hand-rolled binding to the same C library as Rust",
+            "It was decided that tests are not needed for the Node port.",
+        ] {
+            assert_eq!(support(invented, commit), Support::Absent, "{invented}");
+        }
+        // And honest attribution still works against the same text.
+        assert_eq!(
+            support(
+                // The message has `nodejs/` in backticks; the quote has it bare.
+                "nodejs/ reaches C-Produce, a gate ties the format's constants to the",
+                commit
+            ),
+            Support::Present
+        );
+        assert_eq!(
+            support("the status integers ... the base32 alphabet", commit),
+            Support::Loose,
+            "an elision of real words must stay loose"
+        );
+    }
+
+    #[test]
+    fn several_sources_prefer_present_over_loose_and_name_the_match() {
+        let message = "Reject the binding. It would test the same C library twice.";
+        let diff = "+// hand-rolled: a binding would test the same C library twice";
+        let sources = [("message", message), ("src/blake3.js", diff)];
+
+        // Loose in the message, present in the diff: the diff wins whatever the order.
+        let q = "a binding would test the same C library twice";
+        assert_eq!(
+            support_in(q, &sources),
+            (Support::Present, Some("src/blake3.js"))
+        );
+        let reversed = [sources[1], sources[0]];
+        assert_eq!(
+            support_in(q, &reversed),
+            (Support::Present, Some("src/blake3.js"))
+        );
+
+        // Present in both: the first source listed.
+        assert_eq!(
+            support_in("the same C library", &sources),
+            (Support::Present, Some("message"))
+        );
+
+        // Loose only: the first source it is loose in.
+        assert_eq!(
+            support_in("Reject ... C library", &sources),
+            (Support::Loose, Some("message"))
+        );
+
+        // Nowhere.
+        assert_eq!(
+            support_in("serde was adopted", &sources),
+            (Support::Absent, None)
+        );
+        assert_eq!(support_in("anything", &[]), (Support::Absent, None));
+    }
+
     #[test]
     fn a_huge_quote_is_clipped_in_the_diagnostic() {
         let units = vec![quoted("x", Some(&"lorem ".repeat(200)))];

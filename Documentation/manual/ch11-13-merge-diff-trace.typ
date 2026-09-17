@@ -712,35 +712,56 @@ point every node in a trace can carry `[human:vladimir]`, `[model:a/x]`, or
 whichever agents actually touched it, turning "what does this rest on" into
 "what does this rest on, and who is answerable for each piece of it."
 
-#section("The label-versus-uid rule, one more time, verified fresh")
+#section("Labels and uids: two ways to name one unit")
 
-Every uid-taking flag in this book — `--focus`, `--seed`, `--roots`, and
-`trace`'s own positional argument — takes a real content hash, never a
-surface label. This is not a suggestion; the store enforces it, and the
-failure is exactly as blunt as Chapter 19 already showed for `pack`:
+Every command that takes a unit — `trace`'s positional argument, `pack`'s
+`--focus` and `--seed`, `view`'s `--roots`, `retract` — accepts either a
+uid or a label. The two name the same thing, and the output says so:
 
 #screen(caption: "$ smysl trace c/pool-saturation fixtures/corpus/F1-incident.smy")[
 ```
-smysl trace: `c/pool-saturation` is not a uid
+b3:cvhirtgs2mpvli2ethhyeo32uf (root)
+  b3:izyuzlt42mqcvgdfb4nfpllxyq (grounds)
+fixtures/corpus/F1-incident.smy: 2 unit(s) over 1 step(s)
 ```
 ]
 
-Exit code `1`. `c/pool-saturation` is only ever a name inside the one file
-that declared it — it has no existence at the store level, where the only
-identity a unit has is the hash of what it says. The real uid behind that
-label, `b3:cvhirtgs2mpvli2ethhyeo32uf`, is what every example in this chapter
-actually used, and it is exactly the same hash Chapter 19's `pack --focus`
-resolved for the same claim — content hashes are stable across every command
-that ever touches this fixture, which is the whole point of computing
-identity from content rather than position.
+That is byte for byte what the uid `b3:cvhirtgs2mpvli2ethhyeo32uf` produced
+earlier in this chapter. The label is resolved first and the walk is over
+the uid it names; identity is still the hash of what a unit says, and a
+label is still not part of it.
 
-When you do not already know a unit's real uid, the practical path is the
-one this book has used throughout: run `smysl --format surface pack --budget
-<large> --explain <file>` and read every unit's hash straight off the top of
-the output, or reach for `thread --show` once a thread already names the
-unit you care about (Chapter 20). Either way, the uid you paste into `trace`
-has to have come from the store itself — never typed from memory, never
-guessed from a label that merely looks similar.
+Until 1.3 this command failed with "is not a uid", and this section
+explained why: a label "has no existence at the store level". That had
+stopped being true long before the section was written. A label reaches the
+wire as a `LabelBinding` record, so a `.cbor` store carries every name its
+surface source declared, and every command loaded those bindings — and then
+discarded them, leaving a reader to find each uid indirectly and type it
+back in.
+
+A label the store does not bind is refused by name, rather than guessed at:
+
+#screen(caption: "$ smysl trace c/pool-saturated fixtures/corpus/F1-incident.smy")[
+```
+smysl trace: `c/pool-saturated` is a label, and nothing in this store is bound to it
+```
+]
+
+Exit code `1`, and the same code from every command that takes a unit.
+
+A label a store binds to *several* units is refused too, and differently. A
+store merged from separate runs can bind one label to more than one unit —
+`merge` reports that as a `label-collision` contention — and the command
+will not pick one. It lists every candidate with its gist and exits `5`,
+the code `merge` and `relink` use for a disagreement the tool declines to
+settle. Name the unit you mean by its uid. Until 1.3 the last binding in
+the store quietly won, and `retract` by such a label retracted a unit
+nobody had chosen.
+
+A store binds one name per uid. If a surface file declared two labels for
+one unit, `check` reports `SMY-W054` and only the canonically first
+survives — so the second name resolves inside that file, and not in a store
+built from it.
 
 #whatsnext[
   Once you can walk from a claim to exactly what it rests on, the next

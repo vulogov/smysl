@@ -13,7 +13,7 @@ pub use annex::{
     Contention, ContentionStatus, Detected, DetectionKind, DropReason, LabelBinding, Optimality,
     PackInfo, PackMode, SchemaDecl,
 };
-pub use epistemics::{Date, Lod, SourceKind, SourceRef, Status};
+pub use epistemics::{Date, Lod, SourceKind, SourcePolicy, SourceRef, Status};
 pub use provenance::{Attestation, Hlc, Op, Rung};
 pub use record::{code as record_code, Record};
 pub use relation::{RelKind, Relation};

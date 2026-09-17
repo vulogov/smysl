@@ -60,7 +60,7 @@ you'll ever type yourself.
 A record is one of nine kinds (`smysl-core`'s `Record` enum, verbatim):
 `Unit`, `Attestation`, `Relation`, `Thread`, `View`, `Contention`,
 `PackInfo`, `SchemaDecl`, `LabelBinding`. You will hand-author three of these
-regularly, one occasionally, and never touch the rest directly:
+regularly, two occasionally, and never touch the rest directly:
 
 #dtable(
   (auto, auto, 1fr),
@@ -73,7 +73,7 @@ regularly, one occasionally, and never touch the rest directly:
     ([Attestation], [The tool], [The record an operation like `attest` or `ingest` attaches to a unit to say who backed it, at what trust rung, and when — never something you type.]),
     ([Contention], [The tool, during `merge`], [A materialised disagreement between two stores that both spoke about the same unit — the thing rule C promises never gets silently dropped.]),
     ([PackInfo], [The tool, during `pack`], [A self-describing receipt: how much of the budget was used, what got dropped or degraded, and under which estimator.]),
-    ([SchemaDecl], [The tool, rarely you], [A declaration of a non-kernel schema extension a store depends on.]),
+    ([SchemaDecl], [You, when you use an extension], [A declaration of a non-kernel schema extension a store depends on — `@schema x.sre/v1 { relations: [x.sre/mitigated-by] }` — naming the unit types and relation kinds it adds. Chapter 21 shows what an undeclared one costs.]),
     ([LabelBinding], [The tool, from what you typed], [The record that remembers `c/pool-saturation` names a particular unit. You write the label as part of the unit; the binding is how it reaches the wire. It has to be its own record because a label is *not* identity — putting one inside hashed content would make renaming it produce a different unit.]),
   ),
 )
@@ -282,7 +282,7 @@ From the repository root:
 
 #screen(caption: "$ cargo build")[
 ```
-   Compiling smysl v1.2.0 (/Users/gandalf/Src/smysl)
+   Compiling smysl v1.3.0 (/Users/gandalf/Src/smysl)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.37s
 ```
 ]
@@ -545,7 +545,7 @@ full).
 ```
 first.smy: error: SMY-E060: unresolved reference `c/root-cause` (at 77..89)
 first.smy: error: SMY-E060: unresolved reference `c/root-cause` (at 397..439)
-first.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 284..396)
+first.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 284..396) [try: name the units it rests on in `grounds`, or lower the status to `speculative`]
 ```
 ]
 

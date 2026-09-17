@@ -87,7 +87,7 @@ up:
 #screen(caption: "$ smysl check mistake1.smy")[
 ```
 mistake1.smy: error: SMY-E060: unresolved reference `e/missing-evidence` (at 351..369)
-mistake1.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 296..416)
+mistake1.smy: error: SMY-E031: SMY-E031: derived/inferred with empty grounds (at 296..416) [try: name the units it rests on in `grounds`, or lower the status to `speculative`]
 ```
 ]
 
@@ -112,7 +112,7 @@ the source in a moment, and then don't:
 
 #screen(caption: "$ smysl check mistake2.smy")[
 ```
-mistake2.smy: error: SMY-E032: SMY-E032: measured/cited without source (at 108..225)
+mistake2.smy: error: SMY-E032: SMY-E032: measured/cited without source (at 108..225) [try: add a `source` naming the document it came from, or lower the status: `inferred` with grounds, or `speculative` - never raise it]
 ```
 ]
 
@@ -322,6 +322,8 @@ changes nothing, because nothing here is hosted to begin with:
 provider     ollama
 egress       no - local
 path         json-ast (default for small enforced ingest)
+prompt       built-in
+source       file:note.txt (fill-missing)
 rung         document (ceiling cited)
 input        139 bytes, 35 token(s)
 ```
@@ -450,6 +452,8 @@ $ smysl ingest --dry-run --rung document note.txt
 provider     ollama
 egress       no - local
 path         json-ast (default for small enforced ingest)
+prompt       built-in
+source       file:note.txt (fill-missing)
 rung         document (ceiling cited)
 input        139 bytes, 35 token(s)
 ```
@@ -518,6 +522,8 @@ for exactly that reason:
 provider     ollama
 egress       no - local
 path         surface (output too large to risk truncation)
+prompt       built-in
+source       file:bignote.txt (fill-missing)
 rung         document (ceiling cited)
 input        7300 bytes, 1825 token(s)
 ```
@@ -528,6 +534,71 @@ dry-run report always says which reason applied — `caller override`,
 `a structured operation`, `the provider enforces no schema`,
 `output too large to risk truncation`, or the plain default — so you are
 never left guessing why a run took the path it took.
+
+A project whose provider does badly on one path can make the other its
+default rather than typing the flag every time, in `.smysl/config.hjson`:
+
+```
+ingest: { path: json-ast }
+```
+
+`--path` on the command line still wins, including `--path auto`. The
+case that motivated it: a small hosted model on the surface path wrote
+labels like `claim-nodejs-c-produce`, with no `/`, and degraded whole
+documents to prose — while the json-ast path, where the schema's label
+pattern is enforced as the model decodes, converted the same input
+cleanly. Since 1.3 both prompts state the label format and a malformed
+label's repair turn names it with a corrected candidate, so the surface
+path recovers from this far more often; the setting is for the providers
+where it still does not.
+
+#subsection("source: where the units came from")
+
+A named file is its units' source: `source       file:note.txt
+(fill-missing)` in the dry run. The model is not asked for provenance,
+because it cannot know what the document is called — asked anyway, a small
+model wrote the example's placeholder into every unit it produced. It names
+a source only where the document itself attributes a statement to somewhere
+else, a URL or a paper, and `fill-missing` keeps that one. Standard input
+names nothing, so its units get no source from the tool, and a unit with
+none cannot be `cited`.
+
+#subsection("prompt: asking your own question")
+
+The built-in prompts ask for general-purpose units. A pipeline with a
+narrower job — decisions and their rationale out of a commit, say — can
+supply its own wording and, on the json-ast path, a narrower schema:
+
+```
+{
+  id: myproject.extract-decisions
+  version: 1
+  system_file: extract.system.txt
+  user_file: extract.user.txt
+  schema_file: extract.schema.json
+}
+```
+
+Pass it with `--prompt extract.hjson`, or name it once in the project
+config as `ingest: { prompt: prompts/extract.hjson }`. The texts live in
+files beside it because the HJSON this tool reads has no multi-line
+strings; `user` must contain `{input}`, which is where the document goes.
+
+What an override changes is the question. What it does not change is
+everything after the answer: the same conversion, the same check that
+every `quote` really appears in the document, the same rung ceiling, the
+same staging. That is the reason to run an extraction through `ingest`
+rather than beside it.
+
+Three rules keep it honest. The `id` may not begin with `ingest.`, which
+the built-in prompts own. The recipe records the id with a short hash of
+the texts, so two different prompts under one id and version can never be
+aggregated as one pipeline. And a schema must still describe a `units`
+array — it can narrow what a unit may be, but an answer the converter
+cannot turn into units would degrade every chunk to prose, so that is
+refused when the file is loaded rather than discovered run by run. A
+schema only has a channel on the json-ast path, so supplying one moves
+`auto` there, and combining one with `--path surface` is an error.
 
 #section("A real attempt, and what actually happened")
 
@@ -646,9 +717,17 @@ first-class, not workarounds:
     ([Do nothing yet], [Staged file sits at `.smysl/staged.smy`; exit stays `10`], [You want to read it, maybe in an editor, before deciding — the default, and the safest one]),
     ([`smysl merge --staged`], [Commits the staged records into a real store, via the ordinary merge join (Chapter 13)], [You've reviewed it — by eye, by `check`, or both — and it's ready to become part of the document]),
     ([`ingest --yes`], [Same staging happens, but `ingest` itself exits `0` — "staged and confirmed" — instead of `10`], [You've decided in advance that this class of ingest doesn't need a pause — a script that already trusts this recipe and provider]),
-    ([`rm .smysl/staged.smy`], [Discards the batch outright; nothing was ever in your real store to undo], [The proposal isn't worth keeping — maybe the whole run degraded, maybe you changed your mind]),
+    ([`rm .smysl/staged.*`], [Discards the batch outright — the text you review and its provenance sidecar; nothing was ever in your real store to undo], [The proposal isn't worth keeping — maybe the whole run degraded, maybe you changed your mind]),
   ),
 )
+
+Beside `staged.smy` sits `staged.cbor`, which you do not need to read. The
+text file has no way to say who produced a unit, so the sidecar carries each
+unit's attestation — agent, rung, recipe — and `merge --staged` attaches it
+only to a unit the text still holds unchanged. Edit a unit before merging and
+it commits without the tool's attestation, which is the truth: the tool did
+not write what you wrote. Until 1.3 the sidecar did not exist, and every
+ingested unit reached the store with no attestation at all.
 
 One nuance worth being exact about: `--yes` changes `ingest`'s *exit code and
 message*, not what happens to the file. The batch is still written to
@@ -694,11 +773,13 @@ real.
 #section("--granularity, --repair, and what happens when repair runs out")
 
 Two more flags shape what a successful call would have produced.
-`--granularity` names the body-length profile (`fine`, `default`, `coarse`)
-the model is asked to write to, and it becomes part of the ingest *recipe* —
-a hash of everything that decided what the model was asked to do, which is
-what later lets tooling tell two runs of "the same" ingest apart from two
-runs that were never really comparable. `--repair` sets how many times
+`--granularity` names a body-length preset — `fine`, `default` (which
+`standard`, the default value, also means) or `coarse` — and anything else is
+refused before a call is made. It becomes part of the ingest *recipe* — a hash
+of everything that decided what the model was asked to do, which is what later
+lets tooling tell two runs of "the same" ingest apart from two runs that were
+never really comparable. As of 1.3 that is all it does: the units are still
+checked under the default profile, whichever preset you name. `--repair` sets how many times
 `ingest` will show the model its own mistake and ask again before giving up
 on a span — `2` by default.
 
@@ -715,6 +796,13 @@ path pre-empts it — but it is the same function in the source that both
 failure modes call, and the source's own test suite exercises it directly:
 an unrepairable span becomes an opaque `prose` unit whatever put it there,
 never a failed run.
+
+One exception narrows the loss. When every remaining error is a single unit's
+own over-long gist (`SMY-E022`), only that unit degrades — along with any unit
+in the same answer grounded on it — and the rest are staged as the model wrote
+them. A model cannot count tokens the way the estimator does, so a gist a few
+tokens over can survive every repair turn; before 1.3 it took its whole chunk
+with it.
 
 #whatsnext[
   A staged batch is just a store that happens to live at
@@ -776,7 +864,7 @@ never a failed run.
    provider, or a span that exhausts its repair budget, degrades to an
    opaque `prose` unit rather than failing the whole run.],
   [Exit `10` has three legitimate responses: leave it staged and look at it,
-   `smysl merge --staged` once it's reviewed, or `rm .smysl/staged.smy` to
+   `smysl merge --staged` once it's reviewed, or `rm .smysl/staged.*` to
    discard it — `--yes` only changes which of the first two happens by
    default, not whether staging itself happened.],
 ))

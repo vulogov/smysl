@@ -23,8 +23,8 @@ use std::path::{Path, PathBuf};
 use smysl_check::{check, CheckOptions};
 use smysl_core::surface::{write_surface, WriteContext};
 use smysl_core::{
-    canonical_uid, Attestation, Diagnostic, Hlc, Label, Op, Record, Relation, Report, Rung, Uid,
-    UnitCore,
+    canonical_uid, Attestation, Diagnostic, Hlc, Label, Op, Record, Relation, Report, Rung,
+    SchemaDecl, Uid, UnitCore,
 };
 use smysl_graph::Store;
 
@@ -32,6 +32,14 @@ use std::collections::BTreeMap;
 
 /// Where staged output waits for confirmation (§7.3).
 pub const PATH: &str = ".smysl/staged.smy";
+
+/// The staged batch's records as CBOR, beside the surface file.
+///
+/// The surface file is what a reviewer reads, edits and approves, and surface text has no syntax
+/// for an attestation — so a batch read back from it alone commits with no provenance at all. The
+/// sidecar carries the attestations; [`read`] re-attaches each only to a unit the reviewed text
+/// still contains unchanged.
+pub const SIDECAR: &str = ".smysl/staged.cbor";
 
 /// A batch awaiting confirmation.
 #[derive(Debug, Clone, Default)]
@@ -42,6 +50,9 @@ pub struct Staged {
     pub relations: Vec<Relation>,
     pub attestations: Vec<Attestation>,
     pub labels: BTreeMap<Label, Uid>,
+    /// Extension declarations the batch depends on, staged with it so the check sees them and
+    /// the commit carries them.
+    pub schemas: Vec<SchemaDecl>,
     /// What checking the batch against the store found.
     pub report: Report,
     /// Units whose status rule M lowered, and to what. Empty when the model claimed
@@ -66,9 +77,29 @@ impl Staged {
         !self.report.is_clean()
     }
 
-    /// The records a caller would commit.
+    /// The records a caller would commit: declarations, units, their label bindings, relations
+    /// and attestations.
+    ///
+    /// The bindings were missing, so a store built from these records could not resolve a single
+    /// label the batch had just staged. They follow the units they name, as the parser emits them.
     pub fn records(&self) -> Vec<Record> {
-        let mut out: Vec<Record> = self.units.iter().cloned().map(Record::Unit).collect();
+        let mut out: Vec<Record> = self
+            .schemas
+            .iter()
+            .cloned()
+            .map(Record::SchemaDecl)
+            .collect();
+        out.extend(self.units.iter().cloned().map(Record::Unit));
+        // Only for units the batch holds: a label rule M's weakening left pointing at a uid that
+        // is no longer staged would bind a name to nothing.
+        let staged: std::collections::BTreeSet<Uid> =
+            self.units.iter().map(canonical_uid).collect();
+        out.extend(
+            self.labels
+                .iter()
+                .filter(|(_, uid)| staged.contains(uid))
+                .map(|(l, u)| Record::LabelBinding(smysl_core::LabelBinding::new(l.clone(), *u))),
+        );
         out.extend(self.relations.iter().cloned().map(Record::Relation));
         out.extend(self.attestations.iter().cloned().map(Record::Attestation));
         out
@@ -91,6 +122,22 @@ pub fn prepare(
     units: Vec<UnitCore>,
     relations: Vec<Relation>,
     labels: BTreeMap<Label, Uid>,
+    attest: &Attest,
+) -> Staged {
+    prepare_declared(store, units, relations, labels, Vec::new(), attest)
+}
+
+/// [`prepare`], with the extension declarations the batch depends on.
+///
+/// A batch using `x.verify/supports` needs the `SchemaDecl` declaring it, or every check of it
+/// reports `SMY-W013`. The declaration is staged with the batch rather than appended to the
+/// store first, because appending outside staging is the thing rule S forbids.
+pub fn prepare_declared(
+    store: &Store,
+    units: Vec<UnitCore>,
+    relations: Vec<Relation>,
+    labels: BTreeMap<Label, Uid>,
+    schemas: Vec<SchemaDecl>,
     attest: &Attest,
 ) -> Staged {
     // Rule M first, and *before* the check: weakening moves identities, so a report
@@ -123,6 +170,7 @@ pub fn prepare(
     // A throwaway union, never written: staging must not touch the store, which is exactly
     // what rule S is about.
     let mut records: Vec<Record> = store.iter().cloned().collect();
+    records.extend(schemas.iter().cloned().map(Record::SchemaDecl));
     records.extend(applied.units.iter().cloned().map(Record::Unit));
     records.extend(relations.iter().cloned().map(Record::Relation));
     let merged = Store::from_records(records);
@@ -154,6 +202,7 @@ pub fn prepare(
         relations,
         attestations,
         labels,
+        schemas,
         report,
         weakened: applied.weakened,
     }
@@ -220,24 +269,51 @@ pub fn write(root: impl AsRef<Path>, staged: &Staged) -> Result<PathBuf, std::io
         std::fs::create_dir_all(dir)?;
     }
     std::fs::write(&path, staged.to_surface())?;
+    std::fs::write(
+        root.as_ref().join(SIDECAR),
+        smysl_core::to_cbor_seq(&staged.records()),
+    )?;
     Ok(path)
 }
 
 /// Read a staged batch back, as records.
+///
+/// The surface file decides *what* is committed — it is what the reviewer approved. The sidecar
+/// decides *who produced it*: an attestation is kept only when the unit it names is present,
+/// byte for byte, in the reviewed text. A unit the reviewer edited has a different uid and commits
+/// unattested, because the tool did not produce that content and must not be recorded as having.
+/// A missing or unreadable sidecar leaves every unit unattested rather than failing the commit.
 pub fn read(root: impl AsRef<Path>) -> Result<Vec<Record>, String> {
     let path = root.as_ref().join(PATH);
     let src = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let out = smysl_core::surface::parse_surface(&src).map_err(|e| e.to_string())?;
-    Ok(out.records)
+    let mut records = out.records;
+
+    let present: std::collections::BTreeSet<Uid> = records
+        .iter()
+        .filter_map(|r| r.as_unit().map(canonical_uid))
+        .collect();
+    if let Ok(bytes) = std::fs::read(root.as_ref().join(SIDECAR)) {
+        if let Ok((sidecar, _)) = smysl_core::from_cbor_seq(&bytes) {
+            records.extend(sidecar.into_iter().filter(|r| match r {
+                Record::Attestation(a) => present.contains(&a.uid),
+                _ => false,
+            }));
+        }
+    }
+    Ok(records)
 }
 
 /// Discard a staged batch.
 pub fn discard(root: impl AsRef<Path>) -> Result<(), std::io::Error> {
-    match std::fs::remove_file(root.as_ref().join(PATH)) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
+    for f in [PATH, SIDECAR] {
+        match std::fs::remove_file(root.as_ref().join(f)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -273,6 +349,65 @@ mod tests {
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p
+    }
+
+    /// A batch that uses an extension relation stages with its declaration, not a warning.
+    ///
+    /// `prepare` took units, relations and labels, so a library caller had no way to stage the
+    /// `SchemaDecl` for `x.verify/supports`: every batch reported `SMY-W013` unless the declaration
+    /// had been appended to the store outside staging, which rule S exists to prevent.
+    #[test]
+    fn a_batch_stages_with_its_schema_declaration() {
+        let fact = cited("a fact read from the code");
+        let claim = cited("a claim the fact supports");
+        let kind = smysl_core::RelKind::parse("x.verify/supports").unwrap();
+        let rel = Relation::new(kind.clone(), canonical_uid(&fact), canonical_uid(&claim));
+        let mut decl =
+            smysl_core::SchemaDecl::new(smysl_core::SchemaId::parse("x.verify/v1").unwrap(), 1);
+        decl.relations = vec![kind];
+
+        let bare = prepare(
+            &Store::new(),
+            vec![fact.clone(), claim.clone()],
+            vec![rel.clone()],
+            BTreeMap::new(),
+            &attest(),
+        );
+        assert_eq!(
+            bare.report.count(smysl_core::Code::W013),
+            1,
+            "the control: undeclared, it warns"
+        );
+
+        let declared = prepare_declared(
+            &Store::new(),
+            vec![fact, claim],
+            vec![rel],
+            BTreeMap::new(),
+            vec![decl.clone()],
+            &attest(),
+        );
+        assert_eq!(
+            declared.report.count(smysl_core::Code::W013),
+            0,
+            "{:?}",
+            declared.report
+        );
+        assert_eq!(declared.schemas, vec![decl]);
+        assert!(declared
+            .records()
+            .iter()
+            .any(|r| matches!(r, Record::SchemaDecl(_))));
+
+        // And it survives the staged file, since the surface can spell it since 1.3.
+        let dir = tmp("declared");
+        write(&dir, &declared).unwrap();
+        let back = read(&dir).unwrap();
+        assert!(
+            back.iter().any(|r| matches!(r, Record::SchemaDecl(_))),
+            "the declaration did not survive staged.smy"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -401,6 +536,116 @@ mod tests {
         let units: Vec<&UnitCore> = records.iter().filter_map(|r| r.as_unit()).collect();
         assert_eq!(units.len(), 2);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A staged batch's attestations reach the commit — for exactly the units the tool produced.
+    ///
+    /// The staged file is surface text, which has no syntax for an attestation, and `read` parsed
+    /// it back: every unit committed by `merge --staged` arrived with no agent, rung or recipe. Found
+    /// by committing a real live batch — 9 units, 9 label bindings, 0 attestations. The round-trip
+    /// test above counted units and never asked.
+    #[test]
+    fn a_staged_batchs_attestations_survive_the_file_for_units_left_unedited() {
+        let root = tmp("attest");
+        let out = prepare(
+            &Store::new(),
+            vec![cited("p95 rose to 410ms"), cited("the pool saturated")],
+            Vec::new(),
+            BTreeMap::new(),
+            &attest(),
+        );
+        write(&root, &out).unwrap();
+
+        let attested = |records: &[Record]| -> Vec<String> {
+            let units: BTreeMap<Uid, String> = records
+                .iter()
+                .filter_map(|r| r.as_unit().map(|u| (canonical_uid(u), u.gist.clone())))
+                .collect();
+            let mut v: Vec<String> = records
+                .iter()
+                .filter_map(|r| match r {
+                    Record::Attestation(a) => units.get(&a.uid).cloned(),
+                    _ => None,
+                })
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(
+            attested(&read(&root).unwrap()),
+            vec![
+                "p95 rose to 410ms".to_string(),
+                "the pool saturated".to_string()
+            ]
+        );
+
+        // A reviewer edits one unit. Its content is no longer what the tool produced, so it must
+        // not commit carrying the tool's attestation; the untouched one keeps its own.
+        let file = root.join(PATH);
+        let text = std::fs::read_to_string(&file).unwrap();
+        std::fs::write(
+            &file,
+            text.replace("the pool saturated", "the pool saturated at the peak"),
+        )
+        .unwrap();
+        let after = read(&root).unwrap();
+        assert_eq!(attested(&after), vec!["p95 rose to 410ms".to_string()]);
+        // Counted directly as well. The helper above maps attestations through the units present,
+        // so one left naming the edited unit's old uid would vanish from it — and the first
+        // version of this test passed with exactly that defect put back.
+        let attestations = after
+            .iter()
+            .filter(|r| matches!(r, Record::Attestation(_)))
+            .count();
+        assert_eq!(
+            attestations, 1,
+            "an attestation for content that is no longer staged was kept"
+        );
+
+        discard(&root).unwrap();
+        assert!(
+            !root.join(SIDECAR).exists(),
+            "discard left the sidecar behind"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A store built from a staged batch's records resolves the batch's own labels.
+    ///
+    /// `records()` — "the records a caller would commit" — carried units, relations and
+    /// attestations and no `LabelBinding`, so `resolve_label` returned `Unbound` for every label
+    /// the batch had just staged. The CLI had a private helper for it that a library caller could
+    /// not reach.
+    #[test]
+    fn a_staged_batchs_records_carry_its_label_bindings() {
+        let a = cited("p95 rose to 410ms");
+        let b = cited("the pool saturated");
+        let (ua, ub) = (canonical_uid(&a), canonical_uid(&b));
+        let labels = BTreeMap::from([
+            (Label::new("e/p95").unwrap(), ua),
+            (Label::new("c/pool").unwrap(), ub),
+        ]);
+        let staged = prepare(
+            &Store::new(),
+            vec![a, b],
+            Vec::new(),
+            labels.clone(),
+            &attest(),
+        );
+        let store = Store::from_records(staged.records());
+        for (label, uid) in &labels {
+            assert_eq!(
+                smysl_graph::resolve_label(&store, label),
+                Ok(*uid),
+                "{label}"
+            );
+        }
+        let bindings = staged
+            .records()
+            .iter()
+            .filter(|r| matches!(r, Record::LabelBinding(_)))
+            .count();
+        assert_eq!(bindings, 2);
     }
 
     #[test]

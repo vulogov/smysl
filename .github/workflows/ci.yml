@@ -84,6 +84,12 @@ jobs:
           - "--no-default-features --features cli"
           - "--no-default-features --features tui"
           - "--no-default-features --features semantic"
+          # `ingest` without a mapper. It failed `-D warnings` on the streaming `Emitter`, dead
+          # without a streaming mapper, and no row built it — `local` and `remote` both bring a
+          # mapper along.
+          - "--no-default-features --features ingest"
+          # Staging with no provider layer at all: a crate that builds its own units.
+          - "--no-default-features --features stage"
           - "--no-default-features --features local"
           - "--no-default-features --features remote"
           - "--no-default-features --features exact-pack"
@@ -93,6 +99,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace ${{ matrix.features }}
+
+  # Each crate with features, alone at its own defaults and with none. A workspace run
+  # unifies features across members, so `smysl-provider`'s tests at its own defaults did not
+  # compile for a release and no row above could have noticed.
+  crate-features:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: make crate-features
 
   # Rules A and B: the library must stay synchronous and network-free.
   purity:
@@ -235,6 +252,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 scripts/verify-spec-tables.py
+
+  # Internal requirements name the workspace version. Every build here uses paths, so a
+  # requirement left at 1.1.0 while `smysl-ingest` calls a 1.3 item is invisible until a
+  # consumer's lockfile pairs the new crate with an old sibling.
+  dep-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/verify-dep-versions.py
 
   # The same specification, read a third time. Two implementations agreeing could have made
   # the same guess where the document is silent, so independence is what makes agreement

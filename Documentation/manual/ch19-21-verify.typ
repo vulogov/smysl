@@ -434,9 +434,7 @@ itself as the only input) is currently the only way to ask.
 ```
 
 `x.sre/mitigated-by` is shaped like a legal extension relation, but nothing
-in this file declared it with a `SchemaDecl` — which, like an attestation,
-has no surface syntax of its own, so an undeclared extension relation is the
-realistic case:
+in this file declared it:
 
 #screen(caption: "$ smysl check /tmp/w013.smy")[
 ```
@@ -449,6 +447,40 @@ Exit `0` — a warning never blocks a plain `check`, and the store stays
 routable: an unknown kind degrades to the weakest kernel relation
 (`elaborates`) rather than being dropped, so `pack` and `trace` still see an
 edge there, just not the specific meaning `x.sre/mitigated-by` intended.
+
+Declaring the kind is one line. `@schema` names the extension, and lists
+the relation kinds (and unit types) it adds:
+
+```
+@schema x.sre/v1 { version: 1, relations: [x.sre/mitigated-by] }
+
+@claim c/a { status: speculative }
+~ The pool saturated.
+
+@claim c/b { status: speculative }
+~ We rolled back the release.
+
+@rel c/a --x.sre/mitigated-by--> c/b
+```
+
+#screen(caption: "$ smysl check declared.smy")[
+```
+declared.smy: 6 records, 2 units, 0 diagnostic(s)
+```
+]
+
+Six records rather than five: the declaration is one, and it travels with
+the store — through `merge`, into CBOR and back out through `fmt` — so a
+reader who receives the store receives the vocabulary with it.
+
+Until 1.3 there was no way to write this. The `SchemaDecl` record has been
+on the wire since the first release, and this pass has always consulted it,
+but surface text had no spelling for one — so a `.smy` file using an
+extension relation warned on every `check`, whatever its author did. A
+misspelled key in a declaration is an error rather than a skip, for the
+same reason: a `relation:` quietly ignored would leave the kind warning
+under a file that appears to declare it. Declaring a *kernel* kind, such as
+`causes`, is `SMY-E012` — an extension may add, never redefine.
 
 #subsection("Pass 10 — `hashes`")
 
@@ -1033,7 +1065,7 @@ cannot promise anything about.
 xtask check-purity (rules A, B)
   dependency tree (--no-default-features): 31 crates, none forbidden
   pure crates: 7 checked
-  source scan: 71 files, 7 symbols
+  source scan: 73 files, 7 symbols
   rule A: 2 CLI files reach only the facade
 ok
 ```

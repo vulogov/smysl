@@ -128,6 +128,48 @@ impl EdgeSet {
         EdgeSet::of([EdgeKind::Deps, EdgeKind::Grounds])
     }
 
+    /// Every edge along which one unit *rests on* another, oriented as `dependents_via` walks
+    /// them: `deps` and `grounds`, and the relations whose target depends on their source —
+    /// `conditions`, `causes`, `enables`, `warrant` and `backs`.
+    ///
+    /// The set to pass to `dependents_via` for "what breaks if this is false". Building one by
+    /// hand invites the two mistakes that function's documentation describes: including
+    /// `elaborates` or `exemplifies`, whose *source* depends on the target, so their dependents
+    /// come back reversed; or including `rebuts` and `sequences`, which are not dependencies.
+    /// Not the set retraction follows — retraction stays on `deps` and `grounds`.
+    ///
+    /// It is broad on purpose, and the breadth is a choice worth checking against the
+    /// question. `causes` and `enables` make an effect a dependent of its cause, and `warrant`
+    /// and `backs` make a claim a dependent of the reasoning behind it: false-cause and
+    /// false-warrant both reach far. For "which conclusions lose a premise" — an evidence
+    /// audit, where a refuted cause should not flag every effect — use [`EdgeSet::premises`].
+    pub fn dependency() -> EdgeSet {
+        let mut s = EdgeSet::support();
+        for k in [
+            RelKind::Conditions,
+            RelKind::Causes,
+            RelKind::Enables,
+            RelKind::Warrant,
+            RelKind::Backs,
+        ] {
+            if let Some(e) = EdgeKind::kernel(k) {
+                s.kinds.insert(e);
+            }
+        }
+        s
+    }
+
+    /// `deps`, `grounds` and `conditions`: the edges along which one unit is a *premise* of
+    /// another. The narrow counterpart of [`EdgeSet::dependency`], without the causal and
+    /// argumentative relations. Since 1.3.
+    pub fn premises() -> EdgeSet {
+        let mut s = EdgeSet::support();
+        if let Some(e) = EdgeKind::kernel(RelKind::Conditions) {
+            s.kinds.insert(e);
+        }
+        s
+    }
+
     /// What thread ordering runs over: `sequences`, `causes`, `enables` (§19).
     pub fn ordering() -> EdgeSet {
         EdgeSet::of(
@@ -151,6 +193,13 @@ impl EdgeSet {
 
     pub fn one(k: EdgeKind) -> EdgeSet {
         EdgeSet::of([k])
+    }
+
+    /// This set with one more kind — how an extension kind, which only a store can name, joins
+    /// a preset: `EdgeSet::dependency().with(store.adjacency().edge_kind(&kind)?)`.
+    pub fn with(mut self, k: EdgeKind) -> EdgeSet {
+        self.kinds.insert(k);
+        self
     }
 
     pub fn contains(&self, k: EdgeKind) -> bool {
@@ -335,6 +384,22 @@ impl Adjacency {
     /// The extension kind name behind an interned id.
     pub fn extension_name(&self, i: u16) -> Option<&str> {
         self.extensions.get(i as usize).map(String::as_str)
+    }
+
+    /// The edge kind a relation kind has in this adjacency, kernel or extension.
+    ///
+    /// The inverse of [`Adjacency::extension_name`], which was the only direction there was.
+    /// Extension kinds are interned per store, so `x.verify/supports` is a different
+    /// `EdgeKind::Extension` id in each store that holds it, and a caller who wanted to follow
+    /// one — through `dependents_via`, say — had to scan the intern table to build an
+    /// `EdgeSet`. `None` for an extension kind this store holds no edge of.
+    pub fn edge_kind(&self, kind: &RelKind) -> Option<EdgeKind> {
+        EdgeKind::kernel(kind.clone()).or_else(|| {
+            self.extensions
+                .binary_search_by(|e| e.as_str().cmp(kind.as_str()))
+                .ok()
+                .map(|i| EdgeKind::Extension(i as u16))
+        })
     }
 
     pub fn edge_count(&self) -> usize {

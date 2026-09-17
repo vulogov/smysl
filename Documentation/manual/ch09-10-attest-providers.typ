@@ -523,6 +523,12 @@ defined in the same file — a typo in a task name or a provider id is a hard
 parse error, caught when the file is loaded, not discovered mid-run after a
 model has already been asked to do something.
 
+`max_output` is what `ingest` asks each call for, with 2048 as a floor, so a
+provider that never set it (and reads 1024) is not asked for less.
+`ingest --max-output N` overrides both. Until 1.3 every ingest asked for 2048
+whatever this said, and an answer of a dozen units could be cut off at the
+limit — which is now reported as that, and counted as the call it was.
+
 #term("Provider")[
   One configured endpoint: an id, which mapper drives it (`ollama`,
   `anthropic`, and so on), an endpoint URL, a model name, its context window

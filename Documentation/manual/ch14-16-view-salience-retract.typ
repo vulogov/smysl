@@ -787,16 +787,25 @@ seven-day trace. Retracting the trace, dry-run first:
 
 #screen(caption: "$ smysl retract --dry-run b3:re42iey2e7syg6zp73tfrlqbvh fixtures/corpus/F1-incident.smy")[
 ```
-fixtures/corpus/F1-incident.smy: retracting b3:re42iey2e7syg6zp73tfrlqbvh would reach 2 unit(s), orphaning 1
+fixtures/corpus/F1-incident.smy: retracting b3:re42iey2e7syg6zp73tfrlqbvh would leave 2 unit(s) unfounded, 1 of them orphaned
 fixtures/corpus/F1-incident.smy:   b3:wo4t2c46lq45fnakd6tajlgcac would lose all of its grounds
+fixtures/corpus/F1-incident.smy:   1 more unit(s) rest partly on it and keep other support
 ```
 ]
 
-Two units reached — the trace itself, plus `c/regression`, which loses its
-only ground and is named explicitly rather than left for you to work out.
+Two units left unfounded — the trace itself, plus `c/regression`, which loses
+its only ground and is named explicitly rather than left for you to work out.
 Note what is *not* in the blast radius: `f/root-cause` grounds on both
 `c/pool-saturation` and `c/regression`, and only one of those two goes
-unfounded, so the finding keeps standing on the one that survives. A unit
+unfounded, so the finding keeps standing on the one that survives. That is
+the third line: one more unit rests *partly* on the trace. It is not
+unfounded, and it is not untouched either, which is what an impact report
+has to say.
+
+Until 1.3 the first line read "would reach 2 unit(s), orphaning 1", with no
+third line. "Reach" counted the target plus its orphans, so retracting one
+of a decision's four prerequisites said "reach 1" — true of the retraction,
+and read as "nothing depends on this". A unit
 with any surviving ground is never orphaned — orphaning requires *every*
 ground to be gone, which is exactly why the blast radius has to be computed
 rather than assumed from "this reaches the trace, and the trace reaches the
@@ -808,7 +817,7 @@ recomputes effective status with the retraction in place:
 
 #screen(caption: "$ smysl retract --as model:openai/gpt-4 --authority any b3:re42iey2e7syg6zp73tfrlqbvh corrob-two.cbor")[
 ```
-corrob-two.cbor: retracting b3:vxqhovkdp36ndqe454ot6cfkcx would reach 2 unit(s), orphaning 1
+corrob-two.cbor: retracting b3:vxqhovkdp36ndqe454ot6cfkcx would leave 2 unit(s) unfounded, 1 of them orphaned
 corrob-two.cbor:   b3:2tbhvo5rklopzpxb44o4nua2zb would lose all of its grounds
 corrob-two.cbor: 2 unit(s) now read as unfounded
 ```
@@ -853,7 +862,8 @@ authority fails before the blast radius even gets a chance to matter:
 
 #screen(caption: "$ smysl retract --as human:vladimir b3:cvhirtgs2mpvli2ethhyeo32uf fixtures/corpus/F1-incident.smy")[
 ```
-fixtures/corpus/F1-incident.smy: retracting b3:cvhirtgs2mpvli2ethhyeo32uf would reach 1 unit(s), orphaning 0
+fixtures/corpus/F1-incident.smy: retracting b3:cvhirtgs2mpvli2ethhyeo32uf would leave 1 unit(s) unfounded, 0 of them orphaned
+fixtures/corpus/F1-incident.smy:   1 more unit(s) rest partly on it and keep other support
 smysl retract: origin authority: none of the 1 requesting agent(s) attested this unit
 ```
 ]
@@ -865,7 +875,7 @@ agent genuinely is an attestor, succeeds:
 
 #screen(caption: "$ smysl retract --as model:openai/gpt-4 --authority origin b3:vxqhovkdp36ndqe454ot6cfkcx corrob-two.cbor")[
 ```
-corrob-two.cbor: retracting b3:vxqhovkdp36ndqe454ot6cfkcx would reach 2 unit(s), orphaning 1
+corrob-two.cbor: retracting b3:vxqhovkdp36ndqe454ot6cfkcx would leave 2 unit(s) unfounded, 1 of them orphaned
 corrob-two.cbor:   b3:2tbhvo5rklopzpxb44o4nua2zb would lose all of its grounds
 corrob-two.cbor: 2 unit(s) now read as unfounded
 ```
@@ -880,7 +890,7 @@ agent named twice does not:
 
 #screen(caption: "$ smysl retract --as human:a --as human:a --authority quorum:2 b3:vxqhovkdp36ndqe454ot6cfkcx corrob-two.cbor")[
 ```
-corrob-two.cbor: retracting b3:vxqhovkdp36ndqe454ot6cfkcx would reach 2 unit(s), orphaning 1
+corrob-two.cbor: retracting b3:vxqhovkdp36ndqe454ot6cfkcx would leave 2 unit(s) unfounded, 1 of them orphaned
 corrob-two.cbor:   b3:2tbhvo5rklopzpxb44o4nua2zb would lose all of its grounds
 smysl retract: quorum:2 requires 2 distinct agents, got 1
 ```

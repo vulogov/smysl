@@ -93,11 +93,11 @@ impl Registry {
         let id = self
             .tasks
             .get(&t)
-            .ok_or_else(|| ProviderError::Malformed(format!("no provider routed for {t}")))?;
+            .ok_or_else(|| ProviderError::Config(format!("no provider routed for {t}")))?;
         let p = self
             .providers
             .get(id)
-            .ok_or_else(|| ProviderError::Malformed(format!("`{id}` is not configured")))?
+            .ok_or_else(|| ProviderError::Config(format!("`{id}` is not configured")))?
             .as_ref();
         self.admit(p)?;
         Ok(p)
@@ -133,9 +133,7 @@ impl Registry {
     pub fn complete(&self, t: Task, req: &Request) -> Result<Routed, ProviderError> {
         let chain = self.chain(t);
         if chain.is_empty() {
-            return Err(ProviderError::Malformed(format!(
-                "no provider routed for {t}"
-            )));
+            return Err(ProviderError::Config(format!("no provider routed for {t}")));
         }
 
         let mut skipped = Vec::new();
@@ -330,14 +328,23 @@ pub(crate) mod tests {
     #[test]
     fn an_unrouted_task_is_an_error_rather_than_a_guess() {
         let r = Registry::new().with_provider(Box::new(Mock::new("local", true)));
-        assert!(r.for_task(Task::ContentIngest).is_err());
-        assert!(r.complete(Task::ContentIngest, &req()).is_err());
+        assert!(matches!(
+            r.for_task(Task::ContentIngest),
+            Err(ProviderError::Config(_))
+        ));
+        assert!(matches!(
+            r.complete(Task::ContentIngest, &req()),
+            Err(ProviderError::Config(_))
+        ));
     }
 
     #[test]
     fn routing_to_a_missing_provider_is_an_error() {
         let r = Registry::new().route(Task::Attest, id("nowhere"));
-        assert!(r.for_task(Task::Attest).is_err());
+        assert!(matches!(
+            r.for_task(Task::Attest),
+            Err(ProviderError::Config(_))
+        ));
     }
 
     // -- offline (gate) ------------------------------------------------------

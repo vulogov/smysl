@@ -321,7 +321,7 @@ ended at SM-P15, and writing `SM-P16` here would invent one to satisfy a naming 
     ([Flag], [Value], [Meaning]),
     ([`FILE`], [positional], [Document to ingest; `-` reads stdin.]),
     ([`--rung`], [`computed|document|web|model`], [Trust rung of the source; caps what units may claim (rule T).]),
-    ([`--granularity`], [`P`], [Granularity profile the units are produced under.]),
+    ([`--granularity`], [`P`], [Granularity preset recorded in the recipe: `coarse`, `default` (or `standard`), `fine`.]),
     ([`--path`], [`auto|surface|json-ast`], [Override the path D-9 would choose.]),
     ([`--repair`], [`N`], [Repair attempts before a span degrades to opaque prose.]),
     ([`--yes`], [—], [Commit the staged batch instead of exiting 10.]),
@@ -414,8 +414,8 @@ command says so rather than pretending.
 Every diagnostic `smysl` can emit has a stable code, declared once in the `registry!`
 macro invocation in `crates/smysl-core/src/diag.rs` and never reused. The registry is
 single-sourced: wire string, severity, group, and one-line meaning all come from that one
-place, and a workspace test (`registry_matches_appendix_d_size`) asserts the count below
-stays at 49. Codes are grouped exactly as the source groups them; group membership is
+place, and two tests (`the_registry_is_the_size_it_is_meant_to_be` in `smysl-core`, and
+`facade_reexports_the_diagnostic_registry` in the facade) assert the count below stays at 52. Codes are grouped exactly as the source groups them; group membership is
 reporting structure only; it carries no weight on the wire.
 
 #dtable(
@@ -553,6 +553,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W305`], [warning], [Token count estimated rather than provider-reported.]),
     ([`SMY-E307`], [error], [Attributed quote does not occur in the source text.]),
     ([`SMY-W308`], [warning], [Attributed quote occurs only loosely — elided or reworded.]),
+    ([`SMY-W309`], [warning], [A unit's own source was replaced by the caller's, under a source policy that overrides.]),
   ),
 )
 

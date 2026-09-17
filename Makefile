@@ -42,15 +42,17 @@ MATRIX := \
 	--no-default-features@--features@cli \
 	--no-default-features@--features@tui \
 	--no-default-features@--features@semantic \
+	--no-default-features@--features@ingest \
+	--no-default-features@--features@stage \
 	--no-default-features@--features@local \
 	--no-default-features@--features@remote \
 	--no-default-features@--features@exact-pack \
 	--no-default-features@--features@render-typst,render-html
 
 .DEFAULT_GOAL := help
-.PHONY: help all rebuild release test lint clippy fmt fix test-matrix gates purity update seed-fuzz fuzz-build \
+.PHONY: help all rebuild release test lint clippy fmt fix test-matrix crate-features gates purity update seed-fuzz fuzz-build \
         determinism conformance eval live-ollama live-hosted doc fuzz clean sweep \
-        commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables seed-fuzz fuzz-long
+        commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables dep-versions seed-fuzz fuzz-long
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -288,6 +290,22 @@ test-matrix: ## Every feature combination CI builds
 		RUSTFLAGS="-D warnings" $(CARGO) test --workspace $$args; \
 	done
 
+FEATURED := smysl-provider smysl-ingest smysl-render smysl-pack
+
+crate-features: ## Each crate with features, alone, at its defaults and with none
+	@set -e; for c in $(FEATURED); do \
+		for args in "" "--no-default-features"; do \
+			echo "==> cargo test -p $$c $$args"; \
+			RUSTFLAGS="-D warnings" $(CARGO) test -p $$c $$args; \
+		done; \
+	done
+	@# One mapper at a time: `--features gemini` alone warned on an unused `bearer`, and
+	@# `ingest` alone on an unused `Emitter`, while every multi-mapper row was clean.
+	@set -e; for m in ollama anthropic openai gemini deepseek; do \
+		echo "==> cargo test -p smysl-provider --features $$m"; \
+		RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-provider --features $$m; \
+	done
+
 purity: ## Rules A and B: the library stays synchronous and offline
 	$(CARGO) xtask check-purity
 
@@ -307,6 +325,9 @@ doc-cargo: ## Replay the manual's `cargo` transcripts and check its feature tabl
 	@# The first had gone stale *again* by 1.1, one release after being fixed by hand, which
 	@# is the argument: a version number in prose drifts every release.
 	python3 scripts/verify-doc-cargo.py
+
+dep-versions: ## Fail if an internal crate requirement is behind the workspace version
+	python3 scripts/verify-dep-versions.py
 
 spec-tables: ## Fail if the format's constants and the document that defines them disagree
 	@# The gate 1.2.0 needed and did not have. Four facts a C-Produce implementer cannot
@@ -449,7 +470,7 @@ commit: ## Commit with aic and push
 # Everything
 # ---------------------------------------------------------------------------
 
-ci: lint doc-gate api-check test-matrix gates conformance fuzz-build doc-cargo spec-tables ## Everything CI runs, bar the jobs needing a server
+ci: lint doc-gate api-check test-matrix crate-features gates conformance fuzz-build doc-cargo spec-tables dep-versions ## Everything CI runs, bar the jobs needing a server
 	@echo
 	@echo "ci: green."
 	@echo "Not covered here: the ollama job (needs a running server - see make live-ollama)"

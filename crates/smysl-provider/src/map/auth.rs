@@ -55,7 +55,7 @@ pub fn resolve(cfg: &ProviderConfig) -> Result<Option<Secret>, ProviderError> {
             Ok(v) if !v.trim().is_empty() => Ok(Some(Secret::new(v))),
             // Naming a variable that is not set is a configuration error the caller can
             // fix, so it says which variable rather than "unauthorized".
-            _ => Err(ProviderError::Malformed(format!(
+            _ => Err(ProviderError::Config(format!(
                 "{}: ${var} is unset or empty",
                 cfg.id
             ))),
@@ -78,17 +78,17 @@ fn run_key_command(cmd: &str, cfg: &ProviderConfig) -> Result<Secret, ProviderEr
     let mut parts = cmd.split_whitespace();
     let program = parts
         .next()
-        .ok_or_else(|| ProviderError::Malformed(format!("{}: api_key_cmd is empty", cfg.id)))?;
+        .ok_or_else(|| ProviderError::Config(format!("{}: api_key_cmd is empty", cfg.id)))?;
 
     let out = std::process::Command::new(program)
         .args(parts)
         .output()
-        .map_err(|e| ProviderError::Malformed(format!("{}: api_key_cmd: {e}", cfg.id)))?;
+        .map_err(|e| ProviderError::Config(format!("{}: api_key_cmd: {e}", cfg.id)))?;
 
     if !out.status.success() {
         // stderr is not included: a failing credential helper may print the secret it was
         // trying to fetch, and this message reaches logs.
-        return Err(ProviderError::Malformed(format!(
+        return Err(ProviderError::Config(format!(
             "{}: api_key_cmd exited {}",
             cfg.id,
             out.status.code().unwrap_or(-1)
@@ -97,7 +97,7 @@ fn run_key_command(cmd: &str, cfg: &ProviderConfig) -> Result<Secret, ProviderEr
 
     let key = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if key.is_empty() {
-        return Err(ProviderError::Malformed(format!(
+        return Err(ProviderError::Config(format!(
             "{}: api_key_cmd printed nothing",
             cfg.id
         )));
@@ -105,7 +105,9 @@ fn run_key_command(cmd: &str, cfg: &ProviderConfig) -> Result<Secret, ProviderEr
     Ok(Secret::new(key))
 }
 
-/// The `Authorization: Bearer …` header value.
+/// The `Authorization: Bearer …` header value. Only the OpenAI-shaped mappers send one, so a
+/// build with only `anthropic` or `gemini` failed `-D warnings` on it.
+#[cfg(any(feature = "openai", feature = "deepseek", test))]
 pub fn bearer(s: &Secret) -> String {
     format!("Bearer {}", s.expose())
 }

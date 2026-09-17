@@ -1,0 +1,9 @@
+@schema x.sre/v1 { version: 1, relations: [x.sre/mitigated-by] }
+
+@claim c/a { status: speculative }
+~ The pool saturated.
+
+@claim c/b { status: speculative }
+~ We rolled back the release.
+
+@rel c/a --x.sre/mitigated-by--> c/b

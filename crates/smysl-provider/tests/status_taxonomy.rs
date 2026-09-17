@@ -18,6 +18,16 @@
 //! a transient overload becomes a failed pipeline; misclassify a 401 as backpressure and the
 //! CLI retries a credential that will never work, three times, with jitter.
 
+// Without a mapper there is nothing to check, and this file did not build under `-D warnings`
+// (an unused helper) — so at default features it is not compiled rather than run vacuously.
+#![cfg(any(
+    feature = "ollama",
+    feature = "anthropic",
+    feature = "openai",
+    feature = "gemini",
+    feature = "deepseek"
+))]
+
 use smysl_core::error::ProviderError;
 use smysl_provider::config::ProviderConfig;
 use smysl_provider::map::StatusMapping;

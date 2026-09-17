@@ -658,7 +658,15 @@ fn cli() -> Command {
                     Arg::new("granularity")
                         .long("granularity")
                         .value_name("P")
-                        .help("Granularity profile the units are produced under"),
+                        .value_parser(["coarse", "default", "standard", "fine"])
+                        .help("Granularity preset recorded in the recipe (standard = default)"),
+                )
+                .arg(
+                    Arg::new("max-output")
+                        .long("max-output")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(usize))
+                        .help("Output tokens per call [default: the provider's max_output, at least 2048]"),
                 )
                 .arg(
                     Arg::new("path")
@@ -672,6 +680,12 @@ fn cli() -> Command {
                         .long("repair")
                         .value_name("N")
                         .help("Repair attempts before a span degrades to opaque prose"),
+                )
+                .arg(
+                    Arg::new("prompt")
+                        .long("prompt")
+                        .value_name("FILE")
+                        .help("Prompt override (HJSON: id, version, system, user, schema); beats `ingest.prompt` in the config"),
                 )
                 .arg(
                     Arg::new("yes")
@@ -1280,10 +1294,67 @@ fn load_store(
     }
 }
 
-/// Resolve a uid argument against a store, accepting the display form.
-fn resolve(store: &Store, raw: &str) -> Result<Uid, String> {
-    let prefix = UidPrefix::parse(raw).map_err(|_| format!("`{raw}` is not a uid"))?;
-    store.resolve_prefix(&prefix).map_err(|e| e.to_string())
+/// Why a unit argument names no unit, with the exit code that says so.
+struct Unresolved {
+    code: ExitCode,
+    message: String,
+}
+
+impl std::fmt::Display for Unresolved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+/// Resolve a unit argument against a store: a uid, its display form, or a label.
+///
+/// Labels were refused until 1.3 — `smysl trace c/pool-saturation` said "is not a uid" — on the
+/// reasoning that a label "has no existence at the store level", which stopped being true when
+/// `Record::LabelBinding` put labels on the wire in 0.2.
+///
+/// A label is resolved by `smysl::resolve_label`, against the store's binding records, and
+/// **refused when it is bound to more than one unit**. The first version of this took a map
+/// built by inserting bindings into a `BTreeMap`, so in a store merged from several extraction
+/// runs the last binding in record order won, silently — and `retract` by that label retracted
+/// a unit the caller had not chosen. Ambiguity exits 5, as `relink` does for a supersession
+/// fork: the same kind of refusal, a tool declining to adjudicate.
+///
+/// Unambiguous by construction: a uid is spelled `b3:…` and a label never contains `:`. One
+/// helper for every command that takes a unit, so none can disagree with another.
+fn resolve(store: &Store, raw: &str) -> Result<Uid, Unresolved> {
+    if let Ok(label) = smysl::Label::new(raw) {
+        return smysl::resolve_label(store, &label).map_err(|e| match e {
+            smysl::LabelError::Ambiguous(uids) => Unresolved {
+                code: ExitCode::Contentions,
+                message: format!(
+                    "`{raw}` is bound to {} different units; name one by uid:{}",
+                    uids.len(),
+                    uids.iter()
+                        .map(|u| format!(
+                            "\n  {}  {}",
+                            u.canonical(),
+                            store
+                                .get(u)
+                                .map(|x| x.core.gist.as_str())
+                                .unwrap_or("(not in this store)")
+                        ))
+                        .collect::<String>()
+                ),
+            },
+            _ => Unresolved {
+                code: ExitCode::Failure,
+                message: format!("`{raw}` is a label, and nothing in this store is bound to it"),
+            },
+        });
+    }
+    let prefix = UidPrefix::parse(raw).map_err(|_| Unresolved {
+        code: ExitCode::Failure,
+        message: format!("`{raw}` is neither a uid nor a label"),
+    })?;
+    store.resolve_prefix(&prefix).map_err(|e| Unresolved {
+        code: ExitCode::Failure,
+        message: e.to_string(),
+    })
 }
 
 /// The store argument, from the subcommand or the global flag.
@@ -1426,7 +1497,7 @@ fn cmd_trace(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         Ok(u) => u,
         Err(e) => {
             eprintln!("smysl trace: {e}");
-            return ExitCode::Failure;
+            return e.code;
         }
     };
 
@@ -1515,7 +1586,7 @@ fn cmd_view(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                     Ok(u) => out.push(u),
                     Err(e) => {
                         eprintln!("smysl view: {e}");
-                        return ExitCode::Failure;
+                        return e.code;
                     }
                 }
             }
@@ -1793,6 +1864,8 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 Record::Unit(_) | Record::Relation(_) | Record::Thread(_) => false,
                 Record::View(v) => Some(&v.id) != emitted.as_ref(),
                 Record::LabelBinding(b) => ctx.labels.get(&b.uid) != Some(&b.label),
+                // Spelled `@schema` since 1.3, unless it carries what surface text cannot.
+                Record::SchemaDecl(d) => !smysl::surface::schema_decl_has_surface_form(d),
                 _ => true,
             })
             .count();
@@ -1828,6 +1901,19 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     ExitCode::Success
 }
 
+/// Units that rest on `target` through `grounds` or `deps` and survive its retraction.
+///
+/// The impact a retraction does not show: they keep other support, so they are not unfounded,
+/// but part of what they rest on is gone. Measured over the same edges retraction follows.
+fn partly_resting(store: &Store, target: Uid, unfounded: &[Uid]) -> Vec<Uid> {
+    let mut v: Vec<Uid> = smysl::dependents(store, target)
+        .into_iter()
+        .filter(|u| !unfounded.contains(u))
+        .collect();
+    v.sort();
+    v
+}
+
 /// `smysl retract` - withdraw belief in a unit, blast radius first (§23.1).
 ///
 /// `--dry-run` reports exactly what applying it would reach. Nobody should discover what a
@@ -1853,15 +1939,11 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     };
 
     let raw = m.get_one::<String>("uid").expect("required");
-    let target = match UidPrefix::parse(raw).ok().map(|p| store.resolve_prefix(&p)) {
-        Some(Ok(u)) => u,
-        Some(Err(e)) => {
+    let target = match resolve(&store, raw) {
+        Ok(u) => u,
+        Err(e) => {
             eprintln!("smysl retract: {e}");
-            return ExitCode::Failure;
-        }
-        None => {
-            eprintln!("smysl retract: `{raw}` is not a uid");
-            return ExitCode::Usage;
+            return e.code;
         }
     };
 
@@ -1881,10 +1963,11 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         // know it was refused, and refusal is reported on stderr in the text form where a
         // machine reading stdout would never see it.
         println!(
-            "{{\"target\":{},\"blast_radius\":[{}],\"orphaned\":[{}],\"authorised\":{},\"refusal\":{}}}",
+            "{{\"target\":{},\"blast_radius\":[{}],\"orphaned\":[{}],\"rest_partly_on\":[{}],\"authorised\":{},\"refusal\":{}}}",
             smysl::json_escape(&target.canonical()),
             uid_array(&plan.blast_radius),
             uid_array(&plan.orphaned),
+            uid_array(&partly_resting(&store, target, &plan.blast_radius)),
             plan.authorised,
             plan.refusal
                 .as_deref()
@@ -1895,13 +1978,24 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             return ExitCode::Success;
         }
     } else {
+        // "would reach N" counted the target itself plus the units left with no support, so
+        // retracting one of a decision's four prerequisites said "reach 1" — true of the
+        // retraction, and read as "nothing depends on this". The first line now says what the
+        // number is; the second says what the number leaves out.
         println!(
-            "{path}: retracting {target} would reach {} unit(s), orphaning {}",
+            "{path}: retracting {target} would leave {} unit(s) unfounded, {} of them orphaned",
             plan.blast_radius.len(),
             plan.orphaned.len()
         );
         for u in &plan.orphaned {
             println!("{path}:   {u} would lose all of its grounds");
+        }
+        let partly = partly_resting(&store, target, &plan.blast_radius);
+        if !partly.is_empty() {
+            println!(
+                "{path}:   {} more unit(s) rest partly on it and keep other support",
+                partly.len()
+            );
         }
     }
 
@@ -1964,7 +2058,7 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 Ok(u) => focus.push(u),
                 Err(e) => {
                     eprintln!("smysl pack: {e}");
-                    return ExitCode::Failure;
+                    return e.code;
                 }
             }
         }
@@ -2313,7 +2407,7 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                     Ok(u) => seed.push(u),
                     Err(e) => {
                         eprintln!("smysl salience: {e}");
-                        return ExitCode::Failure;
+                        return e.code;
                     }
                 }
             }
@@ -2329,7 +2423,7 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             Ok(u) => u,
             Err(e) => {
                 eprintln!("smysl salience: {e}");
-                return ExitCode::Failure;
+                return e.code;
             }
         };
         let Some(t) = report.explain(&uid) else {
@@ -2575,7 +2669,7 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 Ok(u) => scope.push(u),
                 Err(e) => {
                     eprintln!("smysl thread: {e}");
-                    return ExitCode::Failure;
+                    return e.code;
                 }
             }
         }
@@ -2872,18 +2966,43 @@ fn root_beside(store: Option<&str>) -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
-/// Load the provider configuration, falling back to the all-local default.
+/// The project configuration, or the all-local default when there is none.
 #[cfg(feature = "providers")]
-fn load_registry(global: &ArgMatches) -> Result<smysl::Registry, String> {
+fn load_config(global: &ArgMatches) -> Result<smysl::ProviderConfigFile, String> {
     let path = project_file(global, smysl::ProviderConfigFile::PATH);
-    let cfg = match std::fs::read_to_string(&path) {
+    match std::fs::read_to_string(&path) {
         Ok(src) => {
-            smysl::ProviderConfigFile::load(&src).map_err(|e| format!("{}: {e}", path.display()))?
+            smysl::ProviderConfigFile::load(&src).map_err(|e| format!("{}: {e}", path.display()))
         }
         // A default that reached a hosted provider would mean a first run egressing
         // content nobody asked to send, so the default is entirely local.
-        Err(_) => smysl::ProviderConfigFile::local_default(),
+        Err(_) => Ok(smysl::ProviderConfigFile::local_default()),
+    }
+}
+
+/// The prompt override for `ingest`: `--prompt`, else `ingest.prompt` from the config.
+///
+/// A config path is relative to the project, like every other sidecar; a flag is relative to
+/// where the command was typed, like every other argument.
+#[cfg(feature = "ingest")]
+fn load_prompt(
+    m: &ArgMatches,
+    global: &ArgMatches,
+) -> Result<Option<smysl::PromptOverride>, String> {
+    let path = match m.get_one::<String>("prompt") {
+        Some(p) => std::path::PathBuf::from(p),
+        None => match load_config(global)?.ingest_prompt {
+            Some(p) => project_file(global, &p),
+            None => return Ok(None),
+        },
     };
+    smysl::PromptOverride::load_file(&path).map(Some)
+}
+
+/// Load the provider configuration, falling back to the all-local default.
+#[cfg(feature = "providers")]
+fn load_registry(global: &ArgMatches) -> Result<smysl::Registry, String> {
+    let cfg = load_config(global)?;
 
     let mut r = smysl::Registry::new().offline(global.get_flag("offline"));
     for p in cfg.providers.values() {
@@ -2951,14 +3070,51 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if let Some(g) = m.get_one::<String>("granularity") {
         opts = opts.with_granularity(g);
     }
-    if let Some(p) = m.get_one::<String>("path") {
-        if let Some(p) = smysl::IngestPath::parse(p) {
-            opts = opts.with_path(p);
-        }
+    if let Some(n) = m.get_one::<usize>("max-output") {
+        opts = opts.with_max_output(*n);
+    }
+    // `--path`, else `ingest.path` from the config. `auto` in either means no override.
+    let path_arg = match m.get_one::<String>("path") {
+        Some(p) => Some(p.clone()),
+        None => match load_config(global) {
+            Ok(cfg) => cfg.ingest_path,
+            Err(e) => {
+                eprintln!("smysl ingest: {e}");
+                return ExitCode::Failure;
+            }
+        },
+    };
+    if let Some(p) = path_arg.as_deref().and_then(smysl::IngestPath::parse) {
+        opts = opts.with_path(p);
     }
     if let Some(n) = m.get_one::<String>("repair").and_then(|s| s.parse().ok()) {
         opts = opts.with_repair_attempts(n);
     }
+    // A named file is its units' source. The model cannot know what the document is called, and
+    // asked to cite it wrote `the input document` on every unit of a live run — the placeholder
+    // from its template. `FillMissing`, not `Override`: a source the document itself names, a URL
+    // or a paper it quotes, is the model's to keep. Standard input names nothing, so it gets none.
+    if source != "-" {
+        opts = opts.with_source(
+            smysl::SourceRef::new(smysl::SourceKind::File, source.clone()),
+            smysl::SourcePolicy::FillMissing,
+        );
+    }
+    match load_prompt(m, global) {
+        Ok(Some(p)) => opts = opts.with_prompt(p),
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!("smysl ingest: prompt override: {e}");
+            return ExitCode::Failure;
+        }
+    }
+    let requested = match opts.requested_path() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("smysl ingest: prompt override {e}");
+            return ExitCode::Failure;
+        }
+    };
 
     // `--dry-run` answers the question a caller most wants answered *before* egress: what
     // would be sent, and to whom. It makes no call, which is the whole point.
@@ -2972,7 +3128,7 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         };
         let caps = provider.caps();
         let choice =
-            smysl::choose_ingest_path(&caps, smysl::Task::ContentIngest, input.len(), opts.path);
+            smysl::choose_ingest_path(&caps, smysl::Task::ContentIngest, input.len(), requested);
         println!("provider     {}", provider.id());
         println!(
             "egress       {}",
@@ -2982,7 +3138,42 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 "YES - leaves the machine"
             }
         );
-        println!("path         {} ({})", choice.path, choice.reason.as_str());
+        // When the prompt's schema moved `auto`, the choice reads as a caller override — which
+        // is true of the code path and false of the caller, who typed no `--path`.
+        if requested != opts.path {
+            println!(
+                "path         {} (the prompt override supplies a schema)",
+                choice.path
+            );
+        } else {
+            println!("path         {} ({})", choice.path, choice.reason.as_str());
+        }
+        match &opts.prompt {
+            Some(p) => println!(
+                "prompt       {} v{}{}",
+                p.id,
+                p.version,
+                if p.schema.is_some() {
+                    ", own schema"
+                } else {
+                    ""
+                }
+            ),
+            None => println!("prompt       built-in"),
+        }
+        match &opts.source {
+            Some((s, policy)) => println!(
+                "source       {}:{} ({})",
+                s.kind.as_str(),
+                s.reference,
+                policy.as_str()
+            ),
+            None => println!("source       none - the model names any it can"),
+        }
+        println!(
+            "max output   {} token(s) per call",
+            opts.output_budget(&caps)
+        );
         println!("rung         {rung} (ceiling {})", smysl::ceiling(rung));
         println!(
             "input        {} bytes, {} token(s)",

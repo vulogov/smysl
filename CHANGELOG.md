@@ -7,9 +7,404 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.3.0
+## Unreleased — 1.4.0
 
 Nothing yet.
+
+---
+
+## 1.3.0 — 2026-09-16
+
+The cycle that used smysl as the corpus for another project. rust_smysl records why code
+changed as a smysl store, building units through the library, running its own extraction
+through `ingest`, and checking every quote against the commit it came from. Its requests — six
+gaps, R1–R9 and a verification report — were each a place where smysl knew something and did
+not use it, and each is closed here with an acceptance test.
+
+Nothing here is a format change. `smysl/1.0` is untouched and the same fixtures produce the same
+uids. The facade is 254 names at `--all-features` and 209 pure, every addition listed in
+`API_CONTRACT.md`; `make semver` is clean on all twelve crates against 1.2.0, and
+`SEMVER_BREAKING` is empty for the fourth release running. One surface-text cost: `schema` is a
+reserved word, and a 1.2 reader rejects a `.smy` file that uses `@schema`.
+
+Six gaps found by using smysl as the corpus for another project, where the pipeline writes
+surface text for hundreds of commits, merges the results, and wants to run its own extraction
+through `ingest`. Every one of them was a place where the tool knew something and did not use
+it — a second label, a label binding, a declaration record, a template id, the label grammar —
+which is the same shape as 1.2's findings seen from the consumer's side.
+
+### A reference through a unit's second label resolves (was `SMY-E060`)
+
+`SMY-W054` warns that two labels name one unit and only one survives a round trip. That is
+still true. What was wrong is that the parser then **forgot the second name one pass later**:
+`grounds` and `deps` resolved through every label, while `@rel` endpoints, relation notes,
+thread steps and `@doc roots` resolved through the survivors only. The same document warned
+that `e/two` names `e/one`'s unit and failed a `@rel` naming `e/two` as unresolved. In a merged
+store holding one quote under two labels, that decided whether the edges survived at all.
+
+Found beside it, and fixed: **one label on two different units was silent.** W054's registry
+entry has always described that case and nothing emitted it; the earlier unit lost its name,
+and the parts disagreed about who won — `grounds` took the last declaration, relations and the
+writer's bindings took whichever uid sorted first, so a round trip could move a name between
+units. Now it warns, and every kind of reference agrees on the owner.
+
+### `ingest` takes a caller's own prompt and schema
+
+`resolve_prompt` was documented as "the hook a deployment overrides" and was a free function
+returning its argument, which nothing in Rust can override. It could not have worked through a
+fork either: the recipe hardcoded `"ingest.content.surface"`, version 1, so the documented way
+to distinguish a deployment's wording — change the id or the version — was a change nothing
+read. Replaced by `PromptOverride`, on `IngestOptions::with_prompt`, `smysl ingest --prompt FILE`
+and `ingest: { prompt: … }` in `.smysl/config.hjson`, with texts and schema loadable from files.
+
+What it changes is the question; what it keeps is everything after the answer — the same
+conversion, quote check, rung ceiling and staging, asserted end to end against an answer that
+fabricates a quote and launders `measured`. The recipe now names the template actually sent,
+and an override's id carries a hash of its texts, so two prompts under one id and version can
+never aggregate as one pipeline. A schema must still describe a `units` array, is refused at load
+if it does not, and moves `auto` to json-ast since that is the only path with a channel for it.
+
+Two things found getting there. `--dry-run` computed the path from `--path` alone and would have
+reported `surface` for a run that goes json-ast. And the first version documented `'''` blocks
+for inline prompts, which the HJSON reader has never accepted; the unit test used a one-line
+string, and only running the command against a real file found it.
+
+### Surface ingest tells the model what a label is
+
+Gemini flash-lite on the surface path wrote labels like `claim-nodejs-c-produce`, failed all
+three repair attempts, and degraded whole commits to one prose unit, while `--path json-ast`
+worked. The asymmetry has a precise cause: the json-ast schema carries a label `pattern` an
+enforcing provider applies while decoding, and the surface template showed `@<type> <label>`
+without ever saying what a label looks like. The repair turn only said "malformed".
+
+Both content templates now state the format (version 2 — and the recipe now reads the version),
+and a malformed label's diagnostic carries the rule and a corrected candidate into the repair
+turn: `[try: a label is `kind/name` …, e.g. `claim/nodejs-c-produce`]`. A project can also make
+json-ast its default with `ingest: { path: json-ast }`. And the schema's pattern admitted
+`c/1x`, which the parser rejects, so an enforcing provider could emit a label conversion would
+then refuse; it now matches the parser.
+
+### Commands that take a unit accept its label
+
+`trace`, `retract`, `pack --focus/--seed`, `view --roots`, `salience --seed/--explain` and
+`thread --scope`. Chapter 13 documented the refusal as a rule — a label "has no existence at the
+store level" — which stopped being true when `LabelBinding` put labels on the wire in 0.2.
+`load_store` recovered them from every store and five of six commands discarded them. The label
+and its uid are now the same argument, asserted as identical output byte for byte, from `.smy`
+and from `.cbor`. `retract` had its own copy of the resolution and exited 2 where `trace` exited
+1 for the same mistake; they share one now.
+
+### `@schema` declares an extension in surface text
+
+`check` has always consulted `SchemaDecl` for `SMY-W013`, and surface text had no way to write
+one — the manual called an undeclared extension relation "the realistic case" for that reason,
+so a `.smy` file using `--x.code/touches-->` warned on every check forever.
+`@schema x.code/v1 { version: 1, relations: [x.code/touches] }` is record type 8, on the wire
+since 0.1; nothing about the encoding changes. It survives `fmt`, `merge` and CBOR round trips.
+A misspelled key is an error, because a `relation:` passed over quietly would leave the kind
+warning under a file that visibly declares it.
+
+**The one compatibility cost:** `schema` is now a reserved surface word, as `doc`, `rel` and
+`thread` are. A 1.2 reader rejects a `.smy` file that uses `@schema`; the CBOR form of the same
+store reads everywhere, since the record is not new. **The 1.2 error does not say that.** It reads
+`@schema` as a unit of an unknown type named `schema` and reports `SMY-E001: malformed label
+`x.code/v1`` — true of the text it thinks it is reading, and no help to someone whose file is
+fine. If an older `smysl` says a schema id is a malformed label, the file wants 1.3.
+
+### A merged store is checked against every profile in it, not the first view's id
+
+`check` judged every unit by `store.views().next()` — the view whose id sorts first. In a store
+merged from rationale documents written under `fine` (20..60 tokens) and others under `default`
+(40..120), every rationale warned `SMY-W041`; renaming the default document from `v/other` to
+`v/zzz` made the warnings disappear with no unit changed. With no record of which document
+produced which unit, a store whose views disagree is now checked against the widest envelope
+they allow; one whose views agree is checked exactly as before.
+
+The profile the rationale case needed already existed: `granularity: { profile: fine }`.
+
+### From rust_smysl's library use: six more (R1–R6)
+
+rust_smysl uses smysl as a library to record why code changed, building units itself and
+sending them through `stage::prepare`. Its report came with reproductions and acceptance
+tests; every acceptance test is now in the suite, and each was watched failing first.
+
+**R1 — the repair turn made things worse.** On a real commit with Gemini flash-lite, surface
+ingest degraded in 3 of 3 runs, and replaying the repair turn showed why. The template fenced the
+previous answer with the *input* marker, which the model copied back — 17 bytes that became
+`SMY-E001: stray Text`. It replaced the content system prompt, so the model fixing `cited`
+without a source no longer saw "Never `measured`", and raised every `cited` to `measured`. And
+a degraded chunk reported only the last attempt, hiding the real cause behind the one the repair
+introduced. Now the repair keeps the content prompt (and a caller's override) with the
+correction added; the previous answer has its own marker; a marker or code fence echoed at
+either end of any answer is stripped before parsing; `E031`, `E032` and `E034` carry suggestions
+that only ever lower a status; and a degraded chunk reports every attempt's errors, marked by
+attempt.
+
+**R2 — the surface template had no way to write a source or a quote.** Its only example was
+`@<type> <label> { status: … }`, so flash-lite wrote every record `cited` with no source.
+Version 3 shows a complete header with `source` and `"ingest:quote"` — held as a constant a test
+parses, so the example cannot teach an error — and says what to do without a nameable source.
+One correction to the report: the quote check *already* ran on the surface path. What was
+missing was only the request for a quote, so there was nothing to check.
+
+Not changed: `auto` still takes surface for large inputs. The size rule exists because a
+truncated JSON answer loses a whole batch; `ingest: { path: json-ast }` covers providers where
+surface does badly.
+
+**R3 — a caller supplies the source.** `IngestOptions::with_source(SourceRef, SourcePolicy)`,
+with `FillMissing` and `Override`. Provenance is the one field a model should not invent: models
+wrote `ref: CHANGELOG.md` for a commit message. `source` is inside the uid, and a `cited` unit
+without one fails construction rather than waiting to be patched, so the policy is applied to
+raw fields before any unit is built, on both paths through one shared `SourcePolicy::apply`. An
+override that replaces a model's own source is `SMY-W309`, naming the unit. The recipe records
+source and policy; recipes without one are byte-identical to before. Asserted per path, and each
+path's application was removed in turn to confirm its own case fails.
+
+**R4 — the quote check is public**: `quote_support`, `quote_support_in` (several texts, which one
+matched, `Present` anywhere beating `Loose` anywhere), `QuoteSupport` and `QUOTE_KEY`. Its
+normalisation is now contract, so it is stated on the function and settled first: straight and
+curly, single and double quotation marks are one mark; Markdown `` ` `` and `*` are deleted
+rather than spaced; `_` is kept, because in a code change `foo_bar` and `foobar` are different
+names.
+
+And the frozen definition would have frozen a hole. `Loose` matched a quote word to any later
+source word that contained it or that it contained — stemming in all but name. Against a
+715-word commit message, the invented "Rust was rewritten in Go to match the Python
+implementation." rated `Loose`, a warning, and would have staged. Words are now compared whole
+after removing edge punctuation; the fabrication is `Absent`, honest elisions stay `Loose`, and
+the commit is a fixture in `fixtures/quote/`.
+
+**R5 — an ambiguous label is refused.** A store merged from three extraction runs bound
+`d/g90ec2f7-1` three times, and `trace` and `retract --dry-run` by that label exited 0 on one of
+them — the last binding in record order, because callers built a `BTreeMap` from the bindings.
+`label_bindings` and `resolve_label` in the library; every unit-taking command now exits 5 on
+`Ambiguous`, listing each candidate with its gist, as `relink` does for a fork.
+
+**R6 — dependents over chosen edges, and a retraction report that does not mislead.**
+`dependents_via(store, uid, &EdgeSet)`. Writing it found something rust_smysl's pipeline as
+described would get wrong: **a reverse closure over `{grounds, deps, conditions}` never reaches a
+decision conditioned on a prerequisite.** Support edges are stored from the dependent to what
+it rests on; `p --conditions--> d` is stored from `p` to `d`. So `dependents_via` walks support
+edges inward and relation edges outward, and says which relation kinds that is right for —
+`conditions`, `causes`, `enables`, `warrant`, `backs` — and which it is not. A test asserts the
+plain reverse closure misses the case, so a change of adjacency direction fails loudly.
+
+`retract --dry-run` said "would reach N unit(s), orphaning M", where N was the target plus its
+orphans; retracting one of two prerequisites said "reach 1". It now says "would leave N unit(s)
+unfounded, M of them orphaned", and adds "K more unit(s) rest partly on it and keep other
+support" when there are any; `--json` gains `rest_partly_on`. Nothing pinned the wording
+before except the book; `tests/cmd_retract.rs` does now.
+
+**R1 verified live.** Gemini `gemini-3.5-flash-lite`, surface path, `--rung document`, against
+`git show -s --format='# Commit %h: %s%n%n%b' 4968383` — the input that degraded in 3 of 3 runs
+before. The acceptance asked for units in 2 of 3:
+
+| run | calls | units | degraded | tokens |
+|---|---:|---:|---:|---:|
+| 1 | 1 | 8 | 0 | 2,364 |
+| 2 | 3 | 12 | 0 | 9,372 |
+| 3 | 1 | 8 | 0 | 2,362 |
+
+Run 2 recovered through two repair turns, the path that used to spiral. Every one of the 28
+units carried a source and a quote, every quote was found in the commit, and the blake3 claim
+that R2's replay had inverted was stated correctly in all three runs, quoted verbatim.
+
+Two things the live output showed, carried below: every source was `ref: the input document`,
+and no staged unit had a label.
+
+**Before the cut: provenance, labels and a dependency preset.** The live R1 run showed two
+things wrong with its own success, and both are fixed.
+
+Every source read `ref: the input document`, copied from the v3 template's example by a model
+that cannot know what the document is called. `smysl ingest FILE` now supplies the file as the
+source with `FillMissing`, so a source the document itself names — a URL, a paper — is kept.
+With a caller source the model gets `ingest.content.surface.sourced` or
+`ingest.content.json.sourced`, which tell it provenance is recorded for it, and on json-ast a
+schema without Appendix C's `cited → source` requirement — which an enforcing provider applies
+while decoding, forcing a model to invent one that `FillMissing` would then keep. Without a
+caller source (standard input) the surface template's example `ref` is a placeholder in angle
+brackets, and a test holds every template to that. `unit_schema()` is byte-identical; the variant
+is `unit_schema_with`.
+
+Staged units had no labels: `ingest` gave `stage::prepare` an empty map. The converter's labels
+now reach staging, remapped when rule T's cap moves a uid, and a label two chunks give to
+different units stays with the first, reported as `SMY-W054`.
+
+`EdgeSet::dependency()` is the right-way-round set for `dependents_via`: `deps`, `grounds`,
+`conditions`, `causes`, `enables`, `warrant`, `backs`. `quote_support` keeps `_` as content.
+
+Rerun live, three times per path, same commit:
+
+| run | calls | units | degraded | every unit labelled | every source `file:commit-4968383.md` |
+|---|---:|---:|---:|:-:|:-:|
+| surface 1 | 1 | 8 | 0 | yes | yes |
+| surface 2 | 3 | 16 | 0 | yes | yes |
+| surface 3 | 3 | 1 | **1** | — | — |
+| json-ast 1 | 0 | 1 | **1** | — | — |
+| json-ast 2 | 1 | 11 | 0 | yes | yes |
+| json-ast 3 | 1 | 12 | 0 | yes | yes |
+
+The two degraded runs failed for reasons these changes did not introduce and the live run is the
+first to show; they are carried below. json-ast 1 hit Gemini's `MAX_TOKENS` at the 2,048-token
+output cap. Surface 3 had one gist at 31 tokens against a limit of 30, which three repairs did not
+shorten — and R1's per-attempt history is what made that visible.
+
+**Checked against rust_smysl's verification design, and three more closed.** A fact-to-claim
+verifier needs to follow its own edges, stage its own declarations, and know who produced what.
+
+- **An extension kind can be named.** `Adjacency::edge_kind(&RelKind)` resolves kernel and
+  extension kinds; only `extension_name(id)` existed, and extension ids are interned per store,
+  so `dependents_via` over `x.verify/supports` needed a scan of the intern table.
+  `EdgeSet::with` adds such a kind to a preset.
+- **A batch stages with its declarations.** `stage::prepare_declared` takes the `SchemaDecl`s a
+  batch depends on; `prepare` had no place for one, so a library caller's batch warned
+  `SMY-W013` unless the declaration was appended to the store outside staging.
+- **Staged attestations reach the store.** Committing a real live batch found 9 units, 9 label
+  bindings and **0 attestations**: the staged file is surface text, which cannot spell one, and
+  `merge --staged` read the batch back from it. Every unit ever committed that way had no agent,
+  rung or recipe — nothing for rule T to read, nothing for `trace --agents` to show, and an
+  `origin` retraction that refuses everyone. The batch is now also written to
+  `.smysl/staged.cbor`, and `read` attaches each attestation only to a unit the reviewed text
+  still holds unchanged: a unit a reviewer edited commits unattested, because the tool did not
+  write it. Verified live — 10 staged units, 10 attestations, `trace --agents` names
+  `tool:smysl-ingest`. The round-trip test had counted units and never asked; its first
+  replacement passed with the edited-unit rule removed, and was tightened until it did not.
+
+**R7–R9, from building units without a model.** rust_smysl reads a commit and its diff, writes
+units itself, and stages them — `stage::prepare`, the quote check, rule T, and none of the
+provider layer.
+
+- **R7 — a staged batch's records carry its label bindings.** `Staged::records()` returned units,
+  relations and attestations, and `Store::from_records` over it resolved no label, so a caller
+  that built a store from its own batch could not name anything in it. Only bindings to a unit
+  in the batch are emitted, as the staged file does.
+- **R8 — staging without the provider layer.** The quote check moved to `smysl_core::quote`: it
+  does no I/O, and had lived in `smysl-ingest` only because ingest was its first caller.
+  `smysl_ingest::quote` re-exports it and the facade's four quote names are now ungated.
+  `smysl-provider` is optional in `smysl-ingest`, behind a default `model` feature holding
+  `Ingestor`, `attest` and the path choice; the facade gains `stage`, which is staging, rule T,
+  recipes and CSV import, and `ingest` is `stage` plus the model. `cargo tree --features stage`
+  lists no `smysl-provider`. The pure facade is 209 names, up from 205 by the quote names.
+- **R9 — `--features ingest` alone builds under `-D warnings`.** The streaming `Emitter` was
+  dead without a streaming mapper, and no matrix row built `ingest` without `local` or `remote`.
+  Both combinations, `ingest` and `stage`, are rows now.
+
+**And from the same report, three of the carried items closed.**
+
+- **A configuration mistake says so.** `ProviderError::Config` (the enum is `#[non_exhaustive]`)
+  for an unreadable `.smysl/config.hjson`, an unknown provider id, structured mode or task, a
+  task routed to nothing, a key variable that is unset or an `api_key_cmd` that fails, and a
+  prompt override refused before egress. It prints `provider
+  configuration: …`; a misspelled `ingest.path` printed "malformed provider response" for a call
+  never made. The exit code is still 6. Two `Malformed` uses remain that are not a provider's
+  answer — the usage ledger's file errors — and are left for a variant of their own.
+- **`smysl-provider`'s tests compile at its own defaults.** The retry tests exercised items that
+  exist only with `http-client`, and two integration files had nothing to check without a mapper.
+  A workspace run unifies features, so no row could see it: `make crate-features`, and a CI job,
+  test each crate with features alone at its defaults and with none, and `smysl-provider` with
+  each mapper on its own — which found `--features gemini` and `--features anthropic` failing
+  `-D warnings` on an unused `bearer`, and a streaming control test that fails where no
+  streaming mapper is built. The first `Emitter` fix missed DeepSeek, which streams too; the
+  workspace's `--no-default-features` row caught it, through `smysl-eval`.
+- **`EdgeSet::premises()`** — `deps`, `grounds`, `conditions` — beside `EdgeSet::dependency()`,
+  whose documentation now says what its breadth costs: `causes` and `enables` make every effect a
+  dependent of its cause, which an evidence audit asking "which conclusions lose a premise" does
+  not want.
+
+**One over-long gist no longer costs its chunk.** When repair runs out and every remaining error
+is `SMY-E022` on a unit in the answer, that unit degrades to opaque prose holding its gist and
+body, so does every unit in the answer grounded on it (transitively), relations and labels
+touching them are dropped, and the siblings are staged as written — one `SMY-W304` per degraded
+unit, and `IngestReport::degraded` counts them. Anything else beside it, a missing source or a
+fabricated quote, still degrades the whole span: `repair::UNIT_LOCAL` is only `E022`, because a
+fabricated quote is evidence about the answer it came in. The repair turn already carried the
+count and the limit ("gist is 56 tokens, default allows 30"); a test now holds it there.
+
+Found writing that test: **every degraded span's synthesised gist could fail `SMY-E022` itself.**
+`synth_gist` cut the first sentence at `GIST_MAX_CHARS`, 240 characters, and `l0_max` is 30
+tokens — 120 bytes as the estimator counts. A span whose first sentence ran long degraded to a
+prose unit that staging then reported as an error. It is bounded by `l0_max` in bytes now,
+multi-byte text included. (`GIST_MAX_CHARS` itself still tells the json-ast schema 240; that
+mismatch is carried.)
+
+**`ingest --granularity` is checked.** `coarse`, `default`, `fine`, or `standard` — the field's
+default since before the presets had names, and now an alias of `default`. Anything else is a
+usage error at the CLI and `ProviderError::Config` from `Ingestor::ingest`, before a call; it
+had run, and recorded a recipe no real run shared. The name is still hashed as written, so every
+recipe recorded under a valid name is unchanged — `standard` and `default` stay distinct recipes,
+which is the price of not moving them. `IngestOptions::granularity_profile` resolves it.
+
+**Before the cut: four things a release could not ship with.**
+
+- **Internal requirements name 1.3.0.** Every `[workspace.dependencies]` entry for a sibling crate
+  said `1.1.0`, and 1.3 crates call 1.3 items — `smysl-ingest` uses `smysl_core::quote`,
+  `smysl-provider` `ProviderError::Config`. Published, a consumer with `smysl-core` locked at 1.2
+  would resolve the new `smysl-ingest` against it and fail to build. Nothing here could see it,
+  since every build uses paths: `make dep-versions` and a CI job check it now.
+- **`ingest` asks for the provider's configured `max_output`**, never less than 2,048
+  (`DEFAULT_MAX_OUTPUT`), or `--max-output N` / `IngestOptions::with_max_output` as given. It asked
+  for 2,048 always, and one live json-ast run of three was cut off at `MAX_TOKENS` under a
+  configuration allowing more. `IngestOptions::max_output` defaults to `0`, meaning the provider's;
+  `IngestOptions::output_budget` resolves it, and `--dry-run` prints it.
+- **An answer cut off at the output limit says so, and is a call.** `ProviderError::Truncated
+  { limit, used }` for Gemini's `MAX_TOKENS`, Anthropic's `max_tokens` and OpenAI-shaped `length`.
+  It was `ContextExceeded`, printed "context window exceeded: 2032 > 2048" for 2,032 of 2,048
+  output tokens — false as written, and about the wrong window — and Anthropic's and OpenAI's
+  compared the answer's *bytes* against the cap (OpenAI's against 0). It reads "answer cut off
+  at the output limit of 2048 token(s) (2032 reported); raise max_output". Ingest now counts every
+  error a provider returned as a call, and a truncation's reported output tokens as usage; the
+  run had said `0 call(s), 0 token(s)` and was billed. A `ContextExceeded` with no numbers, from a
+  status error, no longer prints "0 > 0".
+- **The gist bound in the schema is the check's.** `GIST_MAX_CHARS` is 120, `l0_max` at four bytes
+  a token; it was 240, so an enforcing provider held the model to a bound `SMY-E022` then refused,
+  and both surface templates told the model 240. Template versions move with it — surface 5,
+  surface.sourced 2, json 3 (its schema changed, and the recipe hashes the schema's id only),
+  json.sourced 2 — so recipes from runs before this differ from runs after, as they should.
+
+**The quote check's limit is stated where it is defined.** `Present` means the quote is in the
+source. A unit whose gist contradicts its own verbatim quote passes, because the contradiction is
+between the unit and its evidence, which no string comparison sees.
+
+Found on the way: the diagnostic appendix said a test named `registry_matches_appendix_d_size`
+held the registry at 49. No test has that name, and the registry was 51; it is 52 with
+`SMY-W309`, which is numbered past `W306` because retired codes are not reused.
+
+### Also
+
+- `LineClass::SchemaStart` is the enum's last variant, not beside `ThreadStart`: inserting it
+  mid-enum renumbered six published discriminants, which `make semver` reported as a major
+  change. Caught before commit.
+- The facade is 254 names at `--all-features` and 209 pure; the additions are listed in
+  `API_CONTRACT.md`.
+- `err.txt`, a stray build log committed at the root in `6ff7c19`, is gone.
+
+### What is carried
+
+- **Review cannot close what verification opens.** Checked against rust_smysl's design, where a
+  contradicted claim goes to review and is never retracted automatically:
+  - a `rebuts` edge alone is never a contention — detection needs both units in one thread — so
+    nothing lists a bare contradiction for review;
+  - there is no way to withdraw an edge (retraction targets units, and relations have no uid),
+    and `ContentionStatus::Resolved` is set only in tests;
+  - retracting the rebutting unit does not release the claim: pack still pins it as `C3`,
+    verified. §6 requires a selection to carry a claim's **live** rebuttals and never defines
+    live, and merge and pack use the word differently.
+  These need format decisions — what makes a rebuttal live, how an edge is withdrawn, how a
+  contention is resolved — so they are for 1.4, starting from the specification.
+- **An edge cannot record who asserted it.** `Relation.attestations` exists in memory, but the
+  relation body's wire keys are 0–4 and none carries it, the decoder sets it empty, and an
+  attestation record cannot target a relation because relations have no uid. A model-matched
+  `supports` or `rebuts` edge is indistinguishable from a human's. A new relation key is a
+  format addition §8.1 permits; it is a decision, and not taken here.
+- **`strip_echo` removes frame lines, not prose preambles.** A repair answer that opened with a
+  27-byte sentence was still `stray Text`.
+- **A chunk that recovers reports nothing about what it recovered from.** R1's per-attempt
+  history is printed only for a chunk that degrades; run 2's two failed attempts left no trace.
+- **`ingest --granularity` does not choose the profile units are checked under.** It is
+  validated now (below), but `check_local` and staging still use the default profile. Making it
+  bind is a behaviour change for any run that names `coarse` or `fine`, so it is for 1.4.
+- **Whether flash-lite now converges on the surface path** is a live question this cycle could
+  not answer offline. What is tested is that the label format and a candidate reach the model.
 
 ---
 

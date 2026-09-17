@@ -40,6 +40,10 @@ pub struct Conditions {
     /// The schema identifiers in play, sorted - a set, not a sequence.
     pub schema_set: Vec<String>,
     pub path: IngestPath,
+    /// A caller-supplied source and its policy. It decides what the output says about
+    /// provenance, so two runs that differ only here are not one recipe. Absent adds nothing to
+    /// the hash, so every recipe computed before this field existed is unchanged.
+    pub source: Option<(smysl_core::SourceRef, smysl_core::SourcePolicy)>,
 }
 
 impl Conditions {
@@ -53,7 +57,17 @@ impl Conditions {
             temperature: 0.0,
             schema_set: Vec::new(),
             path: IngestPath::Surface,
+            source: None,
         }
+    }
+
+    pub fn with_source(
+        mut self,
+        s: &smysl_core::SourceRef,
+        policy: smysl_core::SourcePolicy,
+    ) -> Conditions {
+        self.source = Some((s.clone(), policy));
+        self
     }
 
     pub fn with_provider(mut self, p: impl Into<String>, model: impl Into<String>) -> Conditions {
@@ -119,6 +133,12 @@ impl Conditions {
             push(b, s.as_bytes());
         }
         push(b, self.path.as_str().as_bytes());
+        if let Some((s, policy)) = &self.source {
+            push(b, b"source");
+            push(b, policy.as_str().as_bytes());
+            push(b, s.kind.as_str().as_bytes());
+            push(b, s.reference.as_bytes());
+        }
     }
 }
 

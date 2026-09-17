@@ -369,6 +369,27 @@ mod tests {
     }
 
     #[test]
+    fn a_relation_declared_in_surface_text_does_not_warn() {
+        // End to end from the text a person writes. The two tests either side of this one build
+        // the `SchemaDecl` by hand, which is the only way one existed until 1.3: surface syntax
+        // had no spelling for it, so a `.smy` file using `--x.code/touches-->` warned SMY-W013 on
+        // every check, forever, whatever the author did.
+        let src = "@schema x.code/v1 { version: 1, relations: [x.code/touches] }\n\n\
+                   @claim c/a { status: speculative }\n~ A.\n\n\
+                   @claim c/b { status: speculative }\n~ B.\n\n\
+                   @rel c/a --x.code/touches--> c/b\n";
+        let out = smysl_core::surface::parse_surface(src).unwrap();
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        let r = check(out.records.clone(), None);
+        assert_eq!(r.count(Code::W013), 0, "a declared kind still warned");
+
+        // And the same file without the declaration is the control.
+        let bare = src.split_once("\n\n").unwrap().1;
+        let out = smysl_core::surface::parse_surface(bare).unwrap();
+        assert_eq!(check(out.records, None).count(Code::W013), 1);
+    }
+
+    #[test]
     fn a_declared_extension_relation_does_not_warn() {
         let a = UnitCoreBuilder::new(KernelType::Claim, "a", Status::Speculative)
             .build()

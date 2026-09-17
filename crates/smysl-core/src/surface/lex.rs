@@ -37,6 +37,12 @@ pub enum LineClass {
     Comment,
     /// Anything else: body, detail, or a gist continuation.
     Text,
+    /// `@schema x.code/v1 { version: 1, relations: [x.code/touches] }` — a `SchemaDecl`.
+    ///
+    /// Last, not beside `ThreadStart` where it belongs by meaning: variants carry implicit
+    /// discriminants, and inserting it mid-enum renumbered six published ones, which
+    /// `cargo-semver-checks` rightly reports as a major change.
+    SchemaStart,
 }
 
 impl LineClass {
@@ -123,6 +129,9 @@ fn classify(line: &str) -> LineClass {
             "doc" => LineClass::DocHeader,
             "rel" => LineClass::RelLine,
             "thread" => LineClass::ThreadStart,
+            // Reserved in 1.3, as `doc`, `rel` and `thread` are. Before, `@schema x.code/v1 {…}`
+            // lexed as a unit of some future type `schema` and failed on its "label".
+            "schema" => LineClass::SchemaStart,
             w if is_record_type(w) => LineClass::RecordStart,
             // A type this build does not know, which a later version may have added. The
             // writer emits exactly the type string it decoded - it has to, since the type
