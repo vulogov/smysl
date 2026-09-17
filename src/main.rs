@@ -251,6 +251,15 @@ fn cli() -> Command {
             "trace" => sub
                 .arg(Arg::new("uid").required(true).value_name("UID"))
                 .arg(
+                    Arg::new("via")
+                        .long("via")
+                        .value_name("KINDS")
+                        .help(
+                            "Walk what a unit rests on over these edges: a preset (premises, \
+                             dependency, support) or relation kinds, comma-separated",
+                        ),
+                )
+                .arg(
                     Arg::new("depth")
                         .long("depth")
                         .value_name("N")
@@ -482,6 +491,22 @@ fn cli() -> Command {
                 ),
             "review" => sub
                 .arg(
+                    Arg::new("confirm")
+                        .long("confirm")
+                        .value_name("KINDS")
+                        .help(
+                            "Also list edges of these relation kinds until somebody attests them \
+                             (comma-separated)",
+                        ),
+                )
+                .arg(
+                    Arg::new("confirmed-by")
+                        .long("confirmed-by")
+                        .value_name("KIND")
+                        .value_parser(["human", "model", "tool"])
+                        .help("Whose attestation confirms one [default: human]"),
+                )
+                .arg(
                     Arg::new("all")
                         .long("all")
                         .help("Include items already resolved")
@@ -567,6 +592,15 @@ fn cli() -> Command {
                         .value_name("N")
                         .required(true)
                         .help("Token budget, counted with the recorded estimator"),
+                )
+                .arg(
+                    Arg::new("support")
+                        .long("support")
+                        .value_name("KINDS")
+                        .help(
+                            "Carry what a selected unit rests on over these edges (C8): a preset \
+                             (premises, dependency, support) or relation kinds, comma-separated",
+                        ),
                 )
                 .arg(
                     Arg::new("focus")
@@ -1576,6 +1610,37 @@ fn uid_array<'a>(uids: impl IntoIterator<Item = &'a Uid>) -> String {
         .join(",")
 }
 
+/// An edge set from a comma-separated list: a preset, or relation kinds.
+///
+/// Extension kinds are interned per store, so the store resolves them; a kind nothing in the store
+/// uses is refused rather than silently matching nothing, which would read as "no dependencies".
+fn edge_set(store: &Store, raw: &str, cmd: &str) -> Result<smysl::EdgeSet, ExitCode> {
+    let mut out = smysl::EdgeSet::of([]);
+    for word in raw.split(',').map(str::trim).filter(|w| !w.is_empty()) {
+        match word {
+            "premises" => out = out.union(&smysl::EdgeSet::premises()),
+            "dependency" => out = out.union(&smysl::EdgeSet::dependency()),
+            "support" => out = out.union(&smysl::EdgeSet::support()),
+            "deps" => out = out.with(smysl::EdgeKind::Deps),
+            "grounds" => out = out.with(smysl::EdgeKind::Grounds),
+            other => match smysl::RelKind::parse(other)
+                .ok()
+                .and_then(|k| store.adjacency().edge_kind(&k))
+            {
+                Some(kind) => out = out.with(kind),
+                None => {
+                    eprintln!(
+                        "smysl {cmd}: `{other}` is not a relation kind in this store, nor a \
+                         preset (premises, dependency, support)"
+                    );
+                    return Err(ExitCode::Usage);
+                }
+            },
+        }
+    }
+    Ok(out)
+}
+
 /// `smysl trace` - walk a unit's ancestry (§23.1). The direct answer to F3.
 fn cmd_trace(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let Some(path) = store_arg(m, global) else {
@@ -1606,7 +1671,13 @@ fn cmd_trace(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     };
     let depth = m.get_one::<String>("depth").and_then(|s| s.parse().ok());
 
-    let l = smysl::trace(&store, target, kind, depth);
+    let l = match m.get_one::<String>("via") {
+        Some(raw) => match edge_set(&store, raw, "trace") {
+            Ok(edges) => smysl::trace_via(&store, target, &edges, depth),
+            Err(code) => return code,
+        },
+        None => smysl::trace(&store, target, kind, depth),
+    };
     if global.get_flag("json") {
         // The tree's shape is what a caller wants, so `depth` and `via` travel per node
         // rather than being encoded as indentation a machine would have to count.
@@ -2277,9 +2348,23 @@ fn review_items(
     store: &Store,
     labels: &std::collections::BTreeMap<smysl::Label, Uid>,
 ) -> Vec<smysl::ReviewItem> {
+    review_items_with(store, labels, &[], None)
+}
+
+/// The queue, with the edge kinds a caller expects somebody to stand behind (1.5).
+fn review_items_with(
+    store: &Store,
+    labels: &std::collections::BTreeMap<smysl::Label, Uid>,
+    confirm: &[RelKind],
+    confirmed_by: Option<smysl::AgentKind>,
+) -> Vec<smysl::ReviewItem> {
     let mut ctx = smysl::DetectionContext::default();
     ctx.labels = vec![labels.clone()];
-    smysl::review(store, &ctx)
+    let mut opts = smysl::ReviewOptions::confirming(confirm.iter().cloned()).with_detection(ctx);
+    if let Some(kind) = confirmed_by {
+        opts = opts.confirmed_by(kind);
+    }
+    smysl::review_with(store, &opts)
 }
 
 /// `smysl withdraw` - an edge that should no longer be followed (1.4).
@@ -2623,8 +2708,32 @@ fn cmd_review(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             return ExitCode::Failure;
         }
     };
+    let mut confirm: Vec<RelKind> = Vec::new();
+    for word in m
+        .get_one::<String>("confirm")
+        .map(|s| s.split(',').map(str::trim).collect::<Vec<_>>())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|w| !w.is_empty())
+    {
+        match RelKind::parse(word) {
+            Ok(k) => confirm.push(k),
+            Err(e) => {
+                eprintln!("smysl review: `{word}` is not a relation kind: {e}");
+                return ExitCode::Usage;
+            }
+        }
+    }
+    let confirmed_by = m
+        .get_one::<String>("confirmed-by")
+        .map(|s| match s.as_str() {
+            "model" => smysl::AgentKind::Model,
+            "tool" => smysl::AgentKind::Tool,
+            _ => smysl::AgentKind::Human,
+        });
+
     let all = m.get_flag("all");
-    let items: Vec<smysl::ReviewItem> = review_items(&store, &labels)
+    let items: Vec<smysl::ReviewItem> = review_items_with(&store, &labels, &confirm, confirmed_by)
         .into_iter()
         .filter(|i| all || !i.resolved)
         .collect();
@@ -2655,6 +2764,14 @@ fn cmd_review(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                     smysl::json_escape(&r.to.canonical()),
                     i.resolved
                 ),
+                smysl::ReviewSubject::Unconfirmed(r) => format!(
+                    "{{\"type\":\"edge\",\"kind\":{},\"rid\":{},\"from\":{},\"to\":{},\"confirmed\":{}}}",
+                    smysl::json_escape(r.kind.as_str()),
+                    smysl::json_escape(&r.uid().canonical()),
+                    smysl::json_escape(&r.from.canonical()),
+                    smysl::json_escape(&r.to.canonical()),
+                    i.resolved
+                ),
                 _ => "{\"type\":\"unknown\"}".into(),
             })
             .collect();
@@ -2674,6 +2791,11 @@ fn cmd_review(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                     println!("{}  {}{mark}", r.uid(), edge_text(&labels, r));
                     println!("  {}  {}", r.to, gist(&r.to));
                     println!("  rebutted by {}  {}", r.from, gist(&r.from));
+                }
+                smysl::ReviewSubject::Unconfirmed(r) => {
+                    let mark = if i.resolved { "  (confirmed)" } else { "" };
+                    println!("{}  {}{mark}", r.uid(), edge_text(&labels, r));
+                    println!("  awaiting confirmation: {}  {}", r.to, gist(&r.to));
                 }
                 _ => {}
             }
@@ -2711,6 +2833,12 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     };
 
     let mut req = PackRequest::budget(budget);
+    if let Some(raw) = m.get_one::<String>("support") {
+        match edge_set(&store, raw, "pack") {
+            Ok(edges) => req = req.resting_on(edges),
+            Err(code) => return code,
+        }
+    }
     if let Some(v) = m.get_many::<String>("focus") {
         let mut focus = Vec::new();
         for raw in v {

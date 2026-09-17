@@ -140,6 +140,24 @@ pub fn prepare_declared(
     schemas: Vec<SchemaDecl>,
     attest: &Attest,
 ) -> Staged {
+    prepare_attested(store, units, relations, labels, schemas, attest)
+}
+
+/// [`prepare_declared`], attested per record (1.5).
+///
+/// Every batch until now was one agent's work, so one `Attest` described it. A caller that links
+/// evidence proposes edges from a different agent than the units — and an edge attestation is how
+/// a store says who asserted one — so the attestor is asked per record rather than fixed for the
+/// batch. `Attest` implements [`Attesting`] and answers the same thing for everything, which is
+/// what `prepare_declared` passes.
+pub fn prepare_attested(
+    store: &Store,
+    units: Vec<UnitCore>,
+    relations: Vec<Relation>,
+    labels: BTreeMap<Label, Uid>,
+    schemas: Vec<SchemaDecl>,
+    attest: &dyn Attesting,
+) -> Staged {
     // Rule M first, and *before* the check: weakening moves identities, so a report
     // computed over the model's original uids would describe a batch that no longer
     // exists. This was the bug the SM-P14 gate kept hitting - the report was taken before
@@ -197,12 +215,12 @@ pub fn prepare_declared(
     // reviewer's — which is what an edge attestation exists to tell apart.
     let mut attestations: Vec<Attestation> = kept
         .iter()
-        .map(|u| attest.for_unit(canonical_uid(u)))
+        .map(|u| Attesting::for_unit(attest, canonical_uid(u)))
         .collect();
     let mut rids = std::collections::BTreeSet::new();
     for r in &relations {
         if rids.insert(r.uid()) {
-            attestations.push(attest.for_relation(r.uid()));
+            attestations.push(Attesting::for_relation(attest, r.uid()));
         }
     }
 
@@ -214,6 +232,34 @@ pub fn prepare_declared(
         schemas,
         report,
         weakened: applied.weakened,
+    }
+}
+
+/// Who attests each staged record.
+///
+/// [`Attest`] answers with one agent for the whole batch, which is what an ingest run is. A caller
+/// whose batch came from several hands — a model that proposed the units, another that linked a
+/// test to the claim it verifies, a person confirming one edge — implements this instead and
+/// answers per record (1.5). Rule T still reads the rung from whatever comes back, so an
+/// attestation with a rung the unit outranks is caught at staging as it always was.
+pub trait Attesting {
+    /// The attestation for a staged unit.
+    fn for_unit(&self, uid: Uid) -> Attestation;
+
+    /// The attestation for a staged edge, by its rid. Defaults to [`Attesting::for_unit`], which
+    /// is right when one agent produced the whole batch.
+    fn for_relation(&self, rid: Uid) -> Attestation {
+        self.for_unit(rid)
+    }
+}
+
+impl Attesting for Attest {
+    fn for_unit(&self, uid: Uid) -> Attestation {
+        Attest::for_unit(self, uid)
+    }
+
+    fn for_relation(&self, rid: Uid) -> Attestation {
+        Attest::for_relation(self, rid)
     }
 }
 
@@ -569,6 +615,62 @@ mod tests {
     /// it back: every unit committed by `merge --staged` arrived with no agent, rung or recipe. Found
     /// by committing a real live batch — 9 units, 9 label bindings, 0 attestations. The round-trip
     /// test above counted units and never asked.
+    /// A batch from several hands: the units from the model that proposed them, the edge from the
+    /// one that linked it (1.5). Before `Attesting`, a caller wanting that staged twice.
+    #[test]
+    fn a_batch_can_be_attested_per_record() {
+        struct PerRecord {
+            units: Attest,
+            edges: Attest,
+            rid: Uid,
+        }
+        impl Attesting for PerRecord {
+            fn for_unit(&self, uid: Uid) -> Attestation {
+                self.units.for_unit(uid)
+            }
+            fn for_relation(&self, rid: Uid) -> Attestation {
+                assert_eq!(rid, self.rid, "asked about an edge the batch does not have");
+                self.edges.for_relation(rid)
+            }
+        }
+
+        let (a, b) = (cited("p95 rose to 410ms"), cited("the pool saturated"));
+        let edge = Relation::new(
+            smysl_core::RelKind::Backs,
+            canonical_uid(&a),
+            canonical_uid(&b),
+        );
+        let linker = AgentId::new("model:linker").unwrap();
+        let attest = PerRecord {
+            units: attest(),
+            edges: Attest::new(linker.clone(), Rung::Model, Hlc::zero(linker.clone())),
+            rid: edge.uid(),
+        };
+        let out = prepare_attested(
+            &Store::new(),
+            vec![a, b],
+            vec![edge.clone()],
+            BTreeMap::new(),
+            Vec::new(),
+            &attest,
+        );
+
+        let who = |uid: Uid| {
+            out.attestations
+                .iter()
+                .find(|x| x.uid == uid)
+                .map(|x| x.agent.clone())
+                .expect("attested")
+        };
+        assert_eq!(who(edge.uid()), linker, "the edge carries the linker");
+        assert_eq!(
+            who(canonical_uid(&out.units[0])),
+            agent(),
+            "the units do not"
+        );
+        assert!(out.report.fail_on(smysl_core::Severity::Error).is_ok());
+    }
+
     /// A staged edge is attested by its rid, keeps that attestation through the staged file while
     /// the reviewed text still holds it, and loses it when the reviewer changes an endpoint.
     #[test]

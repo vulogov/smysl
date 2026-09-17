@@ -24,11 +24,12 @@ survives the cut is never chosen by how important a sentence sounds.
   when it was not.
 ]
 
-#section("The seven constraints")
+#section("The eight constraints")
 
-Every pack is checked against seven named constraints (`smysl-pack`'s
-`constraints.rs`). Six are closure obligations — things a selected unit
-drags in with it — and the seventh is the budget itself. `--explain` prints
+Every pack is checked against eight named constraints (`smysl-pack`'s
+`constraints.rs`). Seven are closure obligations — things a selected unit
+drags in with it — and one, C7, is the budget itself. C8 is the only one a
+caller turns on. `--explain` prints
 the constraint code next to every forced unit, so this table is the key to
 reading that output rather than guessing at it from the letter:
 
@@ -43,8 +44,15 @@ reading that output rather than guessing at it from the letter:
     ([C5], [a unit is pinned], [It must reach L1. Pinning is how `--focus` and an active thread's referenced units make a demand: not "include this," but "include this at enough depth to read."]),
     ([C6], [a unit sits at L1 or above], [Any unit it names in a `warrant` edge — the inferential licence for the step it took — must also be selected, at L0.]),
     ([C7], [always], [Total selected cost must not exceed the budget. The one constraint that is a number rather than a graph shape.]),
+    ([C8], [a unit sits at L1 or above, and the caller named an edge set], [Whatever it rests on over those edges must also be selected, at L0. Off unless asked for (`--support`, `PackRequest::resting_on`). `deps` and `grounds` are inside a unit and therefore inside its uid; a producer that links a prerequisite by `conditions`, so that rewording it does not move every decision resting on it, states that dependency in a relation instead — and C1 and C2 cannot see it. Since 1.5.]),
   ),
 )
+
+`--support` takes a preset — `premises` (`deps`, `grounds`, `conditions`),
+`dependency` (those plus `causes`, `enables`, `warrant`, `backs`) or
+`support` — or a comma-separated list of relation kinds, extension kinds
+included. `smysl trace --via` walks the same edges, so what a pack will
+carry can be read before packing it.
 
 `--explain` reports the *reason* a unit is in using a slightly different
 vocabulary — `Reason` in `closure.rs` — because a reason names *what pulled
@@ -61,6 +69,7 @@ it in*, not just which rule fired:
     ([`dep of U`], [C1], [`U` needs it to be interpretable at L1+.]),
     ([`ground of U`], [C2], [`U` needs it as evidence at L1+.]),
     ([`warrant of U`], [C6], [`U` needs it as the licence for an inference at L1+.]),
+    ([`support of U`], [C8], [`U` rests on it over an edge the caller named with `--support`.]),
     ([`earned on density`], [`-`], [Nothing forced it in — it won a place by value per token, same as any other budget-driven selection.]),
   ),
 )

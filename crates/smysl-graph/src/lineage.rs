@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::{AgentId, RelKind, Uid};
 
-use crate::adjacency::{EdgeKind, EdgeSet};
+use crate::adjacency::{EdgeKind, EdgeSet, NodeId};
 use crate::store::Store;
 use crate::traverse;
 
@@ -33,17 +33,25 @@ pub enum TraceKind {
     Grounds,
     /// Both at once.
     Both,
+    /// What a unit rests on over edges the caller names (1.5). Last, so no published
+    /// discriminant moves.
+    Rests,
 }
 
 impl TraceKind {
-    pub const ALL: &'static [TraceKind] =
-        &[TraceKind::Parents, TraceKind::Grounds, TraceKind::Both];
+    pub const ALL: &'static [TraceKind] = &[
+        TraceKind::Parents,
+        TraceKind::Grounds,
+        TraceKind::Both,
+        TraceKind::Rests,
+    ];
 
     pub const fn as_str(self) -> &'static str {
         match self {
             TraceKind::Parents => "parents",
             TraceKind::Grounds => "grounds",
             TraceKind::Both => "both",
+            TraceKind::Rests => "rests-on",
         }
     }
 
@@ -72,6 +80,8 @@ pub enum Via {
     Supersedes,
     Grounds,
     Deps,
+    /// A relation the caller named as carrying a dependency (1.5).
+    Rests,
 }
 
 impl Via {
@@ -82,6 +92,7 @@ impl Via {
             Via::Supersedes => "supersedes",
             Via::Grounds => "grounds",
             Via::Deps => "deps",
+            Via::Rests => "rests-on",
         }
     }
 }
@@ -203,6 +214,61 @@ pub fn trace(store: &Store, root: Uid, kind: TraceKind, depth: Option<u32>) -> L
     Lineage { root, kind, nodes }
 }
 
+/// [`trace`] over the edges a caller names: what a unit rests on, by depth (1.5).
+///
+/// `trace` follows `grounds` and `deps`, which are inside a unit and therefore inside its uid. A
+/// producer that links a prerequisite by `conditions` keeps it outside identity on purpose, and
+/// this is how such a graph is walked: the same breadth-first shape, the same attribution, over
+/// [`EdgeSet::premises`] or whatever set the caller means. See [`rests_on`] for the flat answer.
+pub fn trace_via(store: &Store, root: Uid, edges: &EdgeSet, depth: Option<u32>) -> Lineage {
+    let mut nodes: Vec<LineageNode> = Vec::new();
+    let mut seen: BTreeSet<Uid> = BTreeSet::new();
+    let mut frontier: Vec<(Uid, Via)> = vec![(root, Via::Root)];
+    seen.insert(root);
+
+    let mut d = 0u32;
+    while !frontier.is_empty() {
+        if let Some(limit) = depth {
+            if d > limit {
+                break;
+            }
+        }
+        frontier.sort();
+        let mut next: Vec<(Uid, Via)> = Vec::new();
+        for (uid, via) in frontier {
+            let (agents, hop) = attribution(store, &uid);
+            nodes.push(LineageNode {
+                uid,
+                depth: d,
+                via,
+                agents,
+                hop,
+            });
+            for u in store.supports_of(&uid, edges) {
+                if seen.insert(u) {
+                    // `grounds` and `deps` keep their own names; anything else is a relation the
+                    // caller nominated, and saying `rests-on` is honest about which it was.
+                    let via = match store.get(&uid) {
+                        Some(unit) if unit.core.grounds.contains(&u) => Via::Grounds,
+                        Some(unit) if unit.core.deps.contains(&u) => Via::Deps,
+                        _ => Via::Rests,
+                    };
+                    next.push((u, via));
+                }
+            }
+        }
+        frontier = next;
+        d += 1;
+    }
+
+    nodes.sort_by_key(|n| (n.depth, n.uid));
+    Lineage {
+        root,
+        kind: TraceKind::Rests,
+        nodes,
+    }
+}
+
 /// Who attested a unit, and at what hop it first appeared.
 fn attribution(store: &Store, uid: &Uid) -> (BTreeSet<AgentId>, Option<u32>) {
     match store.get(uid) {
@@ -286,6 +352,61 @@ pub fn dependents_via(store: &Store, uid: Uid, edges: &EdgeSet) -> Vec<Uid> {
         }
     }
     out
+}
+
+/// Everything a unit rests on, over the edges the caller chooses: [`dependents_via`] the other
+/// way round.
+///
+/// Direction is the same problem seen from the other side. `deps` and `grounds` are stored from
+/// the dependent to what it rests on, so what `uid` rests on is *outgoing*; a relation
+/// `p --conditions--> d` is stored from `p`, so what `d` rests on is *incoming*. Use
+/// [`EdgeSet::premises`] for the narrow reading — `deps`, `grounds`, `conditions` — or
+/// [`EdgeSet::dependency`] for the broad one.
+///
+/// This is what a packing or tracing caller needs when a producer links prerequisites by
+/// `conditions` so that rewording one does not move the uid of every decision resting on it: the
+/// relation carries the dependency, and nothing that reads `grounds` alone can see it.
+///
+/// Transitive, in the order first reached, without the unit itself.
+pub fn rests_on(store: &Store, uid: Uid, edges: &EdgeSet) -> Vec<Uid> {
+    let g = store.adjacency();
+    let Some(start) = g.id(&uid) else {
+        return Vec::new();
+    };
+    let mut seen = vec![false; g.len()];
+    seen[start as usize] = true;
+    let mut stack = vec![start];
+    let mut out = Vec::new();
+    while let Some(n) = stack.pop() {
+        for e in one_hop(g, n, edges) {
+            let m = e as usize;
+            if m < seen.len() && !seen[m] {
+                seen[m] = true;
+                stack.push(e);
+                if let Some(u) = g.uid(e) {
+                    out.push(*u);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// One step of [`rests_on`], which the packer's own fixpoint walks.
+pub(crate) fn one_hop(g: &crate::adjacency::Adjacency, n: NodeId, edges: &EdgeSet) -> Vec<NodeId> {
+    let along_support = g
+        .out_edges(n)
+        .iter()
+        .filter(|e| matches!(e.kind, EdgeKind::Deps | EdgeKind::Grounds));
+    let along_relations = g
+        .in_edges(n)
+        .iter()
+        .filter(|e| !matches!(e.kind, EdgeKind::Deps | EdgeKind::Grounds));
+    along_support
+        .chain(along_relations)
+        .filter(|e| edges.contains(e.kind))
+        .map(|e| e.target)
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

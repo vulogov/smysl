@@ -215,3 +215,70 @@ fn an_extension_kind_is_named_per_store_and_followed() {
         "kernel kinds resolve as before"
     );
 }
+
+/// `rests_on` is `dependents_via` the other way round, over the same edges and with the same
+/// asymmetry: `grounds` along its direction, a relation against its own.
+#[test]
+fn rests_on_is_dependents_via_reversed() {
+    let (store, uid) = setup();
+    let (ground, condition, choice, downstream) = (
+        uid("p/grounding"),
+        uid("p/condition"),
+        uid("d/choice"),
+        uid("c/downstream"),
+    );
+
+    let mut on = smysl_graph::rests_on(&store, downstream, &with_conditions());
+    on.sort();
+    let mut want = vec![choice, ground, condition];
+    want.sort();
+    assert_eq!(
+        on, want,
+        "the decision, both its prerequisites, transitively"
+    );
+
+    assert_eq!(
+        smysl_graph::rests_on(&store, choice, &EdgeSet::support()),
+        vec![ground],
+        "grounds alone stops at the grounded prerequisite"
+    );
+    assert!(smysl_graph::rests_on(&store, ground, &with_conditions()).is_empty());
+
+    // The pair is symmetric: if a rests on b, b has a among its dependents.
+    for start in [downstream, choice] {
+        for x in smysl_graph::rests_on(&store, start, &with_conditions()) {
+            assert!(
+                dependents_via(&store, x, &with_conditions()).contains(&start),
+                "{start} rests on {x}, which does not list it as a dependent"
+            );
+        }
+    }
+}
+
+/// `trace_via` walks the same edges by depth, and names how each unit was reached.
+#[test]
+fn trace_via_walks_chosen_edges_by_depth() {
+    use smysl_graph::{trace_via, Via};
+    let (store, uid) = setup();
+    let line = trace_via(&store, uid("c/downstream"), &with_conditions(), None);
+    assert_eq!(line.kind.as_str(), "rests-on");
+
+    let at = |u| line.nodes.iter().find(|n| n.uid == u).expect("reached");
+    assert_eq!(at(uid("c/downstream")).depth, 0);
+    assert_eq!(at(uid("d/choice")).depth, 1);
+    assert_eq!(at(uid("d/choice")).via, Via::Grounds, "inside the unit");
+    assert_eq!(at(uid("p/condition")).depth, 2);
+    assert_eq!(
+        at(uid("p/condition")).via,
+        Via::Rests,
+        "a relation the caller named"
+    );
+
+    // Depth bounds it, and grounds alone never reaches the conditioned prerequisite.
+    assert_eq!(
+        trace_via(&store, uid("c/downstream"), &with_conditions(), Some(1)).len(),
+        2
+    );
+    let narrow = trace_via(&store, uid("c/downstream"), &EdgeSet::support(), None);
+    assert!(!narrow.nodes.iter().any(|n| n.uid == uid("p/condition")));
+}

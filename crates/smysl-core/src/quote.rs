@@ -73,6 +73,53 @@ pub enum Support {
 ///
 /// Deliberately **not** stemming or synonyms — those would make a reworded claim look
 /// attributed, which is exactly the thing this exists to catch.
+/// [`normalise`], keeping where each normalised byte came from (1.5).
+///
+/// One entry per byte of the result, plus a sentinel, so a match found in the normalised text can
+/// be pointed back at the source a person reads. Normalisation deletes characters, collapses
+/// whitespace runs and can change a character's length when it lowercases, so the mapping cannot
+/// be recomputed from the two strings afterwards — it has to be recorded while it happens.
+fn normalise_mapped(s: &str) -> (String, Vec<usize>) {
+    let mut out = String::with_capacity(s.len());
+    let mut map: Vec<usize> = Vec::with_capacity(s.len() + 1);
+    // Where the run of whitespace began, so the single space that replaces it maps to the end of
+    // the previous word rather than the start of the next. Otherwise a range ending at a word
+    // boundary swallowed the space after it.
+    let mut space: Option<usize> = None;
+    let mut content_ends = 0usize;
+    for (at, c) in s.char_indices() {
+        let c = match c {
+            '`' | '*' => continue,
+            '\u{2018}' | '\u{2019}' | '\u{201B}' | '\u{201C}' | '\u{201D}' | '\u{201F}' | '\'' => {
+                '"'
+            }
+            '\u{2010}'..='\u{2015}' | '\u{2212}' => '-',
+            '\u{00A0}' => ' ',
+            other => other,
+        };
+        if c.is_whitespace() {
+            space.get_or_insert(at);
+            continue;
+        }
+        if let Some(from) = space.take() {
+            if !out.is_empty() {
+                out.push(' ');
+                map.push(from);
+            }
+        }
+        let before = out.len();
+        out.extend(c.to_lowercase());
+        map.resize(out.len().max(before), at);
+        content_ends = at + c.len_utf8();
+    }
+    map.truncate(out.len());
+    // The sentinel ends at the last content character rather than at the end of the string:
+    // trailing whitespace normalises away, and a range ending on the last word must not reach past
+    // it into a newline no reader would call part of the quote.
+    map.push(content_ends);
+    (out, map)
+}
+
 fn normalise(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut space = false;
@@ -130,21 +177,53 @@ fn bare(word: &str) -> &str {
 /// short word of the message inside it. Edge punctuation was the reason for the looseness, and
 /// stripping it is the narrow fix for that reason.
 fn words_in_order(needle: &str, haystack: &str) -> bool {
+    loose_span(needle, haystack).is_some()
+}
+
+/// [`words_in_order`], reporting the region of `haystack` the words were found in (1.5): from the
+/// start of the first matched word to the end of the last, byte offsets into `haystack`.
+fn loose_span(needle: &str, haystack: &str) -> Option<(usize, usize)> {
     let words: Vec<&str> = needle
         .split_whitespace()
         .filter(|w| !is_elision(w))
-        .collect();
-    // A quote of nothing but ellipses attributes nothing. Without this the `all` below is
-    // vacuously true and every such quote reads as loosely supported.
-    if words.is_empty() {
-        return false;
-    }
-    let mut hay = haystack.split_whitespace().map(bare);
-    words
-        .into_iter()
         .map(bare)
         .filter(|w| !w.is_empty())
-        .all(|w| hay.any(|h| h == w))
+        .collect();
+    // A quote of nothing but ellipses attributes nothing. Without this every such quote reads as
+    // loosely supported, the `all` below being vacuously true.
+    if words.is_empty() {
+        return None;
+    }
+    let hay: Vec<(usize, &str)> = word_positions(haystack);
+    let (mut at, mut first, mut last) = (0usize, None, 0usize);
+    for w in words {
+        let found = hay[at..].iter().position(|(_, h)| bare(h) == w)?;
+        let (start, text) = hay[at + found];
+        first.get_or_insert(start);
+        last = start + text.len();
+        at += found + 1;
+    }
+    first.map(|f| (f, last))
+}
+
+/// Whitespace-separated words with their byte offsets.
+fn word_positions(s: &str) -> Vec<(usize, &str)> {
+    let mut out = Vec::new();
+    let mut start = None;
+    for (i, c) in s.char_indices() {
+        match (c.is_whitespace(), start) {
+            (false, None) => start = Some(i),
+            (true, Some(b)) => {
+                out.push((b, &s[b..i]));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(b) = start {
+        out.push((b, &s[b..]));
+    }
+    out
 }
 
 /// How well the source supports a quote.
@@ -172,6 +251,51 @@ pub fn support(quote: &str, source: &str) -> Support {
         return Support::Loose;
     }
     Support::Absent
+}
+
+/// [`support`], and where in `source` the match was found (1.5).
+///
+/// The verdict is [`support`]'s, exactly — this calls the same comparison — and the range is bytes
+/// into `source` as given, not into its normalised form: a caller pointing a reader at a line needs
+/// the text they can see. `Present` spans the contiguous match. `Loose` spans from the first word
+/// matched to the last, elisions included, because that is the region the quote was drawn from —
+/// and the match is the earliest subsequence, so a quote opening on a common word starts the range
+/// at that word's first occurrence. `Absent` has no range.
+pub fn support_span(quote: &str, source: &str) -> (Support, Option<core::ops::Range<usize>>) {
+    let q = normalise(quote);
+    if q.is_empty() {
+        return (Support::Absent, None);
+    }
+    let (s, map) = normalise_mapped(source);
+    let at = |i: usize| map.get(i).copied().unwrap_or(source.len());
+    if let Some(i) = s.find(&q) {
+        return (Support::Present, Some(at(i)..at(i + q.len())));
+    }
+    if let Some((first, last)) = loose_span(&q, &s) {
+        return (Support::Loose, Some(at(first)..at(last)));
+    }
+    (Support::Absent, None)
+}
+
+/// [`support_in`], with the range in the source that matched (1.5).
+pub fn support_in_span<'a>(
+    quote: &str,
+    sources: &[(&'a str, &str)],
+) -> (Support, Option<&'a str>, Option<core::ops::Range<usize>>) {
+    let mut loose: Option<(&'a str, core::ops::Range<usize>)> = None;
+    for (name, text) in sources {
+        match support_span(quote, text) {
+            (Support::Present, span) => return (Support::Present, Some(name), span),
+            (Support::Loose, span) if loose.is_none() => {
+                loose = span.map(|s| (*name, s));
+            }
+            _ => {}
+        }
+    }
+    match loose {
+        Some((name, span)) => (Support::Loose, Some(name), Some(span)),
+        None => (Support::Absent, None, None),
+    }
 }
 
 /// How well any of several sources supports a quote, and which one.
@@ -247,6 +371,97 @@ fn clip(s: &str) -> String {
     }
     let head: String = s.chars().take(LIMIT).collect();
     format!("{head}…")
+}
+
+#[cfg(test)]
+mod span_tests {
+    use super::*;
+
+    const MESSAGE: &str = "Before the cut: the eu-west pool saturated on Thursday, and the \
+                           canary shard stayed clean throughout the window.";
+
+    /// R18: the verdict is unchanged, and the range points at the text a person reads.
+    #[test]
+    fn a_present_match_reports_the_text_it_matched() {
+        let quote = "the eu-west pool saturated";
+        let (support, span) = support_span(quote, MESSAGE);
+        assert_eq!(support, Support::Present);
+        let span = span.expect("a present match has a range");
+        assert_eq!(&MESSAGE[span.clone()], quote);
+        // The rule the request asks for: the range normalises to the quote.
+        assert_eq!(normalise(&MESSAGE[span]), normalise(quote));
+    }
+
+    /// Normalisation moves offsets — deleted markers, collapsed whitespace, curly quotes — so the
+    /// range has to be mapped back rather than searched for again.
+    #[test]
+    fn a_range_survives_normalisation_changing_the_offsets() {
+        let source = "The  `pool`   *saturated* on \u{201C}Thursday\u{201D}.";
+        let (support, span) = support_span("the pool saturated", source);
+        assert_eq!(support, Support::Present);
+        let matched = &source[span.expect("a range")];
+        assert_eq!(normalise(matched), "the pool saturated");
+        assert!(matched.starts_with("The"), "{matched}");
+    }
+
+    #[test]
+    fn a_loose_match_covers_the_region_and_an_absent_one_has_no_range() {
+        let (support, span) = support_span("the pool saturated \u{2026} stayed clean", MESSAGE);
+        assert_eq!(support, Support::Loose);
+        // The earliest subsequence: the quote opens on `the`, and the message's first `the` is the
+        // one before `cut`, so that is where the region starts. Stated on the function.
+        let region = &MESSAGE[span.expect("a loose match has a range")];
+        assert!(region.contains("pool saturated"), "{region}");
+        assert!(region.ends_with("clean"), "{region}");
+
+        assert_eq!(
+            support_span("rust was rewritten in go", MESSAGE),
+            (Support::Absent, None)
+        );
+    }
+
+    /// The verdict never differs from `support`'s, which is what lets a caller use either.
+    #[test]
+    fn the_verdict_is_the_same_as_support() {
+        let sources = ["", MESSAGE, "pool saturated", "unrelated words entirely"];
+        let quotes = [
+            "",
+            "\u{2026}",
+            "the pool saturated",
+            "pool \u{2026} clean",
+            "nothing of the sort",
+        ];
+        for s in sources {
+            for q in quotes {
+                assert_eq!(support_span(q, s).0, support(q, s), "{q:?} in {s:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn support_in_span_names_the_source_and_the_range() {
+        let diff = "+    // the canary shard stayed clean\n";
+        let (support, name, span) = support_in_span(
+            "the canary shard stayed clean",
+            &[("message", MESSAGE), ("diff", diff)],
+        );
+        assert_eq!(support, Support::Present);
+        assert_eq!(name, Some("message"), "the first source that matches wins");
+        assert!(MESSAGE[span.expect("a range")].starts_with("the canary shard"));
+
+        let (support, name, span) =
+            support_in_span("the canary shard stayed clean", &[("diff", diff)]);
+        assert_eq!((support, name), (Support::Present, Some("diff")));
+        assert_eq!(
+            &diff[span.expect("a range")],
+            "the canary shard stayed clean"
+        );
+
+        assert_eq!(
+            support_in_span("absent", &[("diff", diff)]),
+            (Support::Absent, None, None)
+        );
+    }
 }
 
 #[cfg(test)]

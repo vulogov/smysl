@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::diag::{Code, Diagnostic, Report};
 use smysl_core::{DropReason, Lod, Optimality, PackError, PackInfo, PackMode, ThreadId, Uid};
-use smysl_graph::{SalienceReport, Store};
+use smysl_graph::{EdgeSet, SalienceReport, Store};
 
 use crate::bound;
 use crate::closure;
@@ -38,6 +38,10 @@ pub struct PackRequest {
     pub max_lod: Option<Lod>,
     /// Restrict packing to these units; empty means the whole store.
     pub scope: BTreeSet<Uid>,
+    /// C8: edges over which a selected unit rests on another and must bring it (1.5). Empty by
+    /// default. `EdgeSet::premises()` is the set for a producer that links prerequisites by
+    /// `conditions`, which `grounds` cannot express without moving uids.
+    pub support: EdgeSet,
     /// Above this many units, `PackMode::Exact` falls back to greedy and says so
     /// (`SMY-W202`). The problem is NP-hard; an unbounded exact search on a large store
     /// would hang rather than answer.
@@ -54,6 +58,7 @@ impl Default for PackRequest {
             estimator: Estimator::default(),
             max_lod: None,
             scope: BTreeSet::new(),
+            support: EdgeSet::of([]),
             exact_threshold: EXACT_THRESHOLD,
         }
     }
@@ -79,6 +84,12 @@ impl PackRequest {
 
     pub fn capped(mut self, l: Lod) -> PackRequest {
         self.max_lod = Some(l);
+        self
+    }
+
+    /// Also carry what a selected unit rests on over these edges (C8, 1.5).
+    pub fn resting_on(mut self, edges: EdgeSet) -> PackRequest {
+        self.support = edges;
         self
     }
 
@@ -222,7 +233,7 @@ pub fn pack(
     let mut selection = Selection::new();
     for f in &req.focus {
         let want = cap(highest_available(store, f));
-        for (u, l) in closure::required(store, *f, want) {
+        for (u, l) in closure::required_via(store, *f, want, &req.support) {
             raise(&mut selection, u, l);
         }
     }
@@ -242,7 +253,9 @@ pub fn pack(
     let mut why: BTreeMap<Uid, closure::Reason> = BTreeMap::new();
     for f in &req.focus {
         why.insert(*f, closure::Reason::Focus);
-        for (u, r) in closure::reasons(store, *f, cap(highest_available(store, f))) {
+        for (u, r) in
+            closure::reasons_via(store, *f, cap(highest_available(store, f)), &req.support)
+        {
             why.entry(u).or_insert(r);
         }
     }
@@ -253,6 +266,7 @@ pub fn pack(
     let constraints = Constraints {
         pinned: req.focus.clone(),
         budget: req.budget,
+        support: req.support.clone(),
     };
 
     // --- 2a. everything fits ----------------------------------------------
@@ -313,7 +327,7 @@ pub fn pack(
     // computing 7.5 million of them for 4 001 units.
     //
     // Memoising leaves every choice identical and removes the walk from the inner loop.
-    let mut needs = closure::Needs::new();
+    let mut needs = closure::Needs::with_support(req.support.clone());
 
     // The candidate set, fixed for the run: every (unit, level) the greedy could ever weigh.
     let candidates: Vec<(Uid, Lod)> = scope
@@ -451,7 +465,7 @@ pub fn pack(
                 if u == uid {
                     closure::Reason::Density
                 } else {
-                    closure::reasons(store, uid, level)
+                    closure::reasons_via(store, uid, level, &req.support)
                         .remove(&u)
                         .unwrap_or(closure::Reason::Density)
                 }
@@ -574,6 +588,7 @@ pub fn verify(store: &Store, pack: &Pack, req: &PackRequest) -> Vec<Violation> {
         &Constraints {
             pinned: req.focus.clone(),
             budget: req.budget,
+            support: req.support.clone(),
         },
     )
 }

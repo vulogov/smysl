@@ -21,7 +21,7 @@ use smysl_core::{
     ResolutionTarget, Status, Thread, ThreadId, Uid, UidPrefix, Unit, View, ViewId, Withdrawal,
 };
 
-use crate::adjacency::{Adjacency, EdgeKind};
+use crate::adjacency::{Adjacency, EdgeKind, EdgeSet};
 use crate::traverse;
 use index::{Cached, Entry, Index};
 
@@ -871,6 +871,69 @@ impl Store {
             .into_iter()
             .filter_map(|n| self.adjacency.uid(n))
             .filter(|a| self.contains_uid(a) && !self.unfounded.contains(a))
+            .copied()
+            .collect()
+    }
+
+    /// Units whose source reference starts with `prefix`, in canonical order (1.5).
+    ///
+    /// A producer that anchors a unit to a file at a commit — `src/main.rs@90ec2f781421` — asks
+    /// this for every file a diff touches, and was iterating the whole store per diff to do it.
+    /// Prefix rather than equality because the anchor carries the commit: the question is "units
+    /// about this file", whichever revision they were recorded at.
+    pub fn units_with_source_prefix(&self, prefix: &str) -> Vec<Uid> {
+        self.units
+            .iter()
+            .filter(|(_, u)| {
+                u.core
+                    .source
+                    .as_ref()
+                    .is_some_and(|s| s.reference.starts_with(prefix))
+            })
+            .map(|(uid, _)| *uid)
+            .collect()
+    }
+
+    /// Every attestation naming this uid, whether it is a unit or an edge (1.5).
+    ///
+    /// An attestation names a unit or a relation, by its rid (spec §2.4), and a caller asking
+    /// "who stands behind this" should not have to know which it is holding.
+    pub fn attestations_of(&self, uid: &Uid) -> &BTreeSet<Attestation> {
+        static NONE: std::sync::OnceLock<BTreeSet<Attestation>> = std::sync::OnceLock::new();
+        if let Some(u) = self.units.get(uid) {
+            return &u.attestations;
+        }
+        if let Some(r) = self.relation_by_id(uid) {
+            return &r.attestations;
+        }
+        NONE.get_or_init(BTreeSet::new)
+    }
+
+    /// The distinct agents that attested it, unit or edge (1.5).
+    ///
+    /// What a policy counts when it asks for two independent runs to agree before a status is
+    /// raised: the same agent attesting twice is one agent, and a store holding one run's
+    /// attestation twice says nothing more than it did once.
+    pub fn attested_by(&self, uid: &Uid) -> BTreeSet<&AgentId> {
+        self.attestations_of(uid).iter().map(|a| &a.agent).collect()
+    }
+
+    /// Whether at least `n` distinct agents attested it (1.5).
+    pub fn agreement(&self, uid: &Uid, n: usize) -> bool {
+        self.attested_by(uid).len() >= n
+    }
+
+    /// What this unit rests on, one step, over the edges the caller chooses — `deps` and
+    /// `grounds` along their direction, relations against theirs (1.5). `crate::rests_on` is the
+    /// transitive form and explains the asymmetry.
+    pub fn supports_of(&self, uid: &Uid, edges: &EdgeSet) -> Vec<Uid> {
+        let Some(id) = self.adjacency.id(uid) else {
+            return Vec::new();
+        };
+        crate::lineage::one_hop(&self.adjacency, id, edges)
+            .into_iter()
+            .filter_map(|n| self.adjacency.uid(n))
+            .filter(|u| self.contains_uid(u))
             .copied()
             .collect()
     }

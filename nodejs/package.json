@@ -1,6 +1,6 @@
 {
   "name": "smysl-conformance",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "An independent C-Produce implementation of the smysl format, written from the spec",
   "type": "module",
   "main": "src/index.js",

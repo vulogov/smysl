@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::{Contention, Lod, RelKind, Uid};
-use smysl_graph::Store;
+use smysl_graph::{EdgeSet, Store};
 
 /// A selection: which units are in, and at what level.
 pub type Selection = BTreeMap<Uid, Lod>;
@@ -35,6 +35,9 @@ pub enum Violation {
     Warrant { unit: Uid, missing: Uid },
     /// C7: over budget.
     Budget { used: u64, budget: u64 },
+    /// C8: a unit at L1+ whose caller-chosen support is absent (1.5). Last, so no published
+    /// variant is renumbered — `cargo-semver-checks` reports that as a major change.
+    Support { unit: Uid, missing: Uid },
 }
 
 impl Violation {
@@ -46,6 +49,7 @@ impl Violation {
             Violation::Contention { .. } => "C4",
             Violation::Pin { .. } => "C5",
             Violation::Warrant { .. } => "C6",
+            Violation::Support { .. } => "C8",
             Violation::Budget { .. } => "C7",
         }
     }
@@ -72,6 +76,9 @@ impl core::fmt::Display for Violation {
             Violation::Warrant { unit, missing } => {
                 write!(f, "{c}: {unit} needs warrant {missing}")
             }
+            Violation::Support { unit, missing } => {
+                write!(f, "{c}: {unit} rests on {missing}, which is absent")
+            }
             Violation::Budget { used, budget } => {
                 write!(f, "{c}: {used} over a budget of {budget}")
             }
@@ -87,6 +94,9 @@ pub struct Constraints {
     pub pinned: BTreeSet<Uid>,
     /// C7.
     pub budget: u64,
+    /// C8: edges over which a unit rests on another, chosen by the caller (1.5). Empty by
+    /// default, which is C1–C7 exactly as they were.
+    pub support: EdgeSet,
 }
 
 /// Check a selection against C1-C7.
@@ -128,6 +138,14 @@ pub fn violations(
                     out.push(Violation::Warrant {
                         unit: *uid,
                         missing: w,
+                    });
+                }
+            }
+            for s in store.supports_of(uid, &c.support) {
+                if !selection.contains_key(&s) {
+                    out.push(Violation::Support {
+                        unit: *uid,
+                        missing: s,
                     });
                 }
             }
@@ -236,6 +254,7 @@ mod tests {
         Constraints {
             pinned: pinned.into_iter().collect(),
             budget: u64::MAX,
+            support: EdgeSet::of([]),
         }
     }
 
@@ -491,6 +510,7 @@ mod tests {
         let c = Constraints {
             pinned: BTreeSet::new(),
             budget: 100,
+            support: EdgeSet::of([]),
         };
         assert!(violations(&store, &Selection::new(), 100, &c).is_empty());
         let v = violations(&store, &Selection::new(), 101, &c);

@@ -609,6 +609,14 @@ so does `pool`:
 ```
 ]
 
+A caller embedding this rather than running it gets two dials the command line does not
+expose, both added in 1.5. `Query::within` restricts scoring to a candidate set — the units a
+diff touched, the units under one label — which narrows what is eligible without touching how
+anything scores. And `Bm25::index_with(Tokenizer::folding())` turns the English fold *on*, so
+`required` and `require` meet. It is off by default for the reason above, and it is a choice
+rather than an improvement: turning it on moves every score in the index, and a corpus of
+identifiers is worse off for it.
+
 #subsection("Where it is weak, measured rather than guessed")
 
 The project evaluates this rather than asserting it. Twenty queries over the

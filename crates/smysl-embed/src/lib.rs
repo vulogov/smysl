@@ -202,7 +202,7 @@ impl Retriever for Semantic {
         let mut hits: Vec<Hit> = self
             .facts
             .iter()
-            .filter(|(_, (kind, status))| query.admits(*kind, *status))
+            .filter(|(uid, (kind, status))| query.admits_unit(uid, *kind, *status))
             .filter_map(|(uid, _)| {
                 let score = cosine(self.vectors.get(uid)?, &q);
                 // Cosine is bounded in [-1, 1] and a negative score means "less like this

@@ -4,9 +4,10 @@
 [`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md), which is deliberately a fraction of this
 one's length: interoperability needs identity, encoding and the rules, not an account of how
 this implementation happens to be built.
-**Describes:** the code at `dev/1.4.0`, crate `1.4.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`.
+**Describes:** the code at `dev/1.5.0`, crate `1.5.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`.
 Sections 2.3, 4.2, 5 and 13 were brought up to 1.4 — the lifecycle of edges and disagreements —
-on 2026-09-17; the rest describes what has not changed since it was compiled.
+and sections 5, 7.1, 7.4 and 9.5 to 1.5 — reading a corpus whose dependencies are edges — on
+2026-09-17; the rest describes what has not changed since it was compiled.
 **Compiled:** 2026-07-30, from SM-P0 through SM-P15, the operational-merit work after it, the
 0.2 cycle (label bindings, comment syntax, forward compatibility), the 0.3 cycle (global
 flags, nesting bounds, packer performance) and the 0.4 cycle (the fuzz backlog: seven
@@ -276,6 +277,15 @@ grew a store every time. Label-collision detection reads a store's own bindings.
 `smysl::review` is the queue — recorded and detected contentions, and live rebuttals no open
 contention covers — and `review`, `withdraw` and `resolve` are its commands.
 
+1.5 widened what the queue and the store will answer. `review_with(ReviewOptions)` filters the
+queue to what an agent has *not* confirmed — `ReviewSubject::Unconfirmed` — so a second pass over
+a corpus reviews the disagreements nobody has looked at rather than all of them again.
+`rests_on` and `trace_via` walk dependencies over a caller-chosen `EdgeSet` rather than `deps`
+and `grounds` alone, which is what a producer linking prerequisites by `conditions` needs.
+`labels_of` and `label_index` invert label binding, so a run that prints uids can print names.
+And `units_with_source_prefix` answers what is already recorded about a file, by prefix rather
+than equality because a source reference carries the commit.
+
 ---
 
 ## 6. The check pipeline
@@ -323,7 +333,7 @@ than the worst — it is unplaced, not old.
 
 ### 7.1 Packing
 
-`pack` fits a graph to a token budget **without calling a model**. Seven constraints:
+`pack` fits a graph to a token budget **without calling a model**. Eight constraints:
 
 | | Constraint |
 |---|---|
@@ -334,6 +344,14 @@ than the worst — it is unplaced, not old.
 | C5 | a pinned unit is at L1+ |
 | C6 | a unit at L1+ has its warrant |
 | C7 | within budget |
+| C8 | a unit at L1+ has what it rests on, over a caller-chosen edge set (1.5) |
+
+C8 exists because C1 and C2 read `deps` and `grounds` and nothing else. A producer that links
+a prerequisite by `conditions` — so rewording it does not move the uid of every decision beneath
+it — has a dependency the packer could not see, and packs came out with the conclusion and not
+its premise. `PackRequest::resting_on(EdgeSet)` names the edges that count; `Violation::Support`
+and `Reason::SupportOf` say when one pulled a unit in. The default is the empty set, so a caller
+that does not ask gets exactly the seven constraints it got before.
 
 C3 is the one that matters. If a claim's rebuttals cannot fit, packing **fails** with the
 minimum feasible budget rather than shipping the claim without the objection to it.
@@ -357,6 +375,20 @@ document says. Six backends: markdown, html, typst, slides, json, text.
 
 Connectives are template selection keyed by relation kind and seeded by `uid[0]` — never
 model inference, so inserting a block does not reword every transition after it.
+
+### 7.4 Retrieval
+
+`Retriever` is a trait and BM25 over gists is the shipped implementation: pure, no index on
+disk, ties broken by uid. It does not stem, because stemming helps English and destroys
+`connection_pool_size`, and identifiers are split into parts *and* kept whole.
+
+1.5 gave a caller two constraints the command line does not expose. `Query::within` restricts
+scoring to a candidate set — the units a diff touched — which narrows what is eligible without
+changing how anything scores; `Query::admits_unit` is the predicate every `Retriever` applies.
+`Bm25::index_with(Tokenizer::folding())` emits a folded form *beside* each term rather than
+instead of it, so `require` meets `required` and an exact identifier match still scores as it
+did. Both are opt-in: folding moves every score in an index, which is a decision a caller makes
+rather than one an upgrade makes for them.
 
 ---
 
@@ -476,6 +508,14 @@ connective by. All of it worked only on hand-authored fixtures.
 The batch schema now carries `relations`, resolved by the same label-or-uid rule `grounds`
 uses. `supersedes` and `retracts` are excluded: a model reading a document cannot know a
 graph's history, and either would let it delete evidence by mentioning it.
+
+Since 1.5 an edge carries its own attestation (spec §2.4), and `stage::prepare_attested` asks
+who attested each record rather than fixing one agent for the batch. An ingest run is one
+agent's work, so `Attest` implements `Attesting` and answers the same thing for everything —
+but a tool that proposes units while a person confirms the edge between two of them is two
+hands, and a store that could only record one of them was losing the part a reviewer cared
+about. `Store::attested_by`, `attestations_of` and `agreement(uid, n)` read it back without the
+caller knowing whether the uid names a unit or a relation.
 
 ### 9.6 Rule S — it never writes directly
 

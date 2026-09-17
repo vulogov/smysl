@@ -67,7 +67,7 @@ use smysl_provider::{Provider, ProviderError, Registry, Request, Task, Usage};
 #[cfg(feature = "model")]
 pub use attest::{attest, AttestOptions, AttestReport, Judgement, What};
 pub use smysl_core::SourcePolicy;
-pub use stage::{Attest, Staged};
+pub use stage::{Attest, Attesting, Staged};
 
 /// The fewest output tokens an ingest call asks for when the caller names no budget.
 pub const DEFAULT_MAX_OUTPUT: usize = 2048;

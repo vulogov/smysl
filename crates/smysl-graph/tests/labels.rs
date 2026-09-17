@@ -71,3 +71,59 @@ fn an_unbound_label_is_unbound() {
         Err(LabelError::Unbound)
     );
 }
+
+/// R17 (1.5): uid → label, which anything that prints a store needs. A consumer kept its own map
+/// because the store offered only label → uid, and a store read back from disk had none.
+#[test]
+fn labels_of_and_label_index_answer_the_other_direction() {
+    use smysl_graph::{label_index, labels_of, resolve_label};
+
+    let src = "\
+@claim c/pool { status: speculative }
+~ The pool saturated.
+
+@claim c/canary { status: speculative }
+~ The canary stayed clean.
+";
+    let out = smysl_core::surface::parse_surface(src).unwrap();
+    let store = Store::from_records(out.records.clone());
+    let pool = out.labels[&Label::new("c/pool").unwrap()];
+
+    assert_eq!(
+        labels_of(&store, &pool),
+        vec![Label::new("c/pool").unwrap()]
+    );
+    assert!(labels_of(&store, &Uid::from_bytes([7; 32])).is_empty());
+
+    // Every label resolves to a unit that names it back.
+    for label in out.labels.keys() {
+        let uid = resolve_label(&store, label).unwrap();
+        assert!(labels_of(&store, &uid).contains(label), "{label}");
+    }
+
+    // The index agrees with the per-unit answer, and survives a round trip through bytes.
+    let index = label_index(&store);
+    for (uid, labels) in &index {
+        assert_eq!(&labels_of(&store, uid), labels);
+    }
+    let reopened = Store::from_records(smysl_core::from_cbor_seq(&store.log_bytes()).unwrap().0);
+    assert_eq!(label_index(&reopened), index, "a store read back disagrees");
+
+    // Two names for one unit: identity is content, so both bind the same uid.
+    let twice = "\
+@claim c/one { status: speculative }
+~ One claim.
+
+@claim c/two { status: speculative }
+~ One claim.
+";
+    let out = smysl_core::surface::parse_surface(twice).unwrap();
+    let store = Store::from_records(out.records);
+    let (uid, labels) = label_index(&store).into_iter().next().expect("one unit");
+    assert_eq!(
+        labels.len(),
+        1,
+        "surface keeps one name per unit: {labels:?}"
+    );
+    assert_eq!(labels_of(&store, &uid), labels);
+}

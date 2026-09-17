@@ -37,6 +37,7 @@ pub use smysl::Artifact
 pub use smysl::AttestOptions
 pub use smysl::AttestReport
 pub use smysl::Attestation
+pub use smysl::Attesting
 pub use smysl::Backend
 pub use smysl::Block
 pub use smysl::Bm25
@@ -164,6 +165,7 @@ pub use smysl::RetractionPlan
 pub use smysl::RetractionPolicy
 pub use smysl::Retriever
 pub use smysl::ReviewItem
+pub use smysl::ReviewOptions
 pub use smysl::ReviewSubject
 pub use smysl::Role
 pub use smysl::Rung
@@ -201,6 +203,7 @@ pub use smysl::Thread
 pub use smysl::ThreadId
 pub use smysl::ThreadSchema
 pub use smysl::TokenCount
+pub use smysl::Tokenizer
 pub use smysl::TopoOrder
 pub use smysl::Totals
 pub use smysl::TraceKind
@@ -238,6 +241,7 @@ pub use smysl::diff
 pub use smysl::effective_status
 pub use smysl::emit_artifact
 pub use smysl::fidelity
+pub use smysl::fold_suffix
 pub use smysl::format_version_supported
 pub use smysl::from_cbor
 pub use smysl::from_cbor_seq
@@ -248,6 +252,8 @@ pub use smysl::hop_diff
 pub use smysl::json_escape
 pub use smysl::kernel_major
 pub use smysl::label_bindings
+pub use smysl::label_index
+pub use smysl::labels_of
 pub use smysl::membership
 pub use smysl::merge
 pub use smysl::merge
@@ -257,13 +263,18 @@ pub use smysl::plan_retraction
 pub use smysl::quantise
 pub use smysl::quote_support
 pub use smysl::quote_support_in
+pub use smysl::quote_support_in_span
+pub use smysl::quote_support_span
 pub use smysl::rebuttals_of
 pub use smysl::recipe_short
 pub use smysl::relink
 pub use smysl::resolve_label
+pub use smysl::rests_on
+pub use smysl::retrieve_tokenize
 pub use smysl::retrieve_tokenize
 pub use smysl::reverse_closure
 pub use smysl::review
+pub use smysl::review_with
 pub use smysl::role_weight
 pub use smysl::role_weights
 pub use smysl::salience
@@ -278,6 +289,7 @@ pub use smysl::to_cbor_seq
 pub use smysl::tokens
 pub use smysl::topo
 pub use smysl::trace
+pub use smysl::trace_via
 pub use smysl::tui
 pub use smysl::unit_core_bytes
 pub use smysl::verify

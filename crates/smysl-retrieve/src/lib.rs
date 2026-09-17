@@ -41,7 +41,7 @@
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::{KernelType, SchemaId, Status, Uid};
 use smysl_graph::Store;
@@ -50,6 +50,7 @@ pub mod tokenize;
 
 mod lexical;
 pub use lexical::Bm25;
+pub use tokenize::{fold_suffix, tokenize, Tokenizer};
 
 /// One retrieved unit and why it scored.
 ///
@@ -98,6 +99,16 @@ pub struct Query {
     pub kinds: Vec<KernelType>,
     /// Restrict to units at or above this status. `None` means no restriction.
     pub min_status: Option<Status>,
+    /// Restrict to these uids. Empty means no restriction (1.5).
+    ///
+    /// `kinds` cannot separate what a caller can act on from what it cannot: in a corpus where a
+    /// rejected alternative and a recorded consequence are both `Claim`, the type says nothing
+    /// about eligibility. Asking for a large `limit` and filtering afterwards works while a store
+    /// is small and fails as it grows — the top hits fill with ineligible units and the eligible
+    /// ones never surface. Restricting candidates before the limit is the fix, and it leaves
+    /// scoring alone: IDF still comes from the whole index, so a restriction cannot re-weight
+    /// terms.
+    pub within: BTreeSet<Uid>,
 }
 
 impl Query {
@@ -107,6 +118,7 @@ impl Query {
             limit,
             kinds: Vec::new(),
             min_status: None,
+            within: BTreeSet::new(),
         }
     }
 
@@ -120,8 +132,19 @@ impl Query {
         self
     }
 
-    /// Whether a unit passes the filters. Provided so every implementation applies them
-    /// identically rather than each inventing its own reading of `min_status`.
+    /// Restrict to these uids (1.5). Empty means no restriction.
+    pub fn within(mut self, uids: impl IntoIterator<Item = Uid>) -> Query {
+        self.within = uids.into_iter().collect();
+        self
+    }
+
+    /// Whether a unit passes every filter, `within` included (1.5).
+    pub fn admits_unit(&self, uid: &Uid, kind: KernelType, status: Status) -> bool {
+        (self.within.is_empty() || self.within.contains(uid)) && self.admits(kind, status)
+    }
+
+    /// Whether a unit passes the kind and status filters. Provided so every implementation
+    /// applies them identically rather than each inventing its own reading of `min_status`.
     pub fn admits(&self, kind: KernelType, status: Status) -> bool {
         if !self.kinds.is_empty() && !self.kinds.contains(&kind) {
             return false;
