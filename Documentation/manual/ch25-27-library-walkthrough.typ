@@ -482,6 +482,148 @@ applied to the answer.
   proves `smysl-provider` is absent from the tree.
 ]
 
+#section("Reading a corpus whose dependencies are edges")
+
+The example above is a tool writing units. 1.5 is about the other half of the same program:
+reading back what a corpus of them says, when the corpus was written by more than one hand and
+nobody in it types a uid.
+
+```rust
+use smysl::stage::{self, Attest};
+use smysl::{
+    canonical_uid, label_index, labels_of, quote_support_span, rests_on, AgentId, Attestation,
+    Attesting, Bm25, EdgeSet, Hlc, KernelType, Label, Query, QuoteSupport, RelKind, Relation,
+    Retriever, Rung, Severity, SourceKind, SourceRef, Status, Store, Tokenizer, Uid,
+    UnitCoreBuilder,
+};
+use std::collections::BTreeMap;
+
+let file = "src/pool.rs@90ec2f781421";
+let review = "The pool is required to be drained before a reconfigure.";
+
+// Units the tool builds itself, anchored to the file at the commit it read.
+let anchor = SourceRef::new(SourceKind::Doc, file);
+let prerequisite = UnitCoreBuilder::new(
+    KernelType::Claim,
+    "the pool is required to be drained before a reconfigure",
+    Status::Cited,
+)
+.source(anchor.clone())
+.build()
+.unwrap();
+let decision = UnitCoreBuilder::new(
+    KernelType::Decision,
+    "drain the pool in reconfigure()",
+    Status::Cited,
+)
+.source(anchor)
+.build()
+.unwrap();
+let (p, d) = (canonical_uid(&prerequisite), canonical_uid(&decision));
+
+// Two hands: the tool proposed the units, a reviewer asserted the edge between them.
+struct TwoHands {
+    tool: Attest,
+    reviewer: Attest,
+}
+impl Attesting for TwoHands {
+    fn for_unit(&self, uid: Uid) -> Attestation {
+        self.tool.for_unit(uid)
+    }
+    fn for_relation(&self, rid: Uid) -> Attestation {
+        self.reviewer.for_relation(rid)
+    }
+}
+
+let tool = AgentId::new("tool:rust-smysl").unwrap();
+let person = AgentId::new("human:reviewer").unwrap();
+let attest = TwoHands {
+    tool: Attest::new(tool.clone(), Rung::Document, Hlc::zero(tool.clone())),
+    reviewer: Attest::new(person.clone(), Rung::Document, Hlc::zero(person.clone())),
+};
+
+let staged = stage::prepare_attested(
+    &Store::new(),
+    vec![prerequisite, decision],
+    vec![Relation::new(RelKind::Conditions, p, d)],
+    BTreeMap::from([
+        (Label::new("c/drain-first").unwrap(), p),
+        (Label::new("d/drain").unwrap(), d),
+    ]),
+    Vec::new(),
+    &attest,
+);
+assert!(staged.report.fail_on(Severity::Error).is_ok());
+let store = Store::from_records(staged.records());
+
+// Who stands behind what, without knowing whether a uid names a unit or an edge.
+let rid = Relation::new(RelKind::Conditions, p, d).uid();
+assert!(store.attested_by(&rid).contains(&&person));
+assert!(store.attested_by(&d).contains(&&tool));
+assert_eq!(store.attestations_of(&d).len(), 1);
+
+// What the decision rests on, over edges a producer chose — `conditions`, not `grounds`.
+assert_eq!(rests_on(&store, d, &EdgeSet::premises()), vec![p]);
+
+// uid back to the name a person reads. One lookup, or the whole map for a run that
+// renders every uid it prints.
+assert_eq!(labels_of(&store, &d), vec![Label::new("d/drain").unwrap()]);
+assert_eq!(label_index(&store).len(), 2);
+
+// Every unit recorded about this file, whichever commit it was recorded at.
+assert_eq!(store.units_with_source_prefix("src/pool.rs").len(), 2);
+
+// Where in the review the evidence for the prerequisite is, in bytes a reader can see.
+let (support, span) = quote_support_span("pool is required to be drained", review);
+assert_eq!(support, QuoteSupport::Present);
+assert_eq!(&review[span.unwrap()], "pool is required to be drained");
+
+// Retrieval over a candidate set, with the English fold on: `require` finds `required`.
+let hits = Bm25::index_with(&store, Tokenizer::folding())
+    .search(&Query::new("require drain", 10).within([d]));
+assert_eq!(hits.iter().map(|h| h.uid).collect::<Vec<_>>(), vec![d]);
+```
+
+Each call in it answers a question the CLI had an answer for and the library did not.
+
+`stage::prepare_attested` asks who attested each record rather than fixing one agent for the
+batch. Until 1.5 a staged batch was one agent's work, which is what an `ingest` run is; a tool
+that proposes units and a person who confirms an edge between two of them are two hands, and an
+edge attestation is how a store says which. `Attest` implements `Attesting` and answers the same
+thing for everything, so `stage::prepare` is unchanged. `Store::attested_by` then answers *who
+stands behind this* for a unit and an edge alike, without the caller knowing which it holds, and
+`Store::agreement(uid, n)` answers whether at least `n` distinct agents do.
+
+`rests_on` is `dependents_via` read from the other end: what this unit rests on, over the edges
+you choose, rather than what rests on it. It exists because a producer that links a prerequisite
+by `conditions` — so that rewording it does not move the uid of every decision beneath it — has a
+dependency nothing reading `grounds` can see. `trace_via` is the same widening for `trace`, with
+`TraceKind::Rests` naming the new direction in the result.
+
+`labels_of` is the inverse of `resolve_label`: a uid back to the names a person reads. Every run
+that prints uids wants it, and `label_index` builds the whole map once for a run that prints many.
+
+`Store::units_with_source_prefix` answers "what do we already record about this file", by prefix
+rather than equality because a source reference carries the commit — the question is about the
+file, whichever revision a unit was written at.
+
+`quote_support_span` is the quote check with the *location*: the same verdict `quote_support` gives
+and a byte range into the source exactly as supplied, so a caller can underline the line rather
+than tell a reader it is in there somewhere. `Present` spans the match; `Loose` spans first
+matched word to last, elisions included.
+
+And retrieval takes two new constraints. `Query::within` restricts scoring to a candidate set —
+the units a diff touched, say — which is a filter and not a re-rank: scores are the corpus's, only
+the eligible set narrows. `Bm25::index_with(Tokenizer::folding())` turns on an English suffix fold,
+so a query saying `require` retrieves a unit saying `required`. It is off by default, because the
+fold helps prose and hurts `connection_pool_size`, and turning it on moves every score in the
+index — that is the caller's decision to make, not a silent improvement.
+
+#callout(label: "How this was verified")[
+  This code is `tests/manual_library_1_5.rs`, extracted from it, and it runs in the same
+  `--no-default-features --features stage` build as the example above.
+]
+
 #whatsnext[
   You have now seen every operation this book covers from both sides: the CLI, which
   parses a command line and prints a report, and the library underneath it, which takes
@@ -544,6 +686,11 @@ applied to the answer.
   [The `stage` feature is staging, the rung ceiling, rule M and the quote check with no
    provider layer; `staged.records()` carries label bindings, and `dependents_via` with
    `EdgeSet::premises()` answers which conclusions lose a premise.],
+  [1.5 is the reading half: `prepare_attested` for a batch from several hands, `rests_on` and
+   `trace_via` for dependencies carried by edges a producer chose, `labels_of` and `label_index`
+   for uid-to-name, `units_with_source_prefix` for what is already recorded about a file,
+   `quote_support_span` for where the evidence is, and `Query::within` with
+   `Tokenizer::folding()` for retrieval over a candidate set.],
 ))
 
 // ═══════════════════════════════════════════════════════════════════════

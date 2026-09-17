@@ -7,7 +7,30 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.5.0
+## 1.5.0 — 2026-09-17
+
+The cycle that taught the library to *read* a corpus somebody else wrote. 1.4 gave disagreements a
+lifecycle; what 1.5 found is that everything downstream of writing units assumed the writer's own
+conventions were in the store. They are not. A producer that keeps a dependency outside a unit's
+identity on purpose — rust_smysl links a prerequisite with `conditions` so rewording it does not
+move the uid of every decision beneath it — had that dependency invisible to packing and tracing,
+because both read `deps` and `grounds` and nothing else. A program printing a corpus had no way
+back from a uid to the name a person reads. A batch from two hands could only record one of them.
+
+What shipped: C8, so a pack carries what a unit rests on over an edge set the caller names;
+`rests_on` and `trace_via`, the same widening for tracing; `stage::prepare_attested` and the
+`Attesting` trait, so a batch whose units and edges came from different agents records both, with
+`Store::attestations_of`, `attested_by` and `agreement` reading it back for a unit or an edge
+alike; and `review_with`, which filters the queue to what nobody has confirmed yet. And from
+rust_smysl, R16–R20, every one of them a workaround that got more expensive as their corpus grew:
+retrieval restricted to a candidate set, uid → label, the byte range a quote matched at, optional
+suffix folding, and units by source prefix.
+
+**No format break, and nothing removed.** `smysl/1.0` holds — 1.5 adds no record type and no
+surface word. Every addition is off unless asked for: C8's edge set defaults to empty, folding is
+off, and an empty `within` means unrestricted — so a caller that upgrades and changes nothing
+gets byte-identical output. The facade is 272 names, 226 pure; `make semver` is clean on all twelve crates
+against 1.4.0, and `SEMVER_BREAKING` is empty for the sixth release running. 25 commands.
 
 ### Reading a corpus whose dependencies are edges
 

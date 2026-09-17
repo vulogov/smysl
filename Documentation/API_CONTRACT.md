@@ -24,7 +24,8 @@ regretted, and three gates that each know what they are blind to.
   `Withdrawal`, `Resolution`, `ResolutionTarget`, `review`, `ReviewItem` and `ReviewSubject` — all
   needing no feature. 1.5 adds `rests_on`, `trace_via`, `review_with`, `ReviewOptions`,
   `Attesting`, `labels_of`, `label_index`, `quote_support_span`, `quote_support_in_span`,
-  `fold_suffix` and `Tokenizer` (272 and 226 so far in the cycle).
+  `fold_suffix` and `Tokenizer` — twelve, all needing no feature except `Attesting`, which is
+  `stage`'s (272 and 226 at the 1.5.0 cut).
 - **Every public item in each of the eleven library crates** — they share one version, all are
   published, and `make semver` enforces each of them individually. That is the larger and
   truer figure, and §0.2 of `ROAD_TO_1.0.md` explains why it is the one that binds.
