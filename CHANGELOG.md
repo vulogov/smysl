@@ -148,6 +148,45 @@ independent derivations of each identity before the format depends on it. The ve
 `rid_hex` and `digest_hex` so an implementation without base32 can check the hash alone.
 `make spec-tables` holds §3.1 at codes 1–12 against all three.
 
+### Four more before the cut
+
+- **The TUI's contention pane reads the store's status.** It listed recorded contentions with no
+  status at all, so a resolved one looked like any other; it now shows each one's status as the
+  store reads it (open, resolved, stale) and how many items `review` would list.
+- **The implementations' versions track the crate's**, and are checked. `nodejs/` said 1.2.0 and
+  `python/` 0.9.0, the version it was written at; nothing compared either with the workspace.
+  `make dep-versions` now holds `python/pyproject.toml`, `nodejs/package.json` and
+  `nodejs/src/index.js` at the workspace version, and their READMEs say what 1.4 added.
+- **`SMYSL_ARCHITECTURE_RFC.md` describes 1.4**: relation identity and edge attestations, the
+  surface syntax, record-level idempotence, withdrawal, liveness, resolution and the review queue,
+  and the wire fixtures all four implementations read. Its header said crate 1.0.0.
+- **The manual's `withdraw` transcript is checked.** `make doc-output` split commands on spaces, so
+  the quoted edge argument read as a path that did not exist, and its guard against shell
+  redirection saw the `>` inside `-->`. It tokenises as the shell does now, and looks for
+  operators outside quotes: 91 transcripts replayed, one more than before.
+
+### From rust_smysl's 1.4 requests: R12, and a message
+
+`docs/smysl-requests-1.4.md` in rust_smysl lists R10–R15. R10 is above; R15 was already closed by
+the gist bound. R11, R13 and R14 are left open on purpose: rust_smysl's S2 experiment uses them as
+tasks, and fixing them here would spend them.
+
+- **R12 — an imported reading checks clean.** `from_csv` put every column in the gist, so a row of
+  seven columns, or three with a long test name, imported as a `measured` unit `smysl check`
+  refused with `SMY-E022` (measured at 48–62 tokens against a bound of 30). The gist is now the key
+  columns, then the values, cut at the bound on a cell boundary — or a word, when one key is longer
+  than the bound — with an ellipsis. Every cell is still in the payload. **Identity:** a gist that
+  already fit is unchanged, so importing an ordinary file gives the uids it always did; a row whose
+  gist was cut is a different unit from the one 1.3 produced, which never checked.
+- **The payload keeps the whole row.** It was hand-encoded with a map header that could not count
+  past 23 columns and a text head that could not say more than 255 bytes, so a wider row lost
+  columns and a longer cell was cut, silently, in the field documented as keeping the row verbatim.
+  It goes through the core's canonical encoder now, which also normalises to NFC; a test holds its
+  bytes identical to the old encoding wherever that encoding was right. A column named twice keeps
+  its first cell.
+- **`ingest.path: 42` names the problem.** A non-string value read as the empty string, and the
+  message said "`ingest.path` is ``". It says "is an integer" now.
+
 ### Carried from 1.3.0
 
 What this cycle started from (details in 1.3.0):

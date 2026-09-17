@@ -317,8 +317,19 @@ fn draw_lineage(f: &mut Frame<'_>, area: Rect, app: &App) {
 }
 
 fn draw_contentions(f: &mut Frame<'_>, area: Rect, app: &App) {
-    let recorded = app.store().contentions();
-    let mut lines = vec![kv("recorded", &recorded.len().to_string()), Line::from("")];
+    let store = app.store();
+    let recorded = store.contentions();
+    // Open for review as `smysl review` counts it: recorded and detected contentions, and live
+    // rebuttals nobody threaded, less what a resolution names (1.4).
+    let open = smysl_graph::review(store, &smysl_graph::DetectionContext::default())
+        .iter()
+        .filter(|i| !i.resolved)
+        .count();
+    let mut lines = vec![
+        kv("recorded", &recorded.len().to_string()),
+        kv("open for review", &open.to_string()),
+        Line::from(""),
+    ];
     if recorded.is_empty() {
         lines.push(Line::from(Span::styled(
             "None recorded in this store.",
@@ -330,8 +341,16 @@ fn draw_contentions(f: &mut Frame<'_>, area: Rect, app: &App) {
         ));
         lines.push(Line::from("into the log, so an unmerged store shows none."));
     }
+    // Each with the status the store reads, not the one its record was written with: a resolved
+    // contention, or one whose rebuttal was withdrawn, is not an open disagreement.
     for c in recorded {
-        lines.push(Line::from(format!("{} over {}", c.id, short(&c.over))));
+        let status = store.contention_status(c);
+        lines.push(Line::from(format!(
+            "{} over {}  {}",
+            c.id,
+            short(&c.over),
+            status
+        )));
     }
     f.render_widget(
         Paragraph::new(lines)

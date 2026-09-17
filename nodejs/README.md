@@ -97,3 +97,13 @@ kernel from text keys inside a payload, and a JavaScript object turns `0` into `
 exactly the distinction the constraint draws. The spec says nothing about host-language
 representation, and should not, but an implementer meeting this in a language with weak key
 types has to work it out. Worth knowing that it comes up.
+
+## Since 1.4: the identities a withdrawal and a resolution depend on
+
+Records 11 (withdrawal) and 12 (resolution) are named and round-trip, carried by
+`fixtures/wire/F10-lifecycle.cbor`. The implementation also derives the two identities they name
+things by — a relation's rid (§2.5) and a contention's id (§6.2) — and reproduces every vector in
+`fixtures/wire/relation-id/` and `fixtures/wire/contention-id/`, digest and text checked apart. They
+matched the Rust on the first run, which is the point of checking: four derivations of each before
+the format depended on them. The package version tracks the crate's, and `make dep-versions` holds
+it there.
