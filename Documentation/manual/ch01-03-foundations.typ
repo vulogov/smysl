@@ -7,8 +7,8 @@
 Every later chapter in this book points a command at some data and reads back
 a report, a transformed store, or an artifact. That sentence is almost the
 whole tool. What takes a chapter to explain is not the mechanics of any one
-command — it's the small set of ideas that make all twenty-two of them feel
-like the same tool rather than twenty-two different tools that happen to share
+command — it's the small set of ideas that make all twenty-five of them feel
+like the same tool rather than twenty-five different tools that happen to share
 a binary. Get these ideas straight now and every subsequent chapter is a
 variation on a theme instead of a fresh pile of trivia.
 
@@ -225,7 +225,7 @@ thing you do continuously along the way.
    report is identical to running `check` on the file directly — *21 records,
    8 units, 0 diagnostic(s)*. Two things are being demonstrated at once. Name
    both.],
-  [You are on a plane with no network. Which of the twenty-two commands in the
+  [You are on a plane with no network. Which of the twenty-five commands in the
    purity table can you not run, and which one *looks* like it should fail but
    will not?],
   [A colleague sends you a `.smy` file containing an `@attestation` block.

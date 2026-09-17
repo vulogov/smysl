@@ -109,13 +109,13 @@ pub use smysl_graph::compact::{compact, Compacted};
 pub use smysl_graph::relink::{relink, Relinked};
 pub use smysl_graph::{
     closure, cycles, dependents, dependents_via, diff, effective_status, hop_diff, label_bindings,
-    membership, merge, plan_retraction, rebuttals_of, resolve_label, reverse_closure, salience,
-    topo, trace, view_roots, Adjacency, AgentActivity, AppendReport, Cached, DetectionContext,
-    Edge, EdgeKind, EdgeSet, EffectiveStatus, Entry, HopDiff, Index, IndexError, LabelError,
-    Lineage, LineageNode, MergeError, MergeOptions, MergeReport, NodeId, OpenReport, RecipeChange,
-    RecipeChangeKind, RetractionAuthority, RetractionPlan, RetractionPolicy, SalienceReport,
-    SalienceRequest, SalienceTerms, SalienceWeights, Scratch, Store, StoreDiff, StoreOptions,
-    SupersessionPolicy, TopoOrder, TraceKind, Via,
+    membership, merge, plan_retraction, rebuttals_of, resolve_label, reverse_closure, review,
+    salience, topo, trace, view_roots, Adjacency, AgentActivity, AppendReport, Cached,
+    DetectionContext, Edge, EdgeKind, EdgeSet, EffectiveStatus, Entry, HopDiff, Index, IndexError,
+    LabelError, Lineage, LineageNode, MergeError, MergeOptions, MergeReport, NodeId, OpenReport,
+    RecipeChange, RecipeChangeKind, RetractionAuthority, RetractionPlan, RetractionPolicy,
+    ReviewItem, ReviewSubject, SalienceReport, SalienceRequest, SalienceTerms, SalienceWeights,
+    Scratch, Store, StoreDiff, StoreOptions, SupersessionPolicy, TopoOrder, TraceKind, Via,
 };
 
 // ---- retrieve -------------------------------------------------------------

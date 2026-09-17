@@ -286,6 +286,7 @@ rendering are pure functions — same input, same output, byte for byte, verifie
 | `trace` / `diff` | Follow provenance; compare two versions |
 | `salience` | Rank what matters, with the arithmetic shown |
 | `retract` | Remove a claim and report the blast radius first |
+| `review` / `withdraw` / `resolve` | List open disagreements; withdraw an edge; record a review *(1.4)* |
 | `ui` | Browse a store; watch the budget bind, live |
 
 `smysl ui` is worth a minute if the packing rules seem abstract. Pin a claim with `f`,

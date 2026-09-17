@@ -126,6 +126,8 @@ pub use smysl::RetractionAuthority
 pub use smysl::RetractionPlan
 pub use smysl::RetractionPolicy
 pub use smysl::Retriever
+pub use smysl::ReviewItem
+pub use smysl::ReviewSubject
 pub use smysl::Role
 pub use smysl::Rung
 pub use smysl::SalienceReport
@@ -208,6 +210,7 @@ pub use smysl::relink
 pub use smysl::resolve_label
 pub use smysl::retrieve_tokenize
 pub use smysl::reverse_closure
+pub use smysl::review
 pub use smysl::role_weight
 pub use smysl::role_weights
 pub use smysl::salience

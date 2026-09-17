@@ -454,11 +454,11 @@ compared across vendors.
 
 ## 10. Command surface
 
-Twenty-one commands. Only two consult a model.
+Twenty-five commands. Only two consult a model.
 
 | Purity | Commands |
 |---|---|
-| Pure | `fmt` `check` `pack` `merge` `diff` `trace` `view` `bundle` `salience` `retract` `render` `providers` `usage` `reindex` `import` `relink` `compact` `ui` |
+| Pure | `fmt` `check` `pack` `merge` `diff` `trace` `view` `bundle` `salience` `find` `retract` `withdraw` `resolve` `review` `render` `providers` `usage` `reindex` `import` `relink` `compact` `ui` |
 | Mixed | `thread` (`--derive` pure; `--refine` consults a model) |
 | Model | `ingest` `attest` |
 

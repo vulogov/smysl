@@ -9,8 +9,9 @@ section shows what a 1.3 reader does with each.
 **For:** crate `1.4.0`.
 **Implemented:** all six sections in the Rust library (`smysl-core`, `smysl-graph`, `smysl-pack`,
 `smysl-check`), with tests in `crates/smysl-graph/tests/lifecycle.rs`,
-`crates/smysl-pack/tests/lifecycle.rs` and `crates/smysl-core/tests/lifecycle_fixtures.rs`. Not
-yet: the CLI, surface syntax, and the other three implementations.
+`crates/smysl-pack/tests/lifecycle.rs` and `crates/smysl-core/tests/lifecycle_fixtures.rs`; and in
+the CLI as `review`, `withdraw` and `resolve` (`tests/cmd_review.rs`). Not yet: surface syntax and
+the other three implementations.
 
 ## Why
 

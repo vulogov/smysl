@@ -67,6 +67,9 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "salience",  about: "Report derived salience with per-term breakdown",     purity: Purity::Pure,  phase: "SM-P8"  },
     Cmd { name: "find",      about: "Rank units against a query, lexically",                purity: Purity::Pure,  phase: "0.5.0"  },
     Cmd { name: "retract",   about: "Retract a unit; report the blast radius first",       purity: Purity::Pure,  phase: "SM-P6"  },
+    Cmd { name: "withdraw",  about: "Withdraw an edge: kept, and no longer followed",       purity: Purity::Pure,  phase: "1.4.0"  },
+    Cmd { name: "resolve",   about: "Record that a disagreement was reviewed",              purity: Purity::Pure,  phase: "1.4.0"  },
+    Cmd { name: "review",    about: "List the disagreements open for review",               purity: Purity::Pure,  phase: "1.4.0"  },
     Cmd { name: "render",    about: "Thread plus profile to artifact",                     purity: Purity::Pure,  phase: "SM-P12" },
     Cmd { name: "import",    about: "Tabular readings to measured units, without a model",  purity: Purity::Pure,  phase: "SM-P15" },
     Cmd { name: "relink",    about: "Re-point references onto superseded units",             purity: Purity::Pure,  phase: "SM-P15" },
@@ -395,6 +398,99 @@ fn cli() -> Command {
                     Arg::new("store")
                         .value_name("PATH")
                         .help("Store to retract from"),
+                ),
+            "withdraw" => sub
+                .arg(
+                    Arg::new("edge")
+                        .required(true)
+                        .value_name("EDGE")
+                        .help("The edge: its rid (as `review` prints it), or `FROM --KIND--> TO`"),
+                )
+                .arg(
+                    Arg::new("as")
+                        .long("as")
+                        .value_name("AGENT")
+                        .action(ArgAction::Append)
+                        .help("The agent(s) withdrawing it"),
+                )
+                .arg(
+                    Arg::new("authority")
+                        .long("authority")
+                        .value_name("A")
+                        .help("origin | any | quorum:N (origin reads the edge's attestations)"),
+                )
+                .arg(
+                    Arg::new("reason")
+                        .long("reason")
+                        .value_name("UNIT")
+                        .help("A unit saying why, by uid or label"),
+                )
+                .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .value_name("MILLIS")
+                        .value_parser(clap::value_parser!(u64))
+                        .help("Timestamp, in milliseconds since the epoch [default: now]"),
+                )
+                .arg(
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .help("Report what it would release without writing anything")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("store")
+                        .value_name("PATH")
+                        .help("Store to withdraw it in"),
+                ),
+            "resolve" => sub
+                .arg(
+                    Arg::new("item")
+                        .required(true)
+                        .value_name("ITEM")
+                        .help("A contention id (`k/c…`), or a rebuts edge by rid or `FROM --rebuts--> TO`"),
+                )
+                .arg(
+                    Arg::new("as")
+                        .long("as")
+                        .value_name("AGENT")
+                        .help("The agent who reviewed it"),
+                )
+                .arg(
+                    Arg::new("note")
+                        .long("note")
+                        .value_name("UNIT")
+                        .help("A unit recording the decision, by uid or label"),
+                )
+                .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .value_name("MILLIS")
+                        .value_parser(clap::value_parser!(u64))
+                        .help("Timestamp, in milliseconds since the epoch [default: now]"),
+                )
+                .arg(
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .help("Report what would be recorded without writing anything")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("store")
+                        .value_name("PATH")
+                        .help("Store to record it in"),
+                ),
+            "review" => sub
+                .arg(
+                    Arg::new("all")
+                        .long("all")
+                        .help("Include items already resolved")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("store")
+                        .value_name("PATH")
+                        .help("Store to review"),
                 ),
             "find" => sub
                 .arg(
@@ -2002,6 +2098,12 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if m.get_flag("dry-run") {
         return ExitCode::Success;
     }
+    // Now that it writes, a second run must not write twice: a CBOR log would deduplicate the
+    // record, and a surface file would gain the same `@rel` line again.
+    if effective_status(&store, policy).is_retracted(&target) {
+        println!("{path}: {target} is already retracted; nothing to do");
+        return ExitCode::Success;
+    }
     if !plan.authorised {
         eprintln!(
             "smysl retract: {}",
@@ -2010,11 +2112,15 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Failure;
     }
 
-    if let Err(e) = store.append(&[Record::Relation(Relation::new(
-        RelKind::Retracts,
-        target,
-        target,
-    ))]) {
+    // Written to the store it was read from. Until 1.4 this appended to the in-memory copy
+    // `load_store` builds, printed "now read as unfounded", exited 0 and wrote nothing, so a
+    // second run reported the same retraction as new.
+    let retraction = Record::Relation(Relation::new(RelKind::Retracts, target, target));
+    if let Err(e) = persist(&path, std::slice::from_ref(&retraction)) {
+        eprintln!("smysl retract: {e}");
+        return ExitCode::Failure;
+    }
+    if let Err(e) = store.append(&[retraction]) {
         eprintln!("smysl retract: {e}");
         return ExitCode::Failure;
     }
@@ -2024,6 +2130,551 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eff.blast_radius().len()
     );
     ExitCode::Success
+}
+
+/// Write records to the store a command read them against.
+///
+/// A CBOR store is appended to, as the log it is. A surface store gets a text line for each
+/// record surface text can spell — a relation — appended to the file, so what was there,
+/// comments included, is untouched. A record with no surface form (a withdrawal, a resolution)
+/// is refused for a surface store rather than dropped: it would read back as never written.
+fn persist(path: &str, records: &[Record]) -> Result<(), String> {
+    if path == "-" {
+        return Err("a store read from stdin cannot be written back; name the file".into());
+    }
+    let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+    if looks_like_surface(&bytes) {
+        let mut text = String::new();
+        for r in records {
+            match r {
+                Record::Relation(rel) => text.push_str(&format!(
+                    "@rel {} --{}--> {}\n",
+                    rel.from.canonical(),
+                    rel.kind,
+                    rel.to.canonical()
+                )),
+                other => {
+                    return Err(format!(
+                        "{path}: a {} has no surface form, so a surface store cannot hold one; \
+                         convert it first (`smysl merge {path} -o STORE.cbor`) and use that",
+                        other.type_name()
+                    ))
+                }
+            }
+        }
+        let separator = if bytes.ends_with(b"\n") { "\n" } else { "\n\n" };
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(path)
+            .map_err(|e| format!("{path}: {e}"))?;
+        f.write_all(format!("{separator}{text}").as_bytes())
+            .map_err(|e| format!("{path}: {e}"))
+    } else {
+        let mut store = Store::open(path).map_err(|e| format!("{path}: {e}"))?;
+        store.append(records).map_err(|e| format!("{path}: {e}"))?;
+        Ok(())
+    }
+}
+
+/// The store path a command names positionally or with `--store`.
+fn store_path(m: &ArgMatches, global: &ArgMatches, cmd: &str) -> Result<String, ExitCode> {
+    match m
+        .get_one::<String>("store")
+        .or_else(|| global.get_one::<String>("store"))
+    {
+        Some(p) => Ok(p.clone()),
+        None => {
+            eprintln!("smysl {cmd}: no store given");
+            Err(ExitCode::Usage)
+        }
+    }
+}
+
+/// An edge argument: a rid or its display prefix, or `FROM --KIND--> TO` with each end a uid
+/// or a label.
+fn resolve_edge(store: &Store, raw: &str) -> Result<Relation, Unresolved> {
+    let fail = |message: String| Unresolved {
+        code: ExitCode::Failure,
+        message,
+    };
+    if let Some(arrow) = raw.find("-->") {
+        let left = &raw[..arrow];
+        let Some(open) = left.rfind("--") else {
+            return Err(Unresolved {
+                code: ExitCode::Usage,
+                message: format!("`{raw}` is not `FROM --KIND--> TO`"),
+            });
+        };
+        let from = resolve(store, left[..open].trim())?;
+        let to = resolve(store, raw[arrow + 3..].trim())?;
+        let kind = RelKind::parse(left[open + 2..].trim()).map_err(|e| Unresolved {
+            code: ExitCode::Usage,
+            message: format!("`{}` is not a relation kind: {e}", left[open + 2..].trim()),
+        })?;
+        return store
+            .relations()
+            .find(|r| r.kind == kind && r.from == from && r.to == to)
+            .cloned()
+            .ok_or_else(|| {
+                fail(format!(
+                    "no `{kind}` edge from {from} to {to} in this store"
+                ))
+            });
+    }
+    let prefix = UidPrefix::parse(raw).map_err(|_| Unresolved {
+        code: ExitCode::Usage,
+        message: format!("`{raw}` is neither a rid nor `FROM --KIND--> TO`"),
+    })?;
+    let found: Vec<&Relation> = store
+        .relations()
+        .filter(|r| prefix.matches(&r.uid()))
+        .collect();
+    match found.as_slice() {
+        [one] => Ok((*one).clone()),
+        [] => Err(fail(format!("no edge in this store has the rid `{raw}`"))),
+        many => Err(Unresolved {
+            code: ExitCode::Usage,
+            message: format!(
+                "`{raw}` matches {} edges; give more of the rid:{}",
+                many.len(),
+                many.iter()
+                    .map(|r| format!("\n  {}  {} --{}--> {}", r.uid(), r.from, r.kind, r.to))
+                    .collect::<String>()
+            ),
+        }),
+    }
+}
+
+/// `--at`, or the wall clock. A withdrawal and a resolution record when they happened, which is
+/// what `--at` exists to make reproducible.
+fn record_time(m: &ArgMatches) -> u64 {
+    m.get_one::<u64>("at").copied().unwrap_or_else(now_millis)
+}
+
+/// How an edge reads in a report: `FROM --KIND--> TO`, with labels where the store has them.
+fn edge_text(labels: &std::collections::BTreeMap<smysl::Label, Uid>, r: &Relation) -> String {
+    let name = |u: &Uid| {
+        labels
+            .iter()
+            .find(|(_, v)| *v == u)
+            .map(|(l, _)| l.to_string())
+            .unwrap_or_else(|| u.to_string())
+    };
+    format!("{} --{}--> {}", name(&r.from), r.kind, name(&r.to))
+}
+
+/// Items open for review in `store`, under the labels the store binds.
+fn review_items(
+    store: &Store,
+    labels: &std::collections::BTreeMap<smysl::Label, Uid>,
+) -> Vec<smysl::ReviewItem> {
+    let mut ctx = smysl::DetectionContext::default();
+    ctx.labels = vec![labels.clone()];
+    smysl::review(store, &ctx)
+}
+
+/// `smysl withdraw` - an edge that should no longer be followed (1.4).
+///
+/// The edge's record stays; closure, lineage, detection and packing stop following it. What it
+/// releases is reported first, as `retract` reports its blast radius.
+fn cmd_withdraw(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let path = match store_path(m, global, "withdraw") {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+    warn_output_is_a_report(global, "withdraw");
+    let (store, labels) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl withdraw: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let edge = match resolve_edge(&store, m.get_one::<String>("edge").expect("required")) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl withdraw: {e}");
+            return e.code;
+        }
+    };
+    if edge.kind.is_lifecycle() {
+        eprintln!(
+            "smysl withdraw: a `{}` edge cannot be withdrawn (SMY-W056); a withdrawal of it would \
+             be kept and ignored",
+            edge.kind
+        );
+        return ExitCode::Usage;
+    }
+
+    let mut agents: Vec<AgentId> = Vec::new();
+    for raw in m.get_many::<String>("as").into_iter().flatten() {
+        match AgentId::new(raw) {
+            Ok(a) if !agents.contains(&a) => agents.push(a),
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("smysl withdraw: `{raw}` is not an agent id: {e}");
+                return ExitCode::Usage;
+            }
+        }
+    }
+    let authority = match m.get_one::<String>("authority") {
+        Some(s) => match RetractionAuthority::parse(s) {
+            Some(a) => a,
+            None => {
+                eprintln!("smysl withdraw: `{s}` is not an authority: origin, any or quorum:N");
+                return ExitCode::Usage;
+            }
+        },
+        None => RetractionAuthority::default(),
+    };
+    let reason = match m.get_one::<String>("reason").map(|r| resolve(&store, r)) {
+        None => None,
+        Some(Ok(u)) => Some(u),
+        Some(Err(e)) => {
+            eprintln!("smysl withdraw: --reason: {e}");
+            return e.code;
+        }
+    };
+
+    // The same authority rule as retraction, read off the edge: `origin` means an agent that
+    // attested this edge.
+    let refusal = if (agents.len() as u32) < authority.required_agents().max(1) {
+        Some(format!(
+            "{authority} requires {} distinct agent(s), got {}; name them with --as",
+            authority.required_agents().max(1),
+            agents.len()
+        ))
+    } else if authority.requires_origin()
+        && !agents
+            .iter()
+            .any(|a| edge.attestations.iter().any(|x| &x.agent == a))
+    {
+        Some(format!(
+            "origin authority: none of the {} requesting agent(s) attested this edge",
+            agents.len()
+        ))
+    } else {
+        None
+    };
+
+    let rid = edge.uid();
+    let at = record_time(m);
+    let records: Vec<Record> = agents
+        .iter()
+        .map(|a| {
+            let mut w = smysl::Withdrawal::new(rid, a.clone(), Hlc::new(at, 0, a.clone()));
+            if let Some(u) = reason {
+                w = w.with_reason(u);
+            }
+            Record::Withdrawal(w)
+        })
+        .collect();
+    let already = store.is_withdrawn(&edge);
+
+    // What it releases: review items that are open now and would not be after.
+    let open_before: Vec<smysl::ResolutionTarget> = review_items(&store, &labels)
+        .into_iter()
+        .filter(|i| !i.resolved)
+        .map(|i| i.target())
+        .collect();
+    let mut after = store.clone();
+    let _ = after.append(&records);
+    let open_after: Vec<smysl::ResolutionTarget> = review_items(&after, &labels)
+        .into_iter()
+        .filter(|i| !i.resolved)
+        .map(|i| i.target())
+        .collect();
+    let released = open_before
+        .iter()
+        .filter(|t| !open_after.contains(t))
+        .count();
+    let unpinned = if edge.kind == RelKind::Rebuts && store.is_live_rebuttal(&edge) {
+        Some(edge.to)
+    } else {
+        None
+    };
+    let dry = m.get_flag("dry-run");
+    let apply = !dry && refusal.is_none() && !already;
+
+    if apply {
+        if let Err(e) = persist(&path, &records) {
+            eprintln!("smysl withdraw: {e}");
+            return ExitCode::Failure;
+        }
+    }
+
+    if global.get_flag("json") {
+        println!(
+            "{{\"rid\":{},\"kind\":{},\"from\":{},\"to\":{},\"already_withdrawn\":{},\"released_from_review\":{},\"unpins\":{},\"authorised\":{},\"refusal\":{},\"applied\":{}}}",
+            smysl::json_escape(&rid.canonical()),
+            smysl::json_escape(edge.kind.as_str()),
+            smysl::json_escape(&edge.from.canonical()),
+            smysl::json_escape(&edge.to.canonical()),
+            already,
+            released,
+            unpinned
+                .map(|u| smysl::json_escape(&u.canonical()))
+                .unwrap_or_else(|| "null".into()),
+            refusal.is_none(),
+            refusal
+                .as_deref()
+                .map(smysl::json_escape)
+                .unwrap_or_else(|| "null".into()),
+            apply
+        );
+    } else {
+        println!("{path}: {rid}  {}", edge_text(&labels, &edge));
+        if already {
+            println!("{path}:   already withdrawn; nothing to do");
+            return ExitCode::Success;
+        }
+        if let Some(claim) = unpinned {
+            println!("{path}:   {claim} would no longer carry this rebuttal into a pack");
+        }
+        println!("{path}:   {released} item(s) would leave the review queue");
+        if let (true, Some(r)) = (dry, &refusal) {
+            println!("{path}:   would be refused: {r}");
+        }
+        if apply {
+            println!(
+                "{path}: withdrawn by {}",
+                agents
+                    .iter()
+                    .map(|a| a.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+    }
+    if let Some(r) = refusal {
+        if !dry {
+            eprintln!("smysl withdraw: {r}");
+            return ExitCode::Failure;
+        }
+    }
+    ExitCode::Success
+}
+
+/// `smysl resolve` - record that a disagreement was reviewed (1.4).
+///
+/// Decides nothing: the reviewer's conclusion is a retraction or a withdrawal, recorded by
+/// those commands. This takes the item off the review queue and, for a contention, stops it
+/// pinning its positions into a pack.
+fn cmd_resolve(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let path = match store_path(m, global, "resolve") {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+    warn_output_is_a_report(global, "resolve");
+    let (store, labels) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl resolve: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let Some(raw_agent) = m.get_one::<String>("as") else {
+        eprintln!("smysl resolve: name the reviewer with --as");
+        return ExitCode::Usage;
+    };
+    let agent = match AgentId::new(raw_agent) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl resolve: `{raw_agent}` is not an agent id: {e}");
+            return ExitCode::Usage;
+        }
+    };
+    let note = match m.get_one::<String>("note").map(|r| resolve(&store, r)) {
+        None => None,
+        Some(Ok(u)) => Some(u),
+        Some(Err(e)) => {
+            eprintln!("smysl resolve: --note: {e}");
+            return e.code;
+        }
+    };
+
+    let raw = m.get_one::<String>("item").expect("required");
+    let items = review_items(&store, &labels);
+    let (target, what) = if raw.starts_with("k/") {
+        match items.iter().find(|i| match &i.subject {
+            smysl::ReviewSubject::Contention(c) => c.id.as_str() == raw,
+            _ => false,
+        }) {
+            Some(i) => match &i.subject {
+                smysl::ReviewSubject::Contention(c) => (
+                    i.target(),
+                    format!("{}  {} over {}", c.id, c.detected.kind, c.over),
+                ),
+                _ => unreachable!("matched a contention"),
+            },
+            None => {
+                eprintln!(
+                    "smysl resolve: no contention `{raw}` is open or resolved in this store; \
+                     `smysl review --all` lists them"
+                );
+                return ExitCode::Failure;
+            }
+        }
+    } else {
+        let edge = match resolve_edge(&store, raw) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("smysl resolve: {e}");
+                return e.code;
+            }
+        };
+        if edge.kind != RelKind::Rebuts {
+            eprintln!(
+                "smysl resolve: only a contention or a `rebuts` edge is reviewed; this is a `{}` edge",
+                edge.kind
+            );
+            return ExitCode::Usage;
+        }
+        // A rebuttal a thread presents is reviewed as its contention. Resolving the edge instead
+        // would record a review and leave the contention open and pinning.
+        if let Some(k) = items.iter().find_map(|i| match &i.subject {
+            smysl::ReviewSubject::Contention(c)
+                if !i.resolved
+                    && c.detected.kind == smysl::DetectionKind::LiveRebuttal
+                    && c.over == edge.to
+                    && c.positions.contains(&edge.from) =>
+            {
+                Some(c.id.clone())
+            }
+            _ => None,
+        }) {
+            eprintln!(
+                "smysl resolve: this rebuttal is under review as contention `{k}`; resolve that"
+            );
+            return ExitCode::Usage;
+        }
+        (
+            smysl::ResolutionTarget::Relation(edge.uid()),
+            format!("{}  {}", edge.uid(), edge_text(&labels, &edge)),
+        )
+    };
+
+    let mine = store
+        .resolutions()
+        .any(|r| r.target == target && r.agent == agent);
+    let at = record_time(m);
+    let mut resolution = smysl::Resolution::new(
+        target.clone(),
+        agent.clone(),
+        Hlc::new(at, 0, agent.clone()),
+    );
+    if let Some(u) = note {
+        resolution = resolution.with_note(u);
+    }
+    let apply = !m.get_flag("dry-run") && !mine;
+    if apply {
+        if let Err(e) = persist(&path, &[Record::Resolution(resolution)]) {
+            eprintln!("smysl resolve: {e}");
+            return ExitCode::Failure;
+        }
+    }
+
+    if global.get_flag("json") {
+        let (kind, id) = match &target {
+            smysl::ResolutionTarget::Contention(c) => ("contention", c.as_str().to_string()),
+            smysl::ResolutionTarget::Relation(r) => ("rebuttal", r.canonical()),
+            _ => ("unknown", String::new()),
+        };
+        println!(
+            "{{\"target\":{},\"kind\":\"{kind}\",\"agent\":{},\"already_resolved_by_agent\":{mine},\"applied\":{apply}}}",
+            smysl::json_escape(&id),
+            smysl::json_escape(agent.as_str()),
+        );
+    } else {
+        println!("{path}: {what}");
+        if mine {
+            println!("{path}:   {agent} already resolved this; nothing to do");
+        } else if apply {
+            println!("{path}: resolved by {agent}");
+        } else {
+            println!("{path}:   would be resolved by {agent}");
+        }
+    }
+    ExitCode::Success
+}
+
+/// `smysl review` - what is open for review (1.4).
+///
+/// Exits 5 while anything is open, so a pipeline can gate on an empty queue.
+fn cmd_review(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let path = match store_path(m, global, "review") {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+    warn_output_is_a_report(global, "review");
+    let (store, labels) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl review: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let all = m.get_flag("all");
+    let items: Vec<smysl::ReviewItem> = review_items(&store, &labels)
+        .into_iter()
+        .filter(|i| all || !i.resolved)
+        .collect();
+    let open = items.iter().filter(|i| !i.resolved).count();
+    let gist = |u: &Uid| {
+        store
+            .get(u)
+            .map(|x| x.core.gist.clone())
+            .unwrap_or_else(|| "(not in this store)".into())
+    };
+
+    if global.get_flag("json") {
+        let rows: Vec<String> = items
+            .iter()
+            .map(|i| match &i.subject {
+                smysl::ReviewSubject::Contention(c) => format!(
+                    "{{\"type\":\"contention\",\"id\":{},\"kind\":\"{}\",\"over\":{},\"positions\":[{}],\"resolved\":{}}}",
+                    smysl::json_escape(c.id.as_str()),
+                    c.detected.kind,
+                    smysl::json_escape(&c.over.canonical()),
+                    uid_array(&c.positions),
+                    i.resolved
+                ),
+                smysl::ReviewSubject::Rebuttal(r) => format!(
+                    "{{\"type\":\"rebuttal\",\"rid\":{},\"from\":{},\"to\":{},\"resolved\":{}}}",
+                    smysl::json_escape(&r.uid().canonical()),
+                    smysl::json_escape(&r.from.canonical()),
+                    smysl::json_escape(&r.to.canonical()),
+                    i.resolved
+                ),
+                _ => "{\"type\":\"unknown\"}".into(),
+            })
+            .collect();
+        println!("{{\"open\":{open},\"items\":[{}]}}", rows.join(","));
+    } else {
+        println!("{path}: {open} item(s) open for review");
+        for i in &items {
+            let mark = if i.resolved { "  (resolved)" } else { "" };
+            match &i.subject {
+                smysl::ReviewSubject::Contention(c) => {
+                    println!("{}  {}{mark}", c.id, c.detected.kind);
+                    for p in &c.positions {
+                        println!("  {p}  {}", gist(p));
+                    }
+                }
+                smysl::ReviewSubject::Rebuttal(r) => {
+                    println!("{}  {}{mark}", r.uid(), edge_text(&labels, r));
+                    println!("  {}  {}", r.to, gist(&r.to));
+                    println!("  rebutted by {}  {}", r.from, gist(&r.from));
+                }
+                _ => {}
+            }
+        }
+    }
+    if open > 0 {
+        ExitCode::Contentions
+    } else {
+        ExitCode::Success
+    }
 }
 
 /// `smysl pack` - budget-bounded, closure-complete selection (§23.1).
@@ -3355,7 +4006,6 @@ fn cmd_attest(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
 ///
 /// The one place the CLI reads a clock. Everything else takes its timestamp as an argument
 /// so it stays reproducible; the ledger is a record of when things happened, so it does not.
-#[cfg(feature = "providers")]
 fn now_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -3973,7 +4623,7 @@ fn main() -> ProcExitCode {
     //
     // Recorded the way 0.13 recorded `worse`'s `>=` and 1.1 recorded `Lineage::is_empty`, rather
     // than answered with a test that cannot distinguish the two programs. What *is* tested is
-    // the property this lookup exists to support: `tests/dispatch.rs` runs all twenty-two
+    // the property this lookup exists to support: `tests/dispatch.rs` runs all twenty-five
     // commands and fails if any is unrouted.
     let Some(cmd) = COMMANDS.iter().find(|c| c.name == name) else {
         eprintln!("smysl: unknown command `{name}`");
@@ -3992,6 +4642,9 @@ fn main() -> ProcExitCode {
         "find" => cmd_find(sub, &matches),
         "pack" => cmd_pack(sub, &matches),
         "retract" => cmd_retract(sub, &matches),
+        "withdraw" => cmd_withdraw(sub, &matches),
+        "resolve" => cmd_resolve(sub, &matches),
+        "review" => cmd_review(sub, &matches),
         "thread" => cmd_thread(sub, &matches),
         "render" => cmd_render(sub, &matches),
         "ingest" => cmd_ingest(sub, &matches),
@@ -4042,7 +4695,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 22);
+        assert_eq!(COMMANDS.len(), 25);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -4059,6 +4712,9 @@ mod tests {
                 "salience",
                 "find",
                 "retract",
+                "withdraw",
+                "resolve",
+                "review",
                 "render",
                 "import",
                 "relink",

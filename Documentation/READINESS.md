@@ -1049,8 +1049,9 @@ effect.
 
 ## What is deliberately *not* on this list
 
-**Feature completeness.** The command surface is twenty-two commands and has not needed a new
-one since `find` in 0.5. Readiness is not about having more.
+**Feature completeness.** The command surface is twenty-five commands. It went from 0.5's `find`
+to 1.4's `review`, `withdraw` and `resolve` without a new one, and those three arrived because a
+consumer's verification pipeline could not close what it opened — not to have more.
 
 **A single crate.** Abandoned in 0.7.0 — the only benefit was publishing one crate rather than
 eleven, and it would have cost the crate boundary as a compiler-enforced constraint. Eleven

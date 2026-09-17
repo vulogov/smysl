@@ -48,9 +48,37 @@ Two behaviour changes a library caller will see: `Store::rebuttals_of` and
 `Store::relations_of_kind` leave out what is no longer live or withdrawn. The facade gains
 `Withdrawal`, `Resolution` and `ResolutionTarget` (257 names, 212 pure).
 
-Not yet: CLI commands to withdraw, resolve and list what is open for review; surface syntax for the
-two records; and the Python, JavaScript and Go readers, which preserve records 11 and 12 as unknown
-until they decode them.
+Not yet: surface syntax for the two records, and the Python, JavaScript and Go readers, which
+preserve records 11 and 12 as unknown until they decode them.
+
+### `review`, `withdraw` and `resolve`
+
+The three commands a reviewer needs, over the library above (`smysl::review`, `ReviewItem`,
+`ReviewSubject`: 260 facade names, 215 pure). Twenty-five commands.
+
+- **`review`** lists every contention a store records or implies and every live `rebuts` edge no
+  open contention covers, with `--all` for resolved ones and `--json`. Exits 5 while anything is
+  open, so a pipeline can gate on an empty queue.
+- **`withdraw`** takes an edge by rid or as `'FROM --KIND--> TO'`, reports what it releases — the
+  claim it stops pinning, the review items it clears, and whether authority would refuse it —
+  then writes one withdrawal per `--as` agent. Authority is `retract`'s, read off the edge's own
+  attestations. `retracts` and `supersedes` edges are refused (exit 2).
+- **`resolve`** takes a contention id or a `rebuts` edge and records who reviewed it. A rebuttal a
+  thread presents is redirected to its contention's id, because resolving the edge would leave
+  the contention open and pinning. The same reviewer twice writes nothing.
+
+Both writers refuse a surface store — neither record has a surface form — and name the conversion
+(`smysl merge store.smy -o store.cbor`) rather than writing something the file would read back
+without. `--at` fixes the timestamp; otherwise it is the wall clock.
+
+**`retract` wrote nothing.** It applied the retraction to the in-memory copy `load_store` builds,
+printed "N unit(s) now read as unfounded", exited 0 and left the file byte for byte unchanged; a
+second run reported the same retraction as new. Found building `withdraw` on the same pattern. It
+now appends a `@rel … --retracts--> …` line to a surface store or a record to a CBOR log, and a
+second run says "already retracted" and writes nothing.
+
+Found writing the chapter: an edge argument must be quoted, or the shell reads `-->` as a
+redirection and creates a file named after the target.
 
 ### Carried from 1.3.0
 
