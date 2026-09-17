@@ -109,6 +109,25 @@ pub mod schema_decl {
     pub const HIGHEST: u16 = PAYLOAD_SHAPE;
 }
 
+/// Withdrawal (type code 11, 1.4).
+pub mod withdrawal {
+    pub const RELATION: u16 = 0;
+    pub const AGENT: u16 = 1;
+    pub const TS: u16 = 2;
+    pub const REASON: u16 = 3;
+    pub const HIGHEST: u16 = REASON;
+}
+
+/// Resolution (type code 12, 1.4). Exactly one of `CONTENTION` and `RELATION` is present.
+pub mod resolution {
+    pub const CONTENTION: u16 = 0;
+    pub const RELATION: u16 = 1;
+    pub const AGENT: u16 = 2;
+    pub const TS: u16 = 3;
+    pub const NOTE: u16 = 4;
+    pub const HIGHEST: u16 = NOTE;
+}
+
 /// SourceRef, nested inside a unit under [`unit::SOURCE`].
 pub mod source {
     pub const KIND: u16 = 0;
@@ -236,6 +255,27 @@ mod tests {
                     schema_decl::TYPES,
                     schema_decl::RELATIONS,
                     schema_decl::PAYLOAD_SHAPE,
+                ],
+            ),
+            (
+                "withdrawal",
+                withdrawal::HIGHEST,
+                &[
+                    withdrawal::RELATION,
+                    withdrawal::AGENT,
+                    withdrawal::TS,
+                    withdrawal::REASON,
+                ],
+            ),
+            (
+                "resolution",
+                resolution::HIGHEST,
+                &[
+                    resolution::CONTENTION,
+                    resolution::RELATION,
+                    resolution::AGENT,
+                    resolution::TS,
+                    resolution::NOTE,
                 ],
             ),
             (

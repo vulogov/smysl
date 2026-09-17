@@ -13,9 +13,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use smysl_core::{
-    hash_bytes, Contention, ContentionId, Detected, DetectionKind, Hlc, Label, RelKind, Uid,
-};
+use smysl_core::{Contention, ContentionId, Detected, DetectionKind, Hlc, Label, RelKind, Uid};
 
 use crate::store::Store;
 
@@ -41,6 +39,10 @@ pub fn detect(store: &Store, ctx: &DetectionContext) -> Vec<Contention> {
     out.extend(label_collisions(store, ctx));
     out.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
     out.dedup_by(|a, b| a.id == b.id);
+    // Detected, and perhaps already reviewed: a resolution naming the derived id reads through.
+    for c in &mut out {
+        c.status = store.contention_status(c);
+    }
     out
 }
 
@@ -86,13 +88,19 @@ fn totally_ordered(store: &Store, uids: &[Uid]) -> bool {
     true
 }
 
-/// (b) A `rebuts` edge between two units both selected in a common thread.
+/// (b) A live `rebuts` edge between two units both selected in a common thread.
 ///
 /// A rebuttal that nobody has threaded together is a disagreement in waiting; one that a
 /// thread presents as a single line of argument is a disagreement in progress.
+///
+/// Live as rule R defines it since 1.4 — not withdrawn, from a unit that is not `unfounded` —
+/// and over a claim that is not `unfounded` either: a disagreement with a retracted claim is over.
 fn live_rebuttals(store: &Store, ctx: &DetectionContext) -> Vec<Contention> {
     let mut out = Vec::new();
     for rel in store.relations_of_kind(&RelKind::Rebuts) {
+        if !store.is_live_rebuttal(rel) || store.is_unfounded(&rel.to) {
+            continue;
+        }
         let together = store.threads().any(|t| {
             let units: BTreeSet<&Uid> = t.units().collect();
             units.contains(&rel.from) && units.contains(&rel.to)
@@ -148,18 +156,8 @@ fn contention(
 ) -> Contention {
     positions.sort();
     positions.dedup();
-
-    let mut bytes = Vec::with_capacity(1 + 32 * (positions.len() + 1));
-    bytes.push(kind.as_u8());
-    bytes.extend_from_slice(over.as_bytes());
-    for p in &positions {
-        bytes.extend_from_slice(p.as_bytes());
-    }
-    let digest = Uid::from_bytes(hash_bytes(&bytes));
-    // `k/c…` - the leading letter keeps the identifier a well-formed label, whose first
-    // character must be alphabetic.
-    let id = ContentionId::new(format!("k/c{}", &digest.short()[3..]))
-        .expect("a derived identifier is always well-formed");
+    // Normative since 1.4, and in the core: a resolution names a contention by this id.
+    let id = ContentionId::derive(kind, &over, &positions);
 
     let ts = ctx
         .now

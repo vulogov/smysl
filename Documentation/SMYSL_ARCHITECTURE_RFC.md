@@ -257,7 +257,7 @@ Ten passes, in order:
 9. **Extension** — extension and conformance
 10. **Hashes** — recomputed uids against stored
 
-Diagnostics are a closed registry of **52 codes** in eight groups (parse, identity, LOD,
+Diagnostics are a closed registry of **53 codes** in eight groups (parse, identity, LOD,
 epistemics, merge, pack/render, extension, provider). Every code carries a severity, and
 fixtures assert exact code sets rather than "some error".
 

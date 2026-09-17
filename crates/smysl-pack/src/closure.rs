@@ -58,7 +58,7 @@ pub fn required(store: &Store, uid: Uid, level: Lod) -> Selection {
         }
 
         // C4: an open contention pins every position, including the one being bought.
-        for k in store.contentions().iter().filter(|k| k.is_open()) {
+        for k in store.open_contentions() {
             if !k.pins(&x) {
                 continue;
             }
@@ -242,9 +242,8 @@ pub fn reasons(store: &Store, uid: Uid, level: Lod) -> BTreeMap<Uid, Reason> {
                 break;
             }
             if store
-                .contentions()
-                .iter()
-                .any(|k| k.is_open() && k.pins(holder) && k.positions.contains(x))
+                .open_contentions()
+                .any(|k| k.pins(holder) && k.positions.contains(x))
             {
                 reason = Some(Reason::Contests(*holder));
                 break;

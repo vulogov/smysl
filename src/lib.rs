@@ -71,10 +71,10 @@ pub use smysl_core::{
     Date, Detected, DetectionKind, Diagnostic, DropReason, ExitCode, Extra, Fidelity,
     GranularityProfile, Group, Hlc, IdError, IntegrityError, KernelType, Label, LabelBinding,
     LangTag, Lod, NonDetReason, Op, Optimality, PackInfo, PackMode, ParseError, Record, RelKind,
-    Relation, Report, Role, Rung, SchemaDecl, SchemaId, Severity, ShapeError, SourceKind,
-    SourcePolicy, SourceRef, Span, Status, Step, Subject, Thread, ThreadId, ThreadSchema, Uid,
-    UidPrefix, Unit, UnitCore, UnitCoreBuilder, View, ViewId, FORMAT_VERSIONS_SUPPORTED,
-    FORMAT_VERSION_DEFAULT, KERNEL_MAJOR, KERNEL_SCHEMA,
+    Relation, Report, Resolution, ResolutionTarget, Role, Rung, SchemaDecl, SchemaId, Severity,
+    ShapeError, SourceKind, SourcePolicy, SourceRef, Span, Status, Step, Subject, Thread, ThreadId,
+    ThreadSchema, Uid, UidPrefix, Unit, UnitCore, UnitCoreBuilder, View, ViewId, Withdrawal,
+    FORMAT_VERSIONS_SUPPORTED, FORMAT_VERSION_DEFAULT, KERNEL_MAJOR, KERNEL_SCHEMA,
 };
 
 // ---- check ----------------------------------------------------------------
@@ -197,8 +197,8 @@ mod tests {
         // threshold that does not exist and never did, and had sat "documented as
         // unreachable" for two releases — which is a holding pattern, not a decision. A code
         // nobody can trigger is worse than a missing one, because a reader waits for it.
-        // 52 as of 1.3.0, with `SMY-W309`.
-        assert_eq!(Code::ALL.len(), 52);
+        // 52 as of 1.3.0, with `SMY-W309`; 53 as of 1.4.0, with `SMY-W056`.
+        assert_eq!(Code::ALL.len(), 53);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

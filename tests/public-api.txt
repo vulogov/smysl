@@ -157,6 +157,8 @@ pub use smysl::RenderError
 pub use smysl::RenderMeta
 pub use smysl::Report
 pub use smysl::Request
+pub use smysl::Resolution
+pub use smysl::ResolutionTarget
 pub use smysl::RetractionAuthority
 pub use smysl::RetractionPlan
 pub use smysl::RetractionPolicy
@@ -212,6 +214,7 @@ pub use smysl::View
 pub use smysl::ViewId
 pub use smysl::Violation
 pub use smysl::What
+pub use smysl::Withdrawal
 pub use smysl::WriteContext
 pub use smysl::attest
 pub use smysl::attest

@@ -20,7 +20,8 @@ regretted, and three gates that each know what they are blind to.
   are stated on the function. The four quote names need no feature (they are from
   `smysl_core::quote`), which is why the pure count rose by four. 1.3 also added a `stage`
   feature, which is `stage`, `Staged`, `ceiling`, `recipe_short` and CSV import without the
-  provider layer; `ingest` implies it, so no name left `ingest`.
+  provider layer; `ingest` implies it, so no name left `ingest`. 1.4 adds `Withdrawal`,
+  `Resolution` and `ResolutionTarget` (257 and 212 so far in the cycle).
 - **Every public item in each of the eleven library crates** — they share one version, all are
   published, and `make semver` enforces each of them individually. That is the larger and
   truer figure, and §0.2 of `ROAD_TO_1.0.md` explains why it is the one that binds.

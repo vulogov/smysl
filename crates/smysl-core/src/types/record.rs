@@ -4,6 +4,7 @@
 //! registration, more compact, and determinism is easier to guarantee.
 
 use crate::types::annex::{Contention, LabelBinding, PackInfo, SchemaDecl};
+use crate::types::lifecycle::{Resolution, Withdrawal};
 use crate::types::provenance::Attestation;
 use crate::types::relation::Relation;
 use crate::types::thread::Thread;
@@ -29,6 +30,11 @@ pub mod code {
     /// the payload verbatim and re-emits it identically, so a 0.2 store round-trips through
     /// an older build without loss. Verified rather than assumed.
     pub const LABEL_BINDING: u64 = 10;
+    /// An edge that should no longer be followed (1.4). A 1.3 reader preserves it and reports
+    /// `SMY-W014`, which is what makes it an addition rather than a break.
+    pub const WITHDRAWAL: u64 = 11;
+    /// A record that a disagreement was reviewed (1.4). Additive in the same way.
+    pub const RESOLUTION: u64 = 12;
 
     pub const KNOWN: &[u64] = &[
         UNIT_CORE,
@@ -40,6 +46,8 @@ pub mod code {
         PACK_INFO,
         SCHEMA_DECL,
         LABEL_BINDING,
+        WITHDRAWAL,
+        RESOLUTION,
     ];
 }
 
@@ -57,6 +65,10 @@ pub enum Record {
     SchemaDecl(SchemaDecl),
     /// A label bound to the uid it names. Not identity: never hashed.
     LabelBinding(LabelBinding),
+    /// An edge that should no longer be followed (1.4).
+    Withdrawal(Withdrawal),
+    /// A record that a disagreement was reviewed (1.4).
+    Resolution(Resolution),
     /// A record type this build does not know (`SMY-W014`).
     ///
     /// Preserved verbatim - payload bytes exactly as they arrived - and skipped
@@ -80,6 +92,8 @@ impl Record {
             Record::PackInfo(_) => code::PACK_INFO,
             Record::SchemaDecl(_) => code::SCHEMA_DECL,
             Record::LabelBinding(_) => code::LABEL_BINDING,
+            Record::Withdrawal(_) => code::WITHDRAWAL,
+            Record::Resolution(_) => code::RESOLUTION,
             Record::Unknown { code, .. } => *code,
         }
     }
@@ -95,6 +109,8 @@ impl Record {
             Record::PackInfo(_) => "packinfo",
             Record::SchemaDecl(_) => "schemadecl",
             Record::LabelBinding(_) => "labelbinding",
+            Record::Withdrawal(_) => "withdrawal",
+            Record::Resolution(_) => "resolution",
             Record::Unknown { .. } => "unknown",
         }
     }
@@ -149,12 +165,12 @@ mod tests {
 
     /// Ascending, and with a hole. Codes 1-8 are 0.1's records; 9 stays reserved for
     /// checkpointing, whose format interacts with content addressing and must not be
-    /// retrofitted; 10 is 0.2's label binding. The list was contiguous until the hole
+    /// retrofitted; 10 is 0.2's label binding; 11 and 12 are 1.4's withdrawal and resolution. The list was contiguous until the hole
     /// became real, and contiguity was never the property that mattered - being ascending
     /// and free of duplicates is, since a code is a permanent wire commitment.
     #[test]
     fn known_codes_ascend_and_skip_the_reserved_slot() {
-        assert_eq!(code::KNOWN, &[1, 2, 3, 4, 5, 6, 7, 8, 10]);
+        assert_eq!(code::KNOWN, &[1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12]);
         assert!(code::KNOWN.windows(2).all(|w| w[0] < w[1]));
     }
 

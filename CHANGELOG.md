@@ -9,7 +9,52 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.4.0
 
-Nothing shipped yet. What this cycle starts from, carried from 1.3.0 (details there):
+### The lifecycle of edges and disagreements — specification draft and library
+
+[`Documentation/SPEC_DRAFT_1.4.md`](Documentation/SPEC_DRAFT_1.4.md) is the draft, and the Rust
+library implements all six of its decisions. Nothing is folded into the normative specification
+until the cut, and the format version stays `smysl/1.0`: every change is one §8.1 already permits.
+
+Checked against rust_smysl's verification design, 1.3 could not close what verification opens —
+an edge could not be withdrawn, nobody could say who asserted one, "live rebuttal" was undefined,
+and a disagreement could not be closed. All four came back to one missing thing: **a relation had
+no identity the format stated.** The implementation had one since 0.2 (`Relation::uid`), used by
+nothing on the wire.
+
+- **Relation identity** — `rid = BLAKE3(0x03 ‖ kind name ‖ 0x00 ‖ from ‖ to)`, what `Relation::uid`
+  already computed, now stated, with vectors in `fixtures/wire/relation-id/`.
+- **Withdrawal** — record type 11 (`Withdrawal`). A withdrawn edge is kept and not followed: the
+  adjacency, `relations_of_kind`, detection and packing all leave it out. `retracts` and
+  `supersedes` cannot be withdrawn; a withdrawal naming one is kept, ignored, and reported
+  (`SMY-W056`, registry 53). Not a `retracts` edge pointing at a rid, because a 1.3 checker would
+  report that as a dangling reference, an error, on every 1.4 store.
+- **Who asserted an edge** — an attestation whose uid is a rid attaches to that relation
+  (`Store::relation_by_id(..).attestations`), in any delivery order. No wire change.
+- **Live rebuttal** — not withdrawn, from a unit present and not `unfounded` under the strict
+  policy. `Store::rebuttals_of` returns live rebuttals only, so **a retracted rebuttal no longer
+  pins its claim into a pack** — the finding that started this. Supersession does not end
+  liveness. Detection kind 1 also requires the claim not to be `unfounded`.
+- **Resolution** — record type 12 (`Resolution`, `ResolutionTarget`), naming a contention by id or
+  an unthreaded `rebuts` edge by rid. It records that a review happened and decides nothing. A
+  resolved contention stops pinning its positions (C4); a resolved rebuttal still binds rule R.
+  `Store::contention_status` reads a recorded contention as resolved, or stale once its rebuttal
+  is dead; `Store::open_contentions` is what packing now uses. Contention ids became normative for
+  this — `ContentionId::derive`, moved from merge into the core — with vectors in
+  `fixtures/wire/contention-id/`.
+- **Unknown keys in every record body** are preserved, as the implementation already did and §8.1
+  did not say; a test now holds it for relations, withdrawals and resolutions.
+
+Two behaviour changes a library caller will see: `Store::rebuttals_of` and
+`Store::relations_of_kind` leave out what is no longer live or withdrawn. The facade gains
+`Withdrawal`, `Resolution` and `ResolutionTarget` (257 names, 212 pure).
+
+Not yet: CLI commands to withdraw, resolve and list what is open for review; surface syntax for the
+two records; and the Python, JavaScript and Go readers, which preserve records 11 and 12 as unknown
+until they decode them.
+
+### Carried from 1.3.0
+
+What this cycle started from (details in 1.3.0):
 
 - **Review closing what verification opens** — a bare `rebuts` edge listed for review, a way to
   withdraw an edge, and a definition of a *live* rebuttal that merge and pack agree on. Format

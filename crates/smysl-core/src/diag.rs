@@ -102,23 +102,30 @@ impl fmt::Display for Span {
 // The registry
 // ---------------------------------------------------------------------------
 
+// Groups are declared once and blocks name them, so a block may name a group again. `Code` is
+// numbered in declaration order and `cargo-semver-checks` treats a renumbered variant as a major
+// break, so a code added after a release goes at the end — in a trailing block for its own group
+// when that is not the last one. 1.4's `W056` is the first to need it.
 macro_rules! registry {
-    ( $(
-        $group:ident => {
-            $( $var:ident = $wire:literal, $sev:ident, $msg:literal ; )+
-        }
-    )+ ) => {
+    (
+        groups { $( $g:ident ),+ $(,)? }
+        $(
+            $group:ident => {
+                $( $var:ident = $wire:literal, $sev:ident, $msg:literal ; )+
+            }
+        )+
+    ) => {
         /// Appendix D section a code belongs to. Used for grouped reporting only; it is
         /// not part of the wire form.
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[non_exhaustive]
-        pub enum Group { $( $group, )+ }
+        pub enum Group { $( $g, )+ }
 
         impl Group {
-            pub const ALL: &'static [Group] = &[ $( Group::$group, )+ ];
+            pub const ALL: &'static [Group] = &[ $( Group::$g, )+ ];
 
             pub const fn as_str(self) -> &'static str {
-                match self { $( Group::$group => stringify!($group), )+ }
+                match self { $( Group::$g => stringify!($g), )+ }
             }
         }
 
@@ -173,6 +180,8 @@ macro_rules! registry {
 }
 
 registry! {
+    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider }
+
     // --- Parse and encoding ------------------------------------------------
     Parse => {
         E001 = "SMY-E001", Error, "Surface parse error";
@@ -255,6 +264,11 @@ registry! {
         E307 = "SMY-E307", Error, "Attributed quote does not occur in the source text";
         W308 = "SMY-W308", Warn,  "Attributed quote occurs only loosely - elided or reworded";
         W309 = "SMY-W309", Warn,  "A unit's own source was replaced by the caller's (source policy override)";
+    }
+
+    // --- Added after 1.3, each in its own group, at the end so no code is renumbered ----------
+    Merge => {
+        W056 = "SMY-W056", Warn,  "Withdrawal of a retracts or supersedes edge has no effect";
     }
 }
 
@@ -539,10 +553,11 @@ mod tests {
     ///
     /// 51 as of 0.6.0: `SMY-W306` was deleted rather than emitted, having described a usage
     /// threshold that does not exist. 52 as of 1.3.0: `SMY-W309`, a caller's source replacing
-    /// the one a unit gave — numbered past `W306`, which stays retired rather than reused.
+    /// the one a unit gave — numbered past `W306`, which stays retired rather than reused. 53 as
+    /// of 1.4.0: `SMY-W056`, a withdrawal naming an edge 1.4 does not let anyone withdraw.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 52);
+        assert_eq!(Code::ALL.len(), 53);
     }
 
     #[test]

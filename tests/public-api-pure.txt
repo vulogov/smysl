@@ -120,6 +120,8 @@ pub use smysl::Relinked
 pub use smysl::RenderError
 pub use smysl::RenderMeta
 pub use smysl::Report
+pub use smysl::Resolution
+pub use smysl::ResolutionTarget
 pub use smysl::RetractionAuthority
 pub use smysl::RetractionPlan
 pub use smysl::RetractionPolicy
@@ -166,6 +168,7 @@ pub use smysl::Via
 pub use smysl::View
 pub use smysl::ViewId
 pub use smysl::Violation
+pub use smysl::Withdrawal
 pub use smysl::WriteContext
 pub use smysl::build_ir
 pub use smysl::canonical_uid

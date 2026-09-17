@@ -2,6 +2,7 @@
 
 pub mod annex;
 pub mod epistemics;
+pub mod lifecycle;
 pub mod provenance;
 pub mod record;
 pub mod relation;
@@ -14,6 +15,7 @@ pub use annex::{
     PackInfo, PackMode, SchemaDecl,
 };
 pub use epistemics::{Date, Lod, SourceKind, SourcePolicy, SourceRef, Status};
+pub use lifecycle::{Resolution, ResolutionTarget, Withdrawal};
 pub use provenance::{Attestation, Hlc, Op, Rung};
 pub use record::{code as record_code, Record};
 pub use relation::{RelKind, Relation};

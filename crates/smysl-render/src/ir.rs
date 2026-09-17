@@ -293,7 +293,7 @@ fn joining_kinds(store: &Store, thread: &Thread) -> BTreeMap<Uid, RelKind> {
         // Relations are scanned in a fixed order and the first match wins, so a pair of
         // units joined by two kinds always picks the same one.
         let mut found: Option<RelKind> = None;
-        for r in store.relations() {
+        for r in store.relations().filter(|r| !store.is_withdrawn(r)) {
             if (r.from == next && r.to == prev) || (r.from == prev && r.to == next) {
                 let better = match &found {
                     None => true,

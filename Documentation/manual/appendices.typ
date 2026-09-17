@@ -415,7 +415,7 @@ Every diagnostic `smysl` can emit has a stable code, declared once in the `regis
 macro invocation in `crates/smysl-core/src/diag.rs` and never reused. The registry is
 single-sourced: wire string, severity, group, and one-line meaning all come from that one
 place, and two tests (`the_registry_is_the_size_it_is_meant_to_be` in `smysl-core`, and
-`facade_reexports_the_diagnostic_registry` in the facade) assert the count below stays at 52. Codes are grouped exactly as the source groups them; group membership is
+`facade_reexports_the_diagnostic_registry` in the facade) assert the count below stays at 53. Codes are grouped exactly as the source groups them; group membership is
 reporting structure only; it carries no weight on the wire.
 
 #dtable(
@@ -509,6 +509,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W053`], [warning], [Concurrent supersession materialised as a contention.]),
     ([`SMY-W054`], [warning], [Label and uid do not correspond one to one — two labels for one unit, or one label for two.]),
     ([`SMY-W055`], [warning], [Agent contention rate exceeds `--max-contentions-per-agent`.]),
+    ([`SMY-W056`], [warning], [A withdrawal names a `retracts` or `supersedes` edge, which cannot be withdrawn; it is kept and has no effect.]),
   ),
 )
 
