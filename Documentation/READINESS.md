@@ -44,6 +44,12 @@ are the two consecutive quiet cycles that Phase 3 of `ROAD_TO_1.0.md` asked for.
 publication rather than tags — it had been measuring against 1.0.0 while two releases went by,
 the exact drift recorded above for 0.9.0.
 
+**1.3.0 is published.** All twelve crates went to crates.io on 2026-09-16, the day it was cut,
+and `BASELINE` moved to 1.3.0 in the same change. It is the first release whose internal
+requirements are checked against the workspace version (`make dep-versions`): 1.3 crates call
+1.3 items, and the `1.1.0` requirements they carried until the cut would have let a consumer's
+lockfile pair them with 1.2 siblings.
+
 That gap is worth remembering rather than tidying away. `cargo-semver-checks` fetches its
 baseline from crates.io, so `BASELINE` in the Makefile tracks the last *published* version and
 not the last tagged one; it sat at 0.9.0 across two cut-but-unpublished releases, which meant
