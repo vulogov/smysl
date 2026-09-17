@@ -7,7 +7,25 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.3.0
+## Unreleased — 1.4.0
+
+Nothing yet.
+
+---
+
+## 1.3.0 — 2026-09-16
+
+The cycle that used smysl as the corpus for another project. rust_smysl records why code
+changed as a smysl store, building units through the library, running its own extraction
+through `ingest`, and checking every quote against the commit it came from. Its requests — six
+gaps, R1–R9 and a verification report — were each a place where smysl knew something and did
+not use it, and each is closed here with an acceptance test.
+
+Nothing here is a format change. `smysl/1.0` is untouched and the same fixtures produce the same
+uids. The facade is 254 names at `--all-features` and 209 pure, every addition listed in
+`API_CONTRACT.md`; `make semver` is clean on all twelve crates against 1.2.0, and
+`SEMVER_BREAKING` is empty for the fourth release running. One surface-text cost: `schema` is a
+reserved word, and a 1.2 reader rejects a `.smy` file that uses `@schema`.
 
 Six gaps found by using smysl as the corpus for another project, where the pipeline writes
 surface text for hundreds of commits, merges the results, and wants to run its own extraction

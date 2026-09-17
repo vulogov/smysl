@@ -14,10 +14,10 @@
 
 ## Getting it
 
-**On crates.io as of 0.9.0.** Twelve crates: the facade, plus the eleven behind it that exist
-so the compiler can check that the pure set stays pure. The evaluation harness stays
-unpublished — its tests read `fixtures/corpus` from outside its own package root, so a
-published copy would ship tests nobody could run.
+**On crates.io.** Twelve crates: the facade, plus the eleven behind it that exist so the
+compiler can check that the pure set stays pure. The evaluation harness stays unpublished — its
+tests read `fixtures/corpus` from outside its own package root, so a published copy would ship
+tests nobody could run.
 
 ```sh
 cargo install smysl                       # the CLI
@@ -28,53 +28,62 @@ As a library:
 
 ```toml
 [dependencies]
-smysl = "1.2"
+smysl = "1.3"
 ```
 
 Add `default-features = false` for the pure library: no async runtime, no HTTP client and no
 argument parser in the dependency tree, verified in CI on every push rather than promised
 here.
 
-**The crate is `1.2.0` and the format is `smysl/1.0`.** Both are meant literally.
-
-The crate version means the API is frozen: the facade's 244 names and every public item behind
-them move only with a 2.0, enforced per crate by `cargo-semver-checks` on every push rather
-than promised here. Getting there meant taking 482 items *out* of the contract first — the
-provider mappers, the codec internals, the ingest machinery — so that what is frozen is a
-surface somebody chose rather than everything that happened to be `pub`.
+**The crate is `1.3.0` and the format is `smysl/1.0`.** The crate version means the API is
+frozen: the facade's 254 names and every public item behind them move only with a 2.0, enforced
+per crate by `cargo-semver-checks` on every push.
 [`Documentation/API_CONTRACT.md`](Documentation/API_CONTRACT.md) is that promise written down.
+The format version means nothing about the format changed: `smysl/0.1` held across fourteen
+releases and four independent implementations — the Rust, and Python, JavaScript and Go written
+from the specification alone — and `smysl/1.0` reports that record rather than a change.
 
-The format version means something narrower and stronger: **nothing about the format changed.**
-`smysl/0.1` held across fourteen releases and four independent implementations without a
-revision, and `smysl/1.0` reports that record rather than a change. Documents declaring
-`smysl/0.1` are still read, and still round-trip declaring it. What earned the number was the
-gate that could not be worked around — the format has been implemented from the specification
-alone, three times, in Python, JavaScript and Go. Until someone outside the project had done
-that, "another team can implement this" was a claim rather than a fact, and for an interchange
-format that is the difference between a product and a file layout.
+## Release 1.3.0
 
-**As of 1.2.0 all three of those implementations derive uids**, which is the claim that matters:
-reading a document never requires computing one, so three independent readers can round-trip
-every fixture byte for byte while remaining ignorant of what identity *is*. §2.3 — *status is
-part of identity* — now has four independent derivations rather than the Rust's alone.
+The cycle that used smysl as the corpus for another project. rust_smysl records *why* code
+changed, as a smysl store it builds through the library, and every request it made was a place
+where smysl knew something and did not use it. The full account is in
+[`CHANGELOG.md`](CHANGELOG.md).
 
-Each reading has found something, which is the argument for the next one. The first two found
-three places the specification was insufficient; the third found a fixture that could not fail;
-the fourth found four facts a producer cannot proceed without that appeared in no section at
-all — including one where the document said the *opposite* of what the encoder does. All are
-folded in, and `make spec-tables` now parses the specification's tables and compares every
-implementation against them, so the next such gap fails a build instead of surviving two
-releases unnoticed.
+**For library callers that build their own units:**
 
-**One thing 1.0 does not claim.** Of the five model providers, ollama, DeepSeek and Gemini have
-been exercised against live endpoints; OpenAI and Anthropic have not, because no key has been
-available. Both were read against their vendor documentation — which found two real defects —
-and their schema translation is verified against the documented rules, but nobody has confirmed
-the endpoints *accept* what we send. The concrete mappers are deliberately not part of the
-public API, so if one turns out to be wrong it can be fixed without a 2.0.
-[`READINESS.md`](Documentation/READINESS.md) §4 records this as a waiver rather than a
-closed gate. **If you have an OpenAI or Anthropic key, running those live tests and reporting
-what came back is the single most useful contribution available.**
+- **Staging without a model.** The new `stage` feature is staging, rule T, recipes and CSV
+  import with no provider layer compiled in; `ingest` is `stage` plus the model. The quote check
+  (`quote_support`, `quote_support_in`) lives in the core and needs no feature, with its
+  normalisation written into the contract.
+- **A caller's own source**, `IngestOptions::with_source(SourceRef, SourcePolicy)`, applied
+  before identity is computed, so provenance is never the model's invention.
+- **Labels are resolved, not guessed.** `resolve_label` refuses an ambiguous label and every
+  unit-taking command accepts a label and exits 5 on one; staged batches carry their label
+  bindings.
+- **Dependents over chosen edges.** `dependents_via` with `EdgeSet::premises()` (`deps`,
+  `grounds`, `conditions`) or the broader `EdgeSet::dependency()`, and extension kinds named
+  per store with `Adjacency::edge_kind`.
+- **`@schema` in surface text**, so a document using an extension relation can declare it.
+  `schema` is now a reserved surface word: a 1.2 reader rejects such a file, misleadingly, as a
+  malformed label.
+
+**For `smysl ingest`:**
+
+- A caller's prompt and schema (`--prompt`, `ingest.prompt`), with every check after the model
+  still applied.
+- A repair turn that keeps the content rules in front of the model, tolerates an echoed marker,
+  and reports every attempt. Verified live with Gemini flash-lite: units in 3 of 3 runs on the
+  commit that degraded in 3 of 3 before.
+- One over-long gist degrades its own unit, not the chunk; the gist bound the schema states is
+  now the one the check enforces.
+- The provider's configured `max_output` is asked for (`--max-output` overrides); an answer cut
+  off at that limit says so and is counted as the call it was. Configuration mistakes read as
+  configuration, not "malformed provider response". `--granularity` is validated.
+
+No format change: the same fixtures produce the same uids, and `make semver` is clean on all
+twelve crates. Two things that need format decisions — closing a contradiction through review,
+and recording who asserted an edge — are the work of 1.4.
 
 Building from source:
 
@@ -327,7 +336,8 @@ unreachable from the library.
 
 ```toml
 [dependencies]
-smysl = { version = "0.1", default-features = false }
+smysl = { version = "1.3", default-features = false }                      # pure
+smysl = { version = "1.3", default-features = false, features = ["stage"] } # + staging, no model
 ```
 
 With default features off you get a fully synchronous library — no async runtime, no HTTP
@@ -338,7 +348,7 @@ signature says.
 
 ## Status
 
-Format `smysl/0.1`, kernel `smysl.kernel/0.1`. The contract is
+Crate `1.3.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
 [`Documentation/SMYSL_FORMAT_SPEC.md`](Documentation/SMYSL_FORMAT_SPEC.md) — everything a
 second implementation must obey, and nothing else.
 
@@ -346,7 +356,6 @@ RFC SMYSL-1 is retired. It was the product idea, written before there was an imp
 building it produced 69 places where it was silent or self-contradictory, each decided in
 code and recorded in [`Documentation/RFC_PROPOSAL.md`](Documentation/RFC_PROPOSAL.md). Those
 decisions are folded into the spec, which is normative in its place.
-Version 0.1: usable and extensively tested, but the format may still shift before 1.0.
 
 | Phase | Delivers | State |
 |---|---|---|
@@ -369,6 +378,11 @@ reading of a vendor's documentation, not a fact about their API:
 | Gemini | verified against the live endpoint |
 | Anthropic | implemented, but not tested |
 | OpenAI | implemented, but not tested |
+
+Anthropic and OpenAI were read against their vendor documentation — which found two real
+defects — but no key has been available to confirm the endpoints accept what we send. The
+concrete mappers are not part of the public API, so a wrong one is fixable without a 2.0. **If
+you have either key, running those live tests is the most useful contribution available.**
 
 That distinction has already earned its keep. Gemini's support was written from the
 documentation, which describes its response schema as a subset of JSON Schema draft
