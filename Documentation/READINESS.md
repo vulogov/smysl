@@ -50,6 +50,11 @@ requirements are checked against the workspace version (`make dep-versions`): 1.
 1.3 items, and the `1.1.0` requirements they carried until the cut would have let a consumer's
 lockfile pair them with 1.2 siblings.
 
+**1.5.0 is published.** All twelve crates went to crates.io on 2026-09-17, the day it was cut, and
+`BASELINE` moved to 1.5.0 in the same change. Nothing was removed and no record type was added:
+every 1.5 addition is off unless a caller asks for it, which is why `make semver` reported no
+update required on all twelve.
+
 **1.4.0 is published.** All twelve crates went to crates.io on 2026-09-17, the day it was cut, and
 `BASELINE` moved to 1.4.0 in the same change. The format did not move — `smysl/1.0` holds — and the
 three implementations written from the specification carry the crate's version, checked by
