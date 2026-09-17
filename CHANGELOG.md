@@ -80,6 +80,36 @@ second run says "already retracted" and writes nothing.
 Found writing the chapter: an edge argument must be quoted, or the shell reads `-->` as a
 redirection and creates a file named after the target.
 
+### R10 — merge is idempotent for every record type
+
+`merge(A, A)` re-appended records it already held: on a real staged batch of 157 records it added
+42 every time — the 41 label bindings and the schema declaration. `Store::append` skipped a record
+only if `Store::contains` recognised it, and `contains` matched nine record types by their own
+identity and answered "absent" for the rest: label bindings, schema declarations, pack info,
+unknown records, and — a gap in 1.4's own addition — attestations naming an edge's rid, which it
+looked for among units. Rule U says merge is idempotent; at the record level it was not.
+
+A store now keeps the BLAKE3 of every record's canonical encoding, and a record is present iff its
+hash is — one 32-byte hash per record, maintained wherever records are absorbed (`append`,
+`from_records`, `open`, `reindex`). Chosen over an arm per missing type because it is structural:
+a record type added later is recognised without anyone remembering to teach `contains` about it,
+which is exactly how this one was missed. It is also the only one of the two under which merge is
+commutative over records: a relation differing only in weight is a different record, and keying
+relations by their endpoints kept whichever variant arrived first. `from_records` holds a record
+given twice once; `open` keeps a log as it is on disk, since one written before this can hold
+duplicates. Two relation records that are one record by bytes but carry different in-memory
+attestations still union those attestations, as they did when the repeat was appended.
+
+Found with it: **label-collision detection never read a store's own label bindings**, only labels
+a caller passed in `MergeOptions`, so a library merge of two stores binding one label to different
+units reported no contention. It reads them now. The CLI passed its labels explicitly and was not
+affected.
+
+No wire, encoding or signature change; `make semver` is clean. Six tests in
+`crates/smysl-graph/tests/merge_idempotence.rs`, over a store holding every record type, a
+reopened file, associativity and commutativity, and reindex. Through the CLI, a store merged with
+itself three times stays 308 bytes; the 1.4 build before this grew it to 438 and then 698.
+
 ### Carried from 1.3.0
 
 What this cycle started from (details in 1.3.0):

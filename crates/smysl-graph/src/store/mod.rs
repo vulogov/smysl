@@ -88,6 +88,10 @@ pub struct Store {
     resolutions: BTreeSet<Resolution>,
     /// Each relation's rid, to its key in `relations`.
     rids: BTreeMap<Uid, (String, Uid, Uid)>,
+    /// BLAKE3 of the canonical encoding of every record the log holds: what `contains` answers
+    /// from. One 32-byte hash a record, and structural — a record type added later is recognised
+    /// as present without anybody remembering to teach `contains` about it (R10).
+    record_hashes: BTreeSet<[u8; 32]>,
     /// Units whose effective status under the strict policy is `unfounded`: what liveness
     /// reads (1.4, rule R). Derived on every rebuild, like the adjacency.
     unfounded: BTreeSet<Uid>,
@@ -116,15 +120,34 @@ impl Store {
             withdrawals: BTreeMap::new(),
             resolutions: BTreeSet::new(),
             rids: BTreeMap::new(),
+            record_hashes: BTreeSet::new(),
             unfounded: BTreeSet::new(),
             adjacency: Adjacency::default(),
         }
     }
 
     /// Build in memory from records, with no file behind it.
+    ///
+    /// A record given twice is held once, as `append` would hold it. (`open` keeps a log exactly as
+    /// it is on disk, duplicates included: the file is the authority, and one written before R10
+    /// can hold them.)
     pub fn from_records(records: Vec<Record>) -> Store {
         let mut s = Store::new();
+        let mut seen = BTreeSet::new();
+        let mut repeated = Vec::new();
+        let records: Vec<Record> = records
+            .into_iter()
+            .filter_map(|r| {
+                if seen.insert(Self::record_hash(&r)) {
+                    Some(r)
+                } else {
+                    repeated.push(r);
+                    None
+                }
+            })
+            .collect();
         s.absorb(records);
+        s.union_edge_attestations(&repeated);
         s.log_len = s.log_bytes().len() as u64;
         s.log_hash = hash_bytes(&s.log_bytes());
         s
@@ -216,16 +239,23 @@ impl Store {
         let mut report = AppendReport::default();
         let mut fresh = Vec::new();
         let mut bytes = Vec::new();
+        // Also against the batch itself, so the same record twice in one delivery is one record.
+        let mut seen: BTreeSet<[u8; 32]> = BTreeSet::new();
+        let mut repeated = Vec::new();
         for r in records {
-            if self.contains(r) {
+            let encoded = to_cbor(r);
+            let hash = hash_bytes(&encoded);
+            if self.record_hashes.contains(&hash) || !seen.insert(hash) {
                 report.duplicates += 1;
+                repeated.push(r.clone());
                 continue;
             }
-            bytes.extend_from_slice(&to_cbor(r));
+            bytes.extend_from_slice(&encoded);
             fresh.push(r.clone());
             report.added += 1;
         }
         if fresh.is_empty() {
+            self.union_edge_attestations(&repeated);
             return Ok(report);
         }
 
@@ -246,8 +276,25 @@ impl Store {
         report.bytes_written = bytes.len() as u64;
         self.log_len += report.bytes_written;
         self.absorb(fresh);
+        self.union_edge_attestations(&repeated);
         self.log_hash = hash_bytes(&self.log_bytes());
         Ok(report)
+    }
+
+    /// A relation held in memory can carry attestations its encoding does not (they travel as
+    /// attestation records on the wire), so two relation records can be one record by bytes and
+    /// still bring different attestations. Nothing is appended for the repeat; its attestations
+    /// join the edge's, as they did when the repeat was appended.
+    fn union_edge_attestations(&mut self, repeated: &[Record]) {
+        for r in repeated {
+            if let Record::Relation(rel) = r {
+                if let Some(existing) = self.relations.get_mut(&Self::rel_key(rel)) {
+                    existing
+                        .attestations
+                        .extend(rel.attestations.iter().cloned());
+                }
+            }
+        }
     }
 
     /// Write the derived index beside the log.
@@ -549,27 +596,17 @@ impl Store {
 
     // -- internals ---------------------------------------------------------
 
-    fn contains(&self, r: &Record) -> bool {
-        match r {
-            Record::Unit(u) => self.units.contains_key(&canonical_uid(u)),
-            Record::Attestation(a) => self
-                .units
-                .get(&a.uid)
-                .is_some_and(|u| u.attestations.contains(a)),
-            Record::Relation(rel) => self.relations.contains_key(&Self::rel_key(rel)),
-            Record::Thread(t) => self
-                .threads
-                .get(&(t.id.clone(), t.owner.clone()))
-                .is_some_and(|e| e == t),
-            Record::View(v) => self.views.get(&v.id).is_some_and(|e| e == v),
-            Record::Contention(c) => self.contentions.iter().any(|e| e.id == c.id),
-            Record::Withdrawal(w) => self
-                .withdrawals
-                .get(&w.relation)
-                .is_some_and(|s| s.contains(w)),
-            Record::Resolution(r) => self.resolutions.contains(r),
-            _ => false,
-        }
+    /// What makes two records the same record: the BLAKE3 of the canonical encoding.
+    ///
+    /// Byte identity, for every record type. Until R10 `append` asked a `contains` that matched
+    /// nine types by their own notion of identity and answered "absent" for the rest, so every
+    /// merge re-appended label bindings, schema declarations, pack info, unknown records and
+    /// attestations on edges: `merge(A, A)` grew a real 157-record batch by 42 each time. Bytes are
+    /// also what keeps the record set the same whichever order stores are merged in — a relation
+    /// differing only in weight is a different record, and keying it by its endpoints kept
+    /// whichever variant arrived first.
+    fn record_hash(r: &Record) -> [u8; 32] {
+        hash_bytes(&to_cbor(r))
     }
 
     fn rel_key(r: &Relation) -> (String, Uid, Uid) {
@@ -580,6 +617,7 @@ impl Store {
     /// is the same fold merge performs (rule U).
     fn absorb(&mut self, records: Vec<Record>) {
         for r in &records {
+            self.record_hashes.insert(Self::record_hash(r));
             match r {
                 Record::Unit(u) => {
                     let uid = canonical_uid(u);

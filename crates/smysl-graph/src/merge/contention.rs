@@ -125,6 +125,14 @@ fn label_collisions(store: &Store, ctx: &DetectionContext) -> Vec<Contention> {
             bindings.entry(l.clone()).or_default().insert(*u);
         }
     }
+    // The store's own label bindings. A merged store holds each source's bindings as records,
+    // and detection read only labels a caller passed in, so a library merge of two stores
+    // binding one label to different units found no collision (found with R10).
+    for r in store.iter() {
+        if let smysl_core::Record::LabelBinding(b) = r {
+            bindings.entry(b.label.clone()).or_default().insert(b.uid);
+        }
+    }
     // Labels carried on units themselves count too, where a store has them.
     for (uid, unit) in store.units() {
         for l in &unit.labels {
