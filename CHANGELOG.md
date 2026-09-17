@@ -7,6 +7,19 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.6.0
+
+### Carried from 1.5.0
+
+What this cycle starts from (details in 1.5.0):
+
+- **R11, R13 and R14**, held for rust_smysl's S2 experiment. R13's premise is that a failing
+  `check` still exits 6 on the CLI path, which 1.3.0's changelog stated and the CLI does not do;
+  that line needs a correction note wherever it is repeated.
+- **OpenAI and Anthropic** against their live endpoints.
+
+---
+
 ## 1.5.0 — 2026-09-17
 
 The cycle that taught the library to *read* a corpus somebody else wrote. 1.4 gave disagreements a

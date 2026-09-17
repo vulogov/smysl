@@ -4,7 +4,7 @@
 [`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md), which is deliberately a fraction of this
 one's length: interoperability needs identity, encoding and the rules, not an account of how
 this implementation happens to be built.
-**Describes:** the code at `dev/1.5.0`, crate `1.5.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`.
+**Describes:** the code at `dev/1.6.0`, crate `1.6.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`.
 Sections 2.3, 4.2, 5 and 13 were brought up to 1.4 — the lifecycle of edges and disagreements —
 and sections 5, 7.1, 7.4 and 9.5 to 1.5 — reading a corpus whose dependencies are edges — on
 2026-09-17; the rest describes what has not changed since it was compiled.
