@@ -83,11 +83,12 @@ fn relation_ids_match_the_fixture() {
         pre.extend_from_slice(to.as_bytes());
         assert_eq!(Uid::from_bytes(hash_bytes(&pre)), rel.uid(), "{name}");
         out.push_str(&format!(
-            "    {{\n      \"name\": \"{name}\",\n      \"note\": \"{note}\",\n      \"kind\": \"{}\",\n      \"from_hex\": \"{}\",\n      \"to_hex\": \"{}\",\n      \"preimage_hex\": \"{}\",\n      \"rid\": \"{}\"\n    }}{}\n",
+            "    {{\n      \"name\": \"{name}\",\n      \"note\": \"{note}\",\n      \"kind\": \"{}\",\n      \"from_hex\": \"{}\",\n      \"to_hex\": \"{}\",\n      \"preimage_hex\": \"{}\",\n      \"rid_hex\": \"{}\",\n      \"rid\": \"{}\"\n    }}{}\n",
             kind.as_str(),
             hex(from.as_bytes()),
             hex(to.as_bytes()),
             hex(&pre),
+            hex(rel.uid().as_bytes()),
             rel.uid().canonical(),
             if i + 1 < cases.len() { "," } else { "" }
         ));
@@ -140,15 +141,73 @@ fn contention_ids_match_the_fixture() {
             .map(|p| format!("\"{}\"", hex(p.as_bytes())))
             .collect();
         out.push_str(&format!(
-            "    {{\n      \"name\": \"{name}\",\n      \"note\": \"{note}\",\n      \"kind\": {},\n      \"over_hex\": \"{}\",\n      \"positions_hex\": [{}],\n      \"preimage_hex\": \"{}\",\n      \"id\": \"{}\"\n    }}{}\n",
+            "    {{\n      \"name\": \"{name}\",\n      \"note\": \"{note}\",\n      \"kind\": {},\n      \"over_hex\": \"{}\",\n      \"positions_hex\": [{}],\n      \"preimage_hex\": \"{}\",\n      \"digest_hex\": \"{}\",\n      \"id\": \"{}\"\n    }}{}\n",
             kind.as_u8(),
             hex(over.as_bytes()),
             positions_hex.join(", "),
             hex(&pre),
+            hex(&hash_bytes(&pre)),
             id.as_str(),
             if i + 1 < cases.len() { "," } else { "" }
         ));
     }
     out.push_str("  ]\n}\n");
     golden("fixtures/wire/contention-id/cases.json", out);
+}
+
+/// `fixtures/wire/F10-lifecycle.cbor`: a store holding 1.4's records — a withdrawal, two
+/// resolutions and an attestation naming an edge's rid — built from surface text, so the other
+/// implementations' round-trip suites carry them from the moment they exist.
+#[test]
+fn the_lifecycle_wire_fixture_matches_its_source() {
+    let src = "\
+@claim c/pool { status: speculative }
+~ The eu-west connection pool saturated.
+
+@claim c/half { status: speculative }
+~ The pool never exceeded half its size.
+
+@claim c/canary { status: speculative }
+~ The canary shard stayed clean.
+
+@rel c/half --rebuts--> c/pool { weight: 0.5 }
+
+@rel c/canary --rebuts--> c/pool
+
+@withdraw c/half --rebuts--> c/pool { agent: human:reviewer, ts: [1726500000000, 0], reason: c/canary }
+
+@resolve c/canary --rebuts--> c/pool { agent: human:reviewer, ts: [1726500000001, 0] }
+
+@resolve k/ccm3actwjjti65famnoe6mapo5d { agent: \"model:gemini/flash-lite\", ts: [1726500000002, 3] }
+";
+    let out = smysl_core::surface::parse_surface(src).unwrap();
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let mut records = out.records;
+    let pool = out.labels[&smysl_core::Label::new("c/pool").unwrap()];
+    let canary = out.labels[&smysl_core::Label::new("c/canary").unwrap()];
+    let agent = smysl_core::AgentId::new("model:gemini/flash-lite").unwrap();
+    records.push(smysl_core::Record::Attestation(
+        smysl_core::Attestation::new(
+            Relation::new(RelKind::Rebuts, canary, pool).uid(),
+            agent.clone(),
+            smysl_core::Op::Imported,
+            smysl_core::Rung::Model,
+            smysl_core::Hlc::new(1726500000000, 0, agent),
+        ),
+    ));
+    let bytes = smysl_core::to_cbor_seq(&records);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/wire/F10-lifecycle.cbor");
+    if std::env::var_os("SMYSL_BLESS").is_some() {
+        std::fs::write(&path, &bytes).unwrap();
+        return;
+    }
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        bytes,
+        "fixtures/wire/F10-lifecycle.cbor no longer matches its source"
+    );
+    let kinds: Vec<&str> = records.iter().map(|r| r.type_name()).collect();
+    for k in ["withdrawal", "resolution", "attestation"] {
+        assert!(kinds.contains(&k), "{k} missing from the fixture");
+    }
 }

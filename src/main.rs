@@ -1962,6 +1962,9 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 Record::LabelBinding(b) => ctx.labels.get(&b.uid) != Some(&b.label),
                 // Spelled `@schema` since 1.3, unless it carries what surface text cannot.
                 Record::SchemaDecl(d) => !smysl::surface::schema_decl_has_surface_form(d),
+                // `@withdraw` and `@resolve` since 1.4, on the same terms.
+                Record::Withdrawal(w) => !smysl::surface::withdrawal_has_surface_form(w),
+                Record::Resolution(r) => !smysl::surface::resolution_has_surface_form(r),
                 _ => true,
             })
             .count();
@@ -2026,7 +2029,7 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
     warn_output_is_a_report(global, "retract");
-    let (mut store, _) = match load_store(&path) {
+    let (mut store, labels) = match load_store(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl retract: {e}");
@@ -2116,7 +2119,7 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     // `load_store` builds, printed "now read as unfounded", exited 0 and wrote nothing, so a
     // second run reported the same retraction as new.
     let retraction = Record::Relation(Relation::new(RelKind::Retracts, target, target));
-    if let Err(e) = persist(&path, std::slice::from_ref(&retraction)) {
+    if let Err(e) = persist(&path, std::slice::from_ref(&retraction), &store, &labels) {
         eprintln!("smysl retract: {e}");
         return ExitCode::Failure;
     }
@@ -2134,44 +2137,50 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 
 /// Write records to the store a command read them against.
 ///
-/// A CBOR store is appended to, as the log it is. A surface store gets a text line for each
-/// record surface text can spell — a relation — appended to the file, so what was there,
-/// comments included, is untouched. A record with no surface form (a withdrawal, a resolution)
-/// is refused for a surface store rather than dropped: it would read back as never written.
-fn persist(path: &str, records: &[Record]) -> Result<(), String> {
+/// A CBOR store is appended to, as the log it is. A surface store gets each record's surface
+/// spelling appended to the file — written by the library's writer, with the store's labels and
+/// edges, so it reads as the rest of the file does — and what was there, comments included, is
+/// untouched. A record surface text cannot hold is refused rather than dropped: it would read back
+/// as never written.
+fn persist(
+    path: &str,
+    records: &[Record],
+    store: &Store,
+    labels: &std::collections::BTreeMap<smysl::Label, Uid>,
+) -> Result<(), String> {
     if path == "-" {
         return Err("a store read from stdin cannot be written back; name the file".into());
     }
     let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
     if looks_like_surface(&bytes) {
-        let mut text = String::new();
         for r in records {
-            match r {
-                Record::Relation(rel) => text.push_str(&format!(
-                    "@rel {} --{}--> {}\n",
-                    rel.from.canonical(),
-                    rel.kind,
-                    rel.to.canonical()
-                )),
-                other => {
-                    return Err(format!(
-                        "{path}: a {} has no surface form, so a surface store cannot hold one; \
-                         convert it first (`smysl merge {path} -o STORE.cbor`) and use that",
-                        other.type_name()
-                    ))
-                }
+            let expressible = match r {
+                Record::Relation(_) => true,
+                Record::Withdrawal(w) => smysl::surface::withdrawal_has_surface_form(w),
+                Record::Resolution(x) => smysl::surface::resolution_has_surface_form(x),
+                _ => false,
+            };
+            if !expressible {
+                return Err(format!(
+                    "{path}: this {} has no surface form, so a surface store cannot hold it; \
+                     convert it first (`smysl merge {path} -o STORE.cbor`) and use that",
+                    r.type_name()
+                ));
             }
         }
+        let ctx = WriteContext::from_labels(labels).with_relations(store.relations());
+        let text = write_surface(None, records, &ctx);
         let separator = if bytes.ends_with(b"\n") { "\n" } else { "\n\n" };
         let mut f = std::fs::OpenOptions::new()
             .append(true)
             .open(path)
             .map_err(|e| format!("{path}: {e}"))?;
-        f.write_all(format!("{separator}{text}").as_bytes())
+        f.write_all(format!("{separator}{}", text.trim_end()).as_bytes())
+            .and_then(|_| f.write_all(b"\n"))
             .map_err(|e| format!("{path}: {e}"))
     } else {
-        let mut store = Store::open(path).map_err(|e| format!("{path}: {e}"))?;
-        store.append(records).map_err(|e| format!("{path}: {e}"))?;
+        let mut log = Store::open(path).map_err(|e| format!("{path}: {e}"))?;
+        log.append(records).map_err(|e| format!("{path}: {e}"))?;
         Ok(())
     }
 }
@@ -2397,7 +2406,7 @@ fn cmd_withdraw(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let apply = !dry && refusal.is_none() && !already;
 
     if apply {
-        if let Err(e) = persist(&path, &records) {
+        if let Err(e) = persist(&path, &records, &store, &labels) {
             eprintln!("smysl withdraw: {e}");
             return ExitCode::Failure;
         }
@@ -2568,7 +2577,7 @@ fn cmd_resolve(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     }
     let apply = !m.get_flag("dry-run") && !mine;
     if apply {
-        if let Err(e) = persist(&path, &[Record::Resolution(resolution)]) {
+        if let Err(e) = persist(&path, &[Record::Resolution(resolution)], &store, &labels) {
             eprintln!("smysl resolve: {e}");
             return ExitCode::Failure;
         }
@@ -4223,7 +4232,18 @@ fn cmd_compact(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             return ExitCode::Usage;
         }
     };
-    let (store, _) = match load_store(&path) {
+    // A CBOR log is opened as it is on disk, repeats included, so compaction can see and remove
+    // them; `load_store` builds a store that already holds each record once.
+    let is_log = path != "-"
+        && std::fs::read(&path)
+            .map(|b| !looks_like_surface(&b))
+            .unwrap_or(false);
+    let loaded = if is_log {
+        Store::open(&path).map_err(|e| format!("{path}: {e}"))
+    } else {
+        load_store(&path).map(|(s, _)| s)
+    };
+    let store = match loaded {
         Ok(s) => s,
         Err(e) => {
             eprintln!("smysl compact: {e}");
@@ -4232,6 +4252,12 @@ fn cmd_compact(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     };
 
     let out = smysl::compact(&store);
+    if out.duplicates > 0 {
+        eprintln!(
+            "smysl compact: {} record(s) the log held more than once removed",
+            out.duplicates
+        );
+    }
     if !out.still_referenced.is_empty() {
         eprintln!(
             "smysl compact: {} superseded unit(s) kept because something still points at \

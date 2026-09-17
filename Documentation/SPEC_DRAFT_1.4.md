@@ -1,8 +1,8 @@
 # smysl 1.4 — lifecycle of edges and disagreements (specification draft)
 
-**Status:** draft. Nothing here is normative until it is folded into
-[`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md) at the 1.4 cut. Each section names the spec
-section it amends.
+**Status:** folded into [`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md) (§2.4, §2.5, §3.1, §4,
+§6.1–§6.3, §7, §8.1), which is normative. This draft is kept for its reasoning — the compatibility
+table, and what was rejected and why — and binds nothing.
 **Format version:** stays `smysl/1.0`. Every change below is one §8.1 already permits — two new
 record types, a derived identity, and a meaning for fields that exist — and the compatibility
 section shows what a 1.3 reader does with each.
@@ -210,8 +210,7 @@ No 1.3 reader rejects a 1.4 store, and none of its `check` diagnostics becomes a
 
 ## Open
 
-- **Surface syntax** for records 11 and 12. They travel as CBOR only in 1.4, as attestations and
-  contentions do; a reviewed `.smy` file loses them.
+- ~~Surface syntax for records 11 and 12.~~ Added: `@withdraw` and `@resolve` (spec §4).
 - **Withdrawing `retracts` and `supersedes`** (§2).
 - **Reopening** a resolved item.
 - **Authority**: who may withdraw an edge. Retraction's `RetractionAuthority` is enforced by the

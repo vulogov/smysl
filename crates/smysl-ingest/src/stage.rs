@@ -192,10 +192,19 @@ pub fn prepare_declared(
     report.sort();
 
     let kept = applied.units;
-    let attestations = kept
+    // Edges are attested as units are, by their rid (1.4). Until then a staged `rebuts` edge a
+    // model proposed committed with no record of who asserted it, indistinguishable from a
+    // reviewer's — which is what an edge attestation exists to tell apart.
+    let mut attestations: Vec<Attestation> = kept
         .iter()
         .map(|u| attest.for_unit(canonical_uid(u)))
         .collect();
+    let mut rids = std::collections::BTreeSet::new();
+    for r in &relations {
+        if rids.insert(r.uid()) {
+            attestations.push(attest.for_relation(r.uid()));
+        }
+    }
 
     Staged {
         units: kept,
@@ -239,6 +248,12 @@ impl Attest {
     pub fn at_hop(mut self, hop: u32) -> Attest {
         self.hop = hop;
         self
+    }
+
+    /// The attestation for one staged edge, by its rid: the same agent, rung, clock, hop and
+    /// recipe as the units staged with it. Rule T does not read it — an edge has no status.
+    pub fn for_relation(&self, rid: Uid) -> Attestation {
+        self.for_unit(rid)
     }
 
     /// The attestation for one ingested unit.
@@ -289,10 +304,20 @@ pub fn read(root: impl AsRef<Path>) -> Result<Vec<Record>, String> {
     let out = smysl_core::surface::parse_surface(&src).map_err(|e| e.to_string())?;
     let mut records = out.records;
 
-    let present: std::collections::BTreeSet<Uid> = records
+    let units: std::collections::BTreeSet<Uid> = records
         .iter()
         .filter_map(|r| r.as_unit().map(canonical_uid))
         .collect();
+    // Edges too: an edge's attestation is kept while the reviewed text holds the edge *and* both
+    // its endpoints. Editing a unit leaves an `@rel` line naming the old uid, so the rid is
+    // unchanged while the edge now points at content the tool never staged.
+    let mut present = units.clone();
+    present.extend(records.iter().filter_map(|r| match r {
+        Record::Relation(rel) if units.contains(&rel.from) && units.contains(&rel.to) => {
+            Some(rel.uid())
+        }
+        _ => None,
+    }));
     if let Ok(bytes) = std::fs::read(root.as_ref().join(SIDECAR)) {
         if let Ok((sidecar, _)) = smysl_core::from_cbor_seq(&bytes) {
             records.extend(sidecar.into_iter().filter(|r| match r {
@@ -544,6 +569,54 @@ mod tests {
     /// it back: every unit committed by `merge --staged` arrived with no agent, rung or recipe. Found
     /// by committing a real live batch — 9 units, 9 label bindings, 0 attestations. The round-trip
     /// test above counted units and never asked.
+    /// A staged edge is attested by its rid, keeps that attestation through the staged file while
+    /// the reviewed text still holds it, and loses it when the reviewer changes an endpoint.
+    #[test]
+    fn a_staged_edge_is_attested_and_the_attestation_survives_review() {
+        let root = tmp("edge-attest");
+        let (a, b) = (cited("p95 rose to 410ms"), cited("the pool saturated"));
+        let edge = Relation::new(
+            smysl_core::RelKind::Rebuts,
+            canonical_uid(&a),
+            canonical_uid(&b),
+        );
+        let out = prepare(
+            &Store::new(),
+            vec![a, b],
+            vec![edge.clone()],
+            BTreeMap::new(),
+            &attest(),
+        );
+        let on_edge = |records: &[Record]| {
+            records
+                .iter()
+                .filter(|r| matches!(r, Record::Attestation(x) if x.uid == edge.uid()))
+                .count()
+        };
+        assert_eq!(on_edge(&out.records()), 1, "prepare attests the edge");
+        let store = Store::from_records(out.records());
+        let attached = &store.relation_by_id(&edge.uid()).unwrap().attestations;
+        assert_eq!(attached.len(), 1);
+        assert_eq!(attached.iter().next().unwrap().op, Op::Imported);
+
+        write(&root, &out).unwrap();
+        assert_eq!(on_edge(&read(&root).unwrap()), 1, "kept through the file");
+
+        let file = root.join(PATH);
+        let text = std::fs::read_to_string(&file).unwrap();
+        std::fs::write(
+            &file,
+            text.replace("the pool saturated", "the pool saturated at the peak"),
+        )
+        .unwrap();
+        assert_eq!(
+            on_edge(&read(&root).unwrap()),
+            0,
+            "an edge whose endpoint was edited is not the edge the tool staged"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn a_staged_batchs_attestations_survive_the_file_for_units_left_unedited() {
         let root = tmp("attest");

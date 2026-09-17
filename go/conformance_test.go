@@ -240,6 +240,7 @@ func TestRecordTypeCodesMatchTheTable(t *testing.T) {
 	want := map[uint64]string{
 		1: "unit", 2: "attestation", 3: "relation", 4: "thread", 5: "view",
 		6: "contention", 7: "pack_info", 8: "schema_decl", 9: "checkpoint", 10: "label_binding",
+		11: "withdrawal", 12: "resolution",
 	}
 	if len(smysl.RecordNames) != len(want) {
 		t.Fatalf("code count: got %d, want %d", len(smysl.RecordNames), len(want))

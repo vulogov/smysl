@@ -52,6 +52,11 @@ integers, the `source` map's layout, the base32 alphabet, and one place the tabl
 recoverable only by decoding a fixture. Two implementations had already reached C-Produce
 through those gaps without recording that they had guessed.
 
+**As of 1.4 all three name records 11 and 12, round-trip them, and derive the rid (§2.5) and the
+contention id (§6.2)** from the vectors in `fixtures/wire/relation-id/` and
+`fixtures/wire/contention-id/` — so the two identities a withdrawal and a resolution depend on
+had four derivations before the format committed to them.
+
 They exist because every other check in this repository tests whether the Rust is
 self-consistent, and none of them would notice if this document were blank. If you are
 implementing the format, read them as worked examples — and read their `SPEC:` comments as a
@@ -170,9 +175,36 @@ specification does not.
 
 ### 2.4 What is not hashed
 
-Attestations, relations, threads, views, contentions, pack info, schema declarations and
-label bindings are records *about* units. They are never part of a unit's uid. Two stores
-holding the same units with different attestations hold the same units.
+Attestations, relations, threads, views, contentions, pack info, schema declarations, label
+bindings, withdrawals and resolutions are records *about* units. They are never part of a unit's
+uid. Two stores holding the same units with different attestations hold the same units.
+
+An attestation's `uid` (key 0) names either a unit or a relation, by the relation's rid (§2.5).
+It is attached to whichever the store holds, and kept until that arrives. Rule T does not read an
+attestation on a relation, since a relation has no status; everything else in it means what it
+means for a unit, which is what lets a store say who asserted an edge.
+
+### 2.5 Relation identity
+
+A relation has an identity of its own, derived rather than stored:
+
+```
+rid = BLAKE3-256( 0x03 ‖ kind ‖ 0x00 ‖ from ‖ to )
+```
+
+- `kind` is the relation kind's **name** in UTF-8 — `rebuts`, `x.verify/supports` — whether the
+  record encodes it as a kernel integer or as text. Two encodings of one kind are one edge.
+- `from` and `to` are the raw 32-byte uids.
+- `0x03` is the relation record's type code. A unit's preimage is a canonical CBOR map, whose
+  first byte is `0xa0`–`0xbf`, so no uid can equal a rid.
+- `0x00` terminates the name; no kind name contains NUL.
+
+`weight`, `note` and unknown keys are not identity. Two relation records with the same kind and
+endpoints are one edge. A rid is written as a uid is: 32 raw bytes in CBOR, `b3:` and base32 in
+text. `fixtures/wire/relation-id/cases.json` carries vectors, preimage and digest apart.
+
+**Added in 1.4**, and no existing byte changed: every rid is a function of fields relations
+already carried.
 
 ## 3. Deterministic CBOR
 
@@ -261,6 +293,8 @@ Every record is a two-element array: `[type_code, body]`.
 | 8 | schema declaration |
 | 9 | checkpoint |
 | 10 | label binding |
+| 11 | withdrawal |
+| 12 | resolution |
 
 An **unknown type code MUST be preserved verbatim and skipped semantically** (`SMY-W014`),
 not rejected. Its body is still parsed strictly, so an unknown record cannot smuggle in a
@@ -268,6 +302,31 @@ non-deterministic encoding. A store is a concatenation of records with no framin
 
 A decoder MUST NOT supply a default for a field the encoder always writes. If a record
 cannot be re-encoded to the bytes it was read from, it MUST be rejected.
+
+Records 11 and 12 were added in 1.4. A reader that predates them preserves them as unknown
+records (`SMY-W014`), which is what makes them an addition rather than a break (§8.1). Their bodies:
+
+**Withdrawal (11)** — an edge that should no longer be followed.
+
+| key | field | type | presence |
+|---:|---|---|---|
+| 0 | relation | rid, 32 bytes | required |
+| 1 | agent | text, an agent id | required |
+| 2 | ts | HLC, `[wall_ms, counter, agent]` | required |
+| 3 | reason | uid of a unit saying why | optional |
+
+**Resolution (12)** — a record that a disagreement was reviewed.
+
+| key | field | type | presence |
+|---:|---|---|---|
+| 0 | contention | text, a contention id (§6.2) | exactly one of 0 and 1 |
+| 1 | relation | rid, 32 bytes | exactly one of 0 and 1 |
+| 2 | agent | text, an agent id | required |
+| 3 | ts | HLC, `[wall_ms, counter, agent]` | required |
+| 4 | note | uid of a unit recording the decision | optional |
+
+A resolution with both keys 0 and 1, or neither, MUST be rejected. What each record means is
+§6.1 and §6.3.
 
 ## 4. Canonical surface form
 
@@ -292,6 +351,13 @@ Consequences that are easy to get wrong, each of which has been a real defect:
   only one survives a round trip, and it MUST be the canonically first (`SMY-W054`).
 - **A known field appearing twice keeps the first**, and the duplicate does not become an
   unknown-key payload — surface syntax cannot spell a second one.
+- **`@withdraw` and `@resolve` spell records 11 and 12** (1.4), naming an edge as
+  `from --kind--> to` or by its rid, and a contention by its id:
+  `@withdraw c/a --rebuts--> c/b { agent: human:r, ts: [1726500000000, 0], reason: c/why }`.
+  `ts` is `[wall_ms, counter]` with the record's agent as the clock's, as for `@thread`, so a
+  record whose clock names a different agent, or that carries unknown keys, has no surface
+  spelling and travels as CBOR only. A writer that knows the edge MUST spell it by its endpoints.
+  `withdraw` and `resolve` are reserved words, as `doc`, `rel`, `thread` and `schema` are.
 - **A body or detail line opening `#`, `//` or `\` MUST be escaped with a leading `\`.** A
   line starting with a comment marker is a comment wherever it sits, so an unescaped one is
   read as a comment and the content is lost. Only those three sequences, and only at the
@@ -320,7 +386,7 @@ are the format-level obligations.
 | **M** | Monotonicity — a `derived` or `inferred` unit MUST NOT exceed the status of its weakest present ground. |
 | **T** | Trust ceiling — a status MUST NOT exceed the ceiling its attestation's rung allows. |
 | **L** | Closure — a thread's steps MUST reference units whose dependencies are present. |
-| **R** | Rebuttals travel — a selection containing a claim MUST contain its live rebuttals. |
+| **R** | Rebuttals travel — a selection containing a claim MUST contain its live rebuttals (§6.1). |
 | **U** | Merge is a join-semilattice: commutative, associative, idempotent. |
 | **I** | Ingest progress — a unit that cannot be repaired degrades rather than failing the batch. |
 | **S** | Staging — ingested units are staged, not committed, until accepted. |
@@ -331,7 +397,60 @@ are the format-level obligations.
 
 Rule **U** deserves emphasis for the same reason as §2.3: nothing detects a violation from
 inside one peer. Two agents gossiping in different orders reach different stores and each
-believes itself.
+believes itself. It holds at the level of records, not only of meaning: a store merged with
+itself gains no records, whatever their type.
+
+### 6.1 Withdrawal and live rebuttals
+
+**A relation is withdrawn in a store iff the store holds at least one withdrawal naming its
+rid.** A withdrawn relation MUST be preserved — its record round-trips — and MUST NOT be followed
+by anything that interprets the graph. A withdrawal is permanent, as a retraction is: records
+only accumulate. One whose relation is not yet in the store takes effect when it arrives.
+
+A `retracts` or `supersedes` edge **cannot be withdrawn**. A withdrawal naming one is preserved
+and has no effect (`SMY-W056`): un-retracting a unit and re-pointing supersession need rules of
+their own.
+
+In a store under a retraction policy — **strict** where an implementation has no notion of one —
+a relation `(rebuts, a, b)` is **live** iff it is not withdrawn, `a` is present, and `a`'s
+effective status is not `unfounded` (retracted, or orphaned by retraction). Rule R binds live
+rebuttals only: **a retracted or withdrawn rebuttal no longer travels with its claim.**
+Supersession of `a` does not end liveness; a better version of an objection is not a withdrawal
+of it.
+
+### 6.2 Contention identity
+
+Merge detects contentions and does not record them, so two implementations that detect the same
+disagreement must name it the same thing — and a resolution (§6.3) names it by that name:
+
+```
+digest = BLAKE3-256( kind ‖ over ‖ positions )
+id     = "k/c" ‖ base32( first 130 bits of digest )
+```
+
+`kind` is one byte: 0 supersession fork, 1 live rebuttal, 2 label collision. `over` is 32 bytes;
+`positions` are the uids sorted and deduplicated, 32 bytes each. The base32 is §2.1's, 26
+characters. The clock a detection is stamped with is not identity.
+`fixtures/wire/contention-id/cases.json` carries vectors.
+
+A live-rebuttal contention is detected only over a live rebuttal (§6.1) whose claim is not
+`unfounded`.
+
+### 6.3 Resolution
+
+**A resolution records that a disagreement was reviewed. It never decides the outcome.** A
+reviewer who finds a claim wrong retracts it; one who finds a rebuttal wrong retracts it or
+withdraws the edge. Those records have their effects; the resolution records only that someone
+looked, and who.
+
+- A contention named by at least one resolution reads as **resolved**, whatever status its own
+  record carries, and no longer pins its positions into a selection.
+- A recorded live-rebuttal contention whose rebuttal is no longer live, or whose claim is
+  `unfounded`, reads as **stale**, and pins nothing.
+- A `rebuts` edge named by a resolution **stays live** — rule R still binds — and is no longer
+  an item awaiting review.
+
+Resolutions accumulate like withdrawals. There is no reopening a resolved item in this version.
 
 ## 7. Conformance classes
 
@@ -345,7 +464,7 @@ different things and neither needs everything.
 | **C-Read** | *structural* — decode, re-encode byte-identically, reject non-deterministic encoding, preserve unknowns (§5). |
 | **C-Consume** | structural + *epistemic* — enforce rules M and T when interpreting status, and reject an authored `unfounded`. |
 | **C-Produce** | structural + epistemic + *shape* — emit well-formed units: a gist present, grounds where the status demands them, a source where `measured` or `cited` demands one. |
-| **C-Merge** | structural + epistemic + *lifecycle* — honour retraction and supersession. |
+| **C-Merge** | structural + epistemic + *lifecycle* — honour retraction and supersession, withdrawal and resolution (§6.1, §6.3), attach attestations to relations (§2.4), and detect contentions under §6.2's identity. |
 | **C-Full** | all of the above, plus *rendering* obligations. |
 
 Note that **C-Merge does not subsume C-Produce**: an implementation that merges stores need
@@ -370,8 +489,14 @@ An implementation MUST reject a format version it does not support and MUST NOT 
 Three kinds of change are permitted without a bump, and they are permitted because rule X
 already obliges every reader to cope with them:
 
-- **A new record type code.** Older readers preserve it verbatim and report `SMY-W010`.
+- **A new record type code.** Older readers preserve it verbatim and report `SMY-W014`.
 - **A new unit-core key ≥ 9, or a new header key.** Older readers preserve it verbatim.
+- **A new key in any other record body**, above the highest key that record defines. Older
+  readers preserve it verbatim. Stated in 1.4; the reference implementation always did.
+- **A new reserved word in surface syntax** (`@schema` in 1.3, `@withdraw` and `@resolve` in
+  1.4). An older reader rejects a *surface* document using it — it reads the word as a unit type
+  and fails on the label — while the CBOR form of the same store reads everywhere. Surface text is
+  not the identity-bearing form (§4), so this is a cost to state rather than a break.
 - **A new value in an open enumeration** where this document says unknown values are
   preserved rather than rejected.
 

@@ -48,8 +48,8 @@ Two behaviour changes a library caller will see: `Store::rebuttals_of` and
 `Store::relations_of_kind` leave out what is no longer live or withdrawn. The facade gains
 `Withdrawal`, `Resolution` and `ResolutionTarget` (257 names, 212 pure).
 
-Not yet: surface syntax for the two records, and the Python, JavaScript and Go readers, which
-preserve records 11 and 12 as unknown until they decode them.
+Since folded into the normative specification, with surface syntax and the other three
+implementations — see below.
 
 ### `review`, `withdraw` and `resolve`
 
@@ -109,6 +109,44 @@ No wire, encoding or signature change; `make semver` is clean. Six tests in
 `crates/smysl-graph/tests/merge_idempotence.rs`, over a store holding every record type, a
 reopened file, associativity and commutativity, and reindex. Through the CLI, a store merged with
 itself three times stays 308 bytes; the 1.4 build before this grew it to 438 and then 698.
+
+### Three gaps in 1.4's own work
+
+- **Staged edges are attested.** `stage::prepare` attested units only, so an edge a model proposed
+  through `ingest` or a caller's staging committed with no record of who asserted it — the thing
+  edge attestations were added to tell apart. Each staged relation now carries an attestation by
+  its rid (`Attest::for_relation`), and `stage::read` keeps it while the reviewed text holds the
+  edge *and* both endpoints: editing a unit leaves the `@rel` line naming the old uid, so the rid is
+  unchanged while the edge points at content the tool never staged.
+- **`render` no longer shows a resolved contention as open.** It filtered on a contention's
+  recorded status; it reads the store's now, so a resolved contention, or one whose rebuttals were
+  withdrawn, is not surfaced under rule V2 as a standing disagreement.
+- **Repeats in a log written before R10 can be removed.** `open` keeps a log as it is on disk.
+  `compact` now removes records held more than once and says how many (`Compacted::duplicates`),
+  and `smysl compact` opens a CBOR log directly so it sees them.
+
+### Folded into the specification, with surface syntax and four implementations
+
+`SMYSL_FORMAT_SPEC.md` now states what the draft proposed: relation identity (§2.5), attestations
+naming a rid (§2.4), records 11 and 12 with their key tables (§3.1), withdrawal and live rebuttals
+(§6.1), contention identity (§6.2), resolution (§6.3), the C-Merge obligations (§7), and §8.1's
+permission for new keys in any record body and new reserved surface words. `SPEC_DRAFT_1.4.md` is
+kept for its reasoning and binds nothing. §8.1 also said an older reader reports a new record type
+as `SMY-W010`; it is `SMY-W014`.
+
+**`@withdraw` and `@resolve`** spell the two records, naming an edge as `from --kind--> to` or by
+its rid and a contention by its id, with `agent` and `ts: [wall_ms, counter]` as `@thread` has them.
+A writer that knows the edge spells it by its endpoints; a record whose clock names another agent,
+or that carries unknown keys, travels as CBOR only. `withdraw`, `resolve` and `retract` now write to
+a `.smy` store as appended lines in its own labels rather than refusing it. Both words are reserved:
+a 1.3 reader rejects a surface file that uses them, while the CBOR form reads everywhere.
+
+**Python, JavaScript and Go** name records 11 and 12, round-trip `fixtures/wire/F10-lifecycle.cbor`
+(a withdrawal, two resolutions, an attestation on a rid), and derive every vector in
+`fixtures/wire/relation-id/` and `fixtures/wire/contention-id/`, digest and text apart — four
+independent derivations of each identity before the format depends on it. The vectors gained
+`rid_hex` and `digest_hex` so an implementation without base32 can check the hash alone.
+`make spec-tables` holds §3.1 at codes 1–12 against all three.
 
 ### Carried from 1.3.0
 

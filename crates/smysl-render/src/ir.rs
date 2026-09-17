@@ -174,9 +174,11 @@ pub fn build(store: &Store, thread: &Thread, profile: &Profile, opts: &BuildOpti
         all.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
     }
 
+    // Open as the store reads it (1.4): a resolved contention, or one whose rebuttal is no longer
+    // live, is not rendered as an open disagreement whatever its own record says.
     let open: Vec<&Contention> = all
         .iter()
-        .filter(|c| c.is_open())
+        .filter(|c| store.contention_status(c) == smysl_core::ContentionStatus::Open)
         .filter(|c| match show_contentions {
             // `on-rendered` narrows *which* contentions are surfaced; it never hides one
             // that touches a unit the reader can see.
@@ -583,13 +585,48 @@ mod tests {
                 Hlc::zero(AgentId::new("tool:t").unwrap()),
             ),
         );
+        // The rebuttals the contention is about. Without them a live-rebuttal contention reads as
+        // stale, and is rightly not rendered as open.
         let store = Store::from_records(vec![
             Record::Unit(a),
             Record::Unit(b),
             Record::Unit(over),
+            Record::Relation(Relation::new(RelKind::Rebuts, ua, uo)),
+            Record::Relation(Relation::new(RelKind::Rebuts, ub, uo)),
             Record::Contention(c),
         ]);
         (store, uo, ua)
+    }
+
+    /// A contention someone resolved is not rendered as open, and nor is one whose rebuttals were
+    /// withdrawn: rule V2 is about disagreements still standing.
+    #[test]
+    fn a_resolved_or_stale_contention_is_not_rendered_as_open() {
+        let (store, uo, ua) = contested();
+        let reviewer = AgentId::new("human:reviewer").unwrap();
+        let steps = thread(vec![Step::new(Role::BottomLine, uo)]);
+        let plain = Profile::builtin("plain").unwrap();
+
+        let id = store.contentions()[0].id.clone();
+        let mut records: Vec<Record> = store.iter().cloned().collect();
+        records.push(Record::Resolution(smysl_core::Resolution::new(
+            smysl_core::ResolutionTarget::Contention(id),
+            reviewer.clone(),
+            Hlc::zero(reviewer.clone()),
+        )));
+        let out = ir(&Store::from_records(records), &steps, &plain);
+        assert!(out.meta.open_contentions.is_empty(), "resolved");
+
+        let mut records: Vec<Record> = store.iter().cloned().collect();
+        for from in [ua, store.contentions()[0].positions[1]] {
+            records.push(Record::Withdrawal(smysl_core::Withdrawal::new(
+                Relation::new(RelKind::Rebuts, from, uo).uid(),
+                reviewer.clone(),
+                Hlc::zero(reviewer.clone()),
+            )));
+        }
+        let out = ir(&Store::from_records(records), &steps, &plain);
+        assert!(out.meta.open_contentions.is_empty(), "stale");
     }
 
     #[test]

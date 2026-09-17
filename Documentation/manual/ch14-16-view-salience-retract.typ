@@ -964,10 +964,11 @@ the same authority rule applies, read off the edge's own attestations rather tha
 edge a model proposed and a reviewer confirmed carries both, which is what makes `origin`
 meaningful for edges at all.
 
-Withdrawals and resolutions have no surface form, so both commands refuse a `.smy` store and say
-how to convert one (`smysl merge store.smy -o store.cbor`). `retract` writes to either, and since
-1.4 it does write: until then it applied the retraction to an in-memory copy, reported it as
-done, and left the file unchanged.
+All three commands write to either kind of store. A `.smy` file gains a line in its own labels —
+`@withdraw c/canary-clean --rebuts--> c/pool-saturation { agent: human:vladimir, ts: […] }`,
+`@resolve …`, or `@rel … --retracts--> …` — appended, so what was there, comments included, is
+untouched. `retract` has written since 1.4: until then it applied the retraction to an in-memory
+copy, reported it as done, and left the file unchanged.
 
 #whatsnext[
   A retraction changes what a store *means* without changing a single

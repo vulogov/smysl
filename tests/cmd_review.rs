@@ -185,29 +185,57 @@ fn a_withdrawal_respects_authority_and_is_written() {
     assert!(out(&o).contains("already withdrawn"), "{}", out(&o));
 }
 
-/// A withdrawal cannot live in surface text, so a surface store refuses it and names the way
-/// out, rather than writing something the file would read back without.
+/// A surface store takes both records as `@withdraw` and `@resolve` lines appended to the file,
+/// in its own labels, leaving what was there untouched; a fresh process reads them back.
 #[test]
-fn a_surface_store_refuses_what_it_cannot_spell() {
+fn a_surface_store_holds_withdrawals_and_resolutions_as_text() {
     let dir = scratch("surface");
-    for args in [
-        vec![
+    let o = run(
+        &dir,
+        &[
+            "resolve",
+            "--as",
+            "human:reviewer",
+            "--at",
+            "5",
+            EDGE,
+            "s.smy",
+        ],
+    );
+    assert!(o.status.success(), "{}", out(&o));
+    let o = run(
+        &dir,
+        &[
             "withdraw",
             "--as",
             "human:reviewer",
             "--authority",
             "any",
+            "--at",
+            "7",
             EDGE,
             "s.smy",
         ],
-        vec!["resolve", "--as", "human:reviewer", EDGE, "s.smy"],
-    ] {
-        let o = run(&dir, &args);
-        assert_eq!(o.status.code(), Some(1), "{}", out(&o));
-        assert!(out(&o).contains("no surface form"), "{}", out(&o));
-        assert!(out(&o).contains("smysl merge s.smy -o"), "{}", out(&o));
-    }
-    assert_eq!(std::fs::read_to_string(dir.join("s.smy")).unwrap(), DOC);
+    );
+    assert!(o.status.success(), "{}", out(&o));
+
+    let text = std::fs::read_to_string(dir.join("s.smy")).unwrap();
+    assert!(
+        text.starts_with(DOC),
+        "the original text was changed:\n{text}"
+    );
+    assert!(
+        text.contains("@resolve c/half --rebuts--> c/pool { agent: human:reviewer, ts: [5, 0] }"),
+        "{text}"
+    );
+    assert!(
+        text.contains("@withdraw c/half --rebuts--> c/pool { agent: human:reviewer, ts: [7, 0] }"),
+        "{text}"
+    );
+    let o = run(&dir, &["review", "s.smy"]);
+    assert_eq!(o.status.code(), Some(0), "{}", out(&o));
+    let o = run(&dir, &["check", "s.smy"]);
+    assert!(o.status.success(), "{}", out(&o));
 }
 
 /// `retract` said "now read as unfounded" and wrote nothing, so the next process saw the unit
@@ -350,5 +378,28 @@ fn a_threaded_rebuttal_is_resolved_through_its_contention() {
         out(&o).contains("would be resolved by human:r"),
         "{}",
         out(&o)
+    );
+}
+
+/// `smysl compact` on a CBOR log holding repeats says how many and writes a store without them.
+#[test]
+fn compact_reports_and_removes_repeated_records() {
+    let dir = scratch("compact");
+    cbor(&dir);
+    let once = std::fs::read(dir.join("s.cbor")).unwrap();
+    let mut twice = once.clone();
+    twice.extend_from_slice(&once);
+    std::fs::write(dir.join("old.cbor"), &twice).unwrap();
+
+    let o = run(&dir, &["compact", "old.cbor", "-o", "clean.cbor"]);
+    assert!(o.status.success(), "{}", out(&o));
+    assert!(
+        out(&o).contains("record(s) the log held more than once removed"),
+        "{}",
+        out(&o)
+    );
+    assert_eq!(
+        std::fs::read(dir.join("clean.cbor")).unwrap().len(),
+        once.len()
     );
 }

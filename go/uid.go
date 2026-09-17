@@ -29,9 +29,11 @@ package smysl
 // well as its uids, so a disagreement says whether the encoding or the hash was wrong.
 
 import (
+	"encoding/base32"
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"golang.org/x/text/unicode/norm"
 )
@@ -361,4 +363,50 @@ func joinSemicolons(parts []string) string {
 		out += p
 	}
 	return out
+}
+
+// -- §2.5 relation identity and §6.2 contention identity (1.4) ------------------------------
+
+// RelationId is §2.5's rid, which a withdrawal and an edge attestation name a relation by:
+// BLAKE3(0x03 ‖ kind name ‖ 0x00 ‖ from ‖ to). kind is the name — "rebuts",
+// "x.verify/supports" — however the record encodes it.
+func RelationId(kind string, from, to []byte) ([]byte, error) {
+	if len(from) != 32 || len(to) != 32 {
+		return nil, fmt.Errorf("relation endpoints are 32-byte uids")
+	}
+	for i := 0; i < len(kind); i++ {
+		if kind[i] == 0 {
+			return nil, fmt.Errorf("a relation kind name cannot contain NUL")
+		}
+	}
+	pre := make([]byte, 0, 1+len(kind)+1+64)
+	pre = append(pre, 0x03)
+	pre = append(pre, kind...)
+	pre = append(pre, 0x00)
+	pre = append(pre, from...)
+	pre = append(pre, to...)
+	return Blake3(pre), nil
+}
+
+// ContentionId is §6.2's: the digest BLAKE3(kind byte ‖ over ‖ positions), positions sorted and
+// deduplicated, and the id "k/c" plus its first 130 bits in §2.1's base32. Both are returned so a
+// mismatch says which half disagreed.
+func ContentionId(kind byte, over []byte, positions [][]byte) ([]byte, string) {
+	seen := map[string][]byte{}
+	for _, p := range positions {
+		seen[string(p)] = p
+	}
+	keys := make([]string, 0, len(seen))
+	for k := range seen {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	pre := []byte{kind}
+	pre = append(pre, over...)
+	for _, k := range keys {
+		pre = append(pre, seen[k]...)
+	}
+	digest := Blake3(pre)
+	text := strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(digest))
+	return digest, "k/c" + text[:26]
 }

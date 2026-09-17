@@ -1609,3 +1609,168 @@ fn a_schema_declaration_with_a_payload_shape_has_no_surface_form() {
         "a declaration was written without its payload shape"
     );
 }
+
+/// `@withdraw` and `@resolve` (1.4) spell records 11 and 12, naming an edge by its endpoints or its
+/// rid and a contention by its id, and a document holding them is a fixed point.
+#[test]
+fn withdrawals_and_resolutions_parse_write_and_round_trip() {
+    let src = "\
+@claim c/pool { status: speculative }
+~ The pool saturated.
+
+@claim c/half { status: speculative }
+~ The pool never exceeded half its size.
+
+@claim c/why { status: speculative }
+~ The model matched two statements that are not opposed.
+
+@rel c/half --rebuts--> c/pool
+
+@withdraw c/half --rebuts--> c/pool { agent: human:reviewer, ts: [7, 1], reason: c/why }
+
+@resolve c/half --rebuts--> c/pool { agent: \"human:second\", ts: [8, 0] }
+
+@resolve k/ccm3actwjjti65famnoe6mapo5d { agent: human:reviewer, ts: [9, 0], note: c/why }
+";
+    let a = parse_surface(src).unwrap();
+    assert!(a.diagnostics.is_empty(), "{:?}", a.diagnostics);
+    let (uhalf, upool, uwhy) = (
+        a.labels[&Label::new("c/half").unwrap()],
+        a.labels[&Label::new("c/pool").unwrap()],
+        a.labels[&Label::new("c/why").unwrap()],
+    );
+    let rid = smysl_core::Relation::new(smysl_core::RelKind::Rebuts, uhalf, upool).uid();
+
+    let withdrawals: Vec<&smysl_core::Withdrawal> = a
+        .records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Withdrawal(w) => Some(w),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(withdrawals.len(), 1);
+    assert_eq!(
+        withdrawals[0].relation, rid,
+        "the edge by its endpoints is its rid"
+    );
+    assert_eq!(withdrawals[0].reason, Some(uwhy));
+    assert_eq!(
+        (withdrawals[0].ts.wall_ms, withdrawals[0].ts.counter),
+        (7, 1)
+    );
+    assert_eq!(withdrawals[0].ts.agent, withdrawals[0].agent);
+
+    let targets: Vec<smysl_core::ResolutionTarget> = a
+        .records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Resolution(x) => Some(x.target.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        targets,
+        vec![
+            smysl_core::ResolutionTarget::Relation(rid),
+            smysl_core::ResolutionTarget::Contention(
+                smysl_core::ContentionId::new("k/ccm3actwjjti65famnoe6mapo5d").unwrap()
+            ),
+        ]
+    );
+
+    let ctx = WriteContext::from_labels(&a.labels);
+    let text = write_surface(a.view.as_ref(), &a.records, &ctx);
+    assert!(
+        text.contains("@withdraw c/half --rebuts--> c/pool { agent: human:reviewer, ts: [7, 1], reason: c/why }"),
+        "{text}"
+    );
+    let b = parse_surface(&text).unwrap();
+    assert_eq!(
+        a.records, b.records,
+        "round trip changed the records:\n{text}"
+    );
+    assert_eq!(
+        text,
+        write_surface(
+            b.view.as_ref(),
+            &b.records,
+            &WriteContext::from_labels(&b.labels)
+        )
+    );
+
+    // The edge by rid, when the writer does not know the relation, reads back as the same record.
+    let lone: Vec<Record> = a
+        .records
+        .iter()
+        .filter(|r| matches!(r, Record::Withdrawal(_)))
+        .cloned()
+        .collect();
+    // No labels either: this text holds no unit for `c/why` to name, so it says the uid.
+    let rid_text = write_surface(None, &lone, &WriteContext::default());
+    assert!(
+        rid_text.starts_with(&format!("@withdraw {} {{", rid.canonical())),
+        "{rid_text}"
+    );
+    let c = parse_surface(&rid_text).unwrap();
+    assert!(
+        matches!(&c.records[..], [Record::Withdrawal(w)] if w.relation == rid),
+        "{:?} / {:?}",
+        c.records,
+        c.diagnostics
+    );
+}
+
+/// Every mistake is an error, and a record with something surface text cannot hold is left out of
+/// the text rather than written as something else.
+#[test]
+fn withdrawals_and_resolutions_refuse_what_they_would_otherwise_lose() {
+    let edge = "@claim c/a { status: speculative }\n~ A.\n\n@claim c/b { status: speculative }\n~ B.\n\n@rel c/a --rebuts--> c/b\n\n";
+    let refused = [
+        ("no header", "@withdraw c/a --rebuts--> c/b\n"),
+        ("no agent", "@withdraw c/a --rebuts--> c/b { ts: [1, 0] }\n"),
+        ("no ts", "@resolve c/a --rebuts--> c/b { agent: human:r }\n"),
+        (
+            "a misspelled key",
+            "@withdraw c/a --rebuts--> c/b { agent: human:r, ts: [1, 0], note: c/a }\n",
+        ),
+        (
+            "a contention on a withdrawal",
+            "@withdraw k/cabc { agent: human:r, ts: [1, 0] }\n",
+        ),
+        (
+            "a target that is nothing",
+            "@resolve nothing { agent: human:r, ts: [1, 0] }\n",
+        ),
+    ];
+    for (what, bad) in refused {
+        let out = parse_surface(&format!("{edge}{bad}")).unwrap();
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.code == smysl_core::Code::E001),
+            "{what}: accepted: {:?}",
+            out.diagnostics
+        );
+        assert!(
+            !out.records
+                .iter()
+                .any(|r| matches!(r, Record::Withdrawal(_) | Record::Resolution(_))),
+            "{what}: a record was emitted anyway"
+        );
+    }
+
+    // A clock belonging to a different agent than the record's has no surface spelling.
+    let who = smysl_core::AgentId::new("human:r").unwrap();
+    let other = smysl_core::AgentId::new("tool:clock").unwrap();
+    let w = smysl_core::Withdrawal::new(
+        smysl_core::Uid::from_bytes([1; 32]),
+        who,
+        smysl_core::Hlc::new(1, 0, other),
+    );
+    assert!(!smysl_core::surface::withdrawal_has_surface_form(&w));
+    assert_eq!(
+        write_surface(None, &[Record::Withdrawal(w)], &WriteContext::default()),
+        ""
+    );
+}

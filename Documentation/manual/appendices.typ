@@ -270,7 +270,7 @@ nothing. Before, it was applied to an in-memory copy and reported as done.
     ([`--reason`], [`UNIT`], [A unit saying why, by uid or label.]),
     ([`--at`], [`MILLIS`], [Timestamp in milliseconds since the epoch; defaults to now.]),
     ([`--dry-run`], [—], [Report what it would release, and whether it would be refused, without writing.]),
-    ([`PATH`], [positional], [Store to withdraw it in. Must be CBOR: a withdrawal has no surface form.]),
+    ([`PATH`], [positional], [Store to withdraw it in: a CBOR log gains a record, a surface file a `@withdraw` line.]),
   ),
 )
 
@@ -289,7 +289,7 @@ A `retracts` or `supersedes` edge cannot be withdrawn, and is refused with exit 
     ([`--note`], [`UNIT`], [A unit recording the decision, by uid or label.]),
     ([`--at`], [`MILLIS`], [Timestamp in milliseconds since the epoch; defaults to now.]),
     ([`--dry-run`], [—], [Report what would be recorded without writing.]),
-    ([`PATH`], [positional], [Store to record it in. Must be CBOR: a resolution has no surface form.]),
+    ([`PATH`], [positional], [Store to record it in: a CBOR log gains a record, a surface file a `@resolve` line.]),
   ),
 )
 

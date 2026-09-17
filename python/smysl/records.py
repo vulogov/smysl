@@ -24,6 +24,8 @@ RECORD_NAMES = {
     8: "schema_decl",
     9: "checkpoint",
     10: "label_binding",
+    11: "withdrawal",
+    12: "resolution",
 }
 
 #: §2.2, the unit core's integer keys. Anything at 9 or above is an unknown key that rule X

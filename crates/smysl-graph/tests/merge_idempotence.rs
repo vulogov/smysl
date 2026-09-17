@@ -256,3 +256,35 @@ fn reindex_after_self_merges_reproduces_the_store() {
     assert_eq!(record_set(&merged), record_set(&original));
     assert!(merged.converged_with(&original));
 }
+
+/// A log written before R10 can hold the same record many times. `open` keeps it as it is on disk,
+/// and `compact` is where the repeats go: counted, removed, and nothing else changed.
+#[test]
+fn compact_removes_the_repeats_an_old_log_holds() {
+    let dir = std::env::temp_dir().join(format!("smysl-r10-compact-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("old.cbor");
+
+    let records = every_record_type();
+    let mut bytes = smysl_core::to_cbor_seq(&records);
+    bytes.extend(smysl_core::to_cbor_seq(&records[10..12])); // a schema declaration and a binding
+    bytes.extend(smysl_core::to_cbor_seq(&records[10..12]));
+    std::fs::write(&path, &bytes).unwrap();
+
+    let old = Store::open(&path).unwrap();
+    assert_eq!(
+        old.len(),
+        records.len() + 4,
+        "open keeps the log as written"
+    );
+
+    let out = smysl_graph::compact::compact(&old);
+    assert_eq!(out.duplicates, 4);
+    assert!(!out.is_empty());
+    assert_eq!(out.records.len(), records.len());
+    let clean = Store::from_records(out.records);
+    assert_eq!(record_set(&clean), record_set(&old));
+    assert!(clean.converged_with(&old));
+    let _ = std::fs::remove_dir_all(&dir);
+}

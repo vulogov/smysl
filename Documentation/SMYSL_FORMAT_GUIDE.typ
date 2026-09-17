@@ -255,6 +255,8 @@ Four kinds of record are ever hand-authored in surface syntax:
     ([`@rel`], [A typed edge between two units — `causes`, `rebuts`, `warrant`, and eleven more.]),
     ([`@thread`], [A named, ordered, role-annotated walk over units — a brief, a narrative, an analysis.]),
     ([`@schema`], [A declaration of an extension: the unit types and relation kinds it adds. Rarely needed, and one line when it is.]),
+    ([`@withdraw`], [An edge that should no longer be followed, and who withdrew it. Since 1.4.]),
+    ([`@resolve`], [A record that a disagreement was reviewed, and by whom. Since 1.4.]),
   ),
 )
 
@@ -670,6 +672,26 @@ The declaration travels with the store through `merge` and `fmt`. A misspelled k
 is an error rather than something skipped — a `relation:` quietly ignored would leave the
 kind warning under a file that appears to declare it — and declaring a kernel kind such as
 `causes` is `SMY-E012`, because an extension may add but never redefine.
+
+An edge can be *withdrawn* when a reviewer finds the edge itself wrong — two statements a model
+matched as opposed that are not — without retracting either unit:
+
+```
+@withdraw c/canary-clean --rebuts--> c/pool-saturation { agent: human:vladimir, ts: [1726500000000, 0], reason: c/not-opposed }
+```
+
+The `@rel` line stays and the edge is no longer followed: a withdrawn rebuttal no longer travels
+with its claim. `retracts` and `supersedes` edges cannot be withdrawn. When a disagreement is real
+and both sides stand, the review is recorded instead, naming the edge or the contention merge
+reported:
+
+```
+@resolve k/ccm3actwjjti65famnoe6mapo5d { agent: human:vladimir, ts: [1726500000000, 0], note: c/both-stand }
+```
+
+A resolution decides nothing — the rebuttal still travels with the claim — and takes the item
+off the list `smysl review` prints. `ts` is milliseconds and a counter, as for `@thread`. Both
+words are reserved since 1.4, so an older `smysl` rejects a file that uses them.
 
 The fourteen kernel kinds, for reference:
 
