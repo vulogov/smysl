@@ -658,7 +658,8 @@ fn cli() -> Command {
                     Arg::new("granularity")
                         .long("granularity")
                         .value_name("P")
-                        .help("Granularity profile the units are produced under"),
+                        .value_parser(["coarse", "default", "standard", "fine"])
+                        .help("Granularity preset recorded in the recipe (standard = default)"),
                 )
                 .arg(
                     Arg::new("path")

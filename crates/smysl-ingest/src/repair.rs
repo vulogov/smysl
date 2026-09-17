@@ -31,8 +31,8 @@ use std::collections::BTreeMap;
 
 use smysl_check::{check, CheckOptions, Pass};
 use smysl_core::{
-    Code, Diagnostic, KernelType, Record, Relation, Report, Rung, Severity, Status, UnitCore,
-    UnitCoreBuilder,
+    canonical_uid, Code, Diagnostic, GranularityProfile, KernelType, Label, Record, Relation,
+    Report, Rung, Severity, Status, Subject, Uid, UnitCore, UnitCoreBuilder,
 };
 use smysl_graph::Store;
 
@@ -209,6 +209,126 @@ pub fn degrade(span: &str, rung: Rung, why: &str) -> (UnitCore, Diagnostic) {
     (core, d)
 }
 
+/// Errors that are a defect of one unit and say nothing about the others in its answer.
+///
+/// Only `SMY-E022`, a gist over `l0_max`, for now. A model cannot count tokens the way the
+/// estimator does, so an over-long gist can survive every repair turn while its siblings were
+/// fine from the first — and rule I degrading the whole span cost a live run all 16 of its
+/// valid units for one gist a token over. A fabricated quote (`SMY-E307`) is deliberately not
+/// here: it is a unit's defect too, but it is evidence about the answer it came in.
+pub const UNIT_LOCAL: &[Code] = &[Code::E022];
+
+/// What [`salvage`] kept of an answer whose repair budget ran out.
+#[derive(Debug)]
+pub struct Salvaged {
+    pub units: Vec<UnitCore>,
+    pub relations: Vec<Relation>,
+    pub labels: BTreeMap<Label, Uid>,
+    /// One `SMY-W304` per degraded unit, then the answer's remaining diagnostics.
+    pub diagnostics: Vec<Diagnostic>,
+    /// How many units were degraded.
+    pub degraded: usize,
+}
+
+/// Rule I applied to the unit rather than the span, when that is where the defect is.
+///
+/// `None` unless every error that would need repair is in [`UNIT_LOCAL`] and names a unit in
+/// the answer. Otherwise: each such unit degrades to opaque prose holding its own gist and
+/// body, and so does every unit in the answer that rests on one through `grounds` or `deps`,
+/// transitively — a unit is not kept resting on something that was not. Relations touching a
+/// degraded unit are dropped and so are labels naming one; everything else is kept as the
+/// model wrote it.
+pub fn salvage(
+    units: &[UnitCore],
+    relations: &[Relation],
+    labels: &BTreeMap<Label, Uid>,
+    diagnostics: &[Diagnostic],
+    rung: Rung,
+    why: &str,
+) -> Option<Salvaged> {
+    let present: std::collections::BTreeSet<Uid> = units.iter().map(canonical_uid).collect();
+    let errors: Vec<&Diagnostic> = diagnostics
+        .iter()
+        .filter(|d| needs_repair(std::slice::from_ref(*d)))
+        .collect();
+    if units.is_empty() || errors.is_empty() {
+        return None;
+    }
+    let mut bad = std::collections::BTreeSet::new();
+    for d in &errors {
+        match d.subject {
+            Subject::Unit(u) if UNIT_LOCAL.contains(&d.code) && present.contains(&u) => {
+                bad.insert(u);
+            }
+            _ => return None,
+        }
+    }
+    let defective = bad.clone();
+    loop {
+        let before = bad.len();
+        for u in units {
+            if u.grounds.iter().chain(&u.deps).any(|g| bad.contains(g)) {
+                bad.insert(canonical_uid(u));
+            }
+        }
+        if bad.len() == before {
+            break;
+        }
+    }
+    if bad.len() == units.len() {
+        return None;
+    }
+
+    let mut out = Salvaged {
+        units: Vec::new(),
+        relations: Vec::new(),
+        labels: BTreeMap::new(),
+        diagnostics: Vec::new(),
+        degraded: 0,
+    };
+    for u in units {
+        let uid = canonical_uid(u);
+        if !bad.contains(&uid) {
+            out.units.push(u.clone());
+            continue;
+        }
+        let text = match &u.body {
+            Some(b) => format!("{}\n\n{b}", u.gist),
+            None => u.gist.clone(),
+        };
+        let reason = if defective.contains(&uid) {
+            format!("its own error after {why}")
+        } else {
+            "it rests on a unit that degraded".to_string()
+        };
+        let (core, mut d) = degrade(&text, rung, &reason);
+        d.message = format!("unit degraded to opaque prose: {reason}");
+        out.units.push(core);
+        out.diagnostics.push(d);
+        out.degraded += 1;
+    }
+    out.relations = relations
+        .iter()
+        .filter(|r| !bad.contains(&r.from) && !bad.contains(&r.to))
+        .cloned()
+        .collect();
+    out.labels = labels
+        .iter()
+        .filter(|(_, u)| !bad.contains(u))
+        .map(|(l, u)| (l.clone(), *u))
+        .collect();
+    // The errors are already in the caller's attempt history; what is left concerns the kept
+    // units (an elided quote, a capped status) and is reported as on a clean answer.
+    out.diagnostics.extend(
+        diagnostics
+            .iter()
+            .filter(|d| !needs_repair(std::slice::from_ref(*d)))
+            .filter(|d| !matches!(d.subject, Subject::Unit(u) if bad.contains(&u)))
+            .cloned(),
+    );
+    Some(out)
+}
+
 /// `{ "ingest:unrepaired": true }` as deterministic CBOR.
 ///
 /// Hand-encoded: a one-key map of a text key to `true` is four bytes, and reaching for an
@@ -244,11 +364,21 @@ fn synth_gist(span: &str) -> String {
         .trim();
     let first = if first.is_empty() { text } else { first };
 
-    let limit = crate::schema::GIST_MAX_CHARS;
-    if first.chars().count() <= limit {
+    // The bound is `l0_max` as the estimator counts it, four bytes a token. It was
+    // `GIST_MAX_CHARS`, 240 characters — twice what `SMY-E022` allows — so a span whose first
+    // sentence was long degraded to a prose unit that failed the gist check at staging.
+    let budget = GranularityProfile::default().l0_max as usize * 4;
+    if first.len() <= budget {
         return first.to_string();
     }
-    let mut out: String = first.chars().take(limit - 1).collect();
+    let ellipsis = '\u{2026}'.len_utf8();
+    let mut out = String::new();
+    for c in first.chars() {
+        if out.len() + c.len_utf8() + ellipsis > budget {
+            break;
+        }
+        out.push(c);
+    }
     // Trim back to a word boundary so the gist reads as a shortened sentence rather than a
     // severed one.
     if let Some(i) = out.rfind(char::is_whitespace) {
@@ -424,8 +554,22 @@ mod tests {
     fn a_long_first_sentence_is_truncated_on_a_word_boundary() {
         let span = format!("{} and it goes on", "word ".repeat(200));
         let (core, _) = degrade(&span, Rung::Model, "x");
-        assert!(core.gist.chars().count() <= crate::schema::GIST_MAX_CHARS);
         assert!(core.gist.ends_with('\u{2026}'));
+        assert!(core.gist.ends_with("word\u{2026}"), "{}", core.gist);
+    }
+
+    /// The synthesised gist passes the gist check it will meet at staging, in bytes as the
+    /// estimator counts them — multi-byte text included. It was bounded at 240 characters.
+    #[test]
+    fn a_degraded_gist_is_within_l0_max() {
+        let l0 = GranularityProfile::default().l0_max;
+        for span in ["word ".repeat(200), "сервер ".repeat(100), "x".repeat(1000)] {
+            let (core, _) = degrade(&span, Rung::Model, "x");
+            let n = smysl_core::tokens(&core.gist);
+            assert!(n <= l0, "{n} > {l0}: {}", core.gist);
+            let report = check_local(std::slice::from_ref(&core), Rung::Model);
+            assert!(!report.iter().any(|d| d.code == Code::E022), "{report:?}");
+        }
     }
 
     /// A degraded unit must never claim more than its rung allows either.

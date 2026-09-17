@@ -113,6 +113,11 @@ pub struct IngestOptions {
     pub repair_attempts: u8,
     /// `auto` unless the caller insists (D-9).
     pub path: Option<IngestPath>,
+    /// A granularity preset: `coarse`, `default` or `fine`, or `standard`, the name this field
+    /// has defaulted to since before the presets had names and which means `default`. Hashed
+    /// into the recipe as written, so a valid name keeps the recipe it always had; anything
+    /// else is refused by [`Ingestor::ingest`] before a call is made. It does not yet choose
+    /// the profile units are checked under.
     pub granularity: String,
     pub agent: smysl_core::AgentId,
     /// Supplied, never read, so a replayed ingest produces the same attestations.
@@ -190,6 +195,20 @@ impl IngestOptions {
     pub fn with_granularity(mut self, g: impl Into<String>) -> IngestOptions {
         self.granularity = g.into();
         self
+    }
+
+    /// The preset [`IngestOptions::granularity`] names, or why it names none.
+    pub fn granularity_profile(&self) -> Result<smysl_core::GranularityProfile, String> {
+        let name = match self.granularity.as_str() {
+            "standard" => "default",
+            other => other,
+        };
+        smysl_core::GranularityProfile::preset(name).ok_or_else(|| {
+            format!(
+                "`{}` is not a granularity preset: coarse, default (or standard), fine",
+                self.granularity
+            )
+        })
     }
 
     /// Ask with the caller's prompt and, optionally, a narrower schema. Validated by
@@ -271,7 +290,9 @@ pub struct IngestReport {
     pub chunks: usize,
     /// Model calls made, including repairs.
     pub calls: usize,
-    /// Spans that exhausted their repair budget and degraded (`SMY-W304`).
+    /// Spans that exhausted their repair budget and degraded (`SMY-W304`). A chunk whose only
+    /// defects were single units' own (`repair::UNIT_LOCAL`) degrades those units, each
+    /// counted here, and keeps the rest.
     pub degraded: usize,
     pub diagnostics: Vec<Diagnostic>,
     pub path: Option<IngestPath>,
@@ -311,6 +332,11 @@ impl<'a> Ingestor<'a> {
             .opts
             .requested_path()
             .map_err(|e| ProviderError::Config(format!("prompt override {e}")))?;
+        // Was accepted whatever it said and only hashed: `--granularity bogus` ran, and its
+        // recipe differed from every real run's for a word nothing else read.
+        self.opts
+            .granularity_profile()
+            .map_err(ProviderError::Config)?;
         let provider = self.registry.for_task(Task::ContentIngest)?;
         let caps = provider.caps();
 
@@ -348,7 +374,7 @@ impl<'a> Ingestor<'a> {
         for piece in &chunks {
             let out = self.one_chunk(provider, choice.path, &piece.text, &mut report.usage);
             report.calls += out.calls;
-            report.degraded += usize::from(out.degraded);
+            report.degraded += out.degraded;
             report.diagnostics.extend(out.diagnostics);
             units.extend(out.units);
             relations.extend(out.relations);
@@ -415,6 +441,7 @@ impl<'a> Ingestor<'a> {
         // introduced, so the reported cause was one smysl's prompt had caused.
         let mut history: Vec<Diagnostic> = Vec::new();
         let attempts = self.opts.repair_attempts as usize + 1;
+        let mut last_answer = None;
 
         for attempt in 0..=self.opts.repair_attempts {
             let completion = match provider.complete(&request) {
@@ -429,7 +456,7 @@ impl<'a> Ingestor<'a> {
                         relations: Vec::new(),
                         labels: BTreeMap::new(),
                         calls,
-                        degraded: true,
+                        degraded: 1,
                         diagnostics: vec![d],
                     };
                 }
@@ -463,7 +490,7 @@ impl<'a> Ingestor<'a> {
                     relations,
                     labels,
                     calls,
-                    degraded: false,
+                    degraded: 0,
                     diagnostics,
                 };
             }
@@ -492,22 +519,37 @@ impl<'a> Ingestor<'a> {
                     &repair::render_diagnostics(&last),
                 );
                 request = self.request(provider, &t, text, path);
+            } else {
+                last_answer = Some((units, relations, labels, last));
+            }
+        }
+
+        // Exhausted, but perhaps only by units whose defect is their own. Then those degrade
+        // and their siblings are kept; see `repair::salvage`.
+        let why = format!("{} attempt(s)", self.opts.repair_attempts + 1);
+        if let Some((units, relations, labels, last)) = &last_answer {
+            if let Some(s) = repair::salvage(units, relations, labels, last, self.opts.rung, &why) {
+                history.extend(s.diagnostics);
+                return ChunkOutcome {
+                    units: s.units,
+                    relations: s.relations,
+                    labels: s.labels,
+                    calls,
+                    degraded: s.degraded,
+                    diagnostics: history,
+                };
             }
         }
 
         // Exhausted. Rule I: degrade, never fail.
-        let (core, d) = repair::degrade(
-            text,
-            self.opts.rung,
-            &format!("{} attempt(s)", self.opts.repair_attempts + 1),
-        );
+        let (core, d) = repair::degrade(text, self.opts.rung, &why);
         history.push(d);
         ChunkOutcome {
             units: vec![core],
             relations: Vec::new(),
             labels: BTreeMap::new(),
             calls,
-            degraded: true,
+            degraded: 1,
             diagnostics: history,
         }
     }
@@ -586,7 +628,8 @@ struct ChunkOutcome {
     relations: Vec<Relation>,
     labels: BTreeMap<Label, Uid>,
     calls: usize,
-    degraded: bool,
+    /// Spans degraded: the whole chunk counts one, a salvaged answer one per unit.
+    degraded: usize,
     diagnostics: Vec<Diagnostic>,
 }
 

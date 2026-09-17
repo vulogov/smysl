@@ -966,6 +966,48 @@ fn a_bad_override_is_refused_before_any_call_is_made() {
     }
 }
 
+/// `--granularity` names a preset or is refused, before a call. It was only ever hashed into
+/// the recipe, so `bogus` ran and produced a recipe no real run shared.
+#[test]
+fn an_unknown_granularity_is_refused_and_a_preset_keeps_its_recipe() {
+    let (r, calls) = registry(Scripted::saying("{}"));
+    let out = Ingestor::new(&r, opts(Rung::Document).with_granularity("bogus"))
+        .ingest(&Store::new(), DOCUMENT);
+    match out {
+        Err(ProviderError::Config(m)) => assert!(m.contains("`bogus`"), "{m}"),
+        other => panic!("{:?}", other.err()),
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    // The default is still `standard`, still accepted, and still hashed as written: a
+    // recipe recorded before this check is the recipe the same run records now.
+    let answer =
+        r#"{"units":[{"type":"claim","gist":"the pool saturated","status":"speculative"}]}"#;
+    let recipe = |g: &str| {
+        let (r, _) = registry(Scripted::saying(answer));
+        let (_, report) = Ingestor::new(&r, opts(Rung::Document).with_granularity(g))
+            .ingest(&Store::new(), DOCUMENT)
+            .expect(g);
+        report.recipe.expect("a recipe")
+    };
+    assert_eq!(IngestOptions::default().granularity, "standard");
+    let (r, _) = registry(Scripted::saying(answer));
+    let (_, default_run) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), DOCUMENT)
+        .unwrap();
+    assert_eq!(default_run.recipe, Some(recipe("standard")));
+    assert_ne!(recipe("standard"), recipe("default"), "hashed as written");
+    for g in ["coarse", "fine"] {
+        recipe(g);
+    }
+    assert_eq!(
+        opts(Rung::Document)
+            .with_granularity("standard")
+            .granularity_profile(),
+        Ok(smysl_core::GranularityProfile::standard())
+    );
+}
+
 /// The repair turn for a malformed label says what a label is.
 ///
 /// Observed with Gemini flash-lite on the surface path: labels like `claim-nodejs-c-produce`
@@ -1119,6 +1161,117 @@ fn a_degraded_chunk_reports_every_attempts_errors() {
         "not marked by attempt: {}",
         e032[0].message
     );
+}
+
+const LONG_GIST: &str = "the connection pool on the eu-west shard saturated on Thursday \
+    afternoon because the retry storm from the payment service held every connection open far \
+    longer than the configured idle timeout allowed and nothing shed load";
+
+/// An answer whose only defect is one over-long gist, repeated through every repair turn.
+fn long_gist_answer() -> String {
+    format!(
+        r#"{{"units":[
+            {{"type":"observation","label":"o/latency","gist":"p95 rose to 410ms",
+              "status":"speculative"}},
+            {{"type":"claim","label":"c/pool","gist":"{LONG_GIST}","status":"speculative"}},
+            {{"type":"claim","label":"c/fix","gist":"raising the pool size would help",
+              "status":"speculative","grounds":["c/pool"]}},
+            {{"type":"claim","label":"c/canary","gist":"the canary shard stayed clean",
+              "status":"speculative"}}],
+          "relations":[
+            {{"kind":"causes","from":"c/pool","to":"o/latency"}},
+            {{"kind":"rebuts","from":"c/canary","to":"o/latency"}}]}}"#
+    )
+}
+
+/// One gist a few tokens over `l0_max` cost a live run all 16 of its valid units: rule I
+/// degraded the span, and a model cannot count tokens the way the estimator does, so three
+/// repair turns did not help. The defect is the unit's own, so the unit degrades — with what
+/// rests on it — and its siblings are staged as written.
+#[test]
+fn an_over_long_gist_degrades_its_unit_and_keeps_the_siblings() {
+    let (r, calls, seen) = registry_seeing(Scripted::saying(&long_gist_answer()));
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), "one paragraph")
+        .expect("ingests");
+
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        3,
+        "the repair budget was spent"
+    );
+    assert_eq!(
+        report.degraded, 2,
+        "the long unit and the unit grounded on it"
+    );
+
+    let gists: Vec<&str> = staged.units.iter().map(|u| u.gist.as_str()).collect();
+    assert!(gists.contains(&"p95 rose to 410ms"), "{gists:?}");
+    assert!(
+        gists.contains(&"the canary shard stayed clean"),
+        "{gists:?}"
+    );
+    let prose: Vec<_> = staged
+        .units
+        .iter()
+        .filter(|u| repair::is_unrepaired(u))
+        .collect();
+    assert_eq!(prose.len(), 2, "{gists:?}");
+    for u in &prose {
+        assert_eq!(u.schema.kernel(), Some(KernelType::Prose));
+    }
+    assert!(
+        prose.iter().any(|u| u.body.as_deref() == Some(LONG_GIST)),
+        "the long gist is kept verbatim in its prose unit"
+    );
+
+    // The edge from the degraded unit is gone, the edge between kept units is not.
+    assert_eq!(staged.relations.len(), 1);
+    assert_eq!(staged.relations[0].kind.as_str(), "rebuts");
+    let names: Vec<String> = staged.labels.keys().map(|l| l.to_string()).collect();
+    assert_eq!(names, ["c/canary", "o/latency"]);
+
+    assert_eq!(
+        report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == Code::W304)
+            .count(),
+        2
+    );
+    assert!(
+        staged.report.fail_on(Severity::Error).is_ok(),
+        "{:?}",
+        staged.report
+    );
+
+    // The repair turn said by how much: the count and the limit, not only "too long".
+    let requests = seen.lock().unwrap();
+    let repair = &requests[1].messages.last().unwrap().content;
+    assert!(
+        repair.contains("SMY-E022") && repair.contains("allows 30"),
+        "{repair}"
+    );
+}
+
+/// Salvage is for defects that belong to one unit. Beside anything else — here a `cited`
+/// unit with no source — the answer is not trusted piecemeal and the span degrades whole.
+#[test]
+fn an_over_long_gist_beside_another_error_still_degrades_the_chunk() {
+    let answer = format!(
+        r#"{{"units":[
+            {{"type":"claim","label":"c/pool","gist":"{LONG_GIST}","status":"speculative"}},
+            {{"type":"claim","label":"c/cited","gist":"the pool saturated","status":"cited"}},
+            {{"type":"claim","label":"c/canary","gist":"the canary shard stayed clean",
+              "status":"speculative"}}]}}"#
+    );
+    let (r, _) = registry(Scripted::saying(&answer));
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), "one paragraph")
+        .expect("ingests");
+    assert_eq!(report.degraded, 1);
+    assert_eq!(staged.units.len(), 1);
+    assert!(repair::is_unrepaired(&staged.units[0]));
 }
 
 // ---------------------------------------------------------------------------

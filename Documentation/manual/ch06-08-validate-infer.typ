@@ -773,11 +773,13 @@ real.
 #section("--granularity, --repair, and what happens when repair runs out")
 
 Two more flags shape what a successful call would have produced.
-`--granularity` names the body-length profile (`fine`, `default`, `coarse`)
-the model is asked to write to, and it becomes part of the ingest *recipe* —
-a hash of everything that decided what the model was asked to do, which is
-what later lets tooling tell two runs of "the same" ingest apart from two
-runs that were never really comparable. `--repair` sets how many times
+`--granularity` names a body-length preset — `fine`, `default` (which
+`standard`, the default value, also means) or `coarse` — and anything else is
+refused before a call is made. It becomes part of the ingest *recipe* — a hash
+of everything that decided what the model was asked to do, which is what later
+lets tooling tell two runs of "the same" ingest apart from two runs that were
+never really comparable. As of 1.3 that is all it does: the units are still
+checked under the default profile, whichever preset you name. `--repair` sets how many times
 `ingest` will show the model its own mistake and ask again before giving up
 on a span — `2` by default.
 
@@ -794,6 +796,13 @@ path pre-empts it — but it is the same function in the source that both
 failure modes call, and the source's own test suite exercises it directly:
 an unrepairable span becomes an opaque `prose` unit whatever put it there,
 never a failed run.
+
+One exception narrows the loss. When every remaining error is a single unit's
+own over-long gist (`SMY-E022`), only that unit degrades — along with any unit
+in the same answer grounded on it — and the rest are staged as the model wrote
+them. A model cannot count tokens the way the estimator does, so a gist a few
+tokens over can survive every repair turn; before 1.3 it took its whole chunk
+with it.
 
 #whatsnext[
   A staged batch is just a store that happens to live at

@@ -321,7 +321,7 @@ ended at SM-P15, and writing `SM-P16` here would invent one to satisfy a naming 
     ([Flag], [Value], [Meaning]),
     ([`FILE`], [positional], [Document to ingest; `-` reads stdin.]),
     ([`--rung`], [`computed|document|web|model`], [Trust rung of the source; caps what units may claim (rule T).]),
-    ([`--granularity`], [`P`], [Granularity profile the units are produced under.]),
+    ([`--granularity`], [`P`], [Granularity preset recorded in the recipe: `coarse`, `default` (or `standard`), `fine`.]),
     ([`--path`], [`auto|surface|json-ast`], [Override the path D-9 would choose.]),
     ([`--repair`], [`N`], [Repair attempts before a span degrades to opaque prose.]),
     ([`--yes`], [—], [Commit the staged batch instead of exiting 10.]),

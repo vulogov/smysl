@@ -293,6 +293,29 @@ provider layer.
   dependent of its cause, which an evidence audit asking "which conclusions lose a premise" does
   not want.
 
+**One over-long gist no longer costs its chunk.** When repair runs out and every remaining error
+is `SMY-E022` on a unit in the answer, that unit degrades to opaque prose holding its gist and
+body, so does every unit in the answer grounded on it (transitively), relations and labels
+touching them are dropped, and the siblings are staged as written — one `SMY-W304` per degraded
+unit, and `IngestReport::degraded` counts them. Anything else beside it, a missing source or a
+fabricated quote, still degrades the whole span: `repair::UNIT_LOCAL` is only `E022`, because a
+fabricated quote is evidence about the answer it came in. The repair turn already carried the
+count and the limit ("gist is 56 tokens, default allows 30"); a test now holds it there.
+
+Found writing that test: **every degraded span's synthesised gist could fail `SMY-E022` itself.**
+`synth_gist` cut the first sentence at `GIST_MAX_CHARS`, 240 characters, and `l0_max` is 30
+tokens — 120 bytes as the estimator counts. A span whose first sentence ran long degraded to a
+prose unit that staging then reported as an error. It is bounded by `l0_max` in bytes now,
+multi-byte text included. (`GIST_MAX_CHARS` itself still tells the json-ast schema 240; that
+mismatch is carried.)
+
+**`ingest --granularity` is checked.** `coarse`, `default`, `fine`, or `standard` — the field's
+default since before the presets had names, and now an alias of `default`. Anything else is a
+usage error at the CLI and `ProviderError::Config` from `Ingestor::ingest`, before a call; it
+had run, and recorded a recipe no real run shared. The name is still hashed as written, so every
+recipe recorded under a valid name is unchanged — `standard` and `default` stay distinct recipes,
+which is the price of not moving them. `IngestOptions::granularity_profile` resolves it.
+
 **The quote check's limit is stated where it is defined.** `Present` means the quote is in the
 source. A unit whose gist contradicts its own verbatim quote passes, because the contradiction is
 between the unit and its evidence, which no string comparison sees.
@@ -335,17 +358,15 @@ held the registry at 49. No test has that name, and the registry was 51; it is 5
 - **A provider error that happens after the call is reported as no call.** The truncated run
   above said `0 call(s), 0 token(s)` and was billed. And its message, "context window exceeded:
   2032 > 2048", is false as written — the mapper's own comment records fixing the same shape once.
-- **One unit can degrade a whole chunk.** A gist one token over `l0_max` cost a live run all 16 of
-  its otherwise valid units, because rule I degrades the span, not the unit. A model cannot count
-  tokens the way the estimator does, so three repair turns did not help.
+- **The json-ast schema allows a 240-character gist** (`GIST_MAX_CHARS`) and the gist check
+  allows 120 bytes, so an enforcing provider can be held to a bound the check then refuses.
 - **`strip_echo` removes frame lines, not prose preambles.** A repair answer that opened with a
   27-byte sentence was still `stray Text`.
 - **A chunk that recovers reports nothing about what it recovered from.** R1's per-attempt
   history is printed only for a chunk that degrades; run 2's two failed attempts left no trace.
-- **`ingest --granularity` is only ever hashed into the recipe.** It is never resolved to a
-  preset, never validated — `--granularity bogus` is accepted — and does not set the profile
-  units are later checked under. Its default, `"standard"`, names no preset at all. Fixing it
-  moves recipe hashes, so it wants its own decision rather than riding along here.
+- **`ingest --granularity` does not choose the profile units are checked under.** It is
+  validated now (below), but `check_local` and staging still use the default profile. Making it
+  bind is a behaviour change for any run that names `coarse` or `fine`, so it is for 1.4.
 - **Whether flash-lite now converges on the surface path** is a live question this cycle could
   not answer offline. What is tested is that the label format and a candidate reach the model.
 
