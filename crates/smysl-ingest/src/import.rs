@@ -21,9 +21,10 @@
 
 use std::collections::BTreeMap;
 
+use smysl_core::surface::hjson::{HObject, HValue, Spanned};
 use smysl_core::{
-    canonical_uid, AgentId, Attestation, Diagnostic, Hlc, KernelType, Op, Record, Rung, SourceKind,
-    SourceRef, Status, UnitCore, UnitCoreBuilder,
+    canonical_uid, AgentId, Attestation, Diagnostic, GranularityProfile, Hlc, KernelType, Op,
+    Record, Rung, SourceKind, SourceRef, Span, Status, UnitCore, UnitCoreBuilder,
 };
 
 /// What an import produced.
@@ -131,11 +132,12 @@ pub fn from_csv(text: &str, opts: &ImportOptions) -> Imported {
             .filter_map(|c| row.get(c.as_str()).map(|v| format!("{c} {v}")))
             .collect();
 
-        let gist = match (subject.is_empty(), values.is_empty()) {
+        let full = match (subject.is_empty(), values.is_empty()) {
             (_, true) => subject.join(", "),
             (true, _) => values.join(", "),
             _ => format!("{}: {}", subject.join(", "), values.join(", ")),
         };
+        let gist = fit_gist(&full);
         if gist.is_empty() {
             continue;
         }
@@ -175,38 +177,64 @@ pub fn from_csv(text: &str, opts: &ImportOptions) -> Imported {
     out
 }
 
-/// The row as deterministic CBOR, keyed by column name.
+/// A row's summary, within the gist bound `check` enforces.
 ///
-/// Hand-encoded, because this crate has no JSON or CBOR writer and a map of short text keys
-/// to short text values is a few bytes. Keys are emitted in sorted order, which is what the
-/// canonical encoding requires.
-fn row_payload(columns: &[String], cells: &[&str]) -> Vec<u8> {
-    let mut pairs: Vec<(&str, &str)> = columns
-        .iter()
-        .map(String::as_str)
-        .zip(cells.iter().copied())
-        .collect();
-    // Canonical order is by encoded bytes; for short text keys that is length then value.
-    pairs.sort_by(|a, b| a.0.len().cmp(&b.0.len()).then(a.0.cmp(b.0)));
-
-    let mut out = Vec::new();
-    out.push(0xa0 | (pairs.len().min(23) as u8));
-    for (k, v) in pairs.iter().take(23) {
-        text(&mut out, k);
-        text(&mut out, v);
+/// Key columns first, then the values, cut at `l0_max` as the estimator counts it — four bytes a
+/// token — on a word boundary, with an ellipsis. Until R12 (1.4) the whole row went into the gist,
+/// so a row of seven columns, or three with a long test name, imported as a `measured` unit that
+/// `smysl check` then refused with `SMY-E022`. Nothing is lost to the cut: every cell is in the
+/// payload. A gist that already fits is unchanged, so an import of an ordinary file keeps its uids.
+fn fit_gist(full: &str) -> String {
+    let budget = GranularityProfile::default().l0_max as usize * 4;
+    if full.len() <= budget {
+        return full.to_string();
     }
+    let ellipsis = '\u{2026}'.len_utf8();
+    let mut out = String::new();
+    for c in full.chars() {
+        if out.len() + c.len_utf8() + ellipsis > budget {
+            break;
+        }
+        out.push(c);
+    }
+    // At a cell boundary if the cut leaves one, so the gist does not end on a column name whose
+    // value was cut away; at a word otherwise, when a single key is longer than the bound.
+    let boundary = [", ", ": "]
+        .iter()
+        .filter_map(|sep| out.rfind(sep))
+        .max()
+        .filter(|&i| i > 0)
+        .or_else(|| out.rfind(char::is_whitespace).filter(|&i| i > 0));
+    if let Some(i) = boundary {
+        out.truncate(i);
+    }
+    let trimmed = out.trim_end_matches([',', ':', ' ']).len();
+    out.truncate(trimmed);
+    out.push('\u{2026}');
     out
 }
 
-fn text(out: &mut Vec<u8>, s: &str) {
-    let b = s.as_bytes();
-    if b.len() < 24 {
-        out.push(0x60 | b.len() as u8);
-    } else {
-        out.push(0x78);
-        out.push(b.len().min(255) as u8);
+/// The row as deterministic CBOR, keyed by column name, through the core's canonical encoder.
+///
+/// It was hand-encoded, and the hand encoding had two limits nobody had met: a map header that
+/// could not count past 23 columns, and a text head that could not say more than 255 bytes, so a
+/// wider row silently lost columns and a longer cell was cut — in the one field documented as
+/// keeping the row verbatim. The core encoder has neither limit, normalises to NFC as every other
+/// text field is, and produces the same bytes the hand encoding did wherever that one was right.
+/// A column named twice keeps its first cell.
+fn row_payload(columns: &[String], cells: &[&str]) -> Vec<u8> {
+    let span = Span::new(0, 0);
+    let mut o = HObject::new();
+    for (k, v) in columns.iter().zip(cells.iter()) {
+        if o.contains(k) {
+            continue;
+        }
+        o.insert(
+            Spanned::new(k.clone(), span),
+            Spanned::new(HValue::Str((*v).to_string()), span),
+        );
     }
-    out.extend_from_slice(&b[..b.len().min(255)]);
+    smysl_core::surface::payload::object_to_payload(&o).unwrap_or_else(|| vec![0xa0])
 }
 
 #[cfg(test)]
@@ -303,6 +331,129 @@ mod tests {
         let out = from_csv("", &opts());
         assert!(out.is_empty());
         assert!(!out.diagnostics.is_empty());
+    }
+
+    /// R12. A long key column, or a wide row, fits the gist bound and checks clean, and every cell
+    /// is still in the payload.
+    #[test]
+    fn a_long_or_wide_row_checks_without_e022_and_keeps_every_cell() {
+        let long_test = format!("tests::{}", "a_very_long_test_name_".repeat(4));
+        assert!(long_test.len() >= 90);
+        let csv = format!(
+            "test,commit,outcome,run_seconds,toolchain,target,profile\n\
+             {long_test},4968383,passed,0.1,stable-1.89,aarch64-apple-darwin,debug\n"
+        );
+        for key in [vec!["test".to_string()], Vec::new()] {
+            let mut o = opts();
+            o.key = key.clone();
+            let out = from_csv(&csv, &o);
+            assert_eq!(out.units.len(), 1, "{:?}", out.diagnostics);
+            let u = &out.units[0];
+            assert!(
+                smysl_core::tokens(&u.gist) <= GranularityProfile::default().l0_max,
+                "{key:?}: {} tokens: {}",
+                smysl_core::tokens(&u.gist),
+                u.gist
+            );
+            assert!(u.gist.starts_with("test tests::"), "{}", u.gist);
+            assert!(u.gist.ends_with('\u{2026}'), "{}", u.gist);
+            assert!(
+                !u.gist.contains(": commit"),
+                "cut inside a cell rather than between cells: {}",
+                u.gist
+            );
+
+            let store = Store::from_records(out.records());
+            let report = check(&store, CheckOptions::default());
+            assert!(
+                !report.iter().any(|d| d.code == smysl_core::Code::E022),
+                "{key:?}: {report}"
+            );
+            assert!(
+                report.fail_on(smysl_core::Severity::Error).is_ok(),
+                "{report}"
+            );
+
+            let payload = smysl_core::surface::payload::payload_to_object(
+                u.payload.as_ref().expect("a payload"),
+            )
+            .unwrap();
+            for (col, cell) in [
+                ("test", long_test.as_str()),
+                ("commit", "4968383"),
+                ("toolchain", "stable-1.89"),
+                ("profile", "debug"),
+            ] {
+                assert_eq!(
+                    payload.get(col).and_then(|v| v.value.as_str()),
+                    Some(cell),
+                    "{col}"
+                );
+            }
+        }
+    }
+
+    /// The payload keeps a row wider than 23 columns and a cell longer than 255 bytes, which the
+    /// hand encoding could not.
+    #[test]
+    fn the_payload_keeps_wide_rows_and_long_cells() {
+        let columns: Vec<String> = (0..30).map(|i| format!("c{i}")).collect();
+        let long = "x".repeat(300);
+        let mut row: Vec<String> = (0..30).map(|i| i.to_string()).collect();
+        row[29] = long.clone();
+        let csv = format!("{}\n{}\n", columns.join(","), row.join(","));
+        let out = from_csv(&csv, &opts());
+        let payload =
+            smysl_core::surface::payload::payload_to_object(out.units[0].payload.as_ref().unwrap())
+                .unwrap();
+        assert_eq!(payload.len(), 30);
+        assert_eq!(
+            payload.get("c29").and_then(|v| v.value.as_str()),
+            Some(long.as_str())
+        );
+    }
+
+    /// Where the old hand encoding was right, the core encoder writes the same bytes, so an import
+    /// of an ordinary file keeps the uids it had.
+    #[test]
+    fn an_ordinary_row_encodes_as_it_did_before() {
+        fn old(columns: &[String], cells: &[&str]) -> Vec<u8> {
+            let mut pairs: Vec<(&str, &str)> = columns
+                .iter()
+                .map(String::as_str)
+                .zip(cells.iter().copied())
+                .collect();
+            pairs.sort_by(|a, b| a.0.len().cmp(&b.0.len()).then(a.0.cmp(b.0)));
+            let mut out = vec![0xa0 | pairs.len() as u8];
+            for (k, v) in pairs {
+                for s in [k, v] {
+                    let b = s.as_bytes();
+                    if b.len() < 24 {
+                        out.push(0x60 | b.len() as u8);
+                    } else {
+                        out.push(0x78);
+                        out.push(b.len() as u8);
+                    }
+                    out.extend_from_slice(b);
+                }
+            }
+            out
+        }
+        let columns: Vec<String> = ["region", "p50_ms", "p95_ms", "a_long_column_name_here_ok"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let cells = [
+            "eu-west",
+            "180",
+            "610",
+            "a cell value that is longer than 24 bytes",
+        ];
+        assert_eq!(row_payload(&columns, &cells), old(&columns, &cells));
+
+        // And the gist of an ordinary row is what it always was.
+        let out = from_csv(CSV, &opts());
+        assert_eq!(out.units[0].gist, "region eu-west: p50_ms 180, p95_ms 610");
     }
 
     /// Chosen key columns name the reading; everything else is its value.

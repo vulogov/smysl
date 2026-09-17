@@ -1,0 +1,35 @@
+{
+  "purpose": "Contention ids, produced by the Rust. digest = BLAKE3-256(kind byte || over || sorted, deduplicated positions); id = \"k/c\" + the first 130 bits of digest in the base32 of spec section 2.1 (26 characters). A resolution names a contention by this.",
+  "cases": [
+    {
+      "name": "live-rebuttal",
+      "note": "positions listed unsorted; the id sorts them",
+      "kind": 1,
+      "over_hex": "4de66031fe6c868cd949212a08b65919d3e480ac007f02037373c9d649c87f1c",
+      "positions_hex": ["09368318663879d1077eaff107217b033c8d5e6794db26baa3401b921f5ee8ec", "4de66031fe6c868cd949212a08b65919d3e480ac007f02037373c9d649c87f1c"],
+      "preimage_hex": "014de66031fe6c868cd949212a08b65919d3e480ac007f02037373c9d649c87f1c09368318663879d1077eaff107217b033c8d5e6794db26baa3401b921f5ee8ec4de66031fe6c868cd949212a08b65919d3e480ac007f02037373c9d649c87f1c",
+      "digest_hex": "1350ccc897ce09a4e6c874718b48450db768d611b258c4a011620d7f119b67e0",
+      "id": "k/ccnimzsexzye2jzwioryywscfbw"
+    },
+    {
+      "name": "duplicate-position",
+      "note": "the same contention as above: positions are deduplicated",
+      "kind": 1,
+      "over_hex": "4de66031fe6c868cd949212a08b65919d3e480ac007f02037373c9d649c87f1c",
+      "positions_hex": ["4de66031fe6c868cd949212a08b65919d3e480ac007f02037373c9d649c87f1c", "09368318663879d1077eaff107217b033c8d5e6794db26baa3401b921f5ee8ec", "09368318663879d1077eaff107217b033c8d5e6794db26baa3401b921f5ee8ec"],
+      "preimage_hex": "014de66031fe6c868cd949212a08b65919d3e480ac007f02037373c9d649c87f1c09368318663879d1077eaff107217b033c8d5e6794db26baa3401b921f5ee8ec4de66031fe6c868cd949212a08b65919d3e480ac007f02037373c9d649c87f1c",
+      "digest_hex": "1350ccc897ce09a4e6c874718b48450db768d611b258c4a011620d7f119b67e0",
+      "id": "k/ccnimzsexzye2jzwioryywscfbw"
+    },
+    {
+      "name": "supersession-fork",
+      "note": "kind is identity",
+      "kind": 0,
+      "over_hex": "4de66031fe6c868cd949212a08b65919d3e480ac007f02037373c9d649c87f1c",
+      "positions_hex": ["9374f1c63fc4c7ede40a6ad6a300a6d8bfc67f7d1a927366845278bedb34fbbe", "595fa67b3e1b7c6bcbe5d179ec2bb2cb9f1156096fa85d86117ddeb3854ea30e"],
+      "preimage_hex": "004de66031fe6c868cd949212a08b65919d3e480ac007f02037373c9d649c87f1c595fa67b3e1b7c6bcbe5d179ec2bb2cb9f1156096fa85d86117ddeb3854ea30e9374f1c63fc4c7ede40a6ad6a300a6d8bfc67f7d1a927366845278bedb34fbbe",
+      "digest_hex": "4c5983d7882f1cb64adb939b1613cbb922b272ea09151b52a28f42a0cf0e2617",
+      "id": "k/cjrmyhv4if4olmsw3sonrme6lxe"
+    }
+  ]
+}

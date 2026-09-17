@@ -4,7 +4,9 @@
 [`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md), which is deliberately a fraction of this
 one's length: interoperability needs identity, encoding and the rules, not an account of how
 this implementation happens to be built.
-**Describes:** the code at `main`, crate `1.0.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`.
+**Describes:** the code at `dev/1.4.0`, crate `1.4.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`.
+Sections 2.3, 4.2, 5 and 13 were brought up to 1.4 — the lifecycle of edges and disagreements —
+on 2026-09-17; the rest describes what has not changed since it was compiled.
 **Compiled:** 2026-07-30, from SM-P0 through SM-P15, the operational-merit work after it, the
 0.2 cycle (label bindings, comment syntax, forward compatibility), the 0.3 cycle (global
 flags, nesting bounds, packer performance) and the 0.4 cycle (the fuzz backlog: seven
@@ -92,6 +94,12 @@ The ordering is the load-bearing part: it is what rules M and T compare against.
 Fourteen kernel kinds — `elaborates`, `contrasts`, `concedes`, `causes`, `enables`,
 `exemplifies`, `conditions`, `sequences`, `answers`, `rebuts`, `warrant`, `backs`,
 `supersedes`, `retracts` — plus `Extension(String)` of the form `x.<domain>/<kind>`.
+
+**A relation has an identity** (1.4, spec §2.5): its rid, `BLAKE3(0x03 ‖ kind name ‖ 0x00 ‖ from ‖
+to)`, which `Relation::uid` had computed since 0.2 and nothing on the wire used. An attestation
+whose uid is a rid attaches to that edge, so a store can say who asserted one — a model's
+`rebuts` and a reviewer's are told apart by agent, op and rung, and staging attests every edge
+it stages. `Store::relation_by_id` finds an edge by it.
 
 ### 2.4 Identity
 
@@ -200,6 +208,12 @@ choice was tried and was worse: a body runs from the gist to the next record, so
 between records fell inside that range and became the previous unit's body, inventing content
 out of a note and firing a granularity warning about the invention.
 
+**`@withdraw` and `@resolve`** (1.4) spell records 11 and 12, naming an edge as
+`from --kind--> to` or by rid and a contention by id, with `agent` and `ts` as `@thread` has them.
+The writer spells an edge by its endpoints whenever it knows the relation, which is what keeps the
+round trip a fixed point; a record whose clock names another agent, or that carries unknown keys,
+stays CBOR-only.
+
 No record carries a comment, so canonical form cannot reproduce one; `fmt` counts them
 (`ParseOutcome::comments`) and warns before dropping any. Format sniffing had to change with
 it — the "surface text starts with `@`" test is now one function that looks past leading
@@ -240,6 +254,28 @@ Detections are **reported, not recorded**. A detection written into an append-on
 be a stale finding the moment a third store supplied the edge that ordered it — and would
 break associativity outright. Fixtures F8a/F8b exercise all three.
 
+**Idempotence is structural, at the level of records** (R10, 1.4). A store keeps the BLAKE3 of
+every record's canonical encoding and appends a record only if its hash is absent. Until then
+`append` asked each record type for its own notion of presence, answered "absent" for label
+bindings, schema declarations, pack info, unknown records and edge attestations, and a self-merge
+grew a store every time. Label-collision detection reads a store's own bindings.
+
+**Merge does not adjudicate, and since 1.4 a person can.** Three records, one queue:
+
+- a **withdrawal** (record 11) names an edge by rid; a withdrawn edge stays in the log and is left
+  out of the adjacency, `relations_of_kind`, detection and packing. `retracts` and `supersedes`
+  cannot be withdrawn (`SMY-W056`);
+- a **live rebuttal** is one not withdrawn, from a unit present and not `unfounded` under the
+  strict policy. `Store::rebuttals_of` returns live ones only, so a retracted rebuttal no longer
+  pins its claim (rule R);
+- a **resolution** (record 12) names a contention by its derived id, or an unthreaded `rebuts`
+  edge by rid, and decides nothing. `Store::contention_status` reads a named contention as
+  resolved and one whose rebuttal died as stale; only open ones pin (C4), render as open, or
+  count in the TUI.
+
+`smysl::review` is the queue — recorded and detected contentions, and live rebuttals no open
+contention covers — and `review`, `withdraw` and `resolve` are its commands.
+
 ---
 
 ## 6. The check pipeline
@@ -257,7 +293,7 @@ Ten passes, in order:
 9. **Extension** — extension and conformance
 10. **Hashes** — recomputed uids against stored
 
-Diagnostics are a closed registry of **52 codes** in eight groups (parse, identity, LOD,
+Diagnostics are a closed registry of **53 codes** in eight groups (parse, identity, LOD,
 epistemics, merge, pack/render, extension, provider). Every code carries a severity, and
 fixtures assert exact code sets rather than "some error".
 
@@ -454,11 +490,11 @@ compared across vendors.
 
 ## 10. Command surface
 
-Twenty-one commands. Only two consult a model.
+Twenty-five commands. Only two consult a model.
 
 | Purity | Commands |
 |---|---|
-| Pure | `fmt` `check` `pack` `merge` `diff` `trace` `view` `bundle` `salience` `retract` `render` `providers` `usage` `reindex` `import` `relink` `compact` `ui` |
+| Pure | `fmt` `check` `pack` `merge` `diff` `trace` `view` `bundle` `salience` `find` `retract` `withdraw` `resolve` `review` `render` `providers` `usage` `reindex` `import` `relink` `compact` `ui` |
 | Mixed | `thread` (`--derive` pure; `--refine` consults a model) |
 | Model | `ingest` `attest` |
 
@@ -562,6 +598,11 @@ Eight fixtures, each with an expected diagnostic set that is asserted exactly.
 | F8 | multi-agent contention | two files; all three detection kinds on merge |
 
 F6 expects `SMY-E030`, and a run that reports nothing means rule M has stopped binding.
+
+The wire fixtures under `fixtures/wire/` are the other half, read by all four implementations:
+F1, F4, F5 and F9 as CBOR stores, `F10-lifecycle.cbor` (1.4) carrying a withdrawal, two
+resolutions and an attestation on a rid, the rejection corpus in `invalid/`, and derivation
+vectors for uids (`uid/`), relation ids (`relation-id/`) and contention ids (`contention-id/`).
 
 ---
 

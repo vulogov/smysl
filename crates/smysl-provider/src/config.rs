@@ -201,7 +201,19 @@ impl Config {
                 cfg.ingest_prompt = Some(path.to_string());
             }
             if let Some(p) = ingest.get("path") {
-                let path = p.value.as_str().unwrap_or_default();
+                // A number or a list is named as one. `unwrap_or_default` read `path: 42` as the
+                // empty string, and the message then said "`ingest.path` is ``".
+                let Some(path) = p.value.as_str() else {
+                    let kind = p.value.type_name();
+                    let article = if kind.starts_with(['a', 'e', 'i', 'o', 'u']) {
+                        "an"
+                    } else {
+                        "a"
+                    };
+                    return Err(ProviderError::Config(format!(
+                        "`ingest.path` is {article} {kind}; expected auto, surface or json-ast"
+                    )));
+                };
                 // Checked here, against the literal set, because this crate cannot name
                 // `IngestPath` — ingest depends on the provider, not the other way round. An
                 // unknown value is an error at load rather than a silent `auto`.
@@ -411,6 +423,20 @@ mod tests {
             let e = Config::load(src).unwrap_err();
             assert!(matches!(e, ProviderError::Config(_)), "{src}: {e:?}");
             assert!(e.to_string().starts_with("provider configuration: "), "{e}");
+        }
+    }
+
+    /// A value of the wrong type is named by its type, not quoted as an empty string.
+    #[test]
+    fn a_non_string_ingest_path_is_named_by_its_type() {
+        for (src, kind) in [
+            ("{ ingest: { path: 42 } }", "an integer"),
+            ("{ ingest: { path: [surface] } }", "an array"),
+            ("{ ingest: { path: true } }", "a boolean"),
+        ] {
+            let e = Config::load(src).unwrap_err().to_string();
+            assert!(e.contains(&format!("is {kind};")), "{src}: {e}");
+            assert!(!e.contains("``"), "{src}: {e}");
         }
     }
 

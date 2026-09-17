@@ -43,6 +43,11 @@ pub enum LineClass {
     /// discriminants, and inserting it mid-enum renumbered six published ones, which
     /// `cargo-semver-checks` rightly reports as a major change.
     SchemaStart,
+    /// `@withdraw <edge> { agent: …, ts: […] }` — a `Withdrawal` (1.4). At the end for the
+    /// same reason as `SchemaStart`.
+    WithdrawStart,
+    /// `@resolve <item> { agent: …, ts: […] }` — a `Resolution` (1.4).
+    ResolveStart,
 }
 
 impl LineClass {
@@ -54,6 +59,8 @@ impl LineClass {
                 | LineClass::RecordStart
                 | LineClass::RelLine
                 | LineClass::ThreadStart
+                | LineClass::WithdrawStart
+                | LineClass::ResolveStart
         )
     }
 }
@@ -132,6 +139,10 @@ fn classify(line: &str) -> LineClass {
             // Reserved in 1.3, as `doc`, `rel` and `thread` are. Before, `@schema x.code/v1 {…}`
             // lexed as a unit of some future type `schema` and failed on its "label".
             "schema" => LineClass::SchemaStart,
+            // Reserved in 1.4. A 1.3 reader lexes them as units of unknown types and fails on
+            // the "label", as it does `@schema`.
+            "withdraw" => LineClass::WithdrawStart,
+            "resolve" => LineClass::ResolveStart,
             w if is_record_type(w) => LineClass::RecordStart,
             // A type this build does not know, which a later version may have added. The
             // writer emits exactly the type string it decoded - it has to, since the type

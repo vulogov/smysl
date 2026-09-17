@@ -178,3 +178,29 @@ class UnitCore:
     def uid(self) -> bytes:
         """§2.1. BLAKE3 over the canonical bytes — status included, which is §2.3."""
         return blake3(self.canonical_bytes())
+
+
+# -- §2.5 relation identity and §6.2 contention identity (1.4) ----------------------------------
+
+
+def relation_id(kind: str, from_uid: bytes, to_uid: bytes) -> bytes:
+    """§2.5. The rid a withdrawal and an edge attestation name a relation by.
+
+    ``BLAKE3(0x03 || kind name || 0x00 || from || to)``. ``kind`` is the name — ``rebuts``,
+    ``x.verify/supports`` — whether the record encodes it as a kernel integer or as text.
+    """
+    if len(from_uid) != 32 or len(to_uid) != 32:
+        raise ValueError("relation endpoints are 32-byte uids")
+    if "\x00" in kind:
+        raise ValueError("a relation kind name cannot contain NUL")
+    return blake3(b"\x03" + kind.encode("utf-8") + b"\x00" + from_uid + to_uid)
+
+
+def contention_digest(kind: int, over: bytes, positions) -> bytes:
+    """§6.2. The digest a contention id is the first 130 bits of, in §2.1's base32.
+
+    ``BLAKE3(kind byte || over || positions)``, positions sorted and deduplicated. The detection
+    clock is not identity.
+    """
+    ordered = sorted(set(bytes(p) for p in positions))
+    return blake3(bytes([kind]) + bytes(over) + b"".join(ordered))

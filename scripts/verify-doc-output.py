@@ -23,7 +23,7 @@ Known limits, all of them "skipped" rather than silently passed:
 All five are now understood and handled rather than reported as drift, so a mismatch here
 means the manual and the binary genuinely disagree. Verified by breaking one documented
 count by a single character and confirming this script catches it."""
-import re, subprocess, glob, os, sys, json, shutil, tempfile, atexit
+import re, subprocess, glob, os, sys, json, shutil, tempfile, atexit, shlex
 
 # Reader-edits that could not be applied. Collected rather than raised: one broken
 # anchor should say so and let the rest of the book still be checked, but it must
@@ -292,7 +292,12 @@ for f in sorted(glob.glob('Documentation/manual/*.typ')):
         # ran only because an earlier replay had created that file, so a clean machine and a
         # dirty one disagreed about how many blocks were covered. Six commands were in that
         # state, and the count moved between runs without anything changing.
-        toks = cmd.split()
+        # Shell words, not whitespace-separated fragments: `withdraw 'c/a --rebuts--> c/b'` names
+        # one edge, and split on spaces it read as a path `'c/a` that does not exist (1.4).
+        try:
+            toks = shlex.split(cmd)
+        except ValueError:
+            toks = cmd.split()
         # `i` starts at 1: token 0 is the binary this script was told to run, not an input the
         # manual named. It matters because `SMYSL_BIN` may be absolute — `tests/doc_output.rs`
         # passes `CARGO_BIN_EXE_smysl`, which always is — and the absolute-path rule below
@@ -302,7 +307,9 @@ for f in sorted(glob.glob('Documentation/manual/*.typ')):
         paths = [t for i, t in enumerate(toks)
                  if i and '/' in t and not t.startswith('-') and not t.startswith('b3:')
                  and not toks[i - 1] in ('-o', '--output')
-                 and not is_label(t)]
+                 and not is_label(t)
+                 # An edge argument, `from --kind--> to`, is labels and a kind, never a file.
+                 and '-->' not in t]
         # An absolute path as an *input* is narrative state, not something this script can
         # guarantee. It may exist because an earlier replayed command in this very run wrote
         # it — `merge … -o /tmp/incident.cbor` does — and then the manual's transcript
@@ -315,7 +322,9 @@ for f in sorted(glob.glob('Documentation/manual/*.typ')):
             skipped += 1
             continue
         # commands with shell extras are not safely replayable here
-        if any(t in cmd for t in ('|', '>', '<', '&&', ';', '$(')):
+        # Outside quotes only: the `-->` of a quoted edge argument is not a redirection.
+        unquoted = re.sub(r"'[^']*'|\"[^\"]*\"", "", cmd)
+        if any(t in unquoted for t in ('|', '>', '<', '&&', ';', '$(')):
             skipped += 1
             continue
         dec = lambda b: b.decode('utf-8', 'replace')

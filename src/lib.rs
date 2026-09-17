@@ -71,10 +71,10 @@ pub use smysl_core::{
     Date, Detected, DetectionKind, Diagnostic, DropReason, ExitCode, Extra, Fidelity,
     GranularityProfile, Group, Hlc, IdError, IntegrityError, KernelType, Label, LabelBinding,
     LangTag, Lod, NonDetReason, Op, Optimality, PackInfo, PackMode, ParseError, Record, RelKind,
-    Relation, Report, Role, Rung, SchemaDecl, SchemaId, Severity, ShapeError, SourceKind,
-    SourcePolicy, SourceRef, Span, Status, Step, Subject, Thread, ThreadId, ThreadSchema, Uid,
-    UidPrefix, Unit, UnitCore, UnitCoreBuilder, View, ViewId, FORMAT_VERSIONS_SUPPORTED,
-    FORMAT_VERSION_DEFAULT, KERNEL_MAJOR, KERNEL_SCHEMA,
+    Relation, Report, Resolution, ResolutionTarget, Role, Rung, SchemaDecl, SchemaId, Severity,
+    ShapeError, SourceKind, SourcePolicy, SourceRef, Span, Status, Step, Subject, Thread, ThreadId,
+    ThreadSchema, Uid, UidPrefix, Unit, UnitCore, UnitCoreBuilder, View, ViewId, Withdrawal,
+    FORMAT_VERSIONS_SUPPORTED, FORMAT_VERSION_DEFAULT, KERNEL_MAJOR, KERNEL_SCHEMA,
 };
 
 // ---- check ----------------------------------------------------------------
@@ -109,13 +109,13 @@ pub use smysl_graph::compact::{compact, Compacted};
 pub use smysl_graph::relink::{relink, Relinked};
 pub use smysl_graph::{
     closure, cycles, dependents, dependents_via, diff, effective_status, hop_diff, label_bindings,
-    membership, merge, plan_retraction, rebuttals_of, resolve_label, reverse_closure, salience,
-    topo, trace, view_roots, Adjacency, AgentActivity, AppendReport, Cached, DetectionContext,
-    Edge, EdgeKind, EdgeSet, EffectiveStatus, Entry, HopDiff, Index, IndexError, LabelError,
-    Lineage, LineageNode, MergeError, MergeOptions, MergeReport, NodeId, OpenReport, RecipeChange,
-    RecipeChangeKind, RetractionAuthority, RetractionPlan, RetractionPolicy, SalienceReport,
-    SalienceRequest, SalienceTerms, SalienceWeights, Scratch, Store, StoreDiff, StoreOptions,
-    SupersessionPolicy, TopoOrder, TraceKind, Via,
+    membership, merge, plan_retraction, rebuttals_of, resolve_label, reverse_closure, review,
+    salience, topo, trace, view_roots, Adjacency, AgentActivity, AppendReport, Cached,
+    DetectionContext, Edge, EdgeKind, EdgeSet, EffectiveStatus, Entry, HopDiff, Index, IndexError,
+    LabelError, Lineage, LineageNode, MergeError, MergeOptions, MergeReport, NodeId, OpenReport,
+    RecipeChange, RecipeChangeKind, RetractionAuthority, RetractionPlan, RetractionPolicy,
+    ReviewItem, ReviewSubject, SalienceReport, SalienceRequest, SalienceTerms, SalienceWeights,
+    Scratch, Store, StoreDiff, StoreOptions, SupersessionPolicy, TopoOrder, TraceKind, Via,
 };
 
 // ---- retrieve -------------------------------------------------------------
@@ -197,8 +197,8 @@ mod tests {
         // threshold that does not exist and never did, and had sat "documented as
         // unreachable" for two releases — which is a holding pattern, not a decision. A code
         // nobody can trigger is worse than a missing one, because a reader waits for it.
-        // 52 as of 1.3.0, with `SMY-W309`.
-        assert_eq!(Code::ALL.len(), 52);
+        // 52 as of 1.3.0, with `SMY-W309`; 53 as of 1.4.0, with `SMY-W056`.
+        assert_eq!(Code::ALL.len(), 53);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 
@@ -259,7 +259,7 @@ mod tests {
     /// manifest, and the diff will say what you decided.
     #[test]
     fn the_crate_version_is_the_one_we_intend_to_ship() {
-        assert_eq!(VERSION, "1.3.0");
+        assert_eq!(VERSION, "1.4.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two

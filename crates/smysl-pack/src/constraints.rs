@@ -99,8 +99,9 @@ pub fn violations(
     c: &Constraints,
 ) -> Vec<Violation> {
     let mut out = Vec::new();
-    let contentions: Vec<&Contention> =
-        store.contentions().iter().filter(|k| k.is_open()).collect();
+    // Open as the store reads it: a resolution, or a rebuttal no longer live, releases the
+    // positions even where the contention's own record still says open (1.4).
+    let contentions: Vec<&Contention> = store.open_contentions().collect();
 
     for (uid, level) in selection {
         let Some(unit) = store.get(uid) else { continue };

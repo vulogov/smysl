@@ -12,7 +12,7 @@ sync with the binary. Each subcommand heading repeats three facts from the comma
 in `src/main.rs` (`§23`): its one-line description, its *purity* (`pure` — a bit-reproducible
 function of its inputs; `mixed` — pure except for one option; `model-dependent` — the only
 kind that can reach off the machine), and the delivery phase that wired it up. All
-all twenty-two subcommands are covered.
+twenty-five subcommands are covered.
 
 `ui` was described here as a stub through 0.5.0. It is not, and was not: `smysl-tui` is a
 working crate with its own test suite, the `tui` feature is in the *default* set, and the
@@ -252,6 +252,65 @@ ended at SM-P15, and writing `SM-P16` here would invent one to satisfy a naming 
   ),
 )
 
+Since 1.4 the retraction is written to the store — a `@rel … --retracts--> …` line appended to a
+surface file, a record appended to a CBOR log — and a second run of the same retraction writes
+nothing. Before, it was applied to an in-memory copy and reported as done.
+
+#section("withdraw")
+
+*Withdraw an edge: kept, and no longer followed.* Pure · 1.4.0.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`EDGE`], [positional, required], [The edge: its rid, as `review` prints it, or `FROM --KIND--> TO` with each end a uid or a label.]),
+    ([`--as`], [`AGENT` (repeatable)], [The agent(s) withdrawing it; one withdrawal record each.]),
+    ([`--authority`], [`A`], [`origin | any | quorum:N`, as for `retract`; `origin` reads the edge's own attestations.]),
+    ([`--reason`], [`UNIT`], [A unit saying why, by uid or label.]),
+    ([`--at`], [`MILLIS`], [Timestamp in milliseconds since the epoch; defaults to now.]),
+    ([`--dry-run`], [—], [Report what it would release, and whether it would be refused, without writing.]),
+    ([`PATH`], [positional], [Store to withdraw it in: a CBOR log gains a record, a surface file a `@withdraw` line.]),
+  ),
+)
+
+A `retracts` or `supersedes` edge cannot be withdrawn, and is refused with exit 2.
+
+#section("resolve")
+
+*Record that a disagreement was reviewed.* Pure · 1.4.0.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`ITEM`], [positional, required], [A contention id (`k/c…`), or a `rebuts` edge by rid or `FROM --rebuts--> TO`.]),
+    ([`--as`], [`AGENT`, required], [The agent who reviewed it.]),
+    ([`--note`], [`UNIT`], [A unit recording the decision, by uid or label.]),
+    ([`--at`], [`MILLIS`], [Timestamp in milliseconds since the epoch; defaults to now.]),
+    ([`--dry-run`], [—], [Report what would be recorded without writing.]),
+    ([`PATH`], [positional], [Store to record it in: a CBOR log gains a record, a surface file a `@resolve` line.]),
+  ),
+)
+
+A rebuttal a thread presents is reviewed as its contention, and naming the edge is refused with
+the contention's id (exit 2).
+
+#section("review")
+
+*List the disagreements open for review.* Pure · 1.4.0.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`--all`], [—], [Include items already resolved.]),
+    ([`PATH`], [positional], [Store to review.]),
+  ),
+)
+
+Exits 5 while anything is open and 0 when nothing is, so a pipeline can gate on an empty queue.
+
 #section("render")
 
 *Thread plus profile to artifact.* Pure · SM-P12.
@@ -415,7 +474,7 @@ Every diagnostic `smysl` can emit has a stable code, declared once in the `regis
 macro invocation in `crates/smysl-core/src/diag.rs` and never reused. The registry is
 single-sourced: wire string, severity, group, and one-line meaning all come from that one
 place, and two tests (`the_registry_is_the_size_it_is_meant_to_be` in `smysl-core`, and
-`facade_reexports_the_diagnostic_registry` in the facade) assert the count below stays at 52. Codes are grouped exactly as the source groups them; group membership is
+`facade_reexports_the_diagnostic_registry` in the facade) assert the count below stays at 53. Codes are grouped exactly as the source groups them; group membership is
 reporting structure only; it carries no weight on the wire.
 
 #dtable(
@@ -509,6 +568,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W053`], [warning], [Concurrent supersession materialised as a contention.]),
     ([`SMY-W054`], [warning], [Label and uid do not correspond one to one — two labels for one unit, or one label for two.]),
     ([`SMY-W055`], [warning], [Agent contention rate exceeds `--max-contentions-per-agent`.]),
+    ([`SMY-W056`], [warning], [A withdrawal names a `retracts` or `supersedes` edge, which cannot be withdrawn; it is kept and has no effect.]),
   ),
 )
 

@@ -7,9 +7,225 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.4.0
+## Unreleased — 1.5.0
 
 Nothing yet.
+
+---
+
+## 1.4.0 — 2026-09-17
+
+The cycle that gave disagreements a lifecycle. rust_smysl sends a contradicted claim to review and
+never retracts it automatically, and 1.3 could not close what that review opens: an edge could not
+be withdrawn, nobody could say who asserted one, rule R's "live rebuttal" was undefined, and a
+contention could not be resolved. All four came back to one missing thing — **a relation had no
+identity the format stated** — and 1.4 states it.
+
+What shipped: relation identity and edge attestations; withdrawal and resolution as records 11 and
+12, with `@withdraw` and `@resolve` in surface text; live rebuttals, so a retracted or withdrawn
+rebuttal no longer pins its claim; contention identity made normative; `review`, `withdraw` and
+`resolve` on the command line; all of it in the specification, and the two new identities derived
+independently by the Python, JavaScript and Go implementations. And from rust_smysl: merge is
+idempotent for every record type (R10), and imported readings check clean (R12). `retract`, it
+turned out, had never written anything.
+
+**No format break.** `smysl/1.0` holds: two record types, a derived identity, keys in record bodies
+and two reserved surface words, each a change §8.1 permits. A 1.3 reader preserves a 1.4 CBOR store
+and reads it as it always did; it rejects a *surface* file using `@withdraw` or `@resolve`, as it
+rejects `@schema`. The facade is 260 names, 215 pure; `make semver` is clean on all twelve crates
+against 1.3.0, and `SEMVER_BREAKING` is empty for the fifth release running. 25 commands.
+
+### The lifecycle of edges and disagreements — specification draft and library
+
+[`Documentation/SPEC_DRAFT_1.4.md`](Documentation/SPEC_DRAFT_1.4.md) was the draft, and the Rust
+library implements all six of its decisions; it has since been folded into the normative
+specification (below). The format version stays `smysl/1.0`: every change is one §8.1 already
+permits.
+
+Checked against rust_smysl's verification design, 1.3 could not close what verification opens —
+an edge could not be withdrawn, nobody could say who asserted one, "live rebuttal" was undefined,
+and a disagreement could not be closed. All four came back to one missing thing: **a relation had
+no identity the format stated.** The implementation had one since 0.2 (`Relation::uid`), used by
+nothing on the wire.
+
+- **Relation identity** — `rid = BLAKE3(0x03 ‖ kind name ‖ 0x00 ‖ from ‖ to)`, what `Relation::uid`
+  already computed, now stated, with vectors in `fixtures/wire/relation-id/`.
+- **Withdrawal** — record type 11 (`Withdrawal`). A withdrawn edge is kept and not followed: the
+  adjacency, `relations_of_kind`, detection and packing all leave it out. `retracts` and
+  `supersedes` cannot be withdrawn; a withdrawal naming one is kept, ignored, and reported
+  (`SMY-W056`, registry 53). Not a `retracts` edge pointing at a rid, because a 1.3 checker would
+  report that as a dangling reference, an error, on every 1.4 store.
+- **Who asserted an edge** — an attestation whose uid is a rid attaches to that relation
+  (`Store::relation_by_id(..).attestations`), in any delivery order. No wire change.
+- **Live rebuttal** — not withdrawn, from a unit present and not `unfounded` under the strict
+  policy. `Store::rebuttals_of` returns live rebuttals only, so **a retracted rebuttal no longer
+  pins its claim into a pack** — the finding that started this. Supersession does not end
+  liveness. Detection kind 1 also requires the claim not to be `unfounded`.
+- **Resolution** — record type 12 (`Resolution`, `ResolutionTarget`), naming a contention by id or
+  an unthreaded `rebuts` edge by rid. It records that a review happened and decides nothing. A
+  resolved contention stops pinning its positions (C4); a resolved rebuttal still binds rule R.
+  `Store::contention_status` reads a recorded contention as resolved, or stale once its rebuttal
+  is dead; `Store::open_contentions` is what packing now uses. Contention ids became normative for
+  this — `ContentionId::derive`, moved from merge into the core — with vectors in
+  `fixtures/wire/contention-id/`.
+- **Unknown keys in every record body** are preserved, as the implementation already did and §8.1
+  did not say; a test now holds it for relations, withdrawals and resolutions.
+
+Two behaviour changes a library caller will see: `Store::rebuttals_of` and
+`Store::relations_of_kind` leave out what is no longer live or withdrawn. The facade gains
+`Withdrawal`, `Resolution` and `ResolutionTarget` (257 names, 212 pure).
+
+Since folded into the normative specification, with surface syntax and the other three
+implementations — see below.
+
+### `review`, `withdraw` and `resolve`
+
+The three commands a reviewer needs, over the library above (`smysl::review`, `ReviewItem`,
+`ReviewSubject`: 260 facade names, 215 pure). Twenty-five commands.
+
+- **`review`** lists every contention a store records or implies and every live `rebuts` edge no
+  open contention covers, with `--all` for resolved ones and `--json`. Exits 5 while anything is
+  open, so a pipeline can gate on an empty queue.
+- **`withdraw`** takes an edge by rid or as `'FROM --KIND--> TO'`, reports what it releases — the
+  claim it stops pinning, the review items it clears, and whether authority would refuse it —
+  then writes one withdrawal per `--as` agent. Authority is `retract`'s, read off the edge's own
+  attestations. `retracts` and `supersedes` edges are refused (exit 2).
+- **`resolve`** takes a contention id or a `rebuts` edge and records who reviewed it. A rebuttal a
+  thread presents is redirected to its contention's id, because resolving the edge would leave
+  the contention open and pinning. The same reviewer twice writes nothing.
+
+Both writers refuse a surface store — neither record has a surface form — and name the conversion
+(`smysl merge store.smy -o store.cbor`) rather than writing something the file would read back
+without. `--at` fixes the timestamp; otherwise it is the wall clock.
+
+**`retract` wrote nothing.** It applied the retraction to the in-memory copy `load_store` builds,
+printed "N unit(s) now read as unfounded", exited 0 and left the file byte for byte unchanged; a
+second run reported the same retraction as new. Found building `withdraw` on the same pattern. It
+now appends a `@rel … --retracts--> …` line to a surface store or a record to a CBOR log, and a
+second run says "already retracted" and writes nothing.
+
+Found writing the chapter: an edge argument must be quoted, or the shell reads `-->` as a
+redirection and creates a file named after the target.
+
+### R10 — merge is idempotent for every record type
+
+`merge(A, A)` re-appended records it already held: on a real staged batch of 157 records it added
+42 every time — the 41 label bindings and the schema declaration. `Store::append` skipped a record
+only if `Store::contains` recognised it, and `contains` matched nine record types by their own
+identity and answered "absent" for the rest: label bindings, schema declarations, pack info,
+unknown records, and — a gap in 1.4's own addition — attestations naming an edge's rid, which it
+looked for among units. Rule U says merge is idempotent; at the record level it was not.
+
+A store now keeps the BLAKE3 of every record's canonical encoding, and a record is present iff its
+hash is — one 32-byte hash per record, maintained wherever records are absorbed (`append`,
+`from_records`, `open`, `reindex`). Chosen over an arm per missing type because it is structural:
+a record type added later is recognised without anyone remembering to teach `contains` about it,
+which is exactly how this one was missed. It is also the only one of the two under which merge is
+commutative over records: a relation differing only in weight is a different record, and keying
+relations by their endpoints kept whichever variant arrived first. `from_records` holds a record
+given twice once; `open` keeps a log as it is on disk, since one written before this can hold
+duplicates. Two relation records that are one record by bytes but carry different in-memory
+attestations still union those attestations, as they did when the repeat was appended.
+
+Found with it: **label-collision detection never read a store's own label bindings**, only labels
+a caller passed in `MergeOptions`, so a library merge of two stores binding one label to different
+units reported no contention. It reads them now. The CLI passed its labels explicitly and was not
+affected.
+
+No wire, encoding or signature change; `make semver` is clean. Six tests in
+`crates/smysl-graph/tests/merge_idempotence.rs`, over a store holding every record type, a
+reopened file, associativity and commutativity, and reindex. Through the CLI, a store merged with
+itself three times stays 308 bytes; the 1.4 build before this grew it to 438 and then 698.
+
+### Three gaps in 1.4's own work
+
+- **Staged edges are attested.** `stage::prepare` attested units only, so an edge a model proposed
+  through `ingest` or a caller's staging committed with no record of who asserted it — the thing
+  edge attestations were added to tell apart. Each staged relation now carries an attestation by
+  its rid (`Attest::for_relation`), and `stage::read` keeps it while the reviewed text holds the
+  edge *and* both endpoints: editing a unit leaves the `@rel` line naming the old uid, so the rid is
+  unchanged while the edge points at content the tool never staged.
+- **`render` no longer shows a resolved contention as open.** It filtered on a contention's
+  recorded status; it reads the store's now, so a resolved contention, or one whose rebuttals were
+  withdrawn, is not surfaced under rule V2 as a standing disagreement.
+- **Repeats in a log written before R10 can be removed.** `open` keeps a log as it is on disk.
+  `compact` now removes records held more than once and says how many (`Compacted::duplicates`),
+  and `smysl compact` opens a CBOR log directly so it sees them.
+
+### Folded into the specification, with surface syntax and four implementations
+
+`SMYSL_FORMAT_SPEC.md` now states what the draft proposed: relation identity (§2.5), attestations
+naming a rid (§2.4), records 11 and 12 with their key tables (§3.1), withdrawal and live rebuttals
+(§6.1), contention identity (§6.2), resolution (§6.3), the C-Merge obligations (§7), and §8.1's
+permission for new keys in any record body and new reserved surface words. `SPEC_DRAFT_1.4.md` is
+kept for its reasoning and binds nothing. §8.1 also said an older reader reports a new record type
+as `SMY-W010`; it is `SMY-W014`.
+
+**`@withdraw` and `@resolve`** spell the two records, naming an edge as `from --kind--> to` or by
+its rid and a contention by its id, with `agent` and `ts: [wall_ms, counter]` as `@thread` has them.
+A writer that knows the edge spells it by its endpoints; a record whose clock names another agent,
+or that carries unknown keys, travels as CBOR only. `withdraw`, `resolve` and `retract` now write to
+a `.smy` store as appended lines in its own labels rather than refusing it. Both words are reserved:
+a 1.3 reader rejects a surface file that uses them, while the CBOR form reads everywhere.
+
+**Python, JavaScript and Go** name records 11 and 12, round-trip `fixtures/wire/F10-lifecycle.cbor`
+(a withdrawal, two resolutions, an attestation on a rid), and derive every vector in
+`fixtures/wire/relation-id/` and `fixtures/wire/contention-id/`, digest and text apart — four
+independent derivations of each identity before the format depends on it. The vectors gained
+`rid_hex` and `digest_hex` so an implementation without base32 can check the hash alone.
+`make spec-tables` holds §3.1 at codes 1–12 against all three.
+
+### Four more before the cut
+
+- **The TUI's contention pane reads the store's status.** It listed recorded contentions with no
+  status at all, so a resolved one looked like any other; it now shows each one's status as the
+  store reads it (open, resolved, stale) and how many items `review` would list.
+- **The implementations' versions track the crate's**, and are checked. `nodejs/` said 1.2.0 and
+  `python/` 0.9.0, the version it was written at; nothing compared either with the workspace.
+  `make dep-versions` now holds `python/pyproject.toml`, `nodejs/package.json` and
+  `nodejs/src/index.js` at the workspace version, and their READMEs say what 1.4 added.
+- **`SMYSL_ARCHITECTURE_RFC.md` describes 1.4**: relation identity and edge attestations, the
+  surface syntax, record-level idempotence, withdrawal, liveness, resolution and the review queue,
+  and the wire fixtures all four implementations read. Its header said crate 1.0.0.
+- **The manual's `withdraw` transcript is checked.** `make doc-output` split commands on spaces, so
+  the quoted edge argument read as a path that did not exist, and its guard against shell
+  redirection saw the `>` inside `-->`. It tokenises as the shell does now, and looks for
+  operators outside quotes: 91 transcripts replayed, one more than before.
+
+### From rust_smysl's 1.4 requests: R12, and a message
+
+`docs/smysl-requests-1.4.md` in rust_smysl lists R10–R15. R10 is above; R15 was already closed by
+the gist bound. R11, R13 and R14 are left open on purpose: rust_smysl's S2 experiment uses them as
+tasks, and fixing them here would spend them.
+
+- **R12 — an imported reading checks clean.** `from_csv` put every column in the gist, so a row of
+  seven columns, or three with a long test name, imported as a `measured` unit `smysl check`
+  refused with `SMY-E022` (measured at 48–62 tokens against a bound of 30). The gist is now the key
+  columns, then the values, cut at the bound on a cell boundary — or a word, when one key is longer
+  than the bound — with an ellipsis. Every cell is still in the payload. **Identity:** a gist that
+  already fit is unchanged, so importing an ordinary file gives the uids it always did; a row whose
+  gist was cut is a different unit from the one 1.3 produced, which never checked.
+- **The payload keeps the whole row.** It was hand-encoded with a map header that could not count
+  past 23 columns and a text head that could not say more than 255 bytes, so a wider row lost
+  columns and a longer cell was cut, silently, in the field documented as keeping the row verbatim.
+  It goes through the core's canonical encoder now, which also normalises to NFC; a test holds its
+  bytes identical to the old encoding wherever that encoding was right. A column named twice keeps
+  its first cell.
+- **`ingest.path: 42` names the problem.** A non-string value read as the empty string, and the
+  message said "`ingest.path` is ``". It says "is an integer" now.
+
+### What is carried
+
+- **Withdrawing `retracts` and `supersedes`**, and **reopening a resolved item** — both need rules of
+  their own (spec §6.1, §6.3).
+- **`ingest --granularity` choosing the profile units are checked under**, not only the recipe.
+- **`strip_echo` and prose preambles**, and **a recovered chunk's attempt history**.
+- **Whether flash-lite converges on surface template v5**, a live question.
+- **R11, R13 and R14** from rust_smysl — `import --format surface`, a configuration error's exit
+  code, and an unknown provider kind's message — kept open as tasks for its S2 experiment. R13's
+  premise is 1.3.0's line "the exit code is still 6": true of `ProviderError::exit_code`, not of the
+  CLI, which reports a configuration it cannot load and exits 1.
+- **OpenAI and Anthropic** remain unverified against their live endpoints.
 
 ---
 

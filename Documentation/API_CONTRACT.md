@@ -12,7 +12,7 @@ regretted, and three gates that each know what they are blind to.
 
 **What 1.0.0 promises**, precisely:
 
-- **The facade's 254 names at `--all-features`, 209 at `--no-default-features`.** None moves
+- **The facade's 260 names at `--all-features`, 215 at `--no-default-features`.** None moves
   without a 2.0. It was 244 at 1.0. 1.3 added ten — `PromptOverride`, `SourcePolicy`,
   `quote_support`, `quote_support_in`, `QuoteSupport`, `QUOTE_KEY`, `label_bindings`,
   `resolve_label`, `LabelError` and `dependents_via` — additions, which a minor version may
@@ -20,7 +20,9 @@ regretted, and three gates that each know what they are blind to.
   are stated on the function. The four quote names need no feature (they are from
   `smysl_core::quote`), which is why the pure count rose by four. 1.3 also added a `stage`
   feature, which is `stage`, `Staged`, `ceiling`, `recipe_short` and CSV import without the
-  provider layer; `ingest` implies it, so no name left `ingest`.
+  provider layer; `ingest` implies it, so no name left `ingest`. 1.4 added six —
+  `Withdrawal`, `Resolution`, `ResolutionTarget`, `review`, `ReviewItem` and `ReviewSubject` — all
+  needing no feature.
 - **Every public item in each of the eleven library crates** — they share one version, all are
   published, and `make semver` enforces each of them individually. That is the larger and
   truer figure, and §0.2 of `ROAD_TO_1.0.md` explains why it is the one that binds.
@@ -43,7 +45,7 @@ what had been assumed.
 
 | gate | sees | blind to |
 |---|---|---|
-| `tests/public-api.txt` (254 names) | every name the facade exports | anything *behind* a name: methods, signatures, variants |
+| `tests/public-api.txt` (260 names) | every name the facade exports | anything *behind* a name: methods, signatures, variants |
 | `make semver` | every item in each library crate, methods included, under the real semver rules | the facade — a `pub use` from another crate is a line it cannot expand |
 | `tests/public-api-counts.txt` (11 lines) | a crate's surface changing size | an addition and a removal that cancel |
 

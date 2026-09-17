@@ -20,6 +20,7 @@
 pub mod contention;
 pub mod policy;
 pub mod retraction;
+pub mod review;
 
 use std::collections::BTreeMap;
 
@@ -31,6 +32,7 @@ use crate::store::Store;
 pub use contention::DetectionContext;
 pub use policy::{RetractionAuthority, RetractionPolicy, SupersessionPolicy};
 pub use retraction::{effective_status, plan_retraction, EffectiveStatus, RetractionPlan};
+pub use review::{review, ReviewItem, ReviewSubject};
 
 /// How to merge.
 #[derive(Debug, Clone, Default)]

@@ -917,6 +917,59 @@ stake. If a retraction here looks smaller than you expected, check which
 policy the store you are working in was merged with before assuming the
 blast radius is wrong.
 
+#section("Reviewing a disagreement: review, withdraw, resolve")
+
+Merge detects disagreements and refuses to settle them. Since 1.4 there is a way for a person
+to: three commands, one list, and a rule that none of them decides anything on its own.
+
+`review` is the list. It holds every contention the store records or implies, and every live
+`rebuts` edge no contention already covers — a rebuttal nobody has threaded together is a
+disagreement in waiting, and until 1.4 nothing showed it to anyone.
+
+#screen(caption: "$ smysl review fixtures/corpus/F1-incident.smy")[
+```
+fixtures/corpus/F1-incident.smy: 1 item(s) open for review
+k/ccm3actwjjti65famnoe6mapo5d  live-rebuttal
+  b3:cvhirtgs2mpvli2ethhyeo32uf  The eu-west connection pool is saturated.
+  b3:phsoomklkmlq3sjvbe6cyuqy5v  The canary rules out a pure configuration cause.
+```
+]
+
+It exits 5 while anything is open. A reviewer who looks at it reaches one of three conclusions,
+and each already has a command:
+
+- **The claim is wrong.** `retract` it. Its rebuttal no longer has anything to rebut, and the
+  item leaves the list.
+- **The rebuttal is wrong.** `retract` the rebutting unit, or — when the unit is sound and only
+  the *edge* was a mistake, a model matching two statements that are not in fact opposed —
+  `withdraw` the edge. A withdrawn edge stays in the store and is no longer followed: not by
+  closure, lineage, detection or packing. A retracted or withdrawn rebuttal is no longer *live*,
+  and rule R binds only live rebuttals, so the claim stops dragging it into every pack.
+- **Both stand.** The disagreement is real, and `resolve` records that someone looked. The item
+  leaves the list; the rebuttal still travels with the claim, because a resolution decides
+  nothing.
+
+#screen(caption: "$ smysl withdraw --dry-run --as human:vladimir 'c/canary-clean --rebuts--> c/pool-saturation' fixtures/corpus/F1-incident.smy")[
+```
+fixtures/corpus/F1-incident.smy: b3:non46xtmidau7bqi2eg46byfz6  c/canary-clean --rebuts--> c/pool-saturation
+fixtures/corpus/F1-incident.smy:   b3:cvhirtgs2mpvli2ethhyeo32uf would no longer carry this rebuttal into a pack
+fixtures/corpus/F1-incident.smy:   1 item(s) would leave the review queue
+fixtures/corpus/F1-incident.smy:   would be refused: origin authority: none of the 1 requesting agent(s) attested this edge
+```
+]
+
+Quote the edge: unquoted, the shell reads `-->` as a redirection. The dry run reads the same
+way `retract`'s does — what would change, before anything does — and
+the same authority rule applies, read off the edge's own attestations rather than a unit's. An
+edge a model proposed and a reviewer confirmed carries both, which is what makes `origin`
+meaningful for edges at all.
+
+All three commands write to either kind of store. A `.smy` file gains a line in its own labels —
+`@withdraw c/canary-clean --rebuts--> c/pool-saturation { agent: human:vladimir, ts: […] }`,
+`@resolve …`, or `@rel … --retracts--> …` — appended, so what was there, comments included, is
+untouched. `retract` has written since 1.4: until then it applied the retraction to an in-memory
+copy, reported it as done, and left the file unchanged.
+
 #whatsnext[
   A retraction changes what a store *means* without changing a single
   byte of any other unit's declared content — which is exactly the kind of
@@ -987,4 +1040,8 @@ blast radius is wrong.
     merge time, Chapter 13 — governs *how far* an authorised retraction
     reaches, from fully transitive (`strict`) to recorded-but-inert
     (`ignore`).],
+  [`review` lists what is open; `retract`, `withdraw` and `resolve` are the
+    three outcomes of looking at it. Only a live rebuttal binds rule R, so a
+    retracted or withdrawn one releases its claim; a resolution records the
+    review and releases nothing.],
 ))

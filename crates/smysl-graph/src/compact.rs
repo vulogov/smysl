@@ -21,7 +21,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use smysl_core::{canonical_uid, Record, RelKind, Uid};
+use smysl_core::{canonical_uid, hash_bytes, to_cbor, Record, RelKind, Uid};
 
 use crate::store::Store;
 
@@ -40,11 +40,15 @@ pub struct Compacted {
     /// the thing it retracts, or compaction becomes a way to un-retract.
     pub retracted: BTreeSet<Uid>,
     pub records_before: usize,
+    /// Records the log held more than once, removed. A log merged with itself before 1.4's R10
+    /// fix grew by its label bindings, schema declarations and edge attestations on every merge;
+    /// `open` keeps such a log as it is on disk, and this is where the repeats go.
+    pub duplicates: usize,
 }
 
 impl Compacted {
     pub fn is_empty(&self) -> bool {
-        self.dropped.is_empty()
+        self.dropped.is_empty() && self.duplicates == 0
     }
 
     /// Records removed.
@@ -71,6 +75,14 @@ pub fn compact(store: &Store) -> Compacted {
         records_before: store.iter().count(),
         ..Compacted::default()
     };
+    // Exact repeats first: the same record twice is one record, whatever else is dropped.
+    let mut seen = BTreeSet::new();
+    let base: Vec<Record> = store
+        .iter()
+        .filter(|r| seen.insert(hash_bytes(&to_cbor(r))))
+        .cloned()
+        .collect();
+    out.duplicates = out.records_before - base.len();
 
     // A unit is superseded when something supersedes it and that successor is still here.
     // A successor that is itself missing means the replacement never arrived, and dropping
@@ -82,7 +94,7 @@ pub fn compact(store: &Store) -> Compacted {
         }
     }
     if superseded.is_empty() {
-        out.records = store.iter().cloned().collect();
+        out.records = base;
         return out;
     }
 
@@ -123,7 +135,7 @@ pub fn compact(store: &Store) -> Compacted {
         .collect();
 
     if out.dropped.is_empty() {
-        out.records = store.iter().cloned().collect();
+        out.records = base;
         return out;
     }
 
@@ -131,15 +143,14 @@ pub fn compact(store: &Store) -> Compacted {
     // touch them. An orphaned edge would fail integrity, so leaving one behind would trade
     // a smaller store for a broken one.
     let keep_unit = |u: &Uid| !out.dropped.contains(u);
-    out.records = store
-        .iter()
+    out.records = base
+        .into_iter()
         .filter(|r| match r {
             Record::Unit(core) => keep_unit(&canonical_uid(core)),
             Record::Relation(rel) => keep_unit(&rel.from) && keep_unit(&rel.to),
             Record::Attestation(a) => keep_unit(&a.uid),
             _ => true,
         })
-        .cloned()
         .collect();
 
     out

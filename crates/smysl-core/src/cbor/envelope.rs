@@ -21,6 +21,7 @@ use crate::types::annex::{
     PackInfo, PackMode, SchemaDecl,
 };
 use crate::types::epistemics::{Date, Lod, SourceKind, SourceRef, Status};
+use crate::types::lifecycle::{Resolution, ResolutionTarget, Withdrawal};
 use crate::types::provenance::{Attestation, Hlc, Op, Rung};
 use crate::types::record::{code, Record};
 use crate::types::relation::{RelKind, Relation};
@@ -297,6 +298,33 @@ fn dec_label_binding(d: &mut Dec<'_>) -> Res<LabelBinding> {
     })
 }
 
+fn withdrawal_bytes(w: &Withdrawal) -> Vec<u8> {
+    let mut m = MapBuilder::new();
+    m.put(keys::withdrawal::RELATION, |e| e.uid(&w.relation));
+    m.put(keys::withdrawal::AGENT, |e| e.text(w.agent.as_str()));
+    m.put(keys::withdrawal::TS, |e| enc_hlc(e, &w.ts));
+    m.put_opt(keys::withdrawal::REASON, w.reason.as_ref(), |e, u| e.uid(u));
+    m.put_extra(&w.extra);
+    m.into_bytes()
+}
+
+fn resolution_bytes(r: &Resolution) -> Vec<u8> {
+    let mut m = MapBuilder::new();
+    match &r.target {
+        ResolutionTarget::Contention(id) => {
+            m.put(keys::resolution::CONTENTION, |e| e.text(id.as_str()));
+        }
+        ResolutionTarget::Relation(rid) => {
+            m.put(keys::resolution::RELATION, |e| e.uid(rid));
+        }
+    }
+    m.put(keys::resolution::AGENT, |e| e.text(r.agent.as_str()));
+    m.put(keys::resolution::TS, |e| enc_hlc(e, &r.ts));
+    m.put_opt(keys::resolution::NOTE, r.note.as_ref(), |e, u| e.uid(u));
+    m.put_extra(&r.extra);
+    m.into_bytes()
+}
+
 /// Encode one record as a complete envelope.
 pub fn to_cbor(r: &Record) -> Vec<u8> {
     let payload = match r {
@@ -309,6 +337,8 @@ pub fn to_cbor(r: &Record) -> Vec<u8> {
         Record::PackInfo(p) => packinfo_bytes(p),
         Record::SchemaDecl(d) => schema_decl_bytes(d),
         Record::LabelBinding(b) => label_binding_bytes(b),
+        Record::Withdrawal(w) => withdrawal_bytes(w),
+        Record::Resolution(r) => resolution_bytes(r),
         Record::Unknown { payload, .. } => payload.clone(),
     };
     let mut e = Enc::with_capacity(payload.len() + 4);
@@ -943,6 +973,92 @@ fn dec_schema_decl(d: &mut Dec<'_>) -> Res<SchemaDecl> {
     })
 }
 
+fn dec_withdrawal(d: &mut Dec<'_>) -> Res<Withdrawal> {
+    let at = d.position();
+    let mut relation = None;
+    let mut agent = None;
+    let mut ts = None;
+    let mut reason = None;
+    let mut extra = Extra::new();
+
+    read_map(d, &mut extra, |d, k| match k {
+        keys::withdrawal::RELATION => {
+            relation = Some(d.uid()?);
+            Ok(true)
+        }
+        keys::withdrawal::AGENT => {
+            agent = Some(AgentId::new(d.text()?).map_err(|_| bad(at))?);
+            Ok(true)
+        }
+        keys::withdrawal::TS => {
+            ts = Some(dec_hlc(d)?);
+            Ok(true)
+        }
+        keys::withdrawal::REASON => {
+            reason = Some(d.uid()?);
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+
+    Ok(Withdrawal {
+        relation: relation.ok_or_else(|| bad(at))?,
+        agent: agent.ok_or_else(|| bad(at))?,
+        ts: ts.ok_or_else(|| bad(at))?,
+        reason,
+        extra,
+    })
+}
+
+fn dec_resolution(d: &mut Dec<'_>) -> Res<Resolution> {
+    let at = d.position();
+    let mut contention = None;
+    let mut relation = None;
+    let mut agent = None;
+    let mut ts = None;
+    let mut note = None;
+    let mut extra = Extra::new();
+
+    read_map(d, &mut extra, |d, k| match k {
+        keys::resolution::CONTENTION => {
+            contention = Some(ContentionId::new(d.text()?).map_err(|_| bad(at))?);
+            Ok(true)
+        }
+        keys::resolution::RELATION => {
+            relation = Some(d.uid()?);
+            Ok(true)
+        }
+        keys::resolution::AGENT => {
+            agent = Some(AgentId::new(d.text()?).map_err(|_| bad(at))?);
+            Ok(true)
+        }
+        keys::resolution::TS => {
+            ts = Some(dec_hlc(d)?);
+            Ok(true)
+        }
+        keys::resolution::NOTE => {
+            note = Some(d.uid()?);
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+
+    // Exactly one target. Both or neither cannot be re-encoded to what was read as a resolution
+    // of one thing, so it is rejected rather than defaulted.
+    let target = match (contention, relation) {
+        (Some(c), None) => ResolutionTarget::Contention(c),
+        (None, Some(r)) => ResolutionTarget::Relation(r),
+        _ => return Err(bad(at)),
+    };
+    Ok(Resolution {
+        target,
+        agent: agent.ok_or_else(|| bad(at))?,
+        ts: ts.ok_or_else(|| bad(at))?,
+        note,
+        extra,
+    })
+}
+
 /// Decode one record envelope, returning it and the number of bytes consumed.
 pub fn from_cbor(bytes: &[u8]) -> Res<(Record, usize)> {
     let mut d = Dec::new(bytes);
@@ -961,6 +1077,8 @@ pub fn from_cbor(bytes: &[u8]) -> Res<(Record, usize)> {
         code::PACK_INFO => Record::PackInfo(dec_packinfo(&mut d)?),
         code::SCHEMA_DECL => Record::SchemaDecl(dec_schema_decl(&mut d)?),
         code::LABEL_BINDING => Record::LabelBinding(dec_label_binding(&mut d)?),
+        code::WITHDRAWAL => Record::Withdrawal(dec_withdrawal(&mut d)?),
+        code::RESOLUTION => Record::Resolution(dec_resolution(&mut d)?),
         other => {
             // `SMY-W014`: preserved verbatim, skipped semantically. The payload is parsed
             // strictly, so an unknown record cannot smuggle in a non-deterministic encoding.

@@ -173,6 +173,8 @@ def test_record_type_codes_match_the_table_in_3_1():
         8: "schema_decl",
         9: "checkpoint",
         10: "label_binding",
+        11: "withdrawal",
+        12: "resolution",
     }
 
 

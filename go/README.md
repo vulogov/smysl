@@ -75,3 +75,13 @@ representation, but both are decisions an implementer has to reach on their own.
 `uint64` for unsigned and `int64` for negative, so a round trip preserves the encoding rather
 than the host type. An implementation that decoded everything to `int` would re-encode a large
 value differently and fail C-Read for a reason that has nothing to do with the format.
+
+## Since 1.4: the identities a withdrawal and a resolution depend on
+
+Records 11 (withdrawal) and 12 (resolution) are named and round-trip, carried by
+`fixtures/wire/F10-lifecycle.cbor`. The implementation also derives the two identities they name
+things by — a relation's rid (§2.5) and a contention's id (§6.2) — and reproduces every vector in
+`fixtures/wire/relation-id/` and `fixtures/wire/contention-id/`, digest and text checked apart. They
+matched the Rust on the first run, which is the point of checking: four derivations of each before
+the format depended on them. The package version tracks the crate's, and `make dep-versions` holds
+it there.

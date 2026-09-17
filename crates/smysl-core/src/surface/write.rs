@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use crate::ids::{Label, Uid};
 use crate::surface::hjson::{HObject, HValue};
 use crate::surface::payload::payload_to_object;
+use crate::types::lifecycle::{Resolution, ResolutionTarget, Withdrawal};
 use crate::types::relation::Relation;
 use crate::types::thread::Thread;
 use crate::types::unit::UnitCore;
@@ -31,6 +32,10 @@ pub struct WriteContext {
     /// built from CBOR, where the wire carries no version — should say. Set it from
     /// `ParseOutcome::format_version` to re-emit a document as the version it arrived as.
     pub format_version: String,
+    /// Relations known by rid beyond the records being written (1.4), so a `@withdraw` or
+    /// `@resolve` whose edge is not among them can still be spelled `from --kind--> to` rather
+    /// than as a bare rid. Relations in the records are always known.
+    pub relations: BTreeMap<Uid, Relation>,
 }
 
 impl WriteContext {
@@ -51,7 +56,19 @@ impl WriteContext {
             labels: out,
             salience: BTreeMap::new(),
             format_version: crate::FORMAT_VERSION_DEFAULT.to_string(),
+            relations: BTreeMap::new(),
         }
+    }
+
+    /// Make these relations nameable by their endpoints.
+    pub fn with_relations<'a>(
+        mut self,
+        relations: impl IntoIterator<Item = &'a Relation>,
+    ) -> WriteContext {
+        for r in relations {
+            self.relations.insert(r.uid(), r.clone());
+        }
+        self
     }
 
     /// Emit the version a document declared, rather than the one this build prefers.
@@ -94,11 +111,29 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
             }
         }
     }
+    let mut known = ctx.relations.clone();
+    for r in records {
+        if let Record::Relation(rel) = r {
+            known.insert(rel.uid(), rel.clone());
+        }
+    }
     for r in records {
         match r {
             Record::Unit(u) => write_unit(&mut out, u, ctx),
             Record::Relation(rel) => write_relation(&mut out, rel, ctx),
             Record::Thread(t) => write_thread(&mut out, t, ctx),
+            _ => {}
+        }
+    }
+    // After everything they can name, where the parser emits them.
+    for r in records {
+        match r {
+            Record::Withdrawal(w) if withdrawal_has_surface_form(w) => {
+                write_withdrawal(&mut out, w, &known, ctx)
+            }
+            Record::Resolution(res) if resolution_has_surface_form(res) => {
+                write_resolution(&mut out, res, &known, ctx)
+            }
             // Records with no surface form travel as CBOR only.
             _ => {}
         }
@@ -117,6 +152,72 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
 /// was read.
 pub fn schema_decl_has_surface_form(d: &crate::types::annex::SchemaDecl) -> bool {
     d.payload_shape.is_none() && d.extra.is_empty()
+}
+
+/// Whether a withdrawal can be spelled `@withdraw` without losing anything: no keys a later version
+/// added, and a clock whose agent is the withdrawing one, since surface text writes one agent.
+pub fn withdrawal_has_surface_form(w: &Withdrawal) -> bool {
+    w.extra.is_empty() && w.ts.agent == w.agent
+}
+
+/// Whether a resolution can be spelled `@resolve`, on the same terms as a withdrawal.
+pub fn resolution_has_surface_form(r: &Resolution) -> bool {
+    r.extra.is_empty() && r.ts.agent == r.agent
+}
+
+/// An edge by its endpoints when the writer knows it, else by its rid.
+fn edge(rid: &Uid, known: &BTreeMap<Uid, Relation>, ctx: &WriteContext) -> String {
+    match known.get(rid) {
+        Some(r) => format!(
+            "{} --{}--> {}",
+            ctx.reference(&r.from),
+            r.kind,
+            ctx.reference(&r.to)
+        ),
+        None => rid.canonical(),
+    }
+}
+
+fn write_withdrawal(
+    out: &mut String,
+    w: &Withdrawal,
+    known: &BTreeMap<Uid, Relation>,
+    ctx: &WriteContext,
+) {
+    out.push_str(&format!(
+        "@withdraw {} {{ agent: {}, ts: [{}, {}]",
+        edge(&w.relation, known, ctx),
+        quoteless_or_quoted(w.agent.as_str()),
+        w.ts.wall_ms,
+        w.ts.counter
+    ));
+    if let Some(u) = &w.reason {
+        out.push_str(&format!(", reason: {}", ctx.reference(u)));
+    }
+    out.push_str(" }\n\n");
+}
+
+fn write_resolution(
+    out: &mut String,
+    r: &Resolution,
+    known: &BTreeMap<Uid, Relation>,
+    ctx: &WriteContext,
+) {
+    let target = match &r.target {
+        ResolutionTarget::Contention(id) => id.as_str().to_string(),
+        ResolutionTarget::Relation(rid) => edge(rid, known, ctx),
+    };
+    out.push_str(&format!(
+        "@resolve {} {{ agent: {}, ts: [{}, {}]",
+        target,
+        quoteless_or_quoted(r.agent.as_str()),
+        r.ts.wall_ms,
+        r.ts.counter
+    ));
+    if let Some(u) = &r.note {
+        out.push_str(&format!(", note: {}", ctx.reference(u)));
+    }
+    out.push_str(" }\n\n");
 }
 
 fn write_schema_decl(out: &mut String, d: &crate::types::annex::SchemaDecl) {

@@ -11,8 +11,9 @@ use smysl_core::{
     canonical_uid, from_cbor, from_cbor_seq, to_cbor, to_cbor_seq, AgentId, Attestation,
     Contention, ContentionId, ContentionStatus, Date, Detected, DetectionKind, DropReason,
     GranularityProfile, Hlc, KernelType, LangTag, Lod, Op, Optimality, PackInfo, PackMode, Record,
-    RelKind, Relation, Role, Rung, SchemaDecl, SchemaId, SourceKind, SourceRef, Status, Step,
-    Thread, ThreadId, ThreadSchema, Uid, UnitCore, UnitCoreBuilder, View, ViewId,
+    RelKind, Relation, Resolution, ResolutionTarget, Role, Rung, SchemaDecl, SchemaId, SourceKind,
+    SourceRef, Status, Step, Thread, ThreadId, ThreadSchema, Uid, UnitCore, UnitCoreBuilder, View,
+    ViewId, Withdrawal,
 };
 
 fn uid(n: u8) -> Uid {
@@ -122,6 +123,41 @@ fn corpus() -> Vec<Record> {
             payload: vec![0xA1, 0x00, 0x01],
         },
     ]
+}
+
+/// 1.4's records, kept out of `corpus()`: its encoding is a golden file other
+/// implementations compare against, and adding to it would move their fixture too.
+fn lifecycle_records() -> Vec<Record> {
+    vec![
+        Record::Withdrawal(Withdrawal::new(uid(11), agent(), hlc())),
+        Record::Withdrawal(Withdrawal::new(uid(11), agent(), hlc()).with_reason(uid(12))),
+        Record::Resolution(
+            Resolution::new(
+                ResolutionTarget::Contention(ContentionId::new("k/pool-vs-index").unwrap()),
+                agent(),
+                hlc(),
+            )
+            .with_note(uid(13)),
+        ),
+        Record::Resolution(Resolution::new(
+            ResolutionTarget::Relation(uid(14)),
+            agent(),
+            hlc(),
+        )),
+    ]
+}
+
+#[test]
+fn withdrawals_and_resolutions_round_trip_byte_for_byte() {
+    for r in lifecycle_records() {
+        let bytes = to_cbor(&r);
+        let (back, n) = from_cbor(&bytes).unwrap_or_else(|e| panic!("{}: {e}", r.type_name()));
+        assert_eq!(n, bytes.len());
+        assert_eq!(back, r, "{}", r.type_name());
+        assert_eq!(to_cbor(&back), bytes, "{}", r.type_name());
+    }
+    let c = lifecycle_records();
+    assert_eq!(from_cbor_seq(&to_cbor_seq(&c)).unwrap().0, c);
 }
 
 #[test]
@@ -595,4 +631,77 @@ fn unicode_form_never_reaches_a_uid() {
     let (r, n) = smysl_core::from_cbor(&folded).expect("decodes");
     assert_eq!(n, folded.len());
     assert_eq!(smysl_core::to_cbor(&r), folded);
+}
+
+/// A resolution names exactly one thing. Both targets, or neither, is not a resolution of
+/// anything that can be re-encoded as it was read, so the decoder refuses it.
+#[test]
+fn a_resolution_with_two_targets_or_none_is_rejected() {
+    let one = to_cbor(&Record::Resolution(Resolution::new(
+        ResolutionTarget::Relation(uid(14)),
+        agent(),
+        hlc(),
+    )));
+    // Map of four entries: {1: rid, 2: agent, 3: ts}. Swap in a contention id at key 0 and
+    // drop the relation, then add both.
+    let body_start = 2; // [12, {...}]: array head, then the code
+    assert_eq!(one[0], 0x82);
+    assert_eq!(one[1], 12);
+    assert_eq!(one[body_start], 0xA3, "three keys");
+
+    let mut none = one.clone();
+    // Remove key 1 and its 32-byte value: 1 byte key, 2 bytes byte-string head, 32 bytes.
+    none[body_start] = 0xA2;
+    none.drain(body_start + 1..body_start + 1 + 1 + 2 + 32);
+    assert!(from_cbor(&none).is_err(), "no target");
+
+    let id = "k/pool-vs-index";
+    let mut both = vec![0x82, 12, 0xA4, 0x00, 0x60 | id.len() as u8];
+    both.extend_from_slice(id.as_bytes());
+    both.extend_from_slice(&one[body_start + 1..]);
+    assert!(from_cbor(&both).is_err(), "two targets");
+}
+
+/// Spec §8.1 (1.4 draft §6): a key above a record body's highest known key is preserved
+/// verbatim in every record body, not only the unit core and the header. Relations,
+/// withdrawals and resolutions are the bodies 1.4 expects to grow.
+#[test]
+fn an_unknown_key_survives_in_relation_withdrawal_and_resolution_bodies() {
+    let cases = [
+        (
+            Record::Relation(Relation::new(RelKind::Rebuts, uid(1), uid(2))),
+            3u8,
+            9u8,
+        ),
+        (
+            Record::Withdrawal(Withdrawal::new(uid(3), agent(), hlc())),
+            3,
+            7,
+        ),
+        (
+            Record::Resolution(Resolution::new(
+                ResolutionTarget::Relation(uid(4)),
+                agent(),
+                hlc(),
+            )),
+            3,
+            9,
+        ),
+    ];
+    for (record, known, extra_key) in cases {
+        let mut bytes = to_cbor(&record);
+        assert_eq!(bytes[2], 0xA0 | known, "{}: three keys", record.type_name());
+        bytes[2] = 0xA0 | (known + 1);
+        bytes.extend_from_slice(&[extra_key, 0x01]); // {…, extra_key: 1}
+
+        let (back, n) = from_cbor(&bytes).unwrap_or_else(|e| panic!("{}: {e}", record.type_name()));
+        assert_eq!(n, bytes.len());
+        assert_ne!(back, record, "{}: the key was dropped", record.type_name());
+        assert_eq!(
+            to_cbor(&back),
+            bytes,
+            "{}: not verbatim",
+            record.type_name()
+        );
+    }
 }

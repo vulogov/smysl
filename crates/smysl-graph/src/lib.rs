@@ -27,9 +27,13 @@ pub use lineage::{
     dependents, dependents_via, diff, hop_diff, membership, trace, AgentActivity, HopDiff, Lineage,
     LineageNode, RecipeChange, RecipeChangeKind, StoreDiff, TraceKind, Via,
 };
+// The function only: `merge::review` also names the module, and re-exporting both put `review`
+// in the facade twice.
+pub use merge::review::review;
 pub use merge::{
     effective_status, merge, plan_retraction, DetectionContext, EffectiveStatus, MergeOptions,
-    MergeReport, RetractionAuthority, RetractionPlan, RetractionPolicy, SupersessionPolicy,
+    MergeReport, RetractionAuthority, RetractionPlan, RetractionPolicy, ReviewItem, ReviewSubject,
+    SupersessionPolicy,
 };
 pub use salience::{
     salience, view_roots, SalienceReport, SalienceRequest, SalienceTerms, SalienceWeights,

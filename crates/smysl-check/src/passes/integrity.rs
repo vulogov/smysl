@@ -11,8 +11,31 @@ use smysl_graph::{cycles, Adjacency, EdgeKind, EdgeSet, Store};
 /// Run the pass.
 pub fn run(store: &Store, report: &mut Report) {
     dangling(store, report);
+    unwithdrawable(store, report);
     support_cycles(store.adjacency(), report);
     causal_cycles(store.adjacency(), report);
+}
+
+/// `SMY-W056` - a withdrawal naming a `retracts` or `supersedes` edge.
+///
+/// Honouring one would un-retract a unit or change what a superseded unit's dependents rebind
+/// to, and 1.4 has rules for neither. The withdrawal is kept and ignored, which a reader would
+/// otherwise have no way to learn: the edge simply goes on applying.
+fn unwithdrawable(store: &Store, report: &mut Report) {
+    for w in store.withdrawals() {
+        if let Some(rel) = store.relation_by_id(&w.relation) {
+            if rel.kind.is_lifecycle() {
+                report.push(
+                    Diagnostic::new(Code::W056)
+                        .with_subject(Subject::Unit(rel.to))
+                        .with_message(format!(
+                            "{} withdrew a `{}` edge; it cannot be withdrawn and still applies",
+                            w.agent, rel.kind
+                        )),
+                );
+            }
+        }
+    }
 }
 
 /// `SMY-E060` - a reference that points at nothing in this store.
@@ -111,6 +134,39 @@ mod tests {
         let mut r = Report::new();
         run(&store, &mut r);
         r
+    }
+
+    /// A withdrawn `rebuts` edge is silent; a withdrawn retraction says it did nothing.
+    #[test]
+    fn withdrawing_a_retraction_is_reported_and_withdrawing_a_rebuttal_is_not() {
+        let who = smysl_core::AgentId::new("human:reviewer").unwrap();
+        let ts = smysl_core::Hlc::new(1, 0, who.clone());
+        let a = claim("a", vec![]);
+        let b = claim("b", vec![]);
+        let (ua, ub) = (canonical_uid(&a), canonical_uid(&b));
+        let rebuts = Relation::new(RelKind::Rebuts, ub, ua);
+        let retracts = Relation::new(RelKind::Retracts, ua, ua);
+        let withdraw = |r: &Relation| {
+            Record::Withdrawal(smysl_core::Withdrawal::new(
+                r.uid(),
+                who.clone(),
+                ts.clone(),
+            ))
+        };
+        let base = vec![
+            Record::Unit(a),
+            Record::Unit(b),
+            Record::Relation(rebuts.clone()),
+            Record::Relation(retracts.clone()),
+        ];
+
+        let mut quiet = base.clone();
+        quiet.push(withdraw(&rebuts));
+        assert_eq!(check(quiet).count(Code::W056), 0);
+
+        let mut loud = base;
+        loud.push(withdraw(&retracts));
+        assert_eq!(check(loud).count(Code::W056), 1);
     }
 
     #[test]

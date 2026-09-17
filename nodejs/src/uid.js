@@ -281,3 +281,42 @@ export function uidShort(bytes) {
 export function toHex(bytes) {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+// -- §2.5 relation identity and §6.2 contention identity (1.4) --------------------------------
+
+/**
+ * §2.5. The rid a withdrawal and an edge attestation name a relation by:
+ * `BLAKE3(0x03 ‖ kind name ‖ 0x00 ‖ from ‖ to)`. `kind` is the name — `rebuts`,
+ * `x.verify/supports` — however the record encodes it.
+ */
+export function relationId(kind, from, to) {
+  if (from.length !== 32 || to.length !== 32) {
+    throw new RangeError("relation endpoints are 32-byte uids");
+  }
+  const name = new TextEncoder().encode(kind);
+  if (name.includes(0)) {
+    throw new RangeError("a relation kind name cannot contain NUL");
+  }
+  const pre = new Uint8Array(1 + name.length + 1 + 64);
+  pre[0] = 0x03;
+  pre.set(name, 1);
+  pre.set(from, name.length + 2);
+  pre.set(to, name.length + 34);
+  return blake3(pre);
+}
+
+/**
+ * §6.2. A contention's id: `"k/c"` and the first 130 bits of
+ * `BLAKE3(kind byte ‖ over ‖ positions)`, positions sorted and deduplicated. Returns the digest
+ * and the id, so a mismatch says which half disagreed.
+ */
+export function contentionId(kind, over, positions) {
+  const byHex = new Map(positions.map((p) => [toHex(p), p]));
+  const ordered = [...byHex.keys()].sort().map((h) => byHex.get(h));
+  const pre = new Uint8Array(1 + 32 + 32 * ordered.length);
+  pre[0] = kind;
+  pre.set(over, 1);
+  ordered.forEach((p, i) => pre.set(p, 33 + 32 * i));
+  const digest = blake3(pre);
+  return { digest, id: "k/c" + uidShort(digest).slice(3) };
+}

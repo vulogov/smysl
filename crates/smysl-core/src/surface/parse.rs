@@ -18,12 +18,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::diag::{Code, Diagnostic, Span, Subject};
 use crate::error::ParseError;
 use crate::hash::canonical_uid;
-use crate::ids::{AgentId, Label, LangTag, SchemaId, ThreadId, Uid, ViewId};
+use crate::ids::{AgentId, ContentionId, Label, LangTag, SchemaId, ThreadId, Uid, ViewId};
 use crate::surface::hjson::{parse_object_prefix, HObject, HValue, Spanned};
 use crate::surface::lex::{arrow_len, find_arrow, lex, Line, LineClass};
 use crate::surface::payload::object_to_payload;
 use crate::types::annex::SchemaDecl;
 use crate::types::epistemics::{Date, SourceKind, SourcePolicy, SourceRef, Status};
+use crate::types::lifecycle::{Resolution, ResolutionTarget, Withdrawal};
 use crate::types::provenance::Hlc;
 use crate::types::relation::{RelKind, Relation};
 use crate::types::thread::{Role, Step, Thread, ThreadSchema};
@@ -162,6 +163,30 @@ struct RawRelation {
     span: Span,
 }
 
+/// What `@withdraw` or `@resolve` names, as authored.
+enum RawTarget {
+    /// `from --kind--> to`, resolved to a rid once every label is known.
+    Edge {
+        kind: RelKind,
+        from: Spanned<Ref>,
+        to: Spanned<Ref>,
+    },
+    /// A rid, written out.
+    Rid(Uid),
+    /// A contention id (`@resolve` only).
+    Contention(ContentionId),
+}
+
+struct RawLifecycle {
+    withdraw: bool,
+    target: RawTarget,
+    agent: AgentId,
+    ts: Hlc,
+    /// `reason:` on a withdrawal, `note:` on a resolution.
+    unit: Option<Spanned<Ref>>,
+    span: Span,
+}
+
 struct RawThread {
     id: ThreadId,
     schema: ThreadSchema,
@@ -215,6 +240,7 @@ pub fn parse_surface_with(src: &str, opts: &ParseOptions) -> Result<ParseOutcome
         relations: Vec::new(),
         threads: Vec::new(),
         schemas: Vec::new(),
+        lifecycle: Vec::new(),
         view: None,
     };
     p.run()?;
@@ -231,6 +257,7 @@ struct Parser<'a> {
     relations: Vec<RawRelation>,
     threads: Vec<RawThread>,
     schemas: Vec<SchemaDecl>,
+    lifecycle: Vec<RawLifecycle>,
     view: Option<RawView>,
 }
 
@@ -289,6 +316,12 @@ impl<'a> Parser<'a> {
                 LineClass::SchemaStart => {
                     if let Some(d) = self.schema_decl() {
                         self.schemas.push(d);
+                    }
+                }
+                LineClass::WithdrawStart | LineClass::ResolveStart => {
+                    let withdraw = l.class == LineClass::WithdrawStart;
+                    if let Some(r) = self.lifecycle_record(withdraw) {
+                        self.lifecycle.push(r);
                     }
                 }
                 _ => {
@@ -375,6 +408,144 @@ impl<'a> Parser<'a> {
             return None;
         }
         Some(decl)
+    }
+
+    /// `@withdraw <edge> { agent, ts[, reason] }` and `@resolve <item> { agent, ts[, note] }` (1.4).
+    ///
+    /// The edge is `from --kind--> to`, as `@rel` writes it, or its rid; a resolution may name a
+    /// contention id instead. `agent` and `ts` are required — a withdrawal or a review is an act
+    /// by someone at some time, and a default for either would invent one — and, as for `@thread`,
+    /// `ts` is `[wall_ms, counter]` with the agent as the clock's. Any other key is an error: the
+    /// likeliest one is `note:` on a withdrawal, which, passed over, would drop the reason.
+    fn lifecycle_record(&mut self, withdraw: bool) -> Option<RawLifecycle> {
+        let l = self.lines[self.i];
+        let word = if withdraw { "@withdraw" } else { "@resolve" };
+        let rest = l.text.strip_prefix(word).unwrap_or("").trim_start();
+        let target_txt = match rest.find('{') {
+            Some(p) => rest[..p].trim(),
+            None => {
+                self.err(
+                    Code::E001,
+                    l.span,
+                    format!("`{word}` needs a header with `agent` and `ts`"),
+                );
+                self.recover();
+                return None;
+            }
+        };
+
+        let target = if let Some(open) = target_txt.find("--") {
+            let after = &target_txt[open + 2..];
+            let Some(close) = after.find("-->") else {
+                self.err(Code::E001, l.span, "the edge is missing `-->`");
+                self.recover();
+                return None;
+            };
+            let kind_txt = after[..close].trim();
+            let kind = match RelKind::parse(kind_txt) {
+                Ok(k) => k,
+                Err(_) => {
+                    self.err(
+                        Code::W013,
+                        l.span,
+                        format!("unknown relation kind `{kind_txt}`"),
+                    );
+                    RelKind::Extension(kind_txt.to_string())
+                }
+            };
+            let (Some(from), Some(to)) = (
+                self.reference(target_txt[..open].trim(), l.span),
+                self.reference(after[close + 3..].trim(), l.span),
+            ) else {
+                self.recover();
+                return None;
+            };
+            RawTarget::Edge { kind, from, to }
+        } else if target_txt.starts_with(Uid::PREFIX) {
+            match Uid::parse(target_txt) {
+                Ok(u) => RawTarget::Rid(u),
+                Err(_) => {
+                    self.err(
+                        Code::E001,
+                        l.span,
+                        format!("`{target_txt}` is not a full rid"),
+                    );
+                    self.recover();
+                    return None;
+                }
+            }
+        } else if let (false, Ok(id)) = (withdraw, ContentionId::new(target_txt)) {
+            RawTarget::Contention(id)
+        } else {
+            let what = if withdraw {
+                "an edge, as `from --kind--> to` or its rid"
+            } else {
+                "a contention id, or an edge as `from --kind--> to` or its rid"
+            };
+            self.err(
+                Code::E001,
+                l.span,
+                format!("`{word}` names {what}; `{target_txt}` is neither"),
+            );
+            self.recover();
+            return None;
+        };
+
+        let Ok((mut header, header_span)) = self.header_object(l) else {
+            self.recover();
+            return None;
+        };
+        self.advance_past(header_span.end.max(l.span.end));
+
+        let Some(agent) = header
+            .take("agent")
+            .and_then(|v| v.value.as_str().and_then(|s| AgentId::new(s).ok()))
+        else {
+            self.err(
+                Code::E001,
+                l.span,
+                format!("`{word}` needs a valid `agent`"),
+            );
+            return None;
+        };
+        let Some(ts) = header.take("ts").and_then(|v| self.hlc(&v, &agent)) else {
+            self.err(
+                Code::E001,
+                l.span,
+                format!("`{word}` needs `ts: [wall_ms, counter]`"),
+            );
+            return None;
+        };
+        let key = if withdraw { "reason" } else { "note" };
+        let unit = match header.take(key) {
+            None => None,
+            Some(v) => match v.value.as_str().and_then(parse_ref) {
+                Some(r) => Some(Spanned::new(r, v.span)),
+                None => {
+                    self.err(Code::E001, v.span, format!("`{key}` names a unit"));
+                    return None;
+                }
+            },
+        };
+        if let Some((k, _)) = header.iter().next() {
+            self.err(
+                Code::E001,
+                k.span,
+                format!(
+                    "`{word}` has no key `{}`; it takes `agent`, `ts` and `{key}`",
+                    k.value
+                ),
+            );
+            return None;
+        }
+        Some(RawLifecycle {
+            withdraw,
+            target,
+            agent,
+            ts,
+            unit,
+            span: l.span,
+        })
     }
 
     /// A list where every item must parse — a declaration that silently lost a relation kind
@@ -1293,6 +1464,45 @@ impl<'a> Parser<'a> {
                 )
                 .with_steps(steps),
             ));
+        }
+
+        // Withdrawals and resolutions last: they name edges and units, and a reader meets what
+        // they act on first. The writer keeps them in the same place.
+        for r in std::mem::take(&mut self.lifecycle) {
+            let target = match &r.target {
+                RawTarget::Edge { kind, from, to } => {
+                    let (Some(f), Some(t)) = (
+                        lookup(&from.value, &mut self.out, r.span),
+                        lookup(&to.value, &mut self.out, r.span),
+                    ) else {
+                        continue;
+                    };
+                    ResolutionTarget::Relation(Relation::new(kind.clone(), f, t).uid())
+                }
+                RawTarget::Rid(u) => ResolutionTarget::Relation(*u),
+                RawTarget::Contention(id) => ResolutionTarget::Contention(id.clone()),
+            };
+            let unit = match &r.unit {
+                None => None,
+                Some(u) => match lookup(&u.value, &mut self.out, u.span) {
+                    Some(uid) => Some(uid),
+                    None => continue,
+                },
+            };
+            let record = match (r.withdraw, target) {
+                (true, ResolutionTarget::Relation(rid)) => {
+                    let mut w = Withdrawal::new(rid, r.agent, r.ts);
+                    w.reason = unit;
+                    Record::Withdrawal(w)
+                }
+                (false, target) => {
+                    let mut res = Resolution::new(target, r.agent, r.ts);
+                    res.note = unit;
+                    Record::Resolution(res)
+                }
+                (true, _) => continue,
+            };
+            self.out.records.push(record);
         }
 
         if let Some(v) = &self.view {

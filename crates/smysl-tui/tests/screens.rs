@@ -175,3 +175,55 @@ fn the_whole_corpus_browses() {
     }
     assert!(seen >= 8, "only {seen} fixture(s) browsed");
 }
+
+/// The contention pane says what the store reads: a recorded contention someone resolved shows
+/// as resolved, and the review count drops, rather than repeating the status its record was
+/// written with.
+#[test]
+fn the_contention_pane_shows_resolved_contentions_as_resolved() {
+    use smysl_core::{
+        canonical_uid, AgentId, Contention, ContentionId, Detected, DetectionKind, Hlc, KernelType,
+        Record, RelKind, Relation, Resolution, ResolutionTarget, Status, UnitCoreBuilder,
+    };
+    let unit = |g: &str| {
+        UnitCoreBuilder::new(KernelType::Claim, g, Status::Speculative)
+            .build()
+            .unwrap()
+    };
+    let (c, r) = (unit("the pool saturated"), unit("it never exceeded half"));
+    let (uc, ur) = (canonical_uid(&c), canonical_uid(&r));
+    let who = AgentId::new("human:reviewer").unwrap();
+    let k = Contention::new(
+        ContentionId::derive(DetectionKind::LiveRebuttal, &uc, &[uc, ur]),
+        uc,
+        vec![uc, ur],
+        Detected::new(DetectionKind::LiveRebuttal, Hlc::zero(who.clone())),
+    );
+    let base = vec![
+        Record::Unit(c),
+        Record::Unit(r),
+        Record::Relation(Relation::new(RelKind::Rebuts, ur, uc)),
+        Record::Contention(k.clone()),
+    ];
+    let pane = |records: Vec<Record>| {
+        let mut a = App::new(Store::from_records(records), BTreeMap::new());
+        while a.pane() != Pane::Contentions {
+            a.update(Action::NextPane);
+        }
+        render_to_string(&a, 120, 40)
+    };
+
+    let open = pane(base.clone());
+    assert!(open.contains(&format!("{} over", k.id)), "{open}");
+    assert!(open.contains("  open"), "{open}");
+
+    let mut reviewed = base;
+    reviewed.push(Record::Resolution(Resolution::new(
+        ResolutionTarget::Contention(k.id.clone()),
+        who.clone(),
+        Hlc::zero(who),
+    )));
+    let screen = pane(reviewed);
+    assert!(screen.contains("resolved"), "{screen}");
+    assert!(!screen.contains("  open "), "{screen}");
+}
