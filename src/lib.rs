@@ -131,24 +131,26 @@ pub use smysl_retrieve::{tokenize as retrieve_tokenize, Bm25, Hit, Query, Retrie
 pub use smysl_embed::{Hybrid, Model as EmbedModel, Semantic};
 
 // ---- ingest / providers (feature-gated) -----------------------------------
-#[cfg(feature = "ingest")]
+#[cfg(feature = "stage")]
 pub use smysl_ingest::ceiling::ceiling;
 #[cfg(feature = "ingest")]
 pub use smysl_ingest::path::choose as choose_ingest_path;
-#[cfg(feature = "ingest")]
+#[cfg(feature = "stage")]
 pub use smysl_ingest::recipe::short as recipe_short;
 #[cfg(feature = "ingest")]
 pub use smysl_ingest::{
-    attest, stage, AttestOptions, AttestReport, IngestOptions, IngestPath, IngestReport, Ingestor,
-    Judgement, Staged, What, DEFAULT_REPAIR_ATTEMPTS,
+    attest, AttestOptions, AttestReport, IngestOptions, IngestPath, IngestReport, Ingestor,
+    Judgement, What, DEFAULT_REPAIR_ATTEMPTS,
 };
+#[cfg(feature = "stage")]
+pub use smysl_ingest::{stage, Staged};
 // `smysl import` is the only producer of `measured` units and the only unit-producing command
 // that consults no model. Until 0.13 `cmd_import` reached into `smysl_ingest::import` directly
 // and none of these three names was re-exported, so a consumer holding the facade could not do
 // what the command does — a rule A violation that stood because nothing checked rule A.
 // `Imported` is here because it is `from_csv`'s return type: without it the function is
 // callable and its result unnameable.
-#[cfg(feature = "ingest")]
+#[cfg(feature = "stage")]
 pub use smysl_ingest::import::{from_csv, ImportOptions, Imported};
 // A caller's own extraction prompt and schema. Here rather than left in the hidden `prompt`
 // module because the point of it is library use: a pipeline that wants its own question but
@@ -159,9 +161,9 @@ pub use smysl_ingest::prompt::PromptOverride;
 // The quote check, for a caller that builds units itself and sends them to `stage::prepare`
 // rather than through `Ingestor`. Without it the choice was reimplementing it — a second
 // definition of "loose" and "absent" drifting from the first. Its normalisation is stated in
-// full on `smysl_ingest::quote`, because it is now part of what a minor version may not change.
-#[cfg(feature = "ingest")]
-pub use smysl_ingest::quote::{
+// full on `smysl_core::quote`, because it is now part of what a minor version may not change.
+// Ungated since 1.3: it does no I/O, so it lives in core and needs no feature.
+pub use smysl_core::quote::{
     support as quote_support, support_in as quote_support_in, Support as QuoteSupport, QUOTE_KEY,
 };
 #[cfg(feature = "providers")]
@@ -210,7 +212,7 @@ mod tests {
     /// Written when the gate found `cmd_import` reaching into `smysl_ingest::import` for the
     /// CSV reader. `Imported` is named deliberately: it is `from_csv`'s return type, and
     /// re-exporting the function without it would leave the result unnameable.
-    #[cfg(feature = "ingest")]
+    #[cfg(feature = "stage")]
     #[test]
     fn the_import_capability_is_reachable_from_the_facade() {
         let agent = AgentId::new("tool:test").unwrap();

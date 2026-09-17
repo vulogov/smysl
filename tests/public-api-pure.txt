@@ -106,7 +106,9 @@ pub use smysl::Pass
 pub use smysl::Person
 pub use smysl::Profile
 pub use smysl::Provenance
+pub use smysl::QUOTE_KEY
 pub use smysl::Query
+pub use smysl::QuoteSupport
 pub use smysl::Reason
 pub use smysl::RecipeChange
 pub use smysl::RecipeChangeKind
@@ -196,6 +198,8 @@ pub use smysl::pack
 pub use smysl::parse_surface
 pub use smysl::plan_retraction
 pub use smysl::quantise
+pub use smysl::quote_support
+pub use smysl::quote_support_in
 pub use smysl::rebuttals_of
 pub use smysl::relink
 pub use smysl::resolve_label

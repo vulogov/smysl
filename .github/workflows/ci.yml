@@ -84,6 +84,12 @@ jobs:
           - "--no-default-features --features cli"
           - "--no-default-features --features tui"
           - "--no-default-features --features semantic"
+          # `ingest` without a mapper. It failed `-D warnings` on the streaming `Emitter`, dead
+          # without a streaming mapper, and no row built it — `local` and `remote` both bring a
+          # mapper along.
+          - "--no-default-features --features ingest"
+          # Staging with no provider layer at all: a crate that builds its own units.
+          - "--no-default-features --features stage"
           - "--no-default-features --features local"
           - "--no-default-features --features remote"
           - "--no-default-features --features exact-pack"
@@ -93,6 +99,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace ${{ matrix.features }}
+
+  # Each crate with features, alone at its own defaults and with none. A workspace run
+  # unifies features across members, so `smysl-provider`'s tests at its own defaults did not
+  # compile for a release and no row above could have noticed.
+  crate-features:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: make crate-features
 
   # Rules A and B: the library must stay synchronous and network-free.
   purity:

@@ -88,7 +88,10 @@ warning under a file that visibly declares it.
 
 **The one compatibility cost:** `schema` is now a reserved surface word, as `doc`, `rel` and
 `thread` are. A 1.2 reader rejects a `.smy` file that uses `@schema`; the CBOR form of the same
-store reads everywhere, since the record is not new.
+store reads everywhere, since the record is not new. **The 1.2 error does not say that.** It reads
+`@schema` as a unit of an unknown type named `schema` and reports `SMY-E001: malformed label
+`x.code/v1`` — true of the text it thinks it is reading, and no help to someone whose file is
+fine. If an older `smysl` says a schema id is a malformed label, the file wants 1.3.
 
 ### A merged store is checked against every profile in it, not the first view's id
 
@@ -249,6 +252,51 @@ verifier needs to follow its own edges, stage its own declarations, and know who
   `tool:smysl-ingest`. The round-trip test had counted units and never asked; its first
   replacement passed with the edited-unit rule removed, and was tightened until it did not.
 
+**R7–R9, from building units without a model.** rust_smysl reads a commit and its diff, writes
+units itself, and stages them — `stage::prepare`, the quote check, rule T, and none of the
+provider layer.
+
+- **R7 — a staged batch's records carry its label bindings.** `Staged::records()` returned units,
+  relations and attestations, and `Store::from_records` over it resolved no label, so a caller
+  that built a store from its own batch could not name anything in it. Only bindings to a unit
+  in the batch are emitted, as the staged file does.
+- **R8 — staging without the provider layer.** The quote check moved to `smysl_core::quote`: it
+  does no I/O, and had lived in `smysl-ingest` only because ingest was its first caller.
+  `smysl_ingest::quote` re-exports it and the facade's four quote names are now ungated.
+  `smysl-provider` is optional in `smysl-ingest`, behind a default `model` feature holding
+  `Ingestor`, `attest` and the path choice; the facade gains `stage`, which is staging, rule T,
+  recipes and CSV import, and `ingest` is `stage` plus the model. `cargo tree --features stage`
+  lists no `smysl-provider`. The pure facade is 209 names, up from 205 by the quote names.
+- **R9 — `--features ingest` alone builds under `-D warnings`.** The streaming `Emitter` was
+  dead without a streaming mapper, and no matrix row built `ingest` without `local` or `remote`.
+  Both combinations, `ingest` and `stage`, are rows now.
+
+**And from the same report, three of the carried items closed.**
+
+- **A configuration mistake says so.** `ProviderError::Config` (the enum is `#[non_exhaustive]`)
+  for an unreadable `.smysl/config.hjson`, an unknown provider id, structured mode or task, a
+  task routed to nothing, a key variable that is unset or an `api_key_cmd` that fails, and a
+  prompt override refused before egress. It prints `provider
+  configuration: …`; a misspelled `ingest.path` printed "malformed provider response" for a call
+  never made. The exit code is still 6. Two `Malformed` uses remain that are not a provider's
+  answer — the usage ledger's file errors — and are left for a variant of their own.
+- **`smysl-provider`'s tests compile at its own defaults.** The retry tests exercised items that
+  exist only with `http-client`, and two integration files had nothing to check without a mapper.
+  A workspace run unifies features, so no row could see it: `make crate-features`, and a CI job,
+  test each crate with features alone at its defaults and with none, and `smysl-provider` with
+  each mapper on its own — which found `--features gemini` and `--features anthropic` failing
+  `-D warnings` on an unused `bearer`, and a streaming control test that fails where no
+  streaming mapper is built. The first `Emitter` fix missed DeepSeek, which streams too; the
+  workspace's `--no-default-features` row caught it, through `smysl-eval`.
+- **`EdgeSet::premises()`** — `deps`, `grounds`, `conditions` — beside `EdgeSet::dependency()`,
+  whose documentation now says what its breadth costs: `causes` and `enables` make every effect a
+  dependent of its cause, which an evidence audit asking "which conclusions lose a premise" does
+  not want.
+
+**The quote check's limit is stated where it is defined.** `Present` means the quote is in the
+source. A unit whose gist contradicts its own verbatim quote passes, because the contradiction is
+between the unit and its evidence, which no string comparison sees.
+
 Found on the way: the diagnostic appendix said a test named `registry_matches_appendix_d_size`
 held the registry at 49. No test has that name, and the registry was 51; it is 52 with
 `SMY-W309`, which is numbered past `W306` because retired codes are not reused.
@@ -258,7 +306,9 @@ held the registry at 49. No test has that name, and the registry was 51; it is 5
 - `LineClass::SchemaStart` is the enum's last variant, not beside `ThreadStart`: inserting it
   mid-enum renumbered six published discriminants, which `make semver` reported as a major
   change. Caught before commit.
-- The facade is 254 names; the ten additions are listed in `API_CONTRACT.md`.
+- The facade is 254 names at `--all-features` and 209 pure; the additions are listed in
+  `API_CONTRACT.md`.
+- `err.txt`, a stray build log committed at the root in `6ff7c19`, is gone.
 
 ### What is carried
 
@@ -296,10 +346,6 @@ held the registry at 49. No test has that name, and the registry was 51; it is 5
   preset, never validated — `--granularity bogus` is accepted — and does not set the profile
   units are later checked under. Its default, `"standard"`, names no preset at all. Fixing it
   moves recipe hashes, so it wants its own decision rather than riding along here.
-- **Every config error reads "malformed provider response"**, including a misspelled
-  `ingest.path`, because `Config::load` reports through `ProviderError::Malformed`.
-- **`smysl-provider`'s own lib tests do not compile at default features** (35 errors in
-  `http.rs`), a combination CI never builds. Present before this cycle.
 - **Whether flash-lite now converges on the surface path** is a live question this cycle could
   not answer offline. What is tested is that the label format and a candidate reach the model.
 

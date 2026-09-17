@@ -137,6 +137,12 @@ impl EdgeSet {
     /// `elaborates` or `exemplifies`, whose *source* depends on the target, so their dependents
     /// come back reversed; or including `rebuts` and `sequences`, which are not dependencies.
     /// Not the set retraction follows — retraction stays on `deps` and `grounds`.
+    ///
+    /// It is broad on purpose, and the breadth is a choice worth checking against the
+    /// question. `causes` and `enables` make an effect a dependent of its cause, and `warrant`
+    /// and `backs` make a claim a dependent of the reasoning behind it: false-cause and
+    /// false-warrant both reach far. For "which conclusions lose a premise" — an evidence
+    /// audit, where a refuted cause should not flag every effect — use [`EdgeSet::premises`].
     pub fn dependency() -> EdgeSet {
         let mut s = EdgeSet::support();
         for k in [
@@ -149,6 +155,17 @@ impl EdgeSet {
             if let Some(e) = EdgeKind::kernel(k) {
                 s.kinds.insert(e);
             }
+        }
+        s
+    }
+
+    /// `deps`, `grounds` and `conditions`: the edges along which one unit is a *premise* of
+    /// another. The narrow counterpart of [`EdgeSet::dependency`], without the causal and
+    /// argumentative relations. Since 1.3.
+    pub fn premises() -> EdgeSet {
+        let mut s = EdgeSet::support();
+        if let Some(e) = EdgeKind::kernel(RelKind::Conditions) {
+            s.kinds.insert(e);
         }
         s
     }

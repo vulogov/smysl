@@ -77,7 +77,11 @@ impl Staged {
         !self.report.is_clean()
     }
 
-    /// The records a caller would commit.
+    /// The records a caller would commit: declarations, units, their label bindings, relations
+    /// and attestations.
+    ///
+    /// The bindings were missing, so a store built from these records could not resolve a single
+    /// label the batch had just staged. They follow the units they name, as the parser emits them.
     pub fn records(&self) -> Vec<Record> {
         let mut out: Vec<Record> = self
             .schemas
@@ -86,6 +90,16 @@ impl Staged {
             .map(Record::SchemaDecl)
             .collect();
         out.extend(self.units.iter().cloned().map(Record::Unit));
+        // Only for units the batch holds: a label rule M's weakening left pointing at a uid that
+        // is no longer staged would bind a name to nothing.
+        let staged: std::collections::BTreeSet<Uid> =
+            self.units.iter().map(canonical_uid).collect();
+        out.extend(
+            self.labels
+                .iter()
+                .filter(|(_, uid)| staged.contains(uid))
+                .map(|(l, u)| Record::LabelBinding(smysl_core::LabelBinding::new(l.clone(), *u))),
+        );
         out.extend(self.relations.iter().cloned().map(Record::Relation));
         out.extend(self.attestations.iter().cloned().map(Record::Attestation));
         out
@@ -594,6 +608,44 @@ mod tests {
             "discard left the sidecar behind"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A store built from a staged batch's records resolves the batch's own labels.
+    ///
+    /// `records()` — "the records a caller would commit" — carried units, relations and
+    /// attestations and no `LabelBinding`, so `resolve_label` returned `Unbound` for every label
+    /// the batch had just staged. The CLI had a private helper for it that a library caller could
+    /// not reach.
+    #[test]
+    fn a_staged_batchs_records_carry_its_label_bindings() {
+        let a = cited("p95 rose to 410ms");
+        let b = cited("the pool saturated");
+        let (ua, ub) = (canonical_uid(&a), canonical_uid(&b));
+        let labels = BTreeMap::from([
+            (Label::new("e/p95").unwrap(), ua),
+            (Label::new("c/pool").unwrap(), ub),
+        ]);
+        let staged = prepare(
+            &Store::new(),
+            vec![a, b],
+            Vec::new(),
+            labels.clone(),
+            &attest(),
+        );
+        let store = Store::from_records(staged.records());
+        for (label, uid) in &labels {
+            assert_eq!(
+                smysl_graph::resolve_label(&store, label),
+                Ok(*uid),
+                "{label}"
+            );
+        }
+        let bindings = staged
+            .records()
+            .iter()
+            .filter(|r| matches!(r, Record::LabelBinding(_)))
+            .count();
+        assert_eq!(bindings, 2);
     }
 
     #[test]

@@ -16,17 +16,31 @@ repository.workspace   = true
 all-features = true
 
 [features]
-default = []
+default = ["model"]
+# Calling a model: `Ingestor`, `attest`, and the path choice that reads provider capabilities.
+# Default, so a dependent that asked for `smysl-ingest` gets what it always got. Without it the
+# crate is staging, rule T and M, conversion and recipes — what a caller that builds its own
+# units needs, with no provider layer linked.
+model     = ["dep:smysl-provider"]
 # Mirrors of the provider crate's mapper features, so the live gate test can name the
 # providers this build can actually drive.
-ollama    = ["smysl-provider/ollama"]
-anthropic = ["smysl-provider/anthropic"]
-openai    = ["smysl-provider/openai"]
-gemini    = ["smysl-provider/gemini"]
-deepseek  = ["smysl-provider/deepseek"]
+ollama    = ["model", "smysl-provider/ollama"]
+anthropic = ["model", "smysl-provider/anthropic"]
+openai    = ["model", "smysl-provider/openai"]
+gemini    = ["model", "smysl-provider/gemini"]
+deepseek  = ["model", "smysl-provider/deepseek"]
 
 [dependencies]
 smysl-core     = { workspace = true }
 smysl-check    = { workspace = true }
 smysl-graph    = { workspace = true }
-smysl-provider = { workspace = true }
+smysl-provider = { workspace = true, optional = true }
+
+# Both drive `Ingestor` against providers, so neither exists without `model`.
+[[test]]
+name              = "gate"
+required-features = ["model"]
+
+[[test]]
+name              = "providers_live"
+required-features = ["model"]

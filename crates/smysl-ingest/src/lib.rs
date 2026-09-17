@@ -12,10 +12,12 @@
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
+#[cfg(feature = "model")]
 pub mod attest;
 pub mod ceiling;
 // Splitting a document into model-sized pieces. Internal since 0.13 (§1.2 S4): `Ingestor`
 // chunks as part of the path a caller actually takes.
+#[cfg(feature = "model")]
 pub(crate) mod chunk;
 pub mod import;
 /// Reachable for `smysl-eval`'s `quoting_live.rs`, which drives real models against the
@@ -25,6 +27,7 @@ pub mod json_ast;
 // Rule M's status ceiling arithmetic. Internal since 0.13 (§1.2 S4): `ceiling` is the
 // facade-exported way to ask the question this answers.
 pub(crate) mod monotone;
+#[cfg(feature = "model")]
 pub mod path;
 /// Reachable for `tests/gate.rs`, which checks the prompt the ingest path actually sends.
 ///
@@ -37,7 +40,7 @@ pub mod prompt;
 /// Reachable for `tests/gate.rs` and the workspace's `tests/interactions.rs`, which check that
 /// a quoted body survives the round trip the ingest path puts it through.
 #[doc(hidden)]
-pub mod quote;
+pub use smysl_core::quote;
 pub mod recipe;
 /// Reachable for `tests/gate.rs`, which drives `check_local` and the degradation path
 /// directly. No consumer runs the re-ask loop itself — `IngestOptions::repair_attempts` is
@@ -50,12 +53,18 @@ pub mod repair;
 pub mod schema;
 pub mod stage;
 
+#[cfg(feature = "model")]
 use std::collections::BTreeMap;
 
-use smysl_core::{Diagnostic, Hlc, Label, Relation, Rung, Uid, UnitCore};
+#[cfg(feature = "model")]
+use smysl_core::{Diagnostic, Label, Relation, Uid, UnitCore};
+use smysl_core::{Hlc, Rung};
+#[cfg(feature = "model")]
 use smysl_graph::Store;
+#[cfg(feature = "model")]
 use smysl_provider::{Provider, ProviderError, Registry, Request, Task, Usage};
 
+#[cfg(feature = "model")]
 pub use attest::{attest, AttestOptions, AttestReport, Judgement, What};
 pub use smysl_core::SourcePolicy;
 pub use stage::{Attest, Staged};
@@ -254,6 +263,7 @@ impl Default for IngestOptions {
     }
 }
 
+#[cfg(feature = "model")]
 /// What one ingest run did.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
@@ -271,12 +281,14 @@ pub struct IngestReport {
     pub provider: Option<smysl_provider::ProviderId>,
 }
 
+#[cfg(feature = "model")]
 /// The ingest boundary.
 pub struct Ingestor<'a> {
     registry: &'a Registry,
     opts: IngestOptions,
 }
 
+#[cfg(feature = "model")]
 impl<'a> Ingestor<'a> {
     pub fn new(registry: &'a Registry, opts: IngestOptions) -> Ingestor<'a> {
         Ingestor { registry, opts }
@@ -298,7 +310,7 @@ impl<'a> Ingestor<'a> {
         let requested = self
             .opts
             .requested_path()
-            .map_err(|e| ProviderError::Malformed(format!("prompt override {e}")))?;
+            .map_err(|e| ProviderError::Config(format!("prompt override {e}")))?;
         let provider = self.registry.for_task(Task::ContentIngest)?;
         let caps = provider.caps();
 
@@ -568,6 +580,7 @@ impl<'a> Ingestor<'a> {
     }
 }
 
+#[cfg(feature = "model")]
 struct ChunkOutcome {
     units: Vec<UnitCore>,
     relations: Vec<Relation>,
@@ -577,7 +590,7 @@ struct ChunkOutcome {
     diagnostics: Vec<Diagnostic>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "model"))]
 mod tests {
     use super::*;
 

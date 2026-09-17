@@ -108,7 +108,7 @@ impl Config {
     pub fn load(src: &str) -> Result<Config, ProviderError> {
         let brace = src.find('{').unwrap_or(0);
         let obj = parse_object_prefix(&src[brace..], 0)
-            .map_err(|e| ProviderError::Malformed(format!("config: {e}")))?
+            .map_err(|e| ProviderError::Config(format!("config: {e}")))?
             .value;
 
         let mut cfg = Config::default();
@@ -116,10 +116,10 @@ impl Config {
         if let Some(ps) = obj.get("providers").and_then(|v| v.value.as_object()) {
             for (name, body) in ps.iter() {
                 let id = ProviderId::new(name.value.clone()).ok_or_else(|| {
-                    ProviderError::Malformed(format!("`{}` is not a provider id", name.value))
+                    ProviderError::Config(format!("`{}` is not a provider id", name.value))
                 })?;
                 let o = body.value.as_object().ok_or_else(|| {
-                    ProviderError::Malformed(format!("provider {id} is not an object"))
+                    ProviderError::Config(format!("provider {id} is not an object"))
                 })?;
 
                 let kind = o
@@ -146,7 +146,7 @@ impl Config {
                 }
                 if let Some(v) = o.get("structured").and_then(|v| v.value.as_str()) {
                     p.structured = structured(v).ok_or_else(|| {
-                        ProviderError::Malformed(format!("`{v}` is not a structured mode"))
+                        ProviderError::Config(format!("`{v}` is not a structured mode"))
                     })?;
                 }
                 if let Some(v) = o.get("api_key_env").and_then(|v| v.value.as_str()) {
@@ -159,7 +159,7 @@ impl Config {
                 // error rather than a warning that a hurried reader would scroll past.
                 for forbidden in ["api_key", "key", "token", "secret", "password"] {
                     if o.contains(forbidden) {
-                        return Err(ProviderError::Malformed(format!(
+                        return Err(ProviderError::Config(format!(
                             "provider {id} has a `{forbidden}` field; use api_key_env or \
                              api_key_cmd - a config file must be safe to commit"
                         )));
@@ -173,11 +173,11 @@ impl Config {
         if let Some(r) = obj.get("routing").and_then(|v| v.value.as_object()) {
             for (task, target) in r.iter() {
                 let t = Task::parse(&task.value).ok_or_else(|| {
-                    ProviderError::Malformed(format!("`{}` is not a task", task.value))
+                    ProviderError::Config(format!("`{}` is not a task", task.value))
                 })?;
                 let name = target.value.as_str().unwrap_or_default();
                 let id = ProviderId::new(name).ok_or_else(|| {
-                    ProviderError::Malformed(format!("`{name}` is not a provider id"))
+                    ProviderError::Config(format!("`{name}` is not a provider id"))
                 })?;
                 cfg.routing.insert(t, id);
             }
@@ -187,7 +187,7 @@ impl Config {
             for item in f {
                 let name = item.value.as_str().unwrap_or_default();
                 let id = ProviderId::new(name).ok_or_else(|| {
-                    ProviderError::Malformed(format!("`{name}` is not a provider id"))
+                    ProviderError::Config(format!("`{name}` is not a provider id"))
                 })?;
                 cfg.fallback.push(id);
             }
@@ -196,7 +196,7 @@ impl Config {
         if let Some(ingest) = obj.get("ingest").and_then(|v| v.value.as_object()) {
             if let Some(p) = ingest.get("prompt") {
                 let path = p.value.as_str().ok_or_else(|| {
-                    ProviderError::Malformed("`ingest.prompt` is a path to a prompt file".into())
+                    ProviderError::Config("`ingest.prompt` is a path to a prompt file".into())
                 })?;
                 cfg.ingest_prompt = Some(path.to_string());
             }
@@ -206,7 +206,7 @@ impl Config {
                 // `IngestPath` — ingest depends on the provider, not the other way round. An
                 // unknown value is an error at load rather than a silent `auto`.
                 if !matches!(path, "auto" | "surface" | "json-ast") {
-                    return Err(ProviderError::Malformed(format!(
+                    return Err(ProviderError::Config(format!(
                         "`ingest.path` is `{path}`; expected auto, surface or json-ast"
                     )));
                 }
@@ -225,14 +225,14 @@ impl Config {
     pub fn validate(&self) -> Result<(), ProviderError> {
         for (task, id) in &self.routing {
             if !self.providers.contains_key(id) {
-                return Err(ProviderError::Malformed(format!(
+                return Err(ProviderError::Config(format!(
                     "routing sends {task} to `{id}`, which is not configured"
                 )));
             }
         }
         for id in &self.fallback {
             if !self.providers.contains_key(id) {
-                return Err(ProviderError::Malformed(format!(
+                return Err(ProviderError::Config(format!(
                     "fallback names `{id}`, which is not configured"
                 )));
             }
@@ -398,6 +398,20 @@ mod tests {
     fn an_unknown_structured_mode_is_refused() {
         let src = "{ providers: { a: { structured: telepathy } } }";
         assert!(Config::load(src).is_err());
+    }
+
+    /// A mistake in the file is the caller's, and says so. These were `Malformed` until 1.3,
+    /// which prints "malformed provider response" for a call that was never made.
+    #[test]
+    fn a_config_mistake_is_reported_as_configuration() {
+        for src in [
+            "{ providers: ",
+            "{ providers: { a: { structured: telepathy } } }",
+        ] {
+            let e = Config::load(src).unwrap_err();
+            assert!(matches!(e, ProviderError::Config(_)), "{src}: {e:?}");
+            assert!(e.to_string().starts_with("provider configuration: "), "{e}");
+        }
     }
 
     #[test]

@@ -1,5 +1,11 @@
 //! Attributing a unit to the text it came from, and **checking the attribution**.
 //!
+//! In `smysl-core` since 1.3, having started in `smysl-ingest`. It does no I/O and needs no
+//! model, and a caller that builds units itself — reading a commit and its diff, say — needs the
+//! check without linking the provider layer that `smysl-ingest` depends on. `smysl_ingest::quote`
+//! re-exports this module, so the old paths still resolve, and the facade exports its names
+//! without any feature.
+//!
 //! A `source` names a document. It cannot name a passage, so a reviewer asking "which
 //! sentence produced this claim?" has nowhere to go — and verifying a unit against its
 //! source is most of what review actually is.
@@ -20,8 +26,16 @@
 //!   refusing: models elide, and refusing would spend a repair turn on a habit.
 //! - **Absent** (`SMY-E307`). The words are not there in that order. Nothing in the source
 //!   supports the attribution, which is a fabrication rather than a formatting difference.
+//!
+//! **What it does not check: that the unit says what its quote says.** `Present` means the
+//! quote is in the source, nothing more. A unit whose summary reads "p95 fell to 120ms" and
+//! whose quote is "p95 rose to 410ms" passes — the quote is verbatim, and the contradiction is
+//! between the unit and its own evidence, which no string comparison can see. Deciding that
+//! a gist follows from a passage is a judgement; `attest` asks a model for it, and a reviewer
+//! is the other way. Treat `Present` as "the evidence exists", never as "the claim is
+//! supported".
 
-use smysl_core::{canonical_uid, Code, Diagnostic, UnitCore};
+use crate::{canonical_uid, Code, Diagnostic, UnitCore};
 
 /// The payload key a quote travels under.
 ///
@@ -185,7 +199,7 @@ pub fn support_in<'a>(quote: &str, sources: &[(&'a str, &str)]) -> (Support, Opt
 /// The quote a unit attributes itself to, if it declared one.
 pub fn quote_of(core: &UnitCore) -> Option<String> {
     let payload = core.payload.as_deref()?;
-    let object = smysl_core::surface::payload::payload_to_object(payload).ok()?;
+    let object = crate::surface::payload::payload_to_object(payload).ok()?;
     object
         .get(QUOTE_KEY)
         .and_then(|v| v.value.as_str())
@@ -238,7 +252,7 @@ fn clip(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smysl_core::{KernelType, Status, UnitCoreBuilder};
+    use crate::{KernelType, Status, UnitCoreBuilder};
 
     const SOURCE: &str = "On Thursday the eu-west shard slowed: p95 request latency rose \
                           from 180ms to 410ms. Connection pool wait time rose alongside it.";
@@ -316,16 +330,16 @@ mod tests {
     fn quoted(gist: &str, quote: Option<&str>) -> UnitCore {
         let mut b = UnitCoreBuilder::new(KernelType::Claim, gist, Status::Speculative);
         if let Some(q) = quote {
-            let mut o = smysl_core::surface::hjson::HObject::default();
-            let span = smysl_core::Span::new(0, 0);
+            let mut o = crate::surface::hjson::HObject::default();
+            let span = crate::Span::new(0, 0);
             o.insert(
-                smysl_core::surface::hjson::Spanned::new(QUOTE_KEY.to_string(), span),
-                smysl_core::surface::hjson::Spanned::new(
-                    smysl_core::surface::hjson::HValue::Str(q.to_string()),
+                crate::surface::hjson::Spanned::new(QUOTE_KEY.to_string(), span),
+                crate::surface::hjson::Spanned::new(
+                    crate::surface::hjson::HValue::Str(q.to_string()),
                     span,
                 ),
             );
-            if let Some(p) = smysl_core::surface::payload::object_to_payload(&o) {
+            if let Some(p) = crate::surface::payload::object_to_payload(&o) {
                 b = b.payload(p);
             }
         }

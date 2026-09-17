@@ -128,6 +128,41 @@ fn the_dependency_preset_is_the_right_way_round() {
     assert!(!EdgeSet::dependency().contains(EdgeKind::kernel(RelKind::Rebuts).unwrap()));
 }
 
+/// `dependency` follows `causes`; `premises` does not. An effect is a dependent of its cause
+/// under the broad preset and not under the narrow one, which is the difference between
+/// "what breaks" and "which conclusions lose a premise".
+#[test]
+fn the_premises_preset_leaves_out_causes() {
+    let src = "\
+@claim p/cause { status: speculative }
+~ The pool saturated.
+
+@claim c/effect { status: speculative }
+~ Latency rose.
+
+@decision d/conditioned { status: speculative }
+~ Raise the pool size.
+
+@rel p/cause --causes--> c/effect
+@rel p/cause --conditions--> d/conditioned
+";
+    let out = parse_surface(src).unwrap();
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let uid = |l: &str| out.labels[&Label::new(l).unwrap()];
+    let store = Store::from_records(out.records.clone());
+
+    let mut broad = dependents_via(&store, uid("p/cause"), &EdgeSet::dependency());
+    broad.sort();
+    let mut expected = vec![uid("c/effect"), uid("d/conditioned")];
+    expected.sort();
+    assert_eq!(broad, expected);
+    assert_eq!(
+        dependents_via(&store, uid("p/cause"), &EdgeSet::premises()),
+        vec![uid("d/conditioned")]
+    );
+    assert_eq!(EdgeSet::premises(), with_conditions());
+}
+
 /// An extension kind can be named, in whichever store holds it, and followed.
 ///
 /// Extension edge kinds are interned per store, and only `extension_name(id)` existed — there was

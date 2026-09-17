@@ -16,6 +16,7 @@ pub mod diag;
 pub mod error;
 pub mod hash;
 pub mod ids;
+pub mod quote;
 pub mod surface;
 pub mod types;
 

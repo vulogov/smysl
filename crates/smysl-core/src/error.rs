@@ -565,12 +565,22 @@ impl std::error::Error for RenderError {}
 pub enum ProviderError {
     Unreachable,
     Unauthorized,
-    RateLimited { retry_after: Option<Duration> },
-    ContextExceeded { limit: usize, requested: usize },
+    RateLimited {
+        retry_after: Option<Duration>,
+    },
+    ContextExceeded {
+        limit: usize,
+        requested: usize,
+    },
     StructuredUnsupported,
     OfflineViolation,
     Malformed(String),
     Upstream(u16, String),
+    /// The configuration asked for something that cannot be done: an unknown provider id, a
+    /// task routed to nothing, a prompt override that does not fit the path. Since 1.3; until
+    /// then these were `Malformed`, and a config typo printed "malformed provider response"
+    /// for a call that was never made.
+    Config(String),
 }
 
 impl ProviderError {
@@ -622,6 +632,7 @@ impl fmt::Display for ProviderError {
             }
             ProviderError::Malformed(m) => write!(f, "malformed provider response: {m}"),
             ProviderError::Upstream(status, m) => write!(f, "upstream {status}: {m}"),
+            ProviderError::Config(m) => write!(f, "provider configuration: {m}"),
         }
     }
 }

@@ -954,7 +954,7 @@ fn a_bad_override_is_refused_before_any_call_is_made() {
         let (r, calls) = registry(Scripted::saying("{}"));
         let out = Ingestor::new(&r, o).ingest(&Store::new(), DOCUMENT);
         assert!(
-            matches!(out, Err(ProviderError::Malformed(_))),
+            matches!(out, Err(ProviderError::Config(_))),
             "{what}: {:?}",
             out.err()
         );

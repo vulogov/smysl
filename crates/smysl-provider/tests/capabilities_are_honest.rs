@@ -14,6 +14,16 @@
 //! which is the method `READINESS.md` gate 4 recommends, and the second real defect it has
 //! turned up without one.
 
+// Without a mapper there is nothing to check, and this file did not build under `-D warnings`
+// (an unused helper) — so at default features it is not compiled rather than run vacuously.
+#![cfg(any(
+    feature = "ollama",
+    feature = "anthropic",
+    feature = "openai",
+    feature = "gemini",
+    feature = "deepseek"
+))]
+
 use std::sync::mpsc;
 
 use smysl_core::error::ProviderError;
@@ -103,7 +113,9 @@ fn a_mapper_that_declares_streaming_actually_attempts_it() {
 }
 
 /// The control. Without it the test above passes trivially if every mapper declares `false`,
-/// which is the cheap way to make it green and the wrong one.
+/// which is the cheap way to make it green and the wrong one. Only where a streaming mapper is
+/// built: `--features gemini` alone has none to find.
+#[cfg(any(feature = "ollama", feature = "openai", feature = "deepseek"))]
 #[test]
 fn at_least_one_mapper_declares_streaming() {
     let n = mappers().iter().filter(|(_, p)| p.caps().streaming).count();

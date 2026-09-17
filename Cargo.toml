@@ -21,7 +21,7 @@ smysl-render   = { path = "crates/smysl-render",   version = "1.1.0" }
 smysl-retrieve = { path = "crates/smysl-retrieve", version = "1.1.0" }
 smysl-embed    = { path = "crates/smysl-embed",    version = "1.1.0" }
 smysl-provider = { path = "crates/smysl-provider", version = "1.1.0" }
-smysl-ingest   = { path = "crates/smysl-ingest",   version = "1.1.0" }
+smysl-ingest   = { path = "crates/smysl-ingest",   version = "1.1.0", default-features = false }
 smysl-tui      = { path = "crates/smysl-tui",      version = "1.1.0" }
 
 # `pure` keeps the C SIMD backend out of the build: zero C in the core path (§13).
@@ -92,7 +92,11 @@ tui       = ["dep:smysl-tui", "cli"]
 # build that cannot use one should not pay for `tokenizers` in its dependency tree.
 semantic  = ["dep:smysl-embed"]
 providers = ["dep:smysl-provider"]
-ingest    = ["dep:smysl-ingest", "providers"]
+# Staging, rule T and M, recipes, CSV import and the quote check's callers — everything a
+# program that builds its own units needs, with no provider layer compiled in. `ingest` adds
+# the model: `Ingestor`, `attest`, and the providers they call.
+stage     = ["dep:smysl-ingest"]
+ingest    = ["stage", "providers", "smysl-ingest/model"]
 local     = ["ingest", "smysl-provider/ollama", "smysl-ingest/ollama"]
 remote    = [
     "ingest",

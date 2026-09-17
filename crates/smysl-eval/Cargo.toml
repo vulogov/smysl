@@ -15,7 +15,7 @@ repository.workspace   = true
 smysl-provider = { workspace = true, features = ["gemini", "deepseek"] }
 # The quoting experiment needs the shipped ingest prompt, because the arm under test is
 # *that* prompt minus one paragraph. Reconstructing it here would measure a copy.
-smysl-ingest = { workspace = true }
+smysl-ingest = { workspace = true, features = ["model"] }
 
 [dependencies]
 smysl-core  = { workspace = true }
