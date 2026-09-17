@@ -9,7 +9,16 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.4.0
 
-Nothing yet.
+Nothing shipped yet. What this cycle starts from, carried from 1.3.0 (details there):
+
+- **Review closing what verification opens** — a bare `rebuts` edge listed for review, a way to
+  withdraw an edge, and a definition of a *live* rebuttal that merge and pack agree on. Format
+  decisions, so they start from the specification.
+- **Who asserted an edge** — a relation wire key for attestations, which §8.1 permits as an
+  addition.
+- **`ingest --granularity` choosing the profile units are checked under**, not only the recipe.
+- **`strip_echo` and prose preambles**, and **a recovered chunk's attempt history**.
+- **Whether flash-lite converges on surface template v5**, a live question.
 
 ---
 
