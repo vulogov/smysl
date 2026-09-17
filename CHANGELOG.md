@@ -9,7 +9,13 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.5.0
 
-Nothing yet.
+Nothing shipped yet. What this cycle starts from, carried from 1.4.0 (details there):
+
+- **Withdrawing `retracts` and `supersedes`**, and **reopening a resolved item**.
+- **`ingest --granularity` choosing the profile units are checked under.**
+- **`strip_echo` and prose preambles**, and **a recovered chunk's attempt history**.
+- **R11, R13 and R14**, held for rust_smysl's S2 experiment.
+- **OpenAI and Anthropic** against their live endpoints.
 
 ---
 
