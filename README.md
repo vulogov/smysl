@@ -28,62 +28,57 @@ As a library:
 
 ```toml
 [dependencies]
-smysl = "1.3"
+smysl = "1.4"
 ```
 
 Add `default-features = false` for the pure library: no async runtime, no HTTP client and no
 argument parser in the dependency tree, verified in CI on every push rather than promised
 here.
 
-**The crate is `1.3.0` and the format is `smysl/1.0`.** The crate version means the API is
-frozen: the facade's 254 names and every public item behind them move only with a 2.0, enforced
+**The crate is `1.4.0` and the format is `smysl/1.0`.** The crate version means the API is
+frozen: the facade's 260 names and every public item behind them move only with a 2.0, enforced
 per crate by `cargo-semver-checks` on every push.
 [`Documentation/API_CONTRACT.md`](Documentation/API_CONTRACT.md) is that promise written down.
 The format version means nothing about the format changed: `smysl/0.1` held across fourteen
 releases and four independent implementations — the Rust, and Python, JavaScript and Go written
 from the specification alone — and `smysl/1.0` reports that record rather than a change.
 
-## Release 1.3.0
+## Release 1.4.0
 
-The cycle that used smysl as the corpus for another project. rust_smysl records *why* code
-changed, as a smysl store it builds through the library, and every request it made was a place
-where smysl knew something and did not use it. The full account is in
-[`CHANGELOG.md`](CHANGELOG.md).
+The cycle that gave disagreements a lifecycle. Merge detects a disagreement and refuses to settle
+it; until 1.4 nothing let a person settle it either. rust_smysl, which verifies extracted claims
+against the commits they came from, sends a contradicted claim to review — and review had no way
+to close what it opened. The full account is in [`CHANGELOG.md`](CHANGELOG.md).
 
-**For library callers that build their own units:**
+**A review, end to end:**
 
-- **Staging without a model.** The new `stage` feature is staging, rule T, recipes and CSV
-  import with no provider layer compiled in; `ingest` is `stage` plus the model. The quote check
-  (`quote_support`, `quote_support_in`) lives in the core and needs no feature, with its
-  normalisation written into the contract.
-- **A caller's own source**, `IngestOptions::with_source(SourceRef, SourcePolicy)`, applied
-  before identity is computed, so provenance is never the model's invention.
-- **Labels are resolved, not guessed.** `resolve_label` refuses an ambiguous label and every
-  unit-taking command accepts a label and exits 5 on one; staged batches carry their label
-  bindings.
-- **Dependents over chosen edges.** `dependents_via` with `EdgeSet::premises()` (`deps`,
-  `grounds`, `conditions`) or the broader `EdgeSet::dependency()`, and extension kinds named
-  per store with `Adjacency::edge_kind`.
-- **`@schema` in surface text**, so a document using an extension relation can declare it.
-  `schema` is now a reserved surface word: a 1.2 reader rejects such a file, misleadingly, as a
-  malformed label.
+```sh
+smysl review store.cbor                     # what is open; exits 5 while anything is
+smysl withdraw --as human:me 'c/a --rebuts--> c/b' store.cbor   # the edge was the mistake
+smysl resolve  --as human:me k/c…  store.cbor                    # both stand; someone looked
+smysl retract  --as human:me c/a   store.cbor                    # the claim was wrong
+```
 
-**For `smysl ingest`:**
+- **Edges have identity.** A relation's rid is a hash of its kind and endpoints, so an attestation
+  can name an edge: a model's `rebuts` and a reviewer's are told apart, and staging attests every
+  edge it stages.
+- **Withdrawal and resolution are records** (types 11 and 12), spelled `@withdraw` and `@resolve`
+  in surface text. A withdrawn edge is kept and no longer followed; a resolution records that a
+  review happened and decides nothing.
+- **Rule R binds live rebuttals.** A retracted or withdrawn rebuttal no longer pins its claim into
+  every pack, and a resolved contention stops pinning its positions.
+- **In the specification, four times over.** All of it is normative in `SMYSL_FORMAT_SPEC.md`, and
+  the Python, JavaScript and Go implementations derive the two new identities independently of the
+  Rust.
+- **Merge is idempotent for every record type.** A store merged with itself gains nothing; it used
+  to re-append every label binding and schema declaration (R10). `compact` removes the repeats an
+  older log holds.
+- **Imported readings check clean** (R12): a row's summary fits the gist bound, and every cell is in
+  the payload, however wide the row or long the cell.
+- **`retract` writes.** It reported retractions it never saved.
 
-- A caller's prompt and schema (`--prompt`, `ingest.prompt`), with every check after the model
-  still applied.
-- A repair turn that keeps the content rules in front of the model, tolerates an echoed marker,
-  and reports every attempt. Verified live with Gemini flash-lite: units in 3 of 3 runs on the
-  commit that degraded in 3 of 3 before.
-- One over-long gist degrades its own unit, not the chunk; the gist bound the schema states is
-  now the one the check enforces.
-- The provider's configured `max_output` is asked for (`--max-output` overrides); an answer cut
-  off at that limit says so and is counted as the call it was. Configuration mistakes read as
-  configuration, not "malformed provider response". `--granularity` is validated.
-
-No format change: the same fixtures produce the same uids, and `make semver` is clean on all
-twelve crates. Two things that need format decisions — closing a contradiction through review,
-and recording who asserted an edge — are the work of 1.4.
+No format break. A 1.3 reader preserves a 1.4 CBOR store; it rejects a surface file that uses
+`@withdraw` or `@resolve`, as it rejects `@schema`. `make semver` is clean on all twelve crates.
 
 Building from source:
 
@@ -286,7 +281,7 @@ rendering are pure functions — same input, same output, byte for byte, verifie
 | `trace` / `diff` | Follow provenance; compare two versions |
 | `salience` | Rank what matters, with the arithmetic shown |
 | `retract` | Remove a claim and report the blast radius first |
-| `review` / `withdraw` / `resolve` | List open disagreements; withdraw an edge; record a review *(1.4)* |
+| `review` / `withdraw` / `resolve` | List open disagreements; withdraw an edge; record a review |
 | `ui` | Browse a store; watch the budget bind, live |
 
 `smysl ui` is worth a minute if the packing rules seem abstract. Pin a claim with `f`,
@@ -337,8 +332,8 @@ unreachable from the library.
 
 ```toml
 [dependencies]
-smysl = { version = "1.3", default-features = false }                      # pure
-smysl = { version = "1.3", default-features = false, features = ["stage"] } # + staging, no model
+smysl = { version = "1.4", default-features = false }                      # pure
+smysl = { version = "1.4", default-features = false, features = ["stage"] } # + staging, no model
 ```
 
 With default features off you get a fully synchronous library — no async runtime, no HTTP
@@ -349,7 +344,7 @@ signature says.
 
 ## Status
 
-Crate `1.3.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
+Crate `1.4.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
 [`Documentation/SMYSL_FORMAT_SPEC.md`](Documentation/SMYSL_FORMAT_SPEC.md) — everything a
 second implementation must obey, and nothing else.
 

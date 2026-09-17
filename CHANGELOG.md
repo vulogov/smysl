@@ -7,13 +7,40 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.4.0
+## Unreleased — 1.5.0
+
+Nothing yet.
+
+---
+
+## 1.4.0 — 2026-09-17
+
+The cycle that gave disagreements a lifecycle. rust_smysl sends a contradicted claim to review and
+never retracts it automatically, and 1.3 could not close what that review opens: an edge could not
+be withdrawn, nobody could say who asserted one, rule R's "live rebuttal" was undefined, and a
+contention could not be resolved. All four came back to one missing thing — **a relation had no
+identity the format stated** — and 1.4 states it.
+
+What shipped: relation identity and edge attestations; withdrawal and resolution as records 11 and
+12, with `@withdraw` and `@resolve` in surface text; live rebuttals, so a retracted or withdrawn
+rebuttal no longer pins its claim; contention identity made normative; `review`, `withdraw` and
+`resolve` on the command line; all of it in the specification, and the two new identities derived
+independently by the Python, JavaScript and Go implementations. And from rust_smysl: merge is
+idempotent for every record type (R10), and imported readings check clean (R12). `retract`, it
+turned out, had never written anything.
+
+**No format break.** `smysl/1.0` holds: two record types, a derived identity, keys in record bodies
+and two reserved surface words, each a change §8.1 permits. A 1.3 reader preserves a 1.4 CBOR store
+and reads it as it always did; it rejects a *surface* file using `@withdraw` or `@resolve`, as it
+rejects `@schema`. The facade is 260 names, 215 pure; `make semver` is clean on all twelve crates
+against 1.3.0, and `SEMVER_BREAKING` is empty for the fifth release running. 25 commands.
 
 ### The lifecycle of edges and disagreements — specification draft and library
 
-[`Documentation/SPEC_DRAFT_1.4.md`](Documentation/SPEC_DRAFT_1.4.md) is the draft, and the Rust
-library implements all six of its decisions. Nothing is folded into the normative specification
-until the cut, and the format version stays `smysl/1.0`: every change is one §8.1 already permits.
+[`Documentation/SPEC_DRAFT_1.4.md`](Documentation/SPEC_DRAFT_1.4.md) was the draft, and the Rust
+library implements all six of its decisions; it has since been folded into the normative
+specification (below). The format version stays `smysl/1.0`: every change is one §8.1 already
+permits.
 
 Checked against rust_smysl's verification design, 1.3 could not close what verification opens —
 an edge could not be withdrawn, nobody could say who asserted one, "live rebuttal" was undefined,
@@ -187,18 +214,18 @@ tasks, and fixing them here would spend them.
 - **`ingest.path: 42` names the problem.** A non-string value read as the empty string, and the
   message said "`ingest.path` is ``". It says "is an integer" now.
 
-### Carried from 1.3.0
+### What is carried
 
-What this cycle started from (details in 1.3.0):
-
-- **Review closing what verification opens** — a bare `rebuts` edge listed for review, a way to
-  withdraw an edge, and a definition of a *live* rebuttal that merge and pack agree on. Format
-  decisions, so they start from the specification.
-- **Who asserted an edge** — a relation wire key for attestations, which §8.1 permits as an
-  addition.
+- **Withdrawing `retracts` and `supersedes`**, and **reopening a resolved item** — both need rules of
+  their own (spec §6.1, §6.3).
 - **`ingest --granularity` choosing the profile units are checked under**, not only the recipe.
 - **`strip_echo` and prose preambles**, and **a recovered chunk's attempt history**.
 - **Whether flash-lite converges on surface template v5**, a live question.
+- **R11, R13 and R14** from rust_smysl — `import --format surface`, a configuration error's exit
+  code, and an unknown provider kind's message — kept open as tasks for its S2 experiment. R13's
+  premise is 1.3.0's line "the exit code is still 6": true of `ProviderError::exit_code`, not of the
+  CLI, which reports a configuration it cannot load and exits 1.
+- **OpenAI and Anthropic** remain unverified against their live endpoints.
 
 ---
 
