@@ -662,6 +662,13 @@ fn cli() -> Command {
                         .help("Granularity preset recorded in the recipe (standard = default)"),
                 )
                 .arg(
+                    Arg::new("max-output")
+                        .long("max-output")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(usize))
+                        .help("Output tokens per call [default: the provider's max_output, at least 2048]"),
+                )
+                .arg(
                     Arg::new("path")
                         .long("path")
                         .value_name("P")
@@ -3063,6 +3070,9 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if let Some(g) = m.get_one::<String>("granularity") {
         opts = opts.with_granularity(g);
     }
+    if let Some(n) = m.get_one::<usize>("max-output") {
+        opts = opts.with_max_output(*n);
+    }
     // `--path`, else `ingest.path` from the config. `auto` in either means no override.
     let path_arg = match m.get_one::<String>("path") {
         Some(p) => Some(p.clone()),
@@ -3160,6 +3170,10 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             ),
             None => println!("source       none - the model names any it can"),
         }
+        println!(
+            "max output   {} token(s) per call",
+            opts.output_budget(&caps)
+        );
         println!("rung         {rung} (ceiling {})", smysl::ceiling(rung));
         println!(
             "input        {} bytes, {} token(s)",

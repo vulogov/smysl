@@ -110,6 +110,7 @@ if you cannot copy one.";
 
 /// Surface-path content ingest.
 ///
+/// Version 5 bounds the gist at 120 characters, which is `SMY-E022`'s limit; it said 240.
 /// Version 4 replaces the example's plausible `ref` with a placeholder — version 3's was copied
 /// into every unit of a live run — and says to name a source only when the document names one.
 /// Version 3 added the complete header with a `source` and an `"ingest:quote"`; version 2 stated
@@ -117,11 +118,11 @@ if you cannot copy one.";
 pub fn content_ingest_surface() -> Template {
     Template {
         id: "ingest.content.surface".to_string(),
-        version: 4,
+        version: 5,
         system: format!(
             "You convert documents into smysl surface records. {UNTRUSTED}\n\n\
              Emit only records, no commentary. One record per claim, a header line and then a \
-             one-sentence gist under 240 characters:\n\n\
+             one-sentence gist of at most 120 characters:\n\n\
              {SURFACE_EXAMPLE}\n\n\
              {LABEL_FORMAT}\n\n\
              {STATUS_RULES}\n\
@@ -139,15 +140,16 @@ pub fn content_ingest_surface() -> Template {
 ///
 /// Where each record came from is recorded by the caller, so the model is told not to write
 /// provenance at all — except where the document itself attributes a statement to somewhere
-/// else, which the caller cannot know and the source policy then keeps.
+/// else, which the caller cannot know and the source policy then keeps. Version 2 bounds the
+/// gist at 120 characters, as version 5 of the unsourced template does.
 pub fn content_ingest_surface_sourced() -> Template {
     Template {
         id: "ingest.content.surface.sourced".to_string(),
-        version: 1,
+        version: 2,
         system: format!(
             "You convert documents into smysl surface records. {UNTRUSTED}\n\n\
              Emit only records, no commentary. One record per claim, a header line and then a \
-             one-sentence gist under 240 characters:\n\n\
+             one-sentence gist of at most 120 characters:\n\n\
              {SURFACE_EXAMPLE_SOURCED}\n\n\
              {LABEL_FORMAT}\n\n\
              {STATUS_RULES}\n\
@@ -163,13 +165,15 @@ pub fn content_ingest_surface_sourced() -> Template {
 
 /// JSON-AST content ingest.
 ///
-/// Version 2 states the label format. The schema already constrains it where a provider
+/// Version 3: the schema sent with it bounds the gist at 120 characters rather than 240. The
+/// text is unchanged, but the schema is part of what is asked and the recipe hashes only its
+/// id, so the version is what records the change. Version 2 states the label format. The schema already constrains it where a provider
 /// enforces schemas; a provider in json-mode sees the schema only as text, and the rule in
 /// words is cheaper to follow than a regular expression.
 pub fn content_ingest_json() -> Template {
     Template {
         id: "ingest.content.json".to_string(),
-        version: 2,
+        version: 3,
         system: format!(
             "You convert documents into smysl kernel units as JSON. {UNTRUSTED}\n\n\
              Return one object: {{\"units\": [...]}}, matching the supplied schema exactly. \
@@ -200,7 +204,7 @@ pub fn content_ingest_json_sourced() -> Template {
     let base = content_ingest_json();
     Template {
         id: "ingest.content.json.sourced".to_string(),
-        version: 1,
+        version: 2,
         system: format!(
             "{}\n\
              Where the document came from is recorded for you, so do not write a `source`. A \

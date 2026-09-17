@@ -316,6 +316,33 @@ had run, and recorded a recipe no real run shared. The name is still hashed as w
 recipe recorded under a valid name is unchanged — `standard` and `default` stay distinct recipes,
 which is the price of not moving them. `IngestOptions::granularity_profile` resolves it.
 
+**Before the cut: four things a release could not ship with.**
+
+- **Internal requirements name 1.3.0.** Every `[workspace.dependencies]` entry for a sibling crate
+  said `1.1.0`, and 1.3 crates call 1.3 items — `smysl-ingest` uses `smysl_core::quote`,
+  `smysl-provider` `ProviderError::Config`. Published, a consumer with `smysl-core` locked at 1.2
+  would resolve the new `smysl-ingest` against it and fail to build. Nothing here could see it,
+  since every build uses paths: `make dep-versions` and a CI job check it now.
+- **`ingest` asks for the provider's configured `max_output`**, never less than 2,048
+  (`DEFAULT_MAX_OUTPUT`), or `--max-output N` / `IngestOptions::with_max_output` as given. It asked
+  for 2,048 always, and one live json-ast run of three was cut off at `MAX_TOKENS` under a
+  configuration allowing more. `IngestOptions::max_output` defaults to `0`, meaning the provider's;
+  `IngestOptions::output_budget` resolves it, and `--dry-run` prints it.
+- **An answer cut off at the output limit says so, and is a call.** `ProviderError::Truncated
+  { limit, used }` for Gemini's `MAX_TOKENS`, Anthropic's `max_tokens` and OpenAI-shaped `length`.
+  It was `ContextExceeded`, printed "context window exceeded: 2032 > 2048" for 2,032 of 2,048
+  output tokens — false as written, and about the wrong window — and Anthropic's and OpenAI's
+  compared the answer's *bytes* against the cap (OpenAI's against 0). It reads "answer cut off
+  at the output limit of 2048 token(s) (2032 reported); raise max_output". Ingest now counts every
+  error a provider returned as a call, and a truncation's reported output tokens as usage; the
+  run had said `0 call(s), 0 token(s)` and was billed. A `ContextExceeded` with no numbers, from a
+  status error, no longer prints "0 > 0".
+- **The gist bound in the schema is the check's.** `GIST_MAX_CHARS` is 120, `l0_max` at four bytes
+  a token; it was 240, so an enforcing provider held the model to a bound `SMY-E022` then refused,
+  and both surface templates told the model 240. Template versions move with it — surface 5,
+  surface.sourced 2, json 3 (its schema changed, and the recipe hashes the schema's id only),
+  json.sourced 2 — so recipes from runs before this differ from runs after, as they should.
+
 **The quote check's limit is stated where it is defined.** `Present` means the quote is in the
 source. A unit whose gist contradicts its own verbatim quote passes, because the contradiction is
 between the unit and its evidence, which no string comparison sees.
@@ -351,15 +378,6 @@ held the registry at 49. No test has that name, and the registry was 51; it is 5
   attestation record cannot target a relation because relations have no uid. A model-matched
   `supports` or `rebuts` edge is indistinguishable from a human's. A new relation key is a
   format addition §8.1 permits; it is a decision, and not taken here.
-- **`ingest` always asks for 2,048 output tokens.** `cmd_ingest` never sets `max_output`, and a
-  provider's configured `max_output` does not reach it. A json-ast answer of about a dozen units
-  sits right at that cap: one live run of three was cut off at `MAX_TOKENS` and degraded. The
-  `ingest: { path: json-ast }` advice in this release is only as good as that cap.
-- **A provider error that happens after the call is reported as no call.** The truncated run
-  above said `0 call(s), 0 token(s)` and was billed. And its message, "context window exceeded:
-  2032 > 2048", is false as written — the mapper's own comment records fixing the same shape once.
-- **The json-ast schema allows a 240-character gist** (`GIST_MAX_CHARS`) and the gist check
-  allows 120 bytes, so an enforcing provider can be held to a bound the check then refuses.
 - **`strip_echo` removes frame lines, not prose preambles.** A repair answer that opened with a
   27-byte sentence was still `stray Text`.
 - **A chunk that recovers reports nothing about what it recovered from.** R1's per-attempt

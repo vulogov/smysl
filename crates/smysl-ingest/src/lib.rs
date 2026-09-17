@@ -69,6 +69,9 @@ pub use attest::{attest, AttestOptions, AttestReport, Judgement, What};
 pub use smysl_core::SourcePolicy;
 pub use stage::{Attest, Staged};
 
+/// The fewest output tokens an ingest call asks for when the caller names no budget.
+pub const DEFAULT_MAX_OUTPUT: usize = 2048;
+
 /// Default repair attempts before an unrepairable span degrades to opaque `prose`
 /// (rule I, `SMY-W304`).
 pub const DEFAULT_REPAIR_ATTEMPTS: u8 = 2;
@@ -129,6 +132,9 @@ pub struct IngestOptions {
     /// against. Zero for a one-shot ingest; a pipeline increments it per step.
     pub hop: u32,
     pub temperature: f32,
+    /// Output tokens to ask for per call. `0`, the default, means the provider's configured
+    /// `max_output`, and never less than [`DEFAULT_MAX_OUTPUT`]; see
+    /// [`IngestOptions::output_budget`]. Anything else is sent as given.
     pub max_output: usize,
     /// The model to ask for. Empty means the provider's configured default.
     pub model: String,
@@ -180,6 +186,22 @@ impl IngestOptions {
     pub fn with_max_output(mut self, n: usize) -> IngestOptions {
         self.max_output = n;
         self
+    }
+
+    /// The output tokens a call to this provider asks for.
+    ///
+    /// Until 1.3 every ingest asked for 2,048 whatever the provider was configured for, so a
+    /// json-ast answer of about a dozen units was cut off at `MAX_TOKENS` and degraded while
+    /// the configuration said 8,192. Now the configured `max_output` is used when the caller
+    /// names none — with 2,048 as a floor, so a configuration that never set the field (and
+    /// reads 1,024) asks for no less than it did.
+    #[cfg(feature = "model")]
+    pub fn output_budget(&self, caps: &smysl_provider::Capabilities) -> usize {
+        if self.max_output > 0 {
+            self.max_output
+        } else {
+            caps.max_output.max(DEFAULT_MAX_OUTPUT)
+        }
     }
 
     pub fn with_agent(mut self, a: smysl_core::AgentId) -> IngestOptions {
@@ -274,7 +296,7 @@ impl Default for IngestOptions {
             hop: 0,
             agent,
             temperature: 0.0,
-            max_output: 2048,
+            max_output: 0,
             model: String::new(),
             prompt: None,
             source: None,
@@ -341,7 +363,8 @@ impl<'a> Ingestor<'a> {
         let caps = provider.caps();
 
         let choice = path::choose(&caps, Task::ContentIngest, input.len(), requested);
-        let window = chunk::Window::for_context(caps.context_window, self.opts.max_output);
+        let window =
+            chunk::Window::for_context(caps.context_window, self.opts.output_budget(&caps));
         let chunks = chunk::chunk(input, window);
 
         // The recipe names the template that is actually sent. It used to hardcode the
@@ -450,6 +473,23 @@ impl<'a> Ingestor<'a> {
                 // budget - but rule I still applies, so the span degrades rather than taking
                 // the run down.
                 Err(e) => {
+                    // An error the endpoint returned is a call made, and usually billed. Every
+                    // one was reported as no call: a run cut off at the output limit said
+                    // `0 call(s), 0 token(s)`. Only a request that never reached a provider is
+                    // not counted.
+                    if !matches!(
+                        e,
+                        ProviderError::Unreachable
+                            | ProviderError::OfflineViolation
+                            | ProviderError::Config(_)
+                            | ProviderError::StructuredUnsupported
+                    ) {
+                        calls += 1;
+                    }
+                    if let ProviderError::Truncated { used: Some(n), .. } = e {
+                        usage.output_tokens += n as u64;
+                        usage.estimated = true;
+                    }
                     let (core, d) = repair::degrade(text, self.opts.rung, &e.to_string());
                     return ChunkOutcome {
                         units: vec![core],
@@ -589,7 +629,7 @@ impl<'a> Ingestor<'a> {
         let caps = provider.caps();
         let mut r = Request::new(&self.opts.model, template.render(text))
             .with_system(&template.system)
-            .with_max_output(self.opts.max_output);
+            .with_max_output(self.opts.output_budget(&caps));
         r.temperature = self.opts.temperature;
 
         // A schema is only worth *sending as a schema* where the provider will enforce it;
@@ -660,6 +700,7 @@ mod tests {
         assert_eq!(o.repair_attempts, DEFAULT_REPAIR_ATTEMPTS);
         assert_eq!(o.path, None, "auto by default");
         assert_eq!(o.temperature, 0.0);
+        assert_eq!(o.max_output, 0, "the provider's, not a constant");
     }
 
     /// A provider that will not enforce a schema must still be *told* the schema.

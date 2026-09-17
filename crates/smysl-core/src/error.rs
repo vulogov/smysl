@@ -581,6 +581,15 @@ pub enum ProviderError {
     /// then these were `Malformed`, and a config typo printed "malformed provider response"
     /// for a call that was never made.
     Config(String),
+    /// The answer stopped at the output limit the request set. Since 1.3; it was
+    /// `ContextExceeded`, which printed "context window exceeded: 2032 > 2048" for an answer
+    /// that used 2,032 of 2,048 output tokens — false as written, and about the wrong window.
+    /// `limit` is the request's cap where the mapper knows it; `used` is the output tokens the
+    /// provider reported, reasoning included, which it counts differently from the cap.
+    Truncated {
+        limit: Option<usize>,
+        used: Option<usize>,
+    },
 }
 
 impl ProviderError {
@@ -621,6 +630,11 @@ impl fmt::Display for ProviderError {
                 Some(d) => write!(f, "rate limited, retry after {}s", d.as_secs()),
                 None => f.write_str("rate limited"),
             },
+            // A status error knows neither number and sends zeros; "0 > 0" is false as written.
+            ProviderError::ContextExceeded {
+                limit: 0,
+                requested: 0,
+            } => f.write_str("context window exceeded"),
             ProviderError::ContextExceeded { limit, requested } => {
                 write!(f, "context window exceeded: {requested} > {limit}")
             }
@@ -633,6 +647,16 @@ impl fmt::Display for ProviderError {
             ProviderError::Malformed(m) => write!(f, "malformed provider response: {m}"),
             ProviderError::Upstream(status, m) => write!(f, "upstream {status}: {m}"),
             ProviderError::Config(m) => write!(f, "provider configuration: {m}"),
+            ProviderError::Truncated { limit, used } => {
+                f.write_str("answer cut off at the output limit")?;
+                if let Some(l) = limit {
+                    write!(f, " of {l} token(s)")?;
+                }
+                match used {
+                    Some(u) => write!(f, " ({u} reported); raise max_output"),
+                    None => f.write_str("; raise max_output"),
+                }
+            }
         }
     }
 }
@@ -854,6 +878,26 @@ mod tests {
             Error::from(MergeError::ContentionsPresent { count: 3 }).exit_code(),
             ExitCode::Contentions
         );
+    }
+
+    /// Both shapes of "too long" read as true: a truncation names the output limit, and a
+    /// status error that knows no numbers does not print zeros.
+    #[test]
+    fn a_length_error_says_which_limit_and_no_false_comparison() {
+        let t = ProviderError::Truncated {
+            limit: Some(2048),
+            used: Some(2032),
+        };
+        assert_eq!(
+            t.to_string(),
+            "answer cut off at the output limit of 2048 token(s) (2032 reported); raise max_output"
+        );
+        assert!(!t.is_fallback_eligible());
+        let c = ProviderError::ContextExceeded {
+            limit: 0,
+            requested: 0,
+        };
+        assert_eq!(c.to_string(), "context window exceeded");
     }
 
     #[test]

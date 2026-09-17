@@ -147,9 +147,14 @@ pub fn authorable_relations() -> Vec<String> {
         .collect()
 }
 
-/// Appendix C's gist bound. Characters, not tokens: a JSON Schema cannot count tokens, and
-/// a bound the model can actually respect is worth more than an exact one it cannot.
-pub const GIST_MAX_CHARS: usize = 240;
+/// The gist bound, in characters: `l0_max` (30 tokens) at the estimator's four bytes a token.
+///
+/// Characters, not tokens: a JSON Schema cannot count tokens, and a bound the model can
+/// actually respect is worth more than an exact one it cannot. It was 240 until 1.3 — twice
+/// what `SMY-E022` allows — so an enforcing provider held the model to a bound the check then
+/// refused. Exact for ASCII; a gist in a script of multi-byte characters can still fit this
+/// and fail the check, which `repair::salvage` confines to its own unit.
+pub const GIST_MAX_CHARS: usize = 120;
 
 /// Kernel types a model may author.
 ///
@@ -292,9 +297,16 @@ mod tests {
     }
 
     #[test]
-    fn the_gist_bound_is_appendix_cs() {
-        assert_eq!(GIST_MAX_CHARS, 240);
-        assert!(unit_schema().contains("\"maxLength\": 240"));
+    fn the_gist_bound_is_the_checks() {
+        let l0 = smysl_core::GranularityProfile::default().l0_max as usize;
+        assert_eq!(GIST_MAX_CHARS, l0 * 4, "l0_max at four bytes a token");
+        let at_bound = "x".repeat(GIST_MAX_CHARS);
+        assert_eq!(
+            smysl_core::tokens(&at_bound) as usize,
+            l0,
+            "the longest gist passes"
+        );
+        assert!(unit_schema().contains("\"maxLength\": 120"));
     }
 
     /// A conservative core, not an intersection - no provider dialect reached here takes

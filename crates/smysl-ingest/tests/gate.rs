@@ -282,6 +282,41 @@ fn a_provider_failure_degrades_without_spending_the_repair_budget() {
     assert_eq!(calls.load(Ordering::SeqCst), report.chunks, "one call each");
 }
 
+/// An answer cut off at the output limit was billed, and was reported as `0 call(s), 0
+/// token(s)` with "context window exceeded: 2032 > 2048". It is a call, its output tokens
+/// count, and the message names the limit that stopped it. An unreachable provider is still
+/// no call.
+#[test]
+fn an_error_the_provider_returned_is_a_call_and_says_which_limit() {
+    let truncated = ProviderError::Truncated {
+        limit: Some(2048),
+        used: Some(2032),
+    };
+    let (r, _) = registry(Scripted::new(vec![Err(truncated); 8]));
+    let (_, report) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), "one paragraph")
+        .expect("rule I");
+    assert_eq!(report.calls, 1);
+    assert_eq!(report.usage.output_tokens, 2032);
+    let w304 = report
+        .diagnostics
+        .iter()
+        .find(|d| d.code == Code::W304)
+        .expect("degraded");
+    assert!(
+        w304.message.contains("output limit of 2048"),
+        "{}",
+        w304.message
+    );
+    assert!(!w304.message.contains("context window"), "{}", w304.message);
+
+    let (r, _) = registry(Scripted::new(vec![Err(ProviderError::Unreachable); 8]));
+    let (_, report) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), "one paragraph")
+        .expect("rule I");
+    assert_eq!(report.calls, 0, "nothing reached a provider");
+}
+
 /// The repair loop is a loop: an answer that fixes itself on the second turn is accepted,
 /// and the budget is not spent needlessly.
 #[test]
@@ -924,6 +959,36 @@ fn a_prompt_override_is_what_is_sent_and_every_check_after_the_model_still_runs(
     assert_ne!(
         report.recipe, plain.recipe,
         "an override must not share the built-in recipe"
+    );
+}
+
+/// Ingest asks for what the provider is configured to produce. It asked for 2,048 always, and a
+/// live json-ast answer of a dozen units was cut off at `MAX_TOKENS` under a configuration that
+/// allowed 8,192.
+#[test]
+fn ingest_asks_for_the_providers_configured_output() {
+    let answer =
+        r#"{"units":[{"type":"claim","gist":"the pool saturated","status":"speculative"}]}"#;
+    let sent = |configured: usize, o: IngestOptions| {
+        let mut p = Scripted::saying(answer);
+        p.caps.max_output = configured;
+        let (r, _, seen) = registry_seeing(p);
+        Ingestor::new(&r, o)
+            .ingest(&Store::new(), "one paragraph")
+            .unwrap();
+        let n = seen.lock().unwrap()[0].max_output;
+        n
+    };
+    assert_eq!(sent(8192, opts(Rung::Document)), 8192, "the configuration");
+    assert_eq!(
+        sent(1024, opts(Rung::Document)),
+        smysl_ingest::DEFAULT_MAX_OUTPUT,
+        "never less than before"
+    );
+    assert_eq!(
+        sent(8192, opts(Rung::Document).with_max_output(512)),
+        512,
+        "a caller's own budget as given"
     );
 }
 
