@@ -50,6 +50,14 @@ requirements are checked against the workspace version (`make dep-versions`): 1.
 1.3 items, and the `1.1.0` requirements they carried until the cut would have let a consumer's
 lockfile pair them with 1.2 siblings.
 
+**1.6.0 is published.** All twelve crates went to crates.io on 2026-09-17, the day it was cut, and
+`BASELINE` moved to 1.6.0 in the same change. One key was added to one record body and written only
+when non-zero, so every pack encoded before it keeps its bytes — and the wire fixture that proves
+that found a rule X defect in the JavaScript implementation, which had been re-encoding an integral
+float as an integer since it shipped. Gate 2 says three independent implementations; this is the
+first release where one of them was *wrong* and the corpus caught it, which is the gate doing the
+job it was set rather than merely being satisfied.
+
 **1.5.0 is published.** All twelve crates went to crates.io on 2026-09-17, the day it was cut, and
 `BASELINE` moved to 1.5.0 in the same change. Nothing was removed and no record type was added:
 every 1.5 addition is off unless a caller asks for it, which is why `make semver` reported no
