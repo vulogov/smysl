@@ -28,7 +28,7 @@ As a library:
 
 ```toml
 [dependencies]
-smysl = "1.5"
+smysl = "1.6"
 ```
 
 Add `default-features = false` for the pure library: no async runtime, no HTTP client and no
@@ -36,48 +36,51 @@ argument parser in the dependency tree, verified in CI on every push rather than
 here.
 
 **The crate is `1.6.0` and the format is `smysl/1.0`.** The crate version means the API is
-frozen: the facade's 272 names and every public item behind them move only with a 2.0, enforced
+frozen: the facade's 274 names and every public item behind them move only with a 2.0, enforced
 per crate by `cargo-semver-checks` on every push.
 [`Documentation/API_CONTRACT.md`](Documentation/API_CONTRACT.md) is that promise written down.
 The format version means nothing about the format changed: `smysl/0.1` held across fourteen
 releases and four independent implementations — the Rust, and Python, JavaScript and Go written
 from the specification alone — and `smysl/1.0` reports that record rather than a change.
 
-## Release 1.5.0
+## Release 1.6.0
 
-The cycle that taught the library to *read* a corpus somebody else wrote. Everything downstream of
-writing units quietly assumed the writer's conventions were in the store — and they are not. A
-producer that links a prerequisite with `conditions`, so that rewording it does not move the uid of
-every decision beneath it, had that dependency invisible to packing and tracing, because both read
-`deps` and `grounds` and nothing else. The full account is in [`CHANGELOG.md`](CHANGELOG.md).
+The cycle that made a pack fit the prompt it lands in, and a retrieval result say why. A budget was
+a number of tokens for the pack, which is never the number a caller has — what it has is a context
+window, less a system prompt, less the question, less room for the answer. And a score said how
+relevant without saying why, so "retrieved weakly" and "never retrieved" looked identical. The full
+account is in [`CHANGELOG.md`](CHANGELOG.md).
 
-**A pack that carries what its units rest on, and a trace that shows it first:**
+**A pack that fits the window, and a result that explains itself:**
 
 ```sh
-smysl trace --via premises d/drain store.cbor     # what this decision rests on, over those edges
-smysl pack --budget 800 --support premises store.cbor   # and a pack that will not leave it out
-smysl review --confirm backs store.cbor           # edges a person has not confirmed yet
+smysl pack --budget 16k --reserve 2500 store.cbor     # the pack gets what is left
+smysl find "connection pool" --why store.cbor          # which terms earned each hit
+smysl find "pool" --payload code:kind=decision store.cbor   # the schema's own kind, not the kernel's
 ```
 
-- **C8, the eighth packing constraint.** `--support premises` — or any edge set, extensions
-  included — carries what a selected unit rests on, as C1 and C2 carry deps and grounds. Off
-  unless asked for, so C1–C7 are exactly what they were.
-- **`rests_on` and `trace_via`**: `dependents_via` read from the other end, over the edges you
-  choose rather than `deps` and `grounds` alone.
-- **A batch can come from two hands.** `stage::prepare_attested` asks who attested each record, so
-  a tool that proposes units and a person who confirms an edge between them are both recorded.
-  `Store::attested_by` and `agreement(uid, n)` read it back for a unit or an edge alike.
-- **A review queue that knows what is already confirmed.** `review --confirm backs` lists edges
-  until an agent of the accepted kind attests one; a model attesting its own proposal is not a
-  review.
-- **Five requests from rust_smysl** (R16–R20): retrieval restricted to a candidate set
-  (`Query::within`), uid → label (`labels_of`, `label_index`), the byte range a quote matched at
-  (`quote_support_span`), optional English suffix folding (`Tokenizer::folding`), and units by
-  source prefix (`Store::units_with_source_prefix`).
+- **`--reserve` states what else is in the window.** `--budget b --reserve r` selects exactly what
+  `--budget b-r` selects, and the packinfo records both, so `used + reserved <= budget` is a
+  property a reader can check. Reserving the whole budget fails rather than returning an empty
+  pack.
+- **A caller can bring its own tokenizer.** `PackRequest::counting_with(ExternalCost)` takes the
+  counter that will actually bill for the tokens; its id lands in the packinfo, and `verify`
+  accepts a pack built under it.
+- **`--why` decomposes a score.** Exactly: BM25 sums one term per query token, so the parts add up
+  to the whole. A unit in the result on one common word now says so.
+- **`--payload` filters on an extension schema's own field**, which is the axis a corpus of
+  `claim`s is actually distinguished along. Applied before the limit, with scoring untouched; a
+  unit without the key is excluded, so a store written under another schema returns nothing rather
+  than everything. `pack --payload` restricts what `--query` focuses on.
 
-No format break, and nothing removed: 1.5 adds no record type and no surface word, and every
-addition is off unless asked for — so a caller that upgrades and changes nothing gets
-byte-identical output. `make semver` is clean on all twelve crates.
+**A rule X defect, found by a fixture written for something else.** The wire fixture for the new
+packinfo key proves §8.1's rule — an older reader round-trips a permitted addition byte for byte —
+and the JavaScript implementation failed it at once: JavaScript has one number type, so a
+`binary32` zero decoded to `0` and re-encoded as an integer, altering every pack manifest and every
+relation carrying `weight: 1.0`. Live since that implementation shipped, and fixed here.
+
+No format break: one new key in one record body, written only when non-zero, so every pack encoded
+before 1.6 keeps its bytes. `make semver` is clean on all twelve crates.
 
 Building from source:
 
@@ -331,8 +334,8 @@ unreachable from the library.
 
 ```toml
 [dependencies]
-smysl = { version = "1.5", default-features = false }                      # pure
-smysl = { version = "1.5", default-features = false, features = ["stage"] } # + staging, no model
+smysl = { version = "1.6", default-features = false }                      # pure
+smysl = { version = "1.6", default-features = false, features = ["stage"] } # + staging, no model
 ```
 
 With default features off you get a fully synchronous library — no async runtime, no HTTP

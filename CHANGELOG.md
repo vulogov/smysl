@@ -7,7 +7,47 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.6.0
+## 1.6.0 — 2026-09-17
+
+The cycle that made a pack fit the prompt it lands in, and a retrieval result say why. 1.5 taught
+the library to read a corpus somebody else wrote; 1.6 is about the two things a caller does next —
+send it to a model, and act on what comes back — and both had a seam where smysl stopped short and
+the caller improvised.
+
+A budget was a number of tokens for the pack, which is never the number a caller has: what it has
+is a context window, less a system prompt, less the question, less room for the answer. So callers
+packed to a fixed number and trimmed the result, which drops units from a selection the solver
+chose as a whole, taking the closure that made it legal with them. `reserving(n)` moves that
+arithmetic inside. And a score said how relevant without saying why, so "retrieved weakly" and
+"never retrieved" looked identical in a ranked list — the blindness that hid a prerequisite saying
+`require` from five diffs saying `required`.
+
+What shipped: `PackRequest::reserving` and `pack --reserve`, with `PackInfo` recording both numbers
+so `used + reserved <= budget` is checkable; `ExternalCost`, so a caller counting in its provider's
+tokens supplies the counter; `Hit::terms` and `find --why`, an exact decomposition of a BM25 score
+into what each query term contributed; and `Query::with_payload`, `find --payload` and
+`pack --payload`, filtering on the field an extension schema distinguishes its units by rather than
+on kernel type. All of it is rust_smysl's R21-R23 plus the symmetry the CLI was missing.
+
+**A rule X defect, found by a fixture written for something else.** `F12-reserved-pack.cbor` exists
+to prove §8.1's test of a permitted addition — an older reader round-trips it byte for byte — and
+the JavaScript implementation failed it immediately. JavaScript has one number type, so a
+`binary32` zero decoded to `0` and re-encoded as an *integer*: every pack manifest, and every
+relation carrying `weight: 1.0`, came back altered. That is precisely what rule X forbids of a
+reader that does not understand a record, and it had been true since that implementation shipped.
+The lifecycle fixture could not have caught it; its only float is `0.5`.
+
+**No format break.** `smysl/1.0` holds: one new key in one record body (`packinfo` key 7), written
+only when non-zero, so every pack encoded before 1.6 keeps the bytes it had — §8.1 permits it and
+the fixture proves it. Every addition is off unless asked for. The facade is 274 names, 228 pure;
+`make semver` is clean on all twelve crates against 1.5.0, and `SEMVER_BREAKING` is empty for the
+seventh release running. 25 commands.
+
+`Estimator` is where that promise cost something worth recording. The external counter was written
+first as `Estimator::External`, exactly as the request proposed, and `make semver` refused it: a
+fieldless enum whose discriminants a consumer may already depend on cannot gain a variant with data
+without a 2.0. It ships as `ExternalCost` beside it, with `CostModel` as what the solver counts
+with — same capability, no break, and the gate said so before a user did.
 
 ### rust_smysl's 1.6 requests: R21-R23
 
