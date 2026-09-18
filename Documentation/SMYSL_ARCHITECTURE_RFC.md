@@ -690,6 +690,22 @@ vectors for uids (`uid/`), relation ids (`relation-id/`) and contention ids (`co
   | 2000 | 13 (1.7x) | 12 (1.6x) | 19 (1.8x) | 658 (4.1x) |
   | 4000 | 25 (2.0x) | 23 (1.9x) | 37 (2.0x) | 2818 (4.3x) |
 
+  **Retrieval, measured in 1.6** because that release made an index read something new: both
+  retrievers now decode every unit's string-valued payload entries while building one. The
+  synthetic store gained a `code:kind` field so the path is exercised, which is why these
+  absolute figures are not comparable with the table above; the ratios are what travel.
+
+  | units | find | find --payload |
+  |---:|---:|---:|
+  | 1000 | 18 (1.7x) | 19 (1.7x) |
+  | 2000 | 34 (1.8x) | 34 (1.8x) |
+  | 4000 | 64 (1.9x) | 67 (2.0x) |
+
+  Linear, and the filter costs nothing measurable beyond the indexing every query already pays
+  for — 64ms against 67ms at 4 000 units, which is inside the noise of a single run. That was the
+  open question when R23 chose to index payloads rather than decode them per query, and it is now
+  answered rather than assumed.
+
   Two further facts, both measured, both narrowing where to look:
 
   - **It is worst when packing is easiest.** With a budget that admits everything, `pack` is

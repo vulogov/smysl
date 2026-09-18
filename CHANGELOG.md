@@ -41,6 +41,40 @@ pipeline must fit a 16k local context and a hosted one, and a finding has to be 
   query. `payload_strings` is the extractor, and it reads top-level strings and arrays of them -
   a nested object is a shape a flat equality filter cannot express.
 
+### Before the cut
+
+- **`pack --payload`**, so `--query` focuses on the right *kind* of thing. 1.6 gave `find` a filter
+  on an extension schema's own field and left the command that packs by question without one: a
+  review tool asking what decisions a change touches was focusing on rejected alternatives and
+  anticipated consequences too, because all three are `claim`. It restricts the focus and not the
+  pack — what the focus pulls in through the closure still travels — and needs a `--query`, since
+  restricting the pack itself is `--scope`.
+- **`fixtures/wire/F12-reserved-pack.cbor`**, and it found something. §8.1's test of a permitted
+  addition is that an older reader round-trips it byte for byte, so the fixture carries a manifest
+  that reserved nothing (key 7 absent, as every pack before 1.6 encoded it) and two that reserved
+  something. The JavaScript implementation failed it: JavaScript has one number type, so a
+  `binary32` zero — a manifest's optimality gap, or a relation's `weight: 1.0` — decoded to `0` and
+  re-encoded as an *integer*. A record it does not understand was being altered, which is the one
+  thing rule X forbids. It now re-encodes decoded records from the bytes they came from. The
+  lifecycle fixture could never have caught it: its only float is `0.5`.
+- **A correction to 1.3.0's "the exit code is still 6"**, measured on the shipped binary: a
+  configuration that does not parse exits **1**, and only a configuration that parses and then
+  fails at a call exits 6. That line is the premise of rust_smysl's R13, and the same run confirms
+  R14 — an unknown provider *kind* still prints "malformed provider response". Both stay open as S2
+  tasks; the claim no longer reads as settled.
+- **`make doc-output` guarantees the build it replays.** It compares against `target/debug/smysl`,
+  and the test matrix's `--no-default-features` row writes that same path, so replaying what was
+  left behind reported the render chapter as drift — twice in one afternoon, both times nothing
+  wrong with the binary or the book. The script now builds before replaying, unless `SMYSL_BIN`
+  says which binary to use, which is how `tests/doc_output.rs` keeps mutants honest. Skipping those
+  transcripts instead would have dropped a claim chapter 22 makes on purpose.
+- **Retrieval measured**, because 1.6 made an index read something new. Both retrievers decode
+  every unit's string-valued payload entries while building one, and `scripts/bench-scaling.py`
+  had no retrieval column at all. It is linear (1.7x, 1.8x, 1.9x per doubling), and the payload
+  filter costs nothing measurable beyond the indexing every query already pays for: 64ms against
+  67ms at 4 000 units. That was the open question when R23 chose to index rather than decode per
+  query.
+
 ### Carried from 1.5.0
 
 What this cycle starts from (details in 1.5.0):
@@ -652,6 +686,16 @@ provider layer.
   configuration: …`; a misspelled `ingest.path` printed "malformed provider response" for a call
   never made. The exit code is still 6. Two `Malformed` uses remain that are not a provider's
   answer — the usage ledger's file errors — and are left for a variant of their own.
+
+  **Correction (1.6).** "The exit code is still 6" is true of `ProviderError::exit_code` and false
+  of the command line, which is where a caller reads it. Measured on the shipped binary: a config
+  file that does not parse exits **1** from both `providers` and `ingest` — the CLI reports a
+  configuration it cannot load and gives up before any provider is consulted — while a config that
+  parses and then fails at a call exits 6. rust_smysl's R13 is that discrepancy, and it was written
+  against this line. The same run confirms R14: an unknown provider *kind* still prints "malformed
+  provider response: provider kind `x` is not compiled into this build", so the `Config` variant
+  reached the unknown-id path and not that one. Both stay open as S2 tasks; what changes here is
+  that the claim above no longer reads as settled.
 - **`smysl-provider`'s tests compile at its own defaults.** The retry tests exercised items that
   exist only with `http-client`, and two integration files had nothing to check without a mapper.
   A workspace run unifies features, so no row could see it: `make crate-features`, and a CI job,

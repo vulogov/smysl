@@ -640,6 +640,15 @@ fn cli() -> Command {
                         .help("Focus on what this query finds, instead of naming uids"),
                 )
                 .arg(
+                    Arg::new("payload")
+                        .long("payload")
+                        .value_name("KEY=VALUE[,VALUE]")
+                        .help(
+                            "Restrict what --query may focus on to units whose payload has KEY \
+                             equal to one of VALUE",
+                        ),
+                )
+                .arg(
                     Arg::new("query-limit")
                         .long("query-limit")
                         .value_name("N")
@@ -1632,6 +1641,31 @@ fn uid_array<'a>(uids: impl IntoIterator<Item = &'a Uid>) -> String {
         .map(|u| smysl::json_escape(&u.canonical()))
         .collect::<Vec<_>>()
         .join(",")
+}
+
+/// A payload restriction from `KEY=VALUE[,VALUE]` (1.6).
+///
+/// Shared by `find` and `pack` so the two cannot drift into reading the same argument
+/// differently. An empty key or an empty value list is refused rather than treated as "no
+/// restriction": a caller that wrote `--payload` meant to narrow something.
+fn payload_filter(raw: &str, cmd: &str) -> Result<(String, Vec<String>), ExitCode> {
+    let complaint = || {
+        eprintln!("smysl {cmd}: --payload takes KEY=VALUE, with values comma-separated");
+        ExitCode::Usage
+    };
+    let Some((key, values)) = raw.split_once('=') else {
+        return Err(complaint());
+    };
+    let values: Vec<String> = values
+        .split(',')
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .collect();
+    if key.trim().is_empty() || values.is_empty() {
+        return Err(complaint());
+    }
+    Ok((key.trim().to_string(), values))
 }
 
 /// An edge set from a comma-separated list: a preset, or relation kinds.
@@ -2903,10 +2937,23 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     // The default limit is 3 rather than `find`'s 10, because every focused unit drags its
     // closure in with it and ten of those exhaust an ordinary budget before anything is
     // chosen on merit.
+    if m.get_one::<String>("payload").is_some() && m.get_one::<String>("query").is_none() {
+        // It restricts what `--query` may focus on and nothing else. Accepting it alone would
+        // look like a filter on the pack, which is what `--scope` is.
+        eprintln!("smysl pack: --payload restricts --query, so it needs one");
+        return ExitCode::Usage;
+    }
     if let Some(q) = m.get_one::<String>("query") {
         use smysl::Retriever as _;
         let limit = m.get_one::<usize>("query-limit").copied().unwrap_or(3);
-        let hits = smysl::Bm25::index(&store).search(&smysl::Query::new(q.clone(), limit));
+        let mut query = smysl::Query::new(q.clone(), limit);
+        if let Some(raw) = m.get_one::<String>("payload") {
+            match payload_filter(raw, "pack") {
+                Ok((key, values)) => query = query.with_payload(key, values),
+                Err(code) => return code,
+            }
+        }
+        let hits = smysl::Bm25::index(&store).search(&query);
         if hits.is_empty() {
             eprintln!("smysl pack: --query matched nothing, so there is nothing to focus on");
             return ExitCode::Failure;
@@ -3368,16 +3415,10 @@ fn cmd_find(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     }
 
     if let Some(raw) = m.get_one::<String>("payload") {
-        let Some((key, values)) = raw.split_once('=') else {
-            eprintln!("smysl find: --payload takes KEY=VALUE, with values comma-separated");
-            return ExitCode::Usage;
-        };
-        let values: Vec<&str> = values.split(',').filter(|v| !v.is_empty()).collect();
-        if key.is_empty() || values.is_empty() {
-            eprintln!("smysl find: --payload takes KEY=VALUE, with values comma-separated");
-            return ExitCode::Usage;
+        match payload_filter(raw, "find") {
+            Ok((key, values)) => q = q.with_payload(key, values),
+            Err(code) => return code,
         }
-        q = q.with_payload(key, values);
     }
 
     // `Retriever` must be in scope for `search`; the trait is the seam, and using it here

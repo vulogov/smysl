@@ -359,6 +359,32 @@ fitting into rather than against a number it invented.
   program rather than to a reader.
 ]
 
+#subsection("Focusing on the right kind of thing: `--payload`")
+
+`--query` focuses a pack on what a search finds, and a search finds whatever
+matches the words. For a corpus built on an extension schema that is often too
+much: a tool asking "what decisions does this change touch" gets the decisions,
+the alternatives somebody rejected and the consequences somebody anticipated,
+because all three are `claim` and all three are about the same subject.
+
+`--payload` restricts what the query is allowed to focus on, using the field the
+schema itself distinguishes them with:
+
+#screen(caption: "$ smysl --format surface pack --budget 300 --query \"connection pool\" --payload code:kind=decision fixtures/corpus/F11-extension-kinds.smy")[
+```
+smysl pack: --query focused 1 unit(s): b3:5w3ei75662mlliiupstld6lolv
+```
+]
+
+Without it the same query focuses on three. It restricts the *focus* and not the
+pack: everything the focus pulls in through the closure still travels, which is
+the whole point — you are narrowing what the pack is *about*, not what it is
+allowed to contain. Narrowing the latter is `--scope`, and the two compose.
+
+A filter that matches nothing fails the way an empty query already did, rather
+than quietly packing on density and handing back something that answers a
+question nobody asked.
+
 #subsection("When the floor doesn't fit: infeasible budgets")
 
 C3 is not a suggestion. If the mandatory floor — the focus plus everything

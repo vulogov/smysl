@@ -45,3 +45,15 @@ test("records 11 and 12 are known and round-trip", () => {
   assert.ok(records.every((r) => r.isKnown));
   assert.deepEqual(Buffer.from(encodeStore(records)), Buffer.from(data));
 });
+
+// §8.1's test of "permitted", for `packinfo` key 7 (1.6). This implementation does not decode a
+// pack manifest's body, which is the point: a key it has never heard of must come back out
+// exactly as it went in. The fixture holds a manifest that reserved nothing — the key absent, as
+// every pack before 1.6 encoded it — and two that reserved something.
+test("a pack manifest's new key survives a round trip", () => {
+  const data = readFileSync(join(wire, "F12-reserved-pack.cbor"));
+  const records = decodeStore(new Uint8Array(data));
+  assert.deepEqual(records.map((r) => r.name), ["pack_info", "pack_info", "pack_info"]);
+  assert.ok(records.every((r) => r.isKnown));
+  assert.deepEqual(Buffer.from(encodeStore(records)), Buffer.from(data));
+});

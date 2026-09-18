@@ -45,8 +45,14 @@ def store(path: str, n: int) -> None:
     for i in range(n):
         # Two grounds where possible: a chain alone has no fan-out, and a star has no depth.
         g = ["e/base"] if i == 0 else [f"c/u{i-1}"] + ([f"c/u{i-7}"] if i > 7 else [])
+        # A payload field, because 1.6 made retrieval read one: both retrievers decode every
+        # unit's string-valued payload entries when building an index, so a store without any
+        # would measure the path nobody is asking about. Four values in rotation, as an
+        # extension schema that distinguishes its units by kind would have.
+        kind = ("decision", "prerequisite", "rejected-alternative", "consequence")[i % 4]
         out.append(
-            f'@claim c/u{i} {{ status: inferred, grounds: [{", ".join(g)}] }}\n'
+            f'@claim c/u{i} {{ status: inferred, grounds: [{", ".join(g)}], '
+            f'"code:kind": "{kind}" }}\n'
             f"~ Synthetic claim number {i} in the benchmark store.\n"
         )
     # A rebuttal every ten units, so rule R has something to keep with a selection.
@@ -90,6 +96,18 @@ def main() -> int:
             # A budget large enough to admit everything, so the cost measured is the
             # selection machinery rather than the packing decision.
             "pack": lambda p: [BIN, "pack", "--budget", "100000", p],
+            # Retrieval builds its index from scratch per run, and since 1.6 that index also
+            # decodes every unit's payload. Two columns because the question is whether the
+            # filter costs anything beyond the indexing every query already pays for.
+            "find": lambda p: [BIN, "find", "synthetic claim", p],
+            "find+payload": lambda p: [
+                BIN,
+                "find",
+                "synthetic claim",
+                "--payload",
+                "code:kind=decision",
+                p,
+            ],
         }
         names = list(cmds)
         print(f"{'units':>7}  " + "  ".join(f"{n:>10}" for n in names))

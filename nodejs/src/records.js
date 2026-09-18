@@ -46,8 +46,23 @@ export class Record {
     return RECORD_NAMES.has(this.code);
   }
 
+  /** The bytes this record was decoded from, or an encoding of its body if it was built here.
+   *
+   * Re-encoding a decoded record from its body would be wrong in this implementation and is not
+   * wrong in the Python or Go ones, for a reason that is entirely JavaScript's: there is one
+   * number type. A `binary32` zero — a pack manifest's optimality gap, a relation's `weight: 1.0`
+   * — decodes to the number `0`, and an encoder asked to write `0` writes an integer. The record
+   * then re-encodes to different bytes than it was read from, which is the one thing rule X
+   * forbids of a reader that does not understand a record.
+   *
+   * Caught by `fixtures/wire/F12-reserved-pack.cbor`, whose manifests carry a gap of `0.0`. The
+   * lifecycle fixture never found it: its only float is a `weight: 0.5`, which is not an integer
+   * and so took the branch that was right.
+   *
+   * The consequence is that `body` is for reading. A record built here — `new Record(code, body)`
+   * — has no bytes to carry and is encoded from its body as before. */
   reencode() {
-    return encodeOne([this.code, this.body]);
+    return this.raw ?? encodeOne([this.code, this.body]);
   }
 
   /** Name a unit core's known keys. Unknown keys keep their integer, per rule X. */

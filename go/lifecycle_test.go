@@ -124,3 +124,36 @@ func TestRecords11And12AreKnownAndRoundTrip(t *testing.T) {
 		t.Error("F10-lifecycle.cbor did not re-encode byte for byte")
 	}
 }
+
+// §8.1's test of "permitted", for packinfo key 7 (1.6). This implementation does not decode a pack
+// manifest's body, which is the point: a key it has never heard of must come back out exactly as
+// it went in. The fixture holds a manifest that reserved nothing — the key absent, as every pack
+// before 1.6 encoded it — and two that reserved something.
+func TestAPackManifestsNewKeySurvivesARoundTrip(t *testing.T) {
+	data, err := os.ReadFile(wirePath("F12-reserved-pack.cbor"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := smysl.DecodeStore(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 3 {
+		t.Fatalf("got %d records, want 3", len(records))
+	}
+	for _, r := range records {
+		if !r.IsKnown() {
+			t.Errorf("record %d is unknown", r.Code)
+		}
+		if r.Name() != "pack_info" {
+			t.Errorf("got %s, want pack_info", r.Name())
+		}
+	}
+	out, err := smysl.EncodeStore(records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(out, data) {
+		t.Error("F12-reserved-pack.cbor did not re-encode byte for byte")
+	}
+}

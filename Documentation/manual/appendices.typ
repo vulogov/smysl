@@ -94,6 +94,7 @@ These apply to every subcommand, in any position on the command line.
     ([`--tokenizer`], [`ID`], [Cost model; recorded in the packinfo either way (D-2).]),
     ([`--mode`], [`greedy|exact`], [`exact` proves optimality by branch and bound; needs the `exact-pack` feature.]),
     ([`--query`], [`TEXT`], [Focus on what this query finds, instead of naming uids.]),
+    ([`--payload`], [`KEY=VALUE[,VALUE]`], [Restrict what `--query` may focus on to units whose payload has `KEY` equal to one of `VALUE`. Needs a `--query`.]),
     ([`--query-limit`], [`N`], [How many hits `--query` focuses on; 3 by default.]),
     ([`PATH`], [positional], [Store to pack.]),
   ),
