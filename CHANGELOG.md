@@ -7,6 +7,19 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.7.0
+
+### Carried from 1.6.0
+
+What this cycle starts from (details in 1.6.0):
+
+- **R11, R13 and R14**, held for rust_smysl's S2 experiment. 1.6 measured the last two rather than
+  fixing them: a configuration that does not parse exits 1 and not 6, and an unknown provider
+  *kind* still reports "malformed provider response".
+- **OpenAI and Anthropic** against their live endpoints — gate 4's standing waiver.
+
+---
+
 ## 1.6.0 — 2026-09-17
 
 The cycle that made a pack fit the prompt it lands in, and a retrieval result say why. 1.5 taught

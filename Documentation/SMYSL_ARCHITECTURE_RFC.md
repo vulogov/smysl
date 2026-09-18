@@ -4,7 +4,7 @@
 [`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md), which is deliberately a fraction of this
 one's length: interoperability needs identity, encoding and the rules, not an account of how
 this implementation happens to be built.
-**Describes:** the code at `dev/1.6.0`, crate `1.6.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`.
+**Describes:** the code at `dev/1.7.0`, crate `1.7.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`.
 Sections 7.1 and 7.4 carry 1.6's additions — a budget that knows what else is in the window, and
 retrieval that can say why.
 Sections 2.3, 4.2, 5 and 13 were brought up to 1.4 — the lifecycle of edges and disagreements —
