@@ -70,13 +70,34 @@ pub struct Hit {
     /// Higher is more relevant. Scales differ between implementations, so compare within one
     /// result set and never across two.
     pub score: f32,
+    /// Which query terms this unit matched, and what each contributed (1.6).
+    ///
+    /// `score` says how relevant, not *why*, and the difference between "retrieved weakly" and
+    /// "never retrieved" was visible only by printing results and reading them. A finding that
+    /// can name the terms behind its retrieval is auditable; one that cannot is a number.
+    ///
+    /// Ordered by contribution descending, then by term, so it is a function of the index and the
+    /// query like everything else here. **Advisory**: empty means the retriever does not compute
+    /// per-term contributions, not that nothing matched — a `Retriever` is a public trait and
+    /// this cannot be a requirement on every implementation of it.
+    pub terms: Vec<(String, f32)>,
 }
 
 impl Hit {
     /// The two things every hit has. Anything added later gets a setter or a builder, so this
     /// signature stays the one an implementation of `Retriever` writes.
     pub fn new(uid: Uid, score: f32) -> Hit {
-        Hit { uid, score }
+        Hit {
+            uid,
+            score,
+            terms: Vec::new(),
+        }
+    }
+
+    /// Record which query terms this hit matched and what each contributed (1.6).
+    pub fn with_terms(mut self, terms: impl IntoIterator<Item = (String, f32)>) -> Hit {
+        self.terms = terms.into_iter().collect();
+        self
     }
 }
 
@@ -109,6 +130,48 @@ pub struct Query {
     /// scoring alone: IDF still comes from the whole index, so a restriction cannot re-weight
     /// terms.
     pub within: BTreeSet<Uid>,
+    /// Restrict to units whose payload has this key with one of these values (1.6). `None` means
+    /// no restriction.
+    ///
+    /// `within` answers the same question correctly and expensively: a caller that distinguishes
+    /// its units by a payload field walks the whole store to build the eligible set, per query,
+    /// for a set that is a property of the corpus and not of the query. Naming the field instead
+    /// moves that work to indexing time, where it is done once.
+    pub payload: Option<PayloadFilter>,
+}
+
+/// A payload field a query restricts on (1.6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PayloadFilter {
+    pub key: String,
+    /// Any one of these is a match. Empty admits nothing — a caller that named no value asked
+    /// for no units, and returning everything would be the opposite of what it said.
+    pub values: BTreeSet<String>,
+}
+
+impl PayloadFilter {
+    pub fn new(
+        key: impl Into<String>,
+        values: impl IntoIterator<Item = impl Into<String>>,
+    ) -> PayloadFilter {
+        PayloadFilter {
+            key: key.into(),
+            values: values.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    /// Whether a unit carrying these payload strings passes.
+    ///
+    /// A unit *without* the key is excluded: the filter names a property the caller is selecting
+    /// on, and a unit that does not state it has not stated it. That is also what makes the
+    /// filter safe against a store built under a different schema — it returns nothing, rather
+    /// than everything.
+    pub fn admits(&self, strings: &BTreeMap<String, BTreeSet<String>>) -> bool {
+        strings
+            .get(&self.key)
+            .is_some_and(|have| have.iter().any(|v| self.values.contains(v)))
+    }
 }
 
 impl Query {
@@ -119,6 +182,7 @@ impl Query {
             kinds: Vec::new(),
             min_status: None,
             within: BTreeSet::new(),
+            payload: None,
         }
     }
 
@@ -138,9 +202,32 @@ impl Query {
         self
     }
 
+    /// Restrict to units whose payload has `key` equal to one of `values` (1.6).
+    pub fn with_payload(
+        mut self,
+        key: impl Into<String>,
+        values: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Query {
+        self.payload = Some(PayloadFilter::new(key, values));
+        self
+    }
+
     /// Whether a unit passes every filter, `within` included (1.5).
+    ///
+    /// The payload filter is not applied here and cannot be: a uid does not carry a payload. An
+    /// implementation that indexes payloads applies [`Query::admits_payload`] beside this call;
+    /// one that does not indexes no payloads and must return nothing when a payload filter is
+    /// set, which [`Query::admits_payload`] does for an empty map.
     pub fn admits_unit(&self, uid: &Uid, kind: KernelType, status: Status) -> bool {
         (self.within.is_empty() || self.within.contains(uid)) && self.admits(kind, status)
+    }
+
+    /// Whether a unit's payload strings pass the payload filter (1.6). True when none is set.
+    pub fn admits_payload(&self, strings: &BTreeMap<String, BTreeSet<String>>) -> bool {
+        match &self.payload {
+            Some(f) => f.admits(strings),
+            None => true,
+        }
     }
 
     /// Whether a unit passes the kind and status filters. Provided so every implementation

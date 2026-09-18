@@ -124,7 +124,8 @@ pub use smysl_graph::{
 // model and no runtime, so retrieval is a bit-reproducible function of the store and the
 // query. `Retriever` is the seam an impure semantic backend would sit behind.
 pub use smysl_retrieve::{
-    fold_suffix, tokenize as retrieve_tokenize, Bm25, Hit, Query, Retriever, Tokenizer,
+    fold_suffix, tokenize as retrieve_tokenize, Bm25, Hit, PayloadFilter, Query, Retriever,
+    Tokenizer,
 };
 
 // ---- semantic retrieval (feature-gated) -----------------------------------
@@ -171,6 +172,9 @@ pub use smysl_core::quote::{
     support_in_span as quote_support_in_span, support_span as quote_support_span,
     Support as QuoteSupport, QUOTE_KEY,
 };
+/// The string-valued entries of a unit's payload (1.6). What `Query::with_payload` filters on, and
+/// what a caller reads to answer "what kind of thing does this extension schema say this is".
+pub use smysl_core::surface::payload::payload_strings;
 #[cfg(feature = "providers")]
 pub use smysl_provider::usage::{GroupBy, Totals};
 #[cfg(feature = "providers")]
@@ -202,8 +206,9 @@ mod tests {
         // threshold that does not exist and never did, and had sat "documented as
         // unreachable" for two releases — which is a holding pattern, not a decision. A code
         // nobody can trigger is worse than a missing one, because a reader waits for it.
-        // 52 as of 1.3.0, with `SMY-W309`; 53 as of 1.4.0, with `SMY-W056`.
-        assert_eq!(Code::ALL.len(), 53);
+        // 52 as of 1.3.0, with `SMY-W309`; 53 as of 1.4.0, with `SMY-W056`; 54 as of 1.6.0,
+        // with `SMY-E203`.
+        assert_eq!(Code::ALL.len(), 54);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

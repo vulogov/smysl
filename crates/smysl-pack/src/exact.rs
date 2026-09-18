@@ -21,7 +21,7 @@ use smysl_graph::Store;
 use crate::bound;
 use crate::closure;
 use crate::constraints::Selection;
-use crate::cost::{available_levels, Estimator};
+use crate::cost::{available_levels, CostModel};
 
 /// How hard to look before giving up.
 ///
@@ -53,7 +53,7 @@ pub fn solve(
     store: &Store,
     scope: &[Uid],
     salience: &BTreeMap<Uid, f32>,
-    e: &Estimator,
+    e: &CostModel,
     budget: u64,
     floor: &Selection,
     incumbent: Selection,
@@ -96,7 +96,7 @@ fn descend(
     store: &Store,
     scope: &[Uid],
     salience: &BTreeMap<Uid, f32>,
-    e: &Estimator,
+    e: &CostModel,
     budget: u64,
     index: usize,
     selection: Selection,
@@ -219,7 +219,7 @@ fn descend(
     limited
 }
 
-fn cost_of(store: &Store, selection: &Selection, e: &Estimator) -> u64 {
+fn cost_of(store: &Store, selection: &Selection, e: &CostModel) -> u64 {
     selection
         .iter()
         .filter_map(|(u, l)| store.get(u).map(|unit| e.unit(&unit.core, *l)))
@@ -261,7 +261,7 @@ mod tests {
             store,
             &scope,
             &sal,
-            &Estimator::default(),
+            &CostModel::default(),
             budget,
             &Selection::new(),
             Selection::new(),
@@ -342,7 +342,7 @@ mod tests {
             &store,
             &scope,
             &sal,
-            &Estimator::default(),
+            &CostModel::default(),
             10_000,
             &Selection::new(),
             seeded,
@@ -366,7 +366,7 @@ mod tests {
             &store,
             &scope,
             &sal,
-            &Estimator::default(),
+            &CostModel::default(),
             10_000,
             &floor,
             floor.clone(),
@@ -393,7 +393,7 @@ mod tests {
             &store,
             &scope,
             &sal,
-            &Estimator::default(),
+            &CostModel::default(),
             200,
             &Selection::new(),
             Selection::new(),

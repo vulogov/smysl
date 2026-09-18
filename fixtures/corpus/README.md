@@ -54,6 +54,13 @@ Rule T cannot be exercised from surface text: attestations have no surface synta
 programmatically. Rule T's cases live in `crates/smysl-check/src/passes/trust.rs` until
 `ingest` lands in SM-P14.
 
+F11 is the corpus a filter needs and the others cannot supply (1.6). Its four units are told
+apart by an extension schema's own field, `code:kind`, and three of them are `claim` — a
+decision, the prerequisite it rests on, the alternative that was rejected and the consequence
+that was expected. `--kind` cannot separate what a review tool may act on from what it may
+not; `find --payload` can. Its `.expected` set is empty, which is the point: an extension
+payload is not a diagnostic, and a store that used one should check clean.
+
 F3 and F6 carry more weight than their size suggests. F3 is where GE-2 is decided — a
 claim-graph substrate carrying narrative without damaging it is an assertion, not a
 result. F6 is where rules M and T are attacked on purpose rather than merely satisfied.

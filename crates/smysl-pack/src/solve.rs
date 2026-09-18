@@ -18,7 +18,7 @@ use smysl_graph::{EdgeSet, SalienceReport, Store};
 use crate::bound;
 use crate::closure;
 use crate::constraints::{violations, Constraints, Selection, Violation};
-use crate::cost::{available_levels, value, Estimator};
+use crate::cost::{available_levels, value, CostModel, Estimator, ExternalCost};
 
 /// Default local-improvement passes (§18.3).
 /// Default store size above which exact mode declines to run (§18.3 step 4).
@@ -29,11 +29,17 @@ pub const EXACT_THRESHOLD: usize = 256;
 #[non_exhaustive]
 pub struct PackRequest {
     pub budget: u64,
+    /// Taken out of `budget` before solving (1.6): what the caller needs the rest of its prompt,
+    /// its question and the answer to fit in. Zero by default, which is the pre-1.6 behaviour.
+    pub reserved: u64,
     pub thread: Option<ThreadId>,
     /// Units that must reach L1 (C5).
     pub focus: BTreeSet<Uid>,
     pub mode: PackMode,
     pub estimator: Estimator,
+    /// A cost model the caller supplies, standing in for `estimator` (1.6). `None` counts with the
+    /// bundled one, which is what every pack before 1.6 did.
+    pub external: Option<ExternalCost>,
     /// Cap every unit at this level, whatever it was authored at.
     pub max_lod: Option<Lod>,
     /// Restrict packing to these units; empty means the whole store.
@@ -52,10 +58,12 @@ impl Default for PackRequest {
     fn default() -> PackRequest {
         PackRequest {
             budget: 0,
+            reserved: 0,
             thread: None,
             focus: BTreeSet::new(),
             mode: PackMode::Greedy,
             estimator: Estimator::default(),
+            external: None,
             max_lod: None,
             scope: BTreeSet::new(),
             support: EdgeSet::of([]),
@@ -70,6 +78,38 @@ impl PackRequest {
             budget,
             ..PackRequest::default()
         }
+    }
+
+    /// Set `n` aside for whatever else occupies the window (1.6).
+    ///
+    /// The packer then solves against `budget - n`, so `reserving` is not a second budget but a
+    /// statement about the first: a caller whose model has a 16k window, a 900-token system
+    /// prompt, a 400-token diff and 1 200 tokens of room for the answer says `budget(16_384)
+    /// .reserving(2_500)` and gets a pack that fits *the prompt*, rather than one that fits
+    /// smysl's idea of the budget and is then trimmed by hand — which drops units from a
+    /// selection the solver chose as a whole.
+    pub fn reserving(mut self, n: u64) -> PackRequest {
+        self.reserved = n;
+        self
+    }
+
+    /// Count this pack with the caller's own tokenizer rather than the bundled estimator (1.6).
+    ///
+    /// Its id is what `PackInfo::estimator` records, and `verify` accepts a pack built under it —
+    /// given the same request, which is the only way to reproduce a count nobody else holds.
+    pub fn counting_with(mut self, external: ExternalCost) -> PackRequest {
+        self.external = Some(external);
+        self
+    }
+
+    /// What every cost in this request is counted with (1.6).
+    pub fn cost_model(&self) -> CostModel {
+        CostModel::new(self.estimator.clone(), self.external)
+    }
+
+    /// What the solver may actually spend: `budget - reserved`.
+    pub fn effective_budget(&self) -> u64 {
+        self.budget.saturating_sub(self.reserved)
     }
 
     pub fn focusing(mut self, f: impl IntoIterator<Item = Uid>) -> PackRequest {
@@ -204,6 +244,19 @@ pub fn pack(
     salience: &SalienceReport,
     req: &PackRequest,
 ) -> Result<Pack, PackError> {
+    // What the caller reserved is spent before the solver sees a unit, so the whole of the rest
+    // of this function works in one number. Refusing r >= b rather than returning an empty pack:
+    // an empty pack is a legal answer to "fit nothing", and a caller that reserved its whole
+    // window asked the wrong question rather than got a hard one.
+    if req.reserved != 0 && req.reserved >= req.budget {
+        return Err(PackError::OverReserved {
+            budget: req.budget,
+            reserved: req.reserved,
+        });
+    }
+    let budget = req.effective_budget();
+    let counter = req.cost_model();
+
     let scope: Vec<Uid> = if req.scope.is_empty() {
         store.units().map(|(u, _)| *u).collect()
     } else {
@@ -241,12 +294,14 @@ pub fn pack(
     // clone would be dead code rather than merely unused.
     #[cfg(feature = "branch-and-bound")]
     let floor_selection = selection.clone();
-    let floor_cost = cost_of(store, &selection, &req.estimator);
-    if floor_cost > req.budget {
+    let floor_cost = cost_of(store, &selection, &counter);
+    if floor_cost > budget {
         // Rule R: the alternative is a one-sided pack, which is worse than no pack.
+        // `required` is a *total* budget, reservation included, so a caller can retry with
+        // `budget(required)` and the same reservation and be told something new.
         return Err(PackError::Infeasible {
             budget: req.budget,
-            required: floor_cost,
+            required: floor_cost + req.reserved,
         });
     }
 
@@ -265,7 +320,7 @@ pub fn pack(
     // be built after the fact.
     let constraints = Constraints {
         pinned: req.focus.clone(),
-        budget: req.budget,
+        budget,
         support: req.support.clone(),
     };
 
@@ -294,10 +349,10 @@ pub fn pack(
             Some((*u, top))
         })
         .collect();
-    let everything_cost = cost_of(store, &everything, &req.estimator);
+    let everything_cost = cost_of(store, &everything, &counter);
 
     let mut used = floor_cost;
-    if everything_cost <= req.budget
+    if everything_cost <= budget
         && violations(store, &everything, everything_cost, &constraints).is_empty()
     {
         // Every unit reads `earned on density`, and that is the honest answer here rather
@@ -403,14 +458,14 @@ pub fn pack(
             let w = if d.is_empty() {
                 (0, 0.0)
             } else {
-                weigh(store, &selection, &d, &local, &req.estimator)
+                weigh(store, &selection, &d, &local, &counter)
             };
             weighed[i] = Some(w);
             let (dc, dv) = w;
             if dc == 0 {
                 continue;
             }
-            if used + dc > req.budget {
+            if used + dc > budget {
                 parked.insert(i);
                 continue;
             }
@@ -435,7 +490,7 @@ pub fn pack(
             placed[i] = None;
             let (uid, level) = candidates[i];
             let (dc, _) = weighed[i].expect("placed candidates are priced");
-            if used + dc > req.budget {
+            if used + dc > budget {
                 parked.insert(i);
                 continue;
             }
@@ -506,8 +561,8 @@ pub fn pack(
                     store,
                     &scope,
                     &local,
-                    &req.estimator,
-                    req.budget,
+                    &counter,
+                    budget,
                     &floor,
                     selection.clone(),
                     crate::exact::NODE_LIMIT,
@@ -530,7 +585,10 @@ pub fn pack(
     }
 
     // --- 5. the manifest ---------------------------------------------------
-    let mut info = PackInfo::new(req.budget, used, req.estimator.id());
+    // The manifest reports the budget the *caller* stated, with what was set aside beside it:
+    // `used + reserved <= budget` is the property a caller checks, and it cannot check it
+    // against a number it never supplied.
+    let mut info = PackInfo::new(req.budget, used, counter.id()).reserving(req.reserved);
     info.thread = req.thread.clone();
     for uid in &scope {
         if selection.contains_key(uid) {
@@ -555,8 +613,8 @@ pub fn pack(
             &selection,
             &scope,
             &local,
-            &req.estimator,
-            req.budget.saturating_sub(used),
+            &counter,
+            budget.saturating_sub(used),
             cap,
         )
     };
@@ -587,7 +645,9 @@ pub fn verify(store: &Store, pack: &Pack, req: &PackRequest) -> Vec<Violation> {
         pack.info.used,
         &Constraints {
             pinned: req.focus.clone(),
-            budget: req.budget,
+            // C7 is against what the solver was allowed to spend, not against the window the
+            // caller is fitting into — `verify` must ask the question `pack` answered.
+            budget: req.effective_budget(),
             support: req.support.clone(),
         },
     )
@@ -610,7 +670,7 @@ fn raise(selection: &mut Selection, uid: Uid, level: Lod) {
     }
 }
 
-fn cost_of(store: &Store, selection: &Selection, e: &Estimator) -> u64 {
+fn cost_of(store: &Store, selection: &Selection, e: &CostModel) -> u64 {
     selection
         .iter()
         .filter_map(|(u, l)| store.get(u).map(|unit| e.unit(&unit.core, *l)))
@@ -623,7 +683,7 @@ fn weigh(
     selected: &Selection,
     d: &Selection,
     salience: &BTreeMap<Uid, f32>,
-    e: &Estimator,
+    e: &CostModel,
 ) -> (u64, f64) {
     let mut cost = 0u64;
     let mut val = 0.0f64;

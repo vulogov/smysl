@@ -96,7 +96,10 @@ pub mod packinfo {
     pub const DEGRADED: u16 = 4;
     pub const OPTIMALITY: u16 = 5;
     pub const ESTIMATOR: u16 = 6;
-    pub const HIGHEST: u16 = ESTIMATOR;
+    /// What the caller set aside for the rest of its prompt (1.6). Written only when non-zero,
+    /// so every pack encoded before it keeps the bytes it had.
+    pub const RESERVED: u16 = 7;
+    pub const HIGHEST: u16 = RESERVED;
 }
 
 /// SchemaDecl (type code 8).
@@ -244,6 +247,7 @@ mod tests {
                     packinfo::DEGRADED,
                     packinfo::OPTIMALITY,
                     packinfo::ESTIMATOR,
+                    packinfo::RESERVED,
                 ],
             ),
             (

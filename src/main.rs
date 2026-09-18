@@ -547,6 +547,21 @@ fn cli() -> Command {
                         .help("Restrict to units at or above this status"),
                 )
                 .arg(
+                    Arg::new("payload")
+                        .long("payload")
+                        .value_name("KEY=VALUE[,VALUE]")
+                        .help(
+                            "Restrict to units whose payload has KEY equal to one of VALUE; a \
+                             unit without the key is excluded",
+                        ),
+                )
+                .arg(
+                    Arg::new("why")
+                        .long("why")
+                        .action(ArgAction::SetTrue)
+                        .help("Also print which query terms each hit matched, and what each contributed"),
+                )
+                .arg(
                     Arg::new("store")
                         .value_name("PATH")
                         .help("Store to search"),
@@ -592,6 +607,15 @@ fn cli() -> Command {
                         .value_name("N")
                         .required(true)
                         .help("Token budget, counted with the recorded estimator"),
+                )
+                .arg(
+                    Arg::new("reserve")
+                        .long("reserve")
+                        .value_name("N")
+                        .help(
+                            "Set this much of --budget aside for the rest of your prompt; the \
+                             pack is solved against what is left",
+                        ),
                 )
                 .arg(
                     Arg::new("support")
@@ -2833,6 +2857,19 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     };
 
     let mut req = PackRequest::budget(budget);
+    if let Some(raw) = m.get_one::<String>("reserve") {
+        let Some(n) = parse_budget(raw) else {
+            eprintln!("smysl pack: --reserve takes a number, optionally with a `k` suffix");
+            return ExitCode::Usage;
+        };
+        if n >= budget {
+            eprintln!(
+                "smysl pack: --reserve {n} leaves nothing of a --budget of {budget} to pack into"
+            );
+            return ExitCode::Usage;
+        }
+        req = req.reserving(n);
+    }
     if let Some(raw) = m.get_one::<String>("support") {
         match edge_set(&store, raw, "pack") {
             Ok(edges) => req = req.resting_on(edges),
@@ -2956,11 +2993,19 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             eprintln!("{uid} dropped: {reason}");
         }
         eprintln!(
-            "{path}: {} of {} unit(s), {} of {} tokens, {} mode, gap {:.3}{}",
+            "{path}: {} of {} unit(s), {} of {}{} tokens, {} mode, gap {:.3}{}",
             packed.len(),
             store.units().count(),
             packed.used(),
-            packed.info.budget,
+            packed.info.effective_budget(),
+            if packed.info.reserved == 0 {
+                String::new()
+            } else {
+                format!(
+                    " ({} reserved of {})",
+                    packed.info.reserved, packed.info.budget
+                )
+            },
             packed.info.optimality.mode,
             packed.info.optimality.gap,
             if packed.is_optimal() {
@@ -3322,6 +3367,19 @@ fn cmd_find(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     }
 
+    if let Some(raw) = m.get_one::<String>("payload") {
+        let Some((key, values)) = raw.split_once('=') else {
+            eprintln!("smysl find: --payload takes KEY=VALUE, with values comma-separated");
+            return ExitCode::Usage;
+        };
+        let values: Vec<&str> = values.split(',').filter(|v| !v.is_empty()).collect();
+        if key.is_empty() || values.is_empty() {
+            eprintln!("smysl find: --payload takes KEY=VALUE, with values comma-separated");
+            return ExitCode::Usage;
+        }
+        q = q.with_payload(key, values);
+    }
+
     // `Retriever` must be in scope for `search`; the trait is the seam, and using it here
     // keeps the command honest about depending on the interface rather than the engine.
     use smysl::Retriever as _;
@@ -3331,10 +3389,16 @@ fn cmd_find(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         let rows: Vec<String> = hits
             .iter()
             .map(|h| {
+                let terms: Vec<String> = h
+                    .terms
+                    .iter()
+                    .map(|(term, c)| format!("[{},{c:.4}]", smysl::json_escape(term)))
+                    .collect();
                 format!(
-                    "{{\"uid\":{},\"score\":{:.4}}}",
+                    "{{\"uid\":{},\"score\":{:.4},\"terms\":[{}]}}",
                     smysl::json_escape(&h.uid.canonical()),
-                    h.score
+                    h.score,
+                    terms.join(",")
                 )
             })
             .collect();
@@ -3348,12 +3412,27 @@ fn cmd_find(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eprintln!("{path}: nothing matched");
         return ExitCode::Success;
     }
+    let why = m.get_flag("why");
     for h in &hits {
         let gist = store
             .get(&h.uid)
             .map(|u| u.core.gist.as_str())
             .unwrap_or("");
         println!("{:.4}  {}  {}", h.score, h.uid, gist);
+        if why {
+            // On stderr with the uid repeated, so a caller piping stdout still gets the ranking
+            // it had and a reader watching the terminal sees which term did the work.
+            let terms: Vec<String> = h.terms.iter().map(|(t, c)| format!("{t} {c:.4}")).collect();
+            eprintln!(
+                "{}  matched: {}",
+                h.uid,
+                if terms.is_empty() {
+                    "(this retriever does not say)".to_string()
+                } else {
+                    terms.join(", ")
+                }
+            );
+        }
     }
     ExitCode::Success
 }

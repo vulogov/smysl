@@ -9,6 +9,38 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.6.0
 
+### rust_smysl's 1.6 requests: R21-R23
+
+All three come from running `cargo smysl check` against local and hosted models, where the same
+pipeline must fit a 16k local context and a hosted one, and a finding has to be explainable.
+
+- **R21 - a pack that fits the caller's budget, not only its own.** `PackRequest::reserving(n)` and
+  `smysl pack --reserve N` take what the rest of the prompt occupies off the budget before solving:
+  `budget(b).reserving(r)` selects exactly what `budget(b - r)` selects, and `PackInfo` records
+  both numbers so `used + reserved <= budget` is a property the caller can check. Reserving the
+  whole budget is `SMY-E203`, not an empty pack. `PackRequest::counting_with(ExternalCost)` lets a
+  caller counting in its provider's tokens supply the counter; `PackInfo::estimator` records the
+  id, and `verify` accepts a pack built under it. It is a type beside `Estimator` rather than a
+  variant of it: `Estimator` is a fieldless enum whose discriminants a consumer may depend on, so
+  giving it a variant with data would have been a 2.0 change for a 1.6 feature - which
+  `cargo-semver-checks` said before a user did. `CostModel` is what the solver counts with. Until now packing chose what to carry without knowing the
+  prompt it lands in, and the caller dropped units from a selection the solver had chosen whole.
+- **R22 - which query terms a hit matched.** `Hit::terms` carries `(term, contribution)` pairs,
+  ordered by contribution then term, and `smysl find --why` prints them. The decomposition is
+  exact: BM25 sums `idf(t) · value(t, d)` over the query's tokens, so scoring a single-index
+  embedding returns that summand and the summands add up to the score - asserted over both
+  tokenisers and a query with a repeated term. Empty for a retriever that does not decompose its
+  score, which is advisory rather than a contract on every `Retriever`. The case that prompted it:
+  a prerequisite saying `require` was never retrieved for five diffs saying `required`, and nothing
+  in the result distinguished *retrieved weakly* from *never seen*.
+- **R23 - retrieval filtered by an extension schema's own kind.** `Query::with_payload(key, values)`
+  and `smysl find --payload KEY=VALUE`, applied before the limit as `within` is, with scoring
+  untouched. A unit without the key is excluded, so a store built under another schema returns
+  nothing rather than everything. Both retrievers index the payload's string entries once, which is
+  the point: the eligible set is a property of the corpus, and the caller was rebuilding it per
+  query. `payload_strings` is the extractor, and it reads top-level strings and arrays of them -
+  a nested object is a shape a flat equality filter cannot express.
+
 ### Carried from 1.5.0
 
 What this cycle starts from (details in 1.5.0):

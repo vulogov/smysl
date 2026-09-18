@@ -328,6 +328,17 @@ records (`SMY-W014`), which is what makes them an addition rather than a break (
 A resolution with both keys 0 and 1, or neither, MUST be rejected. What each record means is
 §6.1 and §6.3.
 
+**Pack info (7)** gained key 7, `reserved`, in 1.6: an unsigned integer, what the caller set aside
+out of `budget` for the rest of the prompt a pack lands in. A new key in a record body above that
+record's highest, which §8.1 permits — an older reader preserves it verbatim.
+
+It is written **only when non-zero**, and a decoder that does not find it MUST read it as zero.
+That is the one case where the rule above — a decoder MUST NOT supply a default for a field the
+encoder always writes — does not apply, because the encoder does not always write it: a missing key
+and a zero re-encode to the same bytes, so every pack written before 1.6 keeps the encoding it had.
+A packer that reserves `r` out of `b` MUST solve against `b - r` and MUST report `budget` as `b`,
+so that `used + reserved <= budget` holds for any reader that checks it.
+
 ## 4. Canonical surface form
 
 Surface syntax is the human-facing form. It is **not** the identity-bearing form — uids come
@@ -378,7 +389,7 @@ but an unknown type in hand-written surface text is a typo and stays an error.
 
 ## 6. The rules
 
-Named so they can be cited. Numbered constraints C1–C7 for packing are in the manual; these
+Named so they can be cited. Numbered constraints C1–C8 for packing are in the manual; these
 are the format-level obligations.
 
 | rule | obligation |
@@ -612,7 +623,7 @@ conformance suite did not move.
 ## Appendix: what this document deliberately omits
 
 Command-line surface, exit codes, thread schemas, rendering profiles, salience weights, the
-packing algorithm and its constraints C1–C7, the diagnostic registry, ingest and provider
+packing algorithm and its constraints C1–C8, the diagnostic registry, ingest and provider
 behaviour.
 
 None of it is required for interoperability. All of it is in the manual, and an
