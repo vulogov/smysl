@@ -845,6 +845,31 @@ perfectly. Anything with a space in it is prose, and prose goes to the
 embedder — including a sentence that happens to mention `pool.wait_ms`, because
 a sentence about a name is still a sentence.
 
+Until 1.7 all of that was reachable only from Rust. `find` and `pack --query`
+built a lexical index unconditionally, so a binary compiled with
+`--features semantic` still ranked lexically and nothing said so — the engine
+was built, measured, exported and unplugged. `--engine` is how you ask for it,
+and `--model` (or `SMYSL_EMBED_MODEL`) is where the model lives:
+
+```sh
+smysl find "why was it slow" --engine hybrid --model ./potion-base-8M store.smy
+smysl pack --budget 800 --query "why was it slow" --engine hybrid store.smy
+```
+
+Two refusals rather than a fallback. Asking for an engine without a model is an
+error, not a quiet lexical answer — reporting numbers from an engine the caller
+did not ask for is worse than reporting none:
+
+#screen(caption: "$ smysl find \"why was it slow\" --engine hybrid fixtures/corpus/F1-incident.smy")[
+```
+smysl find: --engine hybrid needs a model: pass --model DIR or set SMYSL_EMBED_MODEL
+```
+]
+
+And a build without the feature says so in the same words every absent layer
+uses, rather than pretending: `this build has no semantic retrieval (build with
+--features semantic)`.
+
 #callout(label: "A wrong turn worth keeping")[
   The first version routed on the *kernel type* the caller asked for, on the
   reasoning that the format already records what a unit is. It scored worse
@@ -868,11 +893,12 @@ a sentence about a name is still a sentence.
   reading past four things you did not want — and it is a bigger improvement
   than any tuning of the ranking would be.
 
-  And expect to search for *nouns from the domain* rather than for the
-  sentence you would write. `connection pool` works; "why was it slow" does
-  not. That is a real limitation of lexical search, not a bug, and closing it
-  is what a semantic backend would be for. `Retriever` is a trait precisely so
-  one can be added without disturbing any of this.
+  And on the default build, expect to search for *nouns from the domain* rather
+  than for the sentence you would write. `connection pool` works; "why was it
+  slow" does not. That is a real limitation of lexical search rather than a bug,
+  and it is exactly what the semantic engine above closes — `--engine hybrid`,
+  a model, and a build that compiled one in. `Retriever` is a trait so that the
+  choice is yours rather than the format's.
 ]
 
 #chapter(number: 18, title: "retract — Blast Radius First")

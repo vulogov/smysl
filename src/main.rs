@@ -547,6 +547,25 @@ fn cli() -> Command {
                         .help("Restrict to units at or above this status"),
                 )
                 .arg(
+                    Arg::new("engine")
+                        .long("engine")
+                        .value_name("E")
+                        .value_parser(["lexical", "semantic", "hybrid"])
+                        .help(
+                            "Which retriever to rank with; semantic and hybrid need \
+                             --features semantic and a model",
+                        ),
+                )
+                .arg(
+                    Arg::new("model")
+                        .long("model")
+                        .value_name("DIR")
+                        .help(
+                            "Model2Vec directory for --engine semantic|hybrid (or \
+                             SMYSL_EMBED_MODEL)",
+                        ),
+                )
+                .arg(
                     Arg::new("schema")
                         .long("schema")
                         .value_name("ID")
@@ -656,6 +675,22 @@ fn cli() -> Command {
                         .help(
                             "Restrict what --query may focus on to units whose payload has KEY \
                              equal to one of VALUE",
+                        ),
+                )
+                .arg(
+                    Arg::new("engine")
+                        .long("engine")
+                        .value_name("E")
+                        .value_parser(["lexical", "semantic", "hybrid"])
+                        .help("Which retriever --query focuses with; see `find --engine`"),
+                )
+                .arg(
+                    Arg::new("model")
+                        .long("model")
+                        .value_name("DIR")
+                        .help(
+                            "Model2Vec directory for --engine semantic|hybrid (or \
+                             SMYSL_EMBED_MODEL)",
                         ),
                 )
                 .arg(
@@ -1651,6 +1686,113 @@ fn uid_array<'a>(uids: impl IntoIterator<Item = &'a Uid>) -> String {
         .map(|u| smysl::json_escape(&u.canonical()))
         .collect::<Vec<_>>()
         .join(",")
+}
+
+/// Which retrieval engine a command should use (1.7).
+///
+/// `Hybrid` has been measured against the shared query set since 0.8 — 0.84 MRR to lexical's
+/// 0.74, and 0.50 to 0.12 on paraphrase, with identifier-shaped queries routed to lexical for
+/// its perfect precision — and none of that was reachable from the command line: `find` and
+/// `pack --query` built a `Bm25` unconditionally, so even a build compiled with
+/// `--features semantic` retrieved lexically. The engine was built, measured, exported and
+/// unplugged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Engine {
+    Lexical,
+    Semantic,
+    Hybrid,
+}
+
+impl Engine {
+    fn parse(s: &str) -> Option<Engine> {
+        match s {
+            "lexical" => Some(Engine::Lexical),
+            "semantic" => Some(Engine::Semantic),
+            "hybrid" => Some(Engine::Hybrid),
+            _ => None,
+        }
+    }
+}
+
+/// The engine and model a retrieval command was asked for.
+///
+/// The model directory comes from `--model` or `SMYSL_EMBED_MODEL`. Nothing is downloaded and
+/// nothing is guessed: a semantic run without a model is an error saying so, because silently
+/// falling back to lexical would report numbers from an engine the caller did not ask for.
+fn engine_for(m: &ArgMatches, cmd: &str) -> Result<(Engine, Option<String>), ExitCode> {
+    let engine = match m.get_one::<String>("engine") {
+        Some(raw) => match Engine::parse(raw) {
+            Some(e) => e,
+            None => {
+                eprintln!("smysl {cmd}: `{raw}` is not an engine: lexical, semantic, hybrid");
+                return Err(ExitCode::Usage);
+            }
+        },
+        None => Engine::Lexical,
+    };
+    let model = m
+        .get_one::<String>("model")
+        .cloned()
+        .or_else(|| std::env::var("SMYSL_EMBED_MODEL").ok());
+    if engine != Engine::Lexical && model.is_none() {
+        eprintln!(
+            "smysl {cmd}: --engine {} needs a model: pass --model DIR or set SMYSL_EMBED_MODEL",
+            match engine {
+                Engine::Semantic => "semantic",
+                _ => "hybrid",
+            }
+        );
+        return Err(ExitCode::Usage);
+    }
+    Ok((engine, model))
+}
+
+/// Rank `query` against `store` with the chosen engine.
+#[cfg(feature = "semantic")]
+fn ranked(
+    store: &Store,
+    query: &smysl::Query,
+    engine: Engine,
+    model: Option<&str>,
+    cmd: &str,
+) -> Result<Vec<smysl::Hit>, ExitCode> {
+    use smysl::Retriever as _;
+    let lexical = smysl::Bm25::index(store);
+    if engine == Engine::Lexical {
+        return Ok(lexical.search(query));
+    }
+    let dir = model.expect("engine_for refuses a model-less semantic run");
+    let loaded = match smysl::EmbedModel::from_dir(dir) {
+        Ok(mo) => mo,
+        Err(e) => {
+            eprintln!("smysl {cmd}: {e}");
+            return Err(ExitCode::Failure);
+        }
+    };
+    let semantic = smysl::Semantic::index(store, loaded);
+    Ok(match engine {
+        Engine::Semantic => semantic.search(query),
+        _ => smysl::Hybrid::new(lexical, semantic).search(query),
+    })
+}
+
+/// The same, for a build with no embedder compiled in.
+#[cfg(not(feature = "semantic"))]
+fn ranked(
+    store: &Store,
+    query: &smysl::Query,
+    engine: Engine,
+    _model: Option<&str>,
+    cmd: &str,
+) -> Result<Vec<smysl::Hit>, ExitCode> {
+    use smysl::Retriever as _;
+    if engine != Engine::Lexical {
+        eprintln!(
+            "smysl {cmd}: this build has no semantic retrieval (build with --features semantic)"
+        );
+        return Err(ExitCode::Failure);
+    }
+    Ok(smysl::Bm25::index(store).search(query))
 }
 
 /// A payload restriction from `KEY=VALUE[,VALUE]` (1.6).
@@ -2954,7 +3096,6 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Usage;
     }
     if let Some(q) = m.get_one::<String>("query") {
-        use smysl::Retriever as _;
         let limit = m.get_one::<usize>("query-limit").copied().unwrap_or(3);
         let mut query = smysl::Query::new(q.clone(), limit);
         if let Some(raw) = m.get_one::<String>("payload") {
@@ -2963,7 +3104,14 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 Err(code) => return code,
             }
         }
-        let hits = smysl::Bm25::index(&store).search(&query);
+        let (engine, model) = match engine_for(m, "pack") {
+            Ok(v) => v,
+            Err(code) => return code,
+        };
+        let hits = match ranked(&store, &query, engine, model.as_deref(), "pack") {
+            Ok(h) => h,
+            Err(code) => return code,
+        };
         if hits.is_empty() {
             eprintln!("smysl pack: --query matched nothing, so there is nothing to focus on");
             return ExitCode::Failure;
@@ -3444,10 +3592,16 @@ fn cmd_find(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     }
 
-    // `Retriever` must be in scope for `search`; the trait is the seam, and using it here
-    // keeps the command honest about depending on the interface rather than the engine.
-    use smysl::Retriever as _;
-    let hits = smysl::Bm25::index(&store).search(&q);
+    // The trait is the seam, and the command depends on the interface rather than on an
+    // engine: which one is `--engine`'s to say.
+    let (engine, model) = match engine_for(m, "find") {
+        Ok(v) => v,
+        Err(code) => return code,
+    };
+    let hits = match ranked(&store, &q, engine, model.as_deref(), "find") {
+        Ok(h) => h,
+        Err(code) => return code,
+    };
 
     if global.get_flag("json") {
         let rows: Vec<String> = hits

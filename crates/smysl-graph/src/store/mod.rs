@@ -373,6 +373,17 @@ impl Store {
         self.records.is_empty()
     }
 
+    /// How many records this log holds more than once (1.7).
+    ///
+    /// Zero for anything this build wrote: since 1.4's R10 fix `append` refuses a record whose
+    /// canonical encoding it already holds. A log written before that grew by its label bindings,
+    /// schema declarations and edge attestations on every self-merge, and `open` keeps such a log
+    /// exactly as it is on disk — so the only way to learn it was carrying repeats was to run
+    /// `compact` and read the number. `check` says it now (`SMY-W111`).
+    pub fn duplicate_records(&self) -> usize {
+        self.records.len() - self.record_hashes.len()
+    }
+
     pub fn log_len(&self) -> u64 {
         self.log_len
     }

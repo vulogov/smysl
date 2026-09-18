@@ -43,6 +43,33 @@ anything new was wanted.
   relative to a granularity profile, which a constructor has no access to. The attempt is recorded
   and asserted rather than left for somebody to try again.
 
+### Three more, same rule
+
+- **`find --engine` and `pack --engine`.** `Hybrid` had been built, measured and exported since
+  0.8 — 0.84 MRR against lexical's 0.74, 0.50 against 0.12 on paraphrase, identifier-shaped
+  queries routed to lexical for its perfect precision — and no command could use it: both built a
+  `Bm25` unconditionally, so a binary compiled with `--features semantic` still ranked lexically
+  and said nothing about it. `--model` or `SMYSL_EMBED_MODEL` says where the model is. Two
+  refusals rather than a fallback: an engine without a model is a usage error, and a build without
+  the feature says so in the words every absent layer uses. Answering with lexical would report
+  numbers from an engine the caller did not ask for.
+- **`SMY-W111` — the log holds records more than once.** R10 stopped `append` creating repeats and
+  `compact` removes what an older log has, but nothing told a reader they were there: a store
+  written before 1.4 could carry them indefinitely, and the only way to find out was to run
+  `compact` and read the number. `Store::duplicate_records` counts them and `check` reports one
+  warning, not one per repeat — nothing is *wrong* with such a store, it is larger than it needs
+  to be and the fix is a command.
+- **`make doc-output` stopped skipping transcripts in silence.** It read any argument containing a
+  slash as a filename, so `--as model:openai/gpt-4`, `--schema x.code/decision` and
+  `--via x.verify/supports` looked like commands naming a file that is not there, and were skipped
+  without comment — worse than a mismatch, because the page goes unchecked and nothing says so.
+  Found because a `--schema` transcript added in this very cycle never ran. 98 of the manual's
+  commands are replayed now.
+
+  The census that found it also corrected a claim worth correcting: the skipped transcripts are
+  *not* mostly missing tutorial files. They are absolute paths, pipes, placeholder arguments and
+  commands needing a model — each skipped for a reason the script states.
+
 ### Carried from 1.6.0
 
 What this cycle starts from (details in 1.6.0):

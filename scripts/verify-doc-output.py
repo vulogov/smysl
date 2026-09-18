@@ -337,9 +337,20 @@ for f in sorted(glob.glob('Documentation/manual/*.typ')):
         # would then match the program itself and skip every command in the book. It did:
         # `ran 0, skipped 168`, reported as a pass, because the test asserted only that the
         # script had produced a summary line. Both halves are fixed; this is the half in here.
+        # Flags whose value carries a slash and is never a file: an agent id
+        # (`--as model:openai/gpt-4`), a schema id (`--schema x.code/decision`), an extension
+        # relation kind (`--via x.verify/supports`). Treating one as a filename made the command
+        # look like it named a file that is not there, and the transcript was skipped in silence
+        # — which is worse than a mismatch, because the page goes unchecked and says so nowhere.
+        # Found when a `--schema` transcript added in 1.7 never ran.
+        not_a_path = (
+            '--as', '--schema', '--payload', '--kind', '--via', '--support',
+            '--confirmed-by', '--engine', '--tokenizer', '--authority',
+        )
         paths = [t for i, t in enumerate(toks)
                  if i and '/' in t and not t.startswith('-') and not t.startswith('b3:')
                  and not toks[i - 1] in ('-o', '--output')
+                 and not toks[i - 1] in not_a_path
                  and not is_label(t)
                  # An edge argument, `from --kind--> to`, is labels and a kind, never a file.
                  and '-->' not in t]
