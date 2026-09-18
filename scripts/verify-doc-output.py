@@ -47,6 +47,31 @@ SM = os.environ.get('SMYSL_BIN', './target/debug/smysl')
 # after the chdir above, so it is still the binary this script was told to use.
 SM = os.path.abspath(SM)
 
+
+def ensure_default_build():
+    """Build `target/debug/smysl` with default features before replaying it.
+
+    Only when nobody told us which binary to use. `tests/doc_output.rs` sets `SMYSL_BIN` to the
+    binary cargo built for it, and rebuilding under a mutant would report every mutant as caught
+    while testing none of them — the exact failure `SMYSL_BIN` exists to prevent.
+
+    The precondition is real and was being assumed. `make ci` and `make doc-output` write the
+    same path, and the test matrix builds a row with `--no-default-features`; replaying what it
+    left behind reports the render chapter as drift, because those transcripts were taken from a
+    build that has the targets. Twice in one afternoon, both times nothing wrong with the binary
+    or the book. `make doc-output` already ran this build; doing it here as well makes the script
+    correct on its own rather than correct when invoked a particular way.
+    """
+    if os.environ.get('SMYSL_BIN'):
+        return
+    r = subprocess.run(['cargo', 'build'], capture_output=True, text=True)
+    if r.returncode != 0:
+        print(r.stderr.strip()[-2000:])
+        raise SystemExit('verify-doc-output: the default-features build failed')
+
+
+ensure_default_build()
+
 # #screen(caption: "$ cmd")[ ``` ...output... ``` ]
 # `\"` inside the caption is part of the caption, not its end. The first version stopped at
 # any quote, so a documented command containing a quoted argument — `find "connection pool"`
@@ -387,6 +412,11 @@ for f in sorted(glob.glob('Documentation/manual/*.typ')):
         # one is detected from the answer rather than the caption, because the manual does
         # not annotate it: `make doc-output` builds default features on purpose, and
         # `attest` needs `--features local`.
+        #
+        # Deliberately *not* widened to `RenderError`'s "render target <t> is not available in
+        # this build". Chapter 22 documents that refusal on purpose, for `html` on a default
+        # build, so skipping it would drop a transcript the book is making a claim with. The
+        # build this replays is guaranteed instead — see `ensure_default_build`.
         if any('this build has no' in c for c in candidates):
             ran -= 1
             skipped += 1

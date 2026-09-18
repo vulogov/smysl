@@ -86,6 +86,7 @@ These apply to every subcommand, in any position on the command line.
   (
     ([Flag], [Value], [Meaning]),
     ([`--budget`], [`N` (required)], [Token budget, counted with the recorded estimator.]),
+    ([`--reserve`], [`N`], [Set this much of `--budget` aside for the rest of your prompt; the pack is solved against what is left, and the packinfo records both numbers.]),
     ([`--focus`], [`UID` (repeatable)], [Units that must reach L1; packing fails if they cannot.]),
     ([`--support`], [`KINDS`], [Carry what a selected unit rests on over these edges (C8): a preset — `premises`, `dependency`, `support` — or relation kinds, comma-separated.]),
     ([`--lod`], [`auto|L0|L1|L2`], [Cap every unit at this level.]),
@@ -93,6 +94,7 @@ These apply to every subcommand, in any position on the command line.
     ([`--tokenizer`], [`ID`], [Cost model; recorded in the packinfo either way (D-2).]),
     ([`--mode`], [`greedy|exact`], [`exact` proves optimality by branch and bound; needs the `exact-pack` feature.]),
     ([`--query`], [`TEXT`], [Focus on what this query finds, instead of naming uids.]),
+    ([`--payload`], [`KEY=VALUE[,VALUE]`], [Restrict what `--query` may focus on to units whose payload has `KEY` equal to one of `VALUE`. Needs a `--query`.]),
     ([`--query-limit`], [`N`], [How many hits `--query` focuses on; 3 by default.]),
     ([`PATH`], [positional], [Store to pack.]),
   ),
@@ -230,6 +232,8 @@ not yet wired) · SM-P11.
     ([`-n, --limit`], [`N`], [Maximum hits to return; 10 by default.]),
     ([`--kind`], [`TYPE` (repeatable)], [Restrict to this kernel type.]),
     ([`--min-status`], [`STATUS`], [Restrict to units at or above this status.]),
+    ([`--payload`], [`KEY=VALUE[,VALUE]`], [Restrict to units whose payload has `KEY` equal to one of `VALUE`; a unit without the key is excluded. Applied before the limit, and it does not re-score.]),
+    ([`--why`], [—], [Also print, on stderr, which query terms each hit matched and what each contributed.]),
     ([`PATH`], [positional], [Store to search.]),
   ),
 )
@@ -584,6 +588,7 @@ reporting structure only; it carries no weight on the wire.
     ([Code], [Sev.], [Meaning]),
     ([`SMY-E200`], [error], [Pack infeasible — C3/C4/C5 unsatisfiable; reports minimum feasible budget.]),
     ([`SMY-E201`], [error], [Focus unit absent from store.]),
+    ([`SMY-E203`], [error], [A reservation leaves no budget to pack into — `--reserve` is the whole of `--budget` or more.]),
     ([`SMY-W202`], [warning], [Greedy mode above `exact_threshold`; optimality gap reported.]),
     ([`SMY-E210`], [error], [Rule V1 — profile lacks a rendering for some status.]),
     ([`SMY-W211`], [warning], [Rule V2 — contentions suppressed; recorded in output metadata.]),

@@ -309,6 +309,82 @@ smysl pack: unknown tokenizer `tiktoken/cl100k`
 ```
 ]
 
+Since 1.6 a caller that *does* hold a real tokeniser can hand it over. The
+library takes a function rather than a name —
+`PackRequest::counting_with(ExternalCost { id, cost })` — so the cost question
+is answered by the thing that will actually bill for it, and the id it carries
+lands in the `packinfo` like any other. Two things come with that. `cost` must be pure and deterministic, because rule D is a promise
+smysl cannot keep on a caller's behalf; and a pack counted with an external
+ruler can be re-verified only by someone holding the same one, which is why the
+id has to name the tokeniser *and* its vocabulary rather than the library that
+loaded it.
+
+#subsection("Budgeting for the prompt the pack lands in: `--reserve`")
+
+A budget is a number of tokens, and until 1.6 it was a number of tokens *for
+the pack*. That is rarely the number a caller has. What it has is a context
+window, out of which come a system prompt, the question being asked, and
+whatever room the answer needs; the pack gets the remainder.
+
+The arithmetic is easy and doing it in the wrong place is not. A caller that
+packs to a fixed number and then trims the result to fit is dropping units from
+a selection the solver chose *as a whole* — the closure that made the selection
+legal was computed against a budget nobody is honouring any more, and rule R
+goes with it.
+
+`--reserve` moves that arithmetic inside:
+
+#screen(caption: "$ smysl pack --budget 400 --reserve 120 --explain fixtures/corpus/F1-incident.smy")[
+```
+fixtures/corpus/F1-incident.smy: 8 of 8 unit(s), 244 of 280 (120 reserved of 400) tokens, greedy mode, gap 0.000
+```
+]
+
+The solver sees 280 and behaves exactly as though you had asked for 280 —
+`--budget 400 --reserve 120` selects what `--budget 280` selects, unit for unit.
+What changes is the record: the `packinfo` keeps both numbers, so a reader can
+check `used + reserved ≤ budget` against the window the caller was actually
+fitting into rather than against a number it invented.
+
+#callout(label: "Why")[
+  Reserving the whole budget fails rather than returning an empty pack
+  (`SMY-E203`). An empty pack is a legal answer to "fit nothing in", so
+  returning one would be answering a question nobody asked — the caller either
+  wanted a smaller reservation or a larger window, and both are worth being told
+  about.
+
+  An infeasible floor reports a *total* budget too, reservation included. The
+  number `SMY-E200` hands back is one you can pass straight back in as
+  `--budget` with the same `--reserve`, which is what makes it useful to a
+  program rather than to a reader.
+]
+
+#subsection("Focusing on the right kind of thing: `--payload`")
+
+`--query` focuses a pack on what a search finds, and a search finds whatever
+matches the words. For a corpus built on an extension schema that is often too
+much: a tool asking "what decisions does this change touch" gets the decisions,
+the alternatives somebody rejected and the consequences somebody anticipated,
+because all three are `claim` and all three are about the same subject.
+
+`--payload` restricts what the query is allowed to focus on, using the field the
+schema itself distinguishes them with:
+
+#screen(caption: "$ smysl --format surface pack --budget 300 --query \"connection pool\" --payload code:kind=decision fixtures/corpus/F11-extension-kinds.smy")[
+```
+smysl pack: --query focused 1 unit(s): b3:5w3ei75662mlliiupstld6lolv
+```
+]
+
+Without it the same query focuses on three. It restricts the *focus* and not the
+pack: everything the focus pulls in through the closure still travels, which is
+the whole point — you are narrowing what the pack is *about*, not what it is
+allowed to contain. Narrowing the latter is `--scope`, and the two compose.
+
+A filter that matches nothing fails the way an empty query already did, rather
+than quietly packing on density and handing back something that answers a
+question nobody asked.
+
 #subsection("When the floor doesn't fit: infeasible budgets")
 
 C3 is not a suggestion. If the mandatory floor — the focus plus everything

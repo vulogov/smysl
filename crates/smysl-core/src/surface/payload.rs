@@ -11,6 +11,7 @@
 //! are unaffected.
 
 use std::borrow::Cow;
+use std::collections::{BTreeMap, BTreeSet};
 
 use unicode_normalization::UnicodeNormalization;
 
@@ -97,6 +98,41 @@ fn write_value(e: &mut Enc, v: &HValue) {
 }
 
 /// Decode a payload back into header keys, for re-emission to surface syntax.
+/// The string-valued entries of a payload, as `key -> {value, ...}` (1.6).
+///
+/// An extension schema distinguishes its units by a payload field rather than by kernel type —
+/// a rejected alternative and an anticipated consequence are both `Claim` — so a caller filtering
+/// on "what kind of thing is this" is asking about the payload. This is the shape that question
+/// can be answered from: flat, string-keyed, and cheap to hold beside an index.
+///
+/// Only top-level string values, and arrays of them, are collected. A nested object is a shape a
+/// flat equality filter cannot express, and guessing at a path for it would answer a different
+/// question than the one asked. A payload that does not decode contributes nothing rather than
+/// failing: retrieval degrades on a malformed unit, it does not refuse the store (rule I).
+pub fn payload_strings(bytes: &[u8]) -> BTreeMap<String, BTreeSet<String>> {
+    let Ok(o) = payload_to_object(bytes) else {
+        return BTreeMap::new();
+    };
+    let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (k, v) in o.iter() {
+        let values: BTreeSet<String> = match &v.value {
+            HValue::Str(s) => [s.clone()].into_iter().collect(),
+            HValue::Array(items) => items
+                .iter()
+                .filter_map(|i| match &i.value {
+                    HValue::Str(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .collect(),
+            _ => continue,
+        };
+        if !values.is_empty() {
+            out.insert(k.value.clone(), values);
+        }
+    }
+    out
+}
+
 pub fn payload_to_object(bytes: &[u8]) -> Result<HObject, CodecError> {
     let mut d = Dec::new(bytes);
     let o = read_object(&mut d)?;

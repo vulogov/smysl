@@ -28,7 +28,7 @@ pub mod solve;
 
 pub use closure::Reason;
 pub use constraints::{violations, Constraints, Selection, Violation};
-pub use cost::{available_levels, value, Estimator};
+pub use cost::{available_levels, value, CostModel, Estimator, ExternalCost};
 pub use smysl_core::error::PackError;
 pub use solve::{pack, verify, Pack, PackRequest, EXACT_THRESHOLD};
 

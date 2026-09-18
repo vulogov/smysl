@@ -7,6 +7,125 @@ and the facade asserts the two are independent.
 
 ---
 
+## 1.6.0 — 2026-09-17
+
+The cycle that made a pack fit the prompt it lands in, and a retrieval result say why. 1.5 taught
+the library to read a corpus somebody else wrote; 1.6 is about the two things a caller does next —
+send it to a model, and act on what comes back — and both had a seam where smysl stopped short and
+the caller improvised.
+
+A budget was a number of tokens for the pack, which is never the number a caller has: what it has
+is a context window, less a system prompt, less the question, less room for the answer. So callers
+packed to a fixed number and trimmed the result, which drops units from a selection the solver
+chose as a whole, taking the closure that made it legal with them. `reserving(n)` moves that
+arithmetic inside. And a score said how relevant without saying why, so "retrieved weakly" and
+"never retrieved" looked identical in a ranked list — the blindness that hid a prerequisite saying
+`require` from five diffs saying `required`.
+
+What shipped: `PackRequest::reserving` and `pack --reserve`, with `PackInfo` recording both numbers
+so `used + reserved <= budget` is checkable; `ExternalCost`, so a caller counting in its provider's
+tokens supplies the counter; `Hit::terms` and `find --why`, an exact decomposition of a BM25 score
+into what each query term contributed; and `Query::with_payload`, `find --payload` and
+`pack --payload`, filtering on the field an extension schema distinguishes its units by rather than
+on kernel type. All of it is rust_smysl's R21-R23 plus the symmetry the CLI was missing.
+
+**A rule X defect, found by a fixture written for something else.** `F12-reserved-pack.cbor` exists
+to prove §8.1's test of a permitted addition — an older reader round-trips it byte for byte — and
+the JavaScript implementation failed it immediately. JavaScript has one number type, so a
+`binary32` zero decoded to `0` and re-encoded as an *integer*: every pack manifest, and every
+relation carrying `weight: 1.0`, came back altered. That is precisely what rule X forbids of a
+reader that does not understand a record, and it had been true since that implementation shipped.
+The lifecycle fixture could not have caught it; its only float is `0.5`.
+
+**No format break.** `smysl/1.0` holds: one new key in one record body (`packinfo` key 7), written
+only when non-zero, so every pack encoded before 1.6 keeps the bytes it had — §8.1 permits it and
+the fixture proves it. Every addition is off unless asked for. The facade is 274 names, 228 pure;
+`make semver` is clean on all twelve crates against 1.5.0, and `SEMVER_BREAKING` is empty for the
+seventh release running. 25 commands.
+
+`Estimator` is where that promise cost something worth recording. The external counter was written
+first as `Estimator::External`, exactly as the request proposed, and `make semver` refused it: a
+fieldless enum whose discriminants a consumer may already depend on cannot gain a variant with data
+without a 2.0. It ships as `ExternalCost` beside it, with `CostModel` as what the solver counts
+with — same capability, no break, and the gate said so before a user did.
+
+### rust_smysl's 1.6 requests: R21-R23
+
+All three come from running `cargo smysl check` against local and hosted models, where the same
+pipeline must fit a 16k local context and a hosted one, and a finding has to be explainable.
+
+- **R21 - a pack that fits the caller's budget, not only its own.** `PackRequest::reserving(n)` and
+  `smysl pack --reserve N` take what the rest of the prompt occupies off the budget before solving:
+  `budget(b).reserving(r)` selects exactly what `budget(b - r)` selects, and `PackInfo` records
+  both numbers so `used + reserved <= budget` is a property the caller can check. Reserving the
+  whole budget is `SMY-E203`, not an empty pack. `PackRequest::counting_with(ExternalCost)` lets a
+  caller counting in its provider's tokens supply the counter; `PackInfo::estimator` records the
+  id, and `verify` accepts a pack built under it. It is a type beside `Estimator` rather than a
+  variant of it: `Estimator` is a fieldless enum whose discriminants a consumer may depend on, so
+  giving it a variant with data would have been a 2.0 change for a 1.6 feature - which
+  `cargo-semver-checks` said before a user did. `CostModel` is what the solver counts with. Until now packing chose what to carry without knowing the
+  prompt it lands in, and the caller dropped units from a selection the solver had chosen whole.
+- **R22 - which query terms a hit matched.** `Hit::terms` carries `(term, contribution)` pairs,
+  ordered by contribution then term, and `smysl find --why` prints them. The decomposition is
+  exact: BM25 sums `idf(t) · value(t, d)` over the query's tokens, so scoring a single-index
+  embedding returns that summand and the summands add up to the score - asserted over both
+  tokenisers and a query with a repeated term. Empty for a retriever that does not decompose its
+  score, which is advisory rather than a contract on every `Retriever`. The case that prompted it:
+  a prerequisite saying `require` was never retrieved for five diffs saying `required`, and nothing
+  in the result distinguished *retrieved weakly* from *never seen*.
+- **R23 - retrieval filtered by an extension schema's own kind.** `Query::with_payload(key, values)`
+  and `smysl find --payload KEY=VALUE`, applied before the limit as `within` is, with scoring
+  untouched. A unit without the key is excluded, so a store built under another schema returns
+  nothing rather than everything. Both retrievers index the payload's string entries once, which is
+  the point: the eligible set is a property of the corpus, and the caller was rebuilding it per
+  query. `payload_strings` is the extractor, and it reads top-level strings and arrays of them -
+  a nested object is a shape a flat equality filter cannot express.
+
+### Before the cut
+
+- **`pack --payload`**, so `--query` focuses on the right *kind* of thing. 1.6 gave `find` a filter
+  on an extension schema's own field and left the command that packs by question without one: a
+  review tool asking what decisions a change touches was focusing on rejected alternatives and
+  anticipated consequences too, because all three are `claim`. It restricts the focus and not the
+  pack — what the focus pulls in through the closure still travels — and needs a `--query`, since
+  restricting the pack itself is `--scope`.
+- **`fixtures/wire/F12-reserved-pack.cbor`**, and it found something. §8.1's test of a permitted
+  addition is that an older reader round-trips it byte for byte, so the fixture carries a manifest
+  that reserved nothing (key 7 absent, as every pack before 1.6 encoded it) and two that reserved
+  something. The JavaScript implementation failed it: JavaScript has one number type, so a
+  `binary32` zero — a manifest's optimality gap, or a relation's `weight: 1.0` — decoded to `0` and
+  re-encoded as an *integer*. A record it does not understand was being altered, which is the one
+  thing rule X forbids. It now re-encodes decoded records from the bytes they came from. The
+  lifecycle fixture could never have caught it: its only float is `0.5`.
+- **A correction to 1.3.0's "the exit code is still 6"**, measured on the shipped binary: a
+  configuration that does not parse exits **1**, and only a configuration that parses and then
+  fails at a call exits 6. That line is the premise of rust_smysl's R13, and the same run confirms
+  R14 — an unknown provider *kind* still prints "malformed provider response". Both stay open as S2
+  tasks; the claim no longer reads as settled.
+- **`make doc-output` guarantees the build it replays.** It compares against `target/debug/smysl`,
+  and the test matrix's `--no-default-features` row writes that same path, so replaying what was
+  left behind reported the render chapter as drift — twice in one afternoon, both times nothing
+  wrong with the binary or the book. The script now builds before replaying, unless `SMYSL_BIN`
+  says which binary to use, which is how `tests/doc_output.rs` keeps mutants honest. Skipping those
+  transcripts instead would have dropped a claim chapter 22 makes on purpose.
+- **Retrieval measured**, because 1.6 made an index read something new. Both retrievers decode
+  every unit's string-valued payload entries while building one, and `scripts/bench-scaling.py`
+  had no retrieval column at all. It is linear (1.7x, 1.8x, 1.9x per doubling), and the payload
+  filter costs nothing measurable beyond the indexing every query already pays for: 64ms against
+  67ms at 4 000 units. That was the open question when R23 chose to index rather than decode per
+  query.
+
+### Carried from 1.5.0
+
+What this cycle starts from (details in 1.5.0):
+
+- **R11, R13 and R14**, held for rust_smysl's S2 experiment. R13's premise is that a failing
+  `check` still exits 6 on the CLI path, which 1.3.0's changelog stated and the CLI does not do;
+  that line needs a correction note wherever it is repeated.
+- **OpenAI and Anthropic** against their live endpoints.
+
+---
+
 ## 1.5.0 — 2026-09-17
 
 The cycle that taught the library to *read* a corpus somebody else wrote. 1.4 gave disagreements a
@@ -607,6 +726,16 @@ provider layer.
   configuration: …`; a misspelled `ingest.path` printed "malformed provider response" for a call
   never made. The exit code is still 6. Two `Malformed` uses remain that are not a provider's
   answer — the usage ledger's file errors — and are left for a variant of their own.
+
+  **Correction (1.6).** "The exit code is still 6" is true of `ProviderError::exit_code` and false
+  of the command line, which is where a caller reads it. Measured on the shipped binary: a config
+  file that does not parse exits **1** from both `providers` and `ingest` — the CLI reports a
+  configuration it cannot load and gives up before any provider is consulted — while a config that
+  parses and then fails at a call exits 6. rust_smysl's R13 is that discrepancy, and it was written
+  against this line. The same run confirms R14: an unknown provider *kind* still prints "malformed
+  provider response: provider kind `x` is not compiled into this build", so the `Config` variant
+  reached the unknown-id path and not that one. Both stay open as S2 tasks; what changes here is
+  that the claim above no longer reads as settled.
 - **`smysl-provider`'s tests compile at its own defaults.** The retry tests exercised items that
   exist only with `http-client`, and two integration files had nothing to check without a mapper.
   A workspace run unifies features, so no row could see it: `make crate-features`, and a CI job,

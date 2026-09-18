@@ -51,3 +51,18 @@ def test_records_11_and_12_are_known_and_round_trip():
     assert "withdrawal" in names and "resolution" in names
     assert all(r.is_known for r in records)
     assert smysl.encode_store(records) == data
+
+
+def test_a_pack_manifests_new_key_survives_a_round_trip():
+    """§8.1's test of "permitted", for `packinfo` key 7 (1.6).
+
+    This implementation does not decode a pack manifest's body, which is the point: what it has to
+    prove is that a key it has never heard of comes back out exactly as it went in. The fixture
+    holds a manifest that reserved nothing — the key absent, as every pack before 1.6 encoded it —
+    and two that reserved something.
+    """
+    data = (WIRE / "F12-reserved-pack.cbor").read_bytes()
+    records = smysl.decode_store(data)
+    assert [r.name for r in records] == ["pack_info"] * 3
+    assert all(r.is_known for r in records)
+    assert smysl.encode_store(records) == data

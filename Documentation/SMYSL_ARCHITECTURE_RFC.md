@@ -4,7 +4,9 @@
 [`SMYSL_FORMAT_SPEC.md`](SMYSL_FORMAT_SPEC.md), which is deliberately a fraction of this
 one's length: interoperability needs identity, encoding and the rules, not an account of how
 this implementation happens to be built.
-**Describes:** the code at `dev/1.5.0`, crate `1.5.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`.
+**Describes:** the code at `dev/1.6.0`, crate `1.6.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`.
+Sections 7.1 and 7.4 carry 1.6's additions — a budget that knows what else is in the window, and
+retrieval that can say why.
 Sections 2.3, 4.2, 5 and 13 were brought up to 1.4 — the lifecycle of edges and disagreements —
 and sections 5, 7.1, 7.4 and 9.5 to 1.5 — reading a corpus whose dependencies are edges — on
 2026-09-17; the rest describes what has not changed since it was compiled.
@@ -303,7 +305,7 @@ Ten passes, in order:
 9. **Extension** — extension and conformance
 10. **Hashes** — recomputed uids against stored
 
-Diagnostics are a closed registry of **53 codes** in eight groups (parse, identity, LOD,
+Diagnostics are a closed registry of **54 codes** in eight groups (parse, identity, LOD,
 epistemics, merge, pack/render, extension, provider). Every code carries a severity, and
 fixtures assert exact code sets rather than "some error".
 
@@ -353,6 +355,19 @@ its premise. `PackRequest::resting_on(EdgeSet)` names the edges that count; `Vio
 and `Reason::SupportOf` say when one pulled a unit in. The default is the empty set, so a caller
 that does not ask gets exactly the seven constraints it got before.
 
+**A budget counts the whole window** (R21, 1.6). `PackRequest::reserving(r)` is subtracted before
+solving, so `budget(b).reserving(r)` selects what `budget(b - r)` selects and `PackInfo` records
+both — `used + reserved <= budget` is then a property a reader can check. Reserving the whole
+budget is `SMY-E203` rather than an empty pack, and an infeasible floor reports a *total* budget so
+a caller can retry with the number it was given. `PackRequest::counting_with(ExternalCost { id, cost })` lets a
+caller counting in its provider's tokens supply the counter; `id` lands in the `packinfo`, and
+`cost` is where rule D becomes the caller's promise rather than this crate's — nothing here can
+detect a counter that consults a clock. It is a type beside `Estimator` rather than a variant of
+it, because `Estimator` is a fieldless enum whose discriminants a consumer may already depend on:
+giving it a variant with data is a 2.0 change, and `cargo-semver-checks` said so before a user
+did. `CostModel` is what the solver counts with, and every cost goes through one. Before this, packing chose what to carry without knowing the prompt
+it lands in, and the caller trimmed a selection the solver had chosen whole.
+
 C3 is the one that matters. If a claim's rebuttals cannot fit, packing **fails** with the
 minimum feasible budget rather than shipping the claim without the objection to it.
 
@@ -389,6 +404,16 @@ changing how anything scores; `Query::admits_unit` is the predicate every `Retri
 instead of it, so `require` meets `required` and an exact identifier match still scores as it
 did. Both are opt-in: folding moves every score in an index, which is a decision a caller makes
 rather than one an upgrade makes for them.
+
+1.6 added the two things a caller needed to *act* on a result. `Hit::terms` decomposes a score into
+what each query term contributed — exactly, because BM25 sums one term per query token, so scoring
+a single-index embedding returns that summand. It is advisory: a `Retriever` anyone may implement
+cannot be obliged to explain itself, so an empty list means "does not say" rather than "matched
+nothing". And `Query::with_payload(key, values)` filters on an extension schema's own field, which
+is the axis a corpus of `Claim`s is actually distinguished along; both retrievers index a unit's
+string-valued payload entries once, because the eligible set is a property of the corpus and the
+caller was rebuilding it per query. A unit without the key is excluded, so the filter returns
+nothing rather than everything against a store written under another schema.
 
 ---
 
@@ -664,6 +689,22 @@ vectors for uids (`uid/`), relation ids (`relation-id/`) and contention ids (`co
   | 1000 | 8 (1.6x) | 8 (1.5x) | 10 (1.7x) | 161 (3.9x) |
   | 2000 | 13 (1.7x) | 12 (1.6x) | 19 (1.8x) | 658 (4.1x) |
   | 4000 | 25 (2.0x) | 23 (1.9x) | 37 (2.0x) | 2818 (4.3x) |
+
+  **Retrieval, measured in 1.6** because that release made an index read something new: both
+  retrievers now decode every unit's string-valued payload entries while building one. The
+  synthetic store gained a `code:kind` field so the path is exercised, which is why these
+  absolute figures are not comparable with the table above; the ratios are what travel.
+
+  | units | find | find --payload |
+  |---:|---:|---:|
+  | 1000 | 18 (1.7x) | 19 (1.7x) |
+  | 2000 | 34 (1.8x) | 34 (1.8x) |
+  | 4000 | 64 (1.9x) | 67 (2.0x) |
+
+  Linear, and the filter costs nothing measurable beyond the indexing every query already pays
+  for — 64ms against 67ms at 4 000 units, which is inside the noise of a single run. That was the
+  open question when R23 chose to index payloads rather than decode them per query, and it is now
+  answered rather than assumed.
 
   Two further facts, both measured, both narrowing where to look:
 

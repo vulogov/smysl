@@ -232,6 +232,11 @@ fn packinfo_bytes(p: &PackInfo) -> Vec<u8> {
         e.f32q(p.optimality.gap);
     });
     m.put(keys::packinfo::ESTIMATOR, |e| e.text(&p.estimator));
+    // Only when non-zero: a pack that reserved nothing must encode to the bytes it encoded to
+    // before this key existed, or every fixture's uid moves for a field nobody set.
+    if p.reserved != 0 {
+        m.put(keys::packinfo::RESERVED, |e| e.uint(p.reserved));
+    }
     m.put_extra(&p.extra);
     m.into_bytes()
 }
@@ -855,6 +860,9 @@ fn dec_packinfo(d: &mut Dec<'_>) -> Res<PackInfo> {
     let mut degraded = Vec::new();
     let mut optimality = None;
     let mut estimator = None;
+    // Defaulted rather than required, unlike the four above: the encoder omits it when it is
+    // zero, so a missing key and a zero mean the same thing and re-encode identically.
+    let mut reserved = 0u64;
     let mut extra = Extra::new();
 
     read_map(d, &mut extra, |d, k| match k {
@@ -910,6 +918,10 @@ fn dec_packinfo(d: &mut Dec<'_>) -> Res<PackInfo> {
             estimator = Some(d.text()?.to_string());
             Ok(true)
         }
+        keys::packinfo::RESERVED => {
+            reserved = d.uint()?;
+            Ok(true)
+        }
         _ => Ok(false),
     })?;
 
@@ -921,6 +933,7 @@ fn dec_packinfo(d: &mut Dec<'_>) -> Res<PackInfo> {
         degraded,
         optimality: optimality.ok_or_else(|| bad(at))?,
         estimator: estimator.ok_or_else(|| bad(at))?,
+        reserved,
         extra,
     })
 }

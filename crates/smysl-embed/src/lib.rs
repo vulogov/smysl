@@ -137,6 +137,10 @@ impl std::error::Error for Error {}
 pub struct Semantic {
     vectors: BTreeMap<Uid, Vec<f32>>,
     facts: BTreeMap<Uid, (KernelType, Status)>,
+    /// String-valued payload entries per indexed uid, for `Query::with_payload` (1.6). The
+    /// lexical index holds the same thing for the same reason: a filter the semantic backend
+    /// ignored would return units the caller said it could not act on.
+    payloads: BTreeMap<Uid, std::collections::BTreeMap<String, std::collections::BTreeSet<String>>>,
     model: Model,
 }
 
@@ -163,11 +167,23 @@ impl Semantic {
                     .unwrap_or_default()
             })
             .collect();
+        let payloads = facts
+            .keys()
+            .map(|u| {
+                let strings = store
+                    .get(u)
+                    .and_then(|unit| unit.core.payload.as_deref())
+                    .map(smysl_core::surface::payload::payload_strings)
+                    .unwrap_or_default();
+                (*u, strings)
+            })
+            .collect();
         let vectors = uids.into_iter().zip(model.embed_all(&texts)).collect();
 
         Semantic {
             vectors,
             facts,
+            payloads,
             model,
         }
     }
@@ -203,6 +219,13 @@ impl Retriever for Semantic {
             .facts
             .iter()
             .filter(|(uid, (kind, status))| query.admits_unit(uid, *kind, *status))
+            .filter(|(uid, _)| {
+                query.payload.is_none()
+                    || self
+                        .payloads
+                        .get(*uid)
+                        .is_some_and(|s| query.admits_payload(s))
+            })
             .filter_map(|(uid, _)| {
                 let score = cosine(self.vectors.get(uid)?, &q);
                 // Cosine is bounded in [-1, 1] and a negative score means "less like this

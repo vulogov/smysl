@@ -14,7 +14,7 @@ use smysl_graph::Store;
 use std::collections::BTreeMap;
 
 use crate::constraints::Selection;
-use crate::cost::{available_levels, value, Estimator};
+use crate::cost::{available_levels, value, CostModel};
 
 /// One relaxed item: what upgrading a unit to its best remaining level would cost and be
 /// worth, ignoring everything it would drag in.
@@ -43,7 +43,7 @@ pub fn fractional(
     selection: &Selection,
     scope: &[Uid],
     salience: &BTreeMap<Uid, f32>,
-    e: &Estimator,
+    e: &CostModel,
     remaining: u64,
     cap: impl Fn(Lod) -> Lod,
 ) -> f64 {
@@ -191,7 +191,7 @@ mod tests {
             &Selection::new(),
             &scope,
             &sal,
-            &Estimator::default(),
+            &CostModel::default(),
             0,
             identity,
         );
@@ -206,7 +206,7 @@ mod tests {
             &Selection::new(),
             &scope,
             &sal,
-            &Estimator::default(),
+            &CostModel::default(),
             10_000,
             identity,
         );
@@ -232,7 +232,7 @@ mod tests {
                 &Selection::new(),
                 &scope,
                 &local,
-                &Estimator::default(),
+                &CostModel::default(),
                 budget,
                 identity,
             );
@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn the_bound_shrinks_as_the_selection_grows() {
         let (store, scope, sal) = fixture();
-        let e = Estimator::default();
+        let e = CostModel::default();
         let empty = fractional(&store, &Selection::new(), &scope, &sal, &e, 100, identity);
         let partial = Selection::from([(scope[0], Lod::L1)]);
         let after = fractional(&store, &partial, &scope, &sal, &e, 100, identity);
@@ -262,7 +262,7 @@ mod tests {
             &full,
             &scope,
             &sal,
-            &Estimator::default(),
+            &CostModel::default(),
             10_000,
             identity,
         );
@@ -297,7 +297,7 @@ mod tests {
     #[test]
     fn a_capped_level_lowers_the_bound() {
         let (store, scope, sal) = fixture();
-        let e = Estimator::default();
+        let e = CostModel::default();
         let uncapped = fractional(&store, &Selection::new(), &scope, &sal, &e, 1000, identity);
         let capped = fractional(&store, &Selection::new(), &scope, &sal, &e, 1000, |_| {
             Lod::L0
@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn the_bound_is_deterministic() {
         let (store, scope, sal) = fixture();
-        let e = Estimator::default();
+        let e = CostModel::default();
         let a = fractional(&store, &Selection::new(), &scope, &sal, &e, 37, identity);
         let b = fractional(&store, &Selection::new(), &scope, &sal, &e, 37, identity);
         assert_eq!(a, b);

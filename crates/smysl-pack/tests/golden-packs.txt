@@ -45,6 +45,34 @@ F1-incident budget=5000: 8 unit(s), 244 token(s), Greedy
     b3:re42iey2e7syg6zp73tfrlqbvh L0
     b3:wo4t2c46lq45fnakd6tajlgcac L2
     b3:xkys7j42mcuyiaxiyh73xddimr L0
+F11-extension-kinds budget=40: 2 unit(s), 26 token(s), Greedy
+    b3:lpsxbh7pyhxwtcjdqdlmv7nssa L0
+    b3:phaqn4mt4bxhuewx47py2f3gyh L0
+F11-extension-kinds budget=120: 4 unit(s), 60 token(s), Greedy
+    b3:lpsxbh7pyhxwtcjdqdlmv7nssa L0
+    b3:phaqn4mt4bxhuewx47py2f3gyh L0
+    b3:5w3ei75662mlliiupstld6lolv L0
+    b3:63sbgfkpve3usldjuvetr3whmz L0
+F11-extension-kinds budget=200: 4 unit(s), 60 token(s), Greedy
+    b3:lpsxbh7pyhxwtcjdqdlmv7nssa L0
+    b3:phaqn4mt4bxhuewx47py2f3gyh L0
+    b3:5w3ei75662mlliiupstld6lolv L0
+    b3:63sbgfkpve3usldjuvetr3whmz L0
+F11-extension-kinds budget=400: 4 unit(s), 60 token(s), Greedy
+    b3:lpsxbh7pyhxwtcjdqdlmv7nssa L0
+    b3:phaqn4mt4bxhuewx47py2f3gyh L0
+    b3:5w3ei75662mlliiupstld6lolv L0
+    b3:63sbgfkpve3usldjuvetr3whmz L0
+F11-extension-kinds budget=1000: 4 unit(s), 60 token(s), Greedy
+    b3:lpsxbh7pyhxwtcjdqdlmv7nssa L0
+    b3:phaqn4mt4bxhuewx47py2f3gyh L0
+    b3:5w3ei75662mlliiupstld6lolv L0
+    b3:63sbgfkpve3usldjuvetr3whmz L0
+F11-extension-kinds budget=5000: 4 unit(s), 60 token(s), Greedy
+    b3:lpsxbh7pyhxwtcjdqdlmv7nssa L0
+    b3:phaqn4mt4bxhuewx47py2f3gyh L0
+    b3:5w3ei75662mlliiupstld6lolv L0
+    b3:63sbgfkpve3usldjuvetr3whmz L0
 F2-research budget=40: 2 unit(s), 31 token(s), Greedy
     b3:gvxrs73kd2xjtaqtbg6q62tcuj L0
     b3:xiqskepfsn62nfdhjx23ia7ehu L0

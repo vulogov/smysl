@@ -297,6 +297,12 @@ pub struct PackInfo {
     /// The cost model this pack was built under (D-2). Budgets are approximate against
     /// any specific model by design, and this is where they say so.
     pub estimator: String,
+    /// What the caller set aside out of `budget` for the rest of its prompt (1.6).
+    ///
+    /// The packer solved against `budget - reserved`, so `used + reserved <= budget`. Zero when
+    /// the caller reserved nothing, which is every pack written before 1.6 and every pack whose
+    /// budget is smysl's alone.
+    pub reserved: u64,
     pub extra: Extra,
 }
 
@@ -310,6 +316,7 @@ impl PackInfo {
             degraded: Vec::new(),
             optimality: Optimality::new(PackMode::Greedy, 0.0),
             estimator: estimator.into(),
+            reserved: 0,
             extra: Extra::new(),
         }
     }
@@ -321,6 +328,17 @@ impl PackInfo {
             .map(|&r| (r, self.dropped.iter().filter(|(_, dr)| *dr == r).count()))
             .filter(|(_, n)| *n > 0)
             .collect()
+    }
+
+    /// Record what was set aside for the rest of the prompt (1.6).
+    pub fn reserving(mut self, reserved: u64) -> PackInfo {
+        self.reserved = reserved;
+        self
+    }
+
+    /// What the packer was actually allowed to spend: `budget - reserved`, floored at zero.
+    pub fn effective_budget(&self) -> u64 {
+        self.budget.saturating_sub(self.reserved)
     }
 
     pub fn is_complete(&self) -> bool {

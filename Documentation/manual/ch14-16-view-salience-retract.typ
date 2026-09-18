@@ -617,6 +617,78 @@ anything scores. And `Bm25::index_with(Tokenizer::folding())` turns the English 
 rather than an improvement: turning it on moves every score in the index, and a corpus of
 identifiers is worse off for it.
 
+#subsection("Why a hit is a hit: `--why`")
+
+A score says how relevant. It does not say *why*, and the difference between a
+unit that was retrieved weakly and one that was never retrieved at all is
+invisible in a ranked list — both simply are not near the top.
+
+#screen(caption: "$ smysl find \"connection pool saturated\" --why fixtures/corpus/F1-incident.smy")[
+```
+7.5637  b3:cvhirtgs2mpvli2ethhyeo32uf  The eu-west connection pool is saturated.
+b3:cvhirtgs2mpvli2ethhyeo32uf  matched: connection 3.3249, saturated 3.3249, pool 0.9139
+0.8732  b3:xkys7j42mcuyiaxiyh73xddimr  The 4.2 canary ran the same pool configuration without the regression.
+b3:xkys7j42mcuyiaxiyh73xddimr  matched: pool 0.8732
+```
+]
+
+Read the second line of each pair. The first unit is there because it matched
+three query terms, two of them rare. The second is there on the word `pool`
+alone — it is in the result, and it is in the result for a reason that has
+nothing to do with saturation. That is a judgement a reader can now make
+without opening the store.
+
+The decomposition is exact rather than attributed. BM25 sums one term per
+query token, so scoring a single token against the same unit returns that
+token's summand, and the summands add up to the score — asserted in the suite
+over both tokenisers and over a query that repeats a term. Terms that
+contributed nothing are left out: a line saying a unit matched `the` with
+`0.0000` is noise, not an explanation. In the library the same thing is
+`Hit::terms`, and it is *advisory* — a `Retriever` anyone may implement cannot
+be required to decompose its score, so the semantic backend returns an empty
+list rather than a wrong one.
+
+#subsection("Filtering on what an extension schema says: `--payload`")
+
+`--kind` filters on kernel type, and for a corpus built on an extension schema
+that is often the wrong axis. A tool that records decisions, their
+prerequisites, the alternatives it rejected and the consequences it expects
+writes all four as `claim` and tells them apart with a payload field of its
+own. `--kind claim` cannot separate a rejected alternative from a recorded
+consequence, because the kernel type is the same in both.
+
+#screen(caption: "$ smysl find \"connection pool\" --payload code:kind=decision,prerequisite fixtures/corpus/F11-extension-kinds.smy")[
+```
+0.7607  b3:63sbgfkpve3usldjuvetr3whmz  The connection pool must be drained before a reconfigure.
+0.7445  b3:5w3ei75662mlliiupstld6lolv  Pin the connection pool size rather than tracking the range.
+```
+]
+
+`F11-extension-kinds.smy` holds four units, three of them `claim`. The two the
+query did not return are the rejected alternative and the expected
+consequence — both `claim`, both about the connection pool, and neither
+something a review tool should act on.
+
+Two properties are worth stating because the alternatives are both tempting
+and wrong. A unit that does not carry the key is *excluded*, so pointing this
+at a store written under a different schema returns nothing rather than
+everything — a filter that silently matched everything would be the opposite
+of what the caller asked for. And the restriction is applied before the limit,
+like the 1.5 candidate set, with scoring untouched: inverse document
+frequencies still come from the whole index, so narrowing what is eligible can
+never re-weight a term.
+
+#callout(label: "Why")[
+  The library had an answer to this in 1.5 — `Query::within`, a set of uids —
+  and it was correct and expensive. The eligible set is a property of the
+  *corpus*, not of the query, and a caller rebuilding it per query was walking
+  every unit in the store to ask a question the index could have answered.
+  Naming the field instead moves that work to indexing time, where it happens
+  once. `Query::with_payload` is the library form, and the two agree by
+  construction: a payload filter returns exactly what `within` over the same set
+  returns.
+]
+
 #subsection("Where it is weak, measured rather than guessed")
 
 The project evaluates this rather than asserting it. Twenty queries over the

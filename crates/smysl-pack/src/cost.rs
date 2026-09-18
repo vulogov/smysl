@@ -30,6 +30,8 @@ impl Estimator {
         }
     }
 
+    /// Parse a bundled estimator by id. A caller's own counter cannot be named back into
+    /// existence — the id says which tokenizer counted a pack, and only the caller holds it.
     pub fn parse(s: &str) -> Option<Estimator> {
         Estimator::ALL.iter().find(|e| e.id() == s).cloned()
     }
@@ -59,6 +61,126 @@ impl Estimator {
     /// What upgrading from `from` to `to` costs.
     pub fn upgrade(&self, core: &UnitCore, from: Lod, to: Lod) -> u64 {
         self.unit(core, to).saturating_sub(self.unit(core, from))
+    }
+}
+
+/// A cost model the caller supplies (1.6).
+///
+/// Packing to a model's context window means counting in that model's tokens, and smysl cannot
+/// bundle a tokenizer for every provider without giving up on being offline and dependency-light.
+/// So the caller, who already holds one, answers the cost question — `PackRequest::counting_with`.
+///
+/// It is a type of its own rather than a variant of [`Estimator`] because `Estimator` is a
+/// fieldless enum whose discriminants a consumer may already depend on; giving it a variant with
+/// data would take that away, which is a 2.0 change for a 1.6 feature.
+///
+/// `cost` must be **pure and deterministic**: rule D says the same store, budget and request give
+/// the same pack on any machine, and this is the one place where that is the caller's promise
+/// rather than this crate's. A function that consults the network, a clock or a cache breaks
+/// determinism for everyone downstream, and nothing here can detect it.
+///
+/// `cost` answers for a whole text, framing included — it is not `Utf8Div4`'s formula with a
+/// different divisor, so no `+ 2` is added to what it returns.
+///
+/// `id` is what lands in `PackInfo::estimator`. Name the tokenizer and its vocabulary, as
+/// `"tiktoken/cl100k"` does: a pack whose budget was counted with an unnamed ruler is a number
+/// without a unit, and a pack counted with an external one can only be re-verified by someone
+/// holding the same one.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub struct ExternalCost {
+    pub id: &'static str,
+    pub cost: fn(&str) -> u64,
+}
+
+impl ExternalCost {
+    pub fn new(id: &'static str, cost: fn(&str) -> u64) -> ExternalCost {
+        ExternalCost { id, cost }
+    }
+}
+
+/// Two external counters are the same cost model when they are named the same.
+///
+/// Written out rather than derived because deriving it compares function pointers, which Rust
+/// does not promise to be distinct — two identical `fn`s may be merged to one address, and one
+/// `fn` may have several. The id is the identity that matters anyway: it is what a `packinfo`
+/// records, and a caller that names two different tokenizers the same thing has already told
+/// every reader of that pack they are interchangeable.
+impl PartialEq for ExternalCost {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for ExternalCost {}
+
+/// What a pack is counted with: the bundled estimator, or the caller's counter standing in for it
+/// (1.6).
+///
+/// Every cost in the solver goes through one of these, so a request that supplies a counter cannot
+/// have half its arithmetic done with the other one. It is a separate type from [`Estimator`]
+/// because `Estimator` is a fieldless enum whose discriminants a consumer may already depend on.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CostModel {
+    estimator: Estimator,
+    external: Option<ExternalCost>,
+}
+
+impl CostModel {
+    pub fn new(estimator: Estimator, external: Option<ExternalCost>) -> CostModel {
+        CostModel {
+            estimator,
+            external,
+        }
+    }
+
+    /// The bundled estimator, counting as it always has.
+    pub fn plain(estimator: Estimator) -> CostModel {
+        CostModel::new(estimator, None)
+    }
+
+    /// The identifier recorded in a `packinfo`.
+    pub fn id(&self) -> &'static str {
+        match self.external {
+            Some(e) => e.id,
+            None => self.estimator.id(),
+        }
+    }
+
+    /// Whether the caller supplied the counter rather than this crate.
+    pub fn is_external(&self) -> bool {
+        self.external.is_some()
+    }
+
+    /// The cost of one text.
+    pub fn text(&self, t: &str) -> u64 {
+        match self.external {
+            Some(e) => (e.cost)(t),
+            None => self.estimator.text(t),
+        }
+    }
+
+    /// The cost of a unit at a level. Levels are cumulative, as [`Estimator::unit`] explains.
+    pub fn unit(&self, core: &UnitCore, level: Lod) -> u64 {
+        let mut total = self.text(&core.gist);
+        if level >= Lod::L1 {
+            total += core.body.as_deref().map(|b| self.text(b)).unwrap_or(0);
+        }
+        if level >= Lod::L2 {
+            total += core.detail.as_deref().map(|d| self.text(d)).unwrap_or(0);
+        }
+        total
+    }
+
+    /// What upgrading from `from` to `to` costs.
+    pub fn upgrade(&self, core: &UnitCore, from: Lod, to: Lod) -> u64 {
+        self.unit(core, to).saturating_sub(self.unit(core, from))
+    }
+}
+
+impl From<Estimator> for CostModel {
+    fn from(e: Estimator) -> CostModel {
+        CostModel::plain(e)
     }
 }
 

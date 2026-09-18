@@ -1,0 +1,26 @@
+@doc smysl/0.1 {
+  id: v/f11
+  intent: code-review
+  lang: en
+  requires: ["smysl.kernel/0.1"]
+  roots: [d/pin]
+}
+
+# A corpus whose units are told apart by an extension schema's own field rather than by
+# kernel type. A decision, the prerequisite it rests on, the alternative that was rejected
+# and the consequence that was expected: three of the four are `claim`, so `--kind` cannot
+# separate what a caller may act on from what it may not. `--payload` can.
+
+@schema x.code/v1 { version: 1 }
+
+@decision d/pin { status: speculative, "code:kind": "decision" }
+~ Pin the connection pool size rather than tracking the range.
+
+@claim p/drain { status: speculative, "code:kind": "prerequisite" }
+~ The connection pool must be drained before a reconfigure.
+
+@claim r/raise { status: speculative, "code:kind": "rejected-alternative" }
+~ Raise the connection pool ceiling instead.
+
+@claim k/churn { status: speculative, "code:kind": "consequence" }
+~ Connection churn becomes a deliberate act.

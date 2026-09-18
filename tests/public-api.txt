@@ -132,6 +132,7 @@ pub use smysl::PackRequest
 pub use smysl::ParseError
 pub use smysl::ParseOutcome
 pub use smysl::Pass
+pub use smysl::PayloadFilter
 pub use smysl::Person
 pub use smysl::Probe
 pub use smysl::Profile
@@ -259,6 +260,7 @@ pub use smysl::merge
 pub use smysl::merge
 pub use smysl::pack
 pub use smysl::parse_surface
+pub use smysl::payload_strings
 pub use smysl::plan_retraction
 pub use smysl::quantise
 pub use smysl::quote_support

@@ -430,6 +430,13 @@ pub enum PackError {
     Infeasible { budget: u64, required: u64 },
     /// `SMY-E201`
     FocusAbsent { uid: Uid },
+    /// `SMY-E203` - what the caller reserved for the rest of its prompt is the whole budget or
+    /// more, so there is nothing left to pack into (1.6). An empty pack would answer a question
+    /// nobody asked; the caller wanted a smaller reservation or a larger window.
+    ///
+    /// Last in the enum: a variant inserted before another renumbers nothing here, but the order
+    /// is the one `PackError` has been matched in since 1.0 and appending keeps that true.
+    OverReserved { budget: u64, reserved: u64 },
 }
 
 impl PackError {
@@ -437,6 +444,7 @@ impl PackError {
         match self {
             PackError::Infeasible { .. } => Code::E200,
             PackError::FocusAbsent { .. } => Code::E201,
+            PackError::OverReserved { .. } => Code::E203,
         }
     }
 }
@@ -448,6 +456,9 @@ impl PackError {
         match self {
             PackError::Infeasible { .. } => ExitCode::PackInfeasible,
             PackError::FocusAbsent { .. } => ExitCode::Failure,
+            // Not PackInfeasible: nothing about the *graph* is infeasible, the caller asked for
+            // a budget it had already spent.
+            PackError::OverReserved { .. } => ExitCode::Failure,
         }
     }
 }
@@ -461,6 +472,11 @@ impl fmt::Display for PackError {
                 self.code()
             ),
             PackError::FocusAbsent { uid } => write!(f, "{}: {uid}", self.code()),
+            PackError::OverReserved { budget, reserved } => write!(
+                f,
+                "{}: budget {budget} with {reserved} reserved leaves nothing to pack into",
+                self.code()
+            ),
         }
     }
 }
