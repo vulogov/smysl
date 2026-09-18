@@ -105,18 +105,41 @@ fn write_value(e: &mut Enc, v: &HValue) {
 /// on "what kind of thing is this" is asking about the payload. This is the shape that question
 /// can be answered from: flat, string-keyed, and cheap to hold beside an index.
 ///
-/// Only top-level string values, and arrays of them, are collected. A nested object is a shape a
-/// flat equality filter cannot express, and guessing at a path for it would answer a different
-/// question than the one asked. A payload that does not decode contributes nothing rather than
-/// failing: retrieval degrades on a malformed unit, it does not refuse the store (rule I).
+/// String values, and arrays of them, at any depth (1.7). A nested one is keyed by its path with
+/// `.` between the segments — `{ code: { kind: "decision" } }` is `code.kind`. Until 1.7 only the
+/// top level was collected, on the reasoning that a nested object is a shape a flat equality
+/// filter cannot express; that is true of the *object* and not of the string inside it, and a
+/// producer that groups its fields under one key had no way to filter on them at all.
+///
+/// A key containing a `.` is therefore ambiguous with a path, and is emitted as written: a
+/// producer writing `"code.kind"` flat and one nesting it get the same key, which is the reading
+/// a caller wants and worth stating rather than discovering.
+///
+/// A payload that does not decode contributes nothing rather than failing: retrieval degrades on
+/// a malformed unit, it does not refuse the store (rule I).
 pub fn payload_strings(bytes: &[u8]) -> BTreeMap<String, BTreeSet<String>> {
     let Ok(o) = payload_to_object(bytes) else {
         return BTreeMap::new();
     };
     let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    collect_strings(&o, "", &mut out);
+    out
+}
+
+/// [`payload_strings`]'s walk. Depth-first, so `code.kind` is keyed under its whole path.
+fn collect_strings(o: &HObject, prefix: &str, out: &mut BTreeMap<String, BTreeSet<String>>) {
     for (k, v) in o.iter() {
+        let key = if prefix.is_empty() {
+            k.value.clone()
+        } else {
+            format!("{prefix}.{}", k.value)
+        };
         let values: BTreeSet<String> = match &v.value {
             HValue::Str(s) => [s.clone()].into_iter().collect(),
+            HValue::Object(inner) => {
+                collect_strings(inner, &key, out);
+                continue;
+            }
             HValue::Array(items) => items
                 .iter()
                 .filter_map(|i| match &i.value {
@@ -127,10 +150,9 @@ pub fn payload_strings(bytes: &[u8]) -> BTreeMap<String, BTreeSet<String>> {
             _ => continue,
         };
         if !values.is_empty() {
-            out.insert(k.value.clone(), values);
+            out.entry(key).or_default().extend(values);
         }
     }
-    out
 }
 
 pub fn payload_to_object(bytes: &[u8]) -> Result<HObject, CodecError> {
@@ -331,5 +353,65 @@ mod tests {
             let o = round_trip(&format!("{{ n: {v} }}"));
             assert_eq!(o.get("n").unwrap().value.as_int(), Some(v), "{v}");
         }
+    }
+}
+
+#[cfg(test)]
+mod string_tests {
+    use super::*;
+    use crate::surface::hjson::parse_object;
+
+    fn strings(src: &str) -> BTreeMap<String, BTreeSet<String>> {
+        let o = parse_object(src, 0).expect("the fixture parses").value;
+        let bytes = object_to_payload(&o).expect("a non-empty object encodes");
+        payload_strings(&bytes)
+    }
+
+    fn one(m: &BTreeMap<String, BTreeSet<String>>, k: &str) -> Vec<String> {
+        m.get(k)
+            .map(|s| s.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn top_level_strings_and_arrays_are_collected() {
+        let m = strings(r#"{ kind: "decision", tags: ["a", "b"], n: 3 }"#);
+        assert_eq!(one(&m, "kind"), vec!["decision"]);
+        assert_eq!(one(&m, "tags"), vec!["a", "b"]);
+        assert!(!m.contains_key("n"), "a number is not a string");
+    }
+
+    /// 1.7: a producer that groups its fields under one key can be filtered on (R23's filter
+    /// could not see them at all before).
+    #[test]
+    fn a_nested_string_is_keyed_by_its_path() {
+        let m = strings(r#"{ code: { kind: "decision", tags: ["x"] }, top: "yes" }"#);
+        assert_eq!(one(&m, "code.kind"), vec!["decision"]);
+        assert_eq!(one(&m, "code.tags"), vec!["x"]);
+        assert_eq!(one(&m, "top"), vec!["yes"]);
+        assert!(
+            !m.contains_key("code"),
+            "the object itself is not a value a flat filter can match"
+        );
+    }
+
+    #[test]
+    fn nesting_goes_as_deep_as_it_is_written() {
+        let m = strings(r#"{ a: { b: { c: "deep" } } }"#);
+        assert_eq!(one(&m, "a.b.c"), vec!["deep"]);
+    }
+
+    /// A flat key with a dot and a nested one produce the same key, which is the reading a
+    /// caller wants — and the values meet rather than one replacing the other.
+    #[test]
+    fn a_dotted_key_and_a_nested_one_are_the_same_key() {
+        let m = strings(r#"{ "a.b": "flat", a: { b: "nested" } }"#);
+        assert_eq!(one(&m, "a.b"), vec!["flat", "nested"]);
+    }
+
+    #[test]
+    fn a_payload_that_does_not_decode_contributes_nothing() {
+        assert!(payload_strings(&[0x01]).is_empty());
+        assert!(payload_strings(&[]).is_empty());
     }
 }

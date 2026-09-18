@@ -73,6 +73,29 @@ F11-extension-kinds budget=5000: 4 unit(s), 60 token(s), Greedy
     b3:phaqn4mt4bxhuewx47py2f3gyh L0
     b3:5w3ei75662mlliiupstld6lolv L0
     b3:63sbgfkpve3usldjuvetr3whmz L0
+F12-extension-types budget=40: 2 unit(s), 27 token(s), Greedy
+    b3:aohwp3uveppudn7k62xwkbq6o7 L0
+    b3:g5ghn46xlnyd6dv7sd3bctl5ol L0
+F12-extension-types budget=120: 3 unit(s), 44 token(s), Greedy
+    b3:aohwp3uveppudn7k62xwkbq6o7 L0
+    b3:g5ghn46xlnyd6dv7sd3bctl5ol L0
+    b3:zkfmtqh7cw7yvodqwsr4mwi4li L0
+F12-extension-types budget=200: 3 unit(s), 44 token(s), Greedy
+    b3:aohwp3uveppudn7k62xwkbq6o7 L0
+    b3:g5ghn46xlnyd6dv7sd3bctl5ol L0
+    b3:zkfmtqh7cw7yvodqwsr4mwi4li L0
+F12-extension-types budget=400: 3 unit(s), 44 token(s), Greedy
+    b3:aohwp3uveppudn7k62xwkbq6o7 L0
+    b3:g5ghn46xlnyd6dv7sd3bctl5ol L0
+    b3:zkfmtqh7cw7yvodqwsr4mwi4li L0
+F12-extension-types budget=1000: 3 unit(s), 44 token(s), Greedy
+    b3:aohwp3uveppudn7k62xwkbq6o7 L0
+    b3:g5ghn46xlnyd6dv7sd3bctl5ol L0
+    b3:zkfmtqh7cw7yvodqwsr4mwi4li L0
+F12-extension-types budget=5000: 3 unit(s), 44 token(s), Greedy
+    b3:aohwp3uveppudn7k62xwkbq6o7 L0
+    b3:g5ghn46xlnyd6dv7sd3bctl5ol L0
+    b3:zkfmtqh7cw7yvodqwsr4mwi4li L0
 F2-research budget=40: 2 unit(s), 31 token(s), Greedy
     b3:gvxrs73kd2xjtaqtbg6q62tcuj L0
     b3:xiqskepfsn62nfdhjx23ia7ehu L0

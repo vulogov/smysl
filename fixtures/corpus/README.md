@@ -61,6 +61,13 @@ that was expected. `--kind` cannot separate what a review tool may act on from w
 not; `find --payload` can. Its `.expected` set is empty, which is the point: an extension
 payload is not a diagnostic, and a store that used one should check clean.
 
+F12 is a corpus typed by an extension schema rather than by the kernel (1.7). Its two
+`x.code/*` units were absent from every retrieval index until then — not filtered from a
+result, never indexed — so `find` returned nothing for them and said nothing about why. A
+kernel `claim` sits beside them so the two readings can be told apart: `--kind claim` selects
+the kernel unit, `--schema x.code/decision` selects the extension one, and a query naming
+neither returns all three. Its `.expected` set is empty; an extension type is not a diagnostic.
+
 F3 and F6 carry more weight than their size suggests. F3 is where GE-2 is decided — a
 claim-graph substrate carrying narrative without damaging it is an assertion, not a
 result. F6 is where rules M and T are attacked on purpose rather than merely satisfied.

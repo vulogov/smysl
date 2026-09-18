@@ -648,6 +648,50 @@ contributed nothing are left out: a line saying a unit matched `the` with
 be required to decompose its score, so the semantic backend returns an empty
 list rather than a wrong one.
 
+#subsection("Units an extension schema typed: `--schema`")
+
+Everything above assumes a unit has a kernel type. A corpus can be authored
+under an extension schema instead — `@x.code/decision` rather than `@decision` —
+and until 1.7 those units were not merely unfiltered but *absent*: they were
+never put in the index, so `find` returned nothing for them and said nothing
+about why. That was recorded in the source as a known gap rather than
+discovered; it is closed now, and the rule is the one you would guess.
+
+A query that names no kind returns everything that matches its words. A query
+that names `--kind claim` returns kernel claims only, because an extension unit
+has no kernel type and cannot satisfy a filter over them. And `--schema` is how
+you ask for one by name:
+
+#screen(caption: "$ smysl find \"connection pool\" fixtures/corpus/F12-extension-types.smy")[
+```
+0.4696  b3:g5ghn46xlnyd6dv7sd3bctl5ol  The connection pool saturated under load.
+0.4589  b3:aohwp3uveppudn7k62xwkbq6o7  Connection pool churn becomes a deliberate act.
+0.4293  b3:zkfmtqh7cw7yvodqwsr4mwi4li  Pin the connection pool size rather than tracking the range.
+```
+]
+
+Three units, one of them a kernel `claim` and two typed `x.code/decision` and
+`x.code/consequence`. Before 1.7 that query returned the first line only.
+Naming a kernel type still selects kernel units:
+
+#screen(caption: "$ smysl find \"connection pool\" --kind claim fixtures/corpus/F12-extension-types.smy")[
+```
+0.4696  b3:g5ghn46xlnyd6dv7sd3bctl5ol  The connection pool saturated under load.
+```
+]
+
+And `--schema` names any of them, kernel or extension:
+
+#screen(caption: "$ smysl find \"connection pool\" --schema x.code/decision fixtures/corpus/F12-extension-types.smy")[
+```
+0.4293  b3:zkfmtqh7cw7yvodqwsr4mwi4li  Pin the connection pool size rather than tracking the range.
+```
+]
+
+`--schema claim` and `--kind claim` select the same units, because the filter is
+over schemas rather than over a category and a caller mixing the two should not
+have to know which is which.
+
 #subsection("Filtering on what an extension schema says: `--payload`")
 
 `--kind` filters on kernel type, and for a corpus built on an extension schema
@@ -668,6 +712,11 @@ consequence, because the kernel type is the same in both.
 query did not return are the rejected alternative and the expected
 consequence — both `claim`, both about the connection pool, and neither
 something a review tool should act on.
+
+Nested keys are written with a dot: `{ code: { kind: "decision" } }` is
+`code.kind`, at any depth, so a producer that groups its fields under one key
+can be filtered on. A flat `"code.kind"` and a nested one are the same key,
+which is the reading a caller wants.
 
 Two properties are worth stating because the alternatives are both tempting
 and wrong. A unit that does not carry the key is *excluded*, so pointing this

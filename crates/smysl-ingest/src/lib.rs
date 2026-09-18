@@ -119,9 +119,22 @@ pub struct IngestOptions {
     /// A granularity preset: `coarse`, `default` or `fine`, or `standard`, the name this field
     /// has defaulted to since before the presets had names and which means `default`. Hashed
     /// into the recipe as written, so a valid name keeps the recipe it always had; anything
-    /// else is refused by [`Ingestor::ingest`] before a call is made. It does not yet choose
-    /// the profile units are checked under.
+    /// else is refused by [`Ingestor::ingest`] before a call is made. Since 1.7 it also chooses
+    /// the profile the staged units are checked under — see [`IngestOptions::granularity_named`]
+    /// for when.
     pub granularity: String,
+    /// Whether the caller *named* a granularity, rather than leaving the default (1.7).
+    ///
+    /// The preset was validated and then discarded for three releases: `--granularity fine` was
+    /// accepted, hashed into the recipe, and the batch was checked under whatever the store's
+    /// view declared, so the flag did not do what its name says. It does now — but only when
+    /// asked. The field defaults to `standard`, and a run that never mentions granularity must
+    /// keep taking the profile from the store's view (D-5), or upgrading would silently
+    /// re-check every batch against a different `l0_max`.
+    ///
+    /// Set by [`IngestOptions::with_granularity`]. A caller assigning the field directly is
+    /// saying the same thing the string says, and should set this too.
+    pub granularity_named: bool,
     pub agent: smysl_core::AgentId,
     /// Supplied, never read, so a replayed ingest produces the same attestations.
     pub now: Hlc,
@@ -216,6 +229,7 @@ impl IngestOptions {
 
     pub fn with_granularity(mut self, g: impl Into<String>) -> IngestOptions {
         self.granularity = g.into();
+        self.granularity_named = true;
         self
     }
 
@@ -292,6 +306,7 @@ impl Default for IngestOptions {
             repair_attempts: DEFAULT_REPAIR_ATTEMPTS,
             path: None,
             granularity: "standard".into(),
+            granularity_named: false,
             now: Hlc::zero(agent.clone()),
             hop: 0,
             agent,
@@ -356,9 +371,12 @@ impl<'a> Ingestor<'a> {
             .map_err(|e| ProviderError::Config(format!("prompt override {e}")))?;
         // Was accepted whatever it said and only hashed: `--granularity bogus` ran, and its
         // recipe differed from every real run's for a word nothing else read.
-        self.opts
+        let profile = self
+            .opts
             .granularity_profile()
             .map_err(ProviderError::Config)?;
+        // Named, or not applied: see `IngestOptions::granularity_named`.
+        let profile = self.opts.granularity_named.then_some(profile);
         let provider = self.registry.for_task(Task::ContentIngest)?;
         let caps = provider.caps();
 
@@ -441,7 +459,15 @@ impl<'a> Ingestor<'a> {
         relations.dedup_by(|a, b| a.kind == b.kind && a.from == b.from && a.to == b.to);
 
         Ok((
-            stage::prepare(store, units, relations, labels, &attest),
+            stage::prepare_under(
+                store,
+                units,
+                relations,
+                labels,
+                Vec::new(),
+                &attest,
+                profile,
+            ),
             report,
         ))
     }

@@ -547,6 +547,16 @@ fn cli() -> Command {
                         .help("Restrict to units at or above this status"),
                 )
                 .arg(
+                    Arg::new("schema")
+                        .long("schema")
+                        .value_name("ID")
+                        .action(clap::ArgAction::Append)
+                        .help(
+                            "Restrict to units of this schema, kernel or extension \
+                             (x.domain/type); repeatable",
+                        ),
+                )
+                .arg(
                     Arg::new("payload")
                         .long("payload")
                         .value_name("KEY=VALUE[,VALUE]")
@@ -3414,6 +3424,19 @@ fn cmd_find(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     }
 
+    if let Some(ids) = m.get_many::<String>("schema") {
+        let mut parsed = Vec::new();
+        for raw in ids {
+            match smysl::SchemaId::parse(raw) {
+                Ok(s) => parsed.push(s),
+                Err(_) => {
+                    eprintln!("smysl find: `{raw}` is not a schema id");
+                    return ExitCode::Usage;
+                }
+            }
+        }
+        q = q.schemas(parsed);
+    }
     if let Some(raw) = m.get_one::<String>("payload") {
         match payload_filter(raw, "find") {
             Ok((key, values)) => q = q.with_payload(key, values),

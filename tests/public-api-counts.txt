@@ -29,8 +29,8 @@ smysl-check      242
 smysl-pack       544
 smysl-thread     259
 smysl-render     907
-smysl-retrieve   144
+smysl-retrieve   148
 smysl-embed      62
 smysl-provider   722
-smysl-ingest     577
+smysl-ingest     579
 smysl-tui        216

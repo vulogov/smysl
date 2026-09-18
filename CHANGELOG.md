@@ -9,6 +9,40 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.7.0
 
+### Improvements to what was already there
+
+Five, chosen because the code or the measurements already said they were wrong — not because
+anything new was wanted.
+
+- **Retrieval can see extension-schema units.** A unit whose schema was not a kernel type was left
+  out of every index — not filtered from a result, *absent* — so `find` and `pack --query` could
+  not reach a corpus authored under an extension schema at all, and said nothing about why. The
+  code called it "a real gap, recorded rather than papered over". Every unit is indexed now;
+  `Query::admits_schema` decides, so a query naming no kind returns everything and one naming
+  `claim` still returns kernel claims only; `Query::schemas` and `find --schema` are how a caller
+  asks for an extension type by name.
+- **`--granularity` chooses the profile the batch is checked under.** For three releases the
+  preset was validated, hashed into the recipe, and then discarded, so `ingest --granularity fine`
+  checked its units against whatever the store's view declared — the flag did not do what its name
+  says. `stage::prepare_under` takes the profile, and `IngestOptions::granularity_named` records
+  that the caller asked: a run that never mentions granularity still takes it from the store, or
+  upgrading would silently re-check every batch against a different `l1_range`.
+- **`payload_strings` reads nested keys.** `{ code: { kind: "decision" } }` is `code.kind`, at any
+  depth, so a producer that groups its fields under one key can use `--payload` at all. A flat
+  `"a.b"` and a nested `a: { b: … }` are the same key, which is the reading a caller wants.
+- **The manual's retrieval table is checked against the measurement.** Chapter 15 prints recall@5,
+  MRR and first place per class, hand-copied from a test run and checked by nobody since. Gate 7
+  is "documentation matches the binary", and every other number in the book is either replayed or
+  compared against the code. It asserts agreement, not a target — the floors still refuse to pin
+  paraphrase, because what that number is for is deciding whether a semantic backend earns its
+  dependency.
+- **`UNIT_LOCAL` is one code long on purpose, and now says so.** Widening it to the other
+  single-unit shape defects (`SMY-E023`, `E031`, `E032`, `E034`) turned out to be inert:
+  `UnitCoreBuilder` refuses all four at construction and the decoder runs the same constructor, so
+  a unit reaching `salvage` cannot carry one. `SMY-E022` is genuinely different — the gist bound is
+  relative to a granularity profile, which a constructor has no access to. The attempt is recorded
+  and asserted rather than left for somebody to try again.
+
 ### Carried from 1.6.0
 
 What this cycle starts from (details in 1.6.0):

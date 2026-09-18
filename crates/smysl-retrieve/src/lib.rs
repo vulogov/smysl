@@ -138,6 +138,12 @@ pub struct Query {
     /// for a set that is a property of the corpus and not of the query. Naming the field instead
     /// moves that work to indexing time, where it is done once.
     pub payload: Option<PayloadFilter>,
+    /// Restrict to units of these schemas (1.7). Empty means no restriction.
+    ///
+    /// A unit authored under an extension schema has no kernel type, so `kinds` cannot name it
+    /// and — before 1.7 — nothing else could either: such units were left out of every index
+    /// entirely. They are indexed now, and this is how a caller asks for them.
+    pub schemas: BTreeSet<SchemaId>,
 }
 
 /// A payload field a query restricts on (1.6).
@@ -183,6 +189,7 @@ impl Query {
             min_status: None,
             within: BTreeSet::new(),
             payload: None,
+            schemas: BTreeSet::new(),
         }
     }
 
@@ -222,6 +229,39 @@ impl Query {
         (self.within.is_empty() || self.within.contains(uid)) && self.admits(kind, status)
     }
 
+    /// Restrict to units of these schemas (1.7), kernel or extension.
+    pub fn schemas(mut self, schemas: impl IntoIterator<Item = SchemaId>) -> Query {
+        self.schemas = schemas.into_iter().collect();
+        self
+    }
+
+    /// Whether a unit of this schema passes every filter except the payload one (1.7).
+    ///
+    /// The general form of [`Query::admits_unit`], which can only speak for a unit that has a
+    /// kernel type. A `kinds` filter names kernel types, so a unit that has none cannot satisfy
+    /// one: asking for `claim` must not return an `x.code/decision`, and asking for nothing in
+    /// particular must return both.
+    pub fn admits_schema(&self, uid: &Uid, schema: &SchemaId, status: Status) -> bool {
+        if !self.within.is_empty() && !self.within.contains(uid) {
+            return false;
+        }
+        if !self.schemas.is_empty() && !self.schemas.contains(schema) {
+            return false;
+        }
+        match schema {
+            SchemaId::Kernel(k) => self.admits(*k, status),
+            _ => self.kinds.is_empty() && self.admits_status(status),
+        }
+    }
+
+    /// Whether a status passes the `min_status` filter (1.7).
+    pub fn admits_status(&self, status: Status) -> bool {
+        match self.min_status {
+            Some(m) => status >= m,
+            None => true,
+        }
+    }
+
     /// Whether a unit's payload strings pass the payload filter (1.6). True when none is set.
     pub fn admits_payload(&self, strings: &BTreeMap<String, BTreeSet<String>>) -> bool {
         match &self.payload {
@@ -236,10 +276,7 @@ impl Query {
         if !self.kinds.is_empty() && !self.kinds.contains(&kind) {
             return false;
         }
-        match self.min_status {
-            Some(m) => status >= m,
-            None => true,
-        }
+        self.admits_status(status)
     }
 }
 
@@ -284,16 +321,16 @@ pub(crate) fn indexable(store: &Store, uid: &Uid) -> Option<Vec<(String, f32)>> 
 }
 
 /// Every unit in the store, with the facts the filters need.
-pub(crate) fn candidates(store: &Store) -> BTreeMap<Uid, (KernelType, Status)> {
+///
+/// Every unit, since 1.7. Until then a unit whose schema was not a kernel type was left out of
+/// the index altogether — not filtered, absent — so `find` and `pack --query` could not reach a
+/// corpus authored under an extension schema at all, and said nothing about why. The reasoning
+/// recorded here was that a `KernelType` filter cannot express such a unit, which is true and is
+/// an argument for [`Query::admits_schema`] rather than for dropping it: a query that names no
+/// kind wants everything, and one that names `claim` wants kernel claims.
+pub(crate) fn candidates(store: &Store) -> BTreeMap<Uid, (SchemaId, Status)> {
     store
         .units()
-        .filter_map(|(u, unit)| match &unit.core.schema {
-            // Extension and unknown-kernel units are indexed by nothing here: a filter on
-            // `KernelType` cannot express them, and silently treating them as some kernel
-            // type would be worse than leaving them out. Retrieval over extension types is
-            // a real gap, recorded rather than papered over.
-            SchemaId::Kernel(k) => Some((*u, (*k, unit.core.status))),
-            _ => None,
-        })
+        .map(|(u, unit)| (*u, (unit.core.schema.clone(), unit.core.status)))
         .collect()
 }

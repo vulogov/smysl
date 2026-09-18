@@ -158,6 +158,28 @@ pub fn prepare_attested(
     schemas: Vec<SchemaDecl>,
     attest: &dyn Attesting,
 ) -> Staged {
+    prepare_under(store, units, relations, labels, schemas, attest, None)
+}
+
+/// [`prepare_attested`], checked under a granularity the caller names (1.7).
+///
+/// `None` takes the profile from the store's view, which is what every `prepare` did and still
+/// does. `Some` is a caller saying what *this batch* was produced under — granularity constrains
+/// production, not the store (D-5), so a batch ingested at `fine` should be checked at `fine`
+/// however the store it is joining was authored.
+///
+/// This existed as a validated-and-discarded string for three releases: `ingest --granularity
+/// fine` was accepted, hashed into the recipe, and then checked under the store's profile, so
+/// `l0_max` and the single-assertion admission were not the ones the caller asked for.
+pub fn prepare_under(
+    store: &Store,
+    units: Vec<UnitCore>,
+    relations: Vec<Relation>,
+    labels: BTreeMap<Label, Uid>,
+    schemas: Vec<SchemaDecl>,
+    attest: &dyn Attesting,
+    granularity: Option<smysl_core::GranularityProfile>,
+) -> Staged {
     // Rule M first, and *before* the check: weakening moves identities, so a report
     // computed over the model's original uids would describe a batch that no longer
     // exists. This was the bug the SM-P14 gate kept hitting - the report was taken before
@@ -193,7 +215,10 @@ pub fn prepare_attested(
     records.extend(relations.iter().cloned().map(Record::Relation));
     let merged = Store::from_records(records);
 
-    let opts = CheckOptions::default().with_labels(labels.clone());
+    let mut opts = CheckOptions::default().with_labels(labels.clone());
+    if let Some(g) = granularity {
+        opts = opts.with_granularity(g);
+    }
     let mut report = check(&merged, opts);
 
     // What the weakening did, said out loud. A warning: the unit is in rule M now, and the

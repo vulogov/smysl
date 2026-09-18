@@ -211,11 +211,27 @@ pub fn degrade(span: &str, rung: Rung, why: &str) -> (UnitCore, Diagnostic) {
 
 /// Errors that are a defect of one unit and say nothing about the others in its answer.
 ///
-/// Only `SMY-E022`, a gist over `l0_max`, for now. A model cannot count tokens the way the
-/// estimator does, so an over-long gist can survive every repair turn while its siblings were
-/// fine from the first — and rule I degrading the whole span cost a live run all 16 of its
-/// valid units for one gist a token over. A fabricated quote (`SMY-E307`) is deliberately not
-/// here: it is a unit's defect too, but it is evidence about the answer it came in.
+/// Only `SMY-E022`, a gist over `l0_max`, and that is not an oversight — it is the only error a
+/// *constructed* unit can carry. A model cannot count tokens the way the estimator does, so an
+/// over-long gist can survive every repair turn while its siblings were fine from the first, and
+/// rule I degrading the whole span cost a live run all 16 of its valid units for one gist a token
+/// over.
+///
+/// 1.7 tried to widen this to the other defects that are one unit's shape — `detail` without a
+/// `body` (`SMY-E023`), `derived` with no grounds (`SMY-E031`), `cited` with no source
+/// (`SMY-E032`), an authored `unfounded` (`SMY-E034`) — and found the widening inert.
+/// `UnitCoreBuilder` refuses all four at construction, and the CBOR decoder runs the same
+/// constructor, so a unit reaching `salvage` cannot be carrying one; `passes::shape` keeps them
+/// only as defence in depth against a future constructor bypass. `SMY-E022` is genuinely
+/// different, as that pass says: the gist bound is relative to a granularity profile, which a
+/// constructor has no access to.
+///
+/// Two codes are excluded on judgement rather than reachability, and both are worth keeping:
+///
+/// - A fabricated quote (`SMY-E307`) is a unit's defect too, but it is evidence about the answer
+///   it came in: a model that invented one attribution may have invented others.
+/// - A multi-assertion body (`SMY-E040`) is the same kind of evidence — a model running two
+///   claims into one unit is describing how it is reading, not slipping on one unit.
 pub const UNIT_LOCAL: &[Code] = &[Code::E022];
 
 /// What [`salvage`] kept of an answer whose repair budget ran out.
@@ -422,6 +438,66 @@ mod tests {
     use super::*;
 
     const GOOD_SURFACE: &str = "@claim c/one { status: speculative }\n~ the pool saturated\n";
+
+    /// Why `UNIT_LOCAL` is one code long, asserted rather than argued (1.7).
+    ///
+    /// The other shape defects cannot reach `salvage`: `UnitCoreBuilder` refuses them, so there
+    /// is no unit to degrade. A future constructor that stopped refusing one would fail here
+    /// first, which is the point of writing it down.
+    #[test]
+    fn the_other_shape_defects_cannot_reach_salvage() {
+        use smysl_core::{KernelType, Status, UnitCoreBuilder};
+
+        let refused = [
+            UnitCoreBuilder::new(KernelType::Claim, "the canary stayed clean", Status::Cited)
+                .build()
+                .err(),
+            UnitCoreBuilder::new(KernelType::Claim, "the pool saturated", Status::Derived)
+                .build()
+                .err(),
+            UnitCoreBuilder::new(KernelType::Claim, "the pool saturated", Status::Unfounded)
+                .build()
+                .err(),
+            UnitCoreBuilder::new(KernelType::Claim, "the pool saturated", Status::Speculative)
+                .detail("a detail with no body above it")
+                .build()
+                .err(),
+        ];
+        for (i, e) in refused.iter().enumerate() {
+            let code = e
+                .as_ref()
+                .unwrap_or_else(|| panic!("case {i} was built, so its code could reach salvage"))
+                .code();
+            assert!(
+                !UNIT_LOCAL.contains(&code),
+                "{code} is unreachable at salvage, so listing it would be inert"
+            );
+        }
+        assert_eq!(UNIT_LOCAL, &[Code::E022]);
+    }
+
+    /// And a defect that is evidence about the whole answer still degrades the whole answer.
+    #[test]
+    fn a_fabricated_quote_is_not_a_unit_local_defect() {
+        use smysl_core::{KernelType, Status, UnitCoreBuilder};
+
+        let u = UnitCoreBuilder::new(KernelType::Claim, "the pool saturated", Status::Speculative)
+            .build()
+            .unwrap();
+        let uid = canonical_uid(&u);
+        assert!(
+            salvage(
+                std::slice::from_ref(&u),
+                &[],
+                &BTreeMap::new(),
+                &[Diagnostic::on(Code::E307, uid)],
+                Rung::Model,
+                "the budget ran out",
+            )
+            .is_none(),
+            "a model that invented one attribution may have invented others"
+        );
+    }
 
     #[test]
     fn a_clean_surface_answer_converts_without_diagnostics() {
