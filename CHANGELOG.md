@@ -7,6 +7,28 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.8.0
+
+### Carried from 1.7.0
+
+What this cycle starts from (details in 1.7.0):
+
+- **R11, R13 and R14**, held for rust_smysl's S2 experiment.
+- **Four open questions back to inkhaven**, in
+  [`Documentation/PLAN_1.7_COMMITMENT.md`](Documentation/PLAN_1.7_COMMITMENT.md). The sharpest:
+  whether an author's own commitment should outrank a harvested one by *rung* (rule T) rather than
+  by timestamp, since harvest-on-save means most commitment records will carry `model:` or `tool:`
+  agents.
+- **Rendering the commitment axis**, deliberately not shipped in 1.7: nobody has asked for a
+  rendered commitment yet, and rule V1's marker map is `Status`-specific enough that guessing at a
+  vocabulary would be inventing one.
+- **Multilingual retrieval and localisable strings** (the RFC's §5), a cycle of its own. 1.6 made
+  the retrieval tokenizer pluggable, so that half is closer than the RFC assumes; the diagnostics
+  and render registers are the larger part.
+- **OpenAI and Anthropic** against their live endpoints — gate 4's standing waiver.
+
+---
+
 ## 1.7.0 — 2026-09-18
 
 The cycle that gave the format a second axis, and spent most of its effort finding out that the

@@ -35,7 +35,7 @@ Add `default-features = false` for the pure library: no async runtime, no HTTP c
 argument parser in the dependency tree, verified in CI on every push rather than promised
 here.
 
-**The crate is `1.7.0` and the format is `smysl/1.0`.** The crate version means the API is
+**The crate is `1.8.0` and the format is `smysl/1.0`.** The crate version means the API is
 frozen: the facade's 276 names and every public item behind them move only with a 2.0, enforced
 per crate by `cargo-semver-checks` on every push.
 [`Documentation/API_CONTRACT.md`](Documentation/API_CONTRACT.md) is that promise written down.
@@ -343,7 +343,7 @@ signature says.
 
 ## Status
 
-Crate `1.7.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
+Crate `1.8.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
 [`Documentation/SMYSL_FORMAT_SPEC.md`](Documentation/SMYSL_FORMAT_SPEC.md) — everything a
 second implementation must obey, and nothing else.
 
