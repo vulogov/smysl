@@ -96,6 +96,29 @@ F12-extension-types budget=5000: 3 unit(s), 44 token(s), Greedy
     b3:aohwp3uveppudn7k62xwkbq6o7 L0
     b3:g5ghn46xlnyd6dv7sd3bctl5ol L0
     b3:zkfmtqh7cw7yvodqwsr4mwi4li L0
+F13-canon budget=40: 2 unit(s), 27 token(s), Greedy
+    b3:lz2qagdcv2bumh7zac3ogcp5ky L0
+    b3:2w3axdoswpe3k6r5bk7vgnualc L0
+F13-canon budget=120: 3 unit(s), 42 token(s), Greedy
+    b3:cthfxmh4plkllueigv7iyhajkj L0
+    b3:lz2qagdcv2bumh7zac3ogcp5ky L0
+    b3:2w3axdoswpe3k6r5bk7vgnualc L0
+F13-canon budget=200: 3 unit(s), 42 token(s), Greedy
+    b3:cthfxmh4plkllueigv7iyhajkj L0
+    b3:lz2qagdcv2bumh7zac3ogcp5ky L0
+    b3:2w3axdoswpe3k6r5bk7vgnualc L0
+F13-canon budget=400: 3 unit(s), 42 token(s), Greedy
+    b3:cthfxmh4plkllueigv7iyhajkj L0
+    b3:lz2qagdcv2bumh7zac3ogcp5ky L0
+    b3:2w3axdoswpe3k6r5bk7vgnualc L0
+F13-canon budget=1000: 3 unit(s), 42 token(s), Greedy
+    b3:cthfxmh4plkllueigv7iyhajkj L0
+    b3:lz2qagdcv2bumh7zac3ogcp5ky L0
+    b3:2w3axdoswpe3k6r5bk7vgnualc L0
+F13-canon budget=5000: 3 unit(s), 42 token(s), Greedy
+    b3:cthfxmh4plkllueigv7iyhajkj L0
+    b3:lz2qagdcv2bumh7zac3ogcp5ky L0
+    b3:2w3axdoswpe3k6r5bk7vgnualc L0
 F2-research budget=40: 2 unit(s), 31 token(s), Greedy
     b3:gvxrs73kd2xjtaqtbg6q62tcuj L0
     b3:xiqskepfsn62nfdhjx23ia7ehu L0

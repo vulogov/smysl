@@ -12,7 +12,7 @@ regretted, and three gates that each know what they are blind to.
 
 **What 1.0.0 promises**, precisely:
 
-- **The facade's 274 names at `--all-features`, 228 at `--no-default-features`.** None moves
+- **The facade's 276 names at `--all-features`, 230 at `--no-default-features`.** None moves
   without a 2.0. It was 244 at 1.0. 1.3 added ten — `PromptOverride`, `SourcePolicy`,
   `quote_support`, `quote_support_in`, `QuoteSupport`, `QUOTE_KEY`, `label_bindings`,
   `resolve_label`, `LabelError` and `dependents_via` — additions, which a minor version may
@@ -27,7 +27,8 @@ regretted, and three gates that each know what they are blind to.
   `fold_suffix` and `Tokenizer` — twelve, all needing no feature except `Attesting`, which is
   `stage`'s (272 and 226 at the 1.5.0 cut). 1.6 adds `PayloadFilter` and `payload_strings`, and
   `smysl-pack` gains `CostModel` and `ExternalCost` in its own surface — 274 and 228 at the 1.6.0
-  cut.
+  cut. 1.7 adds `Commit` and `Commitment`, the record type and the axis inkhaven asked for — 276
+  and 230 at the 1.7.0 cut.
 - **Every public item in each of the eleven library crates** — they share one version, all are
   published, and `make semver` enforces each of them individually. That is the larger and
   truer figure, and §0.2 of `ROAD_TO_1.0.md` explains why it is the one that binds.

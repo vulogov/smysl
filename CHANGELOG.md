@@ -7,7 +7,46 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.7.0
+## 1.7.0 — 2026-09-18
+
+The cycle that gave the format a second axis, and spent most of its effort finding out that the
+obvious place to put it was wrong.
+
+inkhaven asked for smysl as the *development history* of a story's canon — what was decided,
+revised and retracted, and what each decision rests on. Their RFC proposed recording how settled a
+unit is as a field on `Unit`, "the same place `attestations` / `salience` / `labels` already live".
+`attestations` and `labels` each have a record type and persist; `salience` has none. Write a store,
+read it back, and an authored salience is *gone*. A commitment modelled on it would have been lost
+at the first save, silently, which for a ledger whose whole purpose is to persist and diff across
+drafts is fatal. So commitment is a record — which also answers *who* settled it and *when*, the
+questions a development history exists to ask and the ones a field cannot express.
+
+What shipped: record type 13 and the `Commitment` axis, independent of `Status` because `Status`'s
+order *is* rule M and authorial confidence does not belong on the ladder that says evidence
+outranks inference; `@commit` and `smysl commit`; `SMY-W057`, rule M's shape on the new axis, as a
+warning rather than an error because outrunning your own foundations is how drafting goes;
+`SMY-W058`, a commitment fork, reported per *agent* so that one author's revisions are not mistaken
+for a disagreement; and `SourceKind::Node`, kept out of the vocabulary models are offered because a
+host's node id is not something a model may invent.
+
+Five improvements to things that already existed came first, each because the code or a
+measurement already said it was wrong — retrieval that could not see extension-schema units at all,
+a `--granularity` flag that was validated and discarded, the hybrid retrieval engine that was built
+and measured and unreachable from the command line, and two gates that were skipping work in
+silence.
+
+**No format break.** `smysl/1.0` holds: one new record type, which an older reader preserves and
+reports as `SMY-W014`, and one new reserved surface word. The facade is 276 names, 230 pure;
+`make semver` is clean on all twelve crates against 1.6.0, and `SEMVER_BREAKING` is empty for the
+eighth release running. 26 commands, 57 diagnostics, and the Python, JavaScript and Go
+implementations all carry record 13 byte for byte.
+
+**And a hole in forward compatibility, closed.** §8.1 permits a new key in any record body
+*because* an older reader preserves it verbatim. The `source` sub-map did not: it collected unknown
+keys and dropped them, so a unit written by a later version decoded without error, re-encoded three
+bytes shorter, and computed **a different uid** — silently, because `source` is inside identity.
+Neither preserved nor rejected is the one outcome content addressing cannot survive. Found while
+planning where a host-source variant could safely go.
 
 ### Improvements to what was already there
 
