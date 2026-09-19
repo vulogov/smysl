@@ -79,7 +79,16 @@ pub fn unit_schema_with(source_supplied: bool) -> String {
 }}"#,
         types = quoted(authorable_types()),
         statuses = quoted(authorable_statuses()),
-        source_kinds = quoted(SourceKind::ALL.iter().map(|k| k.as_str().to_string())),
+        // Every kernel kind a *model* may name. `Node` is deliberately absent (1.7): it points
+        // into a host system's own identifiers, which the model cannot know and must not invent —
+        // provenance is the one field `SourcePolicy` exists to keep out of its hands. A host that
+        // knows the node id supplies it with `IngestOptions::with_source`.
+        source_kinds = quoted(
+            SourceKind::ALL
+                .iter()
+                .filter(|k| **k != SourceKind::Node)
+                .map(|k| k.as_str().to_string())
+        ),
         gist_max = GIST_MAX_CHARS,
         source_rule = source_rule,
     )
@@ -292,6 +301,15 @@ mod tests {
     fn the_source_kind_enum_tracks_the_kernel() {
         let s = unit_schema();
         for k in SourceKind::ALL {
+            // `Node` is the exception, and the reason is in the generator: a host's own node id
+            // is not something a model can know, so offering it the word invites an invention.
+            if *k == SourceKind::Node {
+                assert!(
+                    !s.contains("\"node\""),
+                    "a model must not be offered `node`"
+                );
+                continue;
+            }
             assert!(s.contains(&format!("\"{}\"", k.as_str())), "{k}");
         }
     }

@@ -4,7 +4,7 @@
 //! registration, more compact, and determinism is easier to guarantee.
 
 use crate::types::annex::{Contention, LabelBinding, PackInfo, SchemaDecl};
-use crate::types::lifecycle::{Resolution, Withdrawal};
+use crate::types::lifecycle::{Commit, Resolution, Withdrawal};
 use crate::types::provenance::Attestation;
 use crate::types::relation::Relation;
 use crate::types::thread::Thread;
@@ -35,6 +35,10 @@ pub mod code {
     pub const WITHDRAWAL: u64 = 11;
     /// A record that a disagreement was reviewed (1.4). Additive in the same way.
     pub const RESOLUTION: u64 = 12;
+    /// A commitment to a unit (1.7). Additive in the same way: a 1.6 reader preserves it
+    /// verbatim and reports `SMY-W014`, so a ledger written by 1.7 round-trips through an
+    /// older build without loss — it simply cannot read how settled anything is.
+    pub const COMMIT: u64 = 13;
 
     pub const KNOWN: &[u64] = &[
         UNIT_CORE,
@@ -48,6 +52,7 @@ pub mod code {
         LABEL_BINDING,
         WITHDRAWAL,
         RESOLUTION,
+        COMMIT,
     ];
 }
 
@@ -69,6 +74,8 @@ pub enum Record {
     Withdrawal(Withdrawal),
     /// A record that a disagreement was reviewed (1.4).
     Resolution(Resolution),
+    /// A commitment to a unit (1.7).
+    Commit(Commit),
     /// A record type this build does not know (`SMY-W014`).
     ///
     /// Preserved verbatim - payload bytes exactly as they arrived - and skipped
@@ -94,6 +101,7 @@ impl Record {
             Record::LabelBinding(_) => code::LABEL_BINDING,
             Record::Withdrawal(_) => code::WITHDRAWAL,
             Record::Resolution(_) => code::RESOLUTION,
+            Record::Commit(_) => code::COMMIT,
             Record::Unknown { code, .. } => *code,
         }
     }
@@ -111,6 +119,7 @@ impl Record {
             Record::LabelBinding(_) => "labelbinding",
             Record::Withdrawal(_) => "withdrawal",
             Record::Resolution(_) => "resolution",
+            Record::Commit(_) => "commitment",
             Record::Unknown { .. } => "unknown",
         }
     }
@@ -165,12 +174,13 @@ mod tests {
 
     /// Ascending, and with a hole. Codes 1-8 are 0.1's records; 9 stays reserved for
     /// checkpointing, whose format interacts with content addressing and must not be
-    /// retrofitted; 10 is 0.2's label binding; 11 and 12 are 1.4's withdrawal and resolution. The list was contiguous until the hole
+    /// retrofitted; 10 is 0.2's label binding; 11 and 12 are 1.4's withdrawal and resolution;
+    /// 13 is 1.7's commitment. The list was contiguous until the hole
     /// became real, and contiguity was never the property that mattered - being ascending
     /// and free of duplicates is, since a code is a permanent wire commitment.
     #[test]
     fn known_codes_ascend_and_skip_the_reserved_slot() {
-        assert_eq!(code::KNOWN, &[1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12]);
+        assert_eq!(code::KNOWN, &[1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]);
         assert!(code::KNOWN.windows(2).all(|w| w[0] < w[1]));
     }
 

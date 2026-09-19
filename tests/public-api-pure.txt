@@ -33,6 +33,8 @@ pub use smysl::Cached
 pub use smysl::CheckOptions
 pub use smysl::Code
 pub use smysl::CodecError
+pub use smysl::Commit
+pub use smysl::Commitment
 pub use smysl::Compacted
 pub use smysl::ConformanceClass
 pub use smysl::ConformanceVerdict

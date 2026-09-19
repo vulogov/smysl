@@ -276,6 +276,9 @@ registry! {
     Identity => {
         W111 = "SMY-W111", Warn,  "The log holds records more than once; compact removes them";
     }
+    Epistemics => {
+        W057 = "SMY-W057", Warn,  "A unit is more committed than the weakest thing it rests on";
+    }
 }
 
 impl fmt::Display for Code {
@@ -563,7 +566,7 @@ mod tests {
     /// of 1.4.0: `SMY-W056`, a withdrawal naming an edge 1.4 does not let anyone withdraw.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 55);
+        assert_eq!(Code::ALL.len(), 56);
     }
 
     #[test]

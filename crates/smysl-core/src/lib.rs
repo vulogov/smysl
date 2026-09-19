@@ -33,11 +33,12 @@ pub use ids::{
     UidPrefix, ViewId,
 };
 pub use types::{
-    json_escape, quantise, tokens, Admission, Attestation, Contention, ContentionStatus, Date,
-    Detected, DetectionKind, DropReason, Extra, Fidelity, GranularityProfile, Hlc, LabelBinding,
-    Lod, Op, Optimality, PackInfo, PackMode, Record, RelKind, Relation, Resolution,
-    ResolutionTarget, Role, Rung, SchemaDecl, SourceKind, SourcePolicy, SourceRef, Status, Step,
-    Thread, ThreadSchema, Unit, UnitCore, UnitCoreBuilder, View, Withdrawal,
+    json_escape, quantise, tokens, Admission, Attestation, Commit, Commitment, Contention,
+    ContentionStatus, Date, Detected, DetectionKind, DropReason, Extra, Fidelity,
+    GranularityProfile, Hlc, LabelBinding, Lod, Op, Optimality, PackInfo, PackMode, Record,
+    RelKind, Relation, Resolution, ResolutionTarget, Role, Rung, SchemaDecl, SourceKind,
+    SourcePolicy, SourceRef, Status, Step, Thread, ThreadSchema, Unit, UnitCore, UnitCoreBuilder,
+    View, Withdrawal,
 };
 
 /// Format versions this implementation accepts in a `@doc` header (§11).

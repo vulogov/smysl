@@ -155,3 +155,123 @@ mod tests {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Commitment (1.7)
+// ---------------------------------------------------------------------------
+
+/// How settled a unit is, as a matter of the author's decision rather than of the world.
+///
+/// `Status` answers *how true* — `Measured` means an instrument recorded it — and its integer
+/// order **is** rule M. That is the wrong quantity for a body of work whose content is settled by
+/// fiat rather than confirmed by reality: a plot point is canonical because somebody committed to
+/// it. This is a second axis, deliberately independent of `Status`, so neither order constrains
+/// the other; a `Floated` idea may be `Measured` and a `Canonical` decision may be `Speculative`.
+///
+/// Higher is more settled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+#[non_exhaustive]
+pub enum Commitment {
+    /// An idea on the table.
+    Floated = 0,
+    /// Written down, not load-bearing.
+    Drafted = 1,
+    /// Other decisions may depend on it.
+    Committed = 2,
+    /// Settled truth of the work.
+    Canonical = 3,
+    /// Explicitly overridden, kept as history. Pairs with a `supersedes` edge, which stays
+    /// authoritative for traversal — this says how to *read* the unit, not how to walk to it.
+    Retconned = 4,
+}
+
+impl Commitment {
+    pub const ALL: &'static [Commitment] = &[
+        Commitment::Floated,
+        Commitment::Drafted,
+        Commitment::Committed,
+        Commitment::Canonical,
+        Commitment::Retconned,
+    ];
+
+    pub const fn as_u8(self) -> u8 {
+        self as u8
+    }
+
+    pub const fn from_u8(v: u8) -> Option<Commitment> {
+        match v {
+            0 => Some(Commitment::Floated),
+            1 => Some(Commitment::Drafted),
+            2 => Some(Commitment::Committed),
+            3 => Some(Commitment::Canonical),
+            4 => Some(Commitment::Retconned),
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Commitment::Floated => "floated",
+            Commitment::Drafted => "drafted",
+            Commitment::Committed => "committed",
+            Commitment::Canonical => "canonical",
+            Commitment::Retconned => "retconned",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Commitment> {
+        Commitment::ALL.iter().copied().find(|c| c.as_str() == s)
+    }
+}
+
+impl core::fmt::Display for Commitment {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.pad(self.as_str())
+    }
+}
+
+/// A commitment to a unit (record type 13, 1.7).
+///
+/// A record rather than a field on `Unit`, for two reasons that turned out to be the same one.
+/// `Unit`'s non-identity fields are assembled from records — `attestations` from record 2,
+/// `labels` from record 10 — except `salience`, which has no record and therefore does not
+/// survive a store write at all. A commitment that behaved like `salience` would be lost the
+/// moment a ledger was written to disk.
+///
+/// And a record says more than a field can. *Who* settled this, *when*, and what it said before
+/// are the questions a development history exists to answer; a field holds only the latest answer
+/// and cannot say whose it was.
+///
+/// Identity is untouched: `commitment` is not in `UnitCore`, so committing to a unit does not
+/// move its uid. "The content did not change; my commitment to it did" is the event this records.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub struct Commit {
+    /// The unit being committed to.
+    pub unit: Uid,
+    pub level: Commitment,
+    pub agent: AgentId,
+    pub ts: Hlc,
+    /// A unit saying why, as a withdrawal's `reason` does.
+    pub note: Option<Uid>,
+    pub extra: Extra,
+}
+
+impl Commit {
+    pub fn new(unit: Uid, level: Commitment, agent: AgentId, ts: Hlc) -> Commit {
+        Commit {
+            unit,
+            level,
+            agent,
+            ts,
+            note: None,
+            extra: Extra::new(),
+        }
+    }
+
+    pub fn with_note(mut self, note: Uid) -> Commit {
+        self.note = Some(note);
+        self
+    }
+}

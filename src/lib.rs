@@ -67,14 +67,15 @@ pub use smysl_core::surface::{parse_surface, write_surface, ParseOutcome, WriteC
 pub use smysl_core::{
     canonical_uid, format_version_supported, from_cbor, from_cbor_seq, hash_bytes, json_escape,
     kernel_major, quantise, to_cbor, to_cbor_seq, tokens, unit_core_bytes, verify, Admission,
-    AgentId, AgentKind, Attestation, Code, CodecError, Contention, ContentionId, ContentionStatus,
-    Date, Detected, DetectionKind, Diagnostic, DropReason, ExitCode, Extra, Fidelity,
-    GranularityProfile, Group, Hlc, IdError, IntegrityError, KernelType, Label, LabelBinding,
-    LangTag, Lod, NonDetReason, Op, Optimality, PackInfo, PackMode, ParseError, Record, RelKind,
-    Relation, Report, Resolution, ResolutionTarget, Role, Rung, SchemaDecl, SchemaId, Severity,
-    ShapeError, SourceKind, SourcePolicy, SourceRef, Span, Status, Step, Subject, Thread, ThreadId,
-    ThreadSchema, Uid, UidPrefix, Unit, UnitCore, UnitCoreBuilder, View, ViewId, Withdrawal,
-    FORMAT_VERSIONS_SUPPORTED, FORMAT_VERSION_DEFAULT, KERNEL_MAJOR, KERNEL_SCHEMA,
+    AgentId, AgentKind, Attestation, Code, CodecError, Commit, Commitment, Contention,
+    ContentionId, ContentionStatus, Date, Detected, DetectionKind, Diagnostic, DropReason,
+    ExitCode, Extra, Fidelity, GranularityProfile, Group, Hlc, IdError, IntegrityError, KernelType,
+    Label, LabelBinding, LangTag, Lod, NonDetReason, Op, Optimality, PackInfo, PackMode,
+    ParseError, Record, RelKind, Relation, Report, Resolution, ResolutionTarget, Role, Rung,
+    SchemaDecl, SchemaId, Severity, ShapeError, SourceKind, SourcePolicy, SourceRef, Span, Status,
+    Step, Subject, Thread, ThreadId, ThreadSchema, Uid, UidPrefix, Unit, UnitCore, UnitCoreBuilder,
+    View, ViewId, Withdrawal, FORMAT_VERSIONS_SUPPORTED, FORMAT_VERSION_DEFAULT, KERNEL_MAJOR,
+    KERNEL_SCHEMA,
 };
 
 // ---- check ----------------------------------------------------------------
@@ -207,8 +208,8 @@ mod tests {
         // unreachable" for two releases — which is a holding pattern, not a decision. A code
         // nobody can trigger is worse than a missing one, because a reader waits for it.
         // 52 as of 1.3.0, with `SMY-W309`; 53 as of 1.4.0, with `SMY-W056`; 54 as of 1.6.0,
-        // with `SMY-E203`; 55 as of 1.7.0, with `SMY-W111`.
-        assert_eq!(Code::ALL.len(), 55);
+        // with `SMY-E203`; 55 and 56 as of 1.7.0, with `SMY-W111` and `SMY-W057`.
+        assert_eq!(Code::ALL.len(), 56);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

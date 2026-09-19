@@ -21,7 +21,7 @@ use crate::types::annex::{
     PackInfo, PackMode, SchemaDecl,
 };
 use crate::types::epistemics::{Date, Lod, SourceKind, SourceRef, Status};
-use crate::types::lifecycle::{Resolution, ResolutionTarget, Withdrawal};
+use crate::types::lifecycle::{Commit, Commitment, Resolution, ResolutionTarget, Withdrawal};
 use crate::types::provenance::{Attestation, Hlc, Op, Rung};
 use crate::types::record::{code, Record};
 use crate::types::relation::{RelKind, Relation};
@@ -63,6 +63,9 @@ fn enc_source(e: &mut Enc, s: &SourceRef) {
     m.put_opt(keys::source::CAPTURED, s.captured.as_ref(), |e, d| {
         e.text(&d.to_string())
     });
+    // Rule X inside the sub-map, as every record body has done since 0.2. Without it a reader
+    // that met a key it did not know re-encoded the unit without it and changed its uid.
+    m.put_extra(&s.extra);
     m.finish(e);
 }
 
@@ -330,6 +333,17 @@ fn resolution_bytes(r: &Resolution) -> Vec<u8> {
     m.into_bytes()
 }
 
+fn commit_bytes(c: &Commit) -> Vec<u8> {
+    let mut m = MapBuilder::new();
+    m.put(keys::commit::UNIT, |e| e.uid(&c.unit));
+    m.put(keys::commit::LEVEL, |e| e.uint(c.level.as_u8() as u64));
+    m.put(keys::commit::AGENT, |e| e.text(c.agent.as_str()));
+    m.put(keys::commit::TS, |e| enc_hlc(e, &c.ts));
+    m.put_opt(keys::commit::NOTE, c.note.as_ref(), |e, u| e.uid(u));
+    m.put_extra(&c.extra);
+    m.into_bytes()
+}
+
 /// Encode one record as a complete envelope.
 pub fn to_cbor(r: &Record) -> Vec<u8> {
     let payload = match r {
@@ -344,6 +358,7 @@ pub fn to_cbor(r: &Record) -> Vec<u8> {
         Record::LabelBinding(b) => label_binding_bytes(b),
         Record::Withdrawal(w) => withdrawal_bytes(w),
         Record::Resolution(r) => resolution_bytes(r),
+        Record::Commit(c) => commit_bytes(c),
         Record::Unknown { payload, .. } => payload.clone(),
     };
     let mut e = Enc::with_capacity(payload.len() + 4);
@@ -413,6 +428,7 @@ fn dec_source(d: &mut Dec<'_>) -> Res<SourceRef> {
         kind: kind.ok_or_else(|| bad(at))?,
         reference: reference.ok_or_else(|| bad(at))?,
         captured,
+        extra,
     })
 }
 
@@ -1023,6 +1039,54 @@ fn dec_withdrawal(d: &mut Dec<'_>) -> Res<Withdrawal> {
     })
 }
 
+fn dec_commit(d: &mut Dec<'_>) -> Res<Commit> {
+    let at = d.position();
+    let mut unit = None;
+    let mut level = None;
+    let mut agent = None;
+    let mut ts = None;
+    let mut note = None;
+    let mut extra = Extra::new();
+
+    read_map(d, &mut extra, |d, k| match k {
+        keys::commit::UNIT => {
+            unit = Some(d.uid()?);
+            Ok(true)
+        }
+        keys::commit::LEVEL => {
+            // An unknown level fails the record rather than defaulting: the whole point of the
+            // axis is *how settled*, and guessing at it would put words in an author's mouth.
+            level = Some(
+                Commitment::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(at))?)
+                    .ok_or_else(|| bad(at))?,
+            );
+            Ok(true)
+        }
+        keys::commit::AGENT => {
+            agent = Some(AgentId::new(d.text()?).map_err(|_| bad(at))?);
+            Ok(true)
+        }
+        keys::commit::TS => {
+            ts = Some(dec_hlc(d)?);
+            Ok(true)
+        }
+        keys::commit::NOTE => {
+            note = Some(d.uid()?);
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+
+    Ok(Commit {
+        unit: unit.ok_or_else(|| bad(at))?,
+        level: level.ok_or_else(|| bad(at))?,
+        agent: agent.ok_or_else(|| bad(at))?,
+        ts: ts.ok_or_else(|| bad(at))?,
+        note,
+        extra,
+    })
+}
+
 fn dec_resolution(d: &mut Dec<'_>) -> Res<Resolution> {
     let at = d.position();
     let mut contention = None;
@@ -1092,6 +1156,7 @@ pub fn from_cbor(bytes: &[u8]) -> Res<(Record, usize)> {
         code::LABEL_BINDING => Record::LabelBinding(dec_label_binding(&mut d)?),
         code::WITHDRAWAL => Record::Withdrawal(dec_withdrawal(&mut d)?),
         code::RESOLUTION => Record::Resolution(dec_resolution(&mut d)?),
+        code::COMMIT => Record::Commit(dec_commit(&mut d)?),
         other => {
             // `SMY-W014`: preserved verbatim, skipped semantically. The payload is parsed
             // strictly, so an unknown record cannot smuggle in a non-deterministic encoding.

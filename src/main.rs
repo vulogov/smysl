@@ -70,6 +70,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "withdraw",  about: "Withdraw an edge: kept, and no longer followed",       purity: Purity::Pure,  phase: "1.4.0"  },
     Cmd { name: "resolve",   about: "Record that a disagreement was reviewed",              purity: Purity::Pure,  phase: "1.4.0"  },
     Cmd { name: "review",    about: "List the disagreements open for review",               purity: Purity::Pure,  phase: "1.4.0"  },
+    Cmd { name: "commit",    about: "Record how settled a unit is",                         purity: Purity::Pure,  phase: "1.7.0"  },
     Cmd { name: "render",    about: "Thread plus profile to artifact",                     purity: Purity::Pure,  phase: "SM-P12" },
     Cmd { name: "import",    about: "Tabular readings to measured units, without a model",  purity: Purity::Pure,  phase: "SM-P15" },
     Cmd { name: "relink",    about: "Re-point references onto superseded units",             purity: Purity::Pure,  phase: "SM-P15" },
@@ -408,6 +409,54 @@ fn cli() -> Command {
                         .value_name("PATH")
                         .help("Store to retract from"),
                 ),
+            "commit" => sub
+                .arg(
+                    Arg::new("unit")
+                        .required(true)
+                        .value_name("UID")
+                        .help("The unit being committed to, by uid or label"),
+                )
+                .arg(
+                    Arg::new("level")
+                        .long("level")
+                        .required(true)
+                        .value_name("L")
+                        .value_parser([
+                            "floated",
+                            "drafted",
+                            "committed",
+                            "canonical",
+                            "retconned",
+                        ])
+                        .help("How settled it is"),
+                )
+                .arg(
+                    Arg::new("as")
+                        .long("as")
+                        .required(true)
+                        .value_name("AGENT")
+                        .help("The agent committing"),
+                )
+                .arg(
+                    Arg::new("note")
+                        .long("note")
+                        .value_name("UID")
+                        .help("A unit saying why"),
+                )
+                .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .value_name("MS")
+                        .help("Wall clock for the record, in milliseconds")
+                        .value_parser(clap::value_parser!(u64)),
+                )
+                .arg(
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .action(ArgAction::SetTrue)
+                        .help("Report what would be recorded, and write nothing"),
+                )
+                .arg(Arg::new("store").value_name("PATH")),
             "withdraw" => sub
                 .arg(
                     Arg::new("edge")
@@ -2439,6 +2488,8 @@ fn persist(
                 Record::Relation(_) => true,
                 Record::Withdrawal(w) => smysl::surface::withdrawal_has_surface_form(w),
                 Record::Resolution(x) => smysl::surface::resolution_has_surface_form(x),
+                // A commitment always has one: it names a unit, and a uid can always be written.
+                Record::Commit(_) => true,
                 _ => false,
             };
             if !expressible {
@@ -2581,6 +2632,97 @@ fn review_items_with(
 ///
 /// The edge's record stays; closure, lineage, detection and packing stop following it. What it
 /// releases is reported first, as `retract` reports its blast radius.
+/// `smysl commit` - record how settled a unit is (1.7).
+///
+/// A second axis beside `status`: status is how true, commitment is how settled. Recording one
+/// does not move the unit's uid — the content did not change, the author's commitment to it did,
+/// which is exactly the event a development history wants to keep.
+fn cmd_commit(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let path = match store_path(m, global, "commit") {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+    warn_output_is_a_report(global, "commit");
+    let (store, labels) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl commit: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let unit = match resolve(&store, m.get_one::<String>("unit").expect("required")) {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("smysl commit: {e}");
+            return e.code;
+        }
+    };
+    let level = smysl::Commitment::parse(m.get_one::<String>("level").expect("required"))
+        .expect("clap restricts the values");
+    let agent = match AgentId::new(m.get_one::<String>("as").expect("required")) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl commit: --as: {e}");
+            return ExitCode::Usage;
+        }
+    };
+    let note = match m.get_one::<String>("note").map(|r| resolve(&store, r)) {
+        None => None,
+        Some(Ok(u)) => Some(u),
+        Some(Err(e)) => {
+            eprintln!("smysl commit: --note: {e}");
+            return e.code;
+        }
+    };
+
+    let at = record_time(m);
+    let mut commit = smysl::Commit::new(unit, level, agent.clone(), Hlc::new(at, 0, agent));
+    if let Some(u) = note {
+        commit = commit.with_note(u);
+    }
+    let records = vec![Record::Commit(commit)];
+
+    let before = store.commitment_of(&unit);
+    let dry = m.get_flag("dry-run");
+    // Recording the level it already has is a no-op worth saying out loud rather than a second
+    // identical record: the log would carry both and answer the same either way.
+    let unchanged = before == Some(level);
+    let apply = !dry && !unchanged;
+    if apply {
+        if let Err(e) = persist(&path, &records, &store, &labels) {
+            eprintln!("smysl commit: {e}");
+            return ExitCode::Failure;
+        }
+    }
+
+    if global.get_flag("json") {
+        println!(
+            "{{\"unit\":{},\"level\":{},\"was\":{},\"applied\":{}}}",
+            smysl::json_escape(&unit.canonical()),
+            smysl::json_escape(level.as_str()),
+            before
+                .map(|b| smysl::json_escape(b.as_str()))
+                .unwrap_or_else(|| "null".into()),
+            apply
+        );
+    } else {
+        let name = labels
+            .iter()
+            .find(|(_, u)| **u == unit)
+            .map(|(l, _)| l.as_str().to_string())
+            .unwrap_or_else(|| unit.short());
+        match before {
+            Some(b) if b == level => println!("{path}: {name} is already {level}; nothing to do"),
+            Some(b) => println!("{path}: {name}  {b} -> {level}"),
+            None => println!("{path}: {name}  -> {level}"),
+        }
+        if dry && !unchanged {
+            println!("{path}:   --dry-run, so nothing was written");
+        }
+    }
+    ExitCode::Success
+}
+
 fn cmd_withdraw(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let path = match store_path(m, global, "withdraw") {
         Ok(p) => p,
@@ -5093,6 +5235,7 @@ fn main() -> ProcExitCode {
         "find" => cmd_find(sub, &matches),
         "pack" => cmd_pack(sub, &matches),
         "retract" => cmd_retract(sub, &matches),
+        "commit" => cmd_commit(sub, &matches),
         "withdraw" => cmd_withdraw(sub, &matches),
         "resolve" => cmd_resolve(sub, &matches),
         "review" => cmd_review(sub, &matches),
@@ -5146,7 +5289,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 25);
+        assert_eq!(COMMANDS.len(), 26);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -5166,6 +5309,7 @@ mod tests {
                 "withdraw",
                 "resolve",
                 "review",
+                "commit",
                 "render",
                 "import",
                 "relink",

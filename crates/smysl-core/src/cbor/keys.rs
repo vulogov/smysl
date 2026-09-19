@@ -102,6 +102,16 @@ pub mod packinfo {
     pub const HIGHEST: u16 = RESERVED;
 }
 
+/// Commit (type code 13, 1.7).
+pub mod commit {
+    pub const UNIT: u16 = 0;
+    pub const LEVEL: u16 = 1;
+    pub const AGENT: u16 = 2;
+    pub const TS: u16 = 3;
+    pub const NOTE: u16 = 4;
+    pub const HIGHEST: u16 = NOTE;
+}
+
 /// SchemaDecl (type code 8).
 pub mod schema_decl {
     pub const ID: u16 = 0;
@@ -280,6 +290,17 @@ mod tests {
                     resolution::AGENT,
                     resolution::TS,
                     resolution::NOTE,
+                ],
+            ),
+            (
+                "commit",
+                commit::HIGHEST,
+                &[
+                    commit::UNIT,
+                    commit::LEVEL,
+                    commit::AGENT,
+                    commit::TS,
+                    commit::NOTE,
                 ],
             ),
             (

@@ -24,7 +24,7 @@ use crate::surface::lex::{arrow_len, find_arrow, lex, Line, LineClass};
 use crate::surface::payload::object_to_payload;
 use crate::types::annex::SchemaDecl;
 use crate::types::epistemics::{Date, SourceKind, SourcePolicy, SourceRef, Status};
-use crate::types::lifecycle::{Resolution, ResolutionTarget, Withdrawal};
+use crate::types::lifecycle::{Commit, Commitment, Resolution, ResolutionTarget, Withdrawal};
 use crate::types::provenance::Hlc;
 use crate::types::relation::{RelKind, Relation};
 use crate::types::thread::{Role, Step, Thread, ThreadSchema};
@@ -187,6 +187,16 @@ struct RawLifecycle {
     span: Span,
 }
 
+/// `@commit <unit> { level: …, agent: …, ts: […] }` (1.7).
+struct RawCommit {
+    target: Spanned<Ref>,
+    level: Commitment,
+    agent: AgentId,
+    ts: Hlc,
+    note: Option<Spanned<Ref>>,
+    span: Span,
+}
+
 struct RawThread {
     id: ThreadId,
     schema: ThreadSchema,
@@ -241,6 +251,7 @@ pub fn parse_surface_with(src: &str, opts: &ParseOptions) -> Result<ParseOutcome
         threads: Vec::new(),
         schemas: Vec::new(),
         lifecycle: Vec::new(),
+        commits: Vec::new(),
         view: None,
     };
     p.run()?;
@@ -258,6 +269,7 @@ struct Parser<'a> {
     threads: Vec<RawThread>,
     schemas: Vec<SchemaDecl>,
     lifecycle: Vec<RawLifecycle>,
+    commits: Vec<RawCommit>,
     view: Option<RawView>,
 }
 
@@ -322,6 +334,11 @@ impl<'a> Parser<'a> {
                     let withdraw = l.class == LineClass::WithdrawStart;
                     if let Some(r) = self.lifecycle_record(withdraw) {
                         self.lifecycle.push(r);
+                    }
+                }
+                LineClass::CommitStart => {
+                    if let Some(c) = self.commit_record() {
+                        self.commits.push(c);
                     }
                 }
                 _ => {
@@ -417,6 +434,94 @@ impl<'a> Parser<'a> {
     /// by someone at some time, and a default for either would invent one — and, as for `@thread`,
     /// `ts` is `[wall_ms, counter]` with the agent as the clock's. Any other key is an error: the
     /// likeliest one is `note:` on a withdrawal, which, passed over, would drop the reason.
+    /// `@commit <unit> { level: canonical, agent: human:vu, ts: [1726500000000, 0] }` (1.7).
+    ///
+    /// Its own function rather than a third arm of `lifecycle_record`: a commitment names a unit
+    /// rather than an edge or a contention, and its header key is `level` rather than a reason.
+    /// Threading a third case through the edge parsing would have made both harder to read.
+    fn commit_record(&mut self) -> Option<RawCommit> {
+        let l = self.lines[self.i];
+        let rest = l.text.strip_prefix("@commit").unwrap_or("").trim_start();
+        let target_txt = match rest.find('{') {
+            Some(p) => rest[..p].trim(),
+            None => {
+                self.err(
+                    Code::E001,
+                    l.span,
+                    "`@commit` needs a header with `level`, `agent` and `ts`",
+                );
+                self.recover();
+                return None;
+            }
+        };
+        let Some(target) = self.reference(target_txt, l.span) else {
+            self.recover();
+            return None;
+        };
+
+        let Ok((mut header, header_span)) = self.header_object(l) else {
+            self.recover();
+            return None;
+        };
+        self.advance_past(header_span.end.max(l.span.end));
+
+        let Some(level) = header
+            .take("level")
+            .and_then(|v| v.value.as_str().and_then(Commitment::parse))
+        else {
+            self.err(
+                Code::E001,
+                l.span,
+                "`@commit` needs `level`: floated, drafted, committed, canonical or retconned",
+            );
+            return None;
+        };
+        let Some(agent) = header
+            .take("agent")
+            .and_then(|v| v.value.as_str().and_then(|s| AgentId::new(s).ok()))
+        else {
+            self.err(Code::E001, l.span, "`@commit` needs a valid `agent`");
+            return None;
+        };
+        let Some(ts) = header.take("ts").and_then(|v| self.hlc(&v, &agent)) else {
+            self.err(
+                Code::E001,
+                l.span,
+                "`@commit` needs `ts: [wall_ms, counter]`",
+            );
+            return None;
+        };
+        let note = match header.take("note") {
+            None => None,
+            Some(v) => match v.value.as_str().and_then(parse_ref) {
+                Some(r) => Some(Spanned::new(r, v.span)),
+                None => {
+                    self.err(Code::E001, v.span, "`note` names a unit");
+                    return None;
+                }
+            },
+        };
+        if let Some((k, _)) = header.iter().next() {
+            self.err(
+                Code::E001,
+                k.span,
+                format!(
+                    "`@commit` has no key `{}`; it takes `level`, `agent`, `ts` and `note`",
+                    k.value
+                ),
+            );
+            return None;
+        }
+        Some(RawCommit {
+            target,
+            level,
+            agent,
+            ts,
+            note,
+            span: l.span,
+        })
+    }
+
     fn lifecycle_record(&mut self, withdraw: bool) -> Option<RawLifecycle> {
         let l = self.lines[self.i];
         let word = if withdraw { "@withdraw" } else { "@resolve" };
@@ -1245,6 +1350,10 @@ impl<'a> Parser<'a> {
             kind,
             reference: reference.to_string(),
             captured,
+            // Surface text has no way to write an unknown source key: the parser knows the three
+            // it defines and an author writing a fourth gets a parse error, not a preserved key.
+            // Forward compatibility here is the wire's business (1.7).
+            extra: Default::default(),
         })
     }
 
@@ -1503,6 +1612,23 @@ impl<'a> Parser<'a> {
                 (true, _) => continue,
             };
             self.out.records.push(record);
+        }
+
+        // Commitments last of all, for the same reason: they name a unit the reader has met.
+        for c in std::mem::take(&mut self.commits) {
+            let Some(unit) = lookup(&c.target.value, &mut self.out, c.span) else {
+                continue;
+            };
+            let note = match &c.note {
+                None => None,
+                Some(u) => match lookup(&u.value, &mut self.out, u.span) {
+                    Some(uid) => Some(uid),
+                    None => continue,
+                },
+            };
+            let mut commit = Commit::new(unit, c.level, c.agent, c.ts);
+            commit.note = note;
+            self.out.records.push(Record::Commit(commit));
         }
 
         if let Some(v) = &self.view {

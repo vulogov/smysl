@@ -16,9 +16,10 @@ use std::path::{Path, PathBuf};
 
 use smysl_core::diag::{Code, Diagnostic, Report, Subject};
 use smysl_core::{
-    canonical_uid, from_cbor_seq, hash_bytes, to_cbor, AgentId, Attestation, Contention,
-    ContentionStatus, DetectionKind, Error, IntegrityError, Record, RelKind, Relation, Resolution,
-    ResolutionTarget, Status, Thread, ThreadId, Uid, UidPrefix, Unit, View, ViewId, Withdrawal,
+    canonical_uid, from_cbor_seq, hash_bytes, to_cbor, AgentId, Attestation, Commit, Commitment,
+    Contention, ContentionStatus, DetectionKind, Error, IntegrityError, Record, RelKind, Relation,
+    Resolution, ResolutionTarget, Status, Thread, ThreadId, Uid, UidPrefix, Unit, View, ViewId,
+    Withdrawal,
 };
 
 use crate::adjacency::{Adjacency, EdgeKind, EdgeSet};
@@ -86,6 +87,8 @@ pub struct Store {
     /// Withdrawals by the rid they name, whether or not that relation has arrived (1.4).
     withdrawals: BTreeMap<Uid, BTreeSet<Withdrawal>>,
     resolutions: BTreeSet<Resolution>,
+    /// Commitments by the unit they name, whether or not that unit has arrived (1.7).
+    commits: BTreeMap<Uid, BTreeSet<Commit>>,
     /// Each relation's rid, to its key in `relations`.
     rids: BTreeMap<Uid, (String, Uid, Uid)>,
     /// BLAKE3 of the canonical encoding of every record the log holds: what `contains` answers
@@ -119,6 +122,7 @@ impl Store {
             contentions: Vec::new(),
             withdrawals: BTreeMap::new(),
             resolutions: BTreeSet::new(),
+            commits: BTreeMap::new(),
             rids: BTreeMap::new(),
             record_hashes: BTreeSet::new(),
             unfounded: BTreeSet::new(),
@@ -371,6 +375,47 @@ impl Store {
 
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
+    }
+
+    /// Every commitment naming this unit, in record order (1.7).
+    pub fn commits_of(&self, uid: &Uid) -> &BTreeSet<Commit> {
+        static EMPTY: std::sync::OnceLock<BTreeSet<Commit>> = std::sync::OnceLock::new();
+        self.commits
+            .get(uid)
+            .unwrap_or_else(|| EMPTY.get_or_init(BTreeSet::new))
+    }
+
+    /// How settled this unit is: the level of its latest commitment (1.7).
+    ///
+    /// Latest by `(ts.wall_ms, ts.counter, agent)`, which is a total order — so the answer does
+    /// not depend on the order records arrived in, which rule U requires of anything derived from
+    /// a store. `None` means nobody has committed to it, which is not the same as `Floated`:
+    /// floated is a decision, silence is not.
+    ///
+    /// Taking the *highest level* anyone ever asserted was the obvious alternative and is wrong:
+    /// it makes a commitment impossible to walk back, so `Retconned` could never take effect, and
+    /// "the most committed anyone ever was" is not what a ledger means.
+    pub fn commitment_of(&self, uid: &Uid) -> Option<Commitment> {
+        self.commits
+            .get(uid)?
+            .iter()
+            .max_by(|a, b| {
+                (a.ts.wall_ms, a.ts.counter, a.agent.as_str()).cmp(&(
+                    b.ts.wall_ms,
+                    b.ts.counter,
+                    b.agent.as_str(),
+                ))
+            })
+            .map(|c| c.level)
+    }
+
+    /// Every unit committed at `level`, in canonical order (1.7).
+    pub fn units_at_commitment(&self, level: Commitment) -> Vec<Uid> {
+        self.commits
+            .keys()
+            .filter(|u| self.commitment_of(u) == Some(level))
+            .copied()
+            .collect()
     }
 
     /// How many records this log holds more than once (1.7).
@@ -691,6 +736,9 @@ impl Store {
                 }
                 Record::Resolution(r) => {
                     self.resolutions.insert(r.clone());
+                }
+                Record::Commit(c) => {
+                    self.commits.entry(c.unit).or_default().insert(c.clone());
                 }
                 _ => {}
             }

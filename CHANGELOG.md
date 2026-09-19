@@ -70,6 +70,60 @@ anything new was wanted.
   *not* mostly missing tutorial files. They are absolute paths, pipes, placeholder arguments and
   commands needing a model — each skipped for a reason the script states.
 
+### A commitment axis, from inkhaven's SMYSL-1 RFC
+
+inkhaven wants smysl as the *development history* of a story's canon — what was decided, revised
+and retracted, and what each decision rests on — which is the axis the format was built for and
+nothing in their tree captures. Two asks, both additive, both landed here rather than in 1.8
+because 1.7 is the cycle that is open.
+
+- **Record type 13, a commitment.** `Commitment` is an ordered axis — floated, drafted, committed,
+  canonical, retconned — **independent of `Status`**, whose order is rule M. Status says how well
+  the world supports a unit; commitment says how settled its author considers it, which for a body
+  of work settled by fiat is a different question. `@commit d/motive { level: canonical, agent: …,
+  ts: […] }` in surface text, `smysl commit` on the command line, `Store::commitment_of`,
+  `commits_of` and `units_at_commitment` for reading it back. Committing does not move a uid: the
+  content did not change, the commitment to it did.
+- **`SMY-W057` and check pass 11** — a unit may not be more committed than the weakest thing it
+  rests on. Rule M's shape on the new axis: the canonical-scene-built-on-sand detector. A
+  **warning**, not an error, because outrunning your own foundations is a normal intermediate state
+  of a draft and a gate that refused it would make the ledger unusable during the work it exists to
+  support.
+- **`SourceKind::Node`**, the host back-reference — `inkhaven:<uuid>#ch3/scene2` — so a ledger can
+  point into the system it was harvested from and that system can ask which units a paragraph
+  produced. Stated plainly because it cannot be fixed: a reader older than 1.7 **rejects** a record
+  whose source kind it does not know, so a producer that needs older readers should keep using
+  `Doc` with the same string, which works everywhere.
+
+`Node` is deliberately **not** offered to a model: the ingest schema lists every source kind a
+model may name, and a host's own node id is not one a model can know. Provenance is the field
+`SourcePolicy` exists to keep out of its hands, and a host that knows the id supplies it with
+`IngestOptions::with_source`. The schema gate caught the leak on its first run.
+
+**The RFC's central design would not have worked, and finding out is most of what this cost.** It
+proposed a `commitment` field on `Unit`, "the same place `attestations` / `salience` / `labels`
+already live". `attestations` and `labels` each have a record type and therefore persist.
+`salience` has none: write a store and read it back and an authored salience is *gone*. A
+commitment modelled on it would have been lost at the first save, silently, which for a ledger
+whose purpose is to persist and diff across drafts is fatal. Hence a record — which also answers
+*who* settled it and *when*, the questions a development history exists to ask, and which a field
+cannot express.
+
+How settled a unit is, derived, is normative: the level of the commitment with the greatest
+`(ts, agent)`, a total order over a set and so independent of arrival order (rule U). Taking the
+highest level ever asserted was the obvious alternative and is wrong — it makes a commitment
+impossible to walk back, so `retconned` could never take effect.
+
+### A forward-compatibility hole in `source`, found by planning that work
+
+§8.1 permits a new key in any record body *because* an older reader preserves it verbatim. Every
+record body did. The `source` sub-map did not: it collected unknown keys and dropped them, so a
+unit written by a later version decoded without error, re-encoded three bytes shorter, and
+**computed a different uid** — neither preserved nor rejected, which is the one outcome content
+addressing cannot survive, and silent because `source` is inside `UnitCore` and therefore inside
+identity. `SourceRef` now carries `extra`, pinned by a test that splices an unknown key in and
+checks both the bytes and the uid.
+
 ### Carried from 1.6.0
 
 What this cycle starts from (details in 1.6.0):

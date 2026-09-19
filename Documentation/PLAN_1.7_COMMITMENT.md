@@ -2,7 +2,10 @@
 
 **Status:** plan, written 2026-09-18, in response to
 `../blackInkhaven/Documentation/PROPOSALS/SMYSL-1_RFC.md` (inkhaven, `3.11.0-dev`).
-**For:** crate `1.8.0`, format `smysl/1.0`.
+**For:** crate `1.7.0`, format `smysl/1.0`. The RFC proposes 1.8.0; this lands in the cycle that
+is open, which changes nothing about the design.
+**Re-scanned** 2026-09-18 after the RFC gained §7 (Scaling & budget). Nothing there changes the
+asks; §7 below records what it gets right and the two corrections it needs.
 **Verdict:** both asks are worth doing and neither is as small as the RFC estimates. Two of its
 compatibility claims do not survive contact with the tree, and both failures are the same shape:
 a thing that *looks* like a safe place to put data is not, because it has no wire representation
@@ -200,6 +203,9 @@ rejects the *surface* document and reads the CBOR form fine.
 Ordered so each step is independently green. Sizes are relative to the 1.4 cycle, which is the
 closest precedent.
 
+**Implemented in 1.7** — steps 1, 3, 4, 5, 7 and half of 2 are in the tree as of this writing;
+6, 8 and 9 follow. The table is kept as the record of what the work was.
+
 | # | Step | Touches | Notes |
 |---|---|---|---|
 | 1 | `SourceKind` forward compatibility | `epistemics.rs`, `cbor/envelope.rs`, spec §3.1 | Prerequisite for step 2; worth doing alone |
@@ -244,7 +250,28 @@ have not spent a cycle on a record type nobody uses.
 
 ---
 
-## 6. Open questions for inkhaven
+## 6. The §7 re-scan — scaling and budget
+
+Added to the RFC after the first read. Its arithmetic is right where it touches smysl, and it has
+already picked up 1.6: `pack --budget b --reserve r` is quoted correctly, which is the mechanism
+that makes context cost constant in canon size. Three notes.
+
+- **Correct, and worth confirming from this side.** `salience` is a fixed 32 iterations; `merge` is
+  linear (measured 1.9–2.0× per doubling in `scripts/bench-scaling.py`); `pack` is linear once the
+  scope binds and the greedy is skipped entirely when the budget admits everything; retrieval is
+  linear too, measured in 1.6. A book-scale ledger is nowhere near any of these limits.
+- **One conflation to fix.** §7 describes "`focus` (HNSW-seeded via `role_weights`)". Those are two
+  seams, not one: `--focus` names uids that must reach L1 (constraint C5, a hard pin), while
+  `role_weights` biases the salience score that feeds the packer's value term (a soft blend).
+  Seeding a semantic ranking into `role_weights` is right; seeding it into `focus` would pin
+  whatever the embedder liked, and packing *fails* rather than degrades when a pin does not fit.
+- **The `Unit.salience` override does not survive a store write** (§1). §4 of the RFC offers it as
+  the alternative to `role_weights` — "fully overrides the derived score" — which is true in memory
+  and false across a save. A host injecting relevance must do it per query through
+  `SalienceRequest`, which is the seam that works, rather than by writing `Unit.salience` into a
+  stored ledger and expecting to read it back.
+
+## 7. Open questions for inkhaven
 
 1. **Do you need 1.7 readers to read `Node` sources?** If yes, use the `Doc` convention (§5) and
    we skip the variant; if no, §2's ordering applies.

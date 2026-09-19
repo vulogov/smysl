@@ -157,3 +157,36 @@ func TestAPackManifestsNewKeySurvivesARoundTrip(t *testing.T) {
 		t.Error("F12-reserved-pack.cbor did not re-encode byte for byte")
 	}
 }
+
+// Record type 13 (1.7), from inkhaven's SMYSL-1 RFC. This implementation does not decode a
+// commitment's body; what it proves is that a ledger written by 1.7 survives a trip through a
+// build that reads records it was not told about.
+func TestACommitmentRecordIsKnownAndRoundTrips(t *testing.T) {
+	data, err := os.ReadFile(wirePath("F13-commitment.cbor"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := smysl.DecodeStore(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commits := 0
+	for _, r := range records {
+		if !r.IsKnown() {
+			t.Errorf("record %d is unknown", r.Code)
+		}
+		if r.Name() == "commitment" {
+			commits++
+		}
+	}
+	if commits != 3 {
+		t.Errorf("got %d commitments, want 3", commits)
+	}
+	out, err := smysl.EncodeStore(records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(out, data) {
+		t.Error("F13-commitment.cbor did not re-encode byte for byte")
+	}
+}

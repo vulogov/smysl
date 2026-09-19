@@ -287,6 +287,38 @@ nothing. Before, it was applied to an in-memory copy and reported as done.
 
 A `retracts` or `supersedes` edge cannot be withdrawn, and is refused with exit 2.
 
+#section("commit")
+
+*Record how settled a unit is.* Pure · 1.7.0.
+
+A second axis beside `status`. `status` says how well the world supports a unit; commitment says
+how settled its author considers it — which, for a body of work settled by decision rather than by
+evidence, is the question that matters. Neither order constrains the other: a `floated` idea may be
+`measured`, and a `canonical` decision may be `speculative`.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`UID`], [positional, required], [The unit being committed to, by uid or label.]),
+    ([`--level`], [`L`, required], [`floated | drafted | committed | canonical | retconned`, in increasing order of settledness.]),
+    ([`--as`], [`AGENT`, required], [The agent committing.]),
+    ([`--note`], [`UNIT`], [A unit saying why, by uid or label.]),
+    ([`--at`], [`MILLIS`], [Timestamp in milliseconds since the epoch; defaults to now.]),
+    ([`--dry-run`], [—], [Report the transition without writing.]),
+    ([`PATH`], [positional], [Store to record it in: a CBOR log gains a record, a surface file a `@commit` line.]),
+  ),
+)
+
+Committing does not move a unit's uid — the content did not change, the commitment to it did — and
+recording the level a unit already has is a no-op that says so. How settled a unit *is* comes from
+the latest commitment by `(ts, agent)`, so the answer does not depend on the order records arrived
+in; a unit nobody has committed to has no commitment, which is not the same as `floated`.
+
+`check` reports `SMY-W057` when a unit is more committed than the weakest thing it rests on — the
+canonical-scene-built-on-sand case. A warning rather than an error, because outrunning your own
+foundations is a normal state of a draft.
+
 #section("resolve")
 
 *Record that a disagreement was reviewed.* Pure · 1.4.0.
@@ -582,6 +614,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W054`], [warning], [Label and uid do not correspond one to one — two labels for one unit, or one label for two.]),
     ([`SMY-W055`], [warning], [Agent contention rate exceeds `--max-contentions-per-agent`.]),
     ([`SMY-W056`], [warning], [A withdrawal names a `retracts` or `supersedes` edge, which cannot be withdrawn; it is kept and has no effect.]),
+    ([`SMY-W057`], [warning], [A unit is more committed than the weakest thing it rests on.]),
   ),
 )
 

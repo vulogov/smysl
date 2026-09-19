@@ -118,12 +118,12 @@ PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-re
 # The library crates behind the facade: everything published except the facade itself.
 LIBRARIES := $(filter-out smysl,$(PUBLISHED))
 
-# The twenty-five subcommands, for `cli-surface`. Written out rather than read from `--help`,
+# The twenty-six subcommands, for `cli-surface`. Written out rather than read from `--help`,
 # for the same reason `tests/dispatch.rs` writes them out: a list derived from the binary
 # shrinks silently when the binary does, and the regenerated golden would then record the
 # absence as if it were the intent.
 COMMAND_NAMES := fmt check pack merge diff trace view bundle thread salience find retract \
-                 withdraw resolve review render import relink compact ingest attest providers \
+                 withdraw resolve review commit render import relink compact ingest attest providers \
                  usage reindex ui
 
 DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE SMYSL_RATIONALE_PRESENTATION
