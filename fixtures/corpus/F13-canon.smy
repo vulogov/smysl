@@ -1,0 +1,28 @@
+@doc smysl/0.1 {
+  id: v/f13
+  intent: incident-brief
+  lang: en
+  roots: [d/motive]
+}
+
+# A story's canon as a development history: what was decided, how settled each decision is,
+# and where one rests on something its author has not settled yet. The two commitment
+# diagnostics both fire here on purpose — `SMY-W057` because a canonical decision rests on a
+# floated premise, and `SMY-W058` because two people disagree about the ending.
+
+@claim c/premise { status: speculative }
+~ The villain lost a child before the story opens.
+
+@decision d/motive { status: speculative, grounds: [c/premise] }
+~ The villain's motive is grief rather than revenge.
+
+@decision d/ending { status: speculative }
+~ The sister forgives him in the final scene.
+
+@commit c/premise { level: floated, agent: human:vu, ts: [1726500000000, 0] }
+
+@commit d/motive { level: canonical, agent: human:vu, ts: [1726500000001, 0] }
+
+@commit d/ending { level: canonical, agent: human:vu, ts: [1726500000002, 0] }
+
+@commit d/ending { level: drafted, agent: human:ed, ts: [1726500000003, 0] }

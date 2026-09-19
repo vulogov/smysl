@@ -49,6 +49,10 @@ pub enum Pass {
     Extension,
     /// 10 - hash verification.
     Hashes,
+    /// 11 - commitment support (1.7). Appended last: `Pass` is matched in declaration order by
+    /// every caller that lists it, and a variant inserted mid-enum would renumber nothing here
+    /// but would reorder every report that iterates `ALL`.
+    CommitmentSupport,
 }
 
 impl Pass {
@@ -63,6 +67,7 @@ impl Pass {
         Pass::Retraction,
         Pass::Extension,
         Pass::Hashes,
+        Pass::CommitmentSupport,
     ];
 
     /// The passes this build actually runs.
@@ -74,6 +79,7 @@ impl Pass {
         Pass::Epistemics,
         Pass::Trust,
         Pass::Extension,
+        Pass::CommitmentSupport,
     ];
 
     pub const fn number(self) -> u8 {
@@ -88,6 +94,7 @@ impl Pass {
             Pass::Retraction => 8,
             Pass::Extension => 9,
             Pass::Hashes => 10,
+            Pass::CommitmentSupport => 11,
         }
     }
 
@@ -103,6 +110,7 @@ impl Pass {
             Pass::Retraction => "retraction",
             Pass::Extension => "extension",
             Pass::Hashes => "hashes",
+            Pass::CommitmentSupport => "commitment",
         }
     }
 
@@ -245,6 +253,9 @@ pub fn check(store: &Store, opts: CheckOptions) -> Report {
     }
     if opts.runs(Pass::Extension) {
         passes::extension::run(store, opts.consumer.as_ref(), &mut report);
+    }
+    if opts.runs(Pass::CommitmentSupport) {
+        passes::commitment::run(store, &mut report);
     }
     report.sort();
     report
@@ -523,7 +534,7 @@ mod tests {
 
     #[test]
     fn ten_passes_numbered_as_in_section_17() {
-        assert_eq!(Pass::ALL.len(), 10);
+        assert_eq!(Pass::ALL.len(), 11);
         for (i, p) in Pass::ALL.iter().enumerate() {
             assert_eq!(p.number() as usize, i + 1);
             assert_eq!(Pass::parse(p.as_str()), Some(*p));
@@ -548,7 +559,8 @@ mod tests {
                 "granularity",
                 "epistemics",
                 "trust",
-                "extension"
+                "extension",
+                "commitment"
             ]
         );
         assert!(

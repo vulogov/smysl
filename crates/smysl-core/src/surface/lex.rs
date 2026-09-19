@@ -48,6 +48,9 @@ pub enum LineClass {
     WithdrawStart,
     /// `@resolve <item> { agent: …, ts: […] }` — a `Resolution` (1.4).
     ResolveStart,
+    /// `@commit <unit> { level: …, agent: …, ts: […] }` — a `Commit` (1.7). At the end for the
+    /// same reason as the two above.
+    CommitStart,
 }
 
 impl LineClass {
@@ -61,6 +64,7 @@ impl LineClass {
                 | LineClass::ThreadStart
                 | LineClass::WithdrawStart
                 | LineClass::ResolveStart
+                | LineClass::CommitStart
         )
     }
 }
@@ -143,6 +147,8 @@ fn classify(line: &str) -> LineClass {
             // the "label", as it does `@schema`.
             "withdraw" => LineClass::WithdrawStart,
             "resolve" => LineClass::ResolveStart,
+            // Reserved in 1.7, in the same way.
+            "commit" => LineClass::CommitStart,
             w if is_record_type(w) => LineClass::RecordStart,
             // A type this build does not know, which a later version may have added. The
             // writer emits exactly the type string it decoded - it has to, since the type

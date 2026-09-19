@@ -47,6 +47,8 @@ pub use smysl::Capabilities
 pub use smysl::CheckOptions
 pub use smysl::Code
 pub use smysl::CodecError
+pub use smysl::Commit
+pub use smysl::Commitment
 pub use smysl::Compacted
 pub use smysl::Completion
 pub use smysl::ConformanceClass

@@ -95,6 +95,8 @@ These apply to every subcommand, in any position on the command line.
     ([`--mode`], [`greedy|exact`], [`exact` proves optimality by branch and bound; needs the `exact-pack` feature.]),
     ([`--query`], [`TEXT`], [Focus on what this query finds, instead of naming uids.]),
     ([`--payload`], [`KEY=VALUE[,VALUE]`], [Restrict what `--query` may focus on to units whose payload has `KEY` equal to one of `VALUE`. Needs a `--query`.]),
+    ([`--engine`], [`lexical|semantic|hybrid`], [Which retriever `--query` focuses with; see `find --engine`.]),
+    ([`--model`], [`DIR`], [Model2Vec directory for `--engine semantic|hybrid`.]),
     ([`--query-limit`], [`N`], [How many hits `--query` focuses on; 3 by default.]),
     ([`PATH`], [positional], [Store to pack.]),
   ),
@@ -232,7 +234,10 @@ not yet wired) · SM-P11.
     ([`-n, --limit`], [`N`], [Maximum hits to return; 10 by default.]),
     ([`--kind`], [`TYPE` (repeatable)], [Restrict to this kernel type.]),
     ([`--min-status`], [`STATUS`], [Restrict to units at or above this status.]),
-    ([`--payload`], [`KEY=VALUE[,VALUE]`], [Restrict to units whose payload has `KEY` equal to one of `VALUE`; a unit without the key is excluded. Applied before the limit, and it does not re-score.]),
+    ([`--engine`], [`lexical|semantic|hybrid`], [Which retriever ranks. `lexical` is the default and needs nothing; the other two need a build with `--features semantic` and a model.]),
+    ([`--model`], [`DIR`], [Model2Vec directory for `--engine semantic|hybrid`; `SMYSL_EMBED_MODEL` says the same thing.]),
+    ([`--schema`], [`ID` (repeatable)], [Restrict to units of this schema, kernel or extension (`x.domain/type`). Extension-typed units are retrievable at all since 1.7.]),
+    ([`--payload`], [`KEY=VALUE[,VALUE]`], [Restrict to units whose payload has `KEY` equal to one of `VALUE`, nested keys written `a.b`; a unit without the key is excluded. Applied before the limit, and it does not re-score.]),
     ([`--why`], [—], [Also print, on stderr, which query terms each hit matched and what each contributed.]),
     ([`PATH`], [positional], [Store to search.]),
   ),
@@ -281,6 +286,38 @@ nothing. Before, it was applied to an in-memory copy and reported as done.
 )
 
 A `retracts` or `supersedes` edge cannot be withdrawn, and is refused with exit 2.
+
+#section("commit")
+
+*Record how settled a unit is.* Pure · 1.7.0.
+
+A second axis beside `status`. `status` says how well the world supports a unit; commitment says
+how settled its author considers it — which, for a body of work settled by decision rather than by
+evidence, is the question that matters. Neither order constrains the other: a `floated` idea may be
+`measured`, and a `canonical` decision may be `speculative`.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`UID`], [positional, required], [The unit being committed to, by uid or label.]),
+    ([`--level`], [`L`, required], [`floated | drafted | committed | canonical | retconned`, in increasing order of settledness.]),
+    ([`--as`], [`AGENT`, required], [The agent committing.]),
+    ([`--note`], [`UNIT`], [A unit saying why, by uid or label.]),
+    ([`--at`], [`MILLIS`], [Timestamp in milliseconds since the epoch; defaults to now.]),
+    ([`--dry-run`], [—], [Report the transition without writing.]),
+    ([`PATH`], [positional], [Store to record it in: a CBOR log gains a record, a surface file a `@commit` line.]),
+  ),
+)
+
+Committing does not move a unit's uid — the content did not change, the commitment to it did — and
+recording the level a unit already has is a no-op that says so. How settled a unit *is* comes from
+the latest commitment by `(ts, agent)`, so the answer does not depend on the order records arrived
+in; a unit nobody has committed to has no commitment, which is not the same as `floated`.
+
+`check` reports `SMY-W057` when a unit is more committed than the weakest thing it rests on — the
+canonical-scene-built-on-sand case. A warning rather than an error, because outrunning your own
+foundations is a normal state of a draft.
 
 #section("resolve")
 
@@ -577,6 +614,8 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W054`], [warning], [Label and uid do not correspond one to one — two labels for one unit, or one label for two.]),
     ([`SMY-W055`], [warning], [Agent contention rate exceeds `--max-contentions-per-agent`.]),
     ([`SMY-W056`], [warning], [A withdrawal names a `retracts` or `supersedes` edge, which cannot be withdrawn; it is kept and has no effect.]),
+    ([`SMY-W057`], [warning], [A unit is more committed than the weakest thing it rests on.]),
+    ([`SMY-W058`], [warning], [Two agents' latest commitments to one unit disagree; merge reports it rather than picking.]),
   ),
 )
 
@@ -589,6 +628,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-E200`], [error], [Pack infeasible — C3/C4/C5 unsatisfiable; reports minimum feasible budget.]),
     ([`SMY-E201`], [error], [Focus unit absent from store.]),
     ([`SMY-E203`], [error], [A reservation leaves no budget to pack into — `--reserve` is the whole of `--budget` or more.]),
+    ([`SMY-W111`], [warning], [The log holds records more than once; `compact` removes them. Only a store written before 1.4 can.]),
     ([`SMY-W202`], [warning], [Greedy mode above `exact_threshold`; optimality gap reported.]),
     ([`SMY-E210`], [error], [Rule V1 — profile lacks a rendering for some status.]),
     ([`SMY-W211`], [warning], [Rule V2 — contentions suppressed; recorded in output metadata.]),

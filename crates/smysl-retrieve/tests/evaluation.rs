@@ -269,3 +269,85 @@ fn the_corpus_fixtures_are_actually_loaded() {
         );
     }
 }
+
+/// The manual prints these numbers; this is what keeps them the measurement (1.7).
+///
+/// Chapter 15's table — recall@5, MRR and first place, per class — was hand-copied out of a run
+/// of the test above and checked by nobody afterwards. Gate 7 is "documentation matches the
+/// binary", and every other number in the book is either replayed (`make doc-output`) or compared
+/// against the code (`make spec-tables`); this one was neither, so a retrieval change that moved
+/// it would have left the page quietly wrong.
+///
+/// It asserts agreement, not a target. The floors above deliberately do not pin paraphrase — what
+/// that number is for is deciding whether a semantic backend earns its dependency, not for passing
+/// a test — and this does not pin it either: it says the book must print whatever was measured.
+/// A legitimate change updates the page, which is a decision somebody makes rather than drift.
+#[test]
+fn the_manual_prints_the_measured_table() {
+    let mut by_class: BTreeMap<Class, Tally> = BTreeMap::new();
+    for case in &cases() {
+        let (store, labels) = load(&case.fixture);
+        let want = *labels
+            .get(&Label::new(&case.want).expect("label parses"))
+            .unwrap_or_else(|| panic!("{}: no label {}", case.fixture, case.want));
+        let hits = Bm25::index(&store).search(&Query::new(&case.query, K));
+        by_class
+            .entry(case.class)
+            .or_default()
+            .add(reciprocal_rank(&hits, &want));
+    }
+
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../Documentation/manual/ch14-16-view-salience-retract.typ");
+    let book = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+
+    // `([shared vocabulary], [1.00], [0.94], [0.88]),`
+    let row = |label: &str| -> (f64, f64, f64) {
+        let needle = format!("([{label}], [");
+        let line = book
+            .lines()
+            .find(|l| l.trim_start().starts_with(&needle))
+            .unwrap_or_else(|| panic!("the manual has no `{label}` row in its retrieval table"));
+        let nums: Vec<f64> = line
+            .split('[')
+            .skip(2)
+            .filter_map(|s| s.split(']').next())
+            .filter_map(|s| s.trim().parse::<f64>().ok())
+            .collect();
+        assert_eq!(
+            nums.len(),
+            3,
+            "the `{label}` row is not three numbers: {line}"
+        );
+        (nums[0], nums[1], nums[2])
+    };
+
+    for (label, class) in [
+        ("shared vocabulary", Class::Echo),
+        ("paraphrase", Class::Paraphrase),
+        ("identifier", Class::Identifier),
+    ] {
+        let t = by_class
+            .get(&class)
+            .unwrap_or_else(|| panic!("{class:?} cases ran"));
+        let (recall, mrr, p1) = row(label);
+        let measured = (t.recall(), t.mrr(), t.precision_at_1());
+        for (printed, got, what) in [
+            (recall, measured.0, "recall@5"),
+            (mrr, measured.1, "MRR"),
+            (p1, measured.2, "first place"),
+        ] {
+            // Compared as the page shows it, through the same formatting the test above
+            // prints: `0.875` is `0.88` and `0.125` is `0.12`, because `{:.2}` rounds an exact
+            // half to even. Comparing the floats instead made the table look wrong by 0.005
+            // when it was transcribed from that very output.
+            assert_eq!(
+                format!("{printed:.2}"),
+                format!("{got:.2}"),
+                "the manual prints {what} {printed:.2} for {label}; the measurement is \
+                 {got:.2}. Update the table in ch14-16 — the page is the claim, and this is \
+                 the claim being checked."
+            );
+        }
+    }
+}

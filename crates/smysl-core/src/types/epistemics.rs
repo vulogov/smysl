@@ -3,6 +3,7 @@
 use core::fmt;
 
 use crate::error::IdError;
+use crate::types::unit::Extra;
 
 // ---------------------------------------------------------------------------
 // Status
@@ -161,6 +162,19 @@ pub enum SourceKind {
     Metric = 2,
     Tool = 3,
     Doc = 4,
+    /// A node in a host system that owns the content: `host:<id>` with an optional locator,
+    /// as `inkhaven:0f3a…#ch3/scene2` (1.7).
+    ///
+    /// The back-reference that lets a ledger point into the system of record it was harvested
+    /// from, and lets that system ask which units a given paragraph produced —
+    /// `Store::units_with_source_prefix` answers it by prefix.
+    ///
+    /// `Doc` carried this by convention before, and still can: the difference is that this says
+    /// so in the type rather than in a string nobody validates. The cost is stated in the
+    /// changelog and worth repeating — a reader older than 1.7 **rejects** a record whose source
+    /// kind it does not know, so a store using this is unreadable to one. A producer that needs
+    /// older readers should keep the `Doc` convention.
+    Node = 5,
 }
 
 impl SourceKind {
@@ -170,6 +184,7 @@ impl SourceKind {
         SourceKind::Metric,
         SourceKind::Tool,
         SourceKind::Doc,
+        SourceKind::Node,
     ];
 
     pub const fn as_u8(self) -> u8 {
@@ -183,6 +198,7 @@ impl SourceKind {
             2 => Some(SourceKind::Metric),
             3 => Some(SourceKind::Tool),
             4 => Some(SourceKind::Doc),
+            5 => Some(SourceKind::Node),
             _ => None,
         }
     }
@@ -194,6 +210,7 @@ impl SourceKind {
             SourceKind::Metric => "metric",
             SourceKind::Tool => "tool",
             SourceKind::Doc => "doc",
+            SourceKind::Node => "node",
         }
     }
 
@@ -296,6 +313,15 @@ pub struct SourceRef {
     pub kind: SourceKind,
     pub reference: String,
     pub captured: Option<Date>,
+    /// Unknown keys from a future minor version, preserved verbatim (1.7).
+    ///
+    /// Every other record body has had one since 0.2 and this sub-map did not, which made it the
+    /// one place where §8.1's "a new key in any other record body" was not true: a reader met a
+    /// key it did not know, dropped it, re-encoded three bytes shorter and computed **a different
+    /// uid** — silently, because `source` is inside `UnitCore` and therefore inside identity.
+    /// Neither preserved nor rejected, which is the one outcome content addressing cannot
+    /// survive. Found while planning a host-source variant that would have needed exactly this.
+    pub extra: Extra,
 }
 
 /// How a caller-supplied source combines with one a unit already has.
@@ -354,6 +380,7 @@ impl SourceRef {
             // hash to one uid compare unequal in memory.
             reference: crate::types::normalise(&reference.into()),
             captured: None,
+            extra: Extra::new(),
         }
     }
 
@@ -453,12 +480,15 @@ mod tests {
 
     #[test]
     fn source_kinds_round_trip() {
-        assert_eq!(SourceKind::ALL.len(), 5);
+        assert_eq!(SourceKind::ALL.len(), 6);
         for &k in SourceKind::ALL {
             assert_eq!(SourceKind::from_u8(k.as_u8()), Some(k));
             assert_eq!(SourceKind::parse(k.as_str()), Some(k));
         }
-        assert_eq!(SourceKind::from_u8(5), None);
+        // An unknown kind is refused rather than guessed at, and the decoder fails the record
+        // rather than defaulting — which is why a store using `Node` (added in 1.7) cannot be
+        // read by an older build. Stated in `SourceKind::Node` and in the changelog.
+        assert_eq!(SourceKind::from_u8(6), None);
     }
 
     #[test]

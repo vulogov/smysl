@@ -648,6 +648,50 @@ contributed nothing are left out: a line saying a unit matched `the` with
 be required to decompose its score, so the semantic backend returns an empty
 list rather than a wrong one.
 
+#subsection("Units an extension schema typed: `--schema`")
+
+Everything above assumes a unit has a kernel type. A corpus can be authored
+under an extension schema instead — `@x.code/decision` rather than `@decision` —
+and until 1.7 those units were not merely unfiltered but *absent*: they were
+never put in the index, so `find` returned nothing for them and said nothing
+about why. That was recorded in the source as a known gap rather than
+discovered; it is closed now, and the rule is the one you would guess.
+
+A query that names no kind returns everything that matches its words. A query
+that names `--kind claim` returns kernel claims only, because an extension unit
+has no kernel type and cannot satisfy a filter over them. And `--schema` is how
+you ask for one by name:
+
+#screen(caption: "$ smysl find \"connection pool\" fixtures/corpus/F12-extension-types.smy")[
+```
+0.4696  b3:g5ghn46xlnyd6dv7sd3bctl5ol  The connection pool saturated under load.
+0.4589  b3:aohwp3uveppudn7k62xwkbq6o7  Connection pool churn becomes a deliberate act.
+0.4293  b3:zkfmtqh7cw7yvodqwsr4mwi4li  Pin the connection pool size rather than tracking the range.
+```
+]
+
+Three units, one of them a kernel `claim` and two typed `x.code/decision` and
+`x.code/consequence`. Before 1.7 that query returned the first line only.
+Naming a kernel type still selects kernel units:
+
+#screen(caption: "$ smysl find \"connection pool\" --kind claim fixtures/corpus/F12-extension-types.smy")[
+```
+0.4696  b3:g5ghn46xlnyd6dv7sd3bctl5ol  The connection pool saturated under load.
+```
+]
+
+And `--schema` names any of them, kernel or extension:
+
+#screen(caption: "$ smysl find \"connection pool\" --schema x.code/decision fixtures/corpus/F12-extension-types.smy")[
+```
+0.4293  b3:zkfmtqh7cw7yvodqwsr4mwi4li  Pin the connection pool size rather than tracking the range.
+```
+]
+
+`--schema claim` and `--kind claim` select the same units, because the filter is
+over schemas rather than over a category and a caller mixing the two should not
+have to know which is which.
+
 #subsection("Filtering on what an extension schema says: `--payload`")
 
 `--kind` filters on kernel type, and for a corpus built on an extension schema
@@ -668,6 +712,11 @@ consequence, because the kernel type is the same in both.
 query did not return are the rejected alternative and the expected
 consequence — both `claim`, both about the connection pool, and neither
 something a review tool should act on.
+
+Nested keys are written with a dot: `{ code: { kind: "decision" } }` is
+`code.kind`, at any depth, so a producer that groups its fields under one key
+can be filtered on. A flat `"code.kind"` and a nested one are the same key,
+which is the reading a caller wants.
 
 Two properties are worth stating because the alternatives are both tempting
 and wrong. A unit that does not carry the key is *excluded*, so pointing this
@@ -796,6 +845,31 @@ perfectly. Anything with a space in it is prose, and prose goes to the
 embedder — including a sentence that happens to mention `pool.wait_ms`, because
 a sentence about a name is still a sentence.
 
+Until 1.7 all of that was reachable only from Rust. `find` and `pack --query`
+built a lexical index unconditionally, so a binary compiled with
+`--features semantic` still ranked lexically and nothing said so — the engine
+was built, measured, exported and unplugged. `--engine` is how you ask for it,
+and `--model` (or `SMYSL_EMBED_MODEL`) is where the model lives:
+
+```sh
+smysl find "why was it slow" --engine hybrid --model ./potion-base-8M store.smy
+smysl pack --budget 800 --query "why was it slow" --engine hybrid store.smy
+```
+
+Two refusals rather than a fallback. Asking for an engine without a model is an
+error, not a quiet lexical answer — reporting numbers from an engine the caller
+did not ask for is worse than reporting none:
+
+#screen(caption: "$ smysl find \"why was it slow\" --engine hybrid fixtures/corpus/F1-incident.smy")[
+```
+smysl find: --engine hybrid needs a model: pass --model DIR or set SMYSL_EMBED_MODEL
+```
+]
+
+And a build without the feature says so in the same words every absent layer
+uses, rather than pretending: `this build has no semantic retrieval (build with
+--features semantic)`.
+
 #callout(label: "A wrong turn worth keeping")[
   The first version routed on the *kernel type* the caller asked for, on the
   reasoning that the format already records what a unit is. It scored worse
@@ -819,11 +893,12 @@ a sentence about a name is still a sentence.
   reading past four things you did not want — and it is a bigger improvement
   than any tuning of the ranking would be.
 
-  And expect to search for *nouns from the domain* rather than for the
-  sentence you would write. `connection pool` works; "why was it slow" does
-  not. That is a real limitation of lexical search, not a bug, and closing it
-  is what a semantic backend would be for. `Retriever` is a trait precisely so
-  one can be added without disturbing any of this.
+  And on the default build, expect to search for *nouns from the domain* rather
+  than for the sentence you would write. `connection pool` works; "why was it
+  slow" does not. That is a real limitation of lexical search rather than a bug,
+  and it is exactly what the semantic engine above closes — `--engine hybrid`,
+  a model, and a build that compiled one in. `Retriever` is a trait so that the
+  choice is yours rather than the format's.
 ]
 
 #chapter(number: 18, title: "retract — Blast Radius First")
@@ -1100,6 +1175,109 @@ copy, reported it as done, and left the file unchanged.
    position to observe it.],
 ))
 
+#section("How settled is it: the commitment axis")
+
+Everything above is about whether a unit is *true*. `status` says how well the
+world supports it, from `unfounded` to `measured`, and rule M keeps a unit from
+claiming more than its grounds allow.
+
+Some bodies of work are not settled by the world. A novel's canon is settled by
+its author deciding: the villain's motive is grief because the writer committed
+to it, not because an instrument recorded it. A design document is the same, and
+so is a plan. For those, "how true" is the wrong question and "how settled" is
+the right one — and the two are genuinely independent. A floated idea can rest on
+a measured fact; a canonical decision can rest on a guess.
+
+Since 1.7 that is a second axis, recorded by its own record type and moving on
+its own:
+
+#screen(caption: "$ smysl commit c/premise --level committed --as human:vu --at 1726500009000 --dry-run fixtures/corpus/F13-canon.smy")[
+```
+fixtures/corpus/F13-canon.smy: c/premise  floated -> committed
+fixtures/corpus/F13-canon.smy:   --dry-run, so nothing was written
+```
+]
+
+Five levels, in increasing order of settledness: `floated`, an idea on the
+table; `drafted`, written but not load-bearing; `committed`, other decisions may
+depend on it; `canonical`, the settled truth of the work; and `retconned`,
+explicitly overridden and kept as history.
+
+#callout(label: "Why")[
+  A commitment does not change a unit's uid. That is the whole reason it is a
+  record beside the unit rather than a field inside it: *the content did not
+  change, my commitment to it did*, and a `diff` across two drafts should report
+  that as a commitment change on the same unit rather than as a new one.
+
+  It is also why the level is not simply another `status` value. `Status`'s
+  integer order **is** rule M — `measured` outranks `derived` because evidence
+  outranks inference — and hanging authorial confidence on the same ladder would
+  make "I am sure about this" and "an instrument recorded this" the same claim.
+  They are not, and a format that conflated them would have no way to say a
+  canonical scene is still a guess.
+]
+
+#subsection("The canonical scene built on sand")
+
+Rule M's shape, on the new axis: a unit may not be more committed than the
+weakest thing it rests on. `check` reports it.
+
+#screen(caption: "$ smysl check fixtures/corpus/F13-canon.smy")[
+```
+fixtures/corpus/F13-canon.smy: warning: SMY-W057: committed canonical on grounds no more settled than floated (at b3:cthfxmh4plkllueigv7iyhajkj)
+fixtures/corpus/F13-canon.smy: 11 records, 3 units, 1 diagnostic(s)
+```
+]
+
+The motive is canonical and the premise it rests on is still floating. That is a
+real thing to know about a draft — the scene everyone treats as settled is
+standing on something nobody has decided — and it is exactly the shape rule M
+catches on the epistemic axis.
+
+It is a **warning, not an error**, and the difference is the whole design. Rule M
+firing means a claim is wrong about the world. This firing means you committed to
+an ending before you settled how you get there, which is how writing actually
+goes. A gate that refused it would make the ledger unusable during the work it
+exists to support, so it is reported and left to you. `--strict` makes it fatal
+for a pipeline that wants that.
+
+#subsection("Two people, two answers")
+
+Commitment is a judgement, and judgements differ. When two agents' latest
+commitments to one unit disagree, merge reports it the way it reports every other
+disagreement — as a contention, not a decision:
+
+#screen(caption: "$ smysl review fixtures/corpus/F13-canon.smy")[
+```
+fixtures/corpus/F13-canon.smy: 1 item(s) open for review
+k/cwbpp4h655a65m4ntt4wg4lchak  commitment-fork
+  b3:2w3axdoswpe3k6r5bk7vgnualc  The sister forgives him in the final scene.
+```
+]
+
+One author has the ending canonical, the other has it drafted. `resolve` closes
+it, exactly as it closes a supersession fork or a live rebuttal — a commitment
+fork is a contention like any other, so nothing new had to be invented to review
+one.
+
+#callout(label: "Per agent, not per record")[
+  One author raising a decision from drafted to canonical over a week is a
+  *revision*, not a disagreement, and is not reported. Only the latest word per
+  agent counts, so an author who came round later is not forked with their own
+  earlier self.
+
+  That distinction is not fussiness. A ledger kept *while* writing accumulates
+  revisions constantly, and a review queue that listed them all would be
+  abandoned in a day — which for a feature whose whole premise is "the author
+  keeps it as they work" is the failure that matters most.
+]
+
+Meanwhile `smysl` still has an answer when something needs one: how settled a
+unit *is* comes from the latest commitment by timestamp, with the agent breaking
+a tie, so it is a function of the set of records and not of the order they
+arrived in. Machinery gets a single deterministic value; a person gets told there
+is a disagreement worth looking at. Merge computes, and does not adjudicate.
+
 #recap((
   [Blast radius is every unit a retraction would reach, computed and
     printed before anything is applied — the target, plus every unit that
@@ -1124,4 +1302,10 @@ copy, reported it as done, and left the file unchanged.
     three outcomes of looking at it. Only a live rebuttal binds rule R, so a
     retracted or withdrawn one releases its claim; a resolution records the
     review and releases nothing.],
+  [`commit` records how settled a unit is, on an axis independent of `status`:
+    how true is one question, how decided is another. It does not move the
+    unit's uid, because the content did not change. `SMY-W057` reports a unit
+    more committed than what it rests on, and a commitment fork — two agents
+    whose latest answers differ — is a contention `resolve` closes like any
+    other.],
 ))

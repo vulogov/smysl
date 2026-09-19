@@ -7,7 +7,7 @@ package smysl
 var RecordNames = map[uint64]string{
 	1: "unit", 2: "attestation", 3: "relation", 4: "thread", 5: "view",
 	6: "contention", 7: "pack_info", 8: "schema_decl", 9: "checkpoint", 10: "label_binding",
-	11: "withdrawal", 12: "resolution",
+	11: "withdrawal", 12: "resolution", 13: "commitment",
 }
 
 // UnitKeys is the table in §2.2. Anything at 9 or above is an unknown key that rule X says

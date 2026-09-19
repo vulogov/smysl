@@ -136,7 +136,7 @@ impl std::error::Error for Error {}
 /// rather than one replacing the other.
 pub struct Semantic {
     vectors: BTreeMap<Uid, Vec<f32>>,
-    facts: BTreeMap<Uid, (KernelType, Status)>,
+    facts: BTreeMap<Uid, (SchemaId, Status)>,
     /// String-valued payload entries per indexed uid, for `Query::with_payload` (1.6). The
     /// lexical index holds the same thing for the same reason: a filter the semantic backend
     /// ignored would return units the caller said it could not act on.
@@ -147,12 +147,11 @@ pub struct Semantic {
 impl Semantic {
     /// Embed every unit in `store`.
     pub fn index(store: &Store, model: Model) -> Semantic {
-        let facts: BTreeMap<Uid, (KernelType, Status)> = store
+        // Every unit since 1.7, extension schemas included: they were absent from the index
+        // rather than filtered from a result, so a corpus authored under one was unreachable.
+        let facts: BTreeMap<Uid, (SchemaId, Status)> = store
             .units()
-            .filter_map(|(u, unit)| match &unit.core.schema {
-                SchemaId::Kernel(k) => Some((*u, (*k, unit.core.status))),
-                _ => None,
-            })
+            .map(|(u, unit)| (*u, (unit.core.schema.clone(), unit.core.status)))
             .collect();
 
         // Batched in one call, in uid order, so the work is done once and in a fixed
@@ -218,7 +217,7 @@ impl Retriever for Semantic {
         let mut hits: Vec<Hit> = self
             .facts
             .iter()
-            .filter(|(uid, (kind, status))| query.admits_unit(uid, *kind, *status))
+            .filter(|(uid, (schema, status))| query.admits_schema(uid, schema, *status))
             .filter(|(uid, _)| {
                 query.payload.is_none()
                     || self

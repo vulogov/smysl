@@ -66,3 +66,18 @@ def test_a_pack_manifests_new_key_survives_a_round_trip():
     assert [r.name for r in records] == ["pack_info"] * 3
     assert all(r.is_known for r in records)
     assert smysl.encode_store(records) == data
+
+
+def test_a_commitment_record_is_known_and_round_trips():
+    """Record type 13 (1.7), from inkhaven's SMYSL-1 RFC.
+
+    This implementation does not decode a commitment's body. What it has to prove is that a
+    ledger written by 1.7 — how settled each decision is, and who settled it — survives a trip
+    through a build that reads records it was not told about.
+    """
+    data = (WIRE / "F13-commitment.cbor").read_bytes()
+    records = smysl.decode_store(data)
+    names = [r.name for r in records]
+    assert names.count("commitment") == 3
+    assert all(r.is_known for r in records)
+    assert smysl.encode_store(records) == data

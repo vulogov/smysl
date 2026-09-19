@@ -12,7 +12,7 @@ use bm25::{
     Embedder, EmbedderBuilder, Embedding, Scorer, TokenEmbedder, TokenEmbedding, Tokenizer,
 };
 
-use smysl_core::{KernelType, Status, Uid};
+use smysl_core::{SchemaId, Status, Uid};
 use smysl_graph::Store;
 
 use crate::{candidates, indexable, Hit, Query, Retriever};
@@ -31,8 +31,10 @@ impl Tokenizer for SmyslTokenizer {
 pub struct Bm25 {
     embedder: Embedder<u32, SmyslTokenizer>,
     scorer: Scorer<Uid>,
-    /// Kernel type and status per indexed uid, for the query filters.
-    facts: BTreeMap<Uid, (KernelType, Status)>,
+    /// Schema and status per indexed uid, for the query filters. Schema rather than kernel type
+    /// since 1.7: a unit authored under an extension schema has no kernel type, and used to be
+    /// left out of the index rather than filtered out of a result.
+    facts: BTreeMap<Uid, (SchemaId, Status)>,
     /// The string-valued payload entries per indexed uid, for `Query::with_payload` (1.6). Built
     /// once here rather than decoded per query: the eligible set is a property of the corpus, and
     /// the caller was rebuilding it per query before this existed. Units with no payload hold an
@@ -179,7 +181,7 @@ impl Retriever for Bm25 {
         let mut hits: Vec<Hit> = self
             .facts
             .iter()
-            .filter(|(uid, (kind, status))| query.admits_unit(uid, *kind, *status))
+            .filter(|(uid, (schema, status))| query.admits_schema(uid, schema, *status))
             // Before the limit, as `within` is: a filter applied to a truncated list returns
             // fewer than `limit` results and calls it a ranking.
             .filter(|(uid, _)| {

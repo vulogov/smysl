@@ -16,6 +16,7 @@ export const RECORD_NAMES = new Map([
   [10, "label_binding"],
   [11, "withdrawal"],
   [12, "resolution"],
+  [13, "commitment"],
 ]);
 
 /** §2.2. Anything at 9 or above is an unknown key that rule X says must survive verbatim. */

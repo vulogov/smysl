@@ -7,6 +7,181 @@ and the facade asserts the two are independent.
 
 ---
 
+## 1.7.0 — 2026-09-18
+
+The cycle that gave the format a second axis, and spent most of its effort finding out that the
+obvious place to put it was wrong.
+
+inkhaven asked for smysl as the *development history* of a story's canon — what was decided,
+revised and retracted, and what each decision rests on. Their RFC proposed recording how settled a
+unit is as a field on `Unit`, "the same place `attestations` / `salience` / `labels` already live".
+`attestations` and `labels` each have a record type and persist; `salience` has none. Write a store,
+read it back, and an authored salience is *gone*. A commitment modelled on it would have been lost
+at the first save, silently, which for a ledger whose whole purpose is to persist and diff across
+drafts is fatal. So commitment is a record — which also answers *who* settled it and *when*, the
+questions a development history exists to ask and the ones a field cannot express.
+
+What shipped: record type 13 and the `Commitment` axis, independent of `Status` because `Status`'s
+order *is* rule M and authorial confidence does not belong on the ladder that says evidence
+outranks inference; `@commit` and `smysl commit`; `SMY-W057`, rule M's shape on the new axis, as a
+warning rather than an error because outrunning your own foundations is how drafting goes;
+`SMY-W058`, a commitment fork, reported per *agent* so that one author's revisions are not mistaken
+for a disagreement; and `SourceKind::Node`, kept out of the vocabulary models are offered because a
+host's node id is not something a model may invent.
+
+Five improvements to things that already existed came first, each because the code or a
+measurement already said it was wrong — retrieval that could not see extension-schema units at all,
+a `--granularity` flag that was validated and discarded, the hybrid retrieval engine that was built
+and measured and unreachable from the command line, and two gates that were skipping work in
+silence.
+
+**No format break.** `smysl/1.0` holds: one new record type, which an older reader preserves and
+reports as `SMY-W014`, and one new reserved surface word. The facade is 276 names, 230 pure;
+`make semver` is clean on all twelve crates against 1.6.0, and `SEMVER_BREAKING` is empty for the
+eighth release running. 26 commands, 57 diagnostics, and the Python, JavaScript and Go
+implementations all carry record 13 byte for byte.
+
+**And a hole in forward compatibility, closed.** §8.1 permits a new key in any record body
+*because* an older reader preserves it verbatim. The `source` sub-map did not: it collected unknown
+keys and dropped them, so a unit written by a later version decoded without error, re-encoded three
+bytes shorter, and computed **a different uid** — silently, because `source` is inside identity.
+Neither preserved nor rejected is the one outcome content addressing cannot survive. Found while
+planning where a host-source variant could safely go.
+
+### Improvements to what was already there
+
+Five, chosen because the code or the measurements already said they were wrong — not because
+anything new was wanted.
+
+- **Retrieval can see extension-schema units.** A unit whose schema was not a kernel type was left
+  out of every index — not filtered from a result, *absent* — so `find` and `pack --query` could
+  not reach a corpus authored under an extension schema at all, and said nothing about why. The
+  code called it "a real gap, recorded rather than papered over". Every unit is indexed now;
+  `Query::admits_schema` decides, so a query naming no kind returns everything and one naming
+  `claim` still returns kernel claims only; `Query::schemas` and `find --schema` are how a caller
+  asks for an extension type by name.
+- **`--granularity` chooses the profile the batch is checked under.** For three releases the
+  preset was validated, hashed into the recipe, and then discarded, so `ingest --granularity fine`
+  checked its units against whatever the store's view declared — the flag did not do what its name
+  says. `stage::prepare_under` takes the profile, and `IngestOptions::granularity_named` records
+  that the caller asked: a run that never mentions granularity still takes it from the store, or
+  upgrading would silently re-check every batch against a different `l1_range`.
+- **`payload_strings` reads nested keys.** `{ code: { kind: "decision" } }` is `code.kind`, at any
+  depth, so a producer that groups its fields under one key can use `--payload` at all. A flat
+  `"a.b"` and a nested `a: { b: … }` are the same key, which is the reading a caller wants.
+- **The manual's retrieval table is checked against the measurement.** Chapter 15 prints recall@5,
+  MRR and first place per class, hand-copied from a test run and checked by nobody since. Gate 7
+  is "documentation matches the binary", and every other number in the book is either replayed or
+  compared against the code. It asserts agreement, not a target — the floors still refuse to pin
+  paraphrase, because what that number is for is deciding whether a semantic backend earns its
+  dependency.
+- **`UNIT_LOCAL` is one code long on purpose, and now says so.** Widening it to the other
+  single-unit shape defects (`SMY-E023`, `E031`, `E032`, `E034`) turned out to be inert:
+  `UnitCoreBuilder` refuses all four at construction and the decoder runs the same constructor, so
+  a unit reaching `salvage` cannot carry one. `SMY-E022` is genuinely different — the gist bound is
+  relative to a granularity profile, which a constructor has no access to. The attempt is recorded
+  and asserted rather than left for somebody to try again.
+
+### Three more, same rule
+
+- **`find --engine` and `pack --engine`.** `Hybrid` had been built, measured and exported since
+  0.8 — 0.84 MRR against lexical's 0.74, 0.50 against 0.12 on paraphrase, identifier-shaped
+  queries routed to lexical for its perfect precision — and no command could use it: both built a
+  `Bm25` unconditionally, so a binary compiled with `--features semantic` still ranked lexically
+  and said nothing about it. `--model` or `SMYSL_EMBED_MODEL` says where the model is. Two
+  refusals rather than a fallback: an engine without a model is a usage error, and a build without
+  the feature says so in the words every absent layer uses. Answering with lexical would report
+  numbers from an engine the caller did not ask for.
+- **`SMY-W111` — the log holds records more than once.** R10 stopped `append` creating repeats and
+  `compact` removes what an older log has, but nothing told a reader they were there: a store
+  written before 1.4 could carry them indefinitely, and the only way to find out was to run
+  `compact` and read the number. `Store::duplicate_records` counts them and `check` reports one
+  warning, not one per repeat — nothing is *wrong* with such a store, it is larger than it needs
+  to be and the fix is a command.
+- **`make doc-output` stopped skipping transcripts in silence.** It read any argument containing a
+  slash as a filename, so `--as model:openai/gpt-4`, `--schema x.code/decision` and
+  `--via x.verify/supports` looked like commands naming a file that is not there, and were skipped
+  without comment — worse than a mismatch, because the page goes unchecked and nothing says so.
+  Found because a `--schema` transcript added in this very cycle never ran. 98 of the manual's
+  commands are replayed now.
+
+  The census that found it also corrected a claim worth correcting: the skipped transcripts are
+  *not* mostly missing tutorial files. They are absolute paths, pipes, placeholder arguments and
+  commands needing a model — each skipped for a reason the script states.
+
+### A commitment axis, from inkhaven's SMYSL-1 RFC
+
+inkhaven wants smysl as the *development history* of a story's canon — what was decided, revised
+and retracted, and what each decision rests on — which is the axis the format was built for and
+nothing in their tree captures. Two asks, both additive, both landed here rather than in 1.8
+because 1.7 is the cycle that is open.
+
+- **Record type 13, a commitment.** `Commitment` is an ordered axis — floated, drafted, committed,
+  canonical, retconned — **independent of `Status`**, whose order is rule M. Status says how well
+  the world supports a unit; commitment says how settled its author considers it, which for a body
+  of work settled by fiat is a different question. `@commit d/motive { level: canonical, agent: …,
+  ts: […] }` in surface text, `smysl commit` on the command line, `Store::commitment_of`,
+  `commits_of` and `units_at_commitment` for reading it back. Committing does not move a uid: the
+  content did not change, the commitment to it did.
+- **`SMY-W057` and check pass 11** — a unit may not be more committed than the weakest thing it
+  rests on. Rule M's shape on the new axis: the canonical-scene-built-on-sand detector. A
+  **warning**, not an error, because outrunning your own foundations is a normal intermediate state
+  of a draft and a gate that refused it would make the ledger unusable during the work it exists to
+  support.
+- **`SourceKind::Node`**, the host back-reference — `inkhaven:<uuid>#ch3/scene2` — so a ledger can
+  point into the system it was harvested from and that system can ask which units a paragraph
+  produced. Stated plainly because it cannot be fixed: a reader older than 1.7 **rejects** a record
+  whose source kind it does not know, so a producer that needs older readers should keep using
+  `Doc` with the same string, which works everywhere.
+
+`Node` is deliberately **not** offered to a model: the ingest schema lists every source kind a
+model may name, and a host's own node id is not one a model can know. Provenance is the field
+`SourcePolicy` exists to keep out of its hands, and a host that knows the id supplies it with
+`IngestOptions::with_source`. The schema gate caught the leak on its first run.
+
+**The RFC's central design would not have worked, and finding out is most of what this cost.** It
+proposed a `commitment` field on `Unit`, "the same place `attestations` / `salience` / `labels`
+already live". `attestations` and `labels` each have a record type and therefore persist.
+`salience` has none: write a store and read it back and an authored salience is *gone*. A
+commitment modelled on it would have been lost at the first save, silently, which for a ledger
+whose purpose is to persist and diff across drafts is fatal. Hence a record — which also answers
+*who* settled it and *when*, the questions a development history exists to ask, and which a field
+cannot express.
+
+- **`SMY-W058`, a commitment fork.** Two agents whose latest commitments to one unit differ is a
+  disagreement merge reports rather than settles — the fourth detection kind, beside the
+  supersession fork, the live rebuttal and the label collision. Per *agent*, not per record: one
+  author raising a decision from drafted to canonical over a week is a revision, and reporting that
+  would make the queue useless to the person doing the work. It reaches `review` and closes with
+  `resolve` through 1.4's machinery unchanged, because a resolution already names a contention by
+  its derived id.
+
+How settled a unit is, derived, is normative: the level of the commitment with the greatest
+`(ts, agent)`, a total order over a set and so independent of arrival order (rule U). Taking the
+highest level ever asserted was the obvious alternative and is wrong — it makes a commitment
+impossible to walk back, so `retconned` could never take effect.
+
+### A forward-compatibility hole in `source`, found by planning that work
+
+§8.1 permits a new key in any record body *because* an older reader preserves it verbatim. Every
+record body did. The `source` sub-map did not: it collected unknown keys and dropped them, so a
+unit written by a later version decoded without error, re-encoded three bytes shorter, and
+**computed a different uid** — neither preserved nor rejected, which is the one outcome content
+addressing cannot survive, and silent because `source` is inside `UnitCore` and therefore inside
+identity. `SourceRef` now carries `extra`, pinned by a test that splices an unknown key in and
+checks both the bytes and the uid.
+
+### Carried from 1.6.0
+
+What this cycle starts from (details in 1.6.0):
+
+- **R11, R13 and R14**, held for rust_smysl's S2 experiment. 1.6 measured the last two rather than
+  fixing them: a configuration that does not parse exits 1 and not 6, and an unknown provider
+  *kind* still reports "malformed provider response".
+- **OpenAI and Anthropic** against their live endpoints — gate 4's standing waiver.
+
+---
+
 ## 1.6.0 — 2026-09-17
 
 The cycle that made a pack fit the prompt it lands in, and a retrieval result say why. 1.5 taught

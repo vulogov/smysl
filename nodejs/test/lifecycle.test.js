@@ -57,3 +57,14 @@ test("a pack manifest's new key survives a round trip", () => {
   assert.ok(records.every((r) => r.isKnown));
   assert.deepEqual(Buffer.from(encodeStore(records)), Buffer.from(data));
 });
+
+// Record type 13 (1.7), from inkhaven's SMYSL-1 RFC. This implementation does not decode a
+// commitment's body; what it proves is that a ledger written by 1.7 survives a trip through a
+// build that reads records it was not told about.
+test("a commitment record is known and round-trips", () => {
+  const data = readFileSync(join(wire, "F13-commitment.cbor"));
+  const records = decodeStore(new Uint8Array(data));
+  assert.equal(records.filter((r) => r.name === "commitment").length, 3);
+  assert.ok(records.every((r) => r.isKnown));
+  assert.deepEqual(Buffer.from(encodeStore(records)), Buffer.from(data));
+});

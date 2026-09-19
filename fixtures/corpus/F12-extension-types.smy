@@ -1,0 +1,23 @@
+@doc smysl/0.1 {
+  id: v/f12
+  intent: code-review
+  lang: en
+  requires: ["smysl.kernel/0.1", "x.code/v1"]
+  roots: [d/pin]
+}
+
+# A corpus typed by an extension schema rather than by the kernel. Until 1.7 these units were
+# not in any retrieval index at all — absent rather than filtered — so `find` returned nothing
+# for them and said nothing about why. A kernel claim sits beside them so the two readings of
+# `--kind` and `--schema` can be told apart.
+
+@schema x.code/v1 { version: 1, types: ["x.code/decision", "x.code/consequence"] }
+
+@claim c/kernel { status: speculative }
+~ The connection pool saturated under load.
+
+@x.code/decision d/pin { status: speculative }
+~ Pin the connection pool size rather than tracking the range.
+
+@x.code/consequence k/churn { status: speculative }
+~ Connection pool churn becomes a deliberate act.

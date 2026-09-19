@@ -3,7 +3,7 @@
 **Status:** normative. This document is the contract.
 **Format version:** `smysl/1.0` — `smysl/0.1` is also accepted and always will be (§8.6).
 **Kernel schema:** `smysl.kernel/0.1`.
-**Describes:** crate `1.6.0`.
+**Describes:** crate `1.7.0`.
 
 This is the whole of what a second implementation must obey to interoperate. It is
 deliberately short. Everything it does not say is a free choice.
@@ -295,6 +295,7 @@ Every record is a two-element array: `[type_code, body]`.
 | 10 | label binding |
 | 11 | withdrawal |
 | 12 | resolution |
+| 13 | commitment |
 
 An **unknown type code MUST be preserved verbatim and skipped semantically** (`SMY-W014`),
 not rejected. Its body is still parsed strictly, so an unknown record cannot smuggle in a
@@ -327,6 +328,39 @@ records (`SMY-W014`), which is what makes them an addition rather than a break (
 
 A resolution with both keys 0 and 1, or neither, MUST be rejected. What each record means is
 §6.1 and §6.3.
+
+Record 13 was added in 1.7, in the same way and for the same reason: a reader that predates it
+preserves it as an unknown record (`SMY-W014`).
+
+**Commitment (13)** — how settled a unit is, as a matter of decision rather than of evidence.
+
+| key | field | type | presence |
+|---:|---|---|---|
+| 0 | unit | uid, 32 bytes | required |
+| 1 | level | unsigned, `Commitment` below | required |
+| 2 | agent | text, an agent id | required |
+| 3 | ts | HLC, `[wall_ms, counter, agent]` | required |
+| 4 | note | uid of a unit saying why | optional |
+
+`Commitment` is an ordered enumeration, higher being more settled: `0 floated`, `1 drafted`,
+`2 committed`, `3 canonical`, `4 retconned`. A value outside it MUST be rejected rather than
+defaulted — the axis exists to record what an author decided, and a decoder guessing at it would
+put a word in their mouth.
+
+It is a **second axis, independent of `status` (§2.2)**. Status says how well the world supports a
+unit and its order is rule M; commitment says how settled its author considers it, which for a body
+of work settled by fiat is a different question. Neither order constrains the other.
+
+**A unit's identity is untouched.** `commitment` is a record naming a uid, not a field of
+`UnitCore`, so committing to a unit does not move it: *the content did not change, the commitment
+to it did*, which is the event a development history exists to record.
+
+**How settled a unit is, derived** (normative, because two implementations disagreeing would read
+each other's ledgers differently): the level of the commitment with the greatest
+`(ts.wall_ms, ts.counter, agent)`, which is a total order over a set and therefore independent of
+the order records arrived in (rule U). A unit with no commitment record has **no** commitment,
+which is not the same as `floated`. Taking the highest level ever asserted is NOT permitted: it
+would make a commitment impossible to walk back, so `retconned` could never take effect.
 
 **Pack info (7)** gained key 7, `reserved`, in 1.6: an unsigned integer, what the caller set aside
 out of `budget` for the rest of the prompt a pack lands in. A new key in a record body above that
@@ -369,6 +403,11 @@ Consequences that are easy to get wrong, each of which has been a real defect:
   record whose clock names a different agent, or that carries unknown keys, has no surface
   spelling and travels as CBOR only. A writer that knows the edge MUST spell it by its endpoints.
   `withdraw` and `resolve` are reserved words, as `doc`, `rel`, `thread` and `schema` are.
+- **`@commit` spells record 13** (1.7), naming a unit by label or uid:
+  `@commit d/motive { level: canonical, agent: human:vu, ts: [1726500000001, 0], note: c/why }`.
+  `level` is one of the five names above. `commit` is a reserved word in the same way, and unlike a
+  withdrawal or a resolution a commitment always has a surface form, because a uid can always be
+  written.
 - **A body or detail line opening `#`, `//` or `\` MUST be escaped with a leading `\`.** A
   line starting with a comment marker is a comment wherever it sits, so an unescaped one is
   read as a comment and the content is lost. Only those three sequences, and only at the
@@ -439,13 +478,22 @@ digest = BLAKE3-256( kind ‖ over ‖ positions )
 id     = "k/c" ‖ base32( first 130 bits of digest )
 ```
 
-`kind` is one byte: 0 supersession fork, 1 live rebuttal, 2 label collision. `over` is 32 bytes;
+`kind` is one byte: 0 supersession fork, 1 live rebuttal, 2 label collision, 3 commitment fork
+(1.7). `over` is 32 bytes;
 `positions` are the uids sorted and deduplicated, 32 bytes each. The base32 is §2.1's, 26
 characters. The clock a detection is stamped with is not identity.
 `fixtures/wire/contention-id/cases.json` carries vectors.
 
 A live-rebuttal contention is detected only over a live rebuttal (§6.1) whose claim is not
 `unfounded`.
+
+A **commitment fork** is detected when two distinct agents' latest commitments to one unit name
+different levels. Per agent, not per record: one author revising their own commitment over time is
+a revision and MUST NOT be reported. Its `over` is the unit and its single position is the same
+unit — unlike a supersession fork there are no rival uids, because the rival claims are levels,
+which a reader finds in the commitment records themselves. A store still derives a single answer
+(§3.1); the detection says a person should look, which is the division rule C draws everywhere:
+merge computes, and does not adjudicate.
 
 ### 6.3 Resolution
 
@@ -505,7 +553,7 @@ already obliges every reader to cope with them:
 - **A new key in any other record body**, above the highest key that record defines. Older
   readers preserve it verbatim. Stated in 1.4; the reference implementation always did.
 - **A new reserved word in surface syntax** (`@schema` in 1.3, `@withdraw` and `@resolve` in
-  1.4). An older reader rejects a *surface* document using it — it reads the word as a unit type
+  1.4, `@commit` in 1.7). An older reader rejects a *surface* document using it — it reads the word as a unit type
   and fails on the label — while the CBOR form of the same store reads everywhere. Surface text is
   not the identity-bearing form (§4), so this is a cost to state rather than a break.
 - **A new value in an open enumeration** where this document says unknown values are

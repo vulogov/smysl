@@ -4,6 +4,7 @@
 //! result, because none of them may stop the pipeline.
 
 pub mod closure;
+pub mod commitment;
 pub mod epistemics;
 pub mod extension;
 pub mod granularity;

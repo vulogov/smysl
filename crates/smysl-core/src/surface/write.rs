@@ -134,6 +134,7 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
             Record::Resolution(res) if resolution_has_surface_form(res) => {
                 write_resolution(&mut out, res, &known, ctx)
             }
+            Record::Commit(c) => write_commit(&mut out, c, ctx),
             // Records with no surface form travel as CBOR only.
             _ => {}
         }
@@ -215,6 +216,26 @@ fn write_resolution(
         r.ts.counter
     ));
     if let Some(u) = &r.note {
+        out.push_str(&format!(", note: {}", ctx.reference(u)));
+    }
+    out.push_str(" }\n\n");
+}
+
+/// `@commit <unit> { level: …, agent: …, ts: […] }` (1.7).
+///
+/// Always has a surface form, unlike a withdrawal or a resolution: those name an edge or a
+/// contention, either of which may not be expressible without the relation it refers to, while a
+/// commitment names a unit and `ctx.reference` can always write a uid.
+fn write_commit(out: &mut String, c: &crate::types::lifecycle::Commit, ctx: &WriteContext) {
+    out.push_str(&format!(
+        "@commit {} {{ level: {}, agent: {}, ts: [{}, {}]",
+        ctx.reference(&c.unit),
+        c.level,
+        quoteless_or_quoted(c.agent.as_str()),
+        c.ts.wall_ms,
+        c.ts.counter
+    ));
+    if let Some(u) = &c.note {
         out.push_str(&format!(", note: {}", ctx.reference(u)));
     }
     out.push_str(" }\n\n");

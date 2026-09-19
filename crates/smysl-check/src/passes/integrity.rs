@@ -11,9 +11,30 @@ use smysl_graph::{cycles, Adjacency, EdgeKind, EdgeSet, Store};
 /// Run the pass.
 pub fn run(store: &Store, report: &mut Report) {
     dangling(store, report);
+    repeated_records(store, report);
     unwithdrawable(store, report);
     support_cycles(store.adjacency(), report);
     causal_cycles(store.adjacency(), report);
+}
+
+/// `SMY-W111` - the log holds records more than once (1.7).
+///
+/// Nothing this build writes can: since 1.4's R10 fix `append` refuses a record whose canonical
+/// encoding the store already holds. A log written before that grew by its label bindings, schema
+/// declarations and edge attestations on every self-merge, and `open` keeps a log as it is on
+/// disk rather than quietly rewriting it — so a store could carry the repeats indefinitely and
+/// the only way to find out was to run `compact` and read the number.
+///
+/// A warning rather than an error, and one diagnostic rather than one per repeat: nothing is
+/// *wrong* with such a store — it means the same thing it always did — it is merely larger than
+/// it needs to be, and the fix is a command.
+fn repeated_records(store: &Store, report: &mut Report) {
+    let n = store.duplicate_records();
+    if n > 0 {
+        report.push(Diagnostic::new(Code::W111).with_message(format!(
+            "the log holds {n} record(s) more than once; `smysl compact` removes them"
+        )));
+    }
 }
 
 /// `SMY-W056` - a withdrawal naming a `retracts` or `supersedes` edge.

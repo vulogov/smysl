@@ -125,6 +125,57 @@ mod tests {
 
     /// Provenance is excluded from identity (rule P1): two agents asserting the same
     /// thing produce one unit.
+    /// A key inside `source` that this build does not know survives, and the uid with it (1.7).
+    ///
+    /// §8.1 permits a new key in any record body *because* an older reader preserves it verbatim.
+    /// Every record body did; the `source` sub-map did not — it dropped the key, re-encoded
+    /// shorter, and computed a different uid, silently, for a field that is inside identity.
+    /// Neither preserved nor rejected is the one outcome content addressing cannot survive.
+    #[test]
+    fn an_unknown_key_inside_a_source_is_preserved_with_the_uid() {
+        use crate::cbor::{from_cbor, to_cbor};
+        use crate::types::record::Record;
+
+        let core = UnitCoreBuilder::new(KernelType::Claim, "a gist about a pool", Status::Cited)
+            .source(SourceRef::new(SourceKind::Doc, "inkhaven:abc#ch3"))
+            .build()
+            .unwrap();
+
+        // Splice `{3: "x"}` into the source map, as a later version writing a key we do not know
+        // would: the map head grows by one entry and the pair is appended in key order.
+        let mut bytes = to_cbor(&Record::Unit(core));
+        let at = bytes
+            .iter()
+            .rposition(|b| *b == 0xA2)
+            .expect("the source map");
+        bytes[at] = 0xA3;
+        bytes.extend_from_slice(&[0x03, 0x61, 0x78]);
+
+        let (rec, _) = from_cbor(&bytes).expect("an unknown key degrades, it does not fail");
+        assert_eq!(
+            to_cbor(&rec),
+            bytes,
+            "the record must re-encode to the bytes it was read from"
+        );
+        let Record::Unit(back) = &rec else {
+            panic!("a unit went in")
+        };
+        assert_eq!(
+            back.source.as_ref().expect("a source went in").extra.len(),
+            1,
+            "the key is kept, not dropped"
+        );
+        // And the uid is the writer's: dropping the key would have produced the uid of a unit
+        // whose source lacked it, which is a different unit.
+        let mut without = back.clone();
+        without.source.as_mut().unwrap().extra.clear();
+        assert_ne!(
+            canonical_uid(back),
+            canonical_uid(&without),
+            "the preserved key is inside identity, so losing it moves the uid"
+        );
+    }
+
     #[test]
     fn attestations_labels_and_salience_do_not_change_identity() {
         use crate::ids::{AgentId, Label};

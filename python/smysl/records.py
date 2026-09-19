@@ -26,6 +26,7 @@ RECORD_NAMES = {
     10: "label_binding",
     11: "withdrawal",
     12: "resolution",
+    13: "commitment",
 }
 
 #: §2.2, the unit core's integer keys. Anything at 9 or above is an unknown key that rule X

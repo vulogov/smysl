@@ -210,7 +210,7 @@ def main() -> int:
     check("§2.2 source sub-map is 0..2", sorted(source_keys), [0, 1, 2])
     check("§2.2 has five source kinds", sorted(source_kind), list(range(5)))
     # 11 and 12 since 1.4: withdrawal and resolution.
-    check("§3.1 record codes are 1..12", sorted(record_codes), list(range(1, 13)))
+    check("§3.1 record codes are 1..13", sorted(record_codes), list(range(1, 14)))
 
     # -- python/ -------------------------------------------------------------
     py_records = read("python/smysl/records.py")

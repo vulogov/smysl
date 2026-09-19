@@ -28,59 +28,56 @@ As a library:
 
 ```toml
 [dependencies]
-smysl = "1.6"
+smysl = "1.7"
 ```
 
 Add `default-features = false` for the pure library: no async runtime, no HTTP client and no
 argument parser in the dependency tree, verified in CI on every push rather than promised
 here.
 
-**The crate is `1.6.0` and the format is `smysl/1.0`.** The crate version means the API is
-frozen: the facade's 274 names and every public item behind them move only with a 2.0, enforced
+**The crate is `1.7.0` and the format is `smysl/1.0`.** The crate version means the API is
+frozen: the facade's 276 names and every public item behind them move only with a 2.0, enforced
 per crate by `cargo-semver-checks` on every push.
 [`Documentation/API_CONTRACT.md`](Documentation/API_CONTRACT.md) is that promise written down.
 The format version means nothing about the format changed: `smysl/0.1` held across fourteen
 releases and four independent implementations — the Rust, and Python, JavaScript and Go written
 from the specification alone — and `smysl/1.0` reports that record rather than a change.
 
-## Release 1.6.0
+## Release 1.7.0
 
-The cycle that made a pack fit the prompt it lands in, and a retrieval result say why. A budget was
-a number of tokens for the pack, which is never the number a caller has — what it has is a context
-window, less a system prompt, less the question, less room for the answer. And a score said how
-relevant without saying why, so "retrieved weakly" and "never retrieved" looked identical. The full
-account is in [`CHANGELOG.md`](CHANGELOG.md).
+A second axis. `status` says how well the world supports a unit; **commitment** says how settled
+its author considers it — and for a body of work settled by decision rather than by evidence, that
+is the question that matters. The two are independent: a floated idea may rest on a measured fact,
+and a canonical decision may rest on a guess. The full account is in [`CHANGELOG.md`](CHANGELOG.md).
 
-**A pack that fits the window, and a result that explains itself:**
+**A decision, and how settled it is:**
 
 ```sh
-smysl pack --budget 16k --reserve 2500 store.cbor     # the pack gets what is left
-smysl find "connection pool" --why store.cbor          # which terms earned each hit
-smysl find "pool" --payload code:kind=decision store.cbor   # the schema's own kind, not the kernel's
+smysl commit d/motive --level canonical --as human:vu store.smy   # floated → canonical
+smysl check store.smy      # SMY-W057 if it rests on something less settled
+smysl review store.smy     # a commitment fork: two people, two answers
 ```
 
-- **`--reserve` states what else is in the window.** `--budget b --reserve r` selects exactly what
-  `--budget b-r` selects, and the packinfo records both, so `used + reserved <= budget` is a
-  property a reader can check. Reserving the whole budget fails rather than returning an empty
-  pack.
-- **A caller can bring its own tokenizer.** `PackRequest::counting_with(ExternalCost)` takes the
-  counter that will actually bill for the tokens; its id lands in the packinfo, and `verify`
-  accepts a pack built under it.
-- **`--why` decomposes a score.** Exactly: BM25 sums one term per query token, so the parts add up
-  to the whole. A unit in the result on one common word now says so.
-- **`--payload` filters on an extension schema's own field**, which is the axis a corpus of
-  `claim`s is actually distinguished along. Applied before the limit, with scoring untouched; a
-  unit without the key is excluded, so a store written under another schema returns nothing rather
-  than everything. `pack --payload` restricts what `--query` focuses on.
+- **Record type 13**, so a commitment persists, merges and diffs. It does **not** move the unit's
+  uid — the content did not change, the commitment to it did — and it records who settled it and
+  when, which a field could not.
+- **`SMY-W057`**, rule M's shape on the new axis: a unit may not be more committed than the weakest
+  thing it rests on. The canonical-scene-built-on-sand detector. A warning, because committing to
+  an ending before you settle how you get there is how drafting goes.
+- **`SMY-W058`**, a commitment fork: two agents whose latest answers differ. Reported per *agent*,
+  so one author's revisions are never mistaken for a disagreement, and closed by `resolve` like any
+  other contention.
+- **Five improvements to what already existed**: retrieval reaches extension-schema units at all
+  (`find --schema`), `ingest --granularity` applies the profile it names, `find --engine
+  semantic|hybrid` makes the measured hybrid retriever reachable, `--payload` reads nested keys,
+  and the manual's retrieval table is checked against the measurement rather than hand-copied.
 
-**A rule X defect, found by a fixture written for something else.** The wire fixture for the new
-packinfo key proves §8.1's rule — an older reader round-trips a permitted addition byte for byte —
-and the JavaScript implementation failed it at once: JavaScript has one number type, so a
-`binary32` zero decoded to `0` and re-encoded as an integer, altering every pack manifest and every
-relation carrying `weight: 1.0`. Live since that implementation shipped, and fixed here.
+**A forward-compatibility hole, closed.** A unit whose `source` carried a key this build did not
+know decoded, re-encoded shorter, and silently got a different uid. §8.1 promises an older reader
+preserves such a key; the `source` sub-map was the one place that was not true.
 
-No format break: one new key in one record body, written only when non-zero, so every pack encoded
-before 1.6 keeps its bytes. `make semver` is clean on all twelve crates.
+No format break: one new record type, which an older reader preserves and reports, and one new
+reserved surface word. `make semver` is clean on all twelve crates.
 
 Building from source:
 
@@ -334,8 +331,8 @@ unreachable from the library.
 
 ```toml
 [dependencies]
-smysl = { version = "1.6", default-features = false }                      # pure
-smysl = { version = "1.6", default-features = false, features = ["stage"] } # + staging, no model
+smysl = { version = "1.7", default-features = false }                      # pure
+smysl = { version = "1.7", default-features = false, features = ["stage"] } # + staging, no model
 ```
 
 With default features off you get a fully synchronous library — no async runtime, no HTTP
@@ -346,7 +343,7 @@ signature says.
 
 ## Status
 
-Crate `1.6.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
+Crate `1.7.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
 [`Documentation/SMYSL_FORMAT_SPEC.md`](Documentation/SMYSL_FORMAT_SPEC.md) — everything a
 second implementation must obey, and nothing else.
 
