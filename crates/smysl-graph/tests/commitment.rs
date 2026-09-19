@@ -212,3 +212,174 @@ fn commitment_and_status_are_independent() {
     assert_eq!(store.commitment_of(&uid), Some(Commitment::Floated));
     assert_eq!(store.get(&uid).unwrap().core.status, Status::Cited);
 }
+
+// --- CommitmentFork (SMY-W058) ------------------------------------------------------------
+
+use smysl_core::DetectionKind;
+use smysl_graph::merge::contention::{detect, DetectionContext};
+
+fn forks(store: &Store) -> Vec<smysl_core::Contention> {
+    detect(store, &DetectionContext::default())
+        .into_iter()
+        .filter(|c| c.detected.kind == DetectionKind::CommitmentFork)
+        .collect()
+}
+
+/// Two agents whose latest words differ is a disagreement a person should see.
+#[test]
+fn two_agents_disagreeing_is_a_fork() {
+    let u = claim("the sister is the traitor");
+    let uid = canonical_uid(&u);
+    let (vu, ed) = (agent("human:vu"), agent("human:ed"));
+    let store = Store::from_records(vec![
+        Record::Unit(u),
+        Record::Commit(Commit::new(
+            uid,
+            Commitment::Canonical,
+            vu.clone(),
+            hlc(1, &vu),
+        )),
+        Record::Commit(Commit::new(
+            uid,
+            Commitment::Floated,
+            ed.clone(),
+            hlc(1, &ed),
+        )),
+    ]);
+    let found = forks(&store);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].over, uid);
+    assert!(found[0].is_open());
+
+    // And merge still answers, deterministically, for machinery that needs one value.
+    assert!(store.commitment_of(&uid).is_some());
+}
+
+/// One agent changing their mind is a revision, not a disagreement. Reporting it would make the
+/// queue useless to the person doing the work.
+#[test]
+fn one_agent_changing_their_mind_is_not_a_fork() {
+    let u = claim("the ending is a reconciliation");
+    let uid = canonical_uid(&u);
+    let vu = agent("human:vu");
+    let store = Store::from_records(vec![
+        Record::Unit(u),
+        Record::Commit(Commit::new(
+            uid,
+            Commitment::Floated,
+            vu.clone(),
+            hlc(1, &vu),
+        )),
+        Record::Commit(Commit::new(
+            uid,
+            Commitment::Drafted,
+            vu.clone(),
+            hlc(2, &vu),
+        )),
+        Record::Commit(Commit::new(
+            uid,
+            Commitment::Canonical,
+            vu.clone(),
+            hlc(3, &vu),
+        )),
+    ]);
+    assert!(forks(&store).is_empty());
+}
+
+/// Two agents who agree are not a fork, however many times they said it.
+#[test]
+fn agreement_is_not_a_fork() {
+    let u = claim("the villain survives");
+    let uid = canonical_uid(&u);
+    let (vu, ed) = (agent("human:vu"), agent("human:ed"));
+    let store = Store::from_records(vec![
+        Record::Unit(u),
+        Record::Commit(Commit::new(
+            uid,
+            Commitment::Canonical,
+            vu.clone(),
+            hlc(1, &vu),
+        )),
+        Record::Commit(Commit::new(
+            uid,
+            Commitment::Canonical,
+            ed.clone(),
+            hlc(2, &ed),
+        )),
+        Record::Commit(Commit::new(
+            uid,
+            Commitment::Canonical,
+            vu.clone(),
+            hlc(3, &vu),
+        )),
+    ]);
+    assert!(forks(&store).is_empty());
+}
+
+/// An agent who came round later is not a fork either: only the latest word per agent counts.
+#[test]
+fn a_disagreement_that_was_settled_is_not_a_fork() {
+    let u = claim("the map is a forgery");
+    let uid = canonical_uid(&u);
+    let (vu, ed) = (agent("human:vu"), agent("human:ed"));
+    let store = Store::from_records(vec![
+        Record::Unit(u),
+        Record::Commit(Commit::new(
+            uid,
+            Commitment::Canonical,
+            vu.clone(),
+            hlc(1, &vu),
+        )),
+        Record::Commit(Commit::new(
+            uid,
+            Commitment::Floated,
+            ed.clone(),
+            hlc(2, &ed),
+        )),
+        // ed comes round.
+        Record::Commit(Commit::new(
+            uid,
+            Commitment::Canonical,
+            ed.clone(),
+            hlc(9, &ed),
+        )),
+    ]);
+    assert!(forks(&store).is_empty());
+}
+
+/// Detection is a function of the merged set, so it cannot depend on arrival order (rule U).
+#[test]
+fn the_fork_is_found_whatever_order_the_records_arrive_in() {
+    let (vu, ed) = (agent("human:vu"), agent("human:ed"));
+    let build = |flip: bool| {
+        let u = claim("the sister is the traitor");
+        let uid = canonical_uid(&u);
+        let a = Record::Commit(Commit::new(
+            uid,
+            Commitment::Canonical,
+            vu.clone(),
+            hlc(1, &vu),
+        ));
+        let b = Record::Commit(Commit::new(
+            uid,
+            Commitment::Drafted,
+            ed.clone(),
+            hlc(1, &ed),
+        ));
+        let mut rs = vec![Record::Unit(u)];
+        if flip {
+            rs.extend([b, a]);
+        } else {
+            rs.extend([a, b]);
+        }
+        Store::from_records(rs)
+    };
+    let one = forks(&build(false));
+    let two = forks(&build(true));
+    assert_eq!(one.len(), 1);
+    assert_eq!(
+        one.iter().map(|c| c.id.clone()).collect::<Vec<_>>(),
+        two.iter().map(|c| c.id.clone()).collect::<Vec<_>>(),
+        "the same union gives the same contention, id included"
+    );
+}

@@ -208,8 +208,9 @@ mod tests {
         // unreachable" for two releases — which is a holding pattern, not a decision. A code
         // nobody can trigger is worse than a missing one, because a reader waits for it.
         // 52 as of 1.3.0, with `SMY-W309`; 53 as of 1.4.0, with `SMY-W056`; 54 as of 1.6.0,
-        // with `SMY-E203`; 55 and 56 as of 1.7.0, with `SMY-W111` and `SMY-W057`.
-        assert_eq!(Code::ALL.len(), 56);
+        // with `SMY-E203`; 55, 56 and 57 as of 1.7.0, with `SMY-W111`, `SMY-W057` and
+        // `SMY-W058`.
+        assert_eq!(Code::ALL.len(), 57);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

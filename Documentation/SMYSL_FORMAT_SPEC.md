@@ -478,13 +478,22 @@ digest = BLAKE3-256( kind ‖ over ‖ positions )
 id     = "k/c" ‖ base32( first 130 bits of digest )
 ```
 
-`kind` is one byte: 0 supersession fork, 1 live rebuttal, 2 label collision. `over` is 32 bytes;
+`kind` is one byte: 0 supersession fork, 1 live rebuttal, 2 label collision, 3 commitment fork
+(1.7). `over` is 32 bytes;
 `positions` are the uids sorted and deduplicated, 32 bytes each. The base32 is §2.1's, 26
 characters. The clock a detection is stamped with is not identity.
 `fixtures/wire/contention-id/cases.json` carries vectors.
 
 A live-rebuttal contention is detected only over a live rebuttal (§6.1) whose claim is not
 `unfounded`.
+
+A **commitment fork** is detected when two distinct agents' latest commitments to one unit name
+different levels. Per agent, not per record: one author revising their own commitment over time is
+a revision and MUST NOT be reported. Its `over` is the unit and its single position is the same
+unit — unlike a supersession fork there are no rival uids, because the rival claims are levels,
+which a reader finds in the commitment records themselves. A store still derives a single answer
+(§3.1); the detection says a person should look, which is the division rule C draws everywhere:
+merge computes, and does not adjudicate.
 
 ### 6.3 Resolution
 

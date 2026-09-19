@@ -615,6 +615,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W055`], [warning], [Agent contention rate exceeds `--max-contentions-per-agent`.]),
     ([`SMY-W056`], [warning], [A withdrawal names a `retracts` or `supersedes` edge, which cannot be withdrawn; it is kept and has no effect.]),
     ([`SMY-W057`], [warning], [A unit is more committed than the weakest thing it rests on.]),
+    ([`SMY-W058`], [warning], [Two agents' latest commitments to one unit disagree; merge reports it rather than picking.]),
   ),
 )
 

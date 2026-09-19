@@ -109,6 +109,14 @@ whose purpose is to persist and diff across drafts is fatal. Hence a record — 
 *who* settled it and *when*, the questions a development history exists to ask, and which a field
 cannot express.
 
+- **`SMY-W058`, a commitment fork.** Two agents whose latest commitments to one unit differ is a
+  disagreement merge reports rather than settles — the fourth detection kind, beside the
+  supersession fork, the live rebuttal and the label collision. Per *agent*, not per record: one
+  author raising a decision from drafted to canonical over a week is a revision, and reporting that
+  would make the queue useless to the person doing the work. It reaches `review` and closes with
+  `resolve` through 1.4's machinery unchanged, because a resolution already names a contention by
+  its derived id.
+
 How settled a unit is, derived, is normative: the level of the commitment with the greatest
 `(ts, agent)`, a total order over a set and so independent of arrival order (rule U). Taking the
 highest level ever asserted was the obvious alternative and is wrong — it makes a commitment

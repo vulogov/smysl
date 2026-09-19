@@ -28,6 +28,8 @@ pub enum DetectionKind {
     LiveRebuttal = 1,
     /// One label bound to different uids across views in scope.
     LabelCollision = 2,
+    /// Two agents' latest commitments to one unit disagree about how settled it is (1.7).
+    CommitmentFork = 3,
 }
 
 impl DetectionKind {
@@ -35,6 +37,7 @@ impl DetectionKind {
         DetectionKind::SupersessionFork,
         DetectionKind::LiveRebuttal,
         DetectionKind::LabelCollision,
+        DetectionKind::CommitmentFork,
     ];
 
     pub const fn as_u8(self) -> u8 {
@@ -46,6 +49,7 @@ impl DetectionKind {
             0 => Some(DetectionKind::SupersessionFork),
             1 => Some(DetectionKind::LiveRebuttal),
             2 => Some(DetectionKind::LabelCollision),
+            3 => Some(DetectionKind::CommitmentFork),
             _ => None,
         }
     }
@@ -55,6 +59,7 @@ impl DetectionKind {
             DetectionKind::SupersessionFork => "supersession-fork",
             DetectionKind::LiveRebuttal => "live-rebuttal",
             DetectionKind::LabelCollision => "label-collision",
+            DetectionKind::CommitmentFork => "commitment-fork",
         }
     }
 
@@ -64,6 +69,9 @@ impl DetectionKind {
             DetectionKind::SupersessionFork => crate::diag::Code::W053,
             DetectionKind::LiveRebuttal => crate::diag::Code::W053,
             DetectionKind::LabelCollision => crate::diag::Code::W054,
+            // Its own code: a reader told "concurrent supersession" about a commitment would
+            // go looking for a supersedes edge that is not there.
+            DetectionKind::CommitmentFork => crate::diag::Code::W058,
         }
     }
 }
@@ -439,7 +447,7 @@ mod tests {
 
     #[test]
     fn detection_kinds_round_trip_and_map_to_codes() {
-        assert_eq!(DetectionKind::ALL.len(), 3);
+        assert_eq!(DetectionKind::ALL.len(), 4);
         for &k in DetectionKind::ALL {
             assert_eq!(DetectionKind::from_u8(k.as_u8()), Some(k));
         }
@@ -450,6 +458,12 @@ mod tests {
         assert_eq!(
             DetectionKind::LabelCollision.code(),
             crate::diag::Code::W054
+        );
+        // Its own code (1.7): a reader told "concurrent supersession" about a commitment would
+        // go looking for a `supersedes` edge that is not there.
+        assert_eq!(
+            DetectionKind::CommitmentFork.code(),
+            crate::diag::Code::W058
         );
     }
 

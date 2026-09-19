@@ -37,6 +37,7 @@ pub fn detect(store: &Store, ctx: &DetectionContext) -> Vec<Contention> {
     out.extend(supersession_forks(store, ctx));
     out.extend(live_rebuttals(store, ctx));
     out.extend(label_collisions(store, ctx));
+    out.extend(commitment_forks(store, ctx));
     out.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
     out.dedup_by(|a, b| a.id == b.id);
     // Detected, and perhaps already reviewed: a resolution naming the derived id reads through.
@@ -86,6 +87,52 @@ fn totally_ordered(store: &Store, uids: &[Uid]) -> bool {
         }
     }
     true
+}
+
+/// (d) Two agents' latest commitments to one unit disagree about how settled it is (1.7).
+///
+/// Per *agent*, not per record: one author raising a decision from drafted to canonical over a
+/// week is a revision, and reporting it as a disagreement would make the queue useless to the
+/// person doing the work. Two authors whose latest words differ is the disagreement.
+///
+/// `Store::commitment_of` still answers — machinery needs a single value and gets a deterministic
+/// one — and this says a person should look. That division is the whole of rule C: merge must not
+/// adjudicate, so the answer it computes for a caller and the disagreement it surfaces for a
+/// reviewer are two different things.
+///
+/// The contention is *over* the unit and has the unit as its single position. Unlike a
+/// supersession fork there are no rival uids to name — the rival claims are levels, which live in
+/// the commitment records the reviewer reads next.
+fn commitment_forks(store: &Store, ctx: &DetectionContext) -> Vec<Contention> {
+    let mut out = Vec::new();
+    for (uid, _) in store.units() {
+        let commits = store.commits_of(uid);
+        if commits.is_empty() {
+            continue;
+        }
+        // Each agent's latest word, by the same total order `commitment_of` uses.
+        let mut latest: BTreeMap<&smysl_core::AgentId, (&Hlc, smysl_core::Commitment)> =
+            BTreeMap::new();
+        for c in commits {
+            let key = (&c.ts.wall_ms, c.ts.counter);
+            match latest.get(&c.agent) {
+                Some((ts, _)) if (&ts.wall_ms, ts.counter) >= key => {}
+                _ => {
+                    latest.insert(&c.agent, (&c.ts, c.level));
+                }
+            }
+        }
+        let levels: BTreeSet<smysl_core::Commitment> = latest.values().map(|(_, l)| *l).collect();
+        if latest.len() > 1 && levels.len() > 1 {
+            out.push(contention(
+                DetectionKind::CommitmentFork,
+                *uid,
+                vec![*uid],
+                ctx,
+            ));
+        }
+    }
+    out
 }
 
 /// (b) A live `rebuts` edge between two units both selected in a common thread.
