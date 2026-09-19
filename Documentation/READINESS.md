@@ -50,6 +50,19 @@ requirements are checked against the workspace version (`make dep-versions`): 1.
 1.3 items, and the `1.1.0` requirements they carried until the cut would have let a consumer's
 lockfile pair them with 1.2 siblings.
 
+**1.7.0 is published.** All twelve crates went to crates.io on 2026-09-19, the day it was cut, and
+`BASELINE` moved to 1.7.0 in the same change. It is the first release driven by a consumer's RFC —
+inkhaven's SMYSL-1, asking for smysl as the development history of a story's canon — and the first
+whose central design had to be changed on contact: the RFC proposed recording commitment beside
+`salience`, and `salience` turns out not to survive a store write at all.
+
+Two forward-compatibility holes were closed on the way, both found by planning rather than by a
+bug report. The `source` sub-map dropped unknown keys and silently changed a unit's uid, which is
+§8.1's promise failing in the one place identity lives; and the JavaScript implementation had been
+re-encoding an integral float as an integer since it shipped, caught by a wire fixture written for
+an unrelated feature. Gate 2 says three independent implementations; this is the second release
+running where that gate caught one of them being wrong rather than merely being satisfied.
+
 **1.6.0 is published.** All twelve crates went to crates.io on 2026-09-17, the day it was cut, and
 `BASELINE` moved to 1.6.0 in the same change. One key was added to one record body and written only
 when non-zero, so every pack encoded before it keeps its bytes — and the wire fixture that proves
