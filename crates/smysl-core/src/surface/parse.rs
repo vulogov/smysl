@@ -1346,10 +1346,18 @@ impl<'a> Parser<'a> {
             .get("captured")
             .and_then(|c| c.value.as_str())
             .and_then(|s| Date::parse(s).ok());
+        // Milliseconds as an integer, the same idiom `ts: [wall_ms, counter]` already uses for
+        // an HLC. An ISO-8601 string would read better and would need a calendar to convert;
+        // the format deliberately owns no calendar beyond `Date`'s validation.
+        let observed = o
+            .get("observed")
+            .and_then(|c| c.value.as_int())
+            .and_then(|i| u64::try_from(i).ok());
         Some(SourceRef {
             kind,
             reference: reference.to_string(),
             captured,
+            observed,
             // Surface text has no way to write an unknown source key: the parser knows the three
             // it defines and an author writing a fourth gets a parse error, not a preserved key.
             // Forward compatibility here is the wire's business (1.7).

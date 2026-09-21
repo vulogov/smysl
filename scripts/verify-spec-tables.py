@@ -207,8 +207,10 @@ def main() -> int:
     # quietly relying on a parser accident.
     check("§2.2 unit core keys are 0..8", sorted(unit_keys), list(range(9)))
     check("§2.2 has six statuses", sorted(status), list(range(6)))
-    check("§2.2 source sub-map is 0..2", sorted(source_keys), [0, 1, 2])
-    check("§2.2 has five source kinds", sorted(source_kind), list(range(5)))
+    check("§2.2 source sub-map is 0..3", sorted(source_keys), [0, 1, 2, 3])
+    # Six since 1.7's `node`, which the spec's table did not gain until 1.8 — found by this gate
+    # once `observed` forced a look at the same section.
+    check("§2.2 has six source kinds", sorted(source_kind), list(range(6)))
     # 11 and 12 since 1.4: withdrawal and resolution.
     check("§3.1 record codes are 1..13", sorted(record_codes), list(range(1, 14)))
 
@@ -265,7 +267,9 @@ def main() -> int:
                       r"^\t%s\s+Status = (\d+)$").items()},
           status)
     check("go: §2.2 source sub-map keys",
-          named_ints(go_uid, ["keySourceKind", "keySourceReference", "keySourceCaptured"],
+          named_ints(go_uid,
+                     ["keySourceKind", "keySourceReference", "keySourceCaptured",
+                      "keySourceObserved"],
                      r"^\t%s\s+= (\d+)$"),
           {k: "keysource" + v for k, v in source_keys.items()})
     check("go: §3 constraint 9 nesting bound",

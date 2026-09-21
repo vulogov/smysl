@@ -146,6 +146,17 @@ uids *and* enforce a different monotonicity rule while believing itself conforma
 | 0 | kind | uint | required |
 | 1 | reference | text | required |
 | 2 | captured | text | optional |
+| 3 | observed | uint, epoch milliseconds | optional |
+
+`observed` was added in 1.8 and is written only when present, so a source without one encodes to
+the bytes it always did. It is the instant the observation was taken, **supplied by the
+instrument and never read from a clock by an implementation** — the same arrangement `ts`
+(§2.5) has, and what keeps a pure path pure. `captured` stays a date: it answers when a document
+or dataset was obtained, which is a different and coarser question, and an implementation MUST
+NOT derive one from the other.
+
+Both are inside `source` and therefore inside the uid, so two readings of one metric at different
+instants are **two units**. That is deliberate: collapsing them would lose the series.
 
 and its `kind`:
 
@@ -156,6 +167,7 @@ and its `kind`:
 | 2 | metric |
 | 3 | tool |
 | 4 | doc |
+| 5 | node |
 
 The three tables above were added in 1.2.0. Until then a C-Produce implementer could recover
 them only by decoding `core_bytes_hex` in the uid fixtures — which is to say the fixtures were

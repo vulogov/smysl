@@ -9,6 +9,92 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.8.0
 
+### `observed`: when a measurement was taken, to the millisecond
+
+`SourceRef.captured` is a `Date` — year, month, day — and is closed by design. That is right for
+a document and useless for telemetry: two readings a minute apart carry the same date, so nothing
+can order them, and causal analysis over an estate of incidents is guesswork without *before*.
+
+`SourceRef.observed` is epoch milliseconds, `source` body key 3, written only when present so a
+source without one encodes to the bytes it always did. Surface carries it as an integer, the
+idiom `ts: [wall_ms, counter]` already uses — an ISO-8601 string would read better and would need
+a calendar, which the format deliberately does not own.
+
+**It does not reopen what closed `Date`.** The objection there was that sub-day precision "would
+invite a wall-clock read into an otherwise pure path". `observed` is *supplied by the instrument*
+and never read from a clock, exactly as `Hlc::wall_ms` has been since 0.1 — "supplied, never
+read, so a replayed ingest produces the same attestations". Carrying a number somebody else read
+is not reading a clock.
+
+**It is inside identity, deliberately.** `source` is inside `UnitCore`, so two readings of one
+metric at different instants are two units. Collapsing them would silently lose the series, which
+is the whole point of recording an instant.
+
+Two documentation gaps surfaced while adding it, both found by `make spec-tables` once the source
+section was touched: **§2.2's source-kind table never gained `node`**, added in 1.7, and the
+JavaScript implementation's table had not either. Both fixed; the Go implementation gained
+`observed` so all four agree on the sub-map.
+
+### Appending stopped costing the store
+
+Two `O(store)` terms per `append`, both measured on a growing store rather than reasoned about.
+
+- **The log fingerprint was recomputed from scratch**, re-encoding every record to hash them
+  again. It is a rolling hash now (`Rolling` in `smysl-core`), so an append hashes the bytes it
+  appends. The digest is byte-identical — BLAKE3 over a stream is BLAKE3 over the concatenation —
+  which matters because `log_hash` is what validates a cached index; four tests pin the
+  equivalence at every step, across batch sizes, over a duplicate, and through a reopen.
+- **Every append rescanned the whole log for attestations**, cloning each one, because an
+  attestation can arrive before the unit it vouches for. Only the ones that have not landed are
+  kept now, and retried.
+
+Twenty thousand records appended one at a time: **34.6s → 24.0s**. The remaining term is the
+adjacency, rebuilt from every unit and relation — **once per call, not once per record**, so
+batching is the lever:
+
+| records per call | per record |
+|---:|---:|
+| 1 | 1336 µs |
+| 50 | 25 µs |
+| 1000 | 5 µs |
+
+The same twenty thousand records in batches of 100 take **0.30s**. The cost model is written on
+`Store::append`, where an integrator will meet it.
+
+Rebuilding the adjacency lazily would remove the last term and was **not** done: `adjacency`
+takes `&self`, so deferring needs interior mutability, and `Store` is `Sync` today — a pipeline
+holding one behind an `Arc` would notice losing that far more than it notices this.
+
+### `observed` gets a reader
+
+A field nothing sorts by is a field nobody fills in. `Store::units_in_observed_order` is the
+timeline — units carrying an instant, oldest first, ties broken by uid so two runs agree. Units
+without one are **left out** rather than sorted to an end: a unit with no observation time is not
+early or late, it is not on the timeline.
+
+And `thread --derive` now orders by observation time where a unit has one. A telemetry corpus
+carries `observed` and almost no ordering edges — the relations that would order it are exactly
+the ones nobody writes when the instrument already knows *when* — so the topological fallback was
+putting 14:05 before 14:00 whenever the graph had nothing to say. A derived narrative over timed
+evidence now reads in the order things happened. A corpus carrying no instants derives exactly
+what it derived before.
+
+### `--source`, one subject's units out of a shared store
+
+`Store::units_with_source_prefix` has answered "which units came from this thing" since 1.5, and
+was reachable only from Rust. A store that holds many subjects at once — fifty incidents, a fleet
+of hosts, a repository's files — needs it from the command line too.
+
+- **`find --source PREFIX`** restricts retrieval; **`pack --source PREFIX`** scopes the pack
+  itself, which is the "assemble this one subject" case.
+- **A prefix nothing matches is refused rather than ignored.** Both `Query::within` and
+  `PackRequest::scope` read empty as *unrestricted*, so a mistyped prefix would otherwise have
+  searched or packed the whole store — the exact opposite of what was asked. `find` says so and
+  returns nothing; `pack` fails.
+
+Prefix rather than equality because a source reference carries a locator after the subject
+(`incident:41#auth.pool.wait_ms`), and the question is about the subject.
+
 ### Carried from 1.7.0
 
 What this cycle starts from (details in 1.7.0):

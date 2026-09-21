@@ -313,6 +313,22 @@ pub struct SourceRef {
     pub kind: SourceKind,
     pub reference: String,
     pub captured: Option<Date>,
+    /// When the observation was taken, in milliseconds since the Unix epoch (1.8).
+    ///
+    /// `captured` is a `Date` and closed by design — year, month, day — which is right for a
+    /// document or a dataset and useless for telemetry: two readings a minute apart carry the
+    /// same date, so nothing can order them and causal analysis over them is guesswork.
+    ///
+    /// **Supplied, never read.** smysl does not consult a clock to fill this in; the instrument
+    /// that took the measurement supplies it, exactly as `Hlc::wall_ms` is supplied so that a
+    /// replayed ingest produces the same attestations. That is what keeps rule D intact, and it
+    /// is the objection that closed `Date` to a fourth field — the objection was to *reading* a
+    /// clock in a pure path, not to carrying a number somebody else read.
+    ///
+    /// It is **inside identity**, because `source` is inside `UnitCore`: two readings of one
+    /// metric at different instants are two units. That is correct for a time series, and the
+    /// alternative — collapsing them — would silently lose the series.
+    pub observed: Option<u64>,
     /// Unknown keys from a future minor version, preserved verbatim (1.7).
     ///
     /// Every other record body has had one since 0.2 and this sub-map did not, which made it the
@@ -380,8 +396,15 @@ impl SourceRef {
             // hash to one uid compare unequal in memory.
             reference: crate::types::normalise(&reference.into()),
             captured: None,
+            observed: None,
             extra: Extra::new(),
         }
+    }
+
+    /// The instant the observation was taken, in milliseconds since the Unix epoch (1.8).
+    pub fn observed_at(mut self, ms: u64) -> SourceRef {
+        self.observed = Some(ms);
+        self
     }
 
     pub fn captured_on(mut self, d: Date) -> SourceRef {
