@@ -24,8 +24,10 @@ const DOC: &str = "\
 ~ Pool acquisition wait on billing reached 940 ms.
 ";
 
-fn store() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("smysl-source-{}", std::process::id()));
+/// One directory per test: these run in parallel threads inside one binary, and a shared
+/// path means one test can read the store while another is still writing it.
+fn store(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("smysl-source-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("s.smy");
     std::fs::write(&path, DOC).unwrap();
@@ -51,7 +53,7 @@ fn out(o: &Output) -> String {
 /// The prefix selects one subject's units and excludes the other's.
 #[test]
 fn find_restricts_to_one_subject() {
-    let path = store();
+    let path = store("find_restricts_to_one_subject");
     let p = path.to_str().unwrap();
 
     let all = run(&["find", "pool acquisition wait", p]);
@@ -82,7 +84,7 @@ fn find_restricts_to_one_subject() {
 /// *unrestricted* to `Query::within`, which is the opposite of what the caller asked for.
 #[test]
 fn a_prefix_matching_nothing_says_so() {
-    let path = store();
+    let path = store("a_prefix_matching_nothing_says_so");
     let o = run(&[
         "find",
         "pool",
@@ -106,7 +108,7 @@ fn a_prefix_matching_nothing_says_so() {
 /// `pack --source` scopes the *pack*, which is the "assemble this one subject" case.
 #[test]
 fn pack_scopes_to_one_subject() {
-    let path = store();
+    let path = store("pack_scopes_to_one_subject");
     let p = path.to_str().unwrap();
 
     let o = run(&["pack", "--budget", "400", "--source", "incident:41", p]);
@@ -123,7 +125,7 @@ fn pack_scopes_to_one_subject() {
 /// And the same guard, where an unrestricted pack would be the whole store.
 #[test]
 fn packing_a_prefix_matching_nothing_is_refused() {
-    let path = store();
+    let path = store("packing_a_prefix_matching_nothing_is_refused");
     let o = run(&[
         "pack",
         "--budget",
