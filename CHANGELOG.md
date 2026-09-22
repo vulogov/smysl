@@ -7,6 +7,31 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.9.0
+
+Open. Nothing landed yet.
+
+Carried in from the 1.8 cycle, in the order they were argued for rather than the order they
+are easiest:
+
+- **A staleness check.** A conclusion resting on evidence observed far outside the incident
+  window is a common and expensive error, and `observed` made it checkable for the first time.
+  Opt-in, because the window is a caller's policy and not the format's business.
+- **Rival explanations.** `contrasts` parses, checks clean and is walkable, and `review` cannot
+  see it — so two explanations that compete without either refuting the other are invisible.
+  That is the *normal* state of an investigation, and the format currently sees only the sharp
+  case. A `DetectionKind` reusing the contention identity, `review` and `resolve` machinery
+  whole, as `CommitmentFork` did in 1.7.
+- **A `timeline` thread schema.** 1.8 made derivation *order* by observation time; the five
+  schemas are still argument-shaped. Steps named for phases rather than rhetorical roles.
+- **Corroboration.** `agreement` counts attesting agents, not independent instruments. Two
+  metrics from one exporter are weaker than a metric and a log, and nothing distinguishes them.
+- **An incremental retrieval index.** Rebuilding after a mutation costs 110 ms and there is no
+  incremental path. Only worth doing for a caller that needs interactive latency; batch work
+  does not care.
+
+---
+
 ## 1.8.0 — 2026-09-22
 
 The cycle that gave an observation a time, and stopped `append` charging for the size of the
