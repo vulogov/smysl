@@ -282,7 +282,7 @@ From the repository root:
 
 #screen(caption: "$ cargo build")[
 ```
-   Compiling smysl v1.8.0 (/Users/gandalf/Src/smysl)
+   Compiling smysl v1.8.0 (/path/to/smysl)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.37s
 ```
 ]

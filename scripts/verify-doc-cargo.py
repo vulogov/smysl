@@ -27,7 +27,8 @@ Cargo's output is not byte-reproducible, so a raw comparison would fail on every
 people to ignore it. Three things vary and none of them is what the manual is claiming:
 
   * **Timings.** `in 0.37s` is not a fact about the project.
-  * **The absolute path.** `(/Users/gandalf/Src/smysl)` is one machine's checkout.
+  * **The absolute path.** `(/path/to/smysl)` is one machine's checkout, and must never be
+    written into the manual: it leaks a home directory into a published PDF.
   * **Cargo's own progress.** Which crates needed recompiling depends on what was already
     built, and `cargo xtask determinism` documents what the *gate* printed rather than that
     cargo linked it first. `Compiling`, `Finished` and `Running` lines are dropped from both
@@ -59,7 +60,7 @@ BLOCK = re.compile(
 
 TIMING = re.compile(r'\bin \d+(\.\d+)?(s|ms|m \d+s)\b')
 DURATION = re.compile(r'\[\s*\d+\.\d+s\]')
-CRATE_PATH = re.compile(r' \(<root>[^)]*\)')
+CRATE_PATH = re.compile(r' \((?:<root>|/)[^)]*\)')
 VERSION = re.compile(r'\bsmysl(?:-[a-z]+)? v(\d+\.\d+\.\d+)')
 
 # Cargo's own progress, which the manual trims because it is not what the transcript shows.
