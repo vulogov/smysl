@@ -1774,3 +1774,49 @@ fn withdrawals_and_resolutions_refuse_what_they_would_otherwise_lose() {
         ""
     );
 }
+
+/// A timestamp outside `u64`/`u32` is refused rather than wrapped.
+///
+/// Found by the surface fuzzer, which asserts parse → write → parse is identical.
+/// `as u64` on a negative integer wraps: `ts: [-882868553, 0]` became a wall clock near
+/// `u64::MAX`, was written back as that huge number, and re-parsed to something else
+/// again — so the round trip changed the records. A value out of range is not a
+/// timestamp, and refusing it is the only answer that keeps the guarantee.
+#[test]
+fn a_timestamp_out_of_range_is_refused_not_wrapped() {
+    let doc = |ts: &str| {
+        format!(
+            "@doc smysl/0.1 {{\n  id: v/t\n  intent: test\n  lang: en\n  roots: [d/e]\n}}\n\n\
+             @decision d/e {{ status: speculative }}\n~ A decision to settle.\n\n\
+             @commit d/e {{ level: canonical, agent: human:vu, ts: [{ts}, 0] }}\n"
+        )
+    };
+
+    // A well-formed clock still parses, and still round-trips.
+    let ok = parse_surface(&doc("1726500000001")).expect("a valid timestamp parses");
+    let ctx = WriteContext::from_labels(&ok.labels);
+    let again = parse_surface(&write_surface(ok.view.as_ref(), &ok.records, &ctx))
+        .expect("what was written parses");
+    assert_eq!(again.records, ok.records, "a valid clock must round-trip");
+
+    // A negative clock is refused. The parser recovers rather than fails (rule I), so the
+    // refusal is a diagnostic and a dropped record, not an `Err` — and what remains must
+    // still round-trip, which is the guarantee the fuzzer actually checks.
+    for bad in ["-882868553", "-1"] {
+        let out = parse_surface(&doc(bad)).expect("the parser recovers rather than fails");
+        assert!(
+            !out.records
+                .iter()
+                .any(|r| matches!(r, Record::Commit(_))),
+            "ts {bad} must be refused rather than wrapped into a huge clock"
+        );
+        assert!(
+            !out.diagnostics.is_empty(),
+            "ts {bad} must be reported, not silently dropped"
+        );
+        let ctx = WriteContext::from_labels(&out.labels);
+        let back = parse_surface(&write_surface(out.view.as_ref(), &out.records, &ctx))
+            .expect("what was written parses");
+        assert_eq!(back.records, out.records, "ts {bad} broke the round trip");
+    }
+}

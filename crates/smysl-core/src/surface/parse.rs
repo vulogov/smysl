@@ -1238,9 +1238,14 @@ impl<'a> Parser<'a> {
         if a.len() != 2 {
             return None;
         }
+        // `try_from` rather than `as`: a negative or out-of-range integer wraps under `as`,
+        // so `ts: [-1, 0]` became a wall clock near u64::MAX, was written back as that huge
+        // number, and re-parsed to something else again - a round-trip break the surface
+        // fuzzer found. Out of range is not a timestamp, so it is refused here and the
+        // caller reports `needs ts: [wall_ms, counter]`.
         Some(Hlc::new(
-            a[0].value.as_int()? as u64,
-            a[1].value.as_int()? as u32,
+            u64::try_from(a[0].value.as_int()?).ok()?,
+            u32::try_from(a[1].value.as_int()?).ok()?,
             owner.clone(),
         ))
     }
