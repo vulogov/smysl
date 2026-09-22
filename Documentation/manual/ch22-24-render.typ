@@ -606,7 +606,7 @@ this very manual does. It compiles for real. Piping it straight through the
 #screen(caption: "$ smysl render --thread t/brief --profile plain --target typst fixtures/corpus/F1-incident.smy > brief.typ && typst compile brief.typ brief.pdf")[```
 $ typst compile brief.typ brief.pdf
 $ ls -la brief.pdf
--rw-r--r--  1 gandalf  wheel  23856 Jul 28 01:35 brief.pdf
+-rw-r--r--  1 user  staff  23856 Jul 28 01:35 brief.pdf
 ```]
 
 That is the chain this target exists for: a store you can diff and merge like
