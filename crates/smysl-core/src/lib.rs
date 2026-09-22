@@ -27,7 +27,7 @@ pub use error::{
     CodecError, Error, ExitCode, IdError, IntegrityError, MergeError, NonDetReason, PackError,
     ParseError, ProviderError, RenderError, ShapeError,
 };
-pub use hash::{canonical_uid, hash_bytes, verify};
+pub use hash::{canonical_uid, hash_bytes, verify, Rolling};
 pub use ids::{
     AgentId, AgentKind, ContentionId, KernelType, Label, LangTag, SchemaId, ThreadId, Uid,
     UidPrefix, ViewId,

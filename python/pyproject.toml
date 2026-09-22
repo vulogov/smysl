@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smysl-conformance"
-version = "1.7.0"
+version = "1.8.0"
 description = "An independent C-Read implementation of the smysl format, written from the spec"
 readme = "README.md"
 requires-python = ">=3.9"

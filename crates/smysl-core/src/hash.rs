@@ -44,6 +44,36 @@ pub fn hash_bytes(b: &[u8]) -> [u8; 32] {
     *blake3::hash(b).as_bytes()
 }
 
+/// The same hash, computed over a stream rather than a slice (1.8).
+///
+/// `Rolling::new().update(a).update(b).finish()` is `hash_bytes(&[a, b].concat())` — BLAKE3 is a
+/// streaming hash and one-shot is the same function. Exposed because a caller that holds a
+/// growing byte sequence should not have to hold all of it to hash it.
+///
+/// The reason it exists: a store's log fingerprint is the hash of every record's encoding
+/// concatenated, and it was recomputed from scratch on every append — re-encoding every record in
+/// the store to hash them again. Appending one record to a thirty-thousand-record store took
+/// 130 ms, and the cost grew with the store, which is the shape nobody notices until the store is
+/// large. Keeping the hasher makes an append cost the bytes appended.
+#[derive(Debug, Clone, Default)]
+pub struct Rolling(blake3::Hasher);
+
+impl Rolling {
+    pub fn new() -> Rolling {
+        Rolling(blake3::Hasher::new())
+    }
+
+    pub fn update(&mut self, bytes: &[u8]) -> &mut Rolling {
+        self.0.update(bytes);
+        self
+    }
+
+    /// The digest of everything fed so far. Does not consume the hasher: a log keeps growing.
+    pub fn finish(&self) -> [u8; 32] {
+        *self.0.finalize().as_bytes()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,15 +171,17 @@ mod tests {
             .build()
             .unwrap();
 
-        // Splice `{3: "x"}` into the source map, as a later version writing a key we do not know
-        // would: the map head grows by one entry and the pair is appended in key order.
+        // Splice `{9: "x"}` into the source map, as a later version writing a key we do not know
+        // would: the map head grows by one entry and the pair is appended in key order. Key 9
+        // rather than 3, which 1.8 spent on `observed` — this test has to name a key that is
+        // still unknown, or it stops testing what it exists for.
         let mut bytes = to_cbor(&Record::Unit(core));
         let at = bytes
             .iter()
             .rposition(|b| *b == 0xA2)
             .expect("the source map");
         bytes[at] = 0xA3;
-        bytes.extend_from_slice(&[0x03, 0x61, 0x78]);
+        bytes.extend_from_slice(&[0x09, 0x61, 0x78]);
 
         let (rec, _) = from_cbor(&bytes).expect("an unknown key degrades, it does not fail");
         assert_eq!(

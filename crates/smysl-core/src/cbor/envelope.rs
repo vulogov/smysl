@@ -63,6 +63,9 @@ fn enc_source(e: &mut Enc, s: &SourceRef) {
     m.put_opt(keys::source::CAPTURED, s.captured.as_ref(), |e, d| {
         e.text(&d.to_string())
     });
+    m.put_opt(keys::source::OBSERVED, s.observed.as_ref(), |e, ms| {
+        e.uint(*ms)
+    });
     // Rule X inside the sub-map, as every record body has done since 0.2. Without it a reader
     // that met a key it did not know re-encoded the unit without it and changed its uid.
     m.put_extra(&s.extra);
@@ -408,6 +411,7 @@ fn dec_source(d: &mut Dec<'_>) -> Res<SourceRef> {
     let mut kind = None;
     let mut reference = None;
     let mut captured = None;
+    let mut observed = None;
     let mut extra = Extra::new();
     read_map(d, &mut extra, |d, k| match k {
         keys::source::KIND => {
@@ -422,12 +426,17 @@ fn dec_source(d: &mut Dec<'_>) -> Res<SourceRef> {
             captured = Some(Date::parse(d.text()?).map_err(|_| bad(at))?);
             Ok(true)
         }
+        keys::source::OBSERVED => {
+            observed = Some(d.uint()?);
+            Ok(true)
+        }
         _ => Ok(false),
     })?;
     Ok(SourceRef {
         kind: kind.ok_or_else(|| bad(at))?,
         reference: reference.ok_or_else(|| bad(at))?,
         captured,
+        observed,
         extra,
     })
 }

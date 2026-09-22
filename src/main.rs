@@ -625,6 +625,15 @@ fn cli() -> Command {
                         ),
                 )
                 .arg(
+                    Arg::new("source")
+                        .long("source")
+                        .value_name("PREFIX")
+                        .help(
+                            "Restrict to units whose source reference starts with PREFIX, as \
+                             `incident:41` selects one incident's units in a shared store",
+                        ),
+                )
+                .arg(
                     Arg::new("payload")
                         .long("payload")
                         .value_name("KEY=VALUE[,VALUE]")
@@ -724,6 +733,15 @@ fn cli() -> Command {
                         .help(
                             "Restrict what --query may focus on to units whose payload has KEY \
                              equal to one of VALUE",
+                        ),
+                )
+                .arg(
+                    Arg::new("source")
+                        .long("source")
+                        .value_name("PREFIX")
+                        .help(
+                            "Pack only units whose source reference starts with PREFIX — the \
+                             whole of one incident out of a shared store",
                         ),
                 )
                 .arg(
@@ -3231,6 +3249,22 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     // The default limit is 3 rather than `find`'s 10, because every focused unit drags its
     // closure in with it and ten of those exhaust an ordinary budget before anything is
     // chosen on merit.
+    if let Some(prefix) = m.get_one::<String>("source") {
+        let from = store.units_with_source_prefix(prefix);
+        // `scope` is empty-means-everything too, so a prefix nobody matches must refuse rather
+        // than quietly pack the whole store.
+        if from.is_empty() {
+            eprintln!("smysl pack: no unit has a source starting with `{prefix}`");
+            return ExitCode::Failure;
+        }
+        if !global.get_flag("quiet") {
+            eprintln!(
+                "smysl pack: --source {prefix} scoped {} unit(s)",
+                from.len()
+            );
+        }
+        req = req.scoped(from);
+    }
     if m.get_one::<String>("payload").is_some() && m.get_one::<String>("query").is_none() {
         // It restricts what `--query` may focus on and nothing else. Accepting it alone would
         // look like a filter on the pack, which is what `--scope` is.
@@ -3714,6 +3748,16 @@ fn cmd_find(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     }
 
+    if let Some(prefix) = m.get_one::<String>("source") {
+        let from = store.units_with_source_prefix(prefix);
+        // An empty `within` means *unrestricted*, so a prefix that matches nothing would
+        // silently search the whole store — the opposite of what the caller asked for.
+        if from.is_empty() {
+            eprintln!("{path}: no unit has a source starting with `{prefix}`");
+            return ExitCode::Success;
+        }
+        q = q.within(from);
+    }
     if let Some(ids) = m.get_many::<String>("schema") {
         let mut parsed = Vec::new();
         for raw in ids {

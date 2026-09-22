@@ -224,8 +224,27 @@ fn ordering(store: &Store, scope: &[Uid]) -> Ordering {
 
     // Rank within the scope, by chain index then uid - a total order, so a band is a
     // function of the graph rather than of iteration.
+    //
+    // Observation time comes first where a unit has one (1.8). A corpus of telemetry carries
+    // `observed` and almost no ordering edges: the relations that would order it are exactly the
+    // ones nobody writes when the instrument already knows *when*. Falling straight through to
+    // the topological index there put a reading from 14:05 before one from 14:00 whenever the
+    // graph had nothing to say, which is not an ordering anybody would defend. Units without an
+    // instant keep the chain index they always had, so a corpus that carries none derives
+    // exactly what it derived before.
     let mut ordered: Vec<Uid> = in_scope.iter().copied().collect();
-    ordered.sort_by_key(|u| (index.get(u).copied().unwrap_or(usize::MAX), *u));
+    ordered.sort_by_key(|u| {
+        // `None` sorts *before* `Some` in Rust, which would put every untimed unit at the front
+        // — the opposite of the intent. An untimed unit is not early; it is not on the timeline,
+        // so it follows the timed ones and keeps the chain order it always had.
+        let observed = store.observed_at(u);
+        (
+            observed.is_none(),
+            observed.unwrap_or(0),
+            index.get(u).copied().unwrap_or(usize::MAX),
+            *u,
+        )
+    });
     let rank: BTreeMap<Uid, usize> = ordered.iter().enumerate().map(|(i, u)| (*u, i)).collect();
 
     Ordering {

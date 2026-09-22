@@ -324,6 +324,9 @@ fn write_unit(out: &mut String, u: &UnitCore, ctx: &WriteContext) {
             s.kind,
             quoteless_or_quoted(&s.reference)
         );
+        if let Some(ms) = s.observed {
+            src.push_str(&format!(", observed: {ms}"));
+        }
         if let Some(d) = s.captured {
             src.push_str(&format!(", captured: {d}"));
         }

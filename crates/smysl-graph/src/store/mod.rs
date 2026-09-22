@@ -18,8 +18,8 @@ use smysl_core::diag::{Code, Diagnostic, Report, Subject};
 use smysl_core::{
     canonical_uid, from_cbor_seq, hash_bytes, to_cbor, AgentId, Attestation, Commit, Commitment,
     Contention, ContentionStatus, DetectionKind, Error, IntegrityError, Record, RelKind, Relation,
-    Resolution, ResolutionTarget, Status, Thread, ThreadId, Uid, UidPrefix, Unit, View, ViewId,
-    Withdrawal,
+    Resolution, ResolutionTarget, Rolling, Status, Thread, ThreadId, Uid, UidPrefix, Unit, View,
+    ViewId, Withdrawal,
 };
 
 use crate::adjacency::{Adjacency, EdgeKind, EdgeSet};
@@ -78,6 +78,20 @@ pub struct Store {
     records: Vec<Record>,
     log_len: u64,
     log_hash: [u8; 32],
+    /// Attestations that named a unit or edge the store did not hold yet (1.8).
+    ///
+    /// They arrive out of order — an attestation can reach a peer before the unit it vouches
+    /// for — so every absorb used to rescan the whole log and retry *every* attestation it
+    /// held, cloning each one. Keeping the ones that did not land costs the same correctness
+    /// for work proportional to what is still waiting.
+    pending_attestations: Vec<Attestation>,
+    /// The log's hash, kept open so an append costs the bytes appended rather than the store.
+    ///
+    /// `log_hash` is the digest of every record's encoding concatenated, and it was recomputed
+    /// from scratch on every `append` — re-encoding the whole store to hash it again. One record
+    /// appended to a thirty-thousand-record store took 130 ms, and the cost grew with the store.
+    /// The digest is unchanged: BLAKE3 over a stream is BLAKE3 over the concatenation.
+    log_hasher: Rolling,
 
     units: BTreeMap<Uid, Unit>,
     relations: BTreeMap<(String, Uid, Uid), Relation>,
@@ -115,6 +129,8 @@ impl Store {
             records: Vec::new(),
             log_len: 0,
             log_hash: hash_bytes(&[]),
+            log_hasher: Rolling::new(),
+            pending_attestations: Vec::new(),
             units: BTreeMap::new(),
             relations: BTreeMap::new(),
             threads: BTreeMap::new(),
@@ -152,8 +168,12 @@ impl Store {
             .collect();
         s.absorb(records);
         s.union_edge_attestations(&repeated);
-        s.log_len = s.log_bytes().len() as u64;
-        s.log_hash = hash_bytes(&s.log_bytes());
+        // Once, over the bytes as they are: `log_bytes` was being built twice here, and the
+        // second one only to hash it.
+        let bytes = s.log_bytes();
+        s.log_len = bytes.len() as u64;
+        s.log_hasher.update(&bytes);
+        s.log_hash = s.log_hasher.finish();
         s
     }
 
@@ -212,6 +232,8 @@ impl Store {
         store.absorb(records);
         store.log_len = log_len;
         store.log_hash = log_hash;
+        store.log_hasher = Rolling::new();
+        store.log_hasher.update(&bytes[..consumed]);
 
         if opts.verify_hashes {
             if let Some(ix) = sidecar.as_ref().filter(|_| current) {
@@ -237,8 +259,30 @@ impl Store {
 
     /// Append records, writing through to the log if this store has one.
     ///
-    /// `O(1)` in the log: the new records are encoded and appended, and the running hash
-    /// advances over the new bytes only.
+    /// The log itself is `O(new)`: the records are encoded, written to the end of the file, and
+    /// the running hash advances over the new bytes only (1.8 — it used to re-encode and rehash
+    /// every record in the store, which made an append cost the store).
+    ///
+    /// **The derived state is rebuilt once per call, not once per record**, and that is the cost
+    /// model a caller has to plan around. The adjacency is built from every unit and relation the
+    /// store holds, so one call costs `O(store)` however many records it carries. Appending
+    /// twenty thousand records to a growing store, measured:
+    ///
+    /// | records per call | per record |
+    /// |---:|---:|
+    /// | 1 | 1336 µs |
+    /// | 10 | 127 µs |
+    /// | 50 | 25 µs |
+    /// | 200 | 8 µs |
+    /// | 1000 | 5 µs |
+    ///
+    /// So a producer with a stream of single records — a detector emitting one reading at a time
+    /// — should buffer. Fifty is already within a factor of five of the floor.
+    ///
+    /// Rebuilding lazily instead, on the first read after an append, was considered and not
+    /// done: `adjacency` is `&self`, so deferring the work needs interior mutability, and that
+    /// would make `Store` no longer `Sync` — which a pipeline holding one behind an `Arc` would
+    /// notice far more than it notices this.
     pub fn append(&mut self, records: &[Record]) -> Result<AppendReport, Error> {
         let mut report = AppendReport::default();
         let mut fresh = Vec::new();
@@ -281,7 +325,10 @@ impl Store {
         self.log_len += report.bytes_written;
         self.absorb(fresh);
         self.union_edge_attestations(&repeated);
-        self.log_hash = hash_bytes(&self.log_bytes());
+        // The appended bytes only. `absorb` pushes onto `self.records` in order, so the stream
+        // the hasher has seen is the log in log order — which is what `log_bytes` concatenates.
+        self.log_hasher.update(&bytes);
+        self.log_hash = self.log_hasher.finish();
         Ok(report)
     }
 
@@ -325,6 +372,7 @@ impl Store {
         rebuilt.absorb(records);
         rebuilt.log_len = self.log_len;
         rebuilt.log_hash = self.log_hash;
+        rebuilt.log_hasher = self.log_hasher.clone();
         let ix = rebuilt.index();
         *self = rebuilt;
         ix
@@ -375,6 +423,39 @@ impl Store {
 
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
+    }
+
+    /// Units that carry an observation instant, oldest first (1.8).
+    ///
+    /// The answer to *what happened, in what order* — which for telemetry is the question, and
+    /// which `captured` could not answer at all: it is a date, so everything on one Thursday is
+    /// simultaneous. Ties break by uid, so the order is total and two runs agree (rule D).
+    ///
+    /// Units with no instant are **left out** rather than sorted to one end. A unit with no
+    /// observation time is not early or late; it is not on the timeline. A caller that wants
+    /// them can iterate `units()` for the rest.
+    pub fn units_in_observed_order(&self) -> Vec<Uid> {
+        let mut timed: Vec<(u64, Uid)> = self
+            .units
+            .iter()
+            .filter_map(|(uid, u)| {
+                u.core
+                    .source
+                    .as_ref()
+                    .and_then(|s| s.observed)
+                    .map(|ms| (ms, *uid))
+            })
+            .collect();
+        timed.sort();
+        timed.into_iter().map(|(_, uid)| uid).collect()
+    }
+
+    /// When this unit was observed, if it says (1.8).
+    pub fn observed_at(&self, uid: &Uid) -> Option<u64> {
+        self.units
+            .get(uid)
+            .and_then(|u| u.core.source.as_ref())
+            .and_then(|s| s.observed)
     }
 
     /// Every commitment naming this unit, in record order (1.7).
@@ -681,7 +762,12 @@ impl Store {
                         .entry(uid)
                         .or_insert_with(|| Unit::new(u.clone()));
                 }
-                Record::Attestation(a) => self.attach(a.clone()),
+                Record::Attestation(a) => {
+                    // Keep it if its subject has not arrived; `rebuild_adjacency` retries.
+                    if !self.attach(a.clone()) {
+                        self.pending_attestations.push(a.clone());
+                    }
+                }
                 Record::Relation(rel) => {
                     let key = Self::rel_key(rel);
                     self.rids.insert(rel.uid(), key.clone());
@@ -750,28 +836,35 @@ impl Store {
     /// Attach an attestation to its unit, or to the relation its uid is the rid of (1.4). An
     /// attestation for something that is not here yet is kept in the log and re-attached on the
     /// next rebuild, so delivery order does not matter (rule U).
-    fn attach(&mut self, a: Attestation) {
+    /// Attach an attestation to the unit or edge it names, and say whether it landed.
+    ///
+    /// `false` means the subject has not arrived; the caller keeps it and retries on the next
+    /// absorb, which is what `pending_attestations` is for.
+    fn attach(&mut self, a: Attestation) -> bool {
         if let Some(u) = self.units.get_mut(&a.uid) {
             u.attestations.insert(a);
-        } else if let Some(key) = self.rids.get(&a.uid) {
-            if let Some(rel) = self.relations.get_mut(key) {
+            return true;
+        }
+        if let Some(key) = self.rids.get(&a.uid).cloned() {
+            if let Some(rel) = self.relations.get_mut(&key) {
                 rel.attestations.insert(a);
+                return true;
             }
         }
+        false
     }
 
     fn rebuild_adjacency(&mut self) {
-        // Attestations may have arrived before their units; re-attach whatever now fits.
-        let pending: Vec<Attestation> = self
-            .records
-            .iter()
-            .filter_map(|r| match r {
-                Record::Attestation(a) => Some(a.clone()),
-                _ => None,
-            })
-            .collect();
-        for a in pending {
-            self.attach(a);
+        // Attestations may have arrived before their units; retry the ones still waiting.
+        // Rescanning the whole log here made every append cost the store: on twenty thousand
+        // records it was the largest single term.
+        if !self.pending_attestations.is_empty() {
+            let waiting = std::mem::take(&mut self.pending_attestations);
+            for a in waiting {
+                if !self.attach(a.clone()) {
+                    self.pending_attestations.push(a);
+                }
+            }
         }
         // A withdrawn edge is kept and not followed: the adjacency every traversal reads is
         // built without it.

@@ -146,7 +146,10 @@ pub mod source {
     pub const KIND: u16 = 0;
     pub const REFERENCE: u16 = 1;
     pub const CAPTURED: u16 = 2;
-    pub const HIGHEST: u16 = CAPTURED;
+    /// The observation instant in epoch milliseconds (1.8). Written only when present, so a
+    /// source without one encodes to the bytes it always did.
+    pub const OBSERVED: u16 = 3;
+    pub const HIGHEST: u16 = OBSERVED;
 }
 
 /// GranularityProfile, nested inside a view under [`view::GRANULARITY`].
@@ -306,7 +309,12 @@ mod tests {
             (
                 "source",
                 source::HIGHEST,
-                &[source::KIND, source::REFERENCE, source::CAPTURED],
+                &[
+                    source::KIND,
+                    source::REFERENCE,
+                    source::CAPTURED,
+                    source::OBSERVED,
+                ],
             ),
             (
                 "granularity",

@@ -64,6 +64,8 @@ export const SOURCE_KIND = Object.freeze({
   metric: 2,
   tool: 3,
   doc: 4,
+  // A node in a host system that owns the content (1.7), as `inkhaven:0f3a…#ch3/scene2`.
+  node: 5,
 });
 
 const STATUS_NAME = new Map(Object.entries(STATUS).map(([name, n]) => [n, name]));
