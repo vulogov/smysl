@@ -7,7 +7,21 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.8.0
+## 1.8.0 — 2026-09-22
+
+The cycle that gave an observation a time, and stopped `append` charging for the size of the
+store.
+
+`captured` is a `Date`, which is right for a document and useless for telemetry: two readings a
+minute apart carry the same one, so nothing can order them. `observed` is the instrument's own
+millisecond — supplied, never read from a clock, so the purity argument that closed `Date` is
+untouched. It ships with its readers, because a field nothing sorts by is a field nobody fills in.
+
+The second half was found by measuring a growing store rather than reasoning about one. `append`
+carried two `O(store)` terms — the log fingerprint recomputed from every record, and attestations
+re-derived over the whole store — so adding one record cost more the more you had already added.
+A rolling hasher and a pending queue removed both: 20,000 single appends went 34.6s to 24.0s, and
+batched by a hundred, **0.30s**.
 
 ### `observed`: when a measurement was taken, to the millisecond
 

@@ -28,7 +28,9 @@ regretted, and three gates that each know what they are blind to.
   `stage`'s (272 and 226 at the 1.5.0 cut). 1.6 adds `PayloadFilter` and `payload_strings`, and
   `smysl-pack` gains `CostModel` and `ExternalCost` in its own surface — 274 and 228 at the 1.6.0
   cut. 1.7 adds `Commit` and `Commitment`, the record type and the axis inkhaven asked for — 276
-  and 230 at the 1.7.0 cut.
+  and 230 at the 1.7.0 cut. 1.8 adds none: `observed`, `Rolling` and the observation-order
+  readers are a field, a type and methods behind names the facade already exports, so the
+  counts stand at **276 and 230 at the 1.8.0 cut**.
 - **Every public item in each of the eleven library crates** — they share one version, all are
   published, and `make semver` enforces each of them individually. That is the larger and
   truer figure, and §0.2 of `ROAD_TO_1.0.md` explains why it is the one that binds.

@@ -43,41 +43,43 @@ The format version means nothing about the format changed: `smysl/0.1` held acro
 releases and four independent implementations — the Rust, and Python, JavaScript and Go written
 from the specification alone — and `smysl/1.0` reports that record rather than a change.
 
-## Release 1.7.0
+## Release 1.8.0
 
-A second axis. `status` says how well the world supports a unit; **commitment** says how settled
-its author considers it — and for a body of work settled by decision rather than by evidence, that
-is the question that matters. The two are independent: a floated idea may rest on a measured fact,
-and a canonical decision may rest on a guess. The full account is in [`CHANGELOG.md`](CHANGELOG.md).
+An observation now has a time, and `append` no longer charges for the size of the store.
+`captured` is a date — right for a document, useless for telemetry, where two readings a minute
+apart carry the same one. `observed` is the instrument's own millisecond. The full account is in
+[`CHANGELOG.md`](CHANGELOG.md).
 
-**A decision, and how settled it is:**
+**When a measurement was taken, and what reads it:**
 
 ```sh
-smysl commit d/motive --level canonical --as human:vu store.smy   # floated → canonical
-smysl check store.smy      # SMY-W057 if it rests on something less settled
-smysl review store.smy     # a commitment fork: two people, two answers
+smysl thread --derive narrative store.smy   # ordered by observation time, where units have one
+smysl find "pool wait" --source incident:41 fleet.smy   # one subject out of a shared store
 ```
 
-- **Record type 13**, so a commitment persists, merges and diffs. It does **not** move the unit's
-  uid — the content did not change, the commitment to it did — and it records who settled it and
-  when, which a field could not.
-- **`SMY-W057`**, rule M's shape on the new axis: a unit may not be more committed than the weakest
-  thing it rests on. The canonical-scene-built-on-sand detector. A warning, because committing to
-  an ending before you settle how you get there is how drafting goes.
-- **`SMY-W058`**, a commitment fork: two agents whose latest answers differ. Reported per *agent*,
-  so one author's revisions are never mistaken for a disagreement, and closed by `resolve` like any
-  other contention.
-- **Five improvements to what already existed**: retrieval reaches extension-schema units at all
-  (`find --schema`), `ingest --granularity` applies the profile it names, `find --engine
-  semantic|hybrid` makes the measured hybrid retriever reachable, `--payload` reads nested keys,
-  and the manual's retrieval table is checked against the measurement rather than hand-copied.
+- **`SourceRef.observed`**, epoch milliseconds, `source` body key 3, written only when present —
+  a source without one encodes to the bytes it always did. It does **not** reopen what closed
+  `Date`: the objection there was reading a wall clock inside a pure operation, and `observed` is
+  supplied by the instrument exactly as `Hlc::wall_ms` has been since 0.1.
+- **It is inside identity, deliberately.** `source` is inside `UnitCore`, so two readings of one
+  metric at different instants are two units. Collapsing them would lose the series, which is the
+  whole reason to record an instant.
+- **Readers, shipped with it.** `Store::units_in_observed_order` is the timeline — oldest first,
+  ties broken by uid, and units with no instant left out rather than sorted to an end. `thread
+  --derive` orders by observation time where a unit has one; a corpus carrying no instants
+  derives exactly what it derived before.
+- **`append` stopped costing the store.** Two `O(store)` terms went: the log fingerprint is now
+  rolled forward rather than recomputed from every record, and attestations are queued rather
+  than re-derived over the whole store. 20,000 single appends: 34.6s → 24.0s. Batched by a
+  hundred: **0.30s**, about 25 µs a record.
+- **`--source` on the command line.** `Store::units_with_source_prefix` has answered "which units
+  came from this thing" since 1.5 and was reachable only from Rust. `find --source` restricts
+  retrieval, `pack --source` scopes the pack, and a prefix nothing matches is refused rather than
+  silently treated as unrestricted.
 
-**A forward-compatibility hole, closed.** A unit whose `source` carried a key this build did not
-know decoded, re-encoded shorter, and silently got a different uid. §8.1 promises an older reader
-preserves such a key; the `source` sub-map was the one place that was not true.
-
-No format break: one new record type, which an older reader preserves and reports, and one new
-reserved surface word. `make semver` is clean on all twelve crates.
+No format break, and no change to the public surface: one optional key inside an existing sub-map,
+which an older reader preserves. `make semver` is clean on all twelve crates, and the facade still
+exports 276 names at `--all-features`, 230 pure.
 
 Building from source:
 
