@@ -1805,9 +1805,7 @@ fn a_timestamp_out_of_range_is_refused_not_wrapped() {
     for bad in ["-882868553", "-1"] {
         let out = parse_surface(&doc(bad)).expect("the parser recovers rather than fails");
         assert!(
-            !out.records
-                .iter()
-                .any(|r| matches!(r, Record::Commit(_))),
+            !out.records.iter().any(|r| matches!(r, Record::Commit(_))),
             "ts {bad} must be refused rather than wrapped into a huge clock"
         );
         assert!(
