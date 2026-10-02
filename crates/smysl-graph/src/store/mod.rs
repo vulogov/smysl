@@ -950,8 +950,36 @@ impl Store {
     }
 
     /// Whether two stores carry the same graph, whatever order they were assembled in.
+    /// The record-set digest: BLAKE3 over every record the store holds, framed as §3.1
+    /// frames it, deduplicated, in ascending hash order.
+    ///
+    /// `state_hash` covers *derived* state, and derived state is only as complete as the
+    /// deriving code. It does not fold commitments, schema declarations, pack infos or
+    /// records of a type this build does not understand — so two stores differing in any of
+    /// those compared equal, which is the opposite of what rule U needs from a convergence
+    /// test. This digest is structural instead: `record_hashes` is filled by `absorb` for
+    /// every record that arrives, whatever it is, so a record type added later is covered
+    /// without anybody remembering to extend this function.
+    pub fn record_set_digest(&self) -> [u8; 32] {
+        let mut h = Rolling::new();
+        h.update(b"smysl/rsd/1");
+        h.update(&[0x00]);
+        for rh in &self.record_hashes {
+            h.update(rh);
+        }
+        h.finish()
+    }
+
+    /// Whether two stores have converged (rule U).
+    ///
+    /// Both digests, deliberately. The record-set digest is the answer — equal records are
+    /// equal stores. `state_hash` is kept beside it as a self-check: equal records must
+    /// derive equal state, so a pair that agrees on the records and disagrees on the derived
+    /// state is a bug in deriving, not a pair that has failed to converge. Keeping the
+    /// conjunction costs one comparison and makes that case visible instead of silent.
     pub fn converged_with(&self, other: &Store) -> bool {
-        self.state_hash() == other.state_hash()
+        self.record_set_digest() == other.record_set_digest()
+            && self.state_hash() == other.state_hash()
     }
 
     /// Units whose uid begins with `prefix`, in ascending uid order.

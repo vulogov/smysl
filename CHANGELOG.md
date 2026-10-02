@@ -9,7 +9,27 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.9.0
 
-Open. Nothing landed yet.
+### Convergence could not see a commitment
+
+`converged_with` answered `true` for two stores that disagreed about how settled a unit was.
+It compared `state_hash`, which folds units, attestations, salience, labels, relations, threads,
+views, withdrawals, resolutions and contentions — and never commitments, schema declarations,
+pack infos, or records of a type the build does not understand. Rule U's instrument was blind to
+the axis 1.7 had just added, and to three others besides.
+
+`Store::record_set_digest` is the answer: BLAKE3 over every record the store holds, framed as
+§3.1 frames it, deduplicated, in ascending hash order. It needed no new bookkeeping —
+`record_hashes` has been filled by `absorb` for every arriving record since 1.4, whatever its
+type, so a record type added later is covered without anybody remembering to extend a function.
+
+`converged_with` now compares both. Equal records must derive equal state, so a pair that agrees
+on the records and disagrees on the derived state is a bug in deriving rather than a pair that
+failed to converge; keeping the conjunction costs one comparison and makes that case visible. The
+regression test asserts both halves, including that `state_hash` is still equal across the two
+stores — which is why the second comparison is not redundant.
+
+This is SMYSL-2.3's amendment A-4, implemented ahead of the rest of the set because the defect it
+describes is live rather than prospective.
 
 Carried in from the 1.8 cycle, in the order they were argued for rather than the order they
 are easiest:
