@@ -20,6 +20,13 @@ pub enum Admission {
     SingleAssertion = 0,
     /// A topic per unit. Coarse granularity trades checkability for narrative flow.
     Topical = 1,
+    // 255 is reserved and MUST NOT be assigned (1.9).
+    //
+    // This enumeration stays **closed** in 1.9: an unknown admission still fails the decode,
+    // because `l0_max` and the granularity passes read it and a reader that guessed would
+    // report the wrong verdict. It opens in 1.10, and when it does, 255 is the code `Unknown`
+    // takes — reserving it now means that opening costs no registry change and no renumbering.
+    // `admission_255_stays_reserved` is what stops a later edit spending it.
 }
 
 impl Admission {

@@ -49,6 +49,48 @@ the key is kept, and the record re-encodes to identical bytes.
 This is SMYSL-2.1's H-1. The estimator key it was a prerequisite for (A-9, F-2) waits for 1.10,
 where the counter that would give the registry a second entry is actually calibrated.
 
+### Four enumerations opened, so a later code is an addition rather than a break
+
+`ThreadSchema`, `Role`, `SourceKind` and `DetectionKind` were closed: `from_u8` returned `None`
+for a code it could not name and the decode failed, so **one unrecognised code made a whole store
+unopenable**, and every code allocated after a release was a format break however small it looked.
+1.7 shipped exactly that break by adding `SourceKind::Node = 5` — no 1.6 reader can open a store
+that uses it.
+
+All four now carry an `Unknown` variant at 255, with the **raw code preserved on the container**
+and written back verbatim. That placement is the point rather than a detail: a data-carrying
+variant would be a major bump, and `source.kind` is inside the uid, so normalising an unknown
+code to 255 would give the unit a different identity, silently. `with_unknown_kind` and its
+siblings refuse 255 itself and refuse a code this build already names, so there is one
+representation of each.
+
+The other three are not inside a uid, but they carry the code too: §8.1 requires a record
+carrying an addition to round-trip byte for byte, and under the record-set digest above a changed
+byte is a changed store, so two peers disagreeing about whether to keep a code would never
+converge.
+
+Two interpretations worth stating. An unknown thread schema defines **no roles** rather than
+borrowing `analysis`'s, so a walk over it has nothing to follow. An unknown detection kind reports
+`SMY-W053`, the generic "these disagree" code, which is the most that can honestly be said about
+a detection this build cannot name.
+
+**`SMY-W409`** reports meeting one. Preserving a code in silence would repeat the mistake
+`SMY-W014` exists to fix — a reader handed a document it cannot fully interpret, and told nothing.
+The message names the raw code, because the byte is the only thing that says which future kind
+was meant.
+
+**255 is reserved in all five**, including `admission`, which stays closed in 1.9 because `l0_max`
+reads it and a reader that guessed would report the wrong verdict. Reserving it now means opening
+it in 1.10 costs no renumbering.
+
+`fixtures/wire/F14-unknown-codes.cbor` is what proves the other three implementations agree:
+Python, JavaScript and Go all glob that directory and assert byte-identical re-encoding, so the
+fixture *is* the cross-implementation test. All three pass.
+
+This is SMYSL-2.3's amendment A-8.1, with one addition the RFC does not make: for `source.kind`
+the raw code is identity-bearing, so A-8.1's permission to "use 255 internally to represent
+unknown" does not apply to it.
+
 Carried in from the 1.8 cycle, in the order they were argued for rather than the order they
 are easiest:
 

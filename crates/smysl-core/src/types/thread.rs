@@ -186,6 +186,13 @@ impl Role {
     }
 
     pub fn from_u8(v: u8) -> Option<Role> {
+        // 255 explicitly, because `ALL` is indexed by discriminant and deliberately does not
+        // contain `Unknown`: it lists the roles an author can choose, and `Unknown` is a decode
+        // outcome rather than one of them. Reading it off the end of `ALL` would also make the
+        // next role allocated — A-8.2 starts at 24 — land on `Unknown` by accident.
+        if v == 255 {
+            return Some(Role::Unknown);
+        }
         Role::ALL.get(v as usize).copied()
     }
 

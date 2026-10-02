@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::cbor::envelope::unit_core_bytes;
 use smysl_core::{
-    canonical_uid, from_cbor, from_cbor_seq, to_cbor, to_cbor_seq, AgentId, Attestation,
+    canonical_uid, from_cbor, from_cbor_seq, to_cbor, to_cbor_seq, Admission, AgentId, Attestation,
     Contention, ContentionId, ContentionStatus, Date, Detected, DetectionKind, DropReason,
     GranularityProfile, Hlc, KernelType, LangTag, Lod, Op, Optimality, PackInfo, PackMode, Record,
     RelKind, Relation, Resolution, ResolutionTarget, Role, Rung, SchemaDecl, SchemaId, SourceKind,
@@ -845,4 +845,47 @@ fn code_255_is_refused_as_an_unknown_code() {
         s.with_unknown_kind(4).is_none(),
         "a code this build does know belongs in `kind`, not in the unknown slot"
     );
+}
+
+/// 255 is reserved in all five enumerations, and never assigned.
+///
+/// Four of them opened in 1.9 and use 255 for `Unknown`. `Admission` stays closed — `l0_max`
+/// and the granularity passes read it, and a reader that guessed would report the wrong verdict
+/// — but 255 is held for it too, so opening it in 1.10 costs no registry change and no
+/// renumbering. This test is what stops a later edit spending the code.
+#[test]
+fn code_255_is_reserved_in_all_five_enumerations() {
+    assert_eq!(
+        SourceKind::from_u8(255),
+        Some(SourceKind::Unknown),
+        "an opened enumeration reads 255 as Unknown"
+    );
+    assert_eq!(ThreadSchema::from_u8(255), Some(ThreadSchema::Unknown));
+    assert_eq!(Role::from_u8(255), Some(Role::Unknown));
+    assert_eq!(DetectionKind::from_u8(255), Some(DetectionKind::Unknown));
+
+    assert_eq!(
+        Admission::from_u8(255),
+        None,
+        "admission stays closed in 1.9, so 255 is held rather than used"
+    );
+    assert!(
+        Admission::ALL.iter().all(|a: &Admission| a.as_u8() != 255),
+        "and no admission variant may ever take it"
+    );
+
+    // Nor may any other variant of the four, which is the half that bites: if a later release
+    // assigns 255 to a real kind, every store written in between reads it as Unknown.
+    assert!(SourceKind::ALL
+        .iter()
+        .all(|k| k.as_u8() != 255 || *k == SourceKind::Unknown));
+    assert!(ThreadSchema::ALL
+        .iter()
+        .all(|s| s.as_u8() != 255 || *s == ThreadSchema::Unknown));
+    assert!(Role::ALL
+        .iter()
+        .all(|r| r.as_u8() != 255 || *r == Role::Unknown));
+    assert!(DetectionKind::ALL
+        .iter()
+        .all(|d| d.as_u8() != 255 || *d == DetectionKind::Unknown));
 }
