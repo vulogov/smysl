@@ -282,6 +282,9 @@ registry! {
     Merge => {
         W058 = "SMY-W058", Warn,  "Two agents' latest commitments to one unit disagree";
     }
+    Extension => {
+        W409 = "SMY-W409", Warn,  "Unknown enumeration code - preserved verbatim, treated as unknown";
+    }
 }
 
 impl fmt::Display for Code {
@@ -569,7 +572,7 @@ mod tests {
     /// of 1.4.0: `SMY-W056`, a withdrawal naming an edge 1.4 does not let anyone withdraw.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 57);
+        assert_eq!(Code::ALL.len(), 58);
     }
 
     #[test]

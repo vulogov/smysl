@@ -108,6 +108,57 @@ pub fn run(store: &Store, profile: Option<&ConsumerProfile>, report: &mut Report
         }
     }
 
+    // `SMY-W409` - an enumeration *code* this build does not know, which is W014's argument
+    // one level down. 1.9 opened four enumerations so that an unrecognised code no longer
+    // fails the decode; preserving it silently would repeat the mistake W014 was added to fix,
+    // where a reader is given a document it cannot fully interpret and told nothing.
+    //
+    // The code is reported, not the value: `Unknown` is what the build calls it, and the raw
+    // byte is the only thing that identifies which future kind was meant.
+    for r in store.iter() {
+        match r {
+            smysl_core::Record::Unit(u) => {
+                if let Some(s) = u.source.as_ref() {
+                    if s.kind == smysl_core::SourceKind::Unknown {
+                        report.push(Diagnostic::new(Code::W409).with_message(format!(
+                            "source kind {} is not known to this build; \
+                             preserved verbatim, treated as unknown",
+                            s.kind_code()
+                        )));
+                    }
+                }
+            }
+            smysl_core::Record::Thread(th) => {
+                if th.schema == smysl_core::ThreadSchema::Unknown {
+                    report.push(Diagnostic::new(Code::W409).with_message(format!(
+                        "thread schema {} is not known to this build; \
+                         preserved verbatim, and the thread defines no roles",
+                        th.schema_code()
+                    )));
+                }
+                for st in &th.steps {
+                    if st.role == smysl_core::Role::Unknown {
+                        report.push(Diagnostic::new(Code::W409).with_message(format!(
+                            "step role {} is not known to this build; \
+                             preserved verbatim, treated as unknown",
+                            st.role_code()
+                        )));
+                    }
+                }
+            }
+            smysl_core::Record::Contention(c) => {
+                if c.detected.kind == smysl_core::DetectionKind::Unknown {
+                    report.push(Diagnostic::new(Code::W409).with_message(format!(
+                        "detection kind {} is not known to this build; \
+                         preserved verbatim, reported as a plain disagreement",
+                        c.detected.kind_code()
+                    )));
+                }
+            }
+            _ => {}
+        }
+    }
+
     // `SMY-W010` - a type this *build* does not know, which is stronger than the
     // consumer-profile case below and does not depend on one being supplied. A unit whose
     // type arrived from a later version decodes and round-trips (rule X), but nothing here

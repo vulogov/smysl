@@ -209,8 +209,9 @@ mod tests {
         // nobody can trigger is worse than a missing one, because a reader waits for it.
         // 52 as of 1.3.0, with `SMY-W309`; 53 as of 1.4.0, with `SMY-W056`; 54 as of 1.6.0,
         // with `SMY-E203`; 55, 56 and 57 as of 1.7.0, with `SMY-W111`, `SMY-W057` and
-        // `SMY-W058`.
-        assert_eq!(Code::ALL.len(), 57);
+        // `SMY-W058`; 58 as of 1.9.0, with `SMY-W409` — the four enumerations opened in 1.9
+        // survive an unknown code, and this is how a reader hears that they met one.
+        assert_eq!(Code::ALL.len(), 58);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 
