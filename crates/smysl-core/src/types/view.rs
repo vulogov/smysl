@@ -67,6 +67,16 @@ pub struct GranularityProfile {
     pub l1_min: u32,
     pub l1_max: u32,
     pub admission: Admission,
+    /// Keys this build does not know, kept so a profile survives a round trip.
+    ///
+    /// §8.1 permits a new key in any record body above that record's highest, and obliges an
+    /// older reader to round-trip it byte for byte. This sub-map was the one place that was
+    /// not true: `dec_granularity` collected unknown keys and dropped them, so a profile
+    /// carrying one re-encoded shorter. Unlike `SourceRef.extra` this is not an identity
+    /// hazard — a view is not inside a uid — but it is a plain C-Read failure, and two peers
+    /// disagreeing about whether to keep a key compute different record-set digests for the
+    /// same store.
+    pub extra: Extra,
 }
 
 impl GranularityProfile {
@@ -78,6 +88,7 @@ impl GranularityProfile {
             l1_min: 120,
             l1_max: 400,
             admission: Admission::Topical,
+            extra: Extra::new(),
         }
     }
 
@@ -89,6 +100,7 @@ impl GranularityProfile {
             l1_min: 40,
             l1_max: 120,
             admission: Admission::SingleAssertion,
+            extra: Extra::new(),
         }
     }
 
@@ -100,6 +112,7 @@ impl GranularityProfile {
             l1_min: 20,
             l1_max: 60,
             admission: Admission::SingleAssertion,
+            extra: Extra::new(),
         }
     }
 

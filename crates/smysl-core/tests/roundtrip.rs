@@ -705,3 +705,34 @@ fn an_unknown_key_survives_in_relation_withdrawal_and_resolution_bodies() {
         );
     }
 }
+
+/// A granularity key this build does not know survives a round trip.
+///
+/// §8.1 permits a new key in any record body above that record's highest, and obliges an older
+/// reader to round-trip it byte for byte. The `granularity` sub-map was the one place that was
+/// not true: `dec_granularity` collected unknown keys into a local and dropped it, so a view
+/// carrying one re-encoded shorter. Not an identity hazard — a view is not inside a uid — but a
+/// plain C-Read failure, and two peers disagreeing about whether to keep a key compute different
+/// record-set digests for the same store.
+#[test]
+fn an_unknown_granularity_key_survives_the_round_trip() {
+    let mut v = View::new(ViewId::new("v/g").unwrap(), "test");
+    v.granularity.extra.insert(9, vec![0x18, 0x2a]); // key 9: the CBOR uint 42
+
+    let before = to_cbor(&Record::View(v.clone()));
+    let back = match from_cbor_seq(&before).unwrap().0.pop().unwrap() {
+        Record::View(v) => v,
+        other => panic!("expected a view, got {other:?}"),
+    };
+
+    assert_eq!(
+        back.granularity.extra.get(&9),
+        Some(&vec![0x18, 0x2a]),
+        "the unknown key must be kept"
+    );
+    assert_eq!(
+        to_cbor(&Record::View(back)),
+        before,
+        "and re-encode to the same bytes"
+    );
+}

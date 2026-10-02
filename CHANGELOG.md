@@ -31,6 +31,24 @@ stores — which is why the second comparison is not redundant.
 This is SMYSL-2.3's amendment A-4, implemented ahead of the rest of the set because the defect it
 describes is live rather than prospective.
 
+### A granularity key nobody knew was dropped on the floor
+
+§8.1 permits a new key in any record body above that record's highest, and obliges an older
+reader to round-trip it byte for byte. The `granularity` sub-map was the one place that was not
+true: `dec_granularity` collected unknown keys into a *local* and returned the profile without
+them, so a view carrying one re-encoded shorter.
+
+Not an identity hazard — a view is not inside a uid — but a plain C-Read failure, and it bites
+the convergence work above: two peers disagreeing about whether to keep a key compute different
+record-set digests for the same store.
+
+`GranularityProfile.extra`, collected on decode and written back on encode, the same pattern
+`UnitCore`, `SourceRef` and `Attestation` already use. The regression test asserts both halves —
+the key is kept, and the record re-encodes to identical bytes.
+
+This is SMYSL-2.1's H-1. The estimator key it was a prerequisite for (A-9, F-2) waits for 1.10,
+where the counter that would give the registry a second entry is actually calibrated.
+
 Carried in from the 1.8 cycle, in the order they were argued for rather than the order they
 are easiest:
 

@@ -179,6 +179,7 @@ fn enc_granularity(e: &mut Enc, g: &GranularityProfile) {
     m.put(keys::granularity::ADMISSION, |e| {
         e.uint(g.admission.as_u8() as u64)
     });
+    m.put_extra(&g.extra);
     m.finish(e);
 }
 
@@ -730,6 +731,8 @@ fn dec_thread(d: &mut Dec<'_>) -> Res<Thread> {
 fn dec_granularity(d: &mut Dec<'_>) -> Res<GranularityProfile> {
     let at = d.position();
     let mut g = GranularityProfile::default();
+    // Collected into the profile, not a local: a key this build does not know has to leave
+    // again in the bytes it arrived in (§8.1).
     let mut extra = Extra::new();
     read_map(d, &mut extra, |d, k| match k {
         keys::granularity::PROFILE => {
@@ -755,6 +758,7 @@ fn dec_granularity(d: &mut Dec<'_>) -> Res<GranularityProfile> {
         }
         _ => Ok(false),
     })?;
+    g.extra = extra;
     Ok(g)
 }
 
