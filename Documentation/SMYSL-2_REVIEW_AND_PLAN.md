@@ -355,3 +355,57 @@ shifts under its owner. Both preimages are computable at activation, so the chan
 2. **`W432` ships in 1.9.0.** The entire mitigation is that a release warned first.
 3. **Zero in-corpus uses is reassurance, not permission.** It says nothing about corpora nobody
    can survey, which is the population a format specification exists for.
+
+
+---
+
+## 11. A-4 and A-9 decided, and G−1 closed
+
+**A-4 — Option B + D, 2026-10-02. Implemented (`06a7e30`).**
+
+Convergence compares the record-set digest **and** `state_hash`. The Z interaction is deferred
+with a forward note rather than settled speculatively: rule Z lands at TX-P2, and writing
+normative text now for a filter whose rule does not exist is how a definition gets broken later.
+
+The implementation needed no new bookkeeping. `record_hashes: BTreeSet<[u8; 32]>` has been filled
+by `absorb` for every arriving record since 1.4, whatever its type, and `to_cbor` already frames
+each record as §3.1 frames it — so the digest is eight lines over a structure that was already
+there, and `Record::Unknown` keeping its original bytes satisfies A-4's "covers record types the
+implementation cannot interpret" for free.
+
+**The live defect it closes:** `converged_with` answered `true` for two stores disagreeing about
+how settled a unit was. The regression test asserts `state_hash` is still *equal* across those two
+stores while the digest differs — so nobody later simplifies the second comparison away as
+redundant.
+
+**A-9 — Option B, 2026-10-02. H-1 implemented (`cf8f2b9`).**
+
+1.9.0 takes H-1 alone: `GranularityProfile.extra`, so a key this build does not know survives the
+round trip. A-9 and F-2 ship together in 1.10.
+
+The set conflates three separable things — H-1 is compatibility, A-9 is the key's meaning, F-2 is
+the counter that would give the registry a second entry — and F-2 is already permitted to slip.
+Shipping A-9 now would freeze `script-aware/1`'s milli-weights in normative text before the
+calibration that produces them has run.
+
+**Two corrections to carry into 1.10:**
+
+1. `estimator` must be `Option<TokenEstimator>`. As specified — a defaulted field written only
+   when not `utf8-div4` — a document carrying key 5 = `"smysl/utf8-div4"` decodes to the default
+   and re-encodes *without* key 5, breaking the round trip in the sub-map H-1 just fixed.
+2. An unknown estimator id makes `l0_max` **unevaluable**, not default-evaluated. Otherwise the
+   same bytes give different `SMY-E022` verdicts on different readers, which is a rule D
+   violation on a pure path. A-8.1 gets this right by treating unknown codes as unknown; A-9
+   should match it.
+
+### G−1 is closed
+
+| item | decision | state |
+|---|---|---|
+| A-8.1 | Option B — open four, reserve 255 in five, `source.kind` raw code identity-bearing | decided, probed |
+| A-10 item 2 | Option A + D — reserve `lang:`, `W432` in 1.9.0, report uid changes at activation | decided |
+| A-4 | Option B + D — both digests, Z deferred | **implemented** |
+| A-9 | Option B — H-1 now, key and estimator in 1.10 | **H-1 implemented** |
+
+Nothing in the gate is still open. 1.9.0 can ship without shipping wire behaviour no normative
+text covers, which is what G−1 existed to prevent.
