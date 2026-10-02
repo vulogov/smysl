@@ -134,10 +134,13 @@ made explicit and three corrections folded in.
 
 ### Step 0 — before any code
 
-1. **Install `cargo-semver-checks` and run `make semver` to establish the baseline.** The RFC
-   asserts every change is API-additive (§6.2) while admitting the tool was never run (§2.3).
-   That assertion is unproven, and F-12 depends on `#[non_exhaustive]` suppressing
-   `enum_variant_added`. Prove it before planning around it.
+1. ~~**Install `cargo-semver-checks` and establish the baseline.**~~ **Done, 2026-10-02.**
+   See §8. The RFC's §2.3 claim that the tool "is not installed in the environment" is false
+   here: `cargo-semver-checks 0.50.0` was already present. §6.2's assertion that every change is
+   API-additive is therefore checkable rather than assumed, and each TX-P0 item should be
+   measured against the recorded baseline rather than asserted against it — F-12 above all,
+   where the no-major-bump argument rests entirely on `#[non_exhaustive]` suppressing
+   `enum_variant_added`.
 2. **Owner decides G−1**, at minimum A-8.1.
 3. **Resolve §3(a) and §3(b) above** — they change normative text, not code.
 
@@ -239,3 +242,35 @@ printing without committing; `SEMVER_BREAKING` empty.
 and run), H-18's 24.5 s → 0.55 s figure, H-10's server-side truncation, and the `make semver`
 outcome. The RFC flags all of these *(unverified)* itself. Every static precondition for them is
 confirmed, so they are plausible — but none is reproduced here.
+
+
+---
+
+## 8. The semver baseline, recorded
+
+**Run 2026-10-02 on `dev/1.9.0` at `99a54fe`, `cargo-semver-checks 0.50.0`, `BASELINE = 1.8.0`.**
+
+| | |
+|---|---|
+| crates checked | **12** — the full published set, against what is on crates.io |
+| `no semver update required` | **12** |
+| failures | **0** |
+| changes requiring a new major | **0** |
+| `make semver` exit | **0** |
+| `SEMVER_BREAKING` | empty — no crate is exempted |
+
+This is the clean starting line for TX-P0: the 1.9.0 tree is currently API-identical to published
+1.8.0 in every way `cargo-semver-checks` can see, so any report that is not clean from here is
+caused by TX-P0 itself and nothing earlier.
+
+Two caveats on what the baseline does and does not prove:
+
+- **`make semver` reports, it does not gate.** That is deliberate, and the Makefile records why:
+  until 0.13 a breaking crate was skipped with a one-line SKIP, which left it with *nothing*
+  watching it, so a second unintended break in the same crate rode along invisibly for the rest
+  of the cycle. Running them all and printing the result makes the question answerable — *are
+  these the breaks that were meant?* — rather than silently answered.
+- **It sees the Rust API, not the wire.** None of the §2 items — opened enumerations, new record
+  types, the digest, granularity key 5 — is visible to it. The wire guarantees are held by
+  `make spec-tables`, the conformance corpus and the four-language fixtures, and A-13 adds
+  obligations to all three. A clean `make semver` says nothing about §8.1 compatibility.
