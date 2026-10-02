@@ -1358,16 +1358,13 @@ impl<'a> Parser<'a> {
             .get("observed")
             .and_then(|c| c.value.as_int())
             .and_then(|i| u64::try_from(i).ok());
-        Some(SourceRef {
-            kind,
-            reference: reference.to_string(),
-            captured,
-            observed,
-            // Surface text has no way to write an unknown source key: the parser knows the three
-            // it defines and an author writing a fourth gets a parse error, not a preserved key.
-            // Forward compatibility here is the wire's business (1.7).
-            extra: Default::default(),
-        })
+        // Surface text cannot spell an unknown source kind: `kind:` parses against the named
+        // set, so an open enumeration is the wire's business, not this parser's. A source that
+        // arrived as CBOR with an unknown code keeps it; one written by hand cannot have one.
+        let mut s = SourceRef::new(kind, reference.to_string());
+        s.captured = captured;
+        s.observed = observed;
+        Some(s)
     }
 
     // -----------------------------------------------------------------------

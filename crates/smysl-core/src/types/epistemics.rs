@@ -175,6 +175,20 @@ pub enum SourceKind {
     /// kind it does not know, so a store using this is unreadable to one. A producer that needs
     /// older readers should keep the `Doc` convention.
     Node = 5,
+    /// A kind this build does not know (1.9).
+    ///
+    /// The enumeration is **open** from 1.9: a decoder meeting a code it cannot name keeps the
+    /// code, re-encodes it unchanged, reports `SMY-W409`, and treats the value as unknown
+    /// wherever it would otherwise be interpreted. Before this, `from_u8` returned `None` and
+    /// the decode failed — so one unrecognised code made a whole store unopenable, and every
+    /// code allocated after a release was a format break however small it looked. 1.7 shipped
+    /// exactly that break by adding `Node = 5`, which no 1.6 reader can open.
+    ///
+    /// **The raw code is carried on `SourceRef`, not here.** A data-carrying variant would be a
+    /// major bump — the `as u8` casts in this file would stop compiling — and `source.kind` is
+    /// inside the uid preimage, so the code has to survive re-encoding exactly or the unit
+    /// changes identity. `SourceRef::kind_code` is where it lives.
+    Unknown = 255,
 }
 
 impl SourceKind {
@@ -199,6 +213,7 @@ impl SourceKind {
             3 => Some(SourceKind::Tool),
             4 => Some(SourceKind::Doc),
             5 => Some(SourceKind::Node),
+            255 => Some(SourceKind::Unknown),
             _ => None,
         }
     }
@@ -211,6 +226,7 @@ impl SourceKind {
             SourceKind::Tool => "tool",
             SourceKind::Doc => "doc",
             SourceKind::Node => "node",
+            SourceKind::Unknown => "unknown",
         }
     }
 
@@ -338,6 +354,34 @@ pub struct SourceRef {
     /// Neither preserved nor rejected, which is the one outcome content addressing cannot
     /// survive. Found while planning a host-source variant that would have needed exactly this.
     pub extra: Extra,
+    /// The wire code behind `kind`, when `kind` is `Unknown`.
+    ///
+    /// `source.kind` is inside `UnitCore` and therefore inside the uid, so an unrecognised code
+    /// has to come back out in the bytes it arrived in. Normalising it to 255 would re-encode a
+    /// different core and give the unit a **different uid, silently** — the failure content
+    /// addressing cannot survive, and the reason this is a field rather than a payload on the
+    /// variant.
+    kind_code: Option<u8>,
+}
+
+impl SourceRef {
+    /// The wire code of `kind`: the raw byte for an unknown kind, the discriminant otherwise.
+    pub fn kind_code(&self) -> u8 {
+        self.kind_code.unwrap_or_else(|| self.kind.as_u8())
+    }
+
+    /// Record a kind this build does not know, preserving its code.
+    ///
+    /// Refuses 255 itself, which is reserved and never assigned, and refuses a code this build
+    /// *does* know — those have a named variant and belong in `kind`.
+    pub fn with_unknown_kind(mut self, code: u8) -> Option<SourceRef> {
+        if code == 255 || SourceKind::from_u8(code).is_some() {
+            return None;
+        }
+        self.kind = SourceKind::Unknown;
+        self.kind_code = Some(code);
+        Some(self)
+    }
 }
 
 /// How a caller-supplied source combines with one a unit already has.
@@ -396,6 +440,7 @@ impl SourceRef {
             // hash to one uid compare unequal in memory.
             reference: crate::types::normalise(&reference.into()),
             captured: None,
+            kind_code: None,
             observed: None,
             extra: Extra::new(),
         }

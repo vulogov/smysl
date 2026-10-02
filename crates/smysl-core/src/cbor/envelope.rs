@@ -58,7 +58,7 @@ pub fn unit_core_bytes(u: &UnitCore) -> Vec<u8> {
 
 fn enc_source(e: &mut Enc, s: &SourceRef) {
     let mut m = MapBuilder::new();
-    m.put(keys::source::KIND, |e| e.uint(s.kind.as_u8() as u64));
+    m.put(keys::source::KIND, |e| e.uint(s.kind_code() as u64));
     m.put(keys::source::REFERENCE, |e| e.text(&s.reference));
     m.put_opt(keys::source::CAPTURED, s.captured.as_ref(), |e, d| {
         e.text(&d.to_string())
@@ -413,10 +413,15 @@ fn dec_source(d: &mut Dec<'_>) -> Res<SourceRef> {
     let mut reference = None;
     let mut captured = None;
     let mut observed = None;
+    let mut raw_kind = None;
     let mut extra = Extra::new();
     read_map(d, &mut extra, |d, k| match k {
         keys::source::KIND => {
-            kind = SourceKind::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(at))?);
+            // Open from 1.9: a code this build cannot name is kept, not refused. Before, an
+            // unrecognised kind made the whole store unopenable.
+            let c = u8::try_from(d.uint()?).map_err(|_| bad(at))?;
+            raw_kind = Some(c);
+            kind = Some(SourceKind::from_u8(c).unwrap_or(SourceKind::Unknown));
             Ok(true)
         }
         keys::source::REFERENCE => {
@@ -433,13 +438,19 @@ fn dec_source(d: &mut Dec<'_>) -> Res<SourceRef> {
         }
         _ => Ok(false),
     })?;
-    Ok(SourceRef {
-        kind: kind.ok_or_else(|| bad(at))?,
-        reference: reference.ok_or_else(|| bad(at))?,
-        captured,
-        observed,
-        extra,
-    })
+    let kind = kind.ok_or_else(|| bad(at))?;
+    let mut s = SourceRef::new(kind, reference.ok_or_else(|| bad(at))?);
+    s.captured = captured;
+    s.observed = observed;
+    s.extra = extra;
+    if kind == SourceKind::Unknown {
+        // `source.kind` is inside the uid, so the code has to leave again exactly as it
+        // arrived. `with_unknown_kind` refuses 255 and refuses a code we do know.
+        s = s
+            .with_unknown_kind(raw_kind.ok_or_else(|| bad(at))?)
+            .ok_or_else(|| bad(at))?;
+    }
+    Ok(s)
 }
 
 fn dec_hlc(d: &mut Dec<'_>) -> Res<Hlc> {

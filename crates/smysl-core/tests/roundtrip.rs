@@ -736,3 +736,56 @@ fn an_unknown_granularity_key_survives_the_round_trip() {
         "and re-encode to the same bytes"
     );
 }
+
+/// An unknown source kind keeps its code, and therefore keeps the unit's uid.
+///
+/// `SourceKind` is the only enumeration opened in 1.9 that sits inside the uid preimage, so it
+/// is the only one where normalising an unrecognised code to 255 would be an identity change
+/// rather than a cosmetic one. A-8.1 permits an implementation to "use 255 internally to
+/// represent unknown"; for `source.kind` that permission is a silent uid change, which is why
+/// the raw code is carried on `SourceRef` and written back verbatim.
+#[test]
+fn an_unknown_source_kind_keeps_its_code_and_the_uid() {
+    // A unit whose source kind is 9: legal CBOR, a kind this build cannot name.
+    let known = UnitCoreBuilder::new(
+        KernelType::Claim,
+        "a claim from somewhere new",
+        Status::Cited,
+    )
+    .source(SourceRef::new(SourceKind::Doc, "x://y"))
+    .build()
+    .unwrap();
+    let mut bytes = unit_core_bytes(&known);
+    // Rewrite the source kind byte from 4 (doc) to 9 (unknown to this build).
+    let at = bytes
+        .windows(2)
+        .position(|w| w == [0x00, 0x04])
+        .expect("the source kind is encoded as key 0, value 4");
+    bytes[at + 1] = 0x09;
+
+    // Frame it as §3.1 frames a record: [type_code, body].
+    let mut framed = vec![0x82, 0x01];
+    framed.extend_from_slice(&bytes);
+    let (rec, _) = from_cbor(&framed).expect("an unknown kind must decode");
+    let u = match rec {
+        Record::Unit(u) => u,
+        other => panic!("expected a unit, got {other:?}"),
+    };
+    let s = u.source.as_ref().expect("the unit has a source");
+    assert_eq!(s.kind, SourceKind::Unknown, "the kind is unknown");
+    assert_eq!(s.kind_code(), 9, "and the raw code is kept");
+
+    assert_eq!(
+        unit_core_bytes(&u),
+        bytes,
+        "re-encoding must reproduce the bytes exactly, or the uid moves"
+    );
+    // And the code is load-bearing: a build that normalised it to 255 — which A-8.1 permits
+    // for the other four enumerations — would produce a different unit.
+    let mut normalised = bytes.clone();
+    normalised[at + 1] = 0xff;
+    assert_ne!(
+        normalised, bytes,
+        "normalising the code to 255 changes the core bytes, and so the uid"
+    );
+}
