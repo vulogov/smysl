@@ -146,14 +146,14 @@ pub fn run(store: &Store, profile: Option<&ConsumerProfile>, report: &mut Report
                     }
                 }
             }
-            smysl_core::Record::Contention(c) => {
-                if c.detected.kind == smysl_core::DetectionKind::Unknown {
-                    report.push(Diagnostic::new(Code::W409).with_message(format!(
-                        "detection kind {} is not known to this build; \
-                         preserved verbatim, reported as a plain disagreement",
-                        c.detected.kind_code()
-                    )));
-                }
+            smysl_core::Record::Contention(c)
+                if c.detected.kind == smysl_core::DetectionKind::Unknown =>
+            {
+                report.push(Diagnostic::new(Code::W409).with_message(format!(
+                    "detection kind {} is not known to this build; \
+                     preserved verbatim, reported as a plain disagreement",
+                    c.detected.kind_code()
+                )));
             }
             _ => {}
         }

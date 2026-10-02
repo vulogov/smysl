@@ -871,7 +871,26 @@ impl<'a> Parser<'a> {
 
         let deps = self.ref_list(&mut header, "deps");
         let grounds = self.ref_list(&mut header, "grounds");
-        let source = header.take("source").and_then(|v| self.source(&v));
+        // A `source` that fails to parse refuses the unit, rather than producing one without
+        // it. `source` is inside the uid, so a unit built from a source the author did not
+        // write is a different unit from the one the document describes — and it would carry a
+        // uid nothing else refers to. The diagnostic was already emitted; what changes is that
+        // it is now fatal to the unit rather than advisory.
+        let source = match header.take("source") {
+            None => None,
+            Some(v) => match self.source(&v) {
+                Some(s) => Some(s),
+                // `recover` before returning, as every other refusal in this function does.
+                // The record loop does not advance the cursor for a `RecordStart` — `unit` owns
+                // that, and does it inside `gist_body_detail` — so bailing out before the body
+                // is consumed leaves the parser on the same line forever. A malformed source
+                // would hang the parser rather than reject the document.
+                None => {
+                    self.recover();
+                    return None;
+                }
+            },
+        };
         let salience = header
             .take("salience")
             .and_then(|v| v.value.as_f64())
@@ -1327,6 +1346,16 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// The keys a `source { }` may carry. Anything else is `SMY-E001`.
+    ///
+    /// Closed rather than open, and deliberately: `source` is inside `UnitCore` and therefore
+    /// inside the uid. A key this parser ignored was a key that did not reach the encoder, so
+    /// the unit written back differed from the one the author described — silently, and with a
+    /// different identity. Forward compatibility inside `source` is the wire's business, where
+    /// `SourceRef::extra` preserves what it does not know; surface text has an author to tell.
+    const SOURCE_KEYS: &'static [&'static str] =
+        &["kind", "ref", "reference", "captured", "observed"];
+
     fn source(&mut self, v: &Spanned<HValue>) -> Option<SourceRef> {
         let o = match v.value.as_object() {
             Some(o) => o,
@@ -1335,6 +1364,22 @@ impl<'a> Parser<'a> {
                 return None;
             }
         };
+        // `SMY-E001` for a key this build does not define. The in-code comment here used to
+        // claim exactly this was happening; nothing iterated the object, so it was not.
+        for (k, _) in o.iter() {
+            if !Self::SOURCE_KEYS.contains(&k.value.as_str()) {
+                self.err(
+                    Code::E001,
+                    k.span,
+                    format!(
+                        "`{}` is not a source key; source accepts {}",
+                        k.value,
+                        Self::SOURCE_KEYS.join(", ")
+                    ),
+                );
+                return None;
+            }
+        }
         let kind = o
             .get("kind")
             .and_then(|k| k.value.as_str())
@@ -1347,17 +1392,35 @@ impl<'a> Parser<'a> {
             self.err(Code::E001, v.span, "source needs `kind` and `ref`");
             return None;
         };
-        let captured = o
-            .get("captured")
-            .and_then(|c| c.value.as_str())
-            .and_then(|s| Date::parse(s).ok());
+        // A malformed value is refused, not dropped. Dropping it produced a unit whose source
+        // the author did not write, with a uid to match.
+        let captured = match o.get("captured") {
+            None => None,
+            Some(c) => match c.value.as_str().and_then(|s| Date::parse(s).ok()) {
+                Some(d) => Some(d),
+                None => {
+                    self.err(Code::E001, c.span, "`captured` is not a date");
+                    return None;
+                }
+            },
+        };
         // Milliseconds as an integer, the same idiom `ts: [wall_ms, counter]` already uses for
         // an HLC. An ISO-8601 string would read better and would need a calendar to convert;
         // the format deliberately owns no calendar beyond `Date`'s validation.
-        let observed = o
-            .get("observed")
-            .and_then(|c| c.value.as_int())
-            .and_then(|i| u64::try_from(i).ok());
+        let observed = match o.get("observed") {
+            None => None,
+            Some(c) => match c.value.as_int().and_then(|i| u64::try_from(i).ok()) {
+                Some(ms) => Some(ms),
+                None => {
+                    self.err(
+                        Code::E001,
+                        c.span,
+                        "`observed` is not a non-negative integer of milliseconds",
+                    );
+                    return None;
+                }
+            },
+        };
         // Surface text cannot spell an unknown source kind: `kind:` parses against the named
         // set, so an open enumeration is the wire's business, not this parser's. A source that
         // arrived as CBOR with an unknown code keeps it; one written by hand cannot have one.

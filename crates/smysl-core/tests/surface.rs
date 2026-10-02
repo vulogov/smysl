@@ -1818,3 +1818,99 @@ fn a_timestamp_out_of_range_is_refused_not_wrapped() {
         assert_eq!(back.records, out.records, "ts {bad} broke the round trip");
     }
 }
+
+/// A `source { }` accepts exactly the keys it defines, and refuses the unit otherwise.
+///
+/// `source` is inside `UnitCore` and therefore inside the uid. A key this parser ignored was a
+/// key that never reached the encoder, so the unit written back was a *different unit* from the
+/// one the document described — with a uid nothing else refers to. The in-code comment used to
+/// claim an author writing a fourth key "gets a parse error"; nothing iterated the object, so
+/// they got silence. Forward compatibility inside `source` is the wire's business, where
+/// `SourceRef::extra` preserves what it does not know; surface text has an author to tell.
+#[test]
+fn a_source_key_this_build_does_not_define_refuses_the_unit() {
+    let doc = |src: &str| {
+        format!(
+            "@doc smysl/0.1 {{\n  id: v/t\n  intent: test\n  lang: en\n  roots: [c/x]\n}}\n\n\
+             @claim c/x {{ status: cited, source: {src} }}\n\
+             ~ A claim with a source, long enough to clear the body length check comfortably.\n"
+        )
+    };
+
+    // The control: every defined key, in one source.
+    let ok = parse_surface(&doc(
+        "{ kind: doc, ref: \"x://y\", captured: 2026-07-05, observed: 1726500000000 }",
+    ))
+    .expect("the parser recovers rather than failing");
+    assert!(
+        ok.records.iter().any(|r| matches!(r, Record::Unit(_))),
+        "every defined key together must still produce the unit"
+    );
+
+    for bad in [
+        "{ kind: doc, ref: \"x://y\", bogus: 1 }",
+        "{ kind: doc, ref: \"x://y\", published: 2026 }",
+    ] {
+        let out = parse_surface(&doc(bad)).expect("the parser recovers rather than failing");
+        assert!(
+            !out.records.iter().any(|r| matches!(r, Record::Unit(_))),
+            "{bad}: the unit must be refused, not emitted without its source"
+        );
+        assert!(
+            !out.diagnostics.is_empty(),
+            "{bad}: and the author must be told which key"
+        );
+    }
+}
+
+/// A malformed `captured` or `observed` refuses the unit rather than vanishing.
+///
+/// Both used to be read with `.and_then(…).ok()`, so a value the parser could not make sense of
+/// simply was not there — and the unit it produced carried a source the author did not write.
+#[test]
+fn a_malformed_source_value_refuses_the_unit() {
+    let doc = |src: &str| {
+        format!(
+            "@doc smysl/0.1 {{\n  id: v/t\n  intent: test\n  lang: en\n  roots: [c/x]\n}}\n\n\
+             @claim c/x {{ status: cited, source: {src} }}\n\
+             ~ A claim with a source, long enough to clear the body length check comfortably.\n"
+        )
+    };
+
+    for bad in [
+        "{ kind: doc, ref: \"x://y\", captured: \"not-a-date\" }",
+        "{ kind: doc, ref: \"x://y\", observed: -5 }",
+    ] {
+        let out = parse_surface(&doc(bad)).expect("the parser recovers rather than failing");
+        assert!(
+            !out.records.iter().any(|r| matches!(r, Record::Unit(_))),
+            "{bad}: a value that cannot be read is not a value to drop"
+        );
+    }
+}
+
+/// Refusing a source still advances the parser.
+///
+/// The record loop does not move the cursor for a `RecordStart` — `unit` owns that, and does it
+/// while consuming the body — so a refusal that returns before the body is consumed leaves the
+/// parser on the same line forever. Every other refusal in `unit` calls `recover` first; the
+/// strict-source path has to as well, or a malformed document *hangs* the parser instead of
+/// being rejected by it. The assertion here is simply that this returns at all.
+#[test]
+fn a_refused_source_does_not_stall_the_parser() {
+    let src = "@doc smysl/0.1 {\n  id: v/t\n  intent: test\n  lang: en\n  roots: [c/a]\n}\n\n\
+               @claim c/a { status: cited, source: { kind: doc, ref: \"x://y\", bogus: 1 } }\n\
+               ~ The first claim, refused, and the parser must carry on past it to the second.\n\n\
+               @claim c/b { status: speculative }\n\
+               ~ The second claim, which proves the parser reached the end of the document.\n";
+
+    let out = parse_surface(src).expect("the parser recovers rather than failing");
+    assert_eq!(
+        out.records
+            .iter()
+            .filter(|r| matches!(r, Record::Unit(_)))
+            .count(),
+        1,
+        "the good unit survives and the bad one does not"
+    );
+}

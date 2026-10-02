@@ -91,6 +91,45 @@ This is SMYSL-2.3's amendment A-8.1, with one addition the RFC does not make: fo
 the raw code is identity-bearing, so A-8.1's permission to "use 255 internally to represent
 unknown" does not apply to it.
 
+### `source { }` is strict, and a bad one refuses the unit
+
+**This stops accepting documents that load today. Check stored surface text before upgrading.**
+
+`source` is inside `UnitCore` and therefore inside the uid, and the parser was neither preserving
+unknown keys nor rejecting them — it ignored them. A key it ignored never reached the encoder, so
+the unit written back was a *different unit* from the one the document described, carrying a uid
+nothing else refers to. The in-code comment claimed an author writing a fourth key "gets a parse
+error, not a preserved key"; nothing iterated the object, so they got silence. Forward
+compatibility inside `source` is the wire's business, where `SourceRef::extra` has preserved
+unknown keys since 1.7. Surface text has an author to tell.
+
+Three changes, and the third is the one to read twice:
+
+- **A key outside `kind`, `ref`, `reference`, `captured`, `observed` is `SMY-E001`**, naming the
+  key and listing what is accepted.
+- **A malformed `captured` or an `observed` outside `u64` is `SMY-E001`** rather than silently
+  absent. Both were read with `.and_then(…).ok()`, so a value the parser could not make sense of
+  simply was not there.
+- **A `source` that fails to parse now refuses the whole unit.** It used to emit a diagnostic and
+  build the unit *without* its source. That necessarily widens an error that already existed:
+  **a misspelled `kind:` now costs the unit, not just its source.** A document relying on that
+  leniency stops parsing, by design — a unit whose provenance silently differs from what its
+  author wrote is worse than no unit.
+
+Nothing in the corpus or the fixtures relied on the old behaviour: the full suite passes
+unchanged.
+
+One defect found while building it, and worth recording because it was not a wrong answer but no
+answer. The record loop does not advance the cursor for a `RecordStart` — `unit` owns that, and
+does it while consuming the body — so a refusal that returns before the body is consumed leaves
+the parser on the same line forever. The first version of this change **hung the parser** on a
+malformed `source` instead of rejecting it, which on untrusted input is a denial of service
+rather than a parse error. Every other refusal in `unit` calls `recover` first; this one does
+now, and `a_refused_source_does_not_stall_the_parser` fails by timing out if that is ever
+removed.
+
+This is SMYSL-2.1's F-13 and F-14, and SMYSL-2.3's A-10 item 3.
+
 Carried in from the 1.8 cycle, in the order they were argued for rather than the order they
 are easiest:
 
