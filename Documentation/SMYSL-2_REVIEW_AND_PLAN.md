@@ -274,3 +274,41 @@ Two caveats on what the baseline does and does not prove:
   types, the digest, granularity key 5 — is visible to it. The wire guarantees are held by
   `make spec-tables`, the conformance corpus and the four-language fixtures, and A-13 adds
   obligations to all three. A clean `make semver` says nothing about §8.1 compatibility.
+
+
+---
+
+## 9. A-8.1 decided, and the probe that sized it
+
+**Decision, 2026-10-02: Option B.** Open `ThreadSchema`, `Role`, `SourceKind` and
+`DetectionKind`; reserve 255 in those four plus `admission`; **and** add the normative sentence
+making the raw code identity-bearing for `source.kind`, refusing to encode a code-less
+`Unknown`, with a conformance fixture asserting an unknown source kind leaves the uid unchanged.
+
+### Why, in one fact
+
+`v1.6.0`'s `SourceKind::from_u8` returns `None` for code 5. `1.7.0` added `Node = 5`. **A 1.6
+reader cannot open any store containing `source.kind: node`** — it fails at decode rather than
+degrading. This project has already shipped the break A-8.1 exists to prevent, silently, and on
+the one enumeration that sits inside the uid. The risk is a recurrence, not a forecast.
+
+### The probe, and what it measured
+
+A scratch branch added `Unknown = 255` to all four enumerations and nothing else. Torn down
+after measuring.
+
+| question | answer |
+|---|---|
+| Does `#[non_exhaustive]` suppress `enum_variant_added`? | **Yes.** `smysl-core`: 223 checks, 223 pass, `no semver update required` |
+| All twelve published crates? | **12 clean, 0 failures, 0 major, `make semver` exit 0** |
+| Does the workspace still build? | **Yes**, `--workspace --all-features`, exit 0 |
+| Exhaustive matches broken downstream | **Zero** |
+| Exhaustive matches broken in-crate | **Six**, all in `smysl-core`: `as_str` ×4, `DetectionKind::code`, `ThreadSchema::roles` |
+
+**What this changes about the plan.** The RFC sizes F-12 at 3–5 days and calls it "the highest
+blast radius of the set". On measurement, the *type change* is a morning: four variants and six
+match arms, with no downstream breakage and no semver impact. The 3–5 days is the plumbing —
+carrying the raw code through decode and re-encode, `W409`, recipe hashing, render skipping
+unknowns, and the four-language conformance fixture. That is a better-shaped estimate: the risky
+part is not the API, it is identity preservation, which is exactly where the Option B sentence
+is aimed.
