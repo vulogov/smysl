@@ -30,6 +30,8 @@ pub enum DetectionKind {
     LabelCollision = 2,
     /// Two agents' latest commitments to one unit disagree about how settled it is (1.7).
     CommitmentFork = 3,
+    /// A detection kind this build does not know (1.9). See `ThreadSchema::Unknown`.
+    Unknown = 255,
 }
 
 impl DetectionKind {
@@ -50,6 +52,7 @@ impl DetectionKind {
             1 => Some(DetectionKind::LiveRebuttal),
             2 => Some(DetectionKind::LabelCollision),
             3 => Some(DetectionKind::CommitmentFork),
+            255 => Some(DetectionKind::Unknown),
             _ => None,
         }
     }
@@ -60,6 +63,7 @@ impl DetectionKind {
             DetectionKind::LiveRebuttal => "live-rebuttal",
             DetectionKind::LabelCollision => "label-collision",
             DetectionKind::CommitmentFork => "commitment-fork",
+            DetectionKind::Unknown => "unknown",
         }
     }
 
@@ -72,6 +76,9 @@ impl DetectionKind {
             // Its own code: a reader told "concurrent supersession" about a commitment would
             // go looking for a supersedes edge that is not there.
             DetectionKind::CommitmentFork => crate::diag::Code::W058,
+            // A kind this build cannot name has no diagnostic of its own. W053 is the generic
+            // "these disagree" code, which is the most that can honestly be said about it.
+            DetectionKind::Unknown => crate::diag::Code::W053,
         }
     }
 }
@@ -87,12 +94,33 @@ impl fmt::Display for DetectionKind {
 pub struct Detected {
     pub kind: DetectionKind,
     pub ts: Hlc,
+    /// The wire code behind `kind`, when `kind` is `Unknown`. See `Step::role_code`.
+    kind_code: Option<u8>,
 }
 
 impl Detected {
     /// How a contention was found, and when.
     pub const fn new(kind: DetectionKind, ts: Hlc) -> Detected {
-        Detected { kind, ts }
+        Detected {
+            kind,
+            ts,
+            kind_code: None,
+        }
+    }
+
+    /// The wire code of `kind`: the raw byte for an unknown kind, else the discriminant.
+    pub fn kind_code(&self) -> u8 {
+        self.kind_code.unwrap_or_else(|| self.kind.as_u8())
+    }
+
+    /// Record a detection kind this build does not know, preserving its code.
+    pub fn with_unknown_kind(mut self, code: u8) -> Option<Detected> {
+        if code == 255 || DetectionKind::from_u8(code).is_some() {
+            return None;
+        }
+        self.kind = DetectionKind::Unknown;
+        self.kind_code = Some(code);
+        Some(self)
     }
 }
 

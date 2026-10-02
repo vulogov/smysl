@@ -21,6 +21,13 @@ pub enum ThreadSchema {
     Brief = 2,
     Qa = 3,
     Plan = 4,
+    /// A schema this build does not know (1.9).
+    ///
+    /// Open from 1.9, like `Role`, `SourceKind` and `DetectionKind`. A decoder keeps the code,
+    /// re-encodes it unchanged, and treats the schema as unknown wherever it would be
+    /// interpreted — `definition_of` returns `None` rather than silently deriving as `Analysis`.
+    /// Before, an unrecognised code failed the decode and made the store unopenable.
+    Unknown = 255,
 }
 
 impl ThreadSchema {
@@ -43,6 +50,7 @@ impl ThreadSchema {
             2 => Some(ThreadSchema::Brief),
             3 => Some(ThreadSchema::Qa),
             4 => Some(ThreadSchema::Plan),
+            255 => Some(ThreadSchema::Unknown),
             _ => None,
         }
     }
@@ -54,6 +62,7 @@ impl ThreadSchema {
             ThreadSchema::Brief => "brief",
             ThreadSchema::Qa => "qa",
             ThreadSchema::Plan => "plan",
+            ThreadSchema::Unknown => "unknown",
         }
     }
 
@@ -89,6 +98,9 @@ impl ThreadSchema {
                 Role::Decision,
                 Role::Risk,
             ],
+            // An unknown schema defines no roles: a walk over it has nothing to
+            // follow, which is the honest answer and not the same as `Analysis`.
+            ThreadSchema::Unknown => &[],
         }
     }
 
@@ -137,6 +149,8 @@ pub enum Role {
     Constraint = 21,
     Step = 22,
     Decision = 23,
+    /// A role this build does not know (1.9). See `ThreadSchema::Unknown`.
+    Unknown = 255,
 }
 
 impl Role {
@@ -201,6 +215,7 @@ impl Role {
             Role::Constraint => "constraint",
             Role::Step => "step",
             Role::Decision => "decision",
+            Role::Unknown => "unknown",
         }
     }
 
@@ -222,6 +237,12 @@ pub struct Step {
     pub role: Role,
     pub unit: Uid,
     pub note: Option<String>,
+    /// The wire code behind `role`, when `role` is `Unknown`.
+    ///
+    /// Not an identity concern — a thread is not inside a uid — but §8.1 requires a record
+    /// carrying an addition to round-trip byte for byte, and under the record-set digest a
+    /// changed byte is a changed store. Normalising an unknown role to 255 would do both.
+    role_code: Option<u8>,
 }
 
 impl Step {
@@ -230,12 +251,31 @@ impl Step {
             role,
             unit,
             note: None,
+            role_code: None,
         }
     }
 
     pub fn with_note(mut self, n: impl Into<String>) -> Step {
         self.note = Some(n.into());
         self
+    }
+
+    /// The wire code of `role`: the raw byte for an unknown role, the discriminant otherwise.
+    pub fn role_code(&self) -> u8 {
+        self.role_code.unwrap_or_else(|| self.role.as_u8())
+    }
+
+    /// Record a role this build does not know, preserving its code.
+    ///
+    /// Refuses 255, which is reserved and never assigned, and refuses a code this build does
+    /// know — those have a named variant and belong in `role`.
+    pub fn with_unknown_role(mut self, code: u8) -> Option<Step> {
+        if code == 255 || Role::from_u8(code).is_some() {
+            return None;
+        }
+        self.role = Role::Unknown;
+        self.role_code = Some(code);
+        Some(self)
     }
 }
 
@@ -250,6 +290,8 @@ pub struct Thread {
     pub steps: Vec<Step>,
     pub ts: Hlc,
     pub extra: Extra,
+    /// The wire code behind `schema`, when `schema` is `Unknown`. See `Step::role_code`.
+    schema_code: Option<u8>,
 }
 
 impl Thread {
@@ -268,6 +310,7 @@ impl Thread {
             steps: Vec::new(),
             ts,
             extra: Extra::new(),
+            schema_code: None,
         }
     }
 
@@ -304,6 +347,21 @@ impl Thread {
         v.sort();
         v.dedup();
         v
+    }
+
+    /// The wire code of `schema`: the raw byte for an unknown schema, else the discriminant.
+    pub fn schema_code(&self) -> u8 {
+        self.schema_code.unwrap_or_else(|| self.schema.as_u8())
+    }
+
+    /// Record a schema this build does not know, preserving its code.
+    pub fn with_unknown_schema(mut self, code: u8) -> Option<Thread> {
+        if code == 255 || ThreadSchema::from_u8(code).is_some() {
+            return None;
+        }
+        self.schema = ThreadSchema::Unknown;
+        self.schema_code = Some(code);
+        Some(self)
     }
 }
 

@@ -124,7 +124,7 @@ fn thread_bytes(t: &Thread) -> Vec<u8> {
         .map(|s| {
             enc(|e| {
                 e.array_head(if s.note.is_some() { 3 } else { 2 });
-                e.uint(s.role.as_u8() as u64);
+                e.uint(s.role_code() as u64);
                 e.uid(&s.unit);
                 if let Some(n) = &s.note {
                     e.text(n);
@@ -135,7 +135,7 @@ fn thread_bytes(t: &Thread) -> Vec<u8> {
 
     let mut m = MapBuilder::new();
     m.put(keys::thread::ID, |e| e.text(t.id.as_str()));
-    m.put(keys::thread::SCHEMA, |e| e.uint(t.schema.as_u8() as u64));
+    m.put(keys::thread::SCHEMA, |e| e.uint(t.schema_code() as u64));
     m.put(keys::thread::OWNER, |e| e.text(t.owner.as_str()));
     m.put(keys::thread::GIST, |e| e.text(&t.gist));
     m.put_array(keys::thread::STEPS, steps);
@@ -191,7 +191,7 @@ fn contention_bytes(c: &Contention) -> Vec<u8> {
     m.put_array(keys::contention::POSITIONS, positions);
     m.put(keys::contention::DETECTED, |e| {
         e.array_head(2);
-        e.uint(c.detected.kind.as_u8() as u64);
+        e.uint(c.detected.kind_code() as u64);
         enc_hlc(e, &c.detected.ts);
     });
     m.put(keys::contention::STATUS, |e| {
@@ -679,6 +679,7 @@ fn dec_thread(d: &mut Dec<'_>) -> Res<Thread> {
     let at = d.position();
     let mut id = None;
     let mut schema = None;
+    let mut raw_schema = None;
     let mut owner = None;
     let mut gist = None;
     let mut steps = Vec::new();
@@ -691,7 +692,10 @@ fn dec_thread(d: &mut Dec<'_>) -> Res<Thread> {
             Ok(true)
         }
         keys::thread::SCHEMA => {
-            schema = ThreadSchema::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(at))?);
+            // Open from 1.9: an unrecognised schema is kept, not refused.
+            let c = u8::try_from(d.uint()?).map_err(|_| bad(at))?;
+            raw_schema = Some(c);
+            schema = Some(ThreadSchema::from_u8(c).unwrap_or(ThreadSchema::Unknown));
             Ok(true)
         }
         keys::thread::OWNER => {
@@ -709,15 +713,21 @@ fn dec_thread(d: &mut Dec<'_>) -> Res<Thread> {
                 if !(2..=3).contains(&n) {
                     return Err(bad(at));
                 }
-                let role = Role::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(at))?)
-                    .ok_or_else(|| bad(at))?;
+                // Open from 1.9: an unrecognised role is kept, not refused.
+                let rc = u8::try_from(d.uint()?).map_err(|_| bad(at))?;
+                let role = Role::from_u8(rc).unwrap_or(Role::Unknown);
                 let unit = d.uid()?;
                 let note = if n == 3 {
                     Some(d.text()?.to_string())
                 } else {
                     None
                 };
-                Ok(Step { role, unit, note })
+                let mut s = Step::new(role, unit);
+                s.note = note;
+                if role == Role::Unknown {
+                    s = s.with_unknown_role(rc).ok_or_else(|| bad(at))?;
+                }
+                Ok(s)
             })?;
             Ok(true)
         }
@@ -728,15 +738,22 @@ fn dec_thread(d: &mut Dec<'_>) -> Res<Thread> {
         _ => Ok(false),
     })?;
 
-    Ok(Thread {
-        id: id.ok_or_else(|| bad(at))?,
-        schema: schema.ok_or_else(|| bad(at))?,
-        owner: owner.ok_or_else(|| bad(at))?,
-        gist: gist.ok_or_else(|| bad(at))?,
-        steps,
-        ts: ts.ok_or_else(|| bad(at))?,
-        extra,
-    })
+    let schema = schema.ok_or_else(|| bad(at))?;
+    let mut th = Thread::new(
+        id.ok_or_else(|| bad(at))?,
+        schema,
+        owner.ok_or_else(|| bad(at))?,
+        gist.ok_or_else(|| bad(at))?,
+        ts.ok_or_else(|| bad(at))?,
+    );
+    th.steps = steps;
+    th.extra = extra;
+    if schema == ThreadSchema::Unknown {
+        th = th
+            .with_unknown_schema(raw_schema.ok_or_else(|| bad(at))?)
+            .ok_or_else(|| bad(at))?;
+    }
+    Ok(th)
 }
 
 fn dec_granularity(d: &mut Dec<'_>) -> Res<GranularityProfile> {
@@ -864,9 +881,14 @@ fn dec_contention(d: &mut Dec<'_>) -> Res<Contention> {
             if d.array_head()? != 2 {
                 return Err(bad(a));
             }
-            let kind = DetectionKind::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(a))?)
-                .ok_or_else(|| bad(a))?;
-            detected = Some(Detected::new(kind, dec_hlc(d)?));
+            // Open from 1.9: an unrecognised detection kind is kept, not refused.
+            let c = u8::try_from(d.uint()?).map_err(|_| bad(a))?;
+            let kind = DetectionKind::from_u8(c).unwrap_or(DetectionKind::Unknown);
+            let mut det = Detected::new(kind, dec_hlc(d)?);
+            if kind == DetectionKind::Unknown {
+                det = det.with_unknown_kind(c).ok_or_else(|| bad(a))?;
+            }
+            detected = Some(det);
             Ok(true)
         }
         keys::contention::STATUS => {

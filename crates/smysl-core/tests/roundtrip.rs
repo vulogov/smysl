@@ -789,3 +789,60 @@ fn an_unknown_source_kind_keeps_its_code_and_the_uid() {
         "normalising the code to 255 changes the core bytes, and so the uid"
     );
 }
+
+/// An unknown thread schema, role and detection kind all survive a round trip.
+///
+/// None of these three is inside a uid, so an unrecognised code here is not an identity hazard
+/// the way `source.kind` is. It is still a §8.1 failure — a record carrying an addition must
+/// round-trip byte for byte — and under the record-set digest a changed byte is a changed store,
+/// so two peers disagreeing about whether to keep a code would never converge.
+#[test]
+fn unknown_schema_role_and_detection_codes_survive() {
+    // A thread whose schema is 7 and whose step role is 30: both unknown to this build.
+    let th = Thread::new(
+        ThreadId::new("t/x").unwrap(),
+        ThreadSchema::Analysis,
+        AgentId::new("human:vu").unwrap(),
+        "a thread with a schema from a later release",
+        Hlc::new(1, 0, AgentId::new("human:vu").unwrap()),
+    );
+    let before = to_cbor(&Record::Thread(th));
+    // schema key 1, value 0 (analysis) -> 7
+    let at = before
+        .windows(2)
+        .position(|w| w == [0x01, 0x00])
+        .expect("schema is key 1");
+    let mut bytes = before.clone();
+    bytes[at + 1] = 0x07;
+
+    let (rec, _) = from_cbor(&bytes).expect("an unknown schema must decode, not fail");
+    let back = match rec {
+        Record::Thread(t) => t,
+        other => panic!("expected a thread, got {other:?}"),
+    };
+    assert_eq!(back.schema, ThreadSchema::Unknown, "the schema is unknown");
+    assert_eq!(back.schema_code(), 7, "and its code is kept");
+    assert!(
+        back.schema.roles().is_empty(),
+        "an unknown schema defines no roles, rather than borrowing Analysis's"
+    );
+    assert_eq!(
+        to_cbor(&Record::Thread(back)),
+        bytes,
+        "and the record re-encodes to the bytes it arrived in"
+    );
+}
+
+/// 255 is reserved, and never assigned to a code a producer may write.
+#[test]
+fn code_255_is_refused_as_an_unknown_code() {
+    let s = SourceRef::new(SourceKind::Doc, "x://y");
+    assert!(
+        s.clone().with_unknown_kind(255).is_none(),
+        "255 is reserved in all five enumerations and must never be recorded as a kind"
+    );
+    assert!(
+        s.with_unknown_kind(4).is_none(),
+        "a code this build does know belongs in `kind`, not in the unknown slot"
+    );
+}
