@@ -312,3 +312,46 @@ carrying the raw code through decode and re-encode, `W409`, recipe hashing, rend
 unknowns, and the four-language conformance fixture. That is a better-shaped estimate: the risky
 part is not the API, it is identity preservation, which is exactly where the Option B sentence
 is aimed.
+
+
+---
+
+## 10. A-10 item 2 decided
+
+**Decision, 2026-10-02: Option A + D.** Reserve `lang:` as unit core key 9, require quoting for
+payload use, ship `SMY-W432` in 1.9.0 — **and** at TX-P5, when A-1 activates, emit a `check`
+diagnostic naming every unit whose uid changes, rather than letting the lint be the only warning.
+
+### What was measured, not assumed
+
+- `lang:` on a unit is **accepted today with zero diagnostics**, survives `fmt` unquoted, and is
+  **inside the uid**: the same text gives `b3:27ww…` with it and `b3:mwpk…` without. A-1 yields a
+  third uid for those same bytes.
+- **The project's own corpus is unaffected.** All fifteen `lang:` occurrences under `fixtures/`
+  are in `@doc` headers (view key 6), which is correct and untouched. Zero unit-level uses.
+- **The mitigation is implementable.** `HObject` stores `Vec<(Spanned<String>, Spanned<HValue>)>`,
+  so the key's span survives parsing and `lang:` is distinguishable from `"lang":` by a span
+  check. The 2.3 review's doubt on this point was too pessimistic.
+
+### Why A over the alternatives
+
+A sigil spelling (`@lang:`) buys §8.1 cleanliness with a permanent wart — every other core key is
+a bare word. Leaving `lang` in `x.text/v1` keeps compatibility but gives up validation, and an
+unvalidated language tag is of little use to retrieval or to a five-language library. Both options
+make the format permanently worse to avoid a migration one release wide.
+
+### Why D is the part that matters
+
+The defect in A as written is **silence**, not the break. A lint in 1.9.0 warns whoever upgrades
+and reads the changelog; it does nothing for a corpus that sits untouched until TX-P5 and then
+shifts under its owner. Both preimages are computable at activation, so the change can be
+*reported* — which turns a silent identity drift into a migration.
+
+### Conditions
+
+1. **The spec fold states this as an out-of-band break.** The set's §0 claim that every amendment
+   is a §8.1 addition or a §8.3 tightening is false here, and the §8.3 obligation — "a changelog
+   entry loud enough that somebody with stored documents can check them" — applies.
+2. **`W432` ships in 1.9.0.** The entire mitigation is that a release warned first.
+3. **Zero in-corpus uses is reassurance, not permission.** It says nothing about corpora nobody
+   can survey, which is the population a format specification exists for.
