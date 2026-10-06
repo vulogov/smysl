@@ -255,6 +255,52 @@ fn ordering(store: &Store, scope: &[Uid]) -> Ordering {
     }
 }
 
+/// The ends of every relation whose kind one of the schema's rules names.
+///
+/// `Matcher::SourceOf` and `TargetOf` used to answer by calling `relations_of_kind`, which
+/// filters every relation in the store and allocates a `Vec` — once per unit, per rule. On a
+/// store with R relations and U units in scope that is O(U · R) work to answer a question with
+/// one answer per kind. Built once here instead, from one `relations_of_kind` call per kind the
+/// rules actually mention, so a schema with no relation rule builds nothing.
+///
+/// It is the same call, so the withdrawn-edge filter is the same filter: `relations_of_kind`
+/// excludes a withdrawn relation, and nothing here can disagree with it about which those are.
+struct RelEnds {
+    sources: BTreeMap<RelKind, BTreeSet<Uid>>,
+    targets: BTreeMap<RelKind, BTreeSet<Uid>>,
+}
+
+impl RelEnds {
+    fn for_rules(store: &Store, def: &SchemaDef) -> RelEnds {
+        let mut sources: BTreeMap<RelKind, BTreeSet<Uid>> = BTreeMap::new();
+        let mut targets: BTreeMap<RelKind, BTreeSet<Uid>> = BTreeMap::new();
+        for (matcher, _) in def.rules {
+            match matcher {
+                Matcher::SourceOf(k) => {
+                    sources.entry(k.clone()).or_insert_with(|| {
+                        store
+                            .relations_of_kind(k)
+                            .into_iter()
+                            .map(|r| r.from)
+                            .collect()
+                    });
+                }
+                Matcher::TargetOf(k) => {
+                    targets.entry(k.clone()).or_insert_with(|| {
+                        store
+                            .relations_of_kind(k)
+                            .into_iter()
+                            .map(|r| r.to)
+                            .collect()
+                    });
+                }
+                _ => {}
+            }
+        }
+        RelEnds { sources, targets }
+    }
+}
+
 fn assign(
     store: &Store,
     def: &SchemaDef,
@@ -263,11 +309,12 @@ fn assign(
     order: &Ordering,
 ) -> BTreeMap<Uid, Role> {
     let ranked: Vec<Uid> = sal.top(scope.len()).into_iter().map(|(u, _)| u).collect();
+    let ends = RelEnds::for_rules(store, def);
 
     let mut out = BTreeMap::new();
     for uid in scope {
         for (matcher, role) in def.rules {
-            if matches(store, matcher, uid, order, &ranked) {
+            if matches(store, matcher, uid, order, &ranked, &ends) {
                 out.insert(*uid, *role);
                 break;
             }
@@ -276,7 +323,18 @@ fn assign(
     out
 }
 
-fn matches(store: &Store, m: &Matcher, uid: &Uid, order: &Ordering, ranked: &[Uid]) -> bool {
+fn matches(
+    store: &Store,
+    m: &Matcher,
+    uid: &Uid,
+    order: &Ordering,
+    ranked: &[Uid],
+    ends: &RelEnds,
+) -> bool {
+    // Kept ahead of every arm, including the two that are now set lookups: a uid the store does
+    // not hold matches nothing. An index built from the store's own relations could only contain
+    // uids the store holds, so dropping this would be invisible on any real input and wrong on a
+    // scope naming a unit that is not there.
     let Some(unit) = store.get(uid) else {
         return false;
     };
@@ -284,11 +342,10 @@ fn matches(store: &Store, m: &Matcher, uid: &Uid, order: &Ordering, ranked: &[Ui
         Matcher::Any => true,
         Matcher::Type(k) => unit.core.schema.kernel() == Some(*k),
         Matcher::StatusAtLeast(s) => unit.core.status >= *s,
-        Matcher::SourceOf(k) => store
-            .relations_of_kind(k)
-            .into_iter()
-            .any(|r| r.from == *uid),
-        Matcher::TargetOf(k) => store.relations_of_kind(k).into_iter().any(|r| r.to == *uid),
+        Matcher::SourceOf(k) => ends.sources.get(k).is_some_and(|s| s.contains(uid)),
+        Matcher::TargetOf(k) => ends.targets.get(k).is_some_and(|s| s.contains(uid)),
+        // A scan of `n`, deliberately: rule arities are small, and an index over a prefix of a
+        // ranking would cost more to build than the scan it replaced.
         Matcher::SalienceTop(n) => ranked.iter().take(*n).any(|u| u == uid),
         Matcher::At(Position::First) => order.first.contains(uid),
         Matcher::At(Position::Last) => order.last.contains(uid),

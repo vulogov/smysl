@@ -427,3 +427,40 @@ fn rule_l_reports_a_step_whose_dependency_is_missing() {
         "a thread carrying its dependencies must not be reported"
     );
 }
+
+/// Derivation is byte-identical to what it produced before H-18 rewrote how it looks up
+/// relations.
+///
+/// H-18 replaced two `Matcher` arms that filtered every relation in the store, for every unit,
+/// with a lookup into an index built once per derivation. The predicate is the same, so the
+/// output should be identical — "should" being exactly the kind of claim this repository does
+/// not accept on reasoning alone. The digest below was recorded from the build *before* the
+/// change, over the same 60 generated graphs the gate above uses and every schema, so the
+/// comparison is against measured bytes rather than against the new code's own opinion.
+///
+/// It keeps its value afterwards: any change to role assignment, ordering, selection or repair
+/// moves it, and moving it has to be a decision somebody types.
+#[test]
+fn derivation_is_byte_identical_to_the_recorded_golden() {
+    let mut acc: Vec<u8> = Vec::new();
+    for seed in 1..=60u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+        let n = 1 + rng.below(14);
+        let (records, _) = generate(&mut rng, n);
+        let store = Store::from_records(records);
+        for &schema in ThreadSchema::ALL {
+            let (thread, _) = derive_thread(&store, schema, &opts());
+            acc.extend_from_slice(&smysl_core::to_cbor_seq(&[Record::Thread(thread)]));
+        }
+    }
+    let digest = smysl_core::hash_bytes(&acc);
+    assert_eq!(
+        hex(&digest),
+        "b776321220931bfc59d85904859c3fd2bd9443683016ddb9c54dbd96cea2bf08",
+        "derivation changed what it produces"
+    );
+}
+
+fn hex(b: &[u8; 32]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}

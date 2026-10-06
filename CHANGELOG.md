@@ -370,6 +370,48 @@ is where it belonged.
 
 This is SMYSL-2.1's H-17.
 
+### `thread --derive` was quadratic in units, and is not
+
+Two `Matcher` arms — `SourceOf(k)` and `TargetOf(k)` — answered by calling
+`relations_of_kind(k)`, which filters every relation in the store and allocates a `Vec`. Once
+per unit in scope, per rule. That is O(U · R) work to answer a question with one answer per
+kind, and every schema but `narrative` names at least one relation kind.
+
+The ends of each named kind are now indexed once per derivation, from one `relations_of_kind`
+call per kind the rules actually mention, and the two arms are set lookups. Measured on one
+machine, release build, median of five, before and after:
+
+```text
+units (2 rel/unit)      before        after     x per 2x, before → after
+  1000                  59.19 ms    1.96 ms     -      → -
+  2000                 235.22 ms    4.47 ms     3.97   → 2.28
+  4000                 940.83 ms    9.87 ms     4.00   → 2.21
+  8000                3768.72 ms   21.79 ms     4.01   → 2.21
+
+relations (2000 units)  before        after
+  2000                 120.17 ms    4.07 ms
+ 32000                2030.53 ms    3.90 ms
+```
+
+173× at 8000 units, and the growth is linear rather than quadratic. The relations axis is now
+flat: the index is built once instead of per unit.
+
+The cause is pinned rather than inferred. `narrative` is the one schema whose rules name no
+relation kind, and it is the one schema the old code did not punish — 6.06 ms against 2294 ms
+for `analysis` on the same 4000-unit store. A control that was there all along.
+
+**The output is unchanged, and that is measured too.** A digest over every schema's thread for
+60 generated graphs was recorded from the build *before* the change and is asserted after it:
+`derivation_is_byte_identical_to_the_recorded_golden`. The predicate is the same predicate —
+`relations_of_kind` excludes withdrawn relations, and the index is built from the same call, so
+nothing can disagree with it about which those are — but "the same by construction" is the kind
+of claim this project counts rather than repeats.
+
+`crates/smysl-thread/tests/scaling.rs` is new, `#[ignore]`d like the other three: a
+measurement, not a gate.
+
+This is SMYSL-2.1's H-18.
+
 Carried in from the 1.8 cycle, in the order they were argued for rather than the order they
 are easiest:
 
