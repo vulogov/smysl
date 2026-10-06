@@ -1017,6 +1017,13 @@ fn cli() -> Command {
                         .help("Output tokens per call [default: the provider's max_output, at least 2048]"),
                 )
                 .arg(
+                    Arg::new("normaliser")
+                        .long("normaliser")
+                        .value_name("V")
+                        .value_parser(["v1", "v2"])
+                        .help("Quote-check comparison form [default: v1]"),
+                )
+                .arg(
                     Arg::new("temperature")
                         .long("temperature")
                         .value_name("T")
@@ -4586,6 +4593,16 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     };
     if let Some(p) = path_arg.as_deref().and_then(smysl::IngestPath::parse) {
         opts = opts.with_path(p);
+    }
+    // V2 answers five probes that V1 calls `Loose` or `Absent` on quotes a reader would call
+    // verbatim, and `E307` on an honest quote refuses a correct attribution. It is opt-in in 1.9
+    // because it changes the recipe of any run that asks for it, and a comparison form is the
+    // kind of thing a caller should choose rather than discover.
+    if let Some(n) = m.get_one::<String>("normaliser") {
+        opts = opts.with_normaliser(match n.as_str() {
+            "v2" => smysl::QuoteNormaliser::V2,
+            _ => smysl::QuoteNormaliser::V1,
+        });
     }
     // `--temperature`, else `ingest.temperature`. The range is checked before any call: a
     // request a provider will reject is not worth paying for, and the configuration's own copy

@@ -44,6 +44,13 @@ pub struct Conditions {
     /// provenance, so two runs that differ only here are not one recipe. Absent adds nothing to
     /// the hash, so every recipe computed before this field existed is unchanged.
     pub source: Option<(smysl_core::SourceRef, smysl_core::SourcePolicy)>,
+    /// The quote-check comparison form, when it is not the default (1.9).
+    ///
+    /// `None` and `Some(V1)` are the same run, and both add nothing to the hash: V1 is what
+    /// every recipe computed before this field existed was computed under, so writing it would
+    /// change every one of them for no change in what happened. Only `V2` is pushed, following
+    /// the `source` precedent above.
+    pub normaliser: Option<smysl_core::quote::Normaliser>,
 }
 
 impl Conditions {
@@ -58,6 +65,7 @@ impl Conditions {
             schema_set: Vec::new(),
             path: IngestPath::Surface,
             source: None,
+            normaliser: None,
         }
     }
 
@@ -83,6 +91,17 @@ impl Conditions {
 
     pub fn with_temperature(mut self, t: f32) -> Conditions {
         self.temperature = t;
+        self
+    }
+
+    /// The comparison form the quote check ran under.
+    ///
+    /// V1 is recorded as absent, because it is what an absent field has always meant.
+    pub fn with_normaliser(mut self, n: smysl_core::quote::Normaliser) -> Conditions {
+        self.normaliser = match n {
+            smysl_core::quote::Normaliser::V1 => None,
+            other => Some(other),
+        };
         self
     }
 
@@ -138,6 +157,13 @@ impl Conditions {
             push(b, policy.as_str().as_bytes());
             push(b, s.kind.as_str().as_bytes());
             push(b, s.reference.as_bytes());
+        }
+        // Absent for V1, so every recipe computed before the field existed is unchanged. A
+        // different comparison form is a different run: it decides which quotes the check
+        // passes, which decides which units are staged.
+        if let Some(n) = self.normaliser {
+            push(b, b"normaliser");
+            push(b, n.id().as_bytes());
         }
     }
 }
@@ -200,10 +226,31 @@ mod tests {
             b.clone().with_temperature(0.7),
             b.clone().with_schemas(["x.sre/incident".to_string()]),
             b.clone().with_path(IngestPath::JsonAst),
+            b.clone().with_normaliser(smysl_core::quote::Normaliser::V2),
         ] {
             assert_ne!(changed.recipe(), b.recipe());
             assert_ne!(changed.family(), b.family());
         }
+    }
+
+    /// V1 adds nothing, so every recipe computed before the field existed is unchanged.
+    ///
+    /// The same rule as `source`: an absent field contributes no bytes. V1 is what an absent
+    /// normaliser has always meant, so recording it would change every stored recipe hash for
+    /// no change in what the run did — and a recipe that moves without the run moving is the
+    /// one thing a recipe must not do.
+    #[test]
+    fn the_default_normaliser_adds_nothing() {
+        let b = base();
+        let explicit = b.clone().with_normaliser(smysl_core::quote::Normaliser::V1);
+        assert_eq!(explicit.normaliser, None, "V1 is recorded as absent");
+        assert_eq!(explicit.recipe(), b.recipe());
+        assert_eq!(explicit.family(), b.family());
+
+        // And V2 is not absent, in both hashes.
+        let v2 = b.clone().with_normaliser(smysl_core::quote::Normaliser::V2);
+        assert_eq!(v2.normaliser, Some(smysl_core::quote::Normaliser::V2));
+        assert_ne!(v2.recipe(), b.recipe());
     }
 
     #[test]

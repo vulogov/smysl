@@ -30,7 +30,12 @@ regretted, and three gates that each know what they are blind to.
   cut. 1.7 adds `Commit` and `Commitment`, the record type and the axis inkhaven asked for — 276
   and 230 at the 1.7.0 cut. 1.8 adds none: `observed`, `Rolling` and the observation-order
   readers are a field, a type and methods behind names the facade already exports, so the
-  counts stand at **276 and 230 at the 1.8.0 cut**.
+  counts stand at **276 and 230 at the 1.8.0 cut**. 1.9 adds `quote_support_with`,
+  `quote_support_span_with` and `QuoteNormaliser` — a second comparison form for the quote
+  check, chosen by the caller. The four 1.3 names keep the normalisation 1.3 froze: `V1` is what
+  they compare with, and that is the whole of why the new names exist rather than a flag on the
+  old ones. (F-3 of SMYSL-2.1.) The counts stand at **279 and 233** with those three; 1.9 is not
+  cut yet, and `tests/public-api.txt` is the number that binds either way.
 - **Every public item in each of the eleven library crates** — they share one version, all are
   published, and `make semver` enforces each of them individually. That is the larger and
   truer figure, and §0.2 of `ROAD_TO_1.0.md` explains why it is the one that binds.

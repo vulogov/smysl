@@ -111,6 +111,7 @@ pub use smysl::Profile
 pub use smysl::Provenance
 pub use smysl::QUOTE_KEY
 pub use smysl::Query
+pub use smysl::QuoteNormaliser
 pub use smysl::QuoteSupport
 pub use smysl::Reason
 pub use smysl::RecipeChange
@@ -216,6 +217,8 @@ pub use smysl::quote_support
 pub use smysl::quote_support_in
 pub use smysl::quote_support_in_span
 pub use smysl::quote_support_span
+pub use smysl::quote_support_span_with
+pub use smysl::quote_support_with
 pub use smysl::rebuttals_of
 pub use smysl::relink
 pub use smysl::resolve_label

@@ -337,7 +337,61 @@ fn a_repaired_answer_is_accepted_on_the_second_attempt() {
     assert_eq!(staged.units[0].gist, "the pool saturated");
 }
 
-/// The temperature reaches the request, and the recipe.
+/// The normaliser reaches the quote check, and a quote V1 refuses is accepted under V2.
+///
+/// F-3. The answer attributes a quote that differs from the document only in its quotation
+/// marks: the document writes French guillemets with spaces inside them, the quote writes them
+/// without. A reader calls that verbatim. V1 calls it `Loose` (`SMY-W308`), and a quote that
+/// differed by `ё` rather than by spacing would be `Absent` (`SMY-E307`) — an error, which buys
+/// a repair turn and can degrade the span. Refusing a correct attribution is the expensive
+/// direction of that mistake.
+#[test]
+fn the_normaliser_reaches_the_quote_check() {
+    const DOC: &str = "Il a dit \u{00AB} Libert\u{00E9} \u{00BB} hier, et tout a chang\u{00E9}.";
+    // The characters themselves, not JSON `\u` escapes: the quote must differ from the
+    // document only in the spaces inside the guillemets, which is the whole probe.
+    let answer = concat!(
+        "{\"units\":[{\"type\":\"observation\",\"gist\":\"he said liberty yesterday\",",
+        "\"status\":\"speculative\",",
+        "\"quote\":\"\u{00AB}Libert\u{00E9}\u{00BB}\"}]}"
+    );
+
+    let run = |n: smysl_core::quote::Normaliser| {
+        let (r, _) = registry(Scripted::saying(answer));
+        let (_, report) = Ingestor::new(
+            &r,
+            opts(Rung::Document)
+                .with_path(IngestPath::JsonAst)
+                .with_normaliser(n),
+        )
+        .ingest(&Store::new(), DOC)
+        .unwrap();
+        report
+    };
+
+    let v1 = run(smysl_core::quote::Normaliser::V1);
+    assert!(
+        v1.diagnostics
+            .iter()
+            .any(|d| d.code == smysl_core::Code::W308),
+        "V1 calls the guillemets loose: {:?}",
+        v1.diagnostics
+    );
+
+    let v2 = run(smysl_core::quote::Normaliser::V2);
+    assert!(
+        !v2.diagnostics
+            .iter()
+            .any(|d| d.code == smysl_core::Code::W308 || d.code == smysl_core::Code::E307),
+        "V2 accepts the quote: {:?}",
+        v2.diagnostics
+    );
+    // And the two runs are different recipes, because the comparison form decides which quotes
+    // pass and therefore which units are staged.
+    assert_ne!(v1.recipe, v2.recipe);
+}
+
+/// The temperature reaches the request, and the recipe./// The temperature reaches the request, and the recipe.
 ///
 /// H-12. It has been a condition of the recipe since recipes existed and reachable only from
 /// the library, so nothing outside this crate could set it and nothing asserted it arrived.

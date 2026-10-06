@@ -145,6 +145,15 @@ pub struct IngestOptions {
     /// against. Zero for a one-shot ingest; a pipeline increments it per step.
     pub hop: u32,
     pub temperature: f32,
+    /// Which comparison form the quote check uses (1.9).
+    ///
+    /// `V1` by default, which is what every release up to 1.8 checked with. `V2` answers the
+    /// five SMYSL-2.1 §2.1 probes — French guillemets with spaces inside, German low-high
+    /// quotation marks, `ё` against `е`, `ß` against `ss`, a modifier-letter apostrophe — each of
+    /// which is a quote a reader would call verbatim and the checker called `Loose` or `Absent`.
+    /// `E307` on an honest quote is the expensive direction of that error, since it refuses a
+    /// correct attribution. SMYSL-2.4 makes `V2` the default for text ingest.
+    pub normaliser: smysl_core::quote::Normaliser,
     /// Output tokens to ask for per call. `0`, the default, means the provider's configured
     /// `max_output`, and never less than [`DEFAULT_MAX_OUTPUT`]; see
     /// [`IngestOptions::output_budget`]. Anything else is sent as given.
@@ -198,6 +207,12 @@ impl IngestOptions {
 
     pub fn with_max_output(mut self, n: usize) -> IngestOptions {
         self.max_output = n;
+        self
+    }
+
+    /// Which comparison form the quote check uses.
+    pub fn with_normaliser(mut self, n: smysl_core::quote::Normaliser) -> IngestOptions {
+        self.normaliser = n;
         self
     }
 
@@ -319,6 +334,7 @@ impl Default for IngestOptions {
             hop: 0,
             agent,
             temperature: 0.0,
+            normaliser: smysl_core::quote::Normaliser::V1,
             max_output: 0,
             model: String::new(),
             prompt: None,
@@ -414,6 +430,7 @@ impl<'a> Ingestor<'a> {
             .with_provider(provider.id().to_string(), self.model_for(&caps))
             .with_granularity(&self.opts.granularity)
             .with_temperature(self.opts.temperature)
+            .with_normaliser(self.opts.normaliser)
             .with_schemas(["smysl.kernel/0.1".to_string()])
             .with_path(choice.path);
         let conditions = match &self.opts.source {
@@ -568,7 +585,7 @@ impl<'a> Ingestor<'a> {
             // A quote that is not in the source is a fabricated attribution, and an error -
             // so it buys a repair turn, which is the one thing a model can actually fix
             // here. An elided quote is a warning and passes.
-            diagnostics.extend(quote::verify(&units, text));
+            diagnostics.extend(quote::verify_with(self.opts.normaliser, &units, text));
             // §22.3: check what can be checked without the store, so the model still has a
             // turn in which to fix it. Discovering a granularity violation at staging would
             // mean discovering it after the calls were paid for.

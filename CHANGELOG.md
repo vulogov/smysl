@@ -500,6 +500,77 @@ fixed-size byte array to serve it.
 
 This is SMYSL-2.1's F-4.
 
+### A quote span could point inside a character
+
+`support_span` returns a byte range into the source as given, so that a caller can show a
+reader the text they can see. The obvious use is `&source[span]`, and on some inputs **that
+panicked**.
+
+`normalise_mapped` shadowed its loop variable with the *mapped* character and then computed the
+end sentinel from it. For a three-byte em dash mapped to a one-byte hyphen, the sentinel was
+`at + 1` instead of `at + 3` — so a span ending on the last content character ended *inside*
+it. Any dash, any non-breaking space, or any typographic quote as the final content character
+was enough. A `Loose` range had the same fault more quietly: it pointed at a region one or two
+bytes short of where the match ended.
+
+Present since spans landed in 1.5, in public API, and found by the property test F-3 asked for:
+agreement between `support_with` and `support_span_with` over generated input drawn from the
+characters the normaliser rewrites. No caller in this repository slices the range, which is why
+nothing had crashed here; a library consumer doing the obvious thing would have.
+
+This does change what V1 returns for those inputs, which is the one place the "V1 moves not one
+byte" promise below is broken on purpose. A range that cannot be used to slice its own source
+is not a contract worth keeping.
+
+### A second comparison form for attributed quotes
+
+Five quotes a reader would call verbatim, that the checker called `Loose` or `Absent`:
+
+| quote | source | V1 | V2 |
+|---|---|---|---|
+| `«Liberté»` | `Il a dit « Liberté » hier.` | Loose | **Present** |
+| `«Freiheit»` | `„Freiheit“` | Loose | **Present** |
+| `всё` | `все` | Absent | **Present** |
+| `Straße` | `STRASSE` | Absent | **Present** |
+| `l'homme` | `lʼhomme` | Absent | **Present** |
+
+`SMY-E307` on an honest quote is the expensive direction of that error: it refuses a correct
+attribution, buys a repair turn, and can degrade the span to prose. The cause is that V1 folds
+every quotation mark to one `"` — so French `« Liberté »`, which carries spaces *inside* the
+marks, never becomes contiguous with `«Liberté»` — and that it distinguishes `ё` from `е` and
+`ß` from `ss`, which print interchangeably in the languages that use them.
+
+`Normaliser::V2` deletes quotation marks instead of unifying them, keeps apostrophes inside
+words (`l’homme`, `aujourd’hui`, `qu’il` stay one token), drops Spanish openers, folds `ё` and
+decomposed `е`+U+0308 to `е`, and folds `ß` to `ss`. It is **not** accent stripping and **not**
+stemming: `Liberté` ≠ `Liberte`, and `requires` ≠ `require`.
+
+- `quote_support_with`, `quote_support_span_with` and `QuoteNormaliser` are new; `support`,
+  `support_in`, `support_span`, `support_in_span` and `verify` are unchanged and are V1. They
+  have been contract since 1.3, so a verdict somebody stored is still that verdict.
+- `ingest --normaliser v1|v2`, `IngestOptions::with_normaliser`. V1 stays the default; SMYSL-2.4
+  makes V2 the default for text ingest.
+- The recipe records `normaliser` **only for V2**, following the `source` precedent: V1 is what
+  an absent field has always meant, so every recipe computed before the field existed is
+  unchanged. A different comparison form is a different run, because it decides which quotes
+  pass and therefore which units are staged.
+- The character table is hand-written rather than taken from a crate. V2 goes into a recipe
+  hash, so it has to be frozen, and a dependency's Unicode tables move between releases — a
+  quote that was `Present` in one build would be `Loose` in the next with nothing in the recipe
+  to say why.
+- `fixtures/quote/v2.tsv` is the conformance set: quote, source, V1 verdict, V2 verdict. Every
+  row is a claim about both forms, so a row cannot be satisfied by weakening V1.
+
+Two corrections to the RFC's own table, both caught by writing the tests:
+
+- U+202F and U+2009 are listed as V2 entries. They are not: `char::is_whitespace` already
+  covers them, so V1 collapses them too. The rows pin that, which is what the table was
+  actually asking for.
+- The proposed example `casas` → `casa` is the weakest case available, since English `-s`
+  there produces the correct Spanish singular.
+
+This is SMYSL-2.1's F-3.
+
 Carried in from the 1.8 cycle, in the order they were argued for rather than the order they
 are easiest:
 

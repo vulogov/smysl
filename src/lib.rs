@@ -171,7 +171,8 @@ pub use smysl_ingest::prompt::PromptOverride;
 pub use smysl_core::quote::{
     support as quote_support, support_in as quote_support_in,
     support_in_span as quote_support_in_span, support_span as quote_support_span,
-    Support as QuoteSupport, QUOTE_KEY,
+    support_span_with as quote_support_span_with, support_with as quote_support_with,
+    Normaliser as QuoteNormaliser, Support as QuoteSupport, QUOTE_KEY,
 };
 /// The string-valued entries of a unit's payload (1.6). What `Query::with_payload` filters on, and
 /// what a caller reads to answer "what kind of thing does this extension schema say this is".
