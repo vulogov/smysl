@@ -121,6 +121,26 @@ impl Default for Store {
     }
 }
 
+/// What a bundle carried.
+///
+/// Returned beside the bytes rather than logged, because the caller is the only one who can act
+/// on it: a bundle is outbound, and by the time anyone else sees these records the decision to
+/// send them has been made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BundleReport {
+    /// Units in the bundle.
+    pub units: usize,
+    /// How many of those were not reachable by edges, and arrived because a commitment's note,
+    /// a withdrawal's reason, a resolution's note or a thread's position named them.
+    pub pulled_in_by_reference: usize,
+    /// Records of every kind.
+    pub records: usize,
+    /// Records of a type this build cannot interpret, kept per rule X and counted here so the
+    /// sender knows they are forwarding something they could not read.
+    pub unknown_records: usize,
+}
+
 impl Store {
     /// An empty in-memory store.
     pub fn new() -> Store {
@@ -563,6 +583,7 @@ impl Store {
             }
         }
 
+        self.close_keep_set(view, &mut keep);
         self.emit(view, &keep)
     }
 
@@ -570,15 +591,117 @@ impl Store {
     ///
     /// A view references rather than owns, so this is the only way to make one portable.
     pub fn bundle(&self, view: &View) -> Vec<u8> {
+        self.bundle_with_report(view).0
+    }
+
+    /// A bundle, and what went into it.
+    ///
+    /// The count of records this build cannot interpret is the one a sender needs: a bundle
+    /// keeps them, per rule X, which means forwarding content that cannot be inspected — and
+    /// under rule Z, cannot be evaluated for redaction either. Keeping them is right; keeping
+    /// them *silently* is how a sender comes to believe they have read what they sent.
+    pub fn bundle_with_report(&self, view: &View) -> (Vec<u8>, BundleReport) {
         let g = &self.adjacency;
         let roots: Vec<_> = view.roots.iter().filter_map(|u| g.id(u)).collect();
         let reachable = traverse::closure(g, &roots, &crate::adjacency::EdgeSet::all());
-        let keep: std::collections::BTreeSet<Uid> = reachable
+        let mut keep: std::collections::BTreeSet<Uid> = reachable
             .iter()
             .filter_map(|&n| g.uid(n))
             .copied()
             .collect();
-        self.emit(view, &keep)
+        let reachable_only = keep.len();
+        self.close_keep_set(view, &mut keep);
+
+        let bytes = self.emit(view, &keep);
+        let (records, _) = smysl_core::from_cbor_seq(&bytes).unwrap_or_default();
+        let report = BundleReport {
+            units: keep.len(),
+            pulled_in_by_reference: keep.len() - reachable_only,
+            records: records.len(),
+            unknown_records: records
+                .iter()
+                .filter(|r| matches!(r, Record::Unknown { .. }))
+                .count(),
+        };
+        (bytes, report)
+    }
+
+    /// Grow a keep-set until it is closed under the references records make outside the graph.
+    ///
+    /// `traverse::closure` follows *edges*. A commitment's `note`, a resolution's `note`, a
+    /// withdrawal's `reason` and a thread's step all name a unit without being one, so a single
+    /// pass can emit a record pointing at a unit the bundle does not carry — a dangling
+    /// reference in the one artifact whose whole purpose is to be readable alone. And the
+    /// references compose: pulling in a unit can pull in its own closure, which can carry a
+    /// commitment naming another unit again. So this runs to a fixpoint rather than once.
+    ///
+    /// It terminates because `keep` only grows and is bounded by the store.
+    fn close_keep_set(&self, view: &View, keep: &mut std::collections::BTreeSet<Uid>) {
+        let g = &self.adjacency;
+        loop {
+            let mut added: Vec<Uid> = Vec::new();
+            let want = |u: Option<Uid>, acc: &mut Vec<Uid>| {
+                if let Some(u) = u {
+                    if !keep.contains(&u) {
+                        acc.push(u);
+                    }
+                }
+            };
+
+            for r in &self.records {
+                match r {
+                    Record::Commit(c) if keep.contains(&c.unit) => want(c.note, &mut added),
+                    Record::Withdrawal(w) => {
+                        if self
+                            .relation_by_id(&w.relation)
+                            .is_some_and(|rel| keep.contains(&rel.from) && keep.contains(&rel.to))
+                        {
+                            want(w.reason, &mut added);
+                        }
+                    }
+                    Record::Resolution(res) => {
+                        let on_a_kept_thing = match &res.target {
+                            ResolutionTarget::Relation(rid) => {
+                                self.relation_by_id(rid).is_some_and(|rel| {
+                                    keep.contains(&rel.from) && keep.contains(&rel.to)
+                                })
+                            }
+                            ResolutionTarget::Contention(id) => self
+                                .contentions
+                                .iter()
+                                .any(|c| &c.id == id && keep.contains(&c.over)),
+                            _ => false,
+                        };
+                        if on_a_kept_thing {
+                            want(res.note, &mut added);
+                        }
+                    }
+                    // A thread in the view carries its positions, and a position names a unit.
+                    Record::Thread(th) if view.threads.contains(&th.id) => {
+                        for s in &th.steps {
+                            want(Some(s.unit), &mut added);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if added.is_empty() {
+                return;
+            }
+            // Each newly wanted unit arrives with its own closure, or the bundle would carry a
+            // unit whose grounds are absent — which is the same failure one level down.
+            for u in added {
+                keep.insert(u);
+                if let Some(n) = g.id(&u) {
+                    for m in traverse::closure(g, &[n], &crate::adjacency::EdgeSet::all()) {
+                        if let Some(x) = g.uid(m) {
+                            keep.insert(*x);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn emit(&self, view: &View, keep: &std::collections::BTreeSet<Uid>) -> Vec<u8> {
@@ -586,7 +709,16 @@ impl Store {
         for r in &self.records {
             let included = match r {
                 Record::Unit(u) => keep.contains(&canonical_uid(u)),
-                Record::Attestation(a) => keep.contains(&a.uid),
+                // An attestation names a unit *or* a relation: `attach` resolves it against
+                // `rids` when it is not a unit. Testing only `keep` dropped every edge
+                // attestation from a bundle, so a recipient saw the edge and not who vouched
+                // for it.
+                Record::Attestation(a) => {
+                    keep.contains(&a.uid)
+                        || self
+                            .relation_by_id(&a.uid)
+                            .is_some_and(|rel| keep.contains(&rel.from) && keep.contains(&rel.to))
+                }
                 Record::Relation(rel) => keep.contains(&rel.from) && keep.contains(&rel.to),
                 Record::Thread(t) => view.threads.contains(&t.id),
                 Record::View(v) => v.id == view.id,
@@ -613,9 +745,24 @@ impl Store {
                         .any(|c| &c.id == id && keep.contains(&c.over)),
                     _ => false,
                 },
-                // Pack manifests and schema declarations are about a whole store rather than
-                // any unit in it, so there is no `keep` question to ask; an unknown record
-                // cannot be judged at all.
+                // A commitment travels with the unit it settles. 1.7 added the axis and this
+                // arm was never written, so every bundle silently dropped how settled anything
+                // was — the one thing a ledger exists to carry.
+                Record::Commit(c) => keep.contains(&c.unit),
+                // A declaration travels when the bundle uses the schema it declares. Without
+                // it the recipient holds payloads it cannot interpret, which is rule X failing
+                // in the artifact designed to travel alone. Every revision, because a unit
+                // written against an earlier one is read against that one.
+                Record::SchemaDecl(d) => self.records.iter().any(|r| match r {
+                    Record::Unit(u) => keep.contains(&canonical_uid(u)) && u.schema == d.id,
+                    _ => false,
+                }),
+                // Rule X, in the place it is hardest: a record type this build cannot name is
+                // kept rather than dropped. The sender is told by `SMY-W434`, because
+                // forwarding what you cannot inspect is a decision and should be a visible one.
+                Record::Unknown { .. } => true,
+                // A pack manifest is about a whole store rather than any unit in it, so there
+                // is no `keep` question to ask.
                 _ => false,
             };
             if included {

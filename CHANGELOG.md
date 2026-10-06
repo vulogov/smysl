@@ -130,6 +130,46 @@ removed.
 
 This is SMYSL-2.1's F-13 and F-14, and SMYSL-2.3's A-10 item 3.
 
+### A bundle no longer leaves five kinds of record behind
+
+A bundle is, in the code's own words, "the artifact designed to travel alone" — closure exists so
+it can be handed to a recipient with nothing else to read it against. `Store::emit` ended in
+`_ => false`, and five classes of record fell through it.
+
+**Every bundle produced since 1.7 silently dropped its commitments.** The arm was never written.
+Anyone who bundled a ledger and handed it on sent something that did not say how settled anything
+was — which for a ledger is the one thing it exists to carry. That is a defect in shipped
+behaviour, not a gap the RFC anticipated.
+
+The other four:
+
+- **Schema declarations.** A bundle using an extension travelled without the declaration that
+  interprets its payloads — rule X failing in the artifact that most needs it. Every revision
+  travels, because a unit written against an earlier one is read against that one.
+- **Attestations on relations.** `attach` resolves an attestation's uid against `rids` when it is
+  not a unit; `emit` tested only the unit keep-set, so a recipient saw an edge and not who
+  vouched for it.
+- **Units named without being pointed at.** `Commit.note`, `Withdrawal.reason`, `Resolution.note`
+  and a thread's step all name a unit, and none of them is an edge, so `traverse::closure` could
+  not see them. The keep-set is now grown to a **fixpoint**: each unit pulled in arrives with its
+  own closure, because a unit whose grounds are absent is the same failure one level down. It
+  terminates because the set only grows and is bounded by the store.
+- **Records of a type this build cannot interpret.** Kept, per rule X.
+
+`Store::bundle_with_report` returns a `BundleReport` beside the bytes: units, how many arrived by
+reference rather than by edge, records, and how many of those this build could not interpret.
+**`SMY-W434`** reports the last. Keeping unknown records is right and keeping them *silently* is
+not: a bundle is outbound, so the sender is forwarding content they could not inspect — and under
+a future rule Z, could not evaluate for redaction either. The report is returned rather than
+logged because by the time anyone else sees those records, the decision to send them has been
+made.
+
+The property test is the one the amendment asks for: **no bundled record names an absent unit.**
+
+This is SMYSL-2.1's F-16, with H-14 and H-15 folded in. `BundleOptions` and `bundle --unknown`
+are deliberately not here — a policy knob invented before a caller asks for it is a guess at the
+policy, and the diagnostic is what makes the default safe.
+
 Carried in from the 1.8 cycle, in the order they were argued for rather than the order they
 are easiest:
 
