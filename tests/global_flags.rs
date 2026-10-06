@@ -462,3 +462,115 @@ fn fmt_refuses_a_conversion_that_pretends_to_be_a_formatting() {
         );
     }
 }
+
+/// `--seed-check` asserts rule D, and the assertion is checked.
+///
+/// H-19. It was declared global, advertised on all twenty-six commands, and read by nothing: a
+/// caller asserting reproducibility had the assertion accepted and never checked, which is the
+/// worst possible shape for a flag whose only job is to be a check.
+///
+/// The table's label is not the answer on its own. `find` is lexical unless asked otherwise, so
+/// a `mixed` command is pure in most of its invocations and refusing all of them would make the
+/// flag useless in the cases it exists for. Each row below is a pair: the same command, once in
+/// an invocation that is reproducible and once in one that is not.
+#[test]
+fn seed_check_allows_a_pure_invocation_and_refuses_the_rest() {
+    // Reproducible: these must behave exactly as without the flag.
+    let allowed: &[(&str, Vec<&str>)] = &[
+        ("check", vec!["check", F1]),
+        ("find lexical", vec!["find", "pool", F1]),
+        (
+            "find --engine lexical",
+            vec!["find", "--engine", "lexical", "pool", F1],
+        ),
+        ("pack", vec!["pack", "--budget", "2000", F1]),
+        // `pack` reads `--engine` only inside its `--query` branch, so an engine with no query
+        // cannot reach an embedding. Asserted, because refusing it would be a false negative
+        // and the kind that trains people to drop the flag.
+        (
+            "pack --engine semantic without --query",
+            vec!["pack", "--budget", "2000", "--engine", "semantic", F1],
+        ),
+        // Derivation consults no model. `thread` was labelled mixed for `--refine`, which does
+        // not exist as a flag, so every invocation of it is pure.
+        ("thread --derive", vec!["thread", "--derive", "brief", F1]),
+    ];
+    for (what, base) in allowed {
+        let plain = run(base);
+        let mut checked = base.clone();
+        checked.push("--seed-check");
+        let out = run(&checked);
+        assert_eq!(
+            out.code,
+            plain.code,
+            "{what}: --seed-check changed the outcome of a reproducible invocation; stderr: {}",
+            out.stderr.trim()
+        );
+        assert!(
+            !out.stderr.contains("--seed-check"),
+            "{what}: a reproducible invocation must not be lectured: {}",
+            out.stderr.trim()
+        );
+    }
+
+    // Not reproducible: refused before anything runs.
+    let refused: &[(&str, Vec<&str>)] = &[
+        (
+            "find --engine semantic",
+            vec!["find", "--engine", "semantic", "pool", F1],
+        ),
+        (
+            "find --engine hybrid",
+            vec!["find", "--engine", "hybrid", "pool", F1],
+        ),
+        (
+            "pack --query --engine semantic",
+            vec![
+                "pack", "--budget", "2000", "--query", "pool", "--engine", "semantic", F1,
+            ],
+        ),
+        ("ingest", vec!["ingest", "--offline", "-"]),
+        ("attest", vec!["attest", "--offline", F1]),
+    ];
+    for (what, base) in refused {
+        let mut checked = base.clone();
+        checked.push("--seed-check");
+        let out = run(&checked);
+        assert_eq!(
+            out.code,
+            2,
+            "{what}: --seed-check must refuse an invocation that is not reproducible; \
+             stderr: {}",
+            out.stderr.trim()
+        );
+        assert!(
+            out.stderr.contains("rule D"),
+            "{what}: the refusal must name the rule it is asserting: {}",
+            out.stderr.trim()
+        );
+        assert!(
+            out.stdout.trim().is_empty(),
+            "{what}: a refused invocation must not also produce output"
+        );
+    }
+}
+
+/// The refusal says which invocations are the impure ones, not just that some are.
+///
+/// `mixed` alone sends a reader to the source. The `impure_when` text H-20 added to the help
+/// line is the same text, so the two cannot drift.
+#[test]
+fn seed_check_names_the_flag_that_broke_reproducibility() {
+    let out = run(&["--seed-check", "find", "--engine", "semantic", "pool", F1]);
+    assert!(
+        out.stderr.contains("--engine semantic|hybrid"),
+        "the refusal must name the impure invocations: {}",
+        out.stderr.trim()
+    );
+    let model = run(&["--seed-check", "ingest", "--offline", "-"]);
+    assert!(
+        model.stderr.contains("model-dependent"),
+        "a model-dependent command has no exception to name: {}",
+        model.stderr.trim()
+    );
+}

@@ -412,6 +412,63 @@ measurement, not a gate.
 
 This is SMYSL-2.1's H-18.
 
+### `--seed-check` is checked
+
+It was declared global, advertised on all twenty-six commands, and read by nothing. A caller
+asserting that an invocation is bit-reproducible had the assertion accepted and never tested —
+the worst possible shape for a flag whose only job is to be a check.
+
+The dispatcher now decides **per invocation**, before anything runs, and refuses with exit 2
+what rule D does not cover. Per invocation matters: a `mixed` command is pure in most of its
+invocations, and a flag that refused all of them would be useless in the cases it exists for.
+
+```
+smysl --seed-check find pool store.smy                     runs
+smysl --seed-check find --engine semantic pool store.smy    exit 2
+smysl --seed-check pack --budget 2k --engine semantic s.smy runs
+smysl --seed-check ingest doc.txt                           exit 2
+```
+
+The third is not an oversight: `pack` reads `--engine` only inside its `--query` branch, so an
+engine with no query cannot reach an embedding. Refusing it would be a false negative, and
+false negatives are what teach people to drop a flag.
+
+The refusal names which invocations are the impure ones — `mixed (--engine semantic|hybrid)` —
+using the same `impure_when` text as the help line, so the two cannot drift. A `mixed` command
+the dispatcher cannot narrow is refused rather than waved through, and a test ties that list to
+the command table so the refusal can never be "smysl does not know its own command".
+
+Running the command twice and comparing bytes would be a stronger assertion. It belongs to `sq`
+(`SMY-E416`), and claiming it here on the strength of a label would repeat the mistake the flag
+already made.
+
+#### A correction to 1.9's own purity labels
+
+Wiring this up meant asking what makes each mixed command impure, and `thread`'s answer was
+`--refine` — **a flag that does not exist**. `Task::ThreadRefine` is routed, the provider layer
+is in place, the derivation module documents what refinement would do, and no argument reaches
+it.
+
+The manual has been straight about this all along: *"`--refine` is planned for it — but that
+flag is not yet wired… The classification is deliberately pessimistic: it describes what the
+command is permitted to become, so that nothing downstream has to be re-audited the day the
+flag lands."* That reasoning is sound and `thread` stays `mixed`. What was not sound was the
+help line **this release added** — `pure except --refine` — which turned a documented
+reservation into a promise of a flag a reader cannot pass. It now reads `pure except --refine,
+which is not yet wired`, and `--seed-check` lets every `thread` invocation run, because today
+every one of them is pure.
+
+`thread`'s one-line description also claimed to "refine" and "import", neither of which it
+does; it now says what it does.
+
+Two manual tables still listed `find` and `pack` as `pure` after this release made them
+`mixed`. Fixed, along with the claim that every command outside the model boundary is
+bit-reproducible — `find --engine semantic` sends nothing anywhere and is still not
+reproducible, which is a determinism exception rather than an egress one, and the manual now
+draws that distinction instead of eliding it.
+
+This is SMYSL-2.1's H-19.
+
 Carried in from the 1.8 cycle, in the order they were argued for rather than the order they
 are easiest:
 

@@ -258,7 +258,13 @@ being true.
   machine. There are exactly three: `ingest`, `attest`, and `thread --refine`
   (the one flag on `thread` that touches a model — plain `thread` does not).
   Every other command in `smysl` is a pure function of its inputs: same
-  bytes in, same bytes out, on any machine, forever.
+  bytes in, same bytes out, on any machine, forever — with one exception that
+  is about determinism rather than egress. `find --engine semantic` and
+  `pack --query --engine semantic` read an embedding model from disk, which
+  sends nothing anywhere and is still not bit-reproducible: the model is a file
+  outside the store, and float kernels are not promised identical across
+  platforms. Both are classified *mixed* for that reason, and `--seed-check`
+  refuses those invocations while allowing the lexical default.
 
   This is a statement about *permission*, and the distinction matters when you
   audit a build. `--refine` is not wired in this version, so only two commands

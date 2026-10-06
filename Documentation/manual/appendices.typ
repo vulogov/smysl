@@ -43,7 +43,7 @@ These apply to every subcommand, in any position on the command line.
     ([`--json`], [Machine-readable output.]),
     ([`-q, --quiet`], [Suppress non-error output.]),
     ([`-v, --verbose`], [Increase verbosity; repeatable (`-vv`, `-vvv`, …).]),
-    ([`--seed-check`], [Assert this invocation is bit-reproducible (rule D).]),
+    ([`--seed-check`], [Assert this invocation is bit-reproducible (rule D), and be refused with exit 2 if it is not. Decided per invocation: the command's purity, narrowed by the flags that make a mixed command impure.]),
   ),
 )
 
@@ -186,8 +186,8 @@ These apply to every subcommand, in any position on the command line.
 
 #section("thread")
 
-*Derive, refine, list, show, or import threads.* Mixed (pure except `--refine`, which is
-not yet wired) · SM-P11.
+*Derive, list, or show threads.* Mixed (pure except `--refine`, which is not yet wired) ·
+SM-P11.
 
 #dtable(
   (auto, auto, 1fr),
@@ -736,8 +736,10 @@ and this page for a quick reminder of what the word means.
   A command's classification as *pure* (a bit-reproducible function of its inputs — same
   bytes in, same bytes out, on any machine, forever), *mixed* (pure except for one option),
   or *model-dependent* (the only kind that can reach off the machine). Only `ingest` and
-  `attest` are ever model-dependent; `thread` is mixed only because of an unwired
-  `--refine`.
+  `attest` are ever model-dependent. `find` and `pack` are mixed because semantic and hybrid
+  ranking read an embedding model, and `thread` is mixed only because of an unwired
+  `--refine` — a reservation rather than a description, which is why `--seed-check` lets
+  every `thread` invocation run.
 ]
 
 #term("Canonical form")[

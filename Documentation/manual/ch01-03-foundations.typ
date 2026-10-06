@@ -140,7 +140,7 @@ classification, and each subcommand's own `--help` repeats it under
     ([Command], [Purity]),
     ([`fmt`], [pure]),
     ([`check`], [pure]),
-    ([`pack`], [pure]),
+    ([`pack`], [mixed — pure unless `--query` is ranked with `--engine semantic` or `hybrid`]),
     ([`merge`], [pure]),
     ([`diff`], [pure]),
     ([`trace`], [pure]),
@@ -148,7 +148,7 @@ classification, and each subcommand's own `--help` repeats it under
     ([`bundle`], [pure]),
     ([`thread`], [mixed — pure today; reserved for `--refine`, not yet wired]),
     ([`salience`], [pure]),
-    ([`find`], [pure]),
+    ([`find`], [mixed — pure unless `--engine semantic` or `hybrid`]),
     ([`retract`], [pure]),
     ([`render`], [pure]),
     ([`import`], [pure]),
@@ -388,7 +388,7 @@ it builds to what the enabled features permit. That's the mechanism Chapter
     ([`-v, --verbose`], [Increases verbosity; repeatable (`-vv`, `-vvv`) for progressively more diagnostic detail.], [Debugging any command]),
     ([`--no-color`], [Disables ANSI colour, for logs and terminals that don't want it.], [Scripted use]),
     ([`--noprogress`], [Disables progress bars unconditionally, whatever the terminal thinks it can render.], [Large stores, CI logs]),
-    ([`--seed-check`], [Asserts this exact invocation is bit-reproducible — the command-line hook onto rule D, the same determinism `cargo xtask determinism` checks in CI.], [Ch. 21]),
+    ([`--seed-check`], [Asserts this exact invocation is bit-reproducible — the command-line hook onto rule D, the same determinism `cargo xtask determinism` checks in CI. From 1.9 the assertion is checked: an invocation that reaches a model or an embedding exits 2 before running, and the refusal names which invocations are the impure ones. The decision is per invocation rather than per command, so `find` is refused with `--engine semantic` and runs with the default lexical engine.], [Ch. 21]),
   ),
 )
 

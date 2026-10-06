@@ -44,6 +44,53 @@ impl Purity {
     }
 }
 
+/// Is *this* invocation bit-reproducible, in rule D's sense?
+///
+/// `--seed-check` was declared global, advertised on all 26 commands, and read by nothing: a
+/// caller asserting reproducibility got the assertion accepted and never checked, which is the
+/// worst shape for a flag whose entire job is to be a check.
+///
+/// The table's label is not the answer on its own, because a `Mixed` command is pure in most of
+/// its invocations — `find` is lexical unless asked otherwise. So the label is refined by the
+/// flags, and the refinement lives next to `impure_when`, the prose that tells a reader the
+/// same thing.
+///
+/// `None` for an unrecognised `Mixed` command: a command that is mixed and whose impure
+/// invocations this function cannot name must be refused, not assumed pure. The census test
+/// asserts no such command exists, which is what keeps the two lists together.
+fn reproducible(cmd: &Cmd, sub: &ArgMatches) -> Option<bool> {
+    match cmd.purity {
+        Purity::Pure => Some(true),
+        // `ingest` and `attest` ask a model for a judgement. Nothing refines that.
+        Purity::Model => Some(false),
+        Purity::Mixed => match cmd.name {
+            // Pure in every invocation *today*: `thread` is classified mixed as a reservation
+            // for `--refine`, and that flag is not wired, so no argument can reach a model.
+            // The manual states the reasoning — the label describes what the command is
+            // permitted to become, so nothing downstream is re-audited the day the flag lands —
+            // and a reservation is exactly the thing `--seed-check` must not treat as a fact
+            // about this run. The arm changes when the flag arrives.
+            "thread" => Some(true),
+            // Lexical ranking is a function of the store. Semantic and hybrid are functions of
+            // a model file outside it, and float kernels are not promised bit-identical across
+            // platforms, so rule D does not hold for them.
+            "find" => Some(!embeds(sub)),
+            // `pack` reads `--engine` only inside its `--query` branch, so a pack with no query
+            // cannot reach an embedding however the engine is set.
+            "pack" => Some(!(sub.get_one::<String>("query").is_some() && embeds(sub))),
+            _ => None,
+        },
+    }
+}
+
+/// Does this invocation's engine consult an embedding model? `--engine` defaults to lexical.
+fn embeds(sub: &ArgMatches) -> bool {
+    matches!(
+        sub.get_one::<String>("engine").map(String::as_str),
+        Some("semantic") | Some("hybrid")
+    )
+}
+
 struct Cmd {
     name: &'static str,
     about: &'static str,
@@ -84,7 +131,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "trace",     about: "Walk provenance or evidential support",               purity: Purity::Pure,  phase: "SM-P7"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "view",      about: "Define or print a view",                              purity: Purity::Pure,  phase: "SM-P7"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "bundle",    about: "Emit the reachable closure of a view",                purity: Purity::Pure,  phase: "SM-P7"  , impure_when: None , forms: BOTH },
-    Cmd { name: "thread",    about: "Derive, refine, list, show, or import threads",       purity: Purity::Mixed, phase: "SM-P11" , impure_when: Some("--refine") , forms: BOTH },
+    Cmd { name: "thread",    about: "Derive, list, or show threads",                        purity: Purity::Mixed, phase: "SM-P11" , impure_when: Some("--refine, which is not yet wired") , forms: BOTH },
     Cmd { name: "salience",  about: "Report derived salience with per-term breakdown",     purity: Purity::Pure,  phase: "SM-P8"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "find",      about: "Rank units against a query, lexically",                purity: Purity::Mixed, phase: "0.5.0"  , impure_when: Some("--engine semantic|hybrid") , forms: NO_DOCUMENT },
     Cmd { name: "retract",   about: "Retract a unit; report the blast radius first",       purity: Purity::Pure,  phase: "SM-P6"  , impure_when: None , forms: NO_DOCUMENT },
@@ -5479,6 +5526,42 @@ fn main() -> ProcExitCode {
         return ProcExitCode::from(ExitCode::Usage.as_i32() as u8);
     };
 
+    // Rule D, asserted per invocation and refused before anything runs. A caller passing
+    // `--seed-check` is saying "I am about to depend on these bytes"; the useful moment to be
+    // told otherwise is before the command spends anything, not after it has written output
+    // the caller now believes is reproducible.
+    //
+    // Running twice and comparing bytes would be a stronger assertion. It belongs to `sq`
+    // (`SMY-E416`), and claiming it here on the strength of a label would be the same mistake
+    // the flag already made.
+    if matches.get_flag("seed-check") {
+        match reproducible(cmd, sub) {
+            Some(true) => {}
+            Some(false) => {
+                eprintln!(
+                    "smysl {name}: --seed-check asserts rule D, and this invocation is {}{}",
+                    cmd.purity.tag(),
+                    match cmd.impure_when {
+                        Some(w) => format!(" ({w})"),
+                        None => String::new(),
+                    }
+                );
+                return ProcExitCode::from(ExitCode::Usage.as_i32() as u8);
+            }
+            // A `Mixed` command the judgement does not know how to narrow. Refused rather than
+            // waved through: the whole point of the flag is that it does not take a label's
+            // word for it.
+            None => {
+                eprintln!(
+                    "smysl {name}: --seed-check cannot tell whether this invocation is \
+                     reproducible; {name} is mixed and the dispatcher does not know which of \
+                     its invocations are pure"
+                );
+                return ProcExitCode::from(ExitCode::Usage.as_i32() as u8);
+            }
+        }
+    }
+
     // One place, before anything runs, because the alternative is 26 commands each remembering
     // to check — and 23 of them did not. The message says what the command *does* write, since
     // a refusal that only says no leaves the caller to guess which flag they wanted.
@@ -5602,6 +5685,14 @@ mod tests {
     }
 
     /// Only `ingest`, `attest`, and `thread --refine` may depend on a model (rule D).
+    ///
+    /// `thread`'s `Mixed` is a reservation rather than a description: `--refine` is routed as a
+    /// `Task` and documented in the derivation module, and no argument reaches it. The manual
+    /// gives the reasoning — the label describes what the command is permitted to become, so
+    /// nothing downstream is re-audited the day the flag lands — and that is a deliberate
+    /// pessimism worth keeping. What is not worth keeping is a help line promising a flag a
+    /// reader cannot pass, which is what 1.9 briefly shipped; `impure_when` now says the flag
+    /// is not yet wired, and `--seed-check` lets every `thread` invocation run.
     #[test]
     fn only_ingest_and_attest_are_model_dependent() {
         let model: Vec<&str> = COMMANDS
@@ -5637,6 +5728,34 @@ mod tests {
                 c.impure_when.is_none(),
                 "{} is not mixed, so there is no exception to name",
                 c.name
+            );
+        }
+    }
+
+    /// Every mixed command's impure invocations are ones `--seed-check` can name.
+    ///
+    /// `reproducible` returns `None` for a mixed command it cannot narrow, and the dispatcher
+    /// refuses on `None` rather than assuming the best. That refusal is correct and useless: it
+    /// would tell a caller that smysl does not know its own command. So the two lists are tied
+    /// together here — adding a mixed command without teaching `reproducible` about it fails
+    /// this test rather than shipping a flag that answers "I cannot say".
+    #[test]
+    fn seed_check_can_judge_every_mixed_command() {
+        let judged = ["find", "pack", "thread"];
+        for c in COMMANDS.iter().filter(|c| c.purity == Purity::Mixed) {
+            assert!(
+                judged.contains(&c.name),
+                "{} is mixed and `reproducible` has no arm for it",
+                c.name
+            );
+        }
+        // And nothing in `judged` has stopped being mixed, which would leave an arm that can
+        // never be reached — the other direction of the same drift.
+        for name in judged {
+            let c = COMMANDS.iter().find(|c| c.name == name).expect("a command");
+            assert!(
+                c.purity == Purity::Mixed,
+                "{name} has an arm in `reproducible` and is no longer mixed"
             );
         }
     }
