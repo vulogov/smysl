@@ -1,6 +1,8 @@
 # RFC SMYSL-2.1 — Hardening the 1.9 tree
 
-**Status:** draft 1, for discussion. Implementation RFC (non-normative); normative rules are in SMYSL-2.3.
+**Status:** draft 1, **part built**. Most of TX-P0 shipped in 1.9.0-dev; §10 says which items
+are outstanding and records every place the implementation departed from this document, and why. Implementation RFC (non-normative);
+normative rules are in SMYSL-2.3.
 **Author:** Vladimir Ulogov
 **Date:** 2026-10-02
 **Part of:** RFC set SMYSL-2 — see SMYSL-2.0 (index and roadmap).
@@ -699,8 +701,12 @@ Each section: today, change, API, wire, other implementations, tests, exit test.
 
   Without `-C`, behaviour is unchanged.
 - **API/wire.** None. The CLI surface is unchanged (the flag exists).
-- **Tests.** `tests/global_flags.rs`: `config_flag_is_read` (a config routing to a provider id
-  that `smysl providers` then lists) and `a_missing_config_is_a_usage_error`.
+- **Tests.** Built in `tests/cmd_providers.rs`, not `global_flags.rs`: a listing needs a compiled
+  mapper, and `global_flags.rs` is gated on `cli` alone, where the one provider would be skipped
+  as "not compiled into this build" and the assertion would be about the feature set rather than
+  the flag. `the_config_flag_is_read` (two configs differing in the provider id a listing
+  prints), `a_missing_config_is_a_usage_error`, and
+  `a_relative_prompt_resolves_beside_its_own_config` for the second half of the change.
 - **Exit.** `smysl -C x.hjson providers` reports x.hjson's providers.
 
 #### 4.3.15 H-9..H-13 — what `ingest` records, sends and does
@@ -722,8 +728,9 @@ Each section: today, change, API, wire, other implementations, tests, exit test.
   - Test: extend `the_body_carries_the_model_messages_and_options` (`ollama.rs:435`).
   - Exit: every Ollama request body carries `num_ctx` equal to the configured window.
 - **H-11, repair history.** On success after attempt k > 1, the chunk returns its diagnostics
-  plus `history` re-coded as `SMY-W435` ("repaired: attempt i of n: <code>: <message>"), one per
-  earlier error. Warnings, so exit codes do not move. `IngestReport` gains `repaired: usize`
+  plus `history` re-coded as `SMY-W435` (built as "repaired: <code>: attempt i of n: <message>",
+  so the code of the repaired error sits beside the word `repaired` now that the diagnostic's own
+  code is `W435`), one per earlier error. Warnings, so exit codes do not move. `IngestReport` gains `repaired: usize`
   (`#[non_exhaustive]`, additive). Test: `gate.rs` `a_repaired_chunk_keeps_its_history`
   (Scripted answers `[bad, good]`). Exit: that test sees the first attempt's code under
   `W435`.
@@ -732,7 +739,10 @@ Each section: today, change, API, wire, other implementations, tests, exit test.
   already quantised into the recipe (`recipe.rs`, `push_shared`). Test:
   `tests/cmd_ingest_granularity.rs`-style usage-error test for out-of-range values; `gate.rs`
   asserts the request carries it.
-- **H-13, `--yes`.** Make it do what its help says.
+- **H-13, `--yes`.** **Not built as specified; see §10.** 1.9 corrects the help text and warns
+  at runtime; 1.10 commits. What follows is the 1.10 plan.
+
+  Make it do what its help says.
   - After `stage::write`, `--yes` runs the same commit path as `merge --staged` (`main.rs:2138`):
     append the staged records to `--store`, then `stage::discard`.
   - The two call sites share one helper, so they cannot diverge.
@@ -748,8 +758,13 @@ Each section: today, change, API, wire, other implementations, tests, exit test.
 
 #### 4.3.16 H-17 — the global `--format` is read or refused
 
-- **Change.** One helper, `output_form(global, cmd, allowed)`, replaces the three ad hoc reads
-  (`main.rs:2264`, `:3401`, `:4015`). A command whose output has a single form refuses a
+- **Change.** Built as a `forms` field on the `Cmd` table plus one check in the dispatcher,
+  rather than a helper each command calls: the alternative is 26 commands each remembering to
+  call it, which is how 23 of them came to ignore the flag. The three ad hoc reads
+  (`main.rs:2264`, `:3401`, `:4015`) collapse into `wants_surface(global, default)`, which
+  answers only *which* form, since availability is settled before the command runs. Three
+  classes, not two: five commands write both forms; `import`, `relink` and `compact` write a
+  store log and take `cbor` only; the other eighteen write no document at all. A command whose output has a single form refuses a
   `--format` asking for the other with `ExitCode::Usage`, instead of ignoring it.
   - `fmt --format cbor` writes `to_cbor_seq` of the parsed records with the view, which is what
     Appendix E of draft 3 assumed. It is refused with `--write` (that would replace a text file
@@ -782,22 +797,32 @@ Each section: today, change, API, wire, other implementations, tests, exit test.
   schema over `fixtures/corpus/*.smy`; thread CBOR byte-identical to the pre-change output,
   recorded as a golden). `crates/smysl-thread/tests/scaling.rs` (new, `#[ignore]`d like the
   other `scaling.rs` files): 171k synthetic units under a time bound.
-- **Exit.** Golden byte-identical, plus SMYSL-2.8's 171k probe within its reported 0.55 s ± 50 %
-  on the same hardware (the figure is 2.8's, not re-measured here).
+- **Exit.** Golden byte-identical — **met**; the digest was recorded from the build before the
+  change and asserted after it. SMYSL-2.8's 171k probe was **not** reproduced: its generator is a
+  different shape, so the figure is not comparable and quoting it would have been a measurement
+  nobody took. `crates/smysl-thread/tests/scaling.rs` measures its own, before and after, and
+  the result is stronger than the criterion asked for: quadratic in units confirmed (4.0x per
+  doubling) and removed (2.2x), 173x at 8000 units, and the relations axis flat. See §10.
 
 #### 4.3.18 H-19, H-20 — purity labels and `--seed-check` are honest
 
 - **H-20.** `find` and `pack` become `Purity::Mixed` in the `Cmd` table (`main.rs:60,68`), with
-  the help line "pure with `--engine lexical` (the default); semantic and hybrid depend on an
-  embedding model". The test `only_ingest_and_attest_are_model_dependent` (`main.rs:5372`)
-  changes its `Mixed` list to `["pack", "thread", "find"]` in table order.
+  the help line "pure except `--engine semantic|hybrid`" (built shorter than proposed, from a new
+  `Cmd.impure_when` field that the `--seed-check` refusal reuses, so the help text and the
+  refusal cannot disagree). The test `only_ingest_and_attest_are_model_dependent`
+  (`main.rs:5372`) changes its `Mixed` list to `["pack", "thread", "find"]` in table order, and
+  gains the invariant behind the list: every mixed command names which invocations are impure,
+  and no other command names an exception.
   - Why `Mixed` rather than `Pure`: embeddings are a function of a model file outside the store,
     and float kernels are not promised bit-identical across platforms, so rule D does not hold.
 - **H-19.** The dispatcher (`main.rs:5272` area) reads `--seed-check` before running a command.
   It computes the invocation's effective purity:
   - the table value;
-  - refined for `Mixed` commands by their flags: `thread` without `--refine`, and `find`/`pack`
-    with the lexical engine, are pure;
+  - refined for `Mixed` commands by their flags: `find` and `pack` with the lexical engine are
+    pure. **`thread` has no `--refine` flag** — `Task::ThreadRefine` is routed and `derive.rs`
+    documents what refinement would do, but no argument reaches it, so every `thread` invocation
+    is pure and `--seed-check` allows all of them. `thread` stays `Mixed` as a reservation, which
+    the manual already called "deliberately pessimistic"; see §10;
   - anything else is not.
 
   A non-pure invocation exits with `Usage` and says why. A pure one runs. Running twice and
@@ -952,3 +977,68 @@ else depends on it in TX-P0.
 | OQ-29 | **Resolved in SMYSL-2.3 A-9:** a wire field (granularity key 5), written only when not `smysl/utf8-div4`; H-1 ships first. |
 | OQ-30 | **Resolved in SMYSL-2.3 A-8.1:** `Unknown` plus preserved code; 255 reserved in thread schema, role, source kind, detection kind and admission; the first four open in 1.9.0, admission in 1.10.0; `status` and `lod` stay closed. |
 | OQ-31 | The estimator's objective and reference. It can be faithful to a published tokenizer family (proposal `o200k_base`), in which case the en/ru parity of draft 3 §22 holds only as well as that family's own parity, or it can be content-fair, which makes it a different instrument from a token estimator. Proposal: faithful, and if parity fails, the exit test is restated against the reference tokenizer's own en/ru ratio. |
+
+---
+
+## 10. As built
+
+**TX-P0 is part built.** Shipped in 1.9.0-dev across ten commits: F-12, F-13, F-14, F-16, F-17,
+F-18, H-1 to H-4 and H-7 to H-20. **Outstanding:** §4.3.3 (F-3), §4.3.4 (F-6, H-5) and §4.3.5
+(D-10, `SMY-W433`), which §6.1 step 9 groups into one template-version bump; §4.3.13 (F-4); the
+`--unknown keep|drop` flag of §4.3.9; and §4.3.2 (F-2), deferred to 1.10.0 with A-9 while OQ-31
+is open. §4.4's flag list therefore describes the finished phase, not the current tree: of its
+five new flags only `ingest --temperature` exists today. This section records every departure from the
+plan above, so that a reader of a section is not reading a proposal as if it were a description.
+It is not a summary of the work; the CHANGELOG is that.
+
+### 10.1 Where the plan was wrong
+
+| § | The plan said | What is true |
+|---|---|---|
+| §4.3.18 (H-19) | "`thread` without `--refine` … is pure", implying a flag to test | `thread` has **no `--refine` flag**. `Task::ThreadRefine` is routed in `smysl-provider`, `derive.rs` documents what refinement would do, and no argument reaches it. The dispatcher cannot refine a label by a flag that does not exist, so `--seed-check` allows every `thread` invocation, which is correct: today all of them are pure. |
+| §4.3.17 (H-18) | Exit criterion: SMYSL-2.8's 171k probe within 0.55 s ± 50 % | Not reproduced. 2.8's generator is a different shape, so the figure is not comparable, and quoting it would have been a measurement nobody took. The new `scaling.rs` measures its own, before and after the change. |
+| §4.3.16 (H-17) | Two classes: a command honours `--format` or has "a single form" | Three. Five commands write both forms; `import`, `relink` and `compact` write a store log, which has no surface spelling; **eighteen write no document at all** — a report, a store updated in place, or an artifact with its own `--target`. The plan's "single form" framing had no room for the third, which is most of the CLI. |
+
+The first of those is the one worth drawing a lesson from. The RFC asserted a flag's existence
+in the course of specifying something else, and the assertion survived review because nobody was
+reviewing *that* clause. It was caught by implementation, which is the expensive place to catch
+it. The same shape — a label describing an intention rather than the program — is what H-13,
+H-17 and H-19 are all about, so the RFC committed the error it was written to fix.
+
+### 10.2 Where the implementation chose differently
+
+| § | Decision | Why |
+|---|---|---|
+| §4.3.15 (H-13) | `--yes` **warns** in 1.9 and commits in 1.10, rather than committing now | Implementing it turns a read-only invocation into one that writes `--store`, in a minor, for anyone passing `--yes` to suppress exit 10 rather than to ask for a write. The `SMY-W432` precedent in the same release: when a change moves somebody's data, the warning ships first. Owner's call, taken as option B. |
+| §4.3.16 (H-17) | A `forms` field on the `Cmd` table and one dispatcher check, not an `output_form` helper per command | A helper is 26 commands each remembering to call it, which is how 23 came to ignore the flag. One place cannot be forgotten in 23. |
+| §4.3.18 (H-20) | The help line is "pure except `--engine semantic\|hybrid`", from a new `Cmd.impure_when` field | Shorter than the proposed wording, and the `--seed-check` refusal reuses the same string, so the help text and the refusal cannot disagree. |
+| §4.3.14 (H-8) | Tests in `tests/cmd_providers.rs`, not `global_flags.rs` | A provider listing needs a compiled mapper; `global_flags.rs` is gated on `cli` alone, where the assertion would be about the feature set rather than the flag. |
+| §4.3.15 (H-11) | `SMY-W435` reads "repaired: `<code>`: attempt i of n: `<message>`" | The diagnostic's own code is now `W435`, so the repaired error's code belongs beside the word `repaired` rather than after the attempt. |
+| §4.3.17 (H-18) | Indexed as a per-derivation `BTreeMap<RelKind, BTreeSet<Uid>>`, not as a lookup on the adjacency | SMYSL-2.8 M-4 prescribes `edge_kind(k)` then `out_edges`/`in_edges`, which needs no build step at all and is cheaper. It was not used because `EdgeKind::kernel` is defined for kernel relation kinds only, and an extension kind is treated as `elaborates` for closure (`SMY-W013`) — so a schema rule naming a non-kernel kind would match the wrong set rather than none. Today's rule sets name kernel kinds only, so the two are equivalent in practice, and the built form is equality-based exactly as `relations_of_kind` is. The adjacency route stays open if the remaining constant ever matters; the relations axis is already flat, so it does not. |
+| §4.3.9 (F-16) | `bundle` keeps the referenced units; `--unknown keep\|drop` is **not** built | The closure fix and the flag are separable, and only the closure was a defect. The flag remains for a later phase. |
+| §4.3.1 (F-2) | Deferred to 1.10 with A-9 | OQ-31 is unresolved: whether the estimator is faithful to a published tokenizer family or content-fair is a question about what the instrument *is*, and shipping a key for it first would pin the answer by accident. With two corrections for 1.10: the field is `Option<TokenEstimator>`, and an unknown estimator id makes `l0_max` **unevaluable** rather than default-evaluated. |
+
+### 10.3 What TX-P0 found that this RFC did not
+
+Nine defects already in a released tree, five of them introduced in 1.8.0. They are in the
+CHANGELOG; what belongs here is the pattern, because it predicts where the next ones are.
+
+**Three of the five trace to one cause:** 1.7 added the commitment axis, and three separate
+sites kept working as though it had not — `converged_with` could not see a commitment,
+`bundle` dropped the units a commitment's note named, and `merge --format surface` counted a
+written commitment as omitted. A new record type does not announce itself to the code that
+enumerates record types. Any future phase that adds one (TX-P2's propositions, TX-P7's links)
+should treat "find every site that matches on `Record`" as part of the change rather than as
+follow-up, and the three predicates F-18 added are where that enumeration now lives.
+
+**Four of this repository's own test harnesses** passed `--format surface` to every invocation
+and depended on it being ignored. A flag that is accepted and ignored does not stay inert; code
+grows around it, and the longer it is tolerated the more expensive the correction. That is an
+argument for H-17's shape — refuse, do not warn — being right generally.
+
+### 10.4 Gate G−1
+
+Accepted in full before the work began, recorded in `Documentation/SMYSL-2_REVIEW_AND_PLAN.md`:
+A-8.1 option B (open four enumerations now, admission in 1.10), A-10 item 2 (A + D), A-4
+(B + D), A-9 (B, deferred to 1.10 with F-2). `cargo-semver-checks 0.50.0` is installed with
+`BASELINE := 1.8.0`; every TX-P0 commit ran it, and no commit required a major.

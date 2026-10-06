@@ -375,8 +375,13 @@ features; RSS after the stage):
   the decoded record vector, partly because every core is held twice (§2.1). Peak during
   load is 15% above that. Extrapolated, 10⁶ units need ≈2.6–3 GB in memory **(extrapolated,
   not run)**.
-- **M-4. `derive_thread` is quadratic.** *(Fixed in TX-P0 by SMYSL-2.1 H-18; kept here because the
-  measurement is this RFC's.)* `Matcher::SourceOf(k)` / `TargetOf(k)`
+- **M-4. `derive_thread` is quadratic.** *(Fixed in TX-P0 by SMYSL-2.1 H-18, though **not** by
+  the adjacency lookup proposed below: see SMYSL-2.1 §10.2. H-18 indexes the ends of each named
+  kind once per derivation, which is equality-based like `relations_of_kind` and so cannot
+  mis-handle a non-kernel kind the adjacency folds into `elaborates`. The 171k figures here were
+  not re-measured; `crates/smysl-thread/tests/scaling.rs` records its own, and confirms the
+  shape: 4.0x per doubling of units before, 2.2x after, 173x at 8000 units, and flat in R. Kept
+  here because the measurement is this RFC's.)* `Matcher::SourceOf(k)` / `TargetOf(k)`
   (`crates/smysl-thread/src/derive.rs`, `matches`) call `store.relations_of_kind(k)`, which
   scans and filters every relation and allocates a `Vec`, once per unit in scope and per rule.
   At 171k units × 15.5k relations that is the 24.5 s. Replacing it with a lookup on the

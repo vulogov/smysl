@@ -108,7 +108,7 @@ scale. This set does that. It is **nine documents, one normative**:
 | phase | RFC | delivers | exit (summary) | depends on |
 |---|---|---|---|---|
 | S0 | 2.2 | extraction stability and proposition-trust spike with today's CLI | 2.2 decision table | — |
-| TX-P0 | 2.1 | F-2, F-3, F-4, F-6, F-12, F-13, F-14, F-16, F-17, F-18 and H-1 to H-20 | the probes reversed, F-16/F-17 reproductions fixed, full suite and `make semver` clean | G−1 for release |
+| TX-P0 **part built** | 2.1 | **Built:** F-12, F-13, F-14, F-16, F-17, F-18, H-1 to H-4, H-7 to H-20. **Not built:** F-2 (deferred to 1.10.0 with A-9, OQ-31), F-3 (normaliser V2), F-4 (`folding_for`), F-6 (language policy), H-5 and H-6/D-10 (the §4.3.4 template bump and the injection guard), and `bundle --unknown keep\|drop` | partly met: F-16/F-17 reproductions fixed, the probes reversed, and suite, `make semver`, `api-check`, `doc-output` and `spec-tables` clean on every commit. The §4.3.3–4.3.5 group (one template bump) is outstanding. Departures from plan: 2.1 §10 | G−1 accepted in full |
 | TX-P1 | 2.4 | parts, readings, manifests, object store, first readers, structure, locators; `admission` opened (2.3 A-8.1) | GE-T1 (Bibles and JSON) | TX-P0, G0 |
 | TX-P2 | 2.4 | segmenter, analyzers, `lingua`, chat readers, `text append`, redaction (rule Z) | GE-T1 (chats), redaction survives a stale peer | TX-P1 |
 | TX-P3 | 2.4 | EDTF, `published`, datings, rule E engine, locks, `date` commands | GE-T13 | TX-P2 |
@@ -361,11 +361,28 @@ Coding speed cannot compress those.
 
 ## 9. Next actions
 
-1. **Start TX-P0** from 2.1's ordering (12 steps, plus 11a–11c added for H-8 to H-20). Release as
-   1.9.0. F-2 may slip to 1.10.0 if OQ-31 blocks.
-2. **Run S0** from 2.2 in parallel. It needs no code beyond 2.2's scripts. Two of its
-   workarounds disappear when 2.1 lands: `-C` being ignored, and the model missing from the
-   recipe.
+1. **Finish TX-P0.** Most of it is built in 1.9.0-dev and 2.1 §10 records the departures. What
+   remains is one coherent group and one deferral:
+   - **§4.3.3 (F-3, normaliser V2), §4.3.4 (F-6 language policy, H-5 gist bound) and §4.3.5
+     (D-10 injection guard, `SMY-W433`)** are a single template-version bump — 2.1 §6.1 step 9
+     deliberately groups them so one bump covers all three, and splitting them would cost three
+     bumps and three recipe changes. They are the last items before 1.9.0 is releasable as
+     specified.
+   - **F-4 (`folding_for`)** is independent and small.
+   - **F-2** stays deferred to 1.10.0 with A-9 while OQ-31 is open.
+   - **`bundle --unknown keep|drop`** was separated from F-16: only the closure was a defect.
+2. **Run S0** from 2.2. *This is now the critical path* — G0 gates TX-P1 on it. It needs no code
+   beyond 2.2's scripts, and two of its workarounds have disappeared now that 2.1 has landed:
+   `-C` being ignored (H-8), and the model missing from the recipe (H-9). It needs live model
+   calls, so it needs the owner's go-ahead rather than a free afternoon.
 3. **Owner review of 2.3 Appendix E and §3 of this document.** Confirm or overrule each decision.
-4. **Answer the TX-P1 blockers** in §4, MSRV first.
+   The subset G0 needs is A-1, A-2, A-3, A-5, A-6, the `admission` opening in A-8.1, A-11
+   `x.text/v1`, A-12 (rules E and Z) and A-13 — nine decisions, none of which TX-P0 touched.
+4. **Answer the TX-P1 blockers** in §4, MSRV first. OQ-40 = OQ-66 (raise `rust-version` to 1.90
+   for redb 4.x, with an MSRV CI job) is the one with a dependency outside this repository, so
+   it is the one to settle first.
 5. **At G0, re-plan 2.4 if the spike's decision table (2.2 §3.7) says so**, then begin TX-P1.
+
+**What is startable today without G0:** TX-P13a alone — the `StoreRead` trait and its consumers
+ported in memory (2.8 §§3–4), which §2's note marks as needing only TX-P0. Everything else in
+2.4 waits on the amendments in step 3.
