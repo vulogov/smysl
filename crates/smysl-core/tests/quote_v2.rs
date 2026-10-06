@@ -180,7 +180,7 @@ fn a_span_and_a_verdict_never_disagree() {
         state ^= state << 17;
         state
     };
-    let mut build = |len: usize, next: &mut dyn FnMut() -> u64| -> String {
+    let build = |len: usize, next: &mut dyn FnMut() -> u64| -> String {
         (0..len)
             .map(|_| INTERESTING[(next() % INTERESTING.len() as u64) as usize])
             .collect()
