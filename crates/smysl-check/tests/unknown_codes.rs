@@ -90,3 +90,42 @@ fn a_store_with_no_unknown_codes_is_quiet() {
         "nothing unknown, nothing to say"
     );
 }
+
+/// `SMY-W432`: a payload key named `lang` is flagged before it becomes a core key.
+///
+/// The lint *is* the migration. When `lang` becomes unit core key 9, a document spelling it as a
+/// payload key has it move from the payload into the core — both hashed, so the uid changes and
+/// nothing reports it. Corpus-wide, and undetectable from inside one peer. Shipping the warning
+/// a release early is what gives an author somewhere to stand.
+#[test]
+fn a_lang_payload_key_is_flagged_before_it_moves() {
+    let doc = "@doc smysl/0.1 {\n  id: v/t\n  intent: test\n  lang: en\n  roots: [c/x]\n}\n\n\
+               @claim c/x { status: speculative, lang: en }\n\
+               ~ A claim carrying lang as a payload key, which a later release will move.\n";
+    let out = smysl_core::surface::parse_surface(doc).expect("this parses today");
+    let store = Store::from_records(out.records);
+    let report = check(&store, CheckOptions::strict());
+
+    let w432: Vec<_> = report.iter().filter(|d| d.code == Code::W432).collect();
+    assert_eq!(w432.len(), 1, "exactly one unit carries it");
+    assert!(
+        w432[0].message.contains("\"lang\":"),
+        "the advice must be actionable — quote it to keep it a payload key — got: {}",
+        w432[0].message
+    );
+}
+
+/// A document with no `lang` payload key says nothing.
+#[test]
+fn a_document_without_a_lang_payload_key_is_quiet() {
+    let doc = "@doc smysl/0.1 {\n  id: v/t\n  intent: test\n  lang: en\n  roots: [c/x]\n}\n\n\
+               @claim c/x { status: speculative }\n\
+               ~ An ordinary claim, with the document's own lang where it belongs.\n";
+    let out = smysl_core::surface::parse_surface(doc).unwrap();
+    let store = Store::from_records(out.records);
+    let report = check(&store, CheckOptions::strict());
+    assert!(
+        !report.iter().any(|d| d.code == Code::W432),
+        "the document header's lang is not a payload key and must not be flagged"
+    );
+}

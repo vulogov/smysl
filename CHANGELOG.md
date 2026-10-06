@@ -170,6 +170,50 @@ This is SMYSL-2.1's F-16, with H-14 and H-15 folded in. `BundleOptions` and `bun
 are deliberately not here — a policy knob invented before a caller asks for it is a guess at the
 policy, and the diagnostic is what makes the default safe.
 
+### A record that cannot be spelled is no longer spelled wrong
+
+This reads like a writer tidy-up and is not. Everything it guards is inside `UnitCore` and
+therefore inside the uid, so each case had one ending: the writer emitted text that parsed back
+to a **different unit**, and the identity moved with nobody told.
+
+`unit_has_surface_form`, `thread_has_surface_form` and `commit_has_surface_form` say whether a
+record survives the round trip, and `write_surface` now asks before writing. A record that cannot
+be spelled travels as CBOR, which it always could.
+
+What has no surface form, and why:
+
+- **A core or source key a later version added.** The writer has nowhere to put it, so it wrote
+  the unit without it — three bytes shorter and a different uid.
+- **An unknown source kind, thread schema or role.** 1.9 opened those enumerations *on the wire*
+  so a store survives a code it cannot name. The grammar never gained a spelling, because `kind:`
+  and the schema and role words parse against their named sets. The writer has to decline rather
+  than invent one.
+- **A payload key colliding with `status`, `deps`, `grounds`, `source` or `salience`.** `HObject`
+  drops quoting, so on re-reading the payload key is indistinguishable from the header field.
+
+**`merge` stopped lying about what it omitted.** The count asserted that units, relations and
+threads always have a surface form, and let commitments fall through to the catch-all — so every
+commitment was counted as omitted while `write_surface` wrote it. A guaranteed over-count on any
+store carrying one. That is SMYSL-2.1's H-16.
+
+### `SMY-W432`, a year early on purpose
+
+A payload key named `lang` becomes **unit core key 9** in a later release. Both places are hashed,
+so at that point the uid of every unit spelling it changes — corpus-wide, silently, and
+undetectable from inside one peer.
+
+This warning exists to be seen *before* that happens, which is why it ships now rather than with
+the change it describes. The message says what to do rather than what is wrong:
+
+> a payload key named `lang` becomes unit core key 9 in a later release, which changes this
+> unit's uid; write `"lang":` to keep it a payload key
+
+A test asserts the advice still contains `"lang":`, so nobody later reduces it to a description.
+A document whose `lang` sits in the `@doc` header — which is where it belongs, and what every
+fixture in this repository does — is not flagged.
+
+This is SMYSL-2.1's F-18 and H-2, with H-16 folded in, and SMYSL-2.3's A-10 item 2.
+
 Carried in from the 1.8 cycle, in the order they were argued for rather than the order they
 are easiest:
 

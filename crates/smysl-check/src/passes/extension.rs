@@ -108,6 +108,29 @@ pub fn run(store: &Store, profile: Option<&ConsumerProfile>, report: &mut Report
         }
     }
 
+    // `SMY-W432` - a payload key named `lang`, which a later release turns into unit core key 9.
+    //
+    // The lint is the migration. When `lang` becomes a core key, a document that spells it as a
+    // payload key has it move from the payload into the core — both hashed, so the **uid
+    // changes, and nothing reports it**. Corpus-wide, and undetectable from inside one peer.
+    // Shipping the warning a release early is what gives an author somewhere to stand: quote it
+    // (`"lang":`) to keep it a payload key, or accept the move deliberately.
+    for r in store.iter() {
+        if let smysl_core::Record::Unit(u) = r {
+            if let Some(bytes) = &u.payload {
+                if let Ok(o) = smysl_core::surface::payload_to_object(bytes) {
+                    if o.iter().any(|(k, _)| k.value == "lang") {
+                        report.push(Diagnostic::new(Code::W432).with_message(
+                            "a payload key named `lang` becomes unit core key 9 in a later \
+                             release, which changes this unit's uid; write `\"lang\":` to keep \
+                             it a payload key",
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     // `SMY-W409` - an enumeration *code* this build does not know, which is W014's argument
     // one level down. 1.9 opened four enumerations so that an unrecognised code no longer
     // fails the decode; preserving it silently would repeat the mistake W014 was added to fix,

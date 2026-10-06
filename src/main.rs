@@ -2305,7 +2305,14 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         let dropped = records
             .iter()
             .filter(|r| match r {
-                Record::Unit(_) | Record::Relation(_) | Record::Thread(_) => false,
+                // A relation always has a surface form; a unit or a thread may not, and the
+                // count said they always did. H-16: a commitment fell to the catch-all below
+                // and was counted as omitted while `write_surface` wrote it — a guaranteed
+                // over-count on any store carrying one.
+                Record::Relation(_) => false,
+                Record::Unit(u) => !smysl::surface::unit_has_surface_form(u),
+                Record::Thread(t) => !smysl::surface::thread_has_surface_form(t),
+                Record::Commit(c) => !smysl::surface::commit_has_surface_form(c),
                 Record::View(v) => Some(&v.id) != emitted.as_ref(),
                 Record::LabelBinding(b) => ctx.labels.get(&b.uid) != Some(&b.label),
                 // Spelled `@schema` since 1.3, unless it carries what surface text cannot.

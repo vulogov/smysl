@@ -9,7 +9,10 @@
 //! - the parser does not panic on anything, because its input comes from other agents.
 
 use smysl_core::surface::{parse_surface, write_surface, WriteContext};
-use smysl_core::{Label, Record, Status};
+use smysl_core::{
+    KernelType, Label, Record, SourceKind, SourceRef, Status, Thread, ThreadId, ThreadSchema,
+    UnitCoreBuilder,
+};
 
 /// The worked example of §6, verbatim.
 const RFC_EXAMPLE: &str = r#"@doc smysl/0.1 {
@@ -1912,5 +1915,95 @@ fn a_refused_source_does_not_stall_the_parser() {
             .count(),
         1,
         "the good unit survives and the bad one does not"
+    );
+}
+
+/// A record that cannot be spelled travels as CBOR instead of being written wrong.
+///
+/// The writer used to emit a unit, a thread and a commitment regardless. Everything checked here
+/// is inside `UnitCore` and therefore inside the uid, so each case had the same ending: text that
+/// parses back to something else, and a uid that moved without anyone being told.
+#[test]
+fn a_record_with_no_surface_form_is_not_written() {
+    use smysl_core::surface::{
+        commit_has_surface_form, thread_has_surface_form, unit_has_surface_form,
+    };
+
+    // The control.
+    let plain = UnitCoreBuilder::new(
+        KernelType::Claim,
+        "an ordinary claim with nothing unusual",
+        Status::Speculative,
+    )
+    .build()
+    .unwrap();
+    assert!(
+        unit_has_surface_form(&plain),
+        "an ordinary unit is writable"
+    );
+
+    // A key a later version added: the writer has nowhere to put it.
+    let mut with_extra = plain.clone();
+    with_extra.extra.insert(31, vec![0x01]);
+    assert!(
+        !unit_has_surface_form(&with_extra),
+        "a unit carrying an unknown core key has no surface form"
+    );
+    assert_eq!(
+        write_surface(None, &[Record::Unit(with_extra)], &WriteContext::default()),
+        "",
+        "and is not written"
+    );
+
+    // An unknown source kind has no spelling: `kind:` parses against the named set.
+    let unknown_src = UnitCoreBuilder::new(
+        KernelType::Claim,
+        "a claim whose source kind is from later",
+        Status::Cited,
+    )
+    .source(
+        SourceRef::new(SourceKind::Doc, "x://y")
+            .with_unknown_kind(9)
+            .unwrap(),
+    )
+    .build()
+    .unwrap();
+    assert!(
+        !unit_has_surface_form(&unknown_src),
+        "1.9 opened the enumeration on the wire, not in the grammar"
+    );
+
+    // A thread whose schema or role this build cannot name.
+    let who = smysl_core::AgentId::new("human:vu").unwrap();
+    let th = Thread::new(
+        ThreadId::new("t/x").unwrap(),
+        ThreadSchema::Analysis,
+        who.clone(),
+        "a thread whose schema is from a later release",
+        smysl_core::Hlc::new(1, 0, who),
+    )
+    .with_unknown_schema(7)
+    .unwrap();
+    assert!(
+        !thread_has_surface_form(&th),
+        "an unknown schema has no spelling"
+    );
+
+    // A commitment carrying an unknown key.
+    let a = smysl_core::AgentId::new("human:vu").unwrap();
+    let mut c = smysl_core::Commit::new(
+        smysl_core::Uid::from_bytes([1; 32]),
+        smysl_core::Commitment::Canonical,
+        a.clone(),
+        smysl_core::Hlc::new(1, 0, a),
+    );
+    assert!(
+        commit_has_surface_form(&c),
+        "an ordinary commitment is writable"
+    );
+    c.extra.insert(31, vec![0x01]);
+    assert!(
+        !commit_has_surface_form(&c),
+        "one carrying an unknown key is not"
     );
 }

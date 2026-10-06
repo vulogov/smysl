@@ -119,9 +119,9 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
     }
     for r in records {
         match r {
-            Record::Unit(u) => write_unit(&mut out, u, ctx),
+            Record::Unit(u) if unit_has_surface_form(u) => write_unit(&mut out, u, ctx),
             Record::Relation(rel) => write_relation(&mut out, rel, ctx),
-            Record::Thread(t) => write_thread(&mut out, t, ctx),
+            Record::Thread(t) if thread_has_surface_form(t) => write_thread(&mut out, t, ctx),
             _ => {}
         }
     }
@@ -134,7 +134,7 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
             Record::Resolution(res) if resolution_has_surface_form(res) => {
                 write_resolution(&mut out, res, &known, ctx)
             }
-            Record::Commit(c) => write_commit(&mut out, c, ctx),
+            Record::Commit(c) if commit_has_surface_form(c) => write_commit(&mut out, c, ctx),
             // Records with no surface form travel as CBOR only.
             _ => {}
         }
@@ -164,6 +164,58 @@ pub fn withdrawal_has_surface_form(w: &Withdrawal) -> bool {
 /// Whether a resolution can be spelled `@resolve`, on the same terms as a withdrawal.
 pub fn resolution_has_surface_form(r: &Resolution) -> bool {
     r.extra.is_empty() && r.ts.agent == r.agent
+}
+
+/// The words a unit header spells, which a payload key must not collide with.
+///
+/// `HObject` drops quoting from a key, so a payload key named `status` is indistinguishable from
+/// the header field on re-reading: the unit would come back with a different status and a
+/// different uid. Surface text cannot express that unit, so it travels as CBOR.
+const UNIT_HEADER_WORDS: &[&str] = &["status", "deps", "grounds", "source", "salience"];
+
+/// Whether a unit can be written as surface text without becoming a different unit.
+///
+/// Everything here is inside `UnitCore` and therefore inside the uid, so each case is the same
+/// failure: the writer emits text that parses back to something else, and the uid moves silently.
+/// The writer used to emit all four regardless.
+pub fn unit_has_surface_form(u: &UnitCore) -> bool {
+    // Keys a later version added. The writer has nowhere to put them.
+    if !u.extra.is_empty() {
+        return false;
+    }
+    if let Some(s) = &u.source {
+        // Same, one level down — and an unknown source kind has no spelling at all, because
+        // `kind:` parses against the named set (1.9 opened the enumeration on the wire only).
+        if !s.extra.is_empty() || s.kind == crate::SourceKind::Unknown {
+            return false;
+        }
+    }
+    // The payload is opaque CBOR, so the collision can only be seen by decoding it. A payload
+    // that will not decode has no surface form either.
+    match &u.payload {
+        None => true,
+        Some(bytes) => match crate::surface::payload::payload_to_object(bytes) {
+            Err(_) => false,
+            Ok(o) => !o
+                .iter()
+                .any(|(k, _)| UNIT_HEADER_WORDS.contains(&k.value.as_str())),
+        },
+    }
+}
+
+/// Whether a thread can be written as `@thread` without losing anything.
+///
+/// An unknown schema or role has no surface spelling: both parse against their named sets, so a
+/// code 1.9 preserved on the wire would be written as something else or not at all.
+pub fn thread_has_surface_form(t: &Thread) -> bool {
+    t.extra.is_empty()
+        && t.schema != crate::ThreadSchema::Unknown
+        && t.steps.iter().all(|s| s.role != crate::Role::Unknown)
+}
+
+/// Whether a commitment can be spelled `@commit` without losing anything.
+pub fn commit_has_surface_form(c: &crate::types::lifecycle::Commit) -> bool {
+    c.extra.is_empty()
 }
 
 /// An edge by its endpoints when the writer knows it, else by its rid.
