@@ -24,6 +24,13 @@
 /// Off by default, and deliberately: folding turns `latencies` into `latenc`, which helps prose and
 /// hurts `connection_pool_size` — the term someone actually searches for. A caller retrieving over
 /// English sentences can ask for it, and one retrieving over identifiers should not.
+///
+/// The RFC proposed a private field recording the language, for `Debug`. It is not here: a
+/// `String` field costs `Tokenizer` its `Copy`, which is a public impl and so a major break —
+/// `Bm25::index_with` moves the value into a builder and then reads it again, which is exactly
+/// the code that stops compiling. A `Copy`-shaped substitute would be a fixed-size byte array
+/// for an eight-character subtag, which is a contrivance to serve a debug line. See
+/// SMYSL-2.1 §10.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Tokenizer {
@@ -40,8 +47,39 @@ impl Tokenizer {
     ///
     /// The folded form is emitted *beside* the term rather than instead of it, so an exact
     /// identifier match still scores as it did.
+    ///
+    /// **English only.** [`fold_suffix`] strips English suffixes and applies them to whatever it
+    /// is given, so this folds Spanish `casas` to `cas` and Dutch `lezing` to `lez` — wrong in
+    /// both, and silently. Use [`folding_for`](Tokenizer::folding_for) to let the document's
+    /// language decide.
     pub fn folding() -> Tokenizer {
         Tokenizer { fold: true }
+    }
+
+    /// `folding()` for English, `plain()` for everything else.
+    ///
+    /// F-4. `folding()` was documented as "common English suffixes" and gated on nothing: any
+    /// caller with English prose in mind turned it on for a whole store, and a Spanish or Dutch
+    /// unit in that store was folded by English rules. `casas` became `cas`, which matches
+    /// nothing a reader would type, and no diagnostic said so.
+    ///
+    /// `folding()` itself is unchanged, because changing it would move results for every
+    /// existing caller with no signal — `tests/manual_library_1_5.rs` and
+    /// `tests/hit_terms.rs` among them. A caller holding a view passes `view.lang`, which is
+    /// the only `LangTag` the format carries today; per-unit routing arrives with FC-1.
+    ///
+    /// The primary subtag decides, so `en`, `en-GB` and `en-US-u-va-posix` all fold. Case is
+    /// ignored: BCP 47 says subtags are case-insensitive, and `LangTag` does not normalise.
+    pub fn folding_for(lang: &smysl_core::LangTag) -> Tokenizer {
+        let primary = lang
+            .as_str()
+            .split('-')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        Tokenizer {
+            fold: primary == "en",
+        }
     }
 
     pub fn terms(&self, text: &str) -> Vec<String> {
@@ -60,6 +98,10 @@ impl Tokenizer {
 }
 
 /// One English suffix folded off a term, when the result is still a word-sized stem.
+///
+/// **English suffixes, applied to any text it is given.** It does not inspect the language and
+/// cannot: `casas` folds to `cas` and `lezing` to `lez` as readily as `requires` folds to
+/// `requir`. Use [`Tokenizer::folding_for`] to gate it on a document's language.
 ///
 /// Deterministic, idempotent and locale-free: `s`, `es`, `ed`, `ing` and `ly`, then a trailing
 /// `e`, so `require`, `required`, `requires` and `requiring` all reach `requir`. Not a stemmer —

@@ -87,6 +87,10 @@ impl Bm25 {
     /// a unit saying `require`. Off by default: the fold helps prose and hurts identifiers, and
     /// turning it on moves every score in the index, so it is the caller's decision and not a
     /// silent improvement.
+    ///
+    /// The suffixes are English and are applied to any text given, so a caller indexing a store
+    /// that is not English wants `Tokenizer::folding_for(&view.lang)`, which folds for `en` and
+    /// leaves everything else as written.
     pub fn index_with(store: &Store, tokenizer: crate::tokenize::Tokenizer) -> Bm25 {
         let facts = candidates(store);
 

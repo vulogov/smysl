@@ -138,3 +138,64 @@ fn a_hit_carries_no_terms_unless_a_retriever_supplies_them() {
     assert_eq!(told.terms, vec![("pool".to_string(), 1.5)]);
     assert_eq!(told.score, bare.score);
 }
+
+/// F-4: the fold is English, and `folding_for` is how a caller says so.
+///
+/// `folding()` is documented as "common English suffixes" and gated on nothing, so a caller with
+/// English prose in mind turned it on for a whole store, and a Spanish unit in that store was
+/// folded by English rules with no diagnostic.
+///
+/// The RFC named `casas` for this test, and `casas` is the case that makes the weaker argument:
+/// English `-s` strips to `casa`, which **is** the Spanish singular. The rule is right there by
+/// coincidence, and a rule that is right by coincidence on the example chosen for it is the
+/// thing worth distrusting. So the words that carry the claim are the ones where the
+/// coincidence fails: `lunes` is Monday, not a plural, and folds to `lun`; `crisis` is singular
+/// in both languages and folds to `crisi`. Neither matches anything a reader would type.
+#[test]
+fn folding_for_es_does_not_fold_casas() {
+    use smysl_core::LangTag;
+
+    let es = Tokenizer::folding_for(&LangTag::new("es").unwrap());
+    for word in ["casas", "lunes", "crisis", "viernes"] {
+        assert_eq!(
+            es.terms(word),
+            vec![word],
+            "English suffix rules must not reach Spanish"
+        );
+    }
+
+    // The same words under the ungated fold: what a caller got before F-4, and still gets if
+    // they ask for `folding()` outright. Asserted so the difference is visible here rather than
+    // inferred from the absence of a term above.
+    assert_eq!(Tokenizer::folding().terms("casas"), vec!["casas", "casa"]);
+    assert_eq!(Tokenizer::folding().terms("lunes"), vec!["lunes", "lun"]);
+    assert_eq!(
+        Tokenizer::folding().terms("crisis"),
+        vec!["crisis", "crisi"]
+    );
+}
+
+/// And English still folds, including through a region or an extension subtag.
+///
+/// The primary subtag decides. `en-GB` is English; so is `en-US-u-va-posix`. Case is ignored
+/// because BCP 47 subtags are case-insensitive and `LangTag` does not normalise them.
+#[test]
+fn folding_for_en_matches_folding() {
+    use smysl_core::LangTag;
+
+    let plain = Tokenizer::folding();
+    for tag in ["en", "en-GB", "EN", "en-US-u-va-posix"] {
+        let gated = Tokenizer::folding_for(&LangTag::new(tag).unwrap());
+        for text in ["required", "requires", "classes", "connection_pool_size"] {
+            assert_eq!(
+                gated.terms(text),
+                plain.terms(text),
+                "{tag} is English, so {text} must fold as it always did"
+            );
+        }
+    }
+
+    // A tag that is not English gets `plain()`, which is the other half of the same claim.
+    let de = Tokenizer::folding_for(&LangTag::new("de").unwrap());
+    assert_eq!(de.terms("required"), Tokenizer::plain().terms("required"));
+}

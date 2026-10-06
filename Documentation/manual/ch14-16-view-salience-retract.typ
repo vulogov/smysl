@@ -617,6 +617,11 @@ anything scores. And `Bm25::index_with(Tokenizer::folding())` turns the English 
 rather than an improvement: turning it on moves every score in the index, and a corpus of
 identifiers is worse off for it.
 
+The fold is English and applies to whatever it is given, which until 1.9 it did without saying
+so: Spanish `lunes` — Monday, not a plural — folded to `lun`. `Tokenizer::folding_for(&lang)`
+folds for `en` and leaves every other language as written, so a store with a view language can
+let the document decide instead of the caller guessing.
+
 #subsection("Why a hit is a hit: `--why`")
 
 A score says how relevant. It does not say *why*, and the difference between a

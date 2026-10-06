@@ -617,7 +617,9 @@ the units a diff touched, say — which is a filter and not a re-rank: scores ar
 the eligible set narrows. `Bm25::index_with(Tokenizer::folding())` turns on an English suffix fold,
 so a query saying `require` retrieves a unit saying `required`. It is off by default, because the
 fold helps prose and hurts `connection_pool_size`, and turning it on moves every score in the
-index — that is the caller's decision to make, not a silent improvement.
+index — that is the caller's decision to make, not a silent improvement. The suffixes are
+English and are applied to any text given, so `Tokenizer::folding_for(&view.lang)` (1.9) is the
+form to reach for when the store is not English: it folds for `en` and leaves the rest alone.
 
 #callout(label: "How this was verified")[
   This code is `tests/manual_library_1_5.rs`, extracted from it, and it runs in the same

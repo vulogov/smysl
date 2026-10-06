@@ -469,6 +469,37 @@ draws that distinction instead of eliding it.
 
 This is SMYSL-2.1's H-19.
 
+### The suffix fold is English, and now it says so
+
+`Tokenizer::folding()` is documented as folding "common English suffixes" and was gated on
+nothing. A caller with English prose in mind turned it on for a whole store, and a unit in
+another language was folded by English rules with no diagnostic: `lunes` — Monday, not a plural
+— became `lun`, and `crisis` became `crisi`. Neither matches anything a reader would type.
+
+`Tokenizer::folding_for(&lang)` folds for `en` and leaves everything else as written. The
+primary subtag decides, so `en-GB` and `en-US-u-va-posix` fold and case is ignored, BCP 47
+subtags being case-insensitive. A caller holding a view passes `view.lang`, the only language
+tag the format carries today.
+
+`folding()` itself is unchanged. Changing it would move every score for every existing caller
+with no signal, and the fold is still the right thing for an English store.
+
+Two notes on what this is not:
+
+- The suffix table is not fixed, because it cannot be: it *is* English. `fold_suffix` and
+  `Bm25::index_with` now say so in their own documentation, which is where a caller looks.
+- The RFC named `casas` for this, and `casas` is the weakest case: English `-s` strips it to
+  `casa`, which is the Spanish singular. The rule is right there by coincidence, and a rule
+  that is right by coincidence on the example chosen for it is the one worth distrusting. The
+  test keeps `casas` and adds the words where the coincidence fails.
+
+`Tokenizer` keeps its `Copy`. SMYSL-2.1 proposed a private field recording the language for
+`Debug`; a `String` field costs the type its `Copy`, which is a public impl and so a major
+break, and `Bm25::index_with` is the code that stops compiling. The debug line was not worth a
+fixed-size byte array to serve it.
+
+This is SMYSL-2.1's F-4.
+
 Carried in from the 1.8 cycle, in the order they were argued for rather than the order they
 are easiest:
 
