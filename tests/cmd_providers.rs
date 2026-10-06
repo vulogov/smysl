@@ -379,3 +379,123 @@ fn a_probe_reports_what_it_found() {
     );
     assert_ne!(down.code, SUCCESS, "and does not exit 0");
 }
+
+/// One provider named `id`, with the routing pointing at it.
+///
+/// `config()` routes to `nearby` and nothing else, which is right for every test above — they
+/// all configure `nearby`. The two tests below have to tell two configurations apart by the
+/// one thing a listing prints, so the id is what varies, and the routing has to follow it or
+/// the file is refused as inconsistent before the listing is reached.
+fn routed_to(id: &str) -> String {
+    format!(
+        "{{\n  providers: {{\n{}  }}\n  routing: {{ content-ingest: {id} }}\n  \
+         fallback: [{id}]\n}}\n",
+        provider(id, "http://127.0.0.1:1")
+    )
+}
+
+/// `routed_to`, plus an `ingest.prompt` key naming a relative path.
+fn with_prompt(id: &str, prompt: &str) -> String {
+    routed_to(id).replace(
+        "\n}\n",
+        &format!("\n  ingest: {{ prompt: \"{prompt}\" }}\n}}\n"),
+    )
+}
+
+/// `-C` names the configuration, and `providers` lists what that file says.
+///
+/// H-8: the flag was declared globally and nothing read it, so `-C other.hjson` was accepted
+/// and the project sidecar was read instead. The two configurations here differ in the one
+/// thing the listing prints — the provider's id — so a flag that is ignored cannot pass by
+/// coincidence: the project names `sidecar` and the file named by `-C` names `elsewhere`.
+///
+/// The RFC filed this under `tests/global_flags.rs`. It lives here because a listing needs a
+/// compiled mapper, and `global_flags.rs` is gated on `cli` alone — there the only provider
+/// would be skipped as "not compiled into this build" and the assertion would be about the
+/// feature set rather than the flag.
+#[test]
+fn the_config_flag_is_read() {
+    let dir = project("cfg-flag", &routed_to("sidecar"));
+    let other = dir.join("elsewhere.hjson");
+    std::fs::write(&other, routed_to("elsewhere")).expect("write the config named by -C");
+
+    let out = run_in(&dir, &["-C", "elsewhere.hjson", "providers"]);
+    assert_eq!(
+        out.code,
+        SUCCESS,
+        "a listing from a named config must succeed; stderr: {}",
+        out.stderr.trim()
+    );
+    assert!(
+        out.stdout.contains("elsewhere"),
+        "-C must be the configuration that is read: {}",
+        out.stdout
+    );
+    assert!(
+        !out.stdout.contains("sidecar"),
+        "-C must replace the project sidecar rather than add to it: {}",
+        out.stdout
+    );
+}
+
+/// A `-C` file that is not there is the command line's mistake, not a reason to carry on.
+///
+/// Falling back would run the command against a configuration the caller neither named nor
+/// saw — the all-local default, or a project sidecar from whatever directory they happened to
+/// be in. The project's own missing sidecar still means the default: nobody asked for it by
+/// name, so there is nothing to be wrong about.
+#[test]
+fn a_missing_config_is_a_usage_error() {
+    let dir = project("cfg-missing", &routed_to("sidecar"));
+
+    let out = run_in(&dir, &["-C", "not-here.hjson", "providers"]);
+    assert_eq!(
+        out.code, 2,
+        "a named config that is absent must be a usage error; stdout was: {}",
+        out.stdout
+    );
+    assert!(
+        out.stderr.contains("not-here.hjson"),
+        "the refusal must name the file that is missing: {}",
+        out.stderr
+    );
+    assert!(
+        !out.stdout.contains("sidecar"),
+        "a refused config must not fall back to the project: {}",
+        out.stdout
+    );
+}
+
+/// A relative path *inside* a configuration resolves beside the file that spells it.
+///
+/// H-8's second half, and the one a caller is likelier to be bitten by than the flag itself.
+/// `ingest.prompt: p.md` in a config two directories away named something the author of that
+/// config cannot predict: with the project sidecar it is the project's `p.md`, and under `-C`
+/// it is the one next to the named file. Both halves are asserted, because a resolution that
+/// is right in one case by accident is not a rule.
+///
+/// Neither invocation reaches a provider: the override is loaded before any request is built,
+/// and the path named here does not exist, so the refusal *is* the observation. The endpoint
+/// is loopback port 1 regardless.
+#[test]
+fn a_relative_prompt_resolves_beside_its_own_config() {
+    let dir = project("cfg-prompt", &with_prompt("sidecar", "p.md"));
+    std::fs::create_dir_all(dir.join("sub")).expect("a directory for the named config");
+    std::fs::write(dir.join("sub/cfg.hjson"), with_prompt("elsewhere", "p.md"))
+        .expect("write the config named by -C");
+    std::fs::write(dir.join("in.txt"), "hello\n").expect("something to ingest");
+
+    let named = run_in(&dir, &["-C", "sub/cfg.hjson", "ingest", "in.txt"]);
+    assert!(
+        named.stderr.contains("sub/p.md"),
+        "a -C config's relative prompt belongs beside that file: {}",
+        named.stderr
+    );
+
+    let sidecar = run_in(&dir, &["ingest", "in.txt"]);
+    assert!(
+        sidecar.stderr.contains("p.md") && !sidecar.stderr.contains("sub/p.md"),
+        "the project sidecar's relative prompt belongs to the project: {}",
+        sidecar.stderr
+    );
+}

@@ -95,7 +95,7 @@ fn cli() -> Command {
             .short('C')
             .long("config")
             .global(true)
-            .help("Configuration file")
+            .help("Configuration file; must exist (default: <store dir>/.smysl/config.hjson)")
             .value_name("FILE"),
         Arg::new("store")
             .short('s')
@@ -4242,7 +4242,7 @@ fn project_file(global: &ArgMatches, name: &str) -> std::path::PathBuf {
     root_beside(global.get_one::<String>("store").map(String::as_str)).join(name)
 }
 
-/// The directory a sidecar belongs in, given `--store`.
+/// The directory a sidecar — or a `-C` file's own relative paths — belongs in.
 ///
 /// Separated from the two helpers that call it because they take an `ArgMatches`, which is
 /// what made the `!` in the filter untestable — two mutants survived on the same expression
@@ -4258,14 +4258,69 @@ fn root_beside(store: Option<&str>) -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
-/// The project configuration, or the all-local default when there is none.
+/// A configuration that could not be loaded, and the exit code that says whose mistake it was.
+///
+/// The two cases were one while `-C` was ignored, because the only way to reach this error was a
+/// project sidecar the caller never named. A file the caller named by hand is different: if it is
+/// not there, the command line is wrong, and that is a usage error.
 #[cfg(feature = "providers")]
-fn load_config(global: &ArgMatches) -> Result<smysl::ProviderConfigFile, String> {
-    let path = project_file(global, smysl::ProviderConfigFile::PATH);
+struct ConfigError {
+    code: ExitCode,
+    message: String,
+}
+
+#[cfg(feature = "providers")]
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+/// The configuration file to read, and whether it is allowed not to exist.
+///
+/// `-C FILE` names the file outright, so it is required: silently falling back to the project
+/// sidecar — or to the all-local default — would run the command against a configuration the
+/// caller did not ask for and did not see.
+#[cfg(feature = "providers")]
+fn config_path(global: &ArgMatches) -> (std::path::PathBuf, bool) {
+    match global.get_one::<String>("config") {
+        Some(p) => (std::path::PathBuf::from(p), true),
+        None => (project_file(global, smysl::ProviderConfigFile::PATH), false),
+    }
+}
+
+/// Where a relative path written *inside* the configuration points.
+///
+/// Beside the file that spells it, which for the project sidecar is the project and for `-C` is
+/// wherever the caller keeps it. `PromptOverride::load_file` already resolves its own `*_file`
+/// keys this way; a config two directories away whose `ingest.prompt` resolved against the store
+/// would name a file the author of that config had no way to predict.
+//
+// Gated on `ingest` rather than `providers`, like its one caller: `providers` alone compiles no
+// command that reads a path out of the configuration, and a function that is live in one feature
+// row and dead in another is the dead-code error that failed `-D warnings` for three releases.
+#[cfg(feature = "ingest")]
+fn config_relative(global: &ArgMatches, p: &str) -> std::path::PathBuf {
+    match global.get_one::<String>("config") {
+        Some(c) => root_beside(Some(c.as_str())).join(p),
+        None => project_file(global, p),
+    }
+}
+
+/// The configuration named by `-C`, or the project's, or the all-local default when neither is
+/// there.
+#[cfg(feature = "providers")]
+fn load_config(global: &ArgMatches) -> Result<smysl::ProviderConfigFile, ConfigError> {
+    let (path, required) = config_path(global);
     match std::fs::read_to_string(&path) {
-        Ok(src) => {
-            smysl::ProviderConfigFile::load(&src).map_err(|e| format!("{}: {e}", path.display()))
-        }
+        Ok(src) => smysl::ProviderConfigFile::load(&src).map_err(|e| ConfigError {
+            code: ExitCode::Failure,
+            message: format!("{}: {e}", path.display()),
+        }),
+        Err(e) if required => Err(ConfigError {
+            code: ExitCode::Usage,
+            message: format!("{}: {e}", path.display()),
+        }),
         // A default that reached a hosted provider would mean a first run egressing
         // content nobody asked to send, so the default is entirely local.
         Err(_) => Ok(smysl::ProviderConfigFile::local_default()),
@@ -4274,26 +4329,32 @@ fn load_config(global: &ArgMatches) -> Result<smysl::ProviderConfigFile, String>
 
 /// The prompt override for `ingest`: `--prompt`, else `ingest.prompt` from the config.
 ///
-/// A config path is relative to the project, like every other sidecar; a flag is relative to
-/// where the command was typed, like every other argument.
+/// A config path is relative to the config that spells it — the project for a sidecar, its own
+/// directory under `-C`; a flag is relative to where the command was typed, like every other
+/// argument.
 #[cfg(feature = "ingest")]
 fn load_prompt(
     m: &ArgMatches,
     global: &ArgMatches,
-) -> Result<Option<smysl::PromptOverride>, String> {
+) -> Result<Option<smysl::PromptOverride>, ConfigError> {
     let path = match m.get_one::<String>("prompt") {
         Some(p) => std::path::PathBuf::from(p),
         None => match load_config(global)?.ingest_prompt {
-            Some(p) => project_file(global, &p),
+            Some(p) => config_relative(global, &p),
             None => return Ok(None),
         },
     };
-    smysl::PromptOverride::load_file(&path).map(Some)
+    smysl::PromptOverride::load_file(&path)
+        .map(Some)
+        .map_err(|e| ConfigError {
+            code: ExitCode::Failure,
+            message: e,
+        })
 }
 
 /// Load the provider configuration, falling back to the all-local default.
 #[cfg(feature = "providers")]
-fn load_registry(global: &ArgMatches) -> Result<smysl::Registry, String> {
+fn load_registry(global: &ArgMatches) -> Result<smysl::Registry, ConfigError> {
     let cfg = load_config(global)?;
 
     let mut r = smysl::Registry::new().offline(global.get_flag("offline"));
@@ -4323,7 +4384,7 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         Ok(r) => r,
         Err(e) => {
             eprintln!("smysl ingest: {e}");
-            return ExitCode::Failure;
+            return e.code;
         }
     };
 
@@ -4372,7 +4433,7 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             Ok(cfg) => cfg.ingest_path,
             Err(e) => {
                 eprintln!("smysl ingest: {e}");
-                return ExitCode::Failure;
+                return e.code;
             }
         },
     };
@@ -4397,7 +4458,7 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         Ok(None) => {}
         Err(e) => {
             eprintln!("smysl ingest: prompt override: {e}");
-            return ExitCode::Failure;
+            return e.code;
         }
     }
     let requested = match opts.requested_path() {
@@ -4596,7 +4657,7 @@ fn cmd_attest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         Ok(r) => r,
         Err(e) => {
             eprintln!("smysl attest: {e}");
-            return ExitCode::Failure;
+            return e.code;
         }
     };
 
@@ -4680,7 +4741,7 @@ fn cmd_providers(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         Ok(r) => r,
         Err(e) => {
             eprintln!("smysl providers: {e}");
-            return ExitCode::Failure;
+            return e.code;
         }
     };
 

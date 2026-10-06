@@ -254,6 +254,30 @@ change; the rule is what actually holds.
 
 This is SMYSL-2.1's H-13 and H-20.
 
+### `-C/--config` is read
+
+It has been declared globally — on every subcommand's `--help` — and nothing ever read it.
+`smysl -C other.hjson providers` accepted the flag, ignored the file, and listed the providers
+from `.smysl/config.hjson` beside `--store`. A flag that is accepted and ignored is worse than
+one that is refused: the caller believes they chose, and the output looks like an answer.
+
+Now it is the configuration:
+
+- `-C FILE` **must exist.** Falling back would run the command against a configuration nobody
+  named and nobody saw — the project sidecar from whatever directory the caller was in, or the
+  all-local default. So a missing named file is exit 2, a usage error. A missing *project*
+  sidecar still means the all-local default: nobody asked for it by name, so there is nothing
+  to be wrong about. Those two were one code while the flag was dead, because the only way to
+  reach the error was a file the caller never named.
+- **A relative path inside the configuration resolves beside the configuration**, not beside
+  the store. `ingest.prompt: p.md` in `~/configs/work.hjson` means `~/configs/p.md`. This is
+  the rule `PromptOverride::load_file` already used for its own `*_file` keys; the author of a
+  config two directories away cannot predict which store it will be pointed at.
+
+The default is unchanged in every respect, so a run without `-C` behaves exactly as before.
+
+This is SMYSL-2.1's H-8.
+
 Carried in from the 1.8 cycle, in the order they were argued for rather than the order they
 are easiest:
 
