@@ -56,31 +56,6 @@ pub enum Support {
     Absent,
 }
 
-/// Collapse the differences a model will introduce without meaning anything by them.
-///
-/// This is part of the public contract since 1.3 (`smysl::quote_support`), so the rules are
-/// stated exactly:
-///
-/// - **case** is folded;
-/// - **runs of whitespace**, including a non-breaking space, are one space;
-/// - **quotation marks are one mark**: straight and curly, single and double. A model that
-///   quotes `'Deterministic CBOR'` from `"Deterministic CBOR"` changed style, not content;
-/// - **dashes are hyphens**: en, em, figure and minus;
-/// - **Markdown code and emphasis markers are deleted**: `` ` `` and `*`. They render as the
-///   words they surround, and a quote copies the rendering. Deleted rather than replaced by a
-///   space, because `` `smysl`, `` must become `smysl,` — a space would make it `smysl ,` and
-///   break the very match this allows;
-/// - **an underscore is kept.** In a code change `foo_bar` and `foobar` are different names;
-///   treating `_` as emphasis would call a quote of one an attribution to the other.
-///
-/// Deliberately **not** stemming or synonyms — those would make a reworded claim look
-/// attributed, which is exactly the thing this exists to catch.
-/// [`normalise`], keeping where each normalised byte came from (1.5).
-///
-/// One entry per byte of the result, plus a sentinel, so a match found in the normalised text can
-/// be pointed back at the source a person reads. Normalisation deletes characters, collapses
-/// whitespace runs and can change a character's length when it lowercases, so the mapping cannot
-/// be recomputed from the two strings afterwards — it has to be recorded while it happens.
 /// Which comparison form a quote check uses.
 ///
 /// V1 is what every release up to 1.8 compared with, and it does not change by one byte: `support`
@@ -246,6 +221,31 @@ fn form_mapped(n: Normaliser, s: &str) -> (String, Vec<usize>) {
     }
 }
 
+/// Collapse the differences a model will introduce without meaning anything by them.
+///
+/// This is part of the public contract since 1.3 (`smysl::quote_support`), so the rules are
+/// stated exactly:
+///
+/// - **case** is folded;
+/// - **runs of whitespace**, including a non-breaking space, are one space;
+/// - **quotation marks are one mark**: straight and curly, single and double. A model that
+///   quotes `'Deterministic CBOR'` from `"Deterministic CBOR"` changed style, not content;
+/// - **dashes are hyphens**: en, em, figure and minus;
+/// - **Markdown code and emphasis markers are deleted**: `` ` `` and `*`. They render as the
+///   words they surround, and a quote copies the rendering. Deleted rather than replaced by a
+///   space, because `` `smysl`, `` must become `smysl,` — a space would make it `smysl ,` and
+///   break the very match this allows;
+/// - **an underscore is kept.** In a code change `foo_bar` and `foobar` are different names;
+///   treating `_` as emphasis would call a quote of one an attribution to the other.
+///
+/// Deliberately **not** stemming or synonyms — those would make a reworded claim look
+/// attributed, which is exactly the thing this exists to catch.
+/// `normalise`, keeping where each normalised byte came from (1.5).
+///
+/// One entry per byte of the result, plus a sentinel, so a match found in the normalised text can
+/// be pointed back at the source a person reads. Normalisation deletes characters, collapses
+/// whitespace runs and can change a character's length when it lowercases, so the mapping cannot
+/// be recomputed from the two strings afterwards — it has to be recorded while it happens.
 fn normalise_mapped(s: &str) -> (String, Vec<usize>) {
     let mut out = String::with_capacity(s.len());
     let mut map: Vec<usize> = Vec::with_capacity(s.len() + 1);
