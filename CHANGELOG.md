@@ -214,6 +214,46 @@ fixture in this repository does — is not flagged.
 
 This is SMYSL-2.1's F-18 and H-2, with H-16 folded in, and SMYSL-2.3's A-10 item 2.
 
+### `ingest --yes` says what it does, and what it will do
+
+The flag has promised *"Commit the staged batch instead of exiting 10"* since it was written, and
+has never committed anything: it suppresses exit 10 and stops. Half of what it claimed.
+
+It would have been easy to implement it and call that a fix. That turns a read-only invocation
+into one that writes `--store`, in a minor release, for anyone who has been passing `--yes` to
+avoid exit 10 rather than to ask for a write — and a surprise write is not a thing to discover
+afterwards. So **1.9 says what it does, and 1.10 does what it says**:
+
+```
+--yes    Accept the staged batch and exit 0 rather than 10 (commits to --store from 1.10)
+```
+
+with a warning at runtime naming the workaround, which has existed all along: `smysl merge
+--staged`. The precedent is `SMY-W432` in this same release — when a change moves somebody's
+data, the warning ships first.
+
+### `find` and `pack` are mixed, and the table says when
+
+Both were labelled `pure`. `find --engine semantic|hybrid` calls a model, and `pack --query` can
+reach the same retriever, so the one table a user reads was wrong in exactly the case rule D
+exists for.
+
+They are now `mixed`, which `thread` has been since SM-P11 — but `mixed` alone tells a reader to
+assume the worst of every invocation, and all three are pure by default. So a command that is
+mixed now has to say *when*:
+
+```
+Purity: mixed (pure except --engine semantic|hybrid)
+```
+
+`thread` gains the same note — `pure except --refine` — closing a gap that was older and quieter.
+
+The census test that asserted `mixed == ["thread"]` is now an invariant as well as a list: every
+mixed command must name its exception, and no other command may. A list goes stale on the next
+change; the rule is what actually holds.
+
+This is SMYSL-2.1's H-13 and H-20.
+
 Carried in from the 1.8 cycle, in the order they were argued for rather than the order they
 are easiest:
 

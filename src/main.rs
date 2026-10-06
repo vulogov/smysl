@@ -50,37 +50,43 @@ struct Cmd {
     purity: Purity,
     /// The delivery phase that wires this command to its library API.
     phase: &'static str,
+    /// Which invocations of a `Mixed` command are the impure ones.
+    ///
+    /// `mixed` alone is true and too coarse: a reader cannot tell whether the command they are
+    /// about to run calls a model. The dispatcher decides per invocation under `--seed-check`;
+    /// this is so the table a user actually reads says the same thing.
+    impure_when: Option<&'static str>,
 }
 
 /// The command table of §23, in table order.
 #[rustfmt::skip]
 const COMMANDS: &[Cmd] = &[
-    Cmd { name: "fmt",       about: "Canonicalise surface text and verify the round-trip", purity: Purity::Pure,  phase: "SM-P2"  },
-    Cmd { name: "check",     about: "Run the check pipeline over a store",                 purity: Purity::Pure,  phase: "SM-P4"  },
-    Cmd { name: "pack",      about: "Budget-bounded, closure-complete selection",          purity: Purity::Pure,  phase: "SM-P9"  },
-    Cmd { name: "merge",     about: "Join-semilattice union; materialise contentions",     purity: Purity::Pure,  phase: "SM-P6"  },
-    Cmd { name: "diff",      about: "Partition uids across stores or hops",                purity: Purity::Pure,  phase: "SM-P7"  },
-    Cmd { name: "trace",     about: "Walk provenance or evidential support",               purity: Purity::Pure,  phase: "SM-P7"  },
-    Cmd { name: "view",      about: "Define or print a view",                              purity: Purity::Pure,  phase: "SM-P7"  },
-    Cmd { name: "bundle",    about: "Emit the reachable closure of a view",                purity: Purity::Pure,  phase: "SM-P7"  },
-    Cmd { name: "thread",    about: "Derive, refine, list, show, or import threads",       purity: Purity::Mixed, phase: "SM-P11" },
-    Cmd { name: "salience",  about: "Report derived salience with per-term breakdown",     purity: Purity::Pure,  phase: "SM-P8"  },
-    Cmd { name: "find",      about: "Rank units against a query, lexically",                purity: Purity::Pure,  phase: "0.5.0"  },
-    Cmd { name: "retract",   about: "Retract a unit; report the blast radius first",       purity: Purity::Pure,  phase: "SM-P6"  },
-    Cmd { name: "withdraw",  about: "Withdraw an edge: kept, and no longer followed",       purity: Purity::Pure,  phase: "1.4.0"  },
-    Cmd { name: "resolve",   about: "Record that a disagreement was reviewed",              purity: Purity::Pure,  phase: "1.4.0"  },
-    Cmd { name: "review",    about: "List the disagreements open for review",               purity: Purity::Pure,  phase: "1.4.0"  },
-    Cmd { name: "commit",    about: "Record how settled a unit is",                         purity: Purity::Pure,  phase: "1.7.0"  },
-    Cmd { name: "render",    about: "Thread plus profile to artifact",                     purity: Purity::Pure,  phase: "SM-P12" },
-    Cmd { name: "import",    about: "Tabular readings to measured units, without a model",  purity: Purity::Pure,  phase: "SM-P15" },
-    Cmd { name: "relink",    about: "Re-point references onto superseded units",             purity: Purity::Pure,  phase: "SM-P15" },
-    Cmd { name: "compact",   about: "Drop superseded units nothing needs; never in place",   purity: Purity::Pure,  phase: "SM-P15" },
-    Cmd { name: "ingest",    about: "Prose or data to staged units",                       purity: Purity::Model, phase: "SM-P14" },
-    Cmd { name: "attest",    about: "Semantic checks that require a model",                purity: Purity::Model, phase: "SM-P14" },
-    Cmd { name: "providers", about: "List providers, capabilities, and what would egress", purity: Purity::Pure,  phase: "SM-P13" },
-    Cmd { name: "usage",     about: "Token and cost ledger",                               purity: Purity::Pure,  phase: "SM-P13" },
-    Cmd { name: "reindex",   about: "Rebuild the derived index from the log alone",        purity: Purity::Pure,  phase: "SM-P3"  },
-    Cmd { name: "ui",        about: "Terminal UI",                                         purity: Purity::Pure,  phase: "SM-P15" },
+    Cmd { name: "fmt",       about: "Canonicalise surface text and verify the round-trip", purity: Purity::Pure,  phase: "SM-P2"  , impure_when: None },
+    Cmd { name: "check",     about: "Run the check pipeline over a store",                 purity: Purity::Pure,  phase: "SM-P4"  , impure_when: None },
+    Cmd { name: "pack",      about: "Budget-bounded, closure-complete selection",          purity: Purity::Mixed, phase: "SM-P9"  , impure_when: Some("--query with --engine semantic|hybrid") },
+    Cmd { name: "merge",     about: "Join-semilattice union; materialise contentions",     purity: Purity::Pure,  phase: "SM-P6"  , impure_when: None },
+    Cmd { name: "diff",      about: "Partition uids across stores or hops",                purity: Purity::Pure,  phase: "SM-P7"  , impure_when: None },
+    Cmd { name: "trace",     about: "Walk provenance or evidential support",               purity: Purity::Pure,  phase: "SM-P7"  , impure_when: None },
+    Cmd { name: "view",      about: "Define or print a view",                              purity: Purity::Pure,  phase: "SM-P7"  , impure_when: None },
+    Cmd { name: "bundle",    about: "Emit the reachable closure of a view",                purity: Purity::Pure,  phase: "SM-P7"  , impure_when: None },
+    Cmd { name: "thread",    about: "Derive, refine, list, show, or import threads",       purity: Purity::Mixed, phase: "SM-P11" , impure_when: Some("--refine") },
+    Cmd { name: "salience",  about: "Report derived salience with per-term breakdown",     purity: Purity::Pure,  phase: "SM-P8"  , impure_when: None },
+    Cmd { name: "find",      about: "Rank units against a query, lexically",                purity: Purity::Mixed, phase: "0.5.0"  , impure_when: Some("--engine semantic|hybrid") },
+    Cmd { name: "retract",   about: "Retract a unit; report the blast radius first",       purity: Purity::Pure,  phase: "SM-P6"  , impure_when: None },
+    Cmd { name: "withdraw",  about: "Withdraw an edge: kept, and no longer followed",       purity: Purity::Pure,  phase: "1.4.0"  , impure_when: None },
+    Cmd { name: "resolve",   about: "Record that a disagreement was reviewed",              purity: Purity::Pure,  phase: "1.4.0"  , impure_when: None },
+    Cmd { name: "review",    about: "List the disagreements open for review",               purity: Purity::Pure,  phase: "1.4.0"  , impure_when: None },
+    Cmd { name: "commit",    about: "Record how settled a unit is",                         purity: Purity::Pure,  phase: "1.7.0"  , impure_when: None },
+    Cmd { name: "render",    about: "Thread plus profile to artifact",                     purity: Purity::Pure,  phase: "SM-P12" , impure_when: None },
+    Cmd { name: "import",    about: "Tabular readings to measured units, without a model",  purity: Purity::Pure,  phase: "SM-P15" , impure_when: None },
+    Cmd { name: "relink",    about: "Re-point references onto superseded units",             purity: Purity::Pure,  phase: "SM-P15" , impure_when: None },
+    Cmd { name: "compact",   about: "Drop superseded units nothing needs; never in place",   purity: Purity::Pure,  phase: "SM-P15" , impure_when: None },
+    Cmd { name: "ingest",    about: "Prose or data to staged units",                       purity: Purity::Model, phase: "SM-P14" , impure_when: None },
+    Cmd { name: "attest",    about: "Semantic checks that require a model",                purity: Purity::Model, phase: "SM-P14" , impure_when: None },
+    Cmd { name: "providers", about: "List providers, capabilities, and what would egress", purity: Purity::Pure,  phase: "SM-P13" , impure_when: None },
+    Cmd { name: "usage",     about: "Token and cost ledger",                               purity: Purity::Pure,  phase: "SM-P13" , impure_when: None },
+    Cmd { name: "reindex",   about: "Rebuild the derived index from the log alone",        purity: Purity::Pure,  phase: "SM-P3"  , impure_when: None },
+    Cmd { name: "ui",        about: "Terminal UI",                                         purity: Purity::Pure,  phase: "SM-P15" , impure_when: None },
 ];
 
 fn cli() -> Command {
@@ -169,7 +175,12 @@ fn cli() -> Command {
     for c in COMMANDS {
         let mut sub = Command::new(c.name)
             .about(c.about)
-            .after_help(format!("Purity: {}", c.purity.tag()));
+            .after_help(match c.impure_when {
+                // `mixed` alone makes a reader assume the worst of every invocation, which is
+                // its own kind of wrong: `find` is pure unless asked for a model.
+                Some(w) => format!("Purity: {} (pure except {w})", c.purity.tag()),
+                None => format!("Purity: {}", c.purity.tag()),
+            });
         sub = match c.name {
             "fmt" => sub
                 .arg(
@@ -965,7 +976,10 @@ fn cli() -> Command {
                 .arg(
                     Arg::new("yes")
                         .long("yes")
-                        .help("Commit the staged batch instead of exiting 10")
+                        .help(
+                            "Accept the staged batch and exit 0 rather than 10 \
+                             (commits to --store from 1.10)",
+                        )
                         .action(ArgAction::SetTrue),
                 )
                 .arg(
@@ -4528,6 +4542,17 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 
     if m.get_flag("yes") {
         println!("{} unit(s) staged and confirmed", staged.len());
+        // The flag has promised a commit since it was written and has never performed one: it
+        // suppresses exit 10 and stops there. Implementing it silently would turn a read-only
+        // invocation into one that writes `--store`, in a minor, for anyone using `--yes` to
+        // avoid exit 10 rather than to ask for a write — and that is not a change to discover
+        // afterwards. So 1.9 says what it does and what it will do, and 1.10 does it. The
+        // precedent is `SMY-W432` in this same release: when a change moves somebody's data,
+        // the warning ships first.
+        eprintln!(
+            "smysl ingest: warning: `--yes` does not commit yet; it suppresses exit 10. \
+             It will commit to --store in 1.10. Run `smysl merge --staged` to commit now."
+        );
         // `--yes` used to return 0 here whatever happened, so the one outcome most worth
         // knowing about - the model over-claimed and was corrected - was the outcome
         // indistinguishable from nothing having happened.
@@ -5392,9 +5417,27 @@ mod tests {
             .collect();
         assert_eq!(
             mixed,
-            ["thread"],
-            "thread is mixed only because of --refine"
+            ["pack", "thread", "find"],
+            "a command is mixed when some invocation of it calls a model"
         );
+
+        // `mixed` on its own tells a reader to assume the worst of every invocation, which is
+        // its own kind of wrong: all three are pure by default. Every mixed command therefore
+        // has to say which invocations are not.
+        for c in COMMANDS.iter().filter(|c| c.purity == Purity::Mixed) {
+            assert!(
+                c.impure_when.is_some(),
+                "{} is mixed and does not say when",
+                c.name
+            );
+        }
+        for c in COMMANDS.iter().filter(|c| c.purity != Purity::Mixed) {
+            assert!(
+                c.impure_when.is_none(),
+                "{} is not mixed, so there is no exception to name",
+                c.name
+            );
+        }
     }
 
     /// Every command records where it came from.
