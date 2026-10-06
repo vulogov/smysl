@@ -56,37 +56,52 @@ struct Cmd {
     /// about to run calls a model. The dispatcher decides per invocation under `--seed-check`;
     /// this is so the table a user actually reads says the same thing.
     impure_when: Option<&'static str>,
+    /// The output forms this command can produce, in `--format`'s vocabulary.
+    ///
+    /// Empty means it does not emit a document at all: a report, a store written in place, an
+    /// artifact with its own `--target`. `--format` is global, so all 26 commands advertised
+    /// it and three read it; the other 23 accepted it and wrote whatever they were going to.
+    /// A caller who asked for CBOR and got prose has no way to learn the flag was ignored
+    /// until their parser fails, so the dispatcher refuses what a command cannot do.
+    forms: &'static [&'static str],
 }
+
+/// Both forms a store can be written in.
+const BOTH: &[&str] = &["surface", "cbor"];
+/// A store log, which has no surface spelling: `compact`, `relink` and `import` write one.
+const CBOR_ONLY: &[&str] = &["cbor"];
+/// Not a document: a report, a store written in place, or an artifact with its own target.
+const NO_DOCUMENT: &[&str] = &[];
 
 /// The command table of §23, in table order.
 #[rustfmt::skip]
 const COMMANDS: &[Cmd] = &[
-    Cmd { name: "fmt",       about: "Canonicalise surface text and verify the round-trip", purity: Purity::Pure,  phase: "SM-P2"  , impure_when: None },
-    Cmd { name: "check",     about: "Run the check pipeline over a store",                 purity: Purity::Pure,  phase: "SM-P4"  , impure_when: None },
-    Cmd { name: "pack",      about: "Budget-bounded, closure-complete selection",          purity: Purity::Mixed, phase: "SM-P9"  , impure_when: Some("--query with --engine semantic|hybrid") },
-    Cmd { name: "merge",     about: "Join-semilattice union; materialise contentions",     purity: Purity::Pure,  phase: "SM-P6"  , impure_when: None },
-    Cmd { name: "diff",      about: "Partition uids across stores or hops",                purity: Purity::Pure,  phase: "SM-P7"  , impure_when: None },
-    Cmd { name: "trace",     about: "Walk provenance or evidential support",               purity: Purity::Pure,  phase: "SM-P7"  , impure_when: None },
-    Cmd { name: "view",      about: "Define or print a view",                              purity: Purity::Pure,  phase: "SM-P7"  , impure_when: None },
-    Cmd { name: "bundle",    about: "Emit the reachable closure of a view",                purity: Purity::Pure,  phase: "SM-P7"  , impure_when: None },
-    Cmd { name: "thread",    about: "Derive, refine, list, show, or import threads",       purity: Purity::Mixed, phase: "SM-P11" , impure_when: Some("--refine") },
-    Cmd { name: "salience",  about: "Report derived salience with per-term breakdown",     purity: Purity::Pure,  phase: "SM-P8"  , impure_when: None },
-    Cmd { name: "find",      about: "Rank units against a query, lexically",                purity: Purity::Mixed, phase: "0.5.0"  , impure_when: Some("--engine semantic|hybrid") },
-    Cmd { name: "retract",   about: "Retract a unit; report the blast radius first",       purity: Purity::Pure,  phase: "SM-P6"  , impure_when: None },
-    Cmd { name: "withdraw",  about: "Withdraw an edge: kept, and no longer followed",       purity: Purity::Pure,  phase: "1.4.0"  , impure_when: None },
-    Cmd { name: "resolve",   about: "Record that a disagreement was reviewed",              purity: Purity::Pure,  phase: "1.4.0"  , impure_when: None },
-    Cmd { name: "review",    about: "List the disagreements open for review",               purity: Purity::Pure,  phase: "1.4.0"  , impure_when: None },
-    Cmd { name: "commit",    about: "Record how settled a unit is",                         purity: Purity::Pure,  phase: "1.7.0"  , impure_when: None },
-    Cmd { name: "render",    about: "Thread plus profile to artifact",                     purity: Purity::Pure,  phase: "SM-P12" , impure_when: None },
-    Cmd { name: "import",    about: "Tabular readings to measured units, without a model",  purity: Purity::Pure,  phase: "SM-P15" , impure_when: None },
-    Cmd { name: "relink",    about: "Re-point references onto superseded units",             purity: Purity::Pure,  phase: "SM-P15" , impure_when: None },
-    Cmd { name: "compact",   about: "Drop superseded units nothing needs; never in place",   purity: Purity::Pure,  phase: "SM-P15" , impure_when: None },
-    Cmd { name: "ingest",    about: "Prose or data to staged units",                       purity: Purity::Model, phase: "SM-P14" , impure_when: None },
-    Cmd { name: "attest",    about: "Semantic checks that require a model",                purity: Purity::Model, phase: "SM-P14" , impure_when: None },
-    Cmd { name: "providers", about: "List providers, capabilities, and what would egress", purity: Purity::Pure,  phase: "SM-P13" , impure_when: None },
-    Cmd { name: "usage",     about: "Token and cost ledger",                               purity: Purity::Pure,  phase: "SM-P13" , impure_when: None },
-    Cmd { name: "reindex",   about: "Rebuild the derived index from the log alone",        purity: Purity::Pure,  phase: "SM-P3"  , impure_when: None },
-    Cmd { name: "ui",        about: "Terminal UI",                                         purity: Purity::Pure,  phase: "SM-P15" , impure_when: None },
+    Cmd { name: "fmt",       about: "Canonicalise surface text and verify the round-trip", purity: Purity::Pure,  phase: "SM-P2"  , impure_when: None , forms: BOTH },
+    Cmd { name: "check",     about: "Run the check pipeline over a store",                 purity: Purity::Pure,  phase: "SM-P4"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "pack",      about: "Budget-bounded, closure-complete selection",          purity: Purity::Mixed, phase: "SM-P9"  , impure_when: Some("--query with --engine semantic|hybrid") , forms: BOTH },
+    Cmd { name: "merge",     about: "Join-semilattice union; materialise contentions",     purity: Purity::Pure,  phase: "SM-P6"  , impure_when: None , forms: BOTH },
+    Cmd { name: "diff",      about: "Partition uids across stores or hops",                purity: Purity::Pure,  phase: "SM-P7"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "trace",     about: "Walk provenance or evidential support",               purity: Purity::Pure,  phase: "SM-P7"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "view",      about: "Define or print a view",                              purity: Purity::Pure,  phase: "SM-P7"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "bundle",    about: "Emit the reachable closure of a view",                purity: Purity::Pure,  phase: "SM-P7"  , impure_when: None , forms: BOTH },
+    Cmd { name: "thread",    about: "Derive, refine, list, show, or import threads",       purity: Purity::Mixed, phase: "SM-P11" , impure_when: Some("--refine") , forms: BOTH },
+    Cmd { name: "salience",  about: "Report derived salience with per-term breakdown",     purity: Purity::Pure,  phase: "SM-P8"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "find",      about: "Rank units against a query, lexically",                purity: Purity::Mixed, phase: "0.5.0"  , impure_when: Some("--engine semantic|hybrid") , forms: NO_DOCUMENT },
+    Cmd { name: "retract",   about: "Retract a unit; report the blast radius first",       purity: Purity::Pure,  phase: "SM-P6"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "withdraw",  about: "Withdraw an edge: kept, and no longer followed",       purity: Purity::Pure,  phase: "1.4.0"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "resolve",   about: "Record that a disagreement was reviewed",              purity: Purity::Pure,  phase: "1.4.0"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "review",    about: "List the disagreements open for review",               purity: Purity::Pure,  phase: "1.4.0"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "commit",    about: "Record how settled a unit is",                         purity: Purity::Pure,  phase: "1.7.0"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "render",    about: "Thread plus profile to artifact",                     purity: Purity::Pure,  phase: "SM-P12" , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "import",    about: "Tabular readings to measured units, without a model",  purity: Purity::Pure,  phase: "SM-P15" , impure_when: None , forms: CBOR_ONLY },
+    Cmd { name: "relink",    about: "Re-point references onto superseded units",             purity: Purity::Pure,  phase: "SM-P15" , impure_when: None , forms: CBOR_ONLY },
+    Cmd { name: "compact",   about: "Drop superseded units nothing needs; never in place",   purity: Purity::Pure,  phase: "SM-P15" , impure_when: None , forms: CBOR_ONLY },
+    Cmd { name: "ingest",    about: "Prose or data to staged units",                       purity: Purity::Model, phase: "SM-P14" , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "attest",    about: "Semantic checks that require a model",                purity: Purity::Model, phase: "SM-P14" , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "providers", about: "List providers, capabilities, and what would egress", purity: Purity::Pure,  phase: "SM-P13" , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "usage",     about: "Token and cost ledger",                               purity: Purity::Pure,  phase: "SM-P13" , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "reindex",   about: "Rebuild the derived index from the log alone",        purity: Purity::Pure,  phase: "SM-P3"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "ui",        about: "Terminal UI",                                         purity: Purity::Pure,  phase: "SM-P15" , impure_when: None , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -1132,6 +1147,19 @@ fn cli() -> Command {
 fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let check = m.get_flag("check");
     let write = m.get_flag("write");
+    // `--format cbor` converts rather than formats, so it does not combine with the two flags
+    // that act on a text file — the same reasoning, in the other direction, as the refusal
+    // below for `--check`/`--write` on a CBOR input. Refused here, before a file is read,
+    // because a conversion that half-happened across several inputs is worse than one refused.
+    let to_cbor = !wants_surface(global, true);
+    if to_cbor && (check || write) {
+        let flag = if check { "--check" } else { "--write" };
+        eprintln!(
+            "smysl fmt: --format cbor converts a document; {flag} formats one in place. \
+             Use -o to name the destination."
+        );
+        return ExitCode::Usage;
+    }
     let files: Vec<String> = m
         .get_many::<String>("files")
         .map(|v| v.cloned().collect())
@@ -1255,6 +1283,16 @@ fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             }
         }
 
+        // The records that were just proven to round-trip, as a CBOR sequence: the view, the
+        // units, their bindings. Appendix E of the SMYSL-2 draft assumed this existed; what
+        // existed was the reverse conversion only, so a surface document could be read as CBOR
+        // and never written as it.
+        let bytes: Vec<u8> = if to_cbor {
+            smysl::to_cbor_seq(&out.records)
+        } else {
+            formatted.clone().into_bytes()
+        };
+
         if let Some(dest) = global.get_one::<String>("output") {
             if n_inputs > 1 {
                 eprintln!(
@@ -1263,7 +1301,7 @@ fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 );
                 return ExitCode::Usage;
             }
-            if let Err(e) = std::fs::write(dest, formatted.as_bytes()) {
+            if let Err(e) = std::fs::write(dest, &bytes) {
                 eprintln!("smysl fmt: {dest}: {e}");
                 return ExitCode::Failure;
             }
@@ -1282,7 +1320,7 @@ fn cmd_fmt(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             }
         } else {
             let mut stdout = std::io::stdout().lock();
-            if stdout.write_all(formatted.as_bytes()).is_err() {
+            if stdout.write_all(&bytes).is_err() {
                 return ExitCode::Failure;
             }
         }
@@ -2139,6 +2177,33 @@ fn cmd_bundle(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     // library rather than here, since a library caller building a bundle needs a readable
     // one just as much as the CLI does (rule A).
     let bytes = store.bundle_with(&view, m.get_flag("include-retracted"));
+
+    // `--format surface` used to be accepted and ignored, so `bundle --format surface` wrote
+    // CBOR to a terminal — the identical mistake `merge --format surface` shipped with, in the
+    // command next door. The text form is rendered from the bundle's own bytes rather than
+    // from the store a second time: a second selection could disagree with the first, and the
+    // one artifact whose purpose is to be self-contained is the worst place for that.
+    let bytes = if wants_surface(global, false) {
+        let (records, _) = match smysl::from_cbor_seq(&bytes) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("smysl bundle: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        let labels: std::collections::BTreeMap<smysl::Label, Uid> = records
+            .iter()
+            .filter_map(|r| match r {
+                Record::LabelBinding(b) => Some((b.label.clone(), b.uid)),
+                _ => None,
+            })
+            .collect();
+        let ctx = WriteContext::from_labels(&labels);
+        warn_surface_omissions("bundle", &records, Some(&view.id), &ctx);
+        write_surface(Some(&view), &records, &ctx).into_bytes()
+    } else {
+        bytes
+    };
     emit(global, "bundle", &bytes)
 }
 
@@ -2281,10 +2346,7 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     // later one, and any uid nobody named falls back to its canonical form inside
     // `write_surface`. Colliding labels are already reported as a `label-collision`
     // contention above, so this does not hide anything the merge did not already say.
-    let surface = global
-        .get_one::<String>("format")
-        .map(|f| f == "surface")
-        .unwrap_or(false);
+    let surface = wants_surface(global, false);
 
     let bytes = if surface {
         let mut folded: std::collections::BTreeMap<smysl::Label, Uid> =
@@ -2323,34 +2385,7 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         // form" over a document whose output said `@claim c/a`. Asking `ctx` which label it
         // will actually write is what makes this right rather than restating the rule —
         // `from_labels` keeps one label per uid, and the loser genuinely is dropped.
-        let dropped = records
-            .iter()
-            .filter(|r| match r {
-                // A relation always has a surface form; a unit or a thread may not, and the
-                // count said they always did. H-16: a commitment fell to the catch-all below
-                // and was counted as omitted while `write_surface` wrote it — a guaranteed
-                // over-count on any store carrying one.
-                Record::Relation(_) => false,
-                Record::Unit(u) => !smysl::surface::unit_has_surface_form(u),
-                Record::Thread(t) => !smysl::surface::thread_has_surface_form(t),
-                Record::Commit(c) => !smysl::surface::commit_has_surface_form(c),
-                Record::View(v) => Some(&v.id) != emitted.as_ref(),
-                Record::LabelBinding(b) => ctx.labels.get(&b.uid) != Some(&b.label),
-                // Spelled `@schema` since 1.3, unless it carries what surface text cannot.
-                Record::SchemaDecl(d) => !smysl::surface::schema_decl_has_surface_form(d),
-                // `@withdraw` and `@resolve` since 1.4, on the same terms.
-                Record::Withdrawal(w) => !smysl::surface::withdrawal_has_surface_form(w),
-                Record::Resolution(r) => !smysl::surface::resolution_has_surface_form(r),
-                _ => true,
-            })
-            .count();
-        if dropped > 0 {
-            eprintln!(
-                "smysl merge: warning: {dropped} record(s) have no surface form and were \
-                 omitted (contentions, attestations, and any name the grammar has nowhere to \
-                 put); the default CBOR output preserves them"
-            );
-        }
+        warn_surface_omissions("merge", &records, emitted.as_ref(), &ctx);
         write_surface(view.as_ref(), &records, &ctx).into_bytes()
     } else {
         store.log_bytes()
@@ -3425,10 +3460,7 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         );
     }
 
-    let surface = global
-        .get_one::<String>("format")
-        .map(|f| f == "surface")
-        .unwrap_or(false);
+    let surface = wants_surface(global, false);
 
     let bytes = if surface {
         emit_pack_surface(&store, &packed, &labels).into_bytes()
@@ -3507,6 +3539,68 @@ fn warn_output_is_a_report(global: &ArgMatches, cmd: &str) {
              not a store. Redirect stdout, and use --json if you are parsing it."
         );
     }
+}
+
+/// Count the records a surface rendering will leave out, and say so when there are any.
+///
+/// Extracted from `merge` for `bundle`, which needed the same count the moment `--format
+/// surface` started working there — and which would otherwise have grown its own copy of a
+/// predicate list that has already been wrong twice: once counting every commitment as omitted
+/// while `write_surface` wrote it, and once blaming contentions for a dropped `@doc` header.
+///
+/// `emitted` is the one view that becomes the `@doc` header; the grammar has room for at most
+/// one per file, so any other view in the records genuinely is dropped. A label the context did
+/// not keep is dropped for the same kind of reason.
+fn warn_surface_omissions(
+    cmd: &str,
+    records: &[Record],
+    emitted: Option<&smysl::ViewId>,
+    ctx: &WriteContext,
+) {
+    let dropped = records
+        .iter()
+        .filter(|r| match r {
+            // A relation always has a surface form; a unit or a thread may not, and the count
+            // said they always did. H-16: a commitment fell to the catch-all below and was
+            // counted as omitted while `write_surface` wrote it — a guaranteed over-count on
+            // any store carrying one.
+            Record::Relation(_) => false,
+            Record::Unit(u) => !smysl::surface::unit_has_surface_form(u),
+            Record::Thread(t) => !smysl::surface::thread_has_surface_form(t),
+            Record::Commit(c) => !smysl::surface::commit_has_surface_form(c),
+            Record::View(v) => Some(&v.id) != emitted,
+            Record::LabelBinding(b) => ctx.labels.get(&b.uid) != Some(&b.label),
+            // Spelled `@schema` since 1.3, unless it carries what surface text cannot.
+            Record::SchemaDecl(d) => !smysl::surface::schema_decl_has_surface_form(d),
+            // `@withdraw` and `@resolve` since 1.4, on the same terms.
+            Record::Withdrawal(w) => !smysl::surface::withdrawal_has_surface_form(w),
+            Record::Resolution(r) => !smysl::surface::resolution_has_surface_form(r),
+            _ => true,
+        })
+        .count();
+    if dropped > 0 {
+        eprintln!(
+            "smysl {cmd}: warning: {dropped} record(s) have no surface form and were omitted \
+             (contentions, attestations, and any name the grammar has nowhere to put); the \
+             default CBOR output preserves them"
+        );
+    }
+}
+
+/// Is the output surface text? `--format` when given, else the command's own default.
+///
+/// The three commands that read `--format` each did it inline, identically and separately,
+/// which is why `thread`'s default being the other way round was invisible. The defaults still
+/// differ — `merge`, `pack` and `bundle` write CBOR, `fmt` and `thread` write text — but the
+/// disagreement is now one argument at one call site rather than three copies of a `map`.
+///
+/// Whether the value is *available* is settled in `main` before the command runs, so there is
+/// no error case here.
+fn wants_surface(global: &ArgMatches, default_surface: bool) -> bool {
+    global
+        .get_one::<String>("format")
+        .map(|f| f == "surface")
+        .unwrap_or(default_surface)
 }
 
 /// Write a command's output to `--output`, or to stdout when none was given.
@@ -4039,10 +4133,7 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     // and `thread` does not. Changing it would be right by the rule and would also change
     // what every documented `thread --derive` example prints, so it is left for a decision
     // rather than taken here.
-    let surface = global
-        .get_one::<String>("format")
-        .map(|f| f == "surface")
-        .unwrap_or(true);
+    let surface = wants_surface(global, true);
 
     let bytes = if surface {
         let view = if m.get_flag("only") {
@@ -5388,6 +5479,27 @@ fn main() -> ProcExitCode {
         return ProcExitCode::from(ExitCode::Usage.as_i32() as u8);
     };
 
+    // One place, before anything runs, because the alternative is 26 commands each remembering
+    // to check — and 23 of them did not. The message says what the command *does* write, since
+    // a refusal that only says no leaves the caller to guess which flag they wanted.
+    if let Some(want) = matches.get_one::<String>("format") {
+        if !cmd.forms.contains(&want.as_str()) {
+            if cmd.forms.is_empty() {
+                eprintln!(
+                    "smysl {name}: --format is not honoured here - {name} does not write a \
+                     document. Use --json if you are parsing its output."
+                );
+            } else {
+                eprintln!(
+                    "smysl {name}: --format {want} is not available - {name} writes a store \
+                     log, which has no surface spelling. Pipe it through `smysl fmt` to read \
+                     it as text."
+                );
+            }
+            return ProcExitCode::from(ExitCode::Usage.as_i32() as u8);
+        }
+    }
+
     let code = match name {
         "fmt" => cmd_fmt(sub, &matches),
         "check" => cmd_check(sub, &matches),
@@ -5588,6 +5700,39 @@ mod tests {
 
         // Invalid UTF-8 is CBOR, not surface.
         assert!(!looks_like_surface(&[0xff, 0xfe, 0x00]));
+    }
+
+    /// Every command declares which output forms it can write, and the set is one of three.
+    ///
+    /// The list the CLI matrix asserts lives in `tests/global_flags.rs`, deliberately written
+    /// out there rather than read from here. This is the invariant that list cannot express: a
+    /// command's forms are either both, or the store log alone, or none — never some other
+    /// subset, and never, as happened for twenty-three commands, a flag the dispatcher accepts
+    /// and the command ignores.
+    #[test]
+    fn every_command_declares_its_output_forms() {
+        let mut documents = 0;
+        for c in COMMANDS {
+            assert!(
+                c.forms == BOTH || c.forms == CBOR_ONLY || c.forms == NO_DOCUMENT,
+                "{} declares an unexpected form set: {:?}",
+                c.name,
+                c.forms
+            );
+            if !c.forms.is_empty() {
+                documents += 1;
+            }
+            for f in c.forms {
+                assert!(
+                    *f == "surface" || *f == "cbor",
+                    "{} names a form `--format` does not accept: {f}",
+                    c.name
+                );
+            }
+        }
+        // Five write both, three write a store log. The rest report, mutate in place, or
+        // render an artifact through their own `--target`.
+        assert_eq!(documents, 8);
     }
 
     /// A store named with no directory part has a parent of `""`, which is not the current

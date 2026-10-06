@@ -35,7 +35,7 @@ These apply to every subcommand, in any position on the command line.
     ([`-C, --config FILE`], [Configuration file; must exist. Without it, `.smysl/config.hjson` beside `--store`, and a missing one is the all-local default.]),
     ([`-s, --store PATH`], [Store path; `-` reads stdin (rule P).]),
     ([`-o, --output PATH`], [Output path; defaults to stdout.]),
-    ([`--format surface|cbor`], [Output form; defaults to `cbor` on a non-TTY stdout (rule P).]),
+    ([`--format surface|cbor`], [Output form; defaults to `cbor` on a non-TTY stdout (rule P), and to surface on `fmt` and `thread`. Honoured by `fmt`, `merge`, `pack`, `bundle` and `thread`; `import`, `relink` and `compact` write a store log and take `cbor` only. Every other command refuses it as a usage error.]),
     ([`--strict`], [Treat warnings as errors.]),
     ([`--offline`], [Hard-fail rather than send anything off the machine.]),
     ([`--no-color`], [Disable colour.]),

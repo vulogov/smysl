@@ -327,6 +327,49 @@ The impl stays, so nothing downstream breaks; the reasoning is at the impl.
 
 This is SMYSL-2.1's H-9 through H-12.
 
+### `--format` is honoured or refused, on all twenty-six commands
+
+It is a global flag, so every command's `--help` advertised it. Three read it. The other
+twenty-three accepted it and wrote whatever they were going to:
+
+- `bundle --format surface` put CBOR on a terminal — the identical mistake `merge --format
+  surface` shipped with, in the command next door.
+- `check --format cbor` printed prose to a caller who had asked for bytes.
+
+A flag that is accepted and ignored is documentation of a feature that is not there, and the
+caller finds out when their parser fails. So each command now declares the forms it can write,
+and the dispatcher refuses the rest **before the command runs**:
+
+- **Both forms:** `fmt`, `merge`, `pack`, `bundle`, `thread`.
+- **`cbor` only:** `import`, `relink` and `compact` write a store log, which has no surface
+  spelling. `--format surface` on them is a usage error naming `smysl fmt` as the way to read
+  one as text.
+- **Neither:** the other eighteen. A report, a store updated in place and a rendered artifact
+  are not documents. `--json` is the flag for parsing a report, and the refusal says so.
+
+**This is a behaviour change: `--format` on a command that cannot honour it now exits 2 where
+it used to be ignored.** A pipeline that passes `--format cbor` to several commands at once will
+notice. That is the point — it was already not getting CBOR from most of them — but it is worth
+reading before upgrading.
+
+Two forms that did not exist now do:
+
+- **`fmt --format cbor`** writes the records it just proved round-trip, as a CBOR sequence: the
+  view, the units, their bindings. Only the reverse conversion existed, so a surface document
+  could be read as CBOR and never written as it. It is refused with `--check` and `--write`,
+  which format a text file in place — the same reasoning, in the other direction, as the
+  existing refusal of those flags on a CBOR input.
+- **`bundle --format surface`** renders the bundle, with the omission count `merge` already
+  reported. The text is rendered from the bundle's own bytes rather than from the store a
+  second time: a second selection could disagree with the first, and the one artifact whose
+  purpose is to be self-contained is the worst place for that.
+
+Four of this repository's own test harnesses passed `--format surface` to every invocation and
+relied on it being ignored. Each now asks for the form on the row that emits a document, which
+is where it belonged.
+
+This is SMYSL-2.1's H-17.
+
 Carried in from the 1.8 cycle, in the order they were argued for rather than the order they
 are easiest:
 

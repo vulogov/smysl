@@ -34,9 +34,13 @@ fn store(name: &str) -> PathBuf {
     path
 }
 
+/// `--format surface` belongs to the one case that emits a document, not to the harness.
+///
+/// It was passed to every invocation while `find` ignored it; H-17 made `find` refuse a flag it
+/// cannot honour, and the refusal is right — a report has no surface form. `pack` asks for it
+/// where it needs it.
 fn run(args: &[&str]) -> Output {
     Command::new(BIN)
-        .args(["--format", "surface"])
         .args(args)
         .output()
         .expect("the binary under test must run")
@@ -111,7 +115,16 @@ fn pack_scopes_to_one_subject() {
     let path = store("pack_scopes_to_one_subject");
     let p = path.to_str().unwrap();
 
-    let o = run(&["pack", "--budget", "400", "--source", "incident:41", p]);
+    let o = run(&[
+        "pack",
+        "--format",
+        "surface",
+        "--budget",
+        "400",
+        "--source",
+        "incident:41",
+        p,
+    ]);
     assert!(o.status.success(), "{}", out(&o));
     assert!(out(&o).contains("scoped 2 unit(s)"), "{}", out(&o));
     assert!(out(&o).contains("auth"), "{}", out(&o));

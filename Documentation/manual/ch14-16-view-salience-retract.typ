@@ -212,7 +212,7 @@ ever there.
 
 #exercises((
   [Run `smysl view --id v/narrow --roots b3:wo4t2c46lq45fnakd6tajlgcac
-   --format surface fixtures/corpus/F1-incident.smy`. One root reaches three
+   fixtures/corpus/F1-incident.smy`. One root reaches three
    units. Trace by hand, in the source file, why those three and not the other
    five.],
   [A view stores *roots*, not a list of members. Suppose you add a new claim
