@@ -278,6 +278,55 @@ The default is unchanged in every respect, so a run without `-C` behaves exactly
 
 This is SMYSL-2.1's H-8.
 
+### What `ingest` records, sends and lets you set
+
+Four defects in one command, all of the same kind: the run knew something and nothing kept it.
+
+**The model that ran is now recorded (H-9).** Every mapper falls back to its configured model
+when a request names none — so a run without `--model` always used a specific model, and the
+recipe, whose whole job is to say what produced a unit, stored the empty string for it. Two
+providers differing only in their model produced *one recipe*, which is a recipe claiming that
+two different runs were the same run. `Capabilities` now carries `model`, the ingestor resolves
+it once for both the request and the recipe, and `IngestReport.model` reports it.
+
+The ledger had the same hole, in the open: `smysl ingest` wrote `""` into the `model` column, so
+`smysl usage --by model` grouped every default run under no model at all. It now writes the
+resolved name.
+
+**Runs that left `--model` unset get a new recipe.** That is the point — the old one was
+recorded against a model nobody could name — but if you have stored recipe hashes from such
+runs, they will not match a 1.9 re-run of the same document. Runs that passed `--model`
+are unaffected.
+
+**Ollama is sent `num_ctx` (H-10).** The chunker sizes every chunk against the configured
+context window. Ollama's default `num_ctx` is its own, not yours — so a chunk planned for 32768
+tokens could be truncated to 2048 by the server and answered as if whole, with nothing in the
+output to say so. The configured window is now sent with every request. Configured, never
+probed: `probe` reports the architecture's window, which on a 128k model is two orders of
+magnitude past what the machine will allocate, and sending that unasked is the same mistake in
+the other direction.
+
+**A repair that worked no longer erases what it repaired (`SMY-W435`, H-11).** A chunk that
+failed an attempt and then succeeded returned clean units and dropped the first error on the
+floor. A corpus where most chunks needed a second turn and one where none did reported the same
+thing, and the prompt that caused it could not be found from the output. Each earlier error now
+survives as a warning naming its attempt — `repaired: SMY-E001: attempt 1 of 3: …` — and
+`IngestReport.repaired` counts the chunks. Warnings, so no exit code moves: the units really
+are clean, and a run that repaired itself is not a run that failed. `smysl ingest`'s summary
+line gains `N repaired` beside `N degraded`.
+
+**`--temperature` exists (H-12).** Temperature has been a condition of the recipe since
+recipes existed and has never been settable outside the library: a deployment that wanted
+anything but 0.0 had to write its own binary. There is now `ingest --temperature <t>` and the
+config key `ingest.temperature`, both 0.0 to 2.0, both refused outside it before a single call
+is made — a request a provider will reject is not worth paying for. The default is still 0.0,
+so no recipe changes unless you set one.
+
+`Config` loses its derived `Eq` and gains a hand-written one, because the new field is an `f32`.
+The impl stays, so nothing downstream breaks; the reasoning is at the impl.
+
+This is SMYSL-2.1's H-9 through H-12.
+
 Carried in from the 1.8 cycle, in the order they were argued for rather than the order they
 are easiest:
 

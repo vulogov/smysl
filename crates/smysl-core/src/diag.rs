@@ -287,6 +287,9 @@ registry! {
         W434 = "SMY-W434", Warn,  "Bundle carries records this build cannot interpret";
         W432 = "SMY-W432", Warn,  "A payload key named `lang` becomes a unit core key in a later release";
     }
+    Provider => {
+        W435 = "SMY-W435", Warn,  "A chunk succeeded on a later attempt; the earlier error is kept";
+    }
 }
 
 impl fmt::Display for Code {
@@ -572,9 +575,11 @@ mod tests {
     /// threshold that does not exist. 52 as of 1.3.0: `SMY-W309`, a caller's source replacing
     /// the one a unit gave — numbered past `W306`, which stays retired rather than reused. 53 as
     /// of 1.4.0: `SMY-W056`, a withdrawal naming an edge 1.4 does not let anyone withdraw.
+    /// 61 as of 1.9.0, the last of them `SMY-W435`: a repair that worked used to erase what it
+    /// repaired.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 60);
+        assert_eq!(Code::ALL.len(), 61);
     }
 
     #[test]

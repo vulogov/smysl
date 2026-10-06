@@ -337,6 +337,111 @@ fn a_repaired_answer_is_accepted_on_the_second_attempt() {
     assert_eq!(staged.units[0].gist, "the pool saturated");
 }
 
+/// The temperature reaches the request, and the recipe.
+///
+/// H-12. It has been a condition of the recipe since recipes existed and reachable only from
+/// the library, so nothing outside this crate could set it and nothing asserted it arrived.
+#[test]
+fn a_temperature_reaches_the_request_and_the_recipe() {
+    let (_, answer) = answers(false)[1].clone();
+    let run = |t: f32| {
+        let (r, _, seen) = registry_seeing(Scripted::saying(&answer));
+        let recipe = Ingestor::new(
+            &r,
+            opts(Rung::Document)
+                .with_path(IngestPath::JsonAst)
+                .with_temperature(t),
+        )
+        .ingest(&Store::new(), DOCUMENT)
+        .unwrap()
+        .1
+        .recipe;
+        let sent = seen.lock().unwrap()[0].temperature;
+        (recipe, sent)
+    };
+
+    let (cold, sent_cold) = run(0.0);
+    let (warm, sent_warm) = run(0.7);
+    assert_eq!(sent_cold, 0.0);
+    assert_eq!(sent_warm, 0.7, "the request carries what was asked for");
+    assert_ne!(cold, warm, "two temperatures are two recipes");
+}
+
+/// A repair that worked keeps what it repaired.
+///
+/// H-11. The chunk returns clean units, so nothing was wrong with the result — and the attempt
+/// that *was* wrong used to be dropped on the floor with `history`. A corpus where most chunks
+/// needed a second turn and one where none did reported the same thing, and the prompt that
+/// caused it could not be found from the output.
+///
+/// Warnings, so the exit code does not move: the units are clean, and a run that repaired
+/// itself is not a run that failed.
+#[test]
+fn a_repaired_chunk_keeps_its_history() {
+    let (r, _) =
+        registry(Scripted::new(vec![
+        Ok("not units at all".to_string()),
+        Ok(r#"{"units":[{"type":"claim","gist":"the pool saturated","status":"speculative"}]}"#
+            .to_string()),
+    ]));
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), "one short paragraph")
+        .unwrap();
+
+    assert_eq!(staged.len(), 1, "the repair worked");
+    assert_eq!(report.degraded, 0);
+    assert_eq!(report.repaired, 1, "and the run says a chunk needed one");
+
+    let kept: Vec<&smysl_core::Diagnostic> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == smysl_core::Code::W435)
+        .collect();
+    assert_eq!(
+        kept.len(),
+        1,
+        "one earlier error, one warning: {:?}",
+        report.diagnostics
+    );
+    // "of 3" is the default budget: one attempt plus two repairs. The code of the error that
+    // was repaired is in the text, since the diagnostic's own code is now `W435`.
+    assert!(
+        kept[0].message.contains("attempt 1 of 3"),
+        "the warning says which attempt: {}",
+        kept[0].message
+    );
+    assert!(
+        kept[0].message.contains("SMY-E001"),
+        "and what was wrong: {}",
+        kept[0].message
+    );
+    assert_eq!(
+        kept[0].severity,
+        smysl_core::Severity::Warn,
+        "a run that repaired itself did not fail"
+    );
+}
+
+/// A clean first answer carries no repair history, and no count.
+#[test]
+fn a_clean_answer_reports_no_repair() {
+    let (r, _) = registry(Scripted::saying(
+        r#"{"units":[{"type":"claim","gist":"the pool saturated","status":"speculative"}]}"#,
+    ));
+    let (_, report) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), "one short paragraph")
+        .unwrap();
+    assert_eq!(report.repaired, 0);
+    assert!(
+        !report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == smysl_core::Code::W435),
+        "nothing was repaired, so nothing is reported: {:?}",
+        report.diagnostics
+    );
+}
+
 /// A clean first answer costs one call. A loop that always used its budget would triple the
 /// cost of every ingest.
 #[test]
@@ -1574,6 +1679,54 @@ fn a_caller_source_changes_the_recipe() {
     );
     assert_ne!(plain, filled);
     assert_ne!(filled, overridden, "the policy is a condition too");
+}
+
+/// A run that names no model records the one that ran, and sends it.
+///
+/// H-9. Every mapper falls back to its configured model for an empty `Request.model`, so a run
+/// without `--model` always used a specific model — and the recipe, whose whole job is to say
+/// what produced a unit, recorded the empty string for it. Two providers differing only in
+/// their configured model produced one recipe, which is the recipe claiming two different runs
+/// were the same run.
+///
+/// Both halves are asserted, because the request and the recipe are built at different points
+/// and resolving the name twice would be how they drift: the request must carry the name, and
+/// the recipe must change with it.
+#[test]
+fn an_unnamed_model_is_resolved_from_the_provider_and_recorded() {
+    let (_, answer) = answers(false)[1].clone();
+    let run = |model: &str, named: Option<&str>| {
+        let mut p = Scripted::saying(&answer);
+        p.caps.model = model.to_string();
+        let (r, _, seen) = registry_seeing(p);
+        let mut o = opts(Rung::Document).with_path(IngestPath::JsonAst);
+        if let Some(m) = named {
+            o = o.with_model(m);
+        }
+        let recipe = Ingestor::new(&r, o)
+            .ingest(&Store::new(), DOCUMENT)
+            .unwrap()
+            .1
+            .recipe;
+        let sent = seen.lock().unwrap()[0].model.clone();
+        (recipe, sent)
+    };
+
+    let (recipe_a, sent_a) = run("scripted-7b", None);
+    assert_eq!(
+        sent_a, "scripted-7b",
+        "an unnamed model must be resolved before the request is built"
+    );
+
+    let (recipe_b, _) = run("scripted-70b", None);
+    assert_ne!(
+        recipe_a, recipe_b,
+        "two models are two recipes, even when neither was named"
+    );
+
+    // `--model` still wins: the provider's own is the fallback, not an override.
+    let (_, sent_named) = run("scripted-7b", Some("scripted-70b"));
+    assert_eq!(sent_named, "scripted-70b");
 }
 
 // ---------------------------------------------------------------------------

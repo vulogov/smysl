@@ -608,7 +608,7 @@ the provider it named is actually *there*. Dropping `--dry-run` does:
 #screen(caption: "$ smysl ingest --rung document note.txt")[
 ```
 smysl ingest: warning: SMY-W304: span degraded to opaque prose after provider unreachable (at b3:olmqbgjpyhetxghtootiil6nmr)
-smysl ingest: 1 chunk(s), 0 call(s), 1 unit(s), 1 degraded, 0 token(s)
+smysl ingest: 1 chunk(s), 0 call(s), 1 unit(s), 0 weakened, 1 degraded, 0 repaired, 0 token(s)
 1 unit(s) staged in ./.smysl/staged.smy; review, then `smysl merge --staged`
 ```
 ]

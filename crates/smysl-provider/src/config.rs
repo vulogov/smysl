@@ -81,7 +81,7 @@ impl ProviderConfig {
 }
 
 /// The whole provider configuration.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct Config {
     pub providers: BTreeMap<ProviderId, ProviderConfig>,
@@ -101,7 +101,23 @@ pub struct Config {
     /// during decoding — converted cleanly. A flag on every invocation is the wrong place for a
     /// fact about the project's provider.
     pub ingest_path: Option<String>,
+    /// `ingest: { temperature: 0.2 }` — the sampling temperature for `ingest`, 0.0 to 2.0.
+    ///
+    /// It has always been a condition of the recipe and has never been settable outside the
+    /// library: a deployment that wanted anything but 0.0 had to write its own binary. Like
+    /// `ingest.path`, it is a fact about the project's provider rather than something to type
+    /// on every invocation.
+    pub ingest_temperature: Option<f32>,
 }
+
+/// `Eq` by hand, because `ingest_temperature` is an `f32` and `f32` is not `Eq`.
+///
+/// Derived once, so removing it would be a major break for every consumer that derives `Eq` on
+/// a type holding a `Config` — and the reason to remove it would be a float that cannot occur.
+/// `Eq` promises reflexivity, which only NaN breaks, and `load` refuses a temperature outside
+/// 0.0..=2.0, a range NaN is not in. A caller who assigns `f32::NAN` to the public field by
+/// hand gets a `Config` that does not equal itself; nothing in this crate can produce one.
+impl Eq for Config {}
 
 impl Config {
     /// Parse `.smysl/config.hjson`.
@@ -224,6 +240,22 @@ impl Config {
                 }
                 cfg.ingest_path = Some(path.to_string());
             }
+            if let Some(v) = ingest.get("temperature") {
+                // Range-checked at load, like `ingest.path`'s value set, so a configuration
+                // that cannot produce a request is refused before any call is paid for.
+                let Some(t) = v.value.as_f64() else {
+                    return Err(ProviderError::Config(format!(
+                        "`ingest.temperature` is {}; expected a number from 0.0 to 2.0",
+                        v.value.type_name()
+                    )));
+                };
+                if !(0.0..=2.0).contains(&t) {
+                    return Err(ProviderError::Config(format!(
+                        "`ingest.temperature` is {t}; expected a number from 0.0 to 2.0"
+                    )));
+                }
+                cfg.ingest_temperature = Some(t as f32);
+            }
         }
 
         cfg.validate()?;
@@ -271,6 +303,7 @@ impl Config {
             fallback: vec![id.clone()],
             ingest_prompt: None,
             ingest_path: None,
+            ingest_temperature: None,
         };
         for &t in Task::ALL {
             cfg.routing.insert(t, id.clone());
@@ -494,5 +527,27 @@ mod tests {
             Config::load("{ ingest: { path: json } }").is_err(),
             "a typo is not `auto`"
         );
+    }
+
+    /// `ingest.temperature` is a number in range, and anything else is refused at load.
+    ///
+    /// H-12. The alternative to checking here is checking after the calls are paid for, which
+    /// is the same reason `ingest.path`'s value set is checked here.
+    #[test]
+    fn an_ingest_temperature_is_a_number_in_range() {
+        for (src, want) in [("0", 0.0f32), ("0.2", 0.2), ("2", 2.0)] {
+            let c = Config::load(&format!("{{ ingest: {{ temperature: {src} }} }}")).unwrap();
+            assert_eq!(c.ingest_temperature, Some(want), "{src}");
+        }
+        assert_eq!(Config::load("{}").unwrap().ingest_temperature, None);
+
+        for src in ["2.1", "-0.1", "\"warm\"", "[0.2]"] {
+            let e = Config::load(&format!("{{ ingest: {{ temperature: {src} }} }}"))
+                .expect_err(&format!("{src} was accepted"));
+            assert!(
+                e.to_string().contains("0.0 to 2.0"),
+                "the refusal must say the range: {e}"
+            );
+        }
     }
 }

@@ -529,6 +529,22 @@ provider that never set it (and reads 1024) is not asked for less.
 whatever this said, and an answer of a dozen units could be cut off at the
 limit — which is now reported as that, and counted as the call it was.
 
+An `ingest` block holds the defaults that are facts about the project rather
+than things to type on every invocation: `prompt`, a prompt override file;
+`path`, the ingest path to prefer; and, from 1.9, `temperature`, from 0.0 to
+2.0. A relative path in this block resolves beside the configuration file that
+spells it, which for `-C other.hjson` is that file's own directory. Each has a
+flag that overrides it — `--prompt`, `--path`, `--temperature` — and each is
+range- or value-checked when the file is loaded, so a configuration that cannot
+produce a request is refused before a call is paid for.
+
+`context_window` is also what Ollama is told, as `num_ctx`, with every request.
+The chunker sizes every chunk against it; Ollama's own default is smaller, so a
+chunk planned for a large window could be truncated by the server and answered
+as if whole. It is the configured value that is sent, never one a `--probe`
+measured: a 128k architecture window is routinely more than the machine will
+allocate.
+
 #term("Provider")[
   One configured endpoint: an id, which mapper drives it (`ollama`,
   `anthropic`, and so on), an endpoint URL, a model name, its context window
@@ -616,7 +632,7 @@ records the attempt:
 #screen(caption: "$ echo \"The auth service saw a latency regression after the 4.2 release.\" | smysl ingest --yes")[
 ```
 smysl ingest: warning: SMY-W304: span degraded to opaque prose after provider unreachable (at b3:gnpwyiyujyn6x32m6u36euxjqh)
-smysl ingest: 1 chunk(s), 0 call(s), 1 unit(s), 1 degraded, 0 token(s)
+smysl ingest: 1 chunk(s), 0 call(s), 1 unit(s), 0 weakened, 1 degraded, 0 repaired, 0 token(s)
 1 unit(s) staged and confirmed
 ```
 ]

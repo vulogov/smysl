@@ -647,6 +647,9 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-E011`], [error], [Rule X violation — unrecognised payload dropped on re-emission.]),
     ([`SMY-E012`], [error], [Extension schema attempts to weaken a kernel rule.]),
     ([`SMY-W013`], [warning], [Unknown relation kind treated as `elaborates` for closure.]),
+    ([`SMY-W409`], [warning], [An enumeration code this build does not know — a source kind, a thread schema, a step role or a detection kind. The code is preserved verbatim and treated as unknown, so the document round-trips; this is how a reader hears that it met one.]),
+    ([`SMY-W434`], [warning], [A bundle carries records this build cannot interpret. They travel, and the sender is told what the receiver will not read.]),
+    ([`SMY-W432`], [warning], [A payload key named `lang` becomes a unit core key in a later release. Emitted a release early on purpose: the warning is the whole migration.]),
   ),
 )
 
@@ -665,6 +668,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-E307`], [error], [Attributed quote does not occur in the source text.]),
     ([`SMY-W308`], [warning], [Attributed quote occurs only loosely — elided or reworded.]),
     ([`SMY-W309`], [warning], [A unit's own source was replaced by the caller's, under a source policy that overrides.]),
+    ([`SMY-W435`], [warning], [A chunk failed an attempt and then succeeded; the earlier error is kept, naming its attempt. A repair that worked used to erase what it repaired.]),
   ),
 )
 

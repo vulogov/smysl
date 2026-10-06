@@ -955,6 +955,13 @@ fn cli() -> Command {
                         .help("Output tokens per call [default: the provider's max_output, at least 2048]"),
                 )
                 .arg(
+                    Arg::new("temperature")
+                        .long("temperature")
+                        .value_name("T")
+                        .value_parser(clap::value_parser!(f32))
+                        .help("Sampling temperature, 0.0 to 2.0 [default: 0.0, or ingest.temperature]"),
+                )
+                .arg(
                     Arg::new("path")
                         .long("path")
                         .value_name("P")
@@ -4426,19 +4433,35 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if let Some(n) = m.get_one::<usize>("max-output") {
         opts = opts.with_max_output(*n);
     }
+    // Two defaults come from the configuration, so it is read once rather than per flag.
+    let cfg = match load_config(global) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("smysl ingest: {e}");
+            return e.code;
+        }
+    };
     // `--path`, else `ingest.path` from the config. `auto` in either means no override.
     let path_arg = match m.get_one::<String>("path") {
         Some(p) => Some(p.clone()),
-        None => match load_config(global) {
-            Ok(cfg) => cfg.ingest_path,
-            Err(e) => {
-                eprintln!("smysl ingest: {e}");
-                return e.code;
-            }
-        },
+        None => cfg.ingest_path.clone(),
     };
     if let Some(p) = path_arg.as_deref().and_then(smysl::IngestPath::parse) {
         opts = opts.with_path(p);
+    }
+    // `--temperature`, else `ingest.temperature`. The range is checked before any call: a
+    // request a provider will reject is not worth paying for, and the configuration's own copy
+    // of this check happens at load for the same reason.
+    if let Some(t) = m
+        .get_one::<f32>("temperature")
+        .copied()
+        .or(cfg.ingest_temperature)
+    {
+        if !(0.0..=2.0).contains(&t) {
+            eprintln!("smysl ingest: --temperature {t} is outside 0.0 to 2.0");
+            return ExitCode::Usage;
+        }
+        opts = opts.with_temperature(t);
     }
     if let Some(n) = m.get_one::<String>("repair").and_then(|s| s.parse().ok()) {
         opts = opts.with_repair_attempts(n);
@@ -4562,12 +4585,14 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         );
     }
     eprintln!(
-        "smysl ingest: {} chunk(s), {} call(s), {} unit(s), {} weakened, {} degraded, {} token(s)",
+        "smysl ingest: {} chunk(s), {} call(s), {} unit(s), {} weakened, {} degraded, \
+         {} repaired, {} token(s)",
         report.chunks,
         report.calls,
         staged.len(),
         staged.weakened.len(),
         report.degraded,
+        report.repaired,
         report.usage.total()
     );
 
@@ -4577,7 +4602,10 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         let entry = smysl::LedgerEntry::new(
             now_millis(),
             provider.clone(),
-            "",
+            // The resolved name, not `--model`: a run that named no model still ran one, and
+            // writing the empty string here is what made `usage --by model` group every
+            // default run under nothing (H-9).
+            report.model.clone().unwrap_or_default(),
             smysl::Task::ContentIngest,
             report.usage,
         );

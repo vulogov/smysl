@@ -201,6 +201,14 @@ impl IngestOptions {
         self
     }
 
+    /// The sampling temperature, 0.0 to 2.0. Not range-checked here: the field is public and
+    /// has been since the type existed, so the check belongs where the value is accepted from
+    /// outside — `Config::load` and `--temperature`, both of which refuse before any call.
+    pub fn with_temperature(mut self, t: f32) -> IngestOptions {
+        self.temperature = t;
+        self
+    }
+
     /// The output tokens a call to this provider asks for.
     ///
     /// Until 1.3 every ingest asked for 2,048 whatever the provider was configured for, so a
@@ -331,12 +339,25 @@ pub struct IngestReport {
     /// defects were single units' own (`repair::UNIT_LOCAL`) degrades those units, each
     /// counted here, and keeps the rest.
     pub degraded: usize,
+    /// Chunks that failed at least one attempt and then succeeded (`SMY-W435`).
+    ///
+    /// `degraded` counts the repairs that did not work. This counts the ones that did, which
+    /// used to be invisible: the chunk returned clean units and the attempt that got it wrong
+    /// was dropped on the floor. A run of 40 chunks where 30 needed a second turn and a run
+    /// where none did reported the same thing.
+    pub repaired: usize,
     pub diagnostics: Vec<Diagnostic>,
     pub path: Option<IngestPath>,
     pub recipe: Option<[u8; 32]>,
     pub family: Option<[u8; 32]>,
     pub usage: Usage,
     pub provider: Option<smysl_provider::ProviderId>,
+    /// The model that ran, resolved: what the caller named, else the provider's own.
+    ///
+    /// The caller knows what they passed and cannot know what an empty `--model` resolved to,
+    /// which is why `cmd_ingest` wrote the empty string into the ledger and `usage --by model`
+    /// grouped every default run under no model at all.
+    pub model: Option<String>,
 }
 
 #[cfg(feature = "model")]
@@ -390,7 +411,7 @@ impl<'a> Ingestor<'a> {
         // wording — change the id or the version — a change nothing read.
         let template = self.template_for(choice.path);
         let conditions = recipe::Conditions::new(template.id.clone(), template.version)
-            .with_provider(provider.id().to_string(), &self.opts.model)
+            .with_provider(provider.id().to_string(), self.model_for(&caps))
             .with_granularity(&self.opts.granularity)
             .with_temperature(self.opts.temperature)
             .with_schemas(["smysl.kernel/0.1".to_string()])
@@ -406,6 +427,7 @@ impl<'a> Ingestor<'a> {
             recipe: Some(conditions.recipe()),
             family: Some(conditions.family()),
             provider: Some(provider.id()),
+            model: Some(self.model_for(&caps).to_string()),
             ..IngestReport::default()
         };
 
@@ -416,6 +438,7 @@ impl<'a> Ingestor<'a> {
             let out = self.one_chunk(provider, choice.path, &piece.text, &mut report.usage);
             report.calls += out.calls;
             report.degraded += out.degraded;
+            report.repaired += out.repaired;
             report.diagnostics.extend(out.diagnostics);
             units.extend(out.units);
             relations.extend(out.relations);
@@ -523,6 +546,7 @@ impl<'a> Ingestor<'a> {
                         labels: BTreeMap::new(),
                         calls,
                         degraded: 1,
+                        repaired: 0,
                         diagnostics: vec![d],
                     };
                 }
@@ -551,12 +575,25 @@ impl<'a> Ingestor<'a> {
             diagnostics.extend(repair::check_local(&units, self.opts.rung).iter().cloned());
 
             if !repair::needs_repair(&diagnostics) && !units.is_empty() {
+                // A repair that worked used to erase what it repaired. The chunk returned
+                // clean units, `history` went out of scope, and nothing in the run said the
+                // model had got it wrong first — so a corpus where most chunks needed a second
+                // turn and one where none did reported the same thing, and the prompt that
+                // caused it could not be found from the output. Kept as warnings, so no exit
+                // code moves: the units really are clean.
+                for h in &history {
+                    diagnostics.push(
+                        Diagnostic::new(smysl_core::Code::W435)
+                            .with_message(format!("repaired: {}: {}", h.code, h.message)),
+                    );
+                }
                 return ChunkOutcome {
                     units,
                     relations,
                     labels,
                     calls,
                     degraded: 0,
+                    repaired: usize::from(!history.is_empty()),
                     diagnostics,
                 };
             }
@@ -602,6 +639,7 @@ impl<'a> Ingestor<'a> {
                     labels: s.labels,
                     calls,
                     degraded: s.degraded,
+                    repaired: 0,
                     diagnostics: history,
                 };
             }
@@ -616,6 +654,7 @@ impl<'a> Ingestor<'a> {
             labels: BTreeMap::new(),
             calls,
             degraded: 1,
+            repaired: 0,
             diagnostics: history,
         }
     }
@@ -645,6 +684,21 @@ impl<'a> Ingestor<'a> {
             .unwrap_or_else(|| schema::batch_schema_with(self.opts.source.is_some()))
     }
 
+    /// The model this run will actually use: the one the caller named, else the provider's own.
+    ///
+    /// Every mapper already fell back to its configured model for an empty `Request.model`, so
+    /// a run with no `--model` did use a specific model — and recorded an empty string for it.
+    /// The recipe exists to say what produced a unit, and that is the field it was silent on.
+    /// Resolving it here rather than in each mapper keeps the name in the recipe and the name
+    /// in the request the same by construction.
+    fn model_for<'c>(&'c self, caps: &'c smysl_provider::Capabilities) -> &'c str {
+        if self.opts.model.is_empty() {
+            &caps.model
+        } else {
+            &self.opts.model
+        }
+    }
+
     fn request(
         &self,
         provider: &dyn Provider,
@@ -653,7 +707,7 @@ impl<'a> Ingestor<'a> {
         path: IngestPath,
     ) -> Request {
         let caps = provider.caps();
-        let mut r = Request::new(&self.opts.model, template.render(text))
+        let mut r = Request::new(self.model_for(&caps), template.render(text))
             .with_system(&template.system)
             .with_max_output(self.opts.output_budget(&caps));
         r.temperature = self.opts.temperature;
@@ -696,6 +750,8 @@ struct ChunkOutcome {
     calls: usize,
     /// Spans degraded: the whole chunk counts one, a salvaged answer one per unit.
     degraded: usize,
+    /// 1 when this chunk succeeded after an attempt that did not.
+    repaired: usize,
     diagnostics: Vec<Diagnostic>,
 }
 

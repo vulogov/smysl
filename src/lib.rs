@@ -213,8 +213,10 @@ mod tests {
         // survive an unknown code, and this is how a reader hears that they met one. 59 with
         // `SMY-W434`: a bundle keeps records it cannot interpret, and the sender is told. 60
         // with `SMY-W432`, the warning that has to ship a release before `lang` becomes a core
-        // key, because the lint is the whole migration.
-        assert_eq!(Code::ALL.len(), 60);
+        // key, because the lint is the whole migration. 61 with `SMY-W435`: a chunk that
+        // succeeded on a later attempt used to throw the earlier error away, which is the one
+        // a reader needs to know the model got it wrong first.
+        assert_eq!(Code::ALL.len(), 61);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 
