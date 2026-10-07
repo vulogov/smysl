@@ -9,6 +9,7 @@ use core::fmt;
 use std::collections::BTreeSet;
 
 use crate::ids::{LangTag, SchemaId, ThreadId, Uid, ViewId};
+use crate::types::estimate::ProfileEstimator;
 use crate::types::unit::Extra;
 
 /// How much a single unit is allowed to say (§1.6).
@@ -74,6 +75,9 @@ pub struct GranularityProfile {
     pub l1_min: u32,
     pub l1_max: u32,
     pub admission: Admission,
+    /// How `l0_max` and `l1_range` are counted (F-2). `Unset` is the pre-F-2 meaning,
+    /// `smysl_core::tokens`, and encodes to no key at all.
+    pub estimator: ProfileEstimator,
     /// Keys this build does not know, kept so a profile survives a round trip.
     ///
     /// §8.1 permits a new key in any record body above that record's highest, and obliges an
@@ -95,6 +99,7 @@ impl GranularityProfile {
             l1_min: 120,
             l1_max: 400,
             admission: Admission::Topical,
+            estimator: ProfileEstimator::Unset,
             extra: Extra::new(),
         }
     }
@@ -107,6 +112,7 @@ impl GranularityProfile {
             l1_min: 40,
             l1_max: 120,
             admission: Admission::SingleAssertion,
+            estimator: ProfileEstimator::Unset,
             extra: Extra::new(),
         }
     }
@@ -119,6 +125,7 @@ impl GranularityProfile {
             l1_min: 20,
             l1_max: 60,
             admission: Admission::SingleAssertion,
+            estimator: ProfileEstimator::Unset,
             extra: Extra::new(),
         }
     }
@@ -138,6 +145,30 @@ impl GranularityProfile {
 
     pub fn gist_within_bound(&self, tokens: u32) -> bool {
         tokens <= self.l0_max
+    }
+
+    /// Count `text` the way this profile's bounds are expressed.
+    ///
+    /// `None` when the profile names an estimator this build does not have: the bounds are
+    /// then unevaluable, and a caller must say so (`SMY-W025`) rather than fall back to a
+    /// different count and report a breach it cannot justify.
+    pub fn tokens(&self, text: &str) -> Option<u32> {
+        self.estimator.estimator().map(|e| e.count(text))
+    }
+
+    /// The longest prefix of `text` that fits `l0_max`, as a byte length.
+    ///
+    /// `None` for an unknown estimator, for the same reason as [`Self::tokens`].
+    pub fn fit_gist(&self, text: &str) -> Option<usize> {
+        self.estimator.estimator().map(|e| e.fit(text, self.l0_max))
+    }
+
+    /// As [`Self::fit_gist`], leaving room for `suffix` — an ellipsis on a shortened gist,
+    /// whose own cost depends on the estimator and so cannot be reserved in bytes.
+    pub fn fit_gist_with(&self, text: &str, suffix: &str) -> Option<usize> {
+        self.estimator
+            .estimator()
+            .map(|e| e.fit_with_suffix(text, suffix, self.l0_max))
     }
 }
 

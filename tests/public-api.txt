@@ -139,6 +139,7 @@ pub use smysl::PayloadFilter
 pub use smysl::Person
 pub use smysl::Probe
 pub use smysl::Profile
+pub use smysl::ProfileEstimator
 pub use smysl::PromptOverride
 pub use smysl::Provenance
 pub use smysl::Provider
@@ -208,6 +209,7 @@ pub use smysl::Thread
 pub use smysl::ThreadId
 pub use smysl::ThreadSchema
 pub use smysl::TokenCount
+pub use smysl::TokenEstimator
 pub use smysl::Tokenizer
 pub use smysl::TopoOrder
 pub use smysl::Totals

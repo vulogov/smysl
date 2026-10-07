@@ -12,10 +12,21 @@ use smysl_core::{Lod, UnitCore};
 /// `--tokenizer <id>` selects an alternative; whichever is used is recorded in the
 /// `packinfo`, because a budget that does not say what it was counted with is a number
 /// without a unit.
+///
+/// **Cost, not a bound.** This predicts what a provider will charge, so it wants to be
+/// faithful to a real tokenizer. A granularity bound answers a different question — how much
+/// one unit may say — and is counted by [`smysl_core::TokenEstimator`], which may be
+/// content-fair instead. OQ-31 asked which of the two the estimator should be; the answer is
+/// one each, because they are two instruments (SMYSL-2.1 §4.3.2).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Estimator {
-    /// `ceil(utf8_len(t) / 4) + 2` (D-2). The `+ 2` is per-item framing overhead.
+    /// `ceil(utf8_len(t) / 4)` (D-2), plus framing.
+    ///
+    /// An estimator id names a **count**; the `+ 2` is this crate's per-item framing overhead
+    /// and applies to every estimator, so it is not part of what the id means (F-2 item 4).
+    /// The same count is `smysl_core::TokenEstimator::Utf8Div4`, which is what a granularity
+    /// bound uses — without the framing, because a gist is not a packed item.
     #[default]
     Utf8Div4,
 }

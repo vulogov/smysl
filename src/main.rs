@@ -20,9 +20,10 @@ use smysl::{
     check, conformance, effective_status, fidelity, granularity_distribution, merge, parse_surface,
     plan_retraction, write_surface, AgentId, BuildOptions, CheckOptions, Code, ConformanceClass,
     ConsumerProfile, Contentions, DeriveOptions, Estimator, Hlc, Lod, MergeOptions, PackRequest,
-    Pass, Profile, Record, RelKind, Relation, RetractionAuthority, RetractionPolicy, Role,
-    SalienceRequest, SalienceWeights, SchemaId, Severity, Store, StoreOptions, SupersessionPolicy,
-    Target, TraceKind, Uid, UidPrefix, View, ViewId, WriteContext,
+    Pass, Profile, ProfileEstimator, Record, RelKind, Relation, RetractionAuthority,
+    RetractionPolicy, Role, SalienceRequest, SalienceWeights, SchemaId, Severity, Store,
+    StoreOptions, SupersessionPolicy, Target, TokenEstimator, TraceKind, Uid, UidPrefix, View,
+    ViewId, WriteContext,
 };
 
 /// Purity classification of a command (§23). `Pure` commands are bit-reproducible
@@ -282,6 +283,12 @@ fn cli() -> Command {
                         .long("granularity")
                         .help("Report the granularity distribution of the store")
                         .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("estimator")
+                        .long("estimator")
+                        .value_name("ID")
+                        .help("Count the granularity bounds with this estimator (F-2)"),
                 )
                 .arg(
                     Arg::new("pass")
@@ -1439,6 +1446,29 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         ConsumerProfile::new(name).implementing(schemas)
     });
 
+    // `--estimator` overrides the count the bounds are compared against (F-2). An id this
+    // build does not have is refused here rather than carried in as `Unknown`: the caller
+    // asked for a specific count, and silently reporting every unit unevaluable would answer
+    // a different question.
+    let estimator: Option<ProfileEstimator> = match m.get_one::<String>("estimator") {
+        None => None,
+        Some(id) => match TokenEstimator::parse(id) {
+            Some(e) => Some(ProfileEstimator::Known(e)),
+            None => {
+                eprintln!("smysl check: unknown estimator `{id}`");
+                eprintln!(
+                    "  known: {}",
+                    TokenEstimator::ALL
+                        .iter()
+                        .map(|e| e.id())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                return ExitCode::Usage;
+            }
+        },
+    };
+
     let class: Option<ConformanceClass> = m
         .get_one::<String>("conformance")
         .and_then(|s| ConformanceClass::parse(s));
@@ -1477,6 +1507,7 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         if let Some(f) = &consumer {
             opts = opts.as_consumer(f.clone());
         }
+        opts.estimator = estimator.clone();
         let mut report = check(&store, opts);
         for d in &out.diagnostics {
             report.push(d.clone());

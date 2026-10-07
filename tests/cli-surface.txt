@@ -43,6 +43,7 @@ check      --as
 check      --store
 check      --granularity
 check      --output
+check      --estimator
 check      --format
 check      --pass
 check      --strict

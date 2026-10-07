@@ -721,7 +721,16 @@ mod tests {
     /// change to either side has to move this test too.
     #[test]
     fn the_gist_bound_is_stated_per_script() {
-        let budget = smysl_core::GranularityProfile::default().l0_max;
+        let profile = smysl_core::GranularityProfile::default();
+        let budget = profile.l0_max;
+        // These templates state the bound in characters per script, which is only right for
+        // the byte-counting estimator. F-2 lets a profile name another one, so the day the
+        // default changes the templates have to change with it — this is that tripwire.
+        assert_eq!(
+            profile.estimator.estimator(),
+            Some(smysl_core::TokenEstimator::Utf8Div4),
+            "the default count changed; GIST_BOUND states characters for utf8-div4 only"
+        );
         // The bound in bytes, from the estimator itself.
         let bytes = budget * 4;
         assert_eq!(bytes, 120, "the bound moved; the templates say otherwise");

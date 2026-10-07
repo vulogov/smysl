@@ -291,6 +291,9 @@ registry! {
         W435 = "SMY-W435", Warn,  "A chunk succeeded on a later attempt; the earlier error is kept";
         W433 = "SMY-W433", Warn,  "Ingest input contains a smysl prompt marker; sent inside a derived fence";
     }
+    Lod => {
+        W025 = "SMY-W025", Warn,  "Granularity bounds unevaluable - the profile names an estimator this build does not have";
+    }
 }
 
 impl fmt::Display for Code {
@@ -581,7 +584,7 @@ mod tests {
     /// trusted to be innocent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 62);
+        assert_eq!(Code::ALL.len(), 63);
     }
 
     #[test]

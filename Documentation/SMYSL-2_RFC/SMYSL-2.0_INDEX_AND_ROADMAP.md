@@ -114,7 +114,7 @@ it names, and what each item changes before TX-P1:
 
 | # | change | from | why |
 |---|---|---|---|
-| 1 | **F-2 comes before TX-P1.** It leaves 1.10.0 and becomes TX-P1's precondition. | T11, T14, report §2 | The one change that removes a measured, reproducible loss of propositions, and it rests on no judged label. Hosted Russian degrades 12.67% of units; 579 `E022` across the corpus. Blocked on OQ-31, which is therefore promoted to a TX-P1 blocker (§4). |
+| 1 | ~~F-2 comes before TX-P1~~ **done 2026-10-07.** It left 1.10.0, OQ-31 was answered, and it is built. | T11, T14, report §2 | The one change that removes a measured, reproducible loss of propositions, and it rested on no judged label. Hosted Russian degraded 12.67% of units; 579 `E022` across the corpus. `smysl/content/1` closes draft 3 §22's en/ru gap from 68.5% to 3.2% relative, with the English budget unmoved. |
 | 2 | **Extraction is consensus by default.** TX-P5 extracts twice per window; class measures default to `attested:2`; GE-T2 reruns under that policy. | T3 | J_class within model is 1.000 local but 0.327 hosted, against a 0.6 threshold. |
 | 3 | **Class measures ship as exploration only.** Cross-lingual classes wait for TX-P10's S1 embeddings; `anchored` alone is used for the Bibles. | T6, T7 | Precision at recall 0.7 reaches 0.835 same-language and 0.712 cross-lingual against a 0.9 bar, and that is under the better of two provisional golds. |
 | 4 | **Holder and mode become structural from TX-P5's first ingest**, with a probe-set gate in its exit tests. The holder paragraph does **not** go into the TX-P0 prompt. | T8, T9 | Reported speech is extracted as asserted in 11.1–24.5% of attribution-bearing units. The holder paragraph does not reduce that, and it introduces `E022` degradations in a local configuration that had none (findings MS-9, MS-11). |
@@ -144,8 +144,8 @@ discussion; OQ-7, OQ-23, OQ-35 and OQ-49 stay open with them.
 | phase | RFC | delivers | exit (summary) | depends on |
 |---|---|---|---|---|
 | S0 | 2.2 | extraction stability and proposition-trust spike with today's CLI | 2.2 decision table | — |
-| TX-P0 **built** | 2.1 | Every item except **F-2** — no longer a 1.10.0 deferral: G0's pivot makes it TX-P1's precondition (§1.1 item 1), still gated on OQ-31 — and the `bundle --unknown keep\|drop` flag, which was separated from F-16 because only the closure was a defect | met: F-16/F-17 reproductions fixed, every probe reversed, and suite, `make semver`, `api-check`, `doc-output` and `spec-tables` clean on every commit. Departures from plan: 2.1 §10 | G−1 accepted in full |
-| TX-P1 | 2.4 | parts, readings, manifests, object store, first readers, structure, locators; `admission` opened (2.3 A-8.1) | GE-T1 (Bibles and JSON) | TX-P0, G0 **passed**; F-2 first (§1.1) |
+| TX-P0 **built** | 2.1 | Every item including **F-2**, which G0's pivot pulled out of 1.10.0 and which landed 2026-10-07 with OQ-31 answered (§1.1 item 1); outstanding is only the `bundle --unknown keep\|drop` flag, which was separated from F-16 because only the closure was a defect | met: F-16/F-17 reproductions fixed, every probe reversed, and suite, `make semver`, `api-check`, `doc-output` and `spec-tables` clean on every commit. Departures from plan: 2.1 §10 | G−1 accepted in full |
+| TX-P1 | 2.4 | parts, readings, manifests, object store, first readers, structure, locators; `admission` opened (2.3 A-8.1) | GE-T1 (Bibles and JSON) | TX-P0, G0 **passed**; F-2 **done** (§1.1) |
 | TX-P2 | 2.4 | segmenter, analyzers, `lingua`, chat readers, `text append`, redaction (rule Z) | GE-T1 (chats), redaction survives a stale peer | TX-P1 |
 | TX-P3 | 2.4 | EDTF, `published`, datings, rule E engine, locks, `date` commands | GE-T13 | TX-P2 |
 | TX-P4 | 2.4 | substrate index, persistent postings, `text` commands | `find` p95 < 200 ms at 155k units | TX-P3 |
@@ -202,7 +202,7 @@ Everything not listed here is either resolved (§3) or does not block anything.
 | must be answered before | open questions | owner |
 |---|---|---|
 | ~~**S0 / TX-P0**~~ **both done** | OQ-34 licensing of model outputs as fixtures — **partly answered by S0**: arm L's model is Apache 2.0, so its outputs are usable as fixtures; the hosted model's still needs the decision | 2.1, 2.2 |
-| **TX-P1** | **OQ-31 estimator reference and objective** — promoted here by G0's pivot, because F-2 now precedes TX-P1 (§1.1 item 1). S0 supplies the calibration data: `ceil(bytes/4)` predicts a 1.96x ru/en cost against 1.84x measured locally and 3.38x hosted. · **MSRV: OQ-40 = OQ-66** (redb 4.x needs Rust 1.90; the workspace declares 1.79 and does not test it). Proposal: raise `rust-version` to 1.90 at TX-P1, with an MSRV CI job. · OQ-36 lock mechanism · OQ-37 JSON parsing inside or outside the purity gate · OQ-39 physical erasure of text in plain logs | 2.4, 2.8 |
+| **TX-P1** | ~~OQ-31~~ **answered, and F-2 is built** (2026-10-07): faithful for cost, content-fair for a bound — 2.1 §4.3.2. · **MSRV: OQ-40 = OQ-66** (redb 4.x needs Rust 1.90; the workspace declares 1.79 and does not test it). Proposal: raise `rust-version` to 1.90 at TX-P1, with an MSRV CI job. · OQ-36 lock mechanism · OQ-37 JSON parsing inside or outside the purity gate · OQ-39 physical erasure of text in plain logs | 2.4, 2.8 |
 | **TX-P3** | OQ-13 speaker and device selectors for datings (window targets are already in) | 2.4 |
 | **TX-P4** | OQ-4 source and licence of versification maps · OQ-14 default IDF scope | 2.4, 2.5 |
 | **TX-P5 (G1)** | OQ-41 `ingest:quote` removed from span-carrying units changes their uids · OQ-43 strictness of the digest-scoped reference check | 2.4 |
@@ -408,8 +408,10 @@ Coding speed cannot compress those.
    A-11 `x.text/v1`, A-12 rules E and Z, A-13. 2.3's header records what that carries and what it
    leaves open.
 4. ~~**G0**~~ **Passed 2026-10-07.** Both halves met.
-5. **Do F-2 first.** §1.1 item 1 makes it TX-P1's precondition rather than a 1.10.0 deferral. It
-   is blocked on **OQ-31**, so OQ-31 is now a TX-P1 blocker and the first question to settle.
+5. ~~**Do F-2 first.**~~ **Done 2026-10-07.** OQ-31 is answered — faithful for cost,
+   content-fair for a bound — and F-2 is built with `smysl/content/1`: Russian gains 51% of its
+   gist budget, English moves 2%, and draft 3 §22's en/ru gap closes from 68.5% to 3.2%
+   relative. TX-P0 is now complete except `bundle --unknown keep|drop`. 2.1 §4.3.2 and §10.
 6. **Re-plan 2.4 against §1.1.** Six changes land before TX-P1 starts: consensus extraction by
    default, class measures as exploration only, holder and mode structural from TX-P5, the
    GE-T5/GE-T2 restatement against α, the FC-6 recalibration, and the non-English cost model.
@@ -426,6 +428,7 @@ Coding speed cannot compress those.
    `scripts/verify-spec-tables.py` for each (A-14). A fold is not complete until that gate covers
    its tables.
 
-**What is startable now:** TX-P1 is unblocked by the gate but waits on F-2 and OQ-31 (step 5).
+**What is startable now:** TX-P1 is unblocked — the gate passed and F-2 landed — and waits only
+on the re-plan of step 6 and the remaining blockers of step 7.
 TX-P13a remains independent of all of it — the `StoreRead` trait and its consumers
 ported in memory (2.8 §§3–4), which §2's note marks as needing only TX-P0.

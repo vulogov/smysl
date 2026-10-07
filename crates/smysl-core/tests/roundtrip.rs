@@ -10,10 +10,10 @@ use smysl_core::cbor::envelope::unit_core_bytes;
 use smysl_core::{
     canonical_uid, from_cbor, from_cbor_seq, to_cbor, to_cbor_seq, Admission, AgentId, Attestation,
     Contention, ContentionId, ContentionStatus, Date, Detected, DetectionKind, DropReason,
-    GranularityProfile, Hlc, KernelType, LangTag, Lod, Op, Optimality, PackInfo, PackMode, Record,
-    RelKind, Relation, Resolution, ResolutionTarget, Role, Rung, SchemaDecl, SchemaId, SourceKind,
-    SourceRef, Status, Step, Thread, ThreadId, ThreadSchema, Uid, UnitCore, UnitCoreBuilder, View,
-    ViewId, Withdrawal,
+    GranularityProfile, Hlc, KernelType, LangTag, Lod, Op, Optimality, PackInfo, PackMode,
+    ProfileEstimator, Record, RelKind, Relation, Resolution, ResolutionTarget, Role, Rung,
+    SchemaDecl, SchemaId, SourceKind, SourceRef, Status, Step, Thread, ThreadId, ThreadSchema,
+    TokenEstimator, Uid, UnitCore, UnitCoreBuilder, View, ViewId, Withdrawal,
 };
 
 fn uid(n: u8) -> Uid {
@@ -888,4 +888,69 @@ fn code_255_is_reserved_in_all_five_enumerations() {
     assert!(DetectionKind::ALL
         .iter()
         .all(|d| d.as_u8() != 255 || *d == DetectionKind::Unknown));
+}
+
+/// Granularity key 5, the estimator id (SMYSL-2.3 A-9, F-2).
+///
+/// Three things have to hold at once. A profile naming a known estimator carries the id. A
+/// profile naming one this build does not have carries it anyway, byte for byte, because §8.1
+/// obliges an older reader to round-trip a key it cannot interpret — and dropping it would also
+/// turn an unevaluable bound into an evaluable one, which is worse than losing a field. And the
+/// pre-F-2 default writes **no key at all**, so every view written before F-2 encodes to exactly
+/// the bytes it had.
+#[test]
+fn the_granularity_estimator_round_trips_known_and_unknown_ids() {
+    let view = |g: GranularityProfile| {
+        let v = View::new(ViewId::new("v/e").unwrap(), "i").with_granularity(g);
+        let (back, _) = from_cbor(&to_cbor(&Record::View(v))).unwrap();
+        match back {
+            Record::View(v) => v,
+            other => panic!("expected a view, got {}", other.type_name()),
+        }
+    };
+
+    let mut known = GranularityProfile::standard();
+    known.estimator = ProfileEstimator::Known(TokenEstimator::Content1);
+    let back = view(known.clone());
+    assert_eq!(back.granularity.estimator, known.estimator);
+    assert_eq!(back.granularity, known);
+    assert_eq!(
+        back.granularity.tokens("Да будет свет"),
+        Some(TokenEstimator::Content1.count("Да будет свет"))
+    );
+
+    let mut unknown = GranularityProfile::standard();
+    unknown.estimator = ProfileEstimator::Unknown("smysl/from-the-future/9".into());
+    let back = view(unknown.clone());
+    assert_eq!(
+        back.granularity.estimator, unknown.estimator,
+        "an id this build cannot parse still has to come back"
+    );
+    assert_eq!(
+        back.granularity.tokens("anything"),
+        None,
+        "an unknown estimator leaves the bounds unevaluable"
+    );
+
+    // The default is absent on the wire: these bytes are what 1.9.0 wrote.
+    let plain = GranularityProfile::standard();
+    let with_default = {
+        let mut g = GranularityProfile::standard();
+        g.estimator = ProfileEstimator::Known(TokenEstimator::Utf8Div4);
+        g
+    };
+    let bytes = |g: GranularityProfile| {
+        to_cbor(&Record::View(
+            View::new(ViewId::new("v/e").unwrap(), "i").with_granularity(g),
+        ))
+    };
+    assert_eq!(
+        bytes(plain.clone()),
+        bytes(with_default),
+        "naming the default estimator must not change the bytes"
+    );
+    assert!(
+        !bytes(plain).windows(6).any(|w| w == b"smysl/"),
+        "no estimator id is written for the default"
+    );
 }

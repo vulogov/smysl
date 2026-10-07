@@ -11,7 +11,7 @@
 //! guess is worse than no error at all.
 
 use smysl_core::diag::{Code, Diagnostic, Report};
-use smysl_core::{tokens, Admission, GranularityProfile, Uid, UnitCore};
+use smysl_core::{Admission, GranularityProfile, Uid, UnitCore};
 use smysl_graph::Store;
 
 pub fn run(store: &Store, granularity: &GranularityProfile, report: &mut Report) {
@@ -46,8 +46,12 @@ pub fn check_unit(
         }
     }
 
-    // `SMY-W041` - outside the profile's body range.
-    let n = tokens(body);
+    // `SMY-W041` - outside the profile's body range, counted with the profile's estimator
+    // (F-2). An unknown estimator is reported once per unit by the shape pass, so this pass
+    // stays silent rather than repeating it.
+    let Some(n) = granularity.tokens(body) else {
+        return;
+    };
     if !granularity.body_in_range(n) {
         let direction = if n < granularity.l1_min {
             "under"

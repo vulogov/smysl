@@ -380,19 +380,17 @@ fn synth_gist(span: &str) -> String {
         .trim();
     let first = if first.is_empty() { text } else { first };
 
-    // The bound is `l0_max` as the estimator counts it, four bytes a token. It was
-    // `GIST_MAX_CHARS`, 240 characters — twice what `SMY-E022` allows — so a span whose first
-    // sentence was long degraded to a prose unit that failed the gist check at staging.
-    let budget = GranularityProfile::default().l0_max as usize * 4;
-    if first.len() <= budget {
+    // The bound is `l0_max` as the profile's own estimator counts it — not `l0_max * 4`, which
+    // is the inverse of one estimator only (F-2). It was `GIST_MAX_CHARS`, 240 characters —
+    // twice what `SMY-E022` allows — so a span whose first sentence was long degraded to a
+    // prose unit that failed the gist check at staging.
+    let g = GranularityProfile::default();
+    if g.tokens(first).is_some_and(|n| g.gist_within_bound(n)) {
         return first.to_string();
     }
-    let ellipsis = '\u{2026}'.len_utf8();
+    let end = g.fit_gist_with(first, "\u{2026}").unwrap_or(0);
     let mut out = String::new();
-    for c in first.chars() {
-        if out.len() + c.len_utf8() + ellipsis > budget {
-            break;
-        }
+    for c in first[..end].chars() {
         out.push(c);
     }
     // Trim back to a word boundary so the gist reads as a shortened sentence rather than a

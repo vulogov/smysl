@@ -21,6 +21,7 @@ use crate::types::annex::{
     PackInfo, PackMode, SchemaDecl,
 };
 use crate::types::epistemics::{Date, Lod, SourceKind, SourceRef, Status};
+use crate::types::estimate::ProfileEstimator;
 use crate::types::lifecycle::{Commit, Commitment, Resolution, ResolutionTarget, Withdrawal};
 use crate::types::provenance::{Attestation, Hlc, Op, Rung};
 use crate::types::record::{code, Record};
@@ -179,6 +180,12 @@ fn enc_granularity(e: &mut Enc, g: &GranularityProfile) {
     m.put(keys::granularity::ADMISSION, |e| {
         e.uint(g.admission.as_u8() as u64)
     });
+    // Absent for the pre-F-2 default: writing it would change the bytes of every view that
+    // predates F-2, which §8.1 forbids (A-9).
+    if let Some(id) = g.estimator.wire_id() {
+        let id = id.to_string();
+        m.put(keys::granularity::ESTIMATOR, move |e| e.text(&id));
+    }
     m.put_extra(&g.extra);
     m.finish(e);
 }
@@ -782,6 +789,13 @@ fn dec_granularity(d: &mut Dec<'_>) -> Res<GranularityProfile> {
         keys::granularity::ADMISSION => {
             g.admission = Admission::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(at))?)
                 .ok_or_else(|| bad(at))?;
+            Ok(true)
+        }
+        keys::granularity::ESTIMATOR => {
+            // An id this build does not know is kept as it arrived, not dropped and not
+            // silently replaced by the default: it has to re-encode byte for byte (§8.1), and
+            // it makes the bounds unevaluable rather than evaluable under another count.
+            g.estimator = ProfileEstimator::from_wire(d.text()?);
             Ok(true)
         }
         _ => Ok(false),

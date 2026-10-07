@@ -108,6 +108,7 @@ pub use smysl::Pass
 pub use smysl::PayloadFilter
 pub use smysl::Person
 pub use smysl::Profile
+pub use smysl::ProfileEstimator
 pub use smysl::Provenance
 pub use smysl::QUOTE_KEY
 pub use smysl::Query
@@ -163,6 +164,7 @@ pub use smysl::Target
 pub use smysl::Thread
 pub use smysl::ThreadId
 pub use smysl::ThreadSchema
+pub use smysl::TokenEstimator
 pub use smysl::Tokenizer
 pub use smysl::TopoOrder
 pub use smysl::TraceKind

@@ -1,0 +1,170 @@
+{
+  "id": "smysl/content/1",
+  "objective": "content-fair: parallel translations of one verse get one count, with English under utf8-div4 as the unit (OQ-31 answer B)",
+  "classes": [
+    "latin",
+    "cyrillic",
+    "greek",
+    "cjk",
+    "digit",
+    "space",
+    "other"
+  ],
+  "ranges": {
+    "latin": [
+      [
+        65,
+        90
+      ],
+      [
+        97,
+        122
+      ],
+      [
+        192,
+        591
+      ],
+      [
+        7680,
+        7935
+      ]
+    ],
+    "cyrillic": [
+      [
+        1024,
+        1327
+      ],
+      [
+        7296,
+        7311
+      ],
+      [
+        11744,
+        11775
+      ],
+      [
+        42560,
+        42655
+      ]
+    ],
+    "greek": [
+      [
+        880,
+        1023
+      ],
+      [
+        7936,
+        8191
+      ]
+    ],
+    "cjk": [
+      [
+        12352,
+        12543
+      ],
+      [
+        13312,
+        19903
+      ],
+      [
+        19968,
+        40959
+      ],
+      [
+        63744,
+        64255
+      ],
+      [
+        44032,
+        55215
+      ],
+      [
+        131072,
+        195103
+      ]
+    ],
+    "digit": [
+      [
+        48,
+        57
+      ]
+    ]
+  },
+  "weights_milli_tokens_per_char": {
+    "latin": 188,
+    "cyrillic": 260,
+    "greek": 229,
+    "cjk": 931,
+    "digit": 188,
+    "space": 456,
+    "other": 423
+  },
+  "constrained": {
+    "digit": "equals latin; not identifiable from the corpus"
+  },
+  "fit": {
+    "rows": 44667,
+    "held_out": 10857,
+    "shared_verses": 7932,
+    "split": "80/20 by blake2b(verse key)",
+    "row_weight": "1/target, so influence is relative",
+    "gated_classes": [
+      "el",
+      "ru",
+      "zh"
+    ],
+    "worst_signed_bias": 0.0187,
+    "worst_over_bound_parity_gap": 0.0977,
+    "within_anchor_class_parity_floor": 0.1496,
+    "held_out_mean_abs_rel_err": {
+      "de": 0.1146,
+      "el": 0.1188,
+      "en": 0.021,
+      "es": 0.1101,
+      "fr": 0.1344,
+      "ru": 0.1221,
+      "zh": 0.1575
+    }
+  },
+  "corpus": {
+    "source": "https://ebible.org/Scriptures/<id>_vpl.zip",
+    "note": "public domain verse-per-line editions; no text is vendored",
+    "editions": [
+      {
+        "lang": "de",
+        "file": "deu1912_vpl.txt",
+        "blake2b_256": "cd2b5fd77aa06e3980ad1a04afd353989cea5e4b05f91f02305aad77688bacce"
+      },
+      {
+        "lang": "el",
+        "file": "grcbyz_vpl.txt",
+        "blake2b_256": "3cfdfccf8e5a91964dfb38e6ddc8e41c54591832437a68ba32f0cca61386df56"
+      },
+      {
+        "lang": "en",
+        "file": "eng-kjv_vpl.txt",
+        "blake2b_256": "0e4ccc7f0b5b0a415eda5249dd2847319baf8ee9c9ba1f56244614b80f2b40df"
+      },
+      {
+        "lang": "es",
+        "file": "spaRV1909_vpl.txt",
+        "blake2b_256": "4372222b6752074ab816412762395afd2b1e6e2d35247e76f7837590365947d9"
+      },
+      {
+        "lang": "fr",
+        "file": "fraLSG_vpl.txt",
+        "blake2b_256": "00f64cbe1b205979968a25c2cfa3cc54faee4b87747a34ac284f48fa073a12cc"
+      },
+      {
+        "lang": "ru",
+        "file": "russyn_vpl.txt",
+        "blake2b_256": "8725c71bb9cc2761f04e8161b6879152f82afa3c8ae853847d0fe10fc734d9fe"
+      },
+      {
+        "lang": "zh",
+        "file": "cmn-cu89s_vpl.txt",
+        "blake2b_256": "3fefe056f4d79f7ff6b9a86a69eba422c6cb09e9aec0317c3bf65c98f36fd82d"
+      }
+    ]
+  }
+}

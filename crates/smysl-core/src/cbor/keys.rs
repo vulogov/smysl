@@ -159,7 +159,10 @@ pub mod granularity {
     pub const L1_MIN: u16 = 2;
     pub const L1_MAX: u16 = 3;
     pub const ADMISSION: u16 = 4;
-    pub const HIGHEST: u16 = ADMISSION;
+    /// SMYSL-2.3 A-9: the estimator the bounds are counted with. Written only when it is not
+    /// the pre-F-2 default, so every view written before F-2 encodes to the bytes it had.
+    pub const ESTIMATOR: u16 = 5;
+    pub const HIGHEST: u16 = ESTIMATOR;
 }
 
 #[cfg(test)]
@@ -325,6 +328,7 @@ mod tests {
                     granularity::L1_MIN,
                     granularity::L1_MAX,
                     granularity::ADMISSION,
+                    granularity::ESTIMATOR,
                 ],
             ),
         ];

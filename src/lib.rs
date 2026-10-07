@@ -71,11 +71,11 @@ pub use smysl_core::{
     ContentionId, ContentionStatus, Date, Detected, DetectionKind, Diagnostic, DropReason,
     ExitCode, Extra, Fidelity, GranularityProfile, Group, Hlc, IdError, IntegrityError, KernelType,
     Label, LabelBinding, LangTag, Lod, NonDetReason, Op, Optimality, PackInfo, PackMode,
-    ParseError, Record, RelKind, Relation, Report, Resolution, ResolutionTarget, Role, Rung,
-    SchemaDecl, SchemaId, Severity, ShapeError, SourceKind, SourcePolicy, SourceRef, Span, Status,
-    Step, Subject, Thread, ThreadId, ThreadSchema, Uid, UidPrefix, Unit, UnitCore, UnitCoreBuilder,
-    View, ViewId, Withdrawal, FORMAT_VERSIONS_SUPPORTED, FORMAT_VERSION_DEFAULT, KERNEL_MAJOR,
-    KERNEL_SCHEMA,
+    ParseError, ProfileEstimator, Record, RelKind, Relation, Report, Resolution, ResolutionTarget,
+    Role, Rung, SchemaDecl, SchemaId, Severity, ShapeError, SourceKind, SourcePolicy, SourceRef,
+    Span, Status, Step, Subject, Thread, ThreadId, ThreadSchema, TokenEstimator, Uid, UidPrefix,
+    Unit, UnitCore, UnitCoreBuilder, View, ViewId, Withdrawal, FORMAT_VERSIONS_SUPPORTED,
+    FORMAT_VERSION_DEFAULT, KERNEL_MAJOR, KERNEL_SCHEMA,
 };
 
 // ---- check ----------------------------------------------------------------
@@ -219,8 +219,11 @@ mod tests {
         // a reader needs to know the model got it wrong first. 62 with `SMY-W433`: an input
         // carrying a marker this crate sends is reported rather than assumed innocent — the
         // fence it would collide with is derived per input, so the collision is survivable, and
-        // a reader still wants to know the document tried.
-        assert_eq!(Code::ALL.len(), 62);
+        // a reader still wants to know the document tried. 63 with `SMY-W025`: a granularity
+        // profile may now name the estimator its bounds are counted with (F-2), and one this
+        // build does not have makes `l0_max` unevaluable rather than evaluable under some
+        // other count.
+        assert_eq!(Code::ALL.len(), 63);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

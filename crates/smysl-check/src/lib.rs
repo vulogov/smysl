@@ -18,7 +18,7 @@ pub mod passes;
 
 use std::collections::BTreeMap;
 
-use smysl_core::{Error, GranularityProfile, Label, Severity, Uid};
+use smysl_core::{Error, GranularityProfile, Label, ProfileEstimator, Severity, Uid};
 use smysl_graph::Store;
 
 pub use passes::extension::{fidelity, ConsumerProfile, FidelityReport};
@@ -145,6 +145,10 @@ pub struct CheckOptions {
     /// What the consumer implements, for the `--as` degradation report. Absent means no
     /// `SMY-W010` is emitted: nobody asked what a particular consumer would lose.
     pub consumer: Option<ConsumerProfile>,
+    /// Count the granularity bounds with this estimator instead of the profile's own (F-2,
+    /// `check --estimator`). It overrides whichever profile is in force, because the question
+    /// a caller is asking is "would these units fit under *that* count".
+    pub estimator: Option<ProfileEstimator>,
 }
 
 impl CheckOptions {
@@ -227,10 +231,13 @@ fn store_granularity(store: &Store) -> GranularityProfile {
 ///
 /// Never short-circuits: every requested pass runs, whatever the earlier ones found.
 pub fn check(store: &Store, opts: CheckOptions) -> Report {
-    let granularity = opts
+    let mut granularity = opts
         .granularity
         .clone()
         .unwrap_or_else(|| store_granularity(store));
+    if let Some(e) = opts.estimator.clone() {
+        granularity.estimator = e;
+    }
 
     let mut report = Report::new();
     if opts.runs(Pass::Integrity) {

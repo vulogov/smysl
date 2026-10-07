@@ -1,9 +1,10 @@
 # RFC SMYSL-2.1 — Hardening the 1.9 tree
 
-**Status:** draft 1, **built** except F-2. F-2 was deferred to 1.10.0 with A-9 while OQ-31 is
-open; **G0's pivot of 2026-10-07 reschedules it ahead of TX-P1** (SMYSL-2.0 §1.1 item 1), on S0's
-measurement that the byte estimator costs 12.67% of hosted Russian units. It is still gated on
-OQ-31, which is now a TX-P1 blocker. TX-P0 shipped in
+**Status:** draft 1, **built**. F-2 was deferred to 1.10.0 with A-9 while OQ-31 was open; G0's
+pivot of 2026-10-07 rescheduled it ahead of TX-P1 (SMYSL-2.0 §1.1 item 1) on S0's measurement
+that the byte estimator costs 12.67% of hosted Russian units, and it is **built as of
+2026-10-07** with OQ-31 resolved. TX-P0 is now complete except the `bundle --unknown keep|drop`
+flag. TX-P0 shipped in
 1.9.0-dev; §10 says what is outstanding and records every place the implementation departed from
 this document, and why. Implementation RFC (non-normative);
 normative rules are in SMYSL-2.3.
@@ -236,69 +237,104 @@ Each section: today, change, API, wire, other implementations, tests, exit test.
   `.expected` = valid, byte-identical; regenerate `INDEX.txt` with `generate.py`.
 - **Exit.** The fixture round-trips byte-identically in Rust, Python, JS and Go.
 
-#### 4.3.2 F-2 — script-aware estimator and `GranularityProfile.estimator`
+#### 4.3.2 F-2 — content-fair estimator and `GranularityProfile.estimator` (built)
 
-- **Today.** §2.1. Check, ingest and import all bound gists with `smysl_core::tokens`:
-  `shape.rs:31`, `granularity.rs:50`, `smysl-ingest/src/repair.rs:417` (`check_local` runs the
-  shape and granularity passes), `smysl-ingest/src/import.rs:353` (test).
-- **Change.**
-  1. `smysl-core/src/types/estimate.rs` holds `TokenEstimator`. It lives in core because the
-     profile does and core cannot depend on pack.
-  2. `GranularityProfile.estimator`, default `Utf8Div4`. `GranularityProfile::tokens` dispatches.
-     `shape.rs` and `granularity.rs` call `granularity.tokens(..)` instead of `tokens(..)`.
-     With the default, the count is `smysl_core::tokens`, **without** the pack's `+2`, so every
-     existing store checks exactly as before. (Defaulting to the pack estimator's `text` would
-     add 2 to every gist; draft 3 §10.3.)
-  3. `smysl-pack::Estimator::ScriptAware1`: `text(t) = TokenEstimator::ScriptAware1.count(t) + 2`,
-     id `smysl/script-aware/1`, recorded in `packinfo.estimator` as today.
-  4. An estimator id names a **count**. The `+2` is pack framing for every estimator, and the
-     `Utf8Div4` doc in `cost.rs:18` is reworded to say so.
-- **`smysl/script-aware/1`.** Integer arithmetic only (rule D, no floats):
-  `count(t) = ceil(Σ_c n_c(t) · w_c / 1000)`. `n_c` is the number of chars of class `c`. `w_c` are
-  frozen integer milli-tokens per char. Classes are fixed code-point ranges in the source, not a
-  Unicode-property crate:
+- **Built 2026-10-07**, under OQ-31's answer: faithful for cost, content-fair for a bound. What
+  follows is as built; the draft that preceded it proposed one estimator calibrated to
+  `o200k_base` for both uses.
+- **Why two.** `smysl_core::tokens` was documented as "the single place the two meanings of
+  'token' agree". They do not agree. A cost predicts a provider's bill; a bound limits how much
+  one unit may say. A count faithful to a tokenizer makes one `l0_max` mean 120 characters of
+  English and 67 of Russian, and S0 measured the result: 579 `SMY-E022`, 12.67% of hosted
+  Russian units replaced by opaque prose rather than shortened, and the byte ceiling *rewarding*
+  a model that ignored the language policy because English fits where Cyrillic does not.
+- **`smysl/content/1`.** Integer arithmetic only (rule D, no floats):
+  `count(t) = ceil(Σ_c n_c(t) · w_c / 1000)`, `w_c` frozen integer milli-tokens per character,
+  `n_c` the characters of class `c` under fixed code-point ranges in the source. Classes and
+  ranges are unchanged from the draft. Weights, calibrated:
 
-  | class | ranges |
-  |---|---|
-  | latin | `0041–005A 0061–007A 00C0–024F 1E00–1EFF` |
-  | cyrillic | `0400–052F 1C80–1C8F 2DE0–2DFF A640–A69F` |
-  | greek | `0370–03FF 1F00–1FFF` |
-  | cjk | `3040–30FF 3400–4DBF 4E00–9FFF F900–FAFF AC00–D7AF 20000–2FA1F` |
-  | digit | `0030–0039` |
-  | space | `char::is_whitespace` |
-  | other | everything else (punctuation, symbols, other scripts) |
+  | class | latin | cyrillic | greek | cjk | digit | space | other |
+  |---|---|---|---|---|---|---|---|
+  | milli-tokens/char | 188 | 260 | 229 | 931 | 188 | 456 | 423 |
 
-- **Calibration** (once, then frozen). `scripts/calibrate_estimator.py`, outside the build:
-  1. Corpus: parallel public-domain text per class (Bible verses: KJV en, Synodal ru, a Greek
-     text, Chinese Union Version; UDHR translations for further Latin-script languages). 80 % fit,
-     20 % held out.
-  2. Reference counts from one published tokenizer family (OQ-31; proposal `o200k_base`).
-  3. Non-negative least squares of reference count on `n_c`, rounded to integer milli-weights.
-  4. Acceptance: mean absolute relative error ≤ 10 % per class on the held-out set.
-  5. The weights, the corpus manifest (file hashes) and the reference tokenizer version go into
-     `fixtures/estimator/script-aware-1.json`. A unit test pins the weights to that file.
-     Changing any weight is a new id, `smysl/script-aware/2`. `/1` never changes.
-- **Wire** (SMYSL-2.3 A-9, resolving OQ-29): granularity key 5, text id, **written only when not
-  `Utf8Div4`**, so every existing view encodes to the bytes it had. H-1 must ship first, or a 1.9
-  reader drops it. `check --estimator` selects it per invocation as well.
-- **API.** Additive: new enum, new field, new unit variant on `#[non_exhaustive]`
-  `Estimator`. `smysl::tokens` keeps its meaning.
-- **CLI.** `check --estimator <id>` and `pack --tokenizer smysl/script-aware/1` (the existing
-  flag, recorded in `tests/cli-surface.txt`, resolves through `Estimator::parse`).
-- **H-5 (template bound).** At the template version bump of §4.3.4, the gist instruction states
-  the bound per script under the profile's estimator. For `Utf8Div4`: "at most 120 characters
-  in Latin script, 60 in Cyrillic or Greek, 40 in Chinese, Japanese or Korean". For script-aware,
-  it states `l0_max · 1000 / w_c` per class.
+  `digit` is **not fitted**: the calibration corpus holds 7 digit characters in 99,012 verses,
+  so no weight for it is identifiable, and freezing an unidentified one would score every gist
+  containing a number against noise. A digit is one character of content exactly as a letter is,
+  so it takes the latin weight by construction.
+- **What the bound is worth**, measured on real text of each edition rather than on pure-class
+  runs, at `l0_max` 30:
+
+  | | en | ru | el | zh | de | es | fr |
+  |---|---|---|---|---|---|---|---|
+  | `utf8-div4` | 120 | 67 | 61 | 41 | 118 | 116 | 114 |
+  | `content/1` | 122 | 101 | 111 | 35 | 125 | 123 | 123 |
+
+  English is unchanged by 2%, which is the point: the anchor is English under today's count, so
+  no existing English store's budget moves. Russian gains 51%. Chinese *loses* 14% — under a
+  byte count CJK had been over-allowanced, and content-fairness takes that back too. Russian
+  needing fewer characters than English is not an inequity: the same verse is 0.83x the
+  characters and 1.45x the bytes, and only the second ratio was ever the estimator's doing.
+- **Calibration** (`scripts/calibrate_estimator.py`, outside the build, run once then frozen).
+  Seven public-domain verse-per-line editions from ebible.org; only verses present in every
+  edition, which restricts the fit to the New Testament because the Greek edition is NT-only;
+  7,932 shared verses, 80/20 split by `blake2b` of the verse key, so it is reproducible without
+  a seed. For each (verse, language), `Σ_c n_c(text) · w_c ≈ 1000 · utf8_len(english verse) / 4`,
+  non-negative least squares, each row weighted by `1/target` so influence is relative. No text
+  is vendored: `fixtures/estimator/content-1.json` records the weights, the ranges, the fit
+  statistics and the corpus file hashes, and a unit test pins the weights to it. Changing any
+  weight is a new id, `smysl/content/2`; `/1` never changes.
+- **Acceptance, restated.** The draft asked for mean absolute relative error ≤ 10% per class.
+  That criterion belongs to the faithful objective, where the target is a near-deterministic
+  function of the text. Under content-fairness the per-verse residual is how verbosely a
+  particular translator rendered a particular verse, which no weight set can remove — it is
+  10–16% here and would be whatever the translations disagree by. So the gate is the property
+  the bound actually needs, and it is draft 3 §22's own test rather than a new one: across
+  script classes, signed bias within ±5% (worst 1.87%, Chinese) and the over-bound share within
+  10% relative of the anchor (worst 9.8%, Chinese; Russian 5.2%). Within the latin class the
+  spread reaches 15% (Spanish), which one weight per class cannot represent and which is
+  therefore reported as the floor rather than gated on.
+- **Exit test** (draft 3 §22), over `fixtures/estimator/parallel-en-ru.tsv`, 500 verse-aligned
+  public-domain en/ru pairs: the share over the bound differs between English and Russian by
+  **68.5% relative under `utf8-div4`** and **3.2% under `content/1`**. Pinned as a unit test.
+- **`ProfileEstimator`, three states not two.** §10 asked for `Option<TokenEstimator>`, so that
+  absent is distinguishable from the default, and for an unknown id to leave `l0_max`
+  unevaluable. Both are needed at once, and an unknown id must also round-trip (§8.1), so the id
+  itself has to be kept — which is `Unset | Known(TokenEstimator) | Unknown(String)`.
+  `GranularityProfile::tokens` returns `Option<u32>`: `None` for `Unknown`, and the shape pass
+  reports **`SMY-W025`** rather than evaluating the bound under a count nobody asked for. The
+  granularity pass stays silent, because one report per unit is enough.
+- **Wire** (SMYSL-2.3 A-9): granularity key 5, the text id, written only when it is neither
+  absent nor `Utf8Div4` — so every view written before F-2 encodes to the bytes it had, which a
+  round-trip test asserts by comparing the bytes directly.
+- **Two call sites the draft's change list missed.** `smysl-ingest/src/import.rs` (`fit_gist`)
+  and `repair.rs` both computed `l0_max as usize * 4` to build a byte budget for trimming — the
+  hardcoded inverse of one estimator, which would have silently kept byte semantics after the
+  estimator changed. Both now ask the profile, through `GranularityProfile::fit_gist_with`,
+  which also accounts for the ellipsis the caller appends: what the mark costs depends on the
+  estimator and cannot be reserved in bytes. (The draft cited `import.rs:353` and
+  `repair.rs:417`, which are different lines.)
+- **Pack.** No new variant. `Estimator::Utf8Div4` keeps its id and its `+ 2`, now documented as
+  framing that applies to every estimator and is not part of what an id means — an id names a
+  count. Cost prediction is the faithful half of OQ-31 and did not need to change.
+- **CLI.** `check --estimator <id>` overrides whatever profile is in force, and refuses an id
+  this build does not have rather than carrying it in as `Unknown`: the caller asked for a
+  specific count, and reporting every unit unevaluable would answer a different question.
+  `pack --tokenizer` is unchanged.
+- **H-5 (template bound).** Not generated per estimator. The templates state characters per
+  script as compile-time text under a versioned prompt id, and ingest cannot yet run under a
+  non-default profile, so generating it would churn template versions for unreachable
+  behaviour. Instead the prompt test now asserts that the default estimator *is* `Utf8Div4`, so
+  the day the default moves, the templates have to move with it.
 - **Python/JS/Go.** None (no check pass). Key 5 is preserved by generic maps.
-- **Tests.** `shape.rs` unit tests: `the_default_estimator_is_today_s_count` (every
-  `fixtures/corpus/*.smy` checks with identical diagnostics before and after);
-  `script_aware_counts_are_integer_and_pinned`. `crates/smysl-check/tests/mixed_granularity.rs`:
-  en/ru parallel gists. `crates/smysl-pack/tests/golden.rs`: unchanged goldens under the default.
-  A proptest in `estimate.rs`: `count` is monotone under concatenation and ≥ 1 for non-empty text.
-- **Exit (draft 3 §22).** On 500 en/ru parallel gists (`fixtures/estimator/parallel-en-ru.tsv`),
-  the share of gists over `l0_max` differs by ≤ 10 % relative between en and ru under
-  `script-aware/1`; under `utf8-div4` it reproduces F-2's gap. If the calibrated weights cannot
-  meet ±10 % and stay faithful to the reference tokenizer, OQ-31 decides.
+- **Tests.** `estimate.rs`: weights pinned to the fixture, the default count identical to
+  `smysl_core::tokens`, counts monotone under concatenation and ≥ 1 for non-empty, per-script
+  budgets, `fit` landing on character boundaries and inside the bound, the §22 exit test, and
+  unknown-id round trip. `crates/smysl-check/tests/estimator.rs`: the default count unchanged,
+  a Russian gist `utf8-div4` refused and `content/1` admits, the `--estimator` override,
+  `SMY-W025` for an unknown id, and every `fixtures/corpus/*.smy` checking identically under the
+  default. `crates/smysl-core/tests/roundtrip.rs`: key 5 for known and unknown ids, and the
+  default writing no key at all.
+- **Diagnostic census.** 63, the new one `SMY-W025`.
 
 #### 4.3.3 F-3 — quote normaliser V2
 
@@ -980,16 +1016,15 @@ else depends on it in TX-P0.
 | OQ-27 | Decided here: `converged_with` compares both `state_hash` and the record-set digest (§4.3.10). |
 | OQ-29 | **Resolved in SMYSL-2.3 A-9:** a wire field (granularity key 5), written only when not `smysl/utf8-div4`; H-1 ships first. |
 | OQ-30 | **Resolved in SMYSL-2.3 A-8.1:** `Unknown` plus preserved code; 255 reserved in thread schema, role, source kind, detection kind and admission; the first four open in 1.9.0, admission in 1.10.0; `status` and `lod` stay closed. |
-| OQ-31 | The estimator's objective and reference. It can be faithful to a published tokenizer family (proposal `o200k_base`), in which case the en/ru parity of draft 3 §22 holds only as well as that family's own parity, or it can be content-fair, which makes it a different instrument from a token estimator. Proposal: faithful, and if parity fails, the exit test is restated against the reference tokenizer's own en/ru ratio. |
+| OQ-31 | **Resolved: both, one per instrument.** The question assumed one estimator serves two uses. It does not. A *cost* is a prediction about a provider's bill and stays faithful (`smysl_core::tokens`, `smysl-pack::Estimator`). A *granularity bound* is an editorial limit on how much one unit may say, and is content-fair (`smysl/content/1`). Faithfulness would have reproduced the inequity by construction — S0 measured 12.67% of hosted Russian units destroyed by it — and would have forced draft 3 §22's exit test to be abandoned rather than met. The code already separated the two: cost paths took a selectable estimator, bounds hardcoded `tokens`. See §4.3.2 as built. |
 
 ---
 
 ## 10. As built
 
-**TX-P0 is built, except F-2.** Shipped in 1.9.0-dev across ten commits: F-3, F-4, F-6, F-12, F-13,
-F-14, F-16, F-17, F-18, D-10 and H-1 to H-20 — every item except F-2. **Outstanding:** the
-`--unknown keep|drop` flag of §4.3.9; and §4.3.2 (F-2), deferred to 1.10.0 with A-9 while OQ-31
-is open. §4.4's flag list therefore describes the finished phase, not the current tree: of its
+**TX-P0 is built.** Shipped in 1.9.0-dev across eleven commits: F-3, F-4, F-6, F-12, F-13,
+F-14, F-16, F-17, F-18, D-10, H-1 to H-20, and — after G0's pivot reordered it — F-2.
+**Outstanding:** only the `--unknown keep|drop` flag of §4.3.9. §4.4's flag list therefore describes the finished phase, not the current tree: of its
 five new flags only `ingest --temperature` exists today. This section records every departure from the
 plan above, so that a reader of a section is not reading a proposal as if it were a description.
 It is not a summary of the work; the CHANGELOG is that.
@@ -1023,7 +1058,11 @@ H-17 and H-19 are all about, so the RFC committed the error it was written to fi
 | §4.3.5 (D-10) | The repair turn's system prompt names the derived markers, not `PREVIOUS` | The RFC left the system text alone and changed only the user message, which would have told the model one marker while sending another — a prompt pointing at a boundary that is not there. Both are derived once in `repair` and used in both halves. `strip_echo` also recognises a marker by *shape* rather than by the three prefixes the RFC lists: there is no constant left to compare against, and an echoed marker is an echoed marker whichever kind it is. |
 | §4.3.4 (F-6) | `LangPolicy::parse` returns `Result<_, String>`, not `ProviderError::Config` | `ProviderError` arrives with the `model` feature, and `Conditions` must hold a policy without the provider layer — `recipe` is reachable from `stage` alone, which `make crate-features` is what proves. A conditional error type for one message is worse than the message; the caller prefixes it, so what a user sees is unchanged. |
 | §4.3.9 (F-16) | `bundle` keeps the referenced units; `--unknown keep\|drop` is **not** built | The closure fix and the flag are separable, and only the closure was a defect. The flag remains for a later phase. |
-| §4.3.1 (F-2) | Deferred to 1.10 with A-9 | OQ-31 is unresolved: whether the estimator is faithful to a published tokenizer family or content-fair is a question about what the instrument *is*, and shipping a key for it first would pin the answer by accident. With two corrections for 1.10: the field is `Option<TokenEstimator>`, and an unknown estimator id makes `l0_max` **unevaluable** rather than default-evaluated. |
+| §4.3.1 (F-2) | Deferred to 1.10 with A-9 | ~~OQ-31 is unresolved~~ **Built 2026-10-07.** OQ-31 was resolved by noticing the question was mis-posed: faithful and content-fair are answers to two different instruments, and the code already separated them. Both 1.10 corrections are in — except that `Option<TokenEstimator>` became a three-state enum, because an unknown id must be *kept* to round-trip as well as distinguished, which two `Option`s with an invariant between them cannot express. |
+| §4.3.2 (F-2) | `smysl/script-aware/1`, calibrated by NNLS against `o200k_base`, with a new `smysl-pack::Estimator::ScriptAware1` | The id is **`smysl/content/1`** and the calibration target is content equality across parallel translations, not a reference tokenizer. No pack variant: cost is the faithful half of OQ-31 and did not change. |
+| §4.3.2 (F-2) | Acceptance: mean absolute relative error ≤ 10% per class | Restated to signed bias within ±5% and the over-bound share within 10% relative, both across script classes. The per-verse criterion belongs to the faithful objective; under content-fairness the residual is translation verbosity, irreducible at 10–16%. The intra-latin spread (15%, Spanish) is reported as a floor, not gated: one weight per class cannot represent how verbose a given translation is. |
+| §4.3.2 (F-2) | The change list named `shape.rs`, `granularity.rs`, `repair.rs:417`, `import.rs:353`, `cost.rs` | Two more sites hardcoded `l0_max * 4` as a byte budget — `import.rs` `fit_gist` and the first-sentence trim in `repair.rs` — and would have kept byte semantics after the estimator changed. Both now ask the profile, and account for the ellipsis they append, whose cost is also estimator-dependent. |
+| §4.3.2 (H-5) | The gist instruction states the bound per script under the profile's estimator | Not generated. The templates are compile-time text under a versioned prompt id and ingest cannot run under a non-default profile, so generating it would churn template versions for unreachable behaviour. The prompt test now asserts the default *is* `utf8-div4`, so the templates cannot silently outlive it. |
 
 ### 10.3 What TX-P0 found that this RFC did not
 
