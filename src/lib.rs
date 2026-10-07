@@ -112,12 +112,12 @@ pub use smysl_graph::{
     closure, cycles, dependents, dependents_via, diff, effective_status, hop_diff, label_bindings,
     label_index, labels_of, membership, merge, plan_retraction, rebuttals_of, resolve_label,
     rests_on, reverse_closure, review, review_with, salience, topo, trace, trace_via, view_roots,
-    Adjacency, AgentActivity, AppendReport, Cached, DetectionContext, Edge, EdgeKind, EdgeSet,
-    EffectiveStatus, Entry, HopDiff, Index, IndexError, LabelError, Lineage, LineageNode,
+    Adjacency, AgentActivity, AppendReport, BundleReport, Cached, DetectionContext, Edge, EdgeKind,
+    EdgeSet, EffectiveStatus, Entry, HopDiff, Index, IndexError, LabelError, Lineage, LineageNode,
     MergeError, MergeOptions, MergeReport, NodeId, OpenReport, RecipeChange, RecipeChangeKind,
     RetractionAuthority, RetractionPlan, RetractionPolicy, ReviewItem, ReviewOptions,
     ReviewSubject, SalienceReport, SalienceRequest, SalienceTerms, SalienceWeights, Scratch, Store,
-    StoreDiff, StoreOptions, SupersessionPolicy, TopoOrder, TraceKind, Via,
+    StoreDiff, StoreOptions, SupersessionPolicy, TopoOrder, TraceKind, UnknownRecords, Via,
 };
 
 // ---- retrieve -------------------------------------------------------------

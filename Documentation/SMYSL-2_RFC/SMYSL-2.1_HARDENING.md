@@ -1050,10 +1050,11 @@ else depends on it in TX-P0.
 
 ## 10. As built
 
-**TX-P0 is built.** Shipped in 1.9.0-dev across eleven commits: F-3, F-4, F-6, F-12, F-13,
-F-14, F-16, F-17, F-18, D-10, H-1 to H-20, and — after G0's pivot reordered it — F-2.
-**Outstanding:** only the `--unknown keep|drop` flag of §4.3.9. §4.4's flag list therefore describes the finished phase, not the current tree: of its
-five new flags only `ingest --temperature` exists today. This section records every departure from the
+**TX-P0 is complete.** Shipped in 1.9.0-dev across thirteen commits: F-3, F-4, F-6, F-12, F-13,
+F-14, F-16, F-17, F-18, D-10, H-1 to H-20, F-2 after G0's pivot reordered it, and F-16's
+`--unknown` flag last.
+**Nothing outstanding.** §4.4's flag list is now the tree: `ingest --temperature`,
+`ingest --estimator`, `check --estimator` and `bundle --unknown keep|drop` all exist. This section records every departure from the
 plan above, so that a reader of a section is not reading a proposal as if it were a description.
 It is not a summary of the work; the CHANGELOG is that.
 
@@ -1085,7 +1086,7 @@ H-17 and H-19 are all about, so the RFC committed the error it was written to fi
 | §4.3.13 (F-4) | No private language field; `Tokenizer` keeps its `Copy` | A `String` field removes `Copy`, which is a public impl and a major break — `Bm25::index_with` moves the tokeniser into a builder and reads it again, so it is also the code that stops compiling. A `Copy`-shaped substitute is a fixed-size array for an eight-character subtag, which is a contrivance to serve a debug line. The gate itself is unaffected. Also: the proposed test word `casas` folds to `casa`, which is the correct Spanish singular — English `-s` is right there by coincidence. The test keeps it and adds `lunes` → `lun` and `crisis` → `crisi`, where the coincidence fails. |
 | §4.3.5 (D-10) | The repair turn's system prompt names the derived markers, not `PREVIOUS` | The RFC left the system text alone and changed only the user message, which would have told the model one marker while sending another — a prompt pointing at a boundary that is not there. Both are derived once in `repair` and used in both halves. `strip_echo` also recognises a marker by *shape* rather than by the three prefixes the RFC lists: there is no constant left to compare against, and an echoed marker is an echoed marker whichever kind it is. |
 | §4.3.4 (F-6) | `LangPolicy::parse` returns `Result<_, String>`, not `ProviderError::Config` | `ProviderError` arrives with the `model` feature, and `Conditions` must hold a policy without the provider layer — `recipe` is reachable from `stage` alone, which `make crate-features` is what proves. A conditional error type for one message is worse than the message; the caller prefixes it, so what a user sees is unchanged. |
-| §4.3.9 (F-16) | `bundle` keeps the referenced units; `--unknown keep\|drop` is **not** built | The closure fix and the flag are separable, and only the closure was a defect. The flag remains for a later phase. |
+| §4.3.9 (F-16) | `bundle` keeps the referenced units; `--unknown keep\|drop` is **not** built | ~~The flag remains for a later phase~~ **built 2026-10-07**, closing TX-P0. `UnknownRecords::{Keep,Drop}`, `Store::bundle_with_options`, and `SMY-W434` printed by the CLI — which it never was: the CLI called `bundle_with`, which returns no report, so the count the warning exists to carry had nowhere to come from. The count is of what the closure held, not of what was emitted, so `drop` reports what it left behind. |
 | §4.3.1 (F-2) | Deferred to 1.10 with A-9 | ~~OQ-31 is unresolved~~ **Built 2026-10-07.** OQ-31 was resolved by noticing the question was mis-posed: faithful and content-fair are answers to two different instruments, and the code already separated them. Both 1.10 corrections are in — except that `Option<TokenEstimator>` became a three-state enum, because an unknown id must be *kept* to round-trip as well as distinguished, which two `Option`s with an invariant between them cannot express. |
 | §4.3.2 (F-2) | `smysl/script-aware/1`, calibrated by NNLS against `o200k_base`, with a new `smysl-pack::Estimator::ScriptAware1` | The id is **`smysl/content/1`** and the calibration target is content equality across parallel translations, not a reference tokenizer. No pack variant: cost is the faithful half of OQ-31 and did not change. |
 | §4.3.2 (F-2) | Acceptance: mean absolute relative error ≤ 10% per class | Restated to signed bias within ±5% and the over-bound share within 10% relative, both across script classes. The per-verse criterion belongs to the faithful objective; under content-fairness the residual is translation verbosity, irreducible at 10–16%. The intra-latin spread (15%, Spanish) is reported as a floor, not gated: one weight per class cannot represent how verbose a given translation is. |

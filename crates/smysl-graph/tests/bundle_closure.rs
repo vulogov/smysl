@@ -10,7 +10,7 @@ use smysl_core::{
     canonical_uid, from_cbor_seq, AgentId, Commit, Commitment, Hlc, KernelType, Record, Status,
     Uid, UnitCoreBuilder, View, ViewId,
 };
-use smysl_graph::Store;
+use smysl_graph::{Store, UnknownRecords};
 
 fn agent() -> AgentId {
     AgentId::new("human:vu").unwrap()
@@ -142,4 +142,80 @@ fn unknown_records_travel_and_are_reported() {
             .any(|r| matches!(r, Record::Unknown { code: 42, .. })),
         "rule X: a record this build cannot name is kept, not dropped"
     );
+}
+
+/// `--unknown drop`: the records are left out, and still counted (F-16).
+///
+/// Rule X keeps what this build cannot name, and keeping it means forwarding content that
+/// cannot be inspected and so cannot be evaluated for redaction either (rule Z). `Drop` is the
+/// escape for a sender who must not do that. The count stays, because a sender who dropped
+/// records needs to know they dropped them just as much as one who forwarded them.
+#[test]
+fn unknown_drop_leaves_them_out_and_still_counts() {
+    let u = claim("an ordinary claim beside a record from a later release");
+    let uid = canonical_uid(&u);
+    let store = Store::from_records(vec![
+        Record::Unit(u),
+        Record::Unknown {
+            code: 42,
+            payload: vec![0xa0],
+        },
+        Record::Unknown {
+            code: 43,
+            payload: vec![0xa0],
+        },
+    ]);
+    let view = View::new(ViewId::new("v/u").unwrap(), "bundle").with_roots([uid]);
+
+    let (kept, keep_report) = store.bundle_with_options(&view, false, UnknownRecords::Keep);
+    let (dropped, drop_report) = store.bundle_with_options(&view, false, UnknownRecords::Drop);
+
+    let unknown_in = |bytes: &[u8]| {
+        let (records, _) = from_cbor_seq(bytes).unwrap();
+        records
+            .iter()
+            .filter(|r| matches!(r, Record::Unknown { .. }))
+            .count()
+    };
+    assert_eq!(unknown_in(&kept), 2, "rule X keeps them by default");
+    assert_eq!(unknown_in(&dropped), 0, "`drop` leaves them out");
+
+    assert_eq!(keep_report.unknown_records, 2);
+    assert_eq!(
+        drop_report.unknown_records, 2,
+        "the count is of what the closure held, so `drop` reports what it left behind"
+    );
+
+    // The rest of the bundle is unaffected: the unit still travels either way.
+    assert!(
+        from_cbor_seq(&dropped)
+            .unwrap()
+            .0
+            .iter()
+            .any(|r| matches!(r, Record::Unit(_))),
+        "dropping unknown records must not disturb the closure"
+    );
+    assert_eq!(keep_report.units, drop_report.units);
+}
+
+/// `bundle_with_options` answers both of a sender's questions at once.
+///
+/// `bundle_with` filtered retracted units and returned no report; `bundle_with_report` reported
+/// and did not filter. Keeping both, this is the one that does both, and the retracted
+/// behaviour has to match `bundle_with` exactly or the CLI changed meaning when it moved over.
+#[test]
+fn bundle_with_options_matches_bundle_with_on_retracted_units() {
+    let u = claim("a claim that travels");
+    let uid = canonical_uid(&u);
+    let store = Store::from_records(vec![Record::Unit(u)]);
+    let view = View::new(ViewId::new("v/r").unwrap(), "bundle").with_roots([uid]);
+
+    for include_retracted in [false, true] {
+        let (bytes, _) = store.bundle_with_options(&view, include_retracted, UnknownRecords::Keep);
+        assert_eq!(
+            bytes,
+            store.bundle_with(&view, include_retracted),
+            "bundle_with_options must not change what bundle_with produced"
+        );
+    }
 }

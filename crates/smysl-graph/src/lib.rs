@@ -41,5 +41,5 @@ pub use salience::{
 };
 pub use smysl_core::error::MergeError;
 pub use store::index::{Cached, Entry, Index, IndexError};
-pub use store::{AppendReport, OpenReport, Store, StoreOptions};
+pub use store::{AppendReport, BundleReport, OpenReport, Store, StoreOptions, UnknownRecords};
 pub use traverse::{closure, cycles, rebuttals_of, reverse_closure, topo, Scratch, TopoOrder};

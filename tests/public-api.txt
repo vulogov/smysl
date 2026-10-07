@@ -42,6 +42,7 @@ pub use smysl::Backend
 pub use smysl::Block
 pub use smysl::Bm25
 pub use smysl::BuildOptions
+pub use smysl::BundleReport
 pub use smysl::Cached
 pub use smysl::Capabilities
 pub use smysl::CheckOptions
@@ -219,6 +220,7 @@ pub use smysl::UidPrefix
 pub use smysl::Unit
 pub use smysl::UnitCore
 pub use smysl::UnitCoreBuilder
+pub use smysl::UnknownRecords
 pub use smysl::Usage
 pub use smysl::Verbosity
 pub use smysl::Via

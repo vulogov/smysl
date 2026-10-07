@@ -160,6 +160,7 @@ bundle     --config
 bundle     --view
 bundle     --include-retracted
 bundle     --output
+bundle     --unknown
 bundle     --format
 bundle     --strict
 bundle     --offline

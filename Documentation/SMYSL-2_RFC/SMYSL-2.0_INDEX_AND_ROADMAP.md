@@ -144,7 +144,7 @@ discussion; OQ-7, OQ-23, OQ-35 and OQ-49 stay open with them.
 | phase | RFC | delivers | exit (summary) | depends on |
 |---|---|---|---|---|
 | S0 | 2.2 | extraction stability and proposition-trust spike with today's CLI | 2.2 decision table | — |
-| TX-P0 **built** | 2.1 | Every item including **F-2**, which G0's pivot pulled out of 1.10.0 and which landed 2026-10-07 with OQ-31 answered (§1.1 item 1); outstanding is only the `bundle --unknown keep\|drop` flag, which was separated from F-16 because only the closure was a defect | met: F-16/F-17 reproductions fixed, every probe reversed, and suite, `make semver`, `api-check`, `doc-output` and `spec-tables` clean on every commit. Departures from plan: 2.1 §10 | G−1 accepted in full |
+| TX-P0 **complete** | 2.1 | Every item, including **F-2** — which G0's pivot pulled out of 1.10.0 and which landed 2026-10-07 with OQ-31 answered (§1.1 item 1) — and F-16's `bundle --unknown keep\|drop` flag, which had been separated because only the closure was a defect | met: F-16/F-17 reproductions fixed, every probe reversed, and suite, `make semver`, `api-check`, `doc-output` and `spec-tables` clean on every commit. Departures from plan: 2.1 §10 | G−1 accepted in full |
 | TX-P1 | 2.4 | parts, readings, manifests, object store, first readers, structure, locators; `admission` opened (2.3 A-8.1) | GE-T1 (Bibles and JSON) | TX-P0, G0 **passed**; F-2 **done** (§1.1) |
 | TX-P2 | 2.4 | segmenter, analyzers, `lingua`, chat readers, `text append`, redaction (rule Z) | GE-T1 (chats), redaction survives a stale peer | TX-P1 |
 | TX-P3 | 2.4 | EDTF, `published`, datings, rule E engine, locks, `date` commands | GE-T13 | TX-P2 |
@@ -397,9 +397,9 @@ Coding speed cannot compress those.
 
 ## 9. Next actions
 
-1. ~~**Finish TX-P0**~~ **Done**, except F-2 and `bundle --unknown keep|drop`. 2.1 §10 records
-   every departure from the plan. **1.9.0 is releasable**: G−1 is satisfied and the phase's exit
-   conditions are met.
+1. ~~**Finish TX-P0**~~ **Done, in full**, as of 2026-10-07: F-2 and `bundle --unknown
+   keep|drop` were the last two. 2.1 §10 records every departure from the plan. **1.9.0 is
+   releasable**: G−1 is satisfied and the phase's exit conditions are met.
 2. ~~**Run S0**~~ **Done 2026-10-07.** The full protocol ran — 365 runs, 29 inputs, five
    languages, two models — and its decision table returns *continue with a stated pivot* (§1.1).
    `S0_RESULTS/` holds the report, the table and the findings log.

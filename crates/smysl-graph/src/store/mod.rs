@@ -138,7 +138,29 @@ pub struct BundleReport {
     pub records: usize,
     /// Records of a type this build cannot interpret, kept per rule X and counted here so the
     /// sender knows they are forwarding something they could not read.
+    ///
+    /// Counted whether or not they were kept: under [`UnknownRecords::Drop`] this is what the
+    /// bundle *left out*, which the sender needs to know for the same reason. `SMY-W434` says
+    /// which of the two happened.
     pub unknown_records: usize,
+}
+
+/// Whether a bundle carries records of a type this build cannot interpret (F-16).
+///
+/// Rule X says keep them: a build that drops what it cannot name silently truncates a peer's
+/// store on the way through. But keeping them means forwarding content that cannot be inspected
+/// and so cannot be evaluated for redaction either — a 1.9 peer can pass on a future record 15
+/// (part text) that a newer peer would have filtered under rule Z. So the default keeps, and
+/// this is the escape for a sender who must not forward what they cannot read. SMYSL-2.4
+/// replaces the blanket rule with per-record rows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UnknownRecords {
+    /// Keep and count them (rule X, the default).
+    #[default]
+    Keep,
+    /// Leave them out, and still count them.
+    Drop,
 }
 
 impl Store {
@@ -558,6 +580,22 @@ impl Store {
     /// somebody stopped believing, and the `retracts` edge always travels, so a consumer
     /// can see the withdrawal for itself.
     pub fn bundle_with(&self, view: &View, include_retracted: bool) -> Vec<u8> {
+        self.bundle_with_options(view, include_retracted, UnknownRecords::Keep)
+            .0
+    }
+
+    /// A bundle, with both choices a sender has, and what went into it.
+    ///
+    /// `bundle_with` answers the retracted question and returns no report; `bundle_with_report`
+    /// answers the unknown-record question and does not filter retracted units. The CLI needs
+    /// all three at once, and a sender deciding whether to forward records they cannot read
+    /// needs the count to decide on.
+    pub fn bundle_with_options(
+        &self,
+        view: &View,
+        include_retracted: bool,
+        unknown: UnknownRecords,
+    ) -> (Vec<u8>, BundleReport) {
         let g = &self.adjacency;
         let roots: Vec<_> = view.roots.iter().filter_map(|u| g.id(u)).collect();
         let reachable = traverse::closure(g, &roots, &crate::adjacency::EdgeSet::all());
@@ -583,8 +621,28 @@ impl Store {
             }
         }
 
+        let reachable_only = keep.len();
         self.close_keep_set(view, &mut keep);
-        self.emit(view, &keep)
+
+        let bytes = self.emit_with(view, &keep, unknown);
+        // Counted from what `Keep` would have emitted: under `Drop` the sender still has to be
+        // told what was left out, which is the whole reason the count exists.
+        let all = match unknown {
+            UnknownRecords::Keep => bytes.clone(),
+            UnknownRecords::Drop => self.emit_with(view, &keep, UnknownRecords::Keep),
+        };
+        let (records, _) = smysl_core::from_cbor_seq(&bytes).unwrap_or_default();
+        let (all_records, _) = smysl_core::from_cbor_seq(&all).unwrap_or_default();
+        let report = BundleReport {
+            units: keep.len(),
+            pulled_in_by_reference: keep.len().saturating_sub(reachable_only),
+            records: records.len(),
+            unknown_records: all_records
+                .iter()
+                .filter(|r| matches!(r, Record::Unknown { .. }))
+                .count(),
+        };
+        (bytes, report)
     }
 
     /// The reachable closure of a view, as a self-contained CBOR sequence.
@@ -601,6 +659,19 @@ impl Store {
     /// under rule Z, cannot be evaluated for redaction either. Keeping them is right; keeping
     /// them *silently* is how a sender comes to believe they have read what they sent.
     pub fn bundle_with_report(&self, view: &View) -> (Vec<u8>, BundleReport) {
+        self.bundle_report_with(view, UnknownRecords::Keep)
+    }
+
+    /// As [`Store::bundle_with_report`], choosing what happens to records this build cannot
+    /// interpret.
+    ///
+    /// The count in the report is of unknown records in the closure, not of ones emitted, so
+    /// `Drop` still reports what it left behind.
+    pub fn bundle_report_with(
+        &self,
+        view: &View,
+        unknown: UnknownRecords,
+    ) -> (Vec<u8>, BundleReport) {
         let g = &self.adjacency;
         let roots: Vec<_> = view.roots.iter().filter_map(|u| g.id(u)).collect();
         let reachable = traverse::closure(g, &roots, &crate::adjacency::EdgeSet::all());
@@ -612,13 +683,21 @@ impl Store {
         let reachable_only = keep.len();
         self.close_keep_set(view, &mut keep);
 
-        let bytes = self.emit(view, &keep);
+        let bytes = self.emit_with(view, &keep, unknown);
         let (records, _) = smysl_core::from_cbor_seq(&bytes).unwrap_or_default();
+        // Counted from what `Keep` would have emitted, not from `bytes`: under `Drop` the
+        // sender still has to be told what was left out, which is the whole reason the count
+        // exists.
+        let kept_all = match unknown {
+            UnknownRecords::Keep => bytes.clone(),
+            UnknownRecords::Drop => self.emit_with(view, &keep, UnknownRecords::Keep),
+        };
+        let (all_records, _) = smysl_core::from_cbor_seq(&kept_all).unwrap_or_default();
         let report = BundleReport {
             units: keep.len(),
             pulled_in_by_reference: keep.len() - reachable_only,
             records: records.len(),
-            unknown_records: records
+            unknown_records: all_records
                 .iter()
                 .filter(|r| matches!(r, Record::Unknown { .. }))
                 .count(),
@@ -704,7 +783,12 @@ impl Store {
         }
     }
 
-    fn emit(&self, view: &View, keep: &std::collections::BTreeSet<Uid>) -> Vec<u8> {
+    fn emit_with(
+        &self,
+        view: &View,
+        keep: &std::collections::BTreeSet<Uid>,
+        unknown: UnknownRecords,
+    ) -> Vec<u8> {
         let mut out = Vec::new();
         for r in &self.records {
             let included = match r {
@@ -759,8 +843,9 @@ impl Store {
                 }),
                 // Rule X, in the place it is hardest: a record type this build cannot name is
                 // kept rather than dropped. The sender is told by `SMY-W434`, because
-                // forwarding what you cannot inspect is a decision and should be a visible one.
-                Record::Unknown { .. } => true,
+                // forwarding what you cannot inspect is a decision and should be a visible one
+                // — and `--unknown drop` is how a sender who must not forward it says so.
+                Record::Unknown { .. } => unknown == UnknownRecords::Keep,
                 // A pack manifest is about a whole store rather than any unit in it, so there
                 // is no `keep` question to ask.
                 _ => false,

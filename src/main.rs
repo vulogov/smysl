@@ -411,6 +411,14 @@ fn cli() -> Command {
                         .help("Keep units that have been retracted")
                         .action(ArgAction::SetTrue),
                 )
+                .arg(
+                    Arg::new("unknown")
+                        .long("unknown")
+                        .value_name("WHAT")
+                        .value_parser(["keep", "drop"])
+                        .default_value("keep")
+                        .help("Records of a type this build cannot interpret (rule X)"),
+                )
                 .arg(Arg::new("store").value_name("PATH")),
             "merge" => sub
                 .arg(
@@ -2274,7 +2282,29 @@ fn cmd_bundle(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     // Bindings travel with the bundle because `bundle_with` includes them - fixed in the
     // library rather than here, since a library caller building a bundle needs a readable
     // one just as much as the CLI does (rule A).
-    let bytes = store.bundle_with(&view, m.get_flag("include-retracted"));
+    // Rule X keeps records this build cannot name; `--unknown drop` is the escape for a
+    // sender who must not forward what they cannot inspect, and so cannot evaluate for
+    // redaction either (rule Z).
+    let unknown = match m.get_one::<String>("unknown").map(String::as_str) {
+        Some("drop") => smysl::UnknownRecords::Drop,
+        _ => smysl::UnknownRecords::Keep,
+    };
+    let (bytes, report) =
+        store.bundle_with_options(&view, m.get_flag("include-retracted"), unknown);
+    // `SMY-W434`: forwarding what you could not read is a decision, and a silent one is how a
+    // sender comes to believe they have read what they sent.
+    if report.unknown_records > 0 {
+        let what = if unknown == smysl::UnknownRecords::Drop {
+            "left out of"
+        } else {
+            "carried in"
+        };
+        eprintln!(
+            "smysl bundle: {}: {} record(s) of a type this build cannot interpret {what} the bundle",
+            smysl::Code::W434,
+            report.unknown_records
+        );
+    }
 
     // `--format surface` used to be accepted and ignored, so `bundle --format surface` wrote
     // CBOR to a terminal — the identical mistake `merge --format surface` shipped with, in the
