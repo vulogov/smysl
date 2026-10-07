@@ -1053,8 +1053,13 @@ else depends on it in TX-P0.
 **TX-P0 is complete.** Shipped in 1.9.0-dev across thirteen commits: F-3, F-4, F-6, F-12, F-13,
 F-14, F-16, F-17, F-18, D-10, H-1 to H-20, F-2 after G0's pivot reordered it, and F-16's
 `--unknown` flag last.
-**Nothing outstanding.** §4.4's flag list is now the tree: `ingest --temperature`,
-`ingest --estimator`, `check --estimator` and `bundle --unknown keep|drop` all exist. This section records every departure from the
+**One item outstanding, by design: H-13.** All five flags §4.4 introduces now exist —
+`check --estimator`, `ingest --normaliser`, `ingest --lang-policy`, `ingest --temperature` and
+`bundle --unknown keep|drop` — and so does `ingest --estimator`, which §4.4 does not list because
+reaching F-2 from ingest was not planned until F-2 had landed. The one line of §4.4 that is still
+the plan rather than the tree is *"`ingest --yes` commits (H-13)"*: in 1.9 it warns and points at
+`merge --staged`, and committing is 1.10's job for the reason §10.1 gives. `smysl ingest --yes`
+says so itself at the point of use. This section records every departure from the
 plan above, so that a reader of a section is not reading a proposal as if it were a description.
 It is not a summary of the work; the CHANGELOG is that.
 
@@ -1127,5 +1132,6 @@ argument for H-17's shape — refuse, do not warn — being right generally.
 
 Accepted in full before the work began, recorded in `Documentation/SMYSL-2_REVIEW_AND_PLAN.md`:
 A-8.1 option B (open four enumerations now, admission in 1.10), A-10 item 2 (A + D), A-4
-(B + D), A-9 (B, deferred to 1.10 with F-2). `cargo-semver-checks 0.50.0` is installed with
+(B + D), A-9 (B, deferred to 1.10 with F-2 — which is how it stood at G−1; G0's pivot pulled F-2
+back into 1.9 and A-9 landed with it). `cargo-semver-checks 0.50.0` is installed with
 `BASELINE := 1.8.0`; every TX-P0 commit ran it, and no commit required a major.
