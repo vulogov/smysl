@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.9.0
+## 1.9.0 — 2026-10-07
 
 ### A granularity bound counts content; a cost counts tokens
 
