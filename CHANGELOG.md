@@ -48,6 +48,32 @@ of SMYSL-2.0 §1.1, which moves TX-P5's and TX-P7's exit tests and so is a re-pl
 edit, with TX-P1's MSRV question (OQ-40 = OQ-66) first because it is the only one that depends on
 anything outside this repository.
 
+### `ingest --yes` commits, as its help always said
+
+The flag promised a commit from the day it was written and performed none: it suppressed exit 10
+and stopped. The manual's flag table said *"Commit the staged batch instead of exiting 10"*, and
+the appendix told you to use it for "accepting the gate ahead of time" — both describing a program
+that did not exist. 1.9 corrected the help and warned at runtime; this is the commit, on the
+`SMY-W432` principle that when a change moves somebody's data the warning ships a release first.
+
+`--yes` now appends the staged batch to `--store` and removes the stage, in that order: the stage
+goes only after the write has landed, so a batch that failed to commit is still recoverable. Exit
+codes are unchanged — 0, or **11** when rule M lowered a unit, which is the one outcome worth
+branching on and used to be indistinguishable from nothing having happened.
+
+Two refusals come with it, both before anything is spent:
+
+- **No `--store`, no commit.** `--yes` without a store is a usage error raised before any provider
+  is reached, because the alternative is to pay for a model call and then discover there is
+  nowhere to put the result. Without `--yes`, `ingest` still needs no store at all: it stages and
+  exits 10, which is rule S.
+- **A surface store refuses.** A staged batch carries attestations and attestations have no
+  surface spelling, so appending it to a `.smy` store would write what the model said and lose the
+  recipe that says how it was asked. The refusal names that reason and points at
+  `smysl merge <store> -o STORE.cbor`.
+
+This is SMYSL-2.1's H-13, and the last item of that RFC.
+
 ---
 
 ## 1.9.0 — 2026-10-07

@@ -3,10 +3,9 @@
 **Status:** draft 1, **built**. F-2 was deferred to 1.10.0 with A-9 while OQ-31 was open; G0's
 pivot of 2026-10-07 rescheduled it ahead of TX-P1 (SMYSL-2.0 §1.1 item 1) on S0's measurement
 that the byte estimator costs 12.67% of hosted Russian units, and it is **built as of
-2026-10-07** with OQ-31 resolved. TX-P0 is now complete except the `bundle --unknown keep|drop`
-flag. TX-P0 shipped in
-1.9.0-dev; §10 says what is outstanding and records every place the implementation departed from
-this document, and why. Implementation RFC (non-normative);
+2026-10-07** with OQ-31 resolved. H-13 was always a 1.10 item and is built there, so every item
+of this RFC is now in: TX-P0 shipped in 1.9.0-dev, H-13 in 1.10.0-dev. §10 records every place
+the implementation departed from this document, and why. Implementation RFC (non-normative);
 normative rules are in SMYSL-2.3.
 **Author:** Vladimir Ulogov
 **Date:** 2026-10-02
@@ -807,18 +806,31 @@ Each section: today, change, API, wire, other implementations, tests, exit test.
   already quantised into the recipe (`recipe.rs`, `push_shared`). Test:
   `tests/cmd_ingest_granularity.rs`-style usage-error test for out-of-range values; `gate.rs`
   asserts the request carries it.
-- **H-13, `--yes`.** **Not built as specified; see §10.** 1.9 corrects the help text and warns
-  at runtime; 1.10 commits. What follows is the 1.10 plan.
-
-  Make it do what its help says.
-  - After `stage::write`, `--yes` runs the same commit path as `merge --staged` (`main.rs:2138`):
-    append the staged records to `--store`, then `stage::discard`.
-  - The two call sites share one helper, so they cannot diverge.
-  - Without `--store`, `--yes` is a usage error before any provider call.
+- **H-13, `--yes`.** 1.9 corrected the help text and warned at runtime; **built in 1.10.0**, on
+  the `SMY-W432` principle that when a change moves somebody's data the warning ships a release
+  ahead of the behaviour.
+  - After `stage::write`, `--yes` appends the staged records to `--store` and then discards the
+    stage, in that order: the stage goes only once the write has landed, so a batch that failed
+    to commit is still recoverable. `commit_staged` in `main.rs` does both.
+  - Without `--store`, `--yes` is a usage error raised before any provider call.
   - Exit codes are unchanged (0, or 11 when rule M corrected).
-  - Tests: `tests/cmd_merge.rs` covers the shared helper through `--staged`; a CLI test asserts
-    the pre-call refusal.
-  - Exit: `ingest --yes -s s.smy` leaves no staged file, and `s.smy` holds the batch.
+  - **A surface store refuses.** Not in the plan, and necessary: a staged batch carries
+    attestations, attestations have no surface spelling, and appending the batch to a `.smy`
+    store would keep the units and lose the recipe. The refusal names that reason and points at
+    `merge <store> -o STORE.cbor`.
+  - **No shared helper with `merge --staged`.** The plan asked for one so the two could not
+    diverge; there is no step to share. `merge` reads its inputs, folds the staged batch in with
+    `merge()` and emits to `--output`; `ingest --yes` appends to `--store`. Their only common
+    operation is reading the stage, which is already one function (`stage::read`). `merge
+    --staged` also still leaves the staged file in place, which the manual treats as the user's
+    to remove (`rm`), so making it discard would be a behaviour change outside H-13.
+  - Tests: `tests/cmd_ingest_yes.rs` asserts the pre-call refusal and that a run which never
+    asked to commit is unaffected; `main.rs` unit tests assert the batch reaches the store and
+    the stage is gone, and that a surface store refuses and leaves the batch staged.
+  - Two latent edges found and left alone, both in `persist` and neither reachable from this
+    path: its surface whitelist omits `Unit`, so the message for a unit it will not write says
+    the unit has no surface form, which is false; and `looks_like_surface` reads an empty file as
+    surface, so a brand-new empty store takes the text branch.
 - **API.** Additive fields (`Capabilities.model`, `IngestReport.repaired`). CLI: `ingest
   --temperature`.
 - **Recipe impact.** H-9 changes recipes for runs without `--model`, and H-12 changes them only
@@ -1053,13 +1065,13 @@ else depends on it in TX-P0.
 **TX-P0 is complete.** Shipped in 1.9.0-dev across thirteen commits: F-3, F-4, F-6, F-12, F-13,
 F-14, F-16, F-17, F-18, D-10, H-1 to H-20, F-2 after G0's pivot reordered it, and F-16's
 `--unknown` flag last.
-**One item outstanding, by design: H-13.** All five flags §4.4 introduces now exist —
+**Nothing outstanding.** H-13 landed in 1.10.0, which was always its release. All five flags
+§4.4 introduces exist —
 `check --estimator`, `ingest --normaliser`, `ingest --lang-policy`, `ingest --temperature` and
 `bundle --unknown keep|drop` — and so does `ingest --estimator`, which §4.4 does not list because
 reaching F-2 from ingest was not planned until F-2 had landed. The one line of §4.4 that is still
-the plan rather than the tree is *"`ingest --yes` commits (H-13)"*: in 1.9 it warns and points at
-`merge --staged`, and committing is 1.10's job for the reason §10.1 gives. `smysl ingest --yes`
-says so itself at the point of use. This section records every departure from the
+the plan rather than the tree was *"`ingest --yes` commits (H-13)"*, and it is the tree now: 1.9
+warned and pointed at `merge --staged`, 1.10.0 commits. This section records every departure from the
 plan above, so that a reader of a section is not reading a proposal as if it were a description.
 It is not a summary of the work; the CHANGELOG is that.
 
@@ -1081,7 +1093,7 @@ H-17 and H-19 are all about, so the RFC committed the error it was written to fi
 
 | § | Decision | Why |
 |---|---|---|
-| §4.3.15 (H-13) | `--yes` **warns** in 1.9 and commits in 1.10, rather than committing now | Implementing it turns a read-only invocation into one that writes `--store`, in a minor, for anyone passing `--yes` to suppress exit 10 rather than to ask for a write. The `SMY-W432` precedent in the same release: when a change moves somebody's data, the warning ships first. Owner's call, taken as option B. |
+| §4.3.15 (H-13) | `--yes` **warns** in 1.9 and commits in 1.10, rather than committing now | As planned, and **done in 1.10.0**. Implementing it in 1.9 would have turned a read-only invocation into one that writes `--store`, in a minor, for anyone passing `--yes` to suppress exit 10 rather than to ask for a write. The `SMY-W432` precedent in the same release: when a change moves somebody's data, the warning ships first. Owner's call, taken as option B. Two departures inside the 1.10 plan itself are recorded in §4.3.15: a surface store refuses, and there is no shared helper with `merge --staged` because the two have no step in common. |
 | §4.3.16 (H-17) | A `forms` field on the `Cmd` table and one dispatcher check, not an `output_form` helper per command | A helper is 26 commands each remembering to call it, which is how 23 came to ignore the flag. One place cannot be forgotten in 23. |
 | §4.3.18 (H-20) | The help line is "pure except `--engine semantic\|hybrid`", from a new `Cmd.impure_when` field | Shorter than the proposed wording, and the `--seed-check` refusal reuses the same string, so the help text and the refusal cannot disagree. |
 | §4.3.14 (H-8) | Tests in `tests/cmd_providers.rs`, not `global_flags.rs` | A provider listing needs a compiled mapper; `global_flags.rs` is gated on `cli` alone, where the assertion would be about the feature set rather than the flag. |

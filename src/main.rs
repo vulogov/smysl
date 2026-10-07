@@ -1080,10 +1080,7 @@ fn cli() -> Command {
                 .arg(
                     Arg::new("yes")
                         .long("yes")
-                        .help(
-                            "Accept the staged batch and exit 0 rather than 10 \
-                             (commits to --store from 1.10)",
-                        )
+                        .help("Commit the staged batch to --store and exit 0 rather than 10")
                         .action(ArgAction::SetTrue),
                 )
                 .arg(
@@ -2724,6 +2721,61 @@ fn persist(
         log.append(records).map_err(|e| format!("{path}: {e}"))?;
         Ok(())
     }
+}
+
+/// Commit a staged batch into the store at `path`, and discard the stage (H-13).
+///
+/// `--yes` promised a commit from the day it was written and performed none: it suppressed
+/// exit 10 and stopped. 1.9 said so in the help and at runtime; this is the commit.
+///
+/// **Order matters.** The stage is discarded only after the write has succeeded. A batch that
+/// failed to land is still staged, which is the whole point of staging — the alternative loses
+/// work to a full disk.
+///
+/// **A surface store refuses rather than silently dropping provenance.** A staged batch carries
+/// attestations, and attestations have no surface spelling. Appending the batch to a `.smy`
+/// store would write the units and lose the recipe that says how they were made, which is the
+/// one thing rule D exists to keep. `persist` already refuses records it cannot spell, but its
+/// message names the record type; this one names the reason and the way out.
+#[cfg(feature = "ingest")]
+fn commit_staged(
+    cmd: &str,
+    path: &str,
+    root: &std::path::Path,
+    records: &[Record],
+    store: &Store,
+    labels: &std::collections::BTreeMap<smysl::Label, Uid>,
+) -> Result<(), ExitCode> {
+    if let Ok(bytes) = std::fs::read(path) {
+        if looks_like_surface(&bytes) {
+            let unspellable = records
+                .iter()
+                .filter(|r| matches!(r, Record::Attestation(_)))
+                .count();
+            if unspellable > 0 {
+                eprintln!(
+                    "smysl {cmd}: {path} is a surface store, and {unspellable} attestation(s) \
+                     in this batch have no surface form - committing would keep the units and \
+                     lose the recipe that made them"
+                );
+                eprintln!(
+                    "  convert the store first (`smysl merge {path} -o STORE.cbor`) and commit \
+                     to that, or review and `smysl merge --staged`"
+                );
+                return Err(ExitCode::Usage);
+            }
+        }
+    }
+    if let Err(e) = persist(path, records, store, labels) {
+        eprintln!("smysl {cmd}: {e}");
+        return Err(ExitCode::Failure);
+    }
+    // Only now: the records are in the store, so the staged copy is no longer the only one.
+    if let Err(e) = smysl::stage::discard(root) {
+        eprintln!("smysl {cmd}: committed, but the staged batch could not be removed: {e}");
+        return Err(ExitCode::Failure);
+    }
+    Ok(())
 }
 
 /// The store path a command names positionally or with `--store`.
@@ -4626,15 +4678,23 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
 
-    let store = match store_arg(m, global) {
-        Some(path) => match load_store(&path) {
-            Ok((s, _)) => s,
+    // `--yes` commits to `--store` (H-13), so a run that cannot commit is refused here —
+    // before any provider call, because the alternative is to spend a model call and then
+    // discover there is nowhere to put the result.
+    let store_target = store_arg(m, global);
+    if m.get_flag("yes") && store_target.is_none() {
+        eprintln!("smysl ingest: `--yes` commits the batch, so it needs a store: pass --store");
+        return ExitCode::Usage;
+    }
+    let (store, store_labels) = match &store_target {
+        Some(path) => match load_store(path) {
+            Ok((s, l)) => (s, l),
             Err(e) => {
                 eprintln!("smysl ingest: {e}");
                 return ExitCode::Failure;
             }
         },
-        None => Store::new(),
+        None => (Store::new(), std::collections::BTreeMap::new()),
     };
 
     let rung = m
@@ -4890,18 +4950,20 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let corrected = !staged.weakened.is_empty();
 
     if m.get_flag("yes") {
-        println!("{} unit(s) staged and confirmed", staged.len());
-        // The flag has promised a commit since it was written and has never performed one: it
-        // suppresses exit 10 and stops there. Implementing it silently would turn a read-only
-        // invocation into one that writes `--store`, in a minor, for anyone using `--yes` to
-        // avoid exit 10 rather than to ask for a write — and that is not a change to discover
-        // afterwards. So 1.9 says what it does and what it will do, and 1.10 does it. The
-        // precedent is `SMY-W432` in this same release: when a change moves somebody's data,
-        // the warning ships first.
-        eprintln!(
-            "smysl ingest: warning: `--yes` does not commit yet; it suppresses exit 10. \
-             It will commit to --store in 1.10. Run `smysl merge --staged` to commit now."
-        );
+        // 1.9 warned that this did not commit and said 1.10 would; this is 1.10. The warning
+        // shipped a release ahead of the behaviour because implementing it turns a read-only
+        // invocation into one that writes `--store`, and anyone passing `--yes` to suppress
+        // exit 10 rather than to ask for a write had to be told first. The precedent is
+        // `SMY-W432`: when a change moves somebody's data, the warning ships first.
+        let path = store_target
+            .as_deref()
+            .expect("refused above without a store");
+        let records = staged.records();
+        let n = staged.len();
+        if let Err(code) = commit_staged("ingest", path, &root, &records, &store, &store_labels) {
+            return code;
+        }
+        println!("{n} unit(s) staged and committed to {path}");
         // `--yes` used to return 0 here whatever happened, so the one outcome most worth
         // knowing about - the model over-claimed and was corrected - was the outcome
         // indistinguishable from nothing having happened.
@@ -5757,6 +5819,115 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         cli().debug_assert();
+    }
+
+    /// H-13: a committed batch is in the store and is no longer staged.
+    ///
+    /// `--yes` promised this from the day it was written and did nothing; 1.9 warned, 1.10
+    /// commits. The order is the part worth pinning: the stage goes only after the write
+    /// landed, so a failed write leaves the work recoverable.
+    #[cfg(feature = "ingest")]
+    #[test]
+    fn commit_staged_writes_the_batch_then_drops_the_stage() {
+        use smysl::{KernelType, Record, Status, Store, UnitCoreBuilder};
+
+        let dir = std::env::temp_dir().join(format!("smysl-h13-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".smysl")).unwrap();
+
+        let core = UnitCoreBuilder::new(
+            KernelType::Claim,
+            "the pool saturated at four in the afternoon",
+            Status::Speculative,
+        )
+        .build()
+        .unwrap();
+        let uid = smysl::canonical_uid(&core);
+        let records = vec![Record::Unit(core)];
+
+        // A CBOR store to commit into, and a staged file standing in for `stage::write`.
+        //
+        // The store holds a record already, because an *empty* file is indistinguishable from
+        // surface text to `looks_like_surface` and would send `persist` down the wrong branch.
+        // That is a real edge for a brand-new store and not this test's subject.
+        let seed = UnitCoreBuilder::new(
+            KernelType::Claim,
+            "a claim that was already in the store",
+            Status::Speculative,
+        )
+        .build()
+        .unwrap();
+        let path = dir.join("store.cbor");
+        std::fs::write(&path, smysl::to_cbor_seq(&[Record::Unit(seed)])).unwrap();
+        std::fs::write(dir.join(smysl::stage::PATH), smysl::to_cbor_seq(&records)).unwrap();
+
+        let store = Store::new();
+        let labels = std::collections::BTreeMap::new();
+        let path_s = path.to_str().unwrap();
+        commit_staged("ingest", path_s, &dir, &records, &store, &labels).unwrap();
+
+        let (back, _) = load_store(path_s).unwrap();
+        assert!(
+            back.get(&uid).is_some(),
+            "the batch did not reach the store"
+        );
+        assert!(
+            !dir.join(smysl::stage::PATH).exists(),
+            "the stage outlived the commit"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A surface store refuses the batch rather than keeping the units and losing the recipe.
+    ///
+    /// Attestations have no surface spelling, so appending a staged batch to a `.smy` store
+    /// would write what the model said and drop how it was asked — which is the one thing the
+    /// recipe exists to carry.
+    #[cfg(feature = "ingest")]
+    #[test]
+    fn commit_staged_refuses_a_surface_store_that_would_lose_the_attestations() {
+        use smysl::{AgentId, Hlc, KernelType, Record, Rung, Status, Store, UnitCoreBuilder};
+
+        let dir = std::env::temp_dir().join(format!("smysl-h13-surface-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".smysl")).unwrap();
+
+        let core = UnitCoreBuilder::new(KernelType::Claim, "a staged claim", Status::Speculative)
+            .build()
+            .unwrap();
+        let uid = smysl::canonical_uid(&core);
+        let agent = AgentId::new("tool:test").unwrap();
+        let attest = smysl::stage::Attest::new(agent.clone(), Rung::Document, Hlc::zero(agent));
+        let records = vec![
+            Record::Unit(core),
+            Record::Attestation(attest.for_unit(uid)),
+        ];
+
+        let path = dir.join("store.smy");
+        std::fs::write(
+            &path,
+            "@doc smysl/1.0 {\n  id: v/x\n  intent: t\n  lang: en\n}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join(smysl::stage::PATH), smysl::to_cbor_seq(&records)).unwrap();
+
+        let store = Store::new();
+        let labels = std::collections::BTreeMap::new();
+        let err = commit_staged(
+            "ingest",
+            path.to_str().unwrap(),
+            &dir,
+            &records,
+            &store,
+            &labels,
+        )
+        .unwrap_err();
+        assert_eq!(err, ExitCode::Usage);
+        assert!(
+            dir.join(smysl::stage::PATH).exists(),
+            "a refused commit must leave the batch staged"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// §23's table, plus one.
