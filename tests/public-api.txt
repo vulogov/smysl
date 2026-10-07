@@ -26,6 +26,7 @@
 #
 # Regenerate with `make api`. Check with `make api-check`.
 pub mod smysl
+pub use smysl::ABSENT_PERCENT
 pub use smysl::Adjacency
 pub use smysl::Admission
 pub use smysl::AgentActivity
@@ -116,6 +117,7 @@ pub use smysl::Lineage
 pub use smysl::LineageNode
 pub use smysl::Lod
 pub use smysl::LodPlan
+pub use smysl::MIN_LETTERS
 pub use smysl::Matcher
 pub use smysl::MergeError
 pub use smysl::MergeOptions
@@ -184,6 +186,8 @@ pub use smysl::SchemaDecl
 pub use smysl::SchemaDef
 pub use smysl::SchemaId
 pub use smysl::Scratch
+pub use smysl::Script
+pub use smysl::Scripts
 pub use smysl::Selection
 pub use smysl::Semantic
 pub use smysl::Severity
@@ -263,6 +267,7 @@ pub use smysl::kernel_major
 pub use smysl::label_bindings
 pub use smysl::label_index
 pub use smysl::labels_of
+pub use smysl::lang_verify
 pub use smysl::membership
 pub use smysl::merge
 pub use smysl::merge
@@ -294,6 +299,7 @@ pub use smysl::salience
 pub use smysl::salience_seed
 pub use smysl::satisfies_rule_l
 pub use smysl::schema_definition
+pub use smysl::script_of
 pub use smysl::stage
 pub use smysl::surface
 pub use smysl::to_cbor

@@ -294,6 +294,9 @@ registry! {
     Lod => {
         W025 = "SMY-W025", Warn,  "Granularity bounds unevaluable - the profile names an estimator this build does not have";
     }
+    Provider => {
+        W436 = "SMY-W436", Warn,  "A unit is not in the script of the passage it came from (language policy)";
+    }
 }
 
 impl fmt::Display for Code {
@@ -581,10 +584,14 @@ mod tests {
     /// of 1.4.0: `SMY-W056`, a withdrawal naming an edge 1.4 does not let anyone withdraw.
     /// 61 as of 1.9.0, the last of them `SMY-W435`: a repair that worked used to erase what it
     /// repaired. 62 with `SMY-W433`: an input carrying a prompt marker is told about rather than
-    /// trusted to be innocent.
+    /// trusted to be innocent. 63 with `SMY-W025`: a granularity bound nobody in this build can
+    /// evaluate. 64 as of 1.10.0: `SMY-W436`, a unit written in a different script from its
+    /// passage — numbered at the end of the ingest run rather than in the `W30x` block it
+    /// belongs to semantically, because the free number there is `W306` and that one is
+    /// retired.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 63);
+        assert_eq!(Code::ALL.len(), 64);
     }
 
     #[test]

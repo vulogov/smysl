@@ -174,6 +174,12 @@ pub use smysl_core::quote::{
     support_span_with as quote_support_span_with, support_with as quote_support_with,
     Normaliser as QuoteNormaliser, Support as QuoteSupport, QUOTE_KEY,
 };
+// The script check, on the same reasoning as the quote check above and for the same caller: a
+// pipeline that builds its own units still wants to know whether the model answered in the
+// language it was asked in. Ungated — it is a table of code points and does no I/O.
+pub use smysl_core::lang::{
+    script_of, verify as lang_verify, Script, Scripts, ABSENT_PERCENT, MIN_LETTERS,
+};
 /// The string-valued entries of a unit's payload (1.6). What `Query::with_payload` filters on, and
 /// what a caller reads to answer "what kind of thing does this extension schema say this is".
 pub use smysl_core::surface::payload::payload_strings;
@@ -222,8 +228,12 @@ mod tests {
         // a reader still wants to know the document tried. 63 with `SMY-W025`: a granularity
         // profile may now name the estimator its bounds are counted with (F-2), and one this
         // build does not have makes `l0_max` unevaluable rather than evaluable under some
-        // other count.
-        assert_eq!(Code::ALL.len(), 63);
+        // other count. 64 as of 1.10.0, with `SMY-W436`: `LangPolicy::Source` says a gist is
+        // written in the language of its passage, and nothing checked it — the S0 spike found a
+        // model answering Russian passages in English in 78.6% of its gists, staged without a
+        // remark. The check is by script rather than by language, and by the passage rather than
+        // by a declared tag, because `View::lang` defaults to `en` and ingest never sets it.
+        assert_eq!(Code::ALL.len(), 64);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

@@ -40,6 +40,7 @@ pub mod prompt;
 /// Reachable for `tests/gate.rs` and the workspace's `tests/interactions.rs`, which check that
 /// a quoted body survives the round trip the ingest path puts it through.
 #[doc(hidden)]
+pub use smysl_core::lang;
 pub use smysl_core::quote;
 pub mod recipe;
 /// Reachable for `tests/gate.rs`, which drives `check_local` and the degradation path
@@ -722,6 +723,21 @@ impl<'a> Ingestor<'a> {
             // so it buys a repair turn, which is the one thing a model can actually fix
             // here. An elided quote is a warning and passes.
             diagnostics.extend(quote::verify_with(self.opts.normaliser, &units, text));
+            // And every unit against the *script* of that text (F-6, `SMY-W436`). Until 1.10
+            // nothing checked the language policy at all, so a model answering a Russian
+            // passage in English staged without remark. A warning, not an error: it must not
+            // buy a repair turn on the strength of a code-point table.
+            //
+            // Matched on the policy rather than run unconditionally, even though `Source` is
+            // the only variant there is. `pivot:<lang>` extracts into one working language, so
+            // the script to expect under it is the pivot's and not the passage's — and a new
+            // variant falling through to this call would inherit a comparison that is wrong
+            // for it. The match makes that a compile error instead.
+            match self.opts.lang_policy {
+                LangPolicy::Source => {
+                    diagnostics.extend(smysl_core::lang::verify(&units, text));
+                }
+            }
             // §22.3: check what can be checked without the store, so the model still has a
             // turn in which to fix it. Discovering a granularity violation at staging would
             // mean discovering it after the calls were paid for.

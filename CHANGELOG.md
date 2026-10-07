@@ -12,15 +12,7 @@ and the facade asserts the two are independent.
 What 1.9 argued for and did not land, in the order it was argued rather than the order it is
 easiest.
 
-**A language policy nobody checks.** F-6 gave every content template a rule about what language
-to write in, and 1.9 shipped no way to tell whether a model obeyed it. The S0 spike measured both
-failure directions on the same corpus: the local model wrote **78.6% of its Russian gists in Latin
-script** — answering a Russian passage in English — and the hosted one wrote *every* gist of one
-English chapter in Chinese across four of five runs. Neither is detected today; `smysl ingest`
-stages both without comment. A count of characters by script against the passage's own language
-would catch both, and it is cheap enough to be a diagnostic rather than a pass. The byte ceiling
-made this worse before `smysl/content/1` landed, because an English gist fit where the Russian one
-it should have been did not — so the cheaper thing to do was the wrong thing.
+**A language policy nobody checks** — *landed, see below.*
 
 **A second normaliser that earns nothing yet.** Across 5,560 quotes of the spike corpus, V1 and V2
 never return a different verdict — the disagreement set is empty — and their only difference is
@@ -47,6 +39,57 @@ is Apache 2.0 and settled, the hosted one is not. And the re-plan of SMYSL-2.4 a
 of SMYSL-2.0 §1.1, which moves TX-P5's and TX-P7's exit tests and so is a re-plan rather than an
 edit, with TX-P1's MSRV question (OQ-40 = OQ-66) first because it is the only one that depends on
 anything outside this repository.
+
+### The language policy is checked (`SMY-W436`, MS-5)
+
+F-6 gave every content template a rule about what language to write in, and 1.9 shipped no way to
+tell whether a model obeyed it. The S0 spike measured both failure directions on the same corpus:
+the local model wrote **78.6% of its Russian gists in Latin script** — answering a Russian passage
+in English — and the hosted one wrote *every* gist of one English chapter in Chinese across four
+of five runs. `smysl ingest` staged both without comment. The byte ceiling made it worse before
+`smysl/content/1` landed, because an English gist fit where the Russian one it should have been
+did not, so the cheaper thing to do was also the wrong thing.
+
+`smysl_core::lang` counts a text's letters by script, and `ingest` now checks every unit against
+the script of the chunk it was drawn from, beside the quote check and for the same reason: the
+passage is the one thing in the exchange we did not get from the model.
+
+Three decisions worth stating, because each is a narrower claim than the obvious one.
+
+**By script, not by language.** Telling Russian from Ukrainian needs a model or a word list;
+telling Cyrillic from Latin needs a table of code points. Both measured failures cross a script
+boundary, because the wrong-language answer a model actually gives is in its own dominant tongue
+rather than a neighbouring one. A Serbian gist of a Russian passage passes, and that is a limit,
+not a bug.
+
+**Against the passage, not against a declared tag.** A `LangTag` was the obvious comparand and
+would have measured nothing: `View::lang` defaults to `en` and `ingest` never sets it, so every
+store this check was written for declares English whatever it holds. That is worth knowing on its
+own — the field exists, nothing populates it, and a check resting on it would have reported a
+default. The passage is the input, so it is the thing we are certain about.
+
+**Whether the passage's script has *vanished*, not which script leads.** Below a quarter of a
+unit's letters, not merely behind. `Сервер вернул 500 Internal Server Error` is 19 Latin letters
+against 13 Cyrillic, so "which script leads" would flag perfectly good Russian; a borrowed term is
+normal, and what the spike measured was gists with no Cyrillic in them at all. An eight-letter
+floor below that, which is the arbitrary part and is labelled as such in the source: nothing in the
+corpus pins it, it is just the point below which a percentage of a handful of characters means
+nothing.
+
+A **warning**, and the test that matters most asserts it stays one. Under `ingest` an error buys a
+repair turn and a repair turn is a call, so an error here would re-ask the model on the strength of
+a code-point table — and would do it for every gist carrying a loanword. Exit codes do not move.
+Where either side has no majority script the check reports nothing at all, on `SMY-W025`'s
+principle that a thing nobody can evaluate has neither passed nor been breached.
+
+Gated on the policy rather than run unconditionally, although `Source` is the only variant there
+is: `pivot:<lang>` extracts into one working language, so the script to expect under it is the
+pivot's and not the passage's, and a new variant falling through would inherit a comparison that is
+wrong for it. The `match` makes that a compile error instead.
+
+`SMY-W436` and not `SMY-W306`, which is the free number in the ingest block. `W306` was deleted in
+0.6.0 and stays retired: a reader who met it in an old log should not find it means something else
+now. The registry is 64 codes.
 
 ### `ingest --yes` commits, as its help always said
 

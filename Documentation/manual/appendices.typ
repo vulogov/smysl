@@ -430,6 +430,7 @@ Exits 5 while anything is open and 0 when nothing is, so a pipeline can gate on 
     ([`--granularity`], [`P`], [Granularity preset recorded in the recipe: `coarse`, `default` (or `standard`), `fine`.]),
     ([`--path`], [`auto|surface|json-ast`], [Override the path D-9 would choose.]),
     ([`--repair`], [`N`], [Repair attempts before a span degrades to opaque prose.]),
+    ([`--lang-policy`], [`source`], [What language the model writes in. `source` — each unit in the language of its passage — is the only policy implemented, and `SMY-W436` reports a unit that is not in its passage's script.]),
     ([`--yes`], [—], [Commit the staged batch instead of exiting 10.]),
     ([`--dry-run`], [—], [Report what would be sent and to whom; make no call.]),
   ),
@@ -670,6 +671,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W309`], [warning], [A unit's own source was replaced by the caller's, under a source policy that overrides.]),
     ([`SMY-W435`], [warning], [A chunk failed an attempt and then succeeded; the earlier error is kept, naming its attempt. A repair that worked used to erase what it repaired.]),
     ([`SMY-W433`], [warning], [An ingest input contains a marker this tool sends (`<<<SMYSL-`), with the byte offset. The fence around the input is derived from the input, so the marker cannot close it; the note is there because a document speaking in the tool's voice is a thing its reader should know.]),
+    ([`SMY-W436`], [warning], [A unit is not in the script of the passage it came from, naming the field and the share. The `source` language policy says a gist is written in the language of its passage; this is the only thing that checks it.]),
   ),
 )
 
@@ -684,7 +686,27 @@ usage totals line" was simply wrong.
 
 `SMY-W306` is deleted. It described a usage threshold that does not exist and never did, and
 inventing the feature to justify the code would have been the wrong way round. A code nobody
-can trigger is worse than a missing one, because a reader waits for it.
+can trigger is worse than a missing one, because a reader waits for it. It stays retired rather
+than reused, which is why 1.10's language-policy check is `SMY-W436` and not the free number in
+this block: a reader who met `SMY-W306` in a 0.5 log should not find it means something else now.
+
+`SMY-W436` is what 1.9's language policy was missing. `--lang-policy source` tells the model to
+write each gist in the language of its passage, and nothing checked whether it did. The spike
+behind SMYSL-2 measured both directions of the failure on one corpus: a local model wrote 78.6%
+of its Russian gists in Latin script, and a hosted one wrote every gist of an English chapter in
+Chinese. Both staged without a remark.
+
+The check counts letters by script and asks whether the passage's own script has *vanished* from
+the unit — below a quarter of its letters — rather than which script leads. That distinction is
+the whole design. `Сервер вернул 500 Internal Server Error` has more Latin letters than Cyrillic
+ones and is perfectly good Russian; a borrowed term is normal, and what the spike measured was
+gists with no Cyrillic in them at all.
+
+Three things it does not do. It compares *scripts*, not languages, so a Serbian gist of a Russian
+passage passes. It compares against the *passage*, not against a declared language tag, because
+`lang` on a view defaults to `en` and `ingest` never sets it — a tag-based check would have
+measured the default. And where either side has no majority script it reports nothing, on
+`SMY-W025`'s principle that unevaluable is neither passed nor breached.
 
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix C — Exit Codes
