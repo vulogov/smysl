@@ -7,6 +7,49 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.10.0
+
+What 1.9 argued for and did not land, in the order it was argued rather than the order it is
+easiest.
+
+**A language policy nobody checks.** F-6 gave every content template a rule about what language
+to write in, and 1.9 shipped no way to tell whether a model obeyed it. The S0 spike measured both
+failure directions on the same corpus: the local model wrote **78.6% of its Russian gists in Latin
+script** — answering a Russian passage in English — and the hosted one wrote *every* gist of one
+English chapter in Chinese across four of five runs. Neither is detected today; `smysl ingest`
+stages both without comment. A count of characters by script against the passage's own language
+would catch both, and it is cheap enough to be a diagnostic rather than a pass. The byte ceiling
+made this worse before `smysl/content/1` landed, because an English gist fit where the Russian one
+it should have been did not — so the cheaper thing to do was the wrong thing.
+
+**A second normaliser that earns nothing yet.** Across 5,560 quotes of the spike corpus, V1 and V2
+never return a different verdict — the disagreement set is empty — and their only difference is
+span width, in ten cases, all of them the same shape: V2 swallows a trailing `”`. On this corpus
+the comparison form added in 1.9 buys no verdict and costs one span defect. The overshoot is the
+thing to fix, and until it is, the narrower reading of the amendment is the right one.
+
+**A spec a release behind its wire.** 1.9 put granularity key 5 and an estimator id on the wire,
+and `SMYSL_FORMAT_SPEC.md` still says it describes crate 1.8.0 and does not mention granularity,
+`l0_max`, tokens or an estimator anywhere. That is permitted — the spec says everything it does
+not say is a free choice — but A-14 asks each accepted amendment to be folded as its phase lands,
+and a fold is not complete until `verify-spec-tables` covers its tables. Nine amendments were
+accepted at G0 and none has been folded.
+
+**A ceiling no code can establish.** Every same-as and holder figure the spike reports rests on
+model coders, and no model coder reaches the protocol's α 0.667 on any pairing: 0.600 over three,
+0.544 and 0.624 and 0.636 pairwise, and 0.584 for a single coder against *itself* in a different
+order. The local 14B model agrees with each hosted model better than the two hosted models agree
+with each other, so this is a property of the task and not of a provider. GE-T9's ceiling needs
+people, and five rows of the S0 decision table stay provisional until it has them.
+
+**Two decisions still open.** OQ-34 for the hosted model's outputs as fixtures — the local model
+is Apache 2.0 and settled, the hosted one is not. And the re-plan of SMYSL-2.4 against the pivot
+of SMYSL-2.0 §1.1, which moves TX-P5's and TX-P7's exit tests and so is a re-plan rather than an
+edit, with TX-P1's MSRV question (OQ-40 = OQ-66) first because it is the only one that depends on
+anything outside this repository.
+
+---
+
 ## 1.9.0 — 2026-10-07
 
 ### A granularity bound counts content; a cost counts tokens
