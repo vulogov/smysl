@@ -9,6 +9,72 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.9.0
 
+### A granularity bound counts content; a cost counts tokens
+
+`smysl_core::tokens` was documented as *"the single place the two meanings of token agree"*. They
+do not agree, and the S0 spike put a number on the disagreement.
+
+A **cost** predicts what a provider will charge, and wants to be faithful to a real tokenizer. A
+**granularity bound** is an editorial limit on how much one unit may say. Counting the second
+like the first made one `l0_max` mean 120 characters of English and 67 of Russian, purely because
+Cyrillic takes two bytes in UTF-8 — and the consequence was not shorter Russian gists. It was
+**579 `SMY-E022` across the spike corpus, and 12.67% of hosted Russian units replaced by opaque
+prose** rather than shortened. The ceiling also *rewarded* ignoring the language policy, since an
+English gist fits where the Russian one it should have been does not.
+
+So SMYSL-2.1's OQ-31 — faithful or content-fair? — has two answers, one per instrument. Cost is
+unchanged: `smysl_core::tokens`, `smysl-pack::Estimator`, same ids, same numbers. Bounds gain
+**`smysl/content/1`**, script-weighted so that parallel translations of one proposition get one
+count, with English under today's count as the unit.
+
+| characters that fit in `l0_max` | en | ru | el | zh |
+|---|---|---|---|---|
+| `smysl/utf8-div4` | 120 | 67 | 61 | 41 |
+| `smysl/content/1` | 122 | **101** | **111** | 35 |
+
+English moves 2%, which is the point — it is the anchor, so no existing store's budget shifts.
+Russian gains 51%. Chinese *loses* 14%: a byte count had been over-allowancing it, and fairness
+takes that back too. Russian needing fewer characters than English is not an inequity — the same
+verse is 0.83x the characters and 1.45x the bytes, and only the second ratio was ever ours.
+
+The weights are calibrated once, over 7,932 verses present in all seven public-domain editions of
+a parallel corpus, and frozen in `fixtures/estimator/content-1.json` with a test pinning them.
+Changing any weight is a new id. `digit` is **not** fitted: the corpus holds seven digit
+characters in 99,012 verses, so no weight for it is identifiable, and freezing an unidentified one
+would score every gist containing a number against noise.
+
+**The default does not change.** `utf8-div4` stays, granularity key 5 is written only when the
+estimator is not it, and every view written before this encodes to the bytes it had. Opting in is
+`check --estimator <id>` or `ingest --estimator <id>`; the latter moves both halves at once,
+because stating a bound the check will not honour is worse than stating a vague one. An id this
+build does not have leaves `l0_max` **unevaluable** — the new **`SMY-W025`** — rather than
+evaluated under a count nobody asked for.
+
+Draft 3 §22's exit test, over 500 verse-aligned pairs: the share of gists over the bound differs
+between English and Russian by **68.5% relative under `utf8-div4` and 3.2% under `content/1`**.
+
+This is SMYSL-2.1's F-2. It was deferred to 1.10.0 while OQ-31 was open; the S0 spike's decision
+table reordered it ahead of everything else, because it is the only item that removes a measured,
+reproducible loss of propositions and it rests on no judged label.
+
+### `bundle --unknown`, and a warning with nothing to count
+
+`SMY-W434` was specified as printed by the CLI whenever a bundle carries records this build cannot
+interpret. The CLI called `bundle_with`, which returns no report — so the count the warning exists
+to carry had nowhere to come from, and the warning was never printed at all.
+
+`bundle --unknown keep|drop`, defaulting to `keep`. Rule X keeps what this build cannot name,
+because a build that drops it silently truncates a peer's store on the way through. But keeping it
+means forwarding content that cannot be inspected, and so cannot be evaluated for redaction either
+— a 1.9 peer can pass on a future record a newer one would have filtered under rule Z. `drop` is
+the escape for a sender who must not do that.
+
+The count is of what the closure held rather than of what was emitted, so `drop` reports what it
+*left behind*. A sender who dropped records needs to know that as much as one who forwarded them,
+and the warning now says which of the two happened.
+
+This completes TX-P0.
+
 ### Convergence could not see a commitment
 
 `converged_with` answered `true` for two stores that disagreed about how settled a unit was.
@@ -166,9 +232,9 @@ made.
 
 The property test is the one the amendment asks for: **no bundled record names an absent unit.**
 
-This is SMYSL-2.1's F-16, with H-14 and H-15 folded in. `BundleOptions` and `bundle --unknown`
-are deliberately not here — a policy knob invented before a caller asks for it is a guess at the
-policy, and the diagnostic is what makes the default safe.
+This is SMYSL-2.1's F-16, with H-14 and H-15 folded in. `bundle --unknown` followed later in
+this same release, once there was a reason for it; see *"`bundle --unknown`, and a warning with
+nothing to count"* below.
 
 ### A record that cannot be spelled is no longer spelled wrong
 
