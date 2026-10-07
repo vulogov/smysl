@@ -610,7 +610,10 @@ file, whichever revision a unit was written at.
 `quote_support_span` is the quote check with the *location*: the same verdict `quote_support` gives
 and a byte range into the source exactly as supplied, so a caller can underline the line rather
 than tell a reader it is in there somewhere. `Present` spans the match; `Loose` spans first
-matched word to last, elisions included.
+matched word to last, elisions included. Either way both ends land on a character the comparison
+keeps: a range never reaches past the match into a closing quote mark the fold discarded, or into
+the whitespace after it. That was wrong in both normalisers until 1.10, and the spike behind
+SMYSL-2 is what measured it — 10 ranges in 5,560 that swallowed a trailing `”`.
 
 And retrieval takes two new constraints. `Query::within` restricts scoring to a candidate set —
 the units a diff touched, say — which is a filter and not a re-rank: scores are the corpus's, only

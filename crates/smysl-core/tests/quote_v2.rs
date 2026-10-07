@@ -134,6 +134,127 @@ fn v1_is_byte_for_byte_unchanged() {
     assert_eq!(&COMMIT[span], "a gate ties the format's constants");
 }
 
+/// Whether a character survives `n`'s comparison form.
+///
+/// Asked through the public surface rather than the private fold table, so the question is "does
+/// this character reach the comparison" and not "is it in a list I also wrote". A character that
+/// normalises away compares `Absent` against itself, because the quote side becomes empty.
+fn productive(n: Normaliser, c: char) -> bool {
+    let one = c.to_string();
+    support_with(n, &one, &one) == Support::Present
+}
+
+/// **MS-4.** A `Present` span ends at the match, not past a mark the fold dropped.
+///
+/// The spike measured this on 5,560 spans: V2's range was wider than V1's in 10 of them, every one
+/// the same shape — a verse ending before a closing `”` whose range swallowed it. 0.18%, and the
+/// reason the second normaliser was not worth defaulting to while it held.
+///
+/// Both normalisers are asserted because **both were wrong**, which the finding did not know. V2
+/// drops quotation marks, so the corpus found it there; V1 folds them to `"` and keeps them, but
+/// V1 drops `` ` `` and `*` and overshoots on those in exactly the same way. One defect in two
+/// walkers, from one cause: an upper bound read off the table of where characters *begin*.
+#[test]
+fn a_present_span_does_not_swallow_a_dropped_mark() {
+    // (source, quote, the text the range must cover)
+    let cases: &[(&str, &str, &str)] = &[
+        // The measured shape, in the script it was measured in.
+        (
+            "Он сказал: “доколе, Господи” И забудешь меня.",
+            "доколе, Господи",
+            "доколе, Господи",
+        ),
+        // The same shape in ASCII, so nothing about it is Cyrillic.
+        (
+            "He said \"hello there\" and left.",
+            "hello there",
+            "hello there",
+        ),
+        // The marks V1 drops rather than folds. These are the V1 half of the defect.
+        (
+            "He said `hello there` and left.",
+            "hello there",
+            "hello there",
+        ),
+        (
+            "He said *hello there* and left.",
+            "hello there",
+            "hello there",
+        ),
+        // A dropped mark before the match must not widen the lower bound either.
+        (
+            "He said \"hello there and left.",
+            "hello there",
+            "hello there",
+        ),
+        // Several dropped marks in a row.
+        (
+            "He said ““hello there”” and left.",
+            "hello there",
+            "hello there",
+        ),
+        // The match ending at the very end of the source, with a mark after it.
+        ("he said “hello there”", "hello there", "hello there"),
+    ];
+
+    for (source, quote, want) in cases {
+        for n in [Normaliser::V1, Normaliser::V2] {
+            let (verdict, range) = support_span_with(n, quote, source);
+            assert_eq!(verdict, Support::Present, "{n}: {quote:?} in {source:?}");
+            let r = range.expect("a present quote has a range");
+            assert_eq!(
+                &source[r.clone()],
+                *want,
+                "{n}: {quote:?} in {source:?} — range {r:?} is not the match"
+            );
+        }
+    }
+}
+
+/// The same for `Loose`: the region ends on the last word matched, not past a mark dropped
+/// after it.
+///
+/// Each normaliser is given a mark **it** drops, because that is the defect's shape and the two
+/// tables differ. V2 drops quotation marks; V1 folds them to `"` and keeps them as word content,
+/// so V1's own blind spot is the backtick. Asserting a shared expectation here would be asserting
+/// that the two normalisers agree about typography, which they deliberately do not.
+#[test]
+fn a_loose_span_ends_on_the_last_word_matched() {
+    let cases: &[(Normaliser, &str)] = &[
+        (
+            Normaliser::V2,
+            "He said hello to the wide world” and then left.",
+        ),
+        (
+            Normaliser::V1,
+            "He said hello to the wide world` and then left.",
+        ),
+    ];
+    for (n, source) in cases {
+        let (verdict, range) = support_span_with(*n, "hello ... world", source);
+        assert_eq!(verdict, Support::Loose, "{n}");
+        let r = range.expect("a loose quote has a range");
+        assert_eq!(
+            &source[r.clone()],
+            "hello to the wide world",
+            "{n}: range {r:?} is not the region the quote was drawn from"
+        );
+    }
+}
+
+/// A span is a region a caller slices and shows to a reader, so trailing whitespace is an
+/// overshoot too — the same class as the dropped mark, and the sentinel already handled it. This
+/// is the control that says the MS-4 fix did not cost it.
+#[test]
+fn a_span_does_not_reach_into_trailing_whitespace() {
+    let source = "hello there   \n\n";
+    for n in [Normaliser::V1, Normaliser::V2] {
+        let (_, range) = support_span_with(n, "hello there", source);
+        let r = range.expect("a present quote has a range");
+        assert_eq!(&source[r], "hello there", "{n}");
+    }
+}
+
 /// The verdict and the span agree, for both normalisers, over generated input.
 ///
 /// `support_with` finds a substring in a string the character fold produced; `support_span_with`
@@ -217,6 +338,25 @@ fn a_span_and_a_verdict_never_disagree() {
                         source.is_char_boundary(r.start) && source.is_char_boundary(r.end),
                         "{n}: {quote:?} in {source:?} \u{2014} range {r:?} splits a character"
                     );
+                    // And **tight**: neither end may be a character the comparison form throws
+                    // away. A valid range is not enough — MS-4's overshoot was in bounds, on a
+                    // character boundary, and still wrong, because it reached past the match to
+                    // take in a closing quote mark the fold had dropped. Without this assertion
+                    // the generator above passes with the defect in place, which is how it
+                    // survived to be measured on a corpus instead of caught here.
+                    let slice = &source[r.clone()];
+                    if let Some(c) = slice.chars().next() {
+                        assert!(
+                            productive(n, c),
+                            "{n}: {quote:?} in {source:?} — range {r:?} starts on {c:?}, dropped by this form"
+                        );
+                    }
+                    if let Some(c) = slice.chars().next_back() {
+                        assert!(
+                            productive(n, c),
+                            "{n}: {quote:?} in {source:?} — range {r:?} ends on {c:?}, dropped by this form"
+                        );
+                    }
                 }
             }
         }

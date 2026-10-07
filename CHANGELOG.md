@@ -15,10 +15,9 @@ easiest.
 **A language policy nobody checks** — *landed, see below.*
 
 **A second normaliser that earns nothing yet.** Across 5,560 quotes of the spike corpus, V1 and V2
-never return a different verdict — the disagreement set is empty — and their only difference is
-span width, in ten cases, all of them the same shape: V2 swallows a trailing `”`. On this corpus
-the comparison form added in 1.9 buys no verdict and costs one span defect. The overshoot is the
-thing to fix, and until it is, the narrower reading of the amendment is the right one.
+never return a different verdict — the disagreement set is empty. The span defect that came with it
+is *fixed below*; the empty disagreement set stands, so the case for defaulting to V2 is still
+unmade.
 
 **A spec a release behind its wire.** 1.9 put granularity key 5 and an estimator id on the wire,
 and `SMYSL_FORMAT_SPEC.md` still says it describes crate 1.8.0 and does not mention granularity,
@@ -39,6 +38,45 @@ is Apache 2.0 and settled, the hosted one is not. And the re-plan of SMYSL-2.4 a
 of SMYSL-2.0 §1.1, which moves TX-P5's and TX-P7's exit tests and so is a re-plan rather than an
 edit, with TX-P1's MSRV question (OQ-40 = OQ-66) first because it is the only one that depends on
 anything outside this repository.
+
+### The quote span stops at the match (MS-4)
+
+A `Present` range is the match and a `Loose` range is the region the quote was drawn from, and
+until now either could reach one character too far — past a mark the comparison form had thrown
+away. The spike measured it as a difference between the normalisers: V2's range was wider than
+V1's in 10 of 5,560 comparable spans, 0.18%, every one the same shape, a verse ending before a
+closing `”` whose range swallowed it.
+
+**Both normalisers had it.** That is the part the finding could not see. V2 deletes quotation
+marks, so a corpus of quoted verse found it there; V1 folds them to `"` and keeps them, but V1
+deletes `` ` `` and `*` and overshot on those in exactly the same way. One defect, one cause, two
+walkers — and the corpus happened to contain the characters that expose only one of them.
+
+The cause: a span's two ends were read off one table. `starts[i]` says where the character
+producing output byte `i` begins, which is what a lower bound wants. An upper bound wants where
+the last matched character *ends*, and reading `starts` at the exclusive index answers a different
+question — where does the *next* character begin — so everything dropped in between fell inside
+the range. The walkers now keep an `ends` track beside `starts`, and the span reads one from each.
+
+V1's verdicts do not move; `support` and its siblings answer exactly as before, and the test that
+pins that is unchanged. What moves is where a V1 range ends, in the cases where it was reaching
+past the match. That is a narrowing to what the documentation already promised — "`Present` spans
+the contiguous match" — so it is a defect fixed rather than a contract changed, and the rule is now
+stated on the function instead of being implied by it.
+
+**Why it survived.** The F-3 property test generates 4,000 cases from the fold's own table and
+asserted that every range is in bounds and on a character boundary. The overshoot was both. A
+range can be perfectly valid and still wrong, so the property now also asserts that a range is
+*tight*: neither end may be a character the form discards. That assertion fails on the old code,
+which is the only reason to trust it.
+
+Three regression tests for the concrete shapes, including the measured one in its own script and
+the same shape in ASCII, so nothing about it reads as a Cyrillic problem.
+
+With the overshoot gone, the narrower reading of A-8.1 is no longer forced by a span defect. What
+remains true from the spike is the other half of MS-7: across 5,560 quotes V1 and V2 never return a
+different verdict, so on that corpus the second normaliser still buys nothing — which is an
+argument about evidence for defaulting to it, not about correctness.
 
 ### The language policy is checked (`SMY-W436`, MS-5)
 

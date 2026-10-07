@@ -154,9 +154,10 @@ fn fold_v2(c: char, prev_out: Option<char>) -> Fold {
 /// The same walk as `normalise_mapped`, over `fold_v2` instead of V1's inline table. The two are
 /// separate functions rather than one parameterised walk because V1's offsets are contract and
 /// the safest way to keep them is not to touch the code that produces them.
-fn normalise_v2_mapped(s: &str) -> (String, Vec<usize>) {
+fn normalise_v2_mapped(s: &str) -> Mapped {
     let mut out = String::with_capacity(s.len());
     let mut map: Vec<usize> = Vec::with_capacity(s.len() + 1);
+    let mut ends: Vec<usize> = vec![0];
     let mut space: Option<usize> = None;
     let mut content_ends = 0usize;
     for (at, c) in s.char_indices() {
@@ -173,6 +174,7 @@ fn normalise_v2_mapped(s: &str) -> (String, Vec<usize>) {
                         if !out.is_empty() {
                             out.push(' ');
                             map.push(from);
+                            ends.push(at);
                         }
                     }
                     let before = out.len();
@@ -184,6 +186,7 @@ fn normalise_v2_mapped(s: &str) -> (String, Vec<usize>) {
                         if !out.is_empty() {
                             out.push(' ');
                             map.push(from);
+                            ends.push(at);
                         }
                     }
                     let before = out.len();
@@ -193,16 +196,25 @@ fn normalise_v2_mapped(s: &str) -> (String, Vec<usize>) {
                 }
             }
             content_ends = at + c.len_utf8();
+            // After the output for this character, not inside the match arms: `to_lowercase`
+            // can yield several characters for one source character, and every output byte they
+            // produce ends where that one source character ends.
+            ends.resize(out.len() + 1, content_ends);
         }
     }
     map.truncate(out.len());
     map.push(content_ends);
-    (out, map)
+    ends.truncate(out.len() + 1);
+    Mapped {
+        out,
+        starts: map,
+        ends,
+    }
 }
 
 /// V2's comparison form.
 fn normalise_v2(s: &str) -> String {
-    normalise_v2_mapped(s).0
+    normalise_v2_mapped(s).out
 }
 
 /// The comparison form for `n`.
@@ -214,7 +226,7 @@ fn form(n: Normaliser, s: &str) -> String {
 }
 
 /// The comparison form for `n`, with offsets back into `s`.
-fn form_mapped(n: Normaliser, s: &str) -> (String, Vec<usize>) {
+fn form_mapped(n: Normaliser, s: &str) -> Mapped {
     match n {
         Normaliser::V1 => normalise_mapped(s),
         Normaliser::V2 => normalise_v2_mapped(s),
@@ -246,9 +258,29 @@ fn form_mapped(n: Normaliser, s: &str) -> (String, Vec<usize>) {
 /// be pointed back at the source a person reads. Normalisation deletes characters, collapses
 /// whitespace runs and can change a character's length when it lowercases, so the mapping cannot
 /// be recomputed from the two strings afterwards — it has to be recorded while it happens.
-fn normalise_mapped(s: &str) -> (String, Vec<usize>) {
+/// A text's comparison form, and the source offsets an output range maps back to.
+///
+/// Two tracks, not one, and that is the whole of the MS-4 fix. `starts[i]` is where the character
+/// producing output byte `i` *begins*, which is what a range's lower bound wants. A range's upper
+/// bound wants something else: where the last character of the match *ends*. Reading `starts` at
+/// the exclusive output index answers a different question — "where does the next character
+/// begin?" — and the two answers differ by exactly the characters the normaliser drops between
+/// them. A quote ending before a closing curly mark or a backtick swallowed it.
+struct Mapped {
+    out: String,
+    /// Where the character producing output byte `i` begins, in the source.
+    starts: Vec<usize>,
+    /// For a match ending just before output byte `i`, where the last character that produced it
+    /// ends, in the source. `ends[0]` is zero and is never read: no match ends before it begins.
+    /// Length is `out.len() + 1`, so an exclusive index into the output is always in range.
+    ends: Vec<usize>,
+}
+
+fn normalise_mapped(s: &str) -> Mapped {
     let mut out = String::with_capacity(s.len());
     let mut map: Vec<usize> = Vec::with_capacity(s.len() + 1);
+    // Index 0 is the empty prefix, which no match can end before.
+    let mut ends: Vec<usize> = vec![0];
     // Where the run of whitespace began, so the single space that replaces it maps to the end of
     // the previous word rather than the start of the next. Otherwise a range ending at a word
     // boundary swallowed the space after it.
@@ -278,19 +310,28 @@ fn normalise_mapped(s: &str) -> (String, Vec<usize>) {
             if !out.is_empty() {
                 out.push(' ');
                 map.push(from);
+                // A match that takes in the collapsed space takes in the whole run it stands
+                // for, which ended where this character begins.
+                ends.push(at);
             }
         }
         let before = out.len();
         out.extend(c.to_lowercase());
         map.resize(out.len().max(before), at);
         content_ends = at + raw.len_utf8();
+        ends.resize(out.len() + 1, content_ends);
     }
     map.truncate(out.len());
     // The sentinel ends at the last content character rather than at the end of the string:
     // trailing whitespace normalises away, and a range ending on the last word must not reach past
     // it into a newline no reader would call part of the quote.
     map.push(content_ends);
-    (out, map)
+    ends.truncate(out.len() + 1);
+    Mapped {
+        out,
+        starts: map,
+        ends,
+    }
 }
 
 fn normalise(s: &str) -> String {
@@ -443,6 +484,14 @@ pub fn support_with(n: Normaliser, quote: &str, source: &str) -> Support {
 /// matched to the last, elisions included, because that is the region the quote was drawn from —
 /// and the match is the earliest subsequence, so a quote opening on a common word starts the range
 /// at that word's first occurrence. `Absent` has no range.
+///
+/// **Both ends land on a character the comparison form keeps.** A range never reaches past the
+/// match to take in a mark the fold discarded — a closing `”` under V2, a backtick or an asterisk
+/// under V1 — nor into the whitespace after it. This was wrong until 1.10 in both forms: the upper
+/// bound was read off the table of where characters *begin*, which answers "where does the next
+/// character start?" and so included everything dropped in between. The spike measured it at 10 of
+/// 5,560 spans under V2 (MS-4); V1 had it too, on the marks V1 drops rather than folds, which the
+/// finding did not know. V1's verdicts are unchanged — this moves only where a range ends.
 pub fn support_span(quote: &str, source: &str) -> (Support, Option<core::ops::Range<usize>>) {
     support_span_with(Normaliser::V1, quote, source)
 }
@@ -461,13 +510,18 @@ pub fn support_span_with(
     if q.is_empty() {
         return (Support::Absent, None);
     }
-    let (s, map) = form_mapped(n, source);
-    let at = |i: usize| map.get(i).copied().unwrap_or(source.len());
-    if let Some(i) = s.find(&q) {
-        return (Support::Present, Some(at(i)..at(i + q.len())));
+    let m = form_mapped(n, source);
+    // Lower bounds read `starts`, upper bounds read `ends`. Reading one track for both was the
+    // MS-4 overshoot: an upper bound taken from `starts` is where the *next* character begins,
+    // so every character dropped in between — a closing quote mark, a backtick — fell inside the
+    // range. Measured at 0.18% of 5,560 spans under V2, and present in V1 for the marks it drops.
+    let start = |i: usize| m.starts.get(i).copied().unwrap_or(source.len());
+    let end = |i: usize| m.ends.get(i).copied().unwrap_or(source.len());
+    if let Some(i) = m.out.find(&q) {
+        return (Support::Present, Some(start(i)..end(i + q.len())));
     }
-    if let Some((first, last)) = loose_span(&q, &s) {
-        return (Support::Loose, Some(at(first)..at(last)));
+    if let Some((first, last)) = loose_span(&q, &m.out) {
+        return (Support::Loose, Some(start(first)..end(last)));
     }
     (Support::Absent, None)
 }
