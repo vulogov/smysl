@@ -14,7 +14,9 @@
 //! material to describe rather than directions to follow. That is not a security boundary -
 //! nothing in a prompt is - which is why rule T caps what the answer can claim regardless.
 
-use smysl_core::hash_bytes;
+use std::borrow::Cow;
+
+use smysl_core::{hash_bytes, TokenEstimator};
 
 /// A prompt, with the identity the recipe hashes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,6 +171,48 @@ const GIST_BOUND: &str = "\
 one-sentence gist of at most 120 characters in Latin script, 60 in Cyrillic or Greek, 40 in \
 Chinese, Japanese or Korean";
 
+/// The gist bound, stated per script, for an estimator that is not the default (F-2, H-5).
+///
+/// The default's sentence is the shipped constant above, byte for byte. It is already
+/// conservative, it is part of a versioned template, and recomputing it would change the text
+/// of every ingest — and so every recipe — for no gain.
+///
+/// For any other estimator the numbers are derived from its own weights, because a sentence
+/// that states the wrong budget is worse than a vague one: under `smysl/content/1` a Cyrillic
+/// gist may run to about 100 characters, and telling the model 60 would waste 40% of what the
+/// check will accept.
+///
+/// **The model is prose, not a pure run of one script.** `count` is per character and
+/// whitespace has its own weight, so the characters of one script that fit depends on how often
+/// a space falls between them. Four characters and a space — a shorter word than English
+/// averages, so an over-estimate of the space cost and therefore an under-estimate of the
+/// budget — then rounded down to a multiple of five, because a prompt that says "109" invites
+/// arithmetic and one that says "105" invites counting. Both roundings go the safe way: every
+/// number stated here is at or below what the estimator actually allows that script in prose.
+pub fn gist_bound_for(est: TokenEstimator) -> Cow<'static, str> {
+    if est == TokenEstimator::Utf8Div4 {
+        return Cow::Borrowed(GIST_BOUND);
+    }
+    let l0 = smysl_core::GranularityProfile::default().l0_max;
+    // A representative sample of each script, as prose: four characters then a space. CJK is
+    // written solid, so it gets no space.
+    // `count` returns whole tokens, so a long run is measured and scaled rather than one
+    // word rounded: 400-odd characters of the pattern, then the share of `l0_max` it used.
+    let fits = |sample: &str| -> u32 {
+        let run = sample.repeat(400 / sample.chars().count().max(1));
+        let chars = run.chars().count() as u32;
+        (chars * l0 / est.count(&run).max(1)) / 5 * 5
+    };
+    let latin = fits("abcd ");
+    let cyrillic = fits("абвг ");
+    let greek = fits("αβγδ ");
+    let cjk = fits("漢字");
+    Cow::Owned(format!(
+        "one-sentence gist of at most {latin} characters in Latin script, {cyrillic} in \
+         Cyrillic, {greek} in Greek, {cjk} in Chinese, Japanese or Korean"
+    ))
+}
+
 /// What language to write in (F-6).
 ///
 /// Nothing said. A model handed a Russian passage writes English gists as readily as Russian
@@ -196,13 +240,23 @@ if you cannot copy one.";
 /// Version 3 added the complete header with a `source` and an `"ingest:quote"`; version 2 stated
 /// the label format (`LABEL_FORMAT`).
 pub fn content_ingest_surface() -> Template {
+    content_ingest_surface_with(TokenEstimator::Utf8Div4)
+}
+
+/// As [`content_ingest_surface`], stating the gist bound for `est` (F-2).
+///
+/// The version does not change with the estimator: the template is the same text with
+/// one parameter, and which estimator produced it is recorded in the recipe
+/// (`Conditions::estimator`) rather than in a version that would then mean two things.
+pub fn content_ingest_surface_with(est: TokenEstimator) -> Template {
+    let gist_bound = gist_bound_for(est);
     Template {
         id: "ingest.content.surface".to_string(),
         version: 6,
         system: format!(
             "You convert documents into smysl surface records. {UNTRUSTED}\n\n\
              Emit only records, no commentary. One record per claim, a header line and then a \
-             {GIST_BOUND}:\n\n\
+             {gist_bound}:\n\n\
              {SURFACE_EXAMPLE}\n\n\
              {LABEL_FORMAT}\n\n\
              {STATUS_RULES}\n\
@@ -225,13 +279,23 @@ pub fn content_ingest_surface() -> Template {
 /// gist at 120 characters, as version 5 of the unsourced template does. Version 3 carries
 /// version 6's per-script bound and language policy.
 pub fn content_ingest_surface_sourced() -> Template {
+    content_ingest_surface_sourced_with(TokenEstimator::Utf8Div4)
+}
+
+/// As [`content_ingest_surface_sourced`], stating the gist bound for `est` (F-2).
+///
+/// The version does not change with the estimator: the template is the same text with
+/// one parameter, and which estimator produced it is recorded in the recipe
+/// (`Conditions::estimator`) rather than in a version that would then mean two things.
+pub fn content_ingest_surface_sourced_with(est: TokenEstimator) -> Template {
+    let gist_bound = gist_bound_for(est);
     Template {
         id: "ingest.content.surface.sourced".to_string(),
         version: 3,
         system: format!(
             "You convert documents into smysl surface records. {UNTRUSTED}\n\n\
              Emit only records, no commentary. One record per claim, a header line and then a \
-             {GIST_BOUND}:\n\n\
+             {gist_bound}:\n\n\
              {SURFACE_EXAMPLE_SOURCED}\n\n\
              {LABEL_FORMAT}\n\n\
              {STATUS_RULES}\n\
@@ -255,6 +319,16 @@ pub fn content_ingest_surface_sourced() -> Template {
 /// enforces schemas; a provider in json-mode sees the schema only as text, and the rule in
 /// words is cheaper to follow than a regular expression.
 pub fn content_ingest_json() -> Template {
+    content_ingest_json_with(TokenEstimator::Utf8Div4)
+}
+
+/// As [`content_ingest_json`], stating the gist bound for `est` (F-2).
+///
+/// The version does not change with the estimator: the template is the same text with
+/// one parameter, and which estimator produced it is recorded in the recipe
+/// (`Conditions::estimator`) rather than in a version that would then mean two things.
+pub fn content_ingest_json_with(est: TokenEstimator) -> Template {
+    let gist_bound = gist_bound_for(est);
     Template {
         id: "ingest.content.json".to_string(),
         version: 4,
@@ -274,7 +348,7 @@ pub fn content_ingest_json() -> Template {
              Where two units stand in a relation, say so in `relations`: `causes`, \
              `rebuts`, `warrant`, `answers`, `contrasts` and the rest, naming both ends \
              by `label`.\n\
-             Keep each gist to a {GIST_BOUND}.\n\
+             Keep each gist to a {gist_bound}.\n\
              {LANG_RULE}"
         ),
         user: format!("{FENCE}\n{{input}}\n{FENCE}"),

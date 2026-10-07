@@ -66,6 +66,14 @@ pub struct Conditions {
     /// override's recipe would not change when the framing did, and the framing is part of
     /// what the model was asked under.
     pub framing: Option<&'static str>,
+    /// The estimator the granularity bounds were counted with (1.9, F-2).
+    ///
+    /// `granularity` above is a preset *name*, and a preset says nothing about how its bounds
+    /// are counted. Two runs under `default` with different estimators were asked for different
+    /// gist lengths and were checked against different bounds, so they are not one recipe.
+    /// `None` and `Some(Utf8Div4)` are the same run and both add nothing to the hash — the
+    /// `normaliser` precedent — so every recipe computed before this field existed is unchanged.
+    pub estimator: Option<smysl_core::TokenEstimator>,
 }
 
 impl Conditions {
@@ -83,6 +91,7 @@ impl Conditions {
             normaliser: None,
             lang_policy: None,
             framing: None,
+            estimator: None,
         }
     }
 
@@ -129,6 +138,17 @@ impl Conditions {
     pub fn with_normaliser(mut self, n: smysl_core::quote::Normaliser) -> Conditions {
         self.normaliser = match n {
             smysl_core::quote::Normaliser::V1 => None,
+            other => Some(other),
+        };
+        self
+    }
+
+    /// The estimator the granularity bounds were counted with.
+    ///
+    /// The default is recorded as absent, because it is what an absent field has always meant.
+    pub fn with_estimator(mut self, e: smysl_core::TokenEstimator) -> Conditions {
+        self.estimator = match e {
+            smysl_core::TokenEstimator::Utf8Div4 => None,
             other => Some(other),
         };
         self
@@ -203,6 +223,13 @@ impl Conditions {
         if let Some(f) = self.framing {
             push(b, b"framing");
             push(b, f.as_bytes());
+        }
+        // Absent for the default count, like `normaliser` above. It decides what the gist
+        // instruction states and which gists the check accepts, so it decides what was asked
+        // and what was kept.
+        if let Some(e) = self.estimator {
+            push(b, b"estimator");
+            push(b, e.id().as_bytes());
         }
     }
 }

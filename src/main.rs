@@ -1017,6 +1017,12 @@ fn cli() -> Command {
                         .help("Granularity preset recorded in the recipe (standard = default)"),
                 )
                 .arg(
+                    Arg::new("estimator")
+                        .long("estimator")
+                        .value_name("ID")
+                        .help("Count the gist bound with this estimator, and state it (F-2)"),
+                )
+                .arg(
                     Arg::new("max-output")
                         .long("max-output")
                         .value_name("N")
@@ -4612,6 +4618,25 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     }
     if let Some(g) = m.get_one::<String>("granularity") {
         opts = opts.with_granularity(g);
+    }
+    // The estimator decides both the bound stated in the prompt and the bound the staged units
+    // are checked against, so an id this build lacks is refused rather than defaulted.
+    if let Some(id) = m.get_one::<String>("estimator") {
+        match TokenEstimator::parse(id) {
+            Some(e) => opts = opts.with_estimator(e),
+            None => {
+                eprintln!("smysl ingest: unknown estimator `{id}`");
+                eprintln!(
+                    "  known: {}",
+                    TokenEstimator::ALL
+                        .iter()
+                        .map(|e| e.id())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                return ExitCode::Usage;
+            }
+        }
     }
     if let Some(n) = m.get_one::<usize>("max-output") {
         opts = opts.with_max_output(*n);

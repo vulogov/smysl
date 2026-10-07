@@ -316,15 +316,43 @@ Each section: today, change, API, wire, other implementations, tests, exit test.
 - **Pack.** No new variant. `Estimator::Utf8Div4` keeps its id and its `+ 2`, now documented as
   framing that applies to every estimator and is not part of what an id means — an id names a
   count. Cost prediction is the faithful half of OQ-31 and did not need to change.
-- **CLI.** `check --estimator <id>` overrides whatever profile is in force, and refuses an id
-  this build does not have rather than carrying it in as `Unknown`: the caller asked for a
-  specific count, and reporting every unit unevaluable would answer a different question.
-  `pack --tokenizer` is unchanged.
-- **H-5 (template bound).** Not generated per estimator. The templates state characters per
-  script as compile-time text under a versioned prompt id, and ingest cannot yet run under a
-  non-default profile, so generating it would churn template versions for unreachable
-  behaviour. Instead the prompt test now asserts that the default estimator *is* `Utf8Div4`, so
-  the day the default moves, the templates have to move with it.
+- **CLI.** `check --estimator <id>` overrides whatever profile is in force, and
+  `ingest --estimator <id>` sets the bound the prompt states and the bound the units are checked
+  against. Both refuse an id this build does not have rather than carrying it in as `Unknown`:
+  the caller asked for a specific count, and reporting every unit unevaluable would answer a
+  different question. `pack --tokenizer` is unchanged.
+- **H-5 (template bound), and reaching F-2 from ingest.** Done in a second pass, because F-2 as
+  first landed was a capability nothing could use: `ingest --granularity` chose among three
+  presets and all three counted bytes, so the 12.67% S0 measured kept being lost. Now
+  `ingest --estimator <id>` sets both halves at once — `gist_bound_for` states the estimator's
+  own budget in the prompt, and `IngestOptions::granularity_profile` carries it into the bound
+  the staged units are checked against.
+  - The stated numbers are derived from the weights as **prose**, not as a pure run of one
+    script: whitespace has its own weight, so four characters and a space (a shorter word than
+    English averages, so the space cost is over-estimated and the budget under-estimated), then
+    rounded down to a multiple of five. Under `content/1` that is 120 Latin, 100 Cyrillic, 105
+    Greek, 30 CJK, against measured real-text budgets of 122, 101, 111 and 35 — every stated
+    figure at or below what the check accepts, which a test verifies as prose of each script.
+    Latin is unchanged at 120; only Cyrillic and Greek gain, and CJK tightens from 40.
+  - The default's sentence is the shipped constant, byte for byte. Recomputing it would change
+    the text of every ingest and so every recipe, for no gain.
+  - The template **version does not move with the estimator**: it is one text with one
+    parameter, and which estimator produced it is recorded in the recipe instead of in a
+    version that would then mean two things.
+  - `Conditions.estimator` is new, on the `normaliser` precedent: `None` and the default both
+    add nothing to the hash, so every recipe computed before the field existed is unchanged,
+    and `smysl/content/1` is pushed. Without it two runs told different gist lengths under the
+    same preset name would have hashed to one recipe — `granularity` records a preset *name*,
+    and a preset says nothing about what counts against its bounds.
+  - `IngestOptions.estimator_named` exists for the same reason `granularity_named` does, and a
+    worse one: without it the profile is not applied, so the prompt would state the new bound
+    (about 100 characters of Cyrillic) while the check still enforced 67 — a caller asking for
+    a fairer bound would have got **more** `SMY-E022`, not fewer. Naming an estimator therefore
+    counts as naming the profile.
+  - `granularity_profile()` leaves the default `Unset` rather than naming it, so a default
+    ingest's profile is still exactly the preset it was before F-2 existed.
+  - The prompt test also asserts the default estimator *is* `Utf8Div4`, so the templates cannot
+    silently outlive it.
 - **Python/JS/Go.** None (no check pass). Key 5 is preserved by generic maps.
 - **Tests.** `estimate.rs`: weights pinned to the fixture, the default count identical to
   `smysl_core::tokens`, counts monotone under concatenation and ≥ 1 for non-empty, per-script

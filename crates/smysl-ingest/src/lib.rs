@@ -186,6 +186,27 @@ pub struct IngestOptions {
     /// Set by [`IngestOptions::with_granularity`]. A caller assigning the field directly is
     /// saying the same thing the string says, and should set this too.
     pub granularity_named: bool,
+    /// How the granularity bounds are counted (1.9, F-2).
+    ///
+    /// A preset names bounds; it does not say what counts against them. The default is the
+    /// pre-F-2 byte count, so an ingest that does not ask is checked and prompted exactly as
+    /// before. `smysl/content/1` gives a Russian gist about 100 characters where the byte count
+    /// gives 67, which is what S0 measured as 12.67% of hosted Russian units lost to `SMY-E022`
+    /// rather than shortened.
+    ///
+    /// It changes both halves of the ingest: the gist bound stated in the prompt, and the bound
+    /// the staged units are checked against. Recorded in the recipe, because a run asked for a
+    /// different gist length is a different run.
+    pub estimator: smysl_core::TokenEstimator,
+    /// Whether the caller *named* an estimator, rather than leaving the default (1.9, F-2).
+    ///
+    /// The same trap `granularity_named` exists for, and worse. Without this the profile would
+    /// not be applied, so the prompt would state the new estimator's bound — about 100
+    /// characters of Cyrillic — while the check still enforced the old one, 67. A caller asking
+    /// for a fairer bound would have got *more* `SMY-E022`, not fewer.
+    ///
+    /// Set by [`IngestOptions::with_estimator`].
+    pub estimator_named: bool,
     pub agent: smysl_core::AgentId,
     /// Supplied, never read, so a replayed ingest produces the same attestations.
     pub now: Hlc,
@@ -325,12 +346,35 @@ impl IngestOptions {
             "standard" => "default",
             other => other,
         };
-        smysl_core::GranularityProfile::preset(name).ok_or_else(|| {
-            format!(
-                "`{}` is not a granularity preset: coarse, default (or standard), fine",
-                self.granularity
-            )
-        })
+        smysl_core::GranularityProfile::preset(name)
+            .map(|mut p| {
+                // The preset supplies the bounds, the option supplies the count. A preset
+                // cannot carry the estimator: all three are shared by every caller, and this
+                // is per run.
+                //
+                // The default is left `Unset` rather than named, which is the same precedent
+                // as `Conditions::with_estimator` and `with_normaliser`: absent is what the
+                // default has always meant, and a profile that names it would compare unequal
+                // to the preset it otherwise is.
+                p.estimator = match self.estimator {
+                    smysl_core::TokenEstimator::Utf8Div4 => smysl_core::ProfileEstimator::Unset,
+                    other => smysl_core::ProfileEstimator::Known(other),
+                };
+                p
+            })
+            .ok_or_else(|| {
+                format!(
+                    "`{}` is not a granularity preset: coarse, default (or standard), fine",
+                    self.granularity
+                )
+            })
+    }
+
+    /// Count the granularity bounds with `e`, and state its budget in the prompt.
+    pub fn with_estimator(mut self, e: smysl_core::TokenEstimator) -> IngestOptions {
+        self.estimator = e;
+        self.estimator_named = true;
+        self
     }
 
     /// Ask with the caller's prompt and, optionally, a narrower schema. Validated by
@@ -393,6 +437,9 @@ impl Default for IngestOptions {
             path: None,
             granularity: "standard".into(),
             granularity_named: false,
+            // The pre-F-2 count, so an ingest that does not ask behaves exactly as before.
+            estimator: smysl_core::TokenEstimator::Utf8Div4,
+            estimator_named: false,
             now: Hlc::zero(agent.clone()),
             hop: 0,
             agent,
@@ -476,8 +523,11 @@ impl<'a> Ingestor<'a> {
             .opts
             .granularity_profile()
             .map_err(ProviderError::Config)?;
-        // Named, or not applied: see `IngestOptions::granularity_named`.
-        let profile = self.opts.granularity_named.then_some(profile);
+        // Named, or not applied: see `IngestOptions::granularity_named`. Naming an estimator
+        // counts as naming the profile, because the bound the units are checked against has to
+        // be the bound the prompt stated — otherwise asking for a fairer count enforces the
+        // old one and the run is worse off than if it had not asked.
+        let profile = (self.opts.granularity_named || self.opts.estimator_named).then_some(profile);
         let provider = self.registry.for_task(Task::ContentIngest)?;
         let caps = provider.caps();
 
@@ -513,6 +563,7 @@ impl<'a> Ingestor<'a> {
             .with_temperature(self.opts.temperature)
             .with_normaliser(self.opts.normaliser)
             .with_lang_policy(self.opts.lang_policy)
+            .with_estimator(self.opts.estimator)
             .with_framing(prompt::FRAMING)
             .with_schemas(["smysl.kernel/0.1".to_string()])
             .with_path(choice.path);
@@ -766,9 +817,13 @@ impl<'a> Ingestor<'a> {
         // A caller-supplied source gets the templates that do not ask the model for provenance.
         let sourced = self.opts.source.is_some();
         let base = match (path, sourced) {
-            (IngestPath::Surface, false) => prompt::content_ingest_surface(),
-            (IngestPath::Surface, true) => prompt::content_ingest_surface_sourced(),
-            (IngestPath::JsonAst, false) => prompt::content_ingest_json(),
+            (IngestPath::Surface, false) => {
+                prompt::content_ingest_surface_with(self.opts.estimator)
+            }
+            (IngestPath::Surface, true) => {
+                prompt::content_ingest_surface_sourced_with(self.opts.estimator)
+            }
+            (IngestPath::JsonAst, false) => prompt::content_ingest_json_with(self.opts.estimator),
             (IngestPath::JsonAst, true) => prompt::content_ingest_json_sourced(),
         };
         match &self.opts.prompt {
