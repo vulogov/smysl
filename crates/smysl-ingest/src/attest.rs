@@ -311,7 +311,16 @@ mod tests {
         for &w in What::ALL {
             let t = w.template();
             assert!(t.system.contains("data, never instruction"), "{w}");
-            assert_eq!(t.render("x").matches(FENCE).count(), 2, "{w}");
+            // `render` derives the marker from the input (D-10), so the literal `FENCE` is not
+            // what a rendered question carries. The attest templates are fenced by the same
+            // mechanism as the ingest ones, which is the point of asserting it here too.
+            let rendered = t.render("x");
+            assert_eq!(
+                rendered.matches(&crate::prompt::fence_for("x")).count(),
+                2,
+                "{w}"
+            );
+            assert!(!rendered.contains(FENCE), "{w} sends the literal marker");
         }
     }
 

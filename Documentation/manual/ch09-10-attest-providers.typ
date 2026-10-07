@@ -140,6 +140,25 @@ unit, so the failure is reported once, up front, rather than once per unit.
   *data, never instruction* — the same fencing discipline Chapter 10 covers
   for `ingest`, applied here to a whole unit instead of raw prose.
 
+  From 1.9 the markers are *derived from the content they fence*: a 16-hex
+  digest of it, so `<<<SMYSL-INPUT-9f3c…>>>` rather than a fixed string.
+  A fixed marker is a seam the content can write. Text containing
+  `<<<SMYSL-INPUT>>>` closed the fence early and everything after it read as
+  the prompt's own voice — the document was then instructing the model, which
+  is exactly what the *data, never instruction* sentence exists to prevent and
+  could not. A document cannot contain the marker derived from it short of
+  finding a BLAKE3 fixed point, and a document that contains the *prefix* is
+  reported as `SMY-W433` with its offset: survivable, and still worth knowing.
+  The repair turn fences the previous answer and the diagnostics the same way,
+  each under its own derived marker, because the diagnostics quote the model's
+  own text back at it.
+
+  None of this is a security boundary, and the chapter says so twice for a
+  reason. Rule T, the ceiling and the quote check are what make an obedient
+  answer harmless: a model that does what an injected paragraph tells it still
+  cannot write `measured`, and a quote it invents still fails against the
+  document.
+
   The model must answer with `YES` or `NO` as its first word, followed by a
   short reason. `attest` reads that first word and nothing more sophisticated:
   an answer that starts with neither word — `"I'm not sure"`, an empty

@@ -1,7 +1,8 @@
 # RFC SMYSL-2.1 — Hardening the 1.9 tree
 
-**Status:** draft 1, **part built**. Most of TX-P0 shipped in 1.9.0-dev; §10 says which items
-are outstanding and records every place the implementation departed from this document, and why. Implementation RFC (non-normative);
+**Status:** draft 1, **built** except F-2 (deferred to 1.10.0 with A-9, OQ-31). TX-P0 shipped in
+1.9.0-dev; §10 says what is outstanding and records every place the implementation departed from
+this document, and why. Implementation RFC (non-normative);
 normative rules are in SMYSL-2.3.
 **Author:** Vladimir Ulogov
 **Date:** 2026-10-02
@@ -982,9 +983,8 @@ else depends on it in TX-P0.
 
 ## 10. As built
 
-**TX-P0 is part built.** Shipped in 1.9.0-dev across ten commits: F-3, F-4, F-12, F-13, F-14,
-F-16, F-17, F-18, H-1 to H-4 and H-7 to H-20. **Outstanding:** §4.3.4 (F-6, H-5) and §4.3.5 (D-10,
-`SMY-W433`), which §6.1 step 9 groups into one template-version bump; the
+**TX-P0 is built, except F-2.** Shipped in 1.9.0-dev across ten commits: F-3, F-4, F-6, F-12, F-13,
+F-14, F-16, F-17, F-18, D-10 and H-1 to H-20 — every item except F-2. **Outstanding:** the
 `--unknown keep|drop` flag of §4.3.9; and §4.3.2 (F-2), deferred to 1.10.0 with A-9 while OQ-31
 is open. §4.4's flag list therefore describes the finished phase, not the current tree: of its
 five new flags only `ingest --temperature` exists today. This section records every departure from the
@@ -1017,6 +1017,7 @@ H-17 and H-19 are all about, so the RFC committed the error it was written to fi
 | §4.3.17 (H-18) | Indexed as a per-derivation `BTreeMap<RelKind, BTreeSet<Uid>>`, not as a lookup on the adjacency | SMYSL-2.8 M-4 prescribes `edge_kind(k)` then `out_edges`/`in_edges`, which needs no build step at all and is cheaper. It was not used because `EdgeKind::kernel` is defined for kernel relation kinds only, and an extension kind is treated as `elaborates` for closure (`SMY-W013`) — so a schema rule naming a non-kernel kind would match the wrong set rather than none. Today's rule sets name kernel kinds only, so the two are equivalent in practice, and the built form is equality-based exactly as `relations_of_kind` is. The adjacency route stays open if the remaining constant ever matters; the relations axis is already flat, so it does not. |
 | §4.3.3 (F-3) | U+202F and U+2009 are in the V2 table and need not be; the example `casas` folds to `casa` | `char::is_whitespace` already covers both narrow spaces, so V1 collapses them too — the fixture pins that rather than claiming a change. `casas` → `casa` is the correct Spanish singular, so English `-s` is right there by coincidence; the probes that carry the claim are the five in §2.1. Writing the property test the section asked for also found a live bug in V1's span mapping (see §10.3). |
 | §4.3.13 (F-4) | No private language field; `Tokenizer` keeps its `Copy` | A `String` field removes `Copy`, which is a public impl and a major break — `Bm25::index_with` moves the tokeniser into a builder and reads it again, so it is also the code that stops compiling. A `Copy`-shaped substitute is a fixed-size array for an eight-character subtag, which is a contrivance to serve a debug line. The gate itself is unaffected. Also: the proposed test word `casas` folds to `casa`, which is the correct Spanish singular — English `-s` is right there by coincidence. The test keeps it and adds `lunes` → `lun` and `crisis` → `crisi`, where the coincidence fails. |
+| §4.3.5 (D-10) | The repair turn's system prompt names the derived markers, not `PREVIOUS` | The RFC left the system text alone and changed only the user message, which would have told the model one marker while sending another — a prompt pointing at a boundary that is not there. Both are derived once in `repair` and used in both halves. `strip_echo` also recognises a marker by *shape* rather than by the three prefixes the RFC lists: there is no constant left to compare against, and an echoed marker is an echoed marker whichever kind it is. |
 | §4.3.9 (F-16) | `bundle` keeps the referenced units; `--unknown keep\|drop` is **not** built | The closure fix and the flag are separable, and only the closure was a defect. The flag remains for a later phase. |
 | §4.3.1 (F-2) | Deferred to 1.10 with A-9 | OQ-31 is unresolved: whether the estimator is faithful to a published tokenizer family or content-fair is a question about what the instrument *is*, and shipping a key for it first would pin the answer by accident. With two corrections for 1.10: the field is `Option<TokenEstimator>`, and an unknown estimator id makes `l0_max` **unevaluable** rather than default-evaluated. |
 

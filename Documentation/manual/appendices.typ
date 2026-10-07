@@ -669,6 +669,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W308`], [warning], [Attributed quote occurs only loosely — elided or reworded.]),
     ([`SMY-W309`], [warning], [A unit's own source was replaced by the caller's, under a source policy that overrides.]),
     ([`SMY-W435`], [warning], [A chunk failed an attempt and then succeeded; the earlier error is kept, naming its attempt. A repair that worked used to erase what it repaired.]),
+    ([`SMY-W433`], [warning], [An ingest input contains a marker this tool sends (`<<<SMYSL-`), with the byte offset. The fence around the input is derived from the input, so the marker cannot close it; the note is there because a document speaking in the tool's voice is a thing its reader should know.]),
   ),
 )
 

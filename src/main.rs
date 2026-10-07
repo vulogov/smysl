@@ -1017,6 +1017,13 @@ fn cli() -> Command {
                         .help("Output tokens per call [default: the provider's max_output, at least 2048]"),
                 )
                 .arg(
+                    Arg::new("lang-policy")
+                        .long("lang-policy")
+                        .value_name("P")
+                        .value_parser(["source"])
+                        .help("What language the model writes in [default: source]"),
+                )
+                .arg(
                     Arg::new("normaliser")
                         .long("normaliser")
                         .value_name("V")
@@ -4593,6 +4600,18 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     };
     if let Some(p) = path_arg.as_deref().and_then(smysl::IngestPath::parse) {
         opts = opts.with_path(p);
+    }
+    // One accepted value, and the flag exists so that a caller can say it rather than assume
+    // it: `pivot:<lang>` is a later release's, and `LangPolicy::parse` refuses it by name
+    // instead of falling back to `source` and handing back gists in the passage's language.
+    if let Some(p) = m.get_one::<String>("lang-policy") {
+        match smysl::LangPolicy::parse(p) {
+            Ok(policy) => opts = opts.with_lang_policy(policy),
+            Err(e) => {
+                eprintln!("smysl ingest: {e}");
+                return ExitCode::Usage;
+            }
+        }
     }
     // V2 answers five probes that V1 calls `Loose` or `Absent` on quotes a reader would call
     // verbatim, and `E307` on an honest quote refuses a correct attribution. It is opt-in in 1.9

@@ -66,6 +66,51 @@ use smysl_provider::{Provider, ProviderError, Registry, Request, Task, Usage};
 
 #[cfg(feature = "model")]
 pub use attest::{attest, AttestOptions, AttestReport, Judgement, What};
+
+/// What language the model writes in (F-6).
+///
+/// `Source` is the only policy 1.9 implements and the only one it accepts: write each gist in
+/// the language of the passage it came from. It is also the only policy that keeps the quote
+/// check honest, since a translated quote cannot be `Present` against the text it came from.
+///
+/// `pivot:<lang>` — extract into one working language and keep the original as the quote — is
+/// SMYSL-2.4's, and is refused here rather than ignored: a caller who names it is asking for
+/// something this release does not do, and silently giving them `Source` would hand back
+/// gists in whatever language the passage used while they believed otherwise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[non_exhaustive]
+pub enum LangPolicy {
+    #[default]
+    Source,
+}
+
+impl LangPolicy {
+    /// The identifier a recipe records.
+    pub const fn id(self) -> &'static str {
+        match self {
+            LangPolicy::Source => "source",
+        }
+    }
+
+    /// Parse a policy name, refusing the one that is reserved.
+    pub fn parse(s: &str) -> Result<LangPolicy, ProviderError> {
+        match s {
+            "source" => Ok(LangPolicy::Source),
+            p if p.starts_with("pivot:") => Err(ProviderError::Config(format!(
+                "`{p}` is reserved for a later release; only `source` is implemented"
+            ))),
+            other => Err(ProviderError::Config(format!(
+                "`{other}` is not a language policy; expected `source`"
+            ))),
+        }
+    }
+}
+
+impl std::fmt::Display for LangPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.pad(self.id())
+    }
+}
 pub use smysl_core::SourcePolicy;
 pub use stage::{Attest, Attesting, Staged};
 
@@ -145,6 +190,12 @@ pub struct IngestOptions {
     /// against. Zero for a one-shot ingest; a pipeline increments it per step.
     pub hop: u32,
     pub temperature: f32,
+    /// What language the model writes in (1.9).
+    ///
+    /// `Source` always, and the only reason the field exists is that the recipe has to record
+    /// it: a run under a policy and a run under none are different runs, and before 1.9 there
+    /// was no policy at all, so nothing was recorded and nothing was asked for.
+    pub lang_policy: LangPolicy,
     /// Which comparison form the quote check uses (1.9).
     ///
     /// `V1` by default, which is what every release up to 1.8 checked with. `V2` answers the
@@ -207,6 +258,12 @@ impl IngestOptions {
 
     pub fn with_max_output(mut self, n: usize) -> IngestOptions {
         self.max_output = n;
+        self
+    }
+
+    /// What language the model writes in.
+    pub fn with_lang_policy(mut self, p: LangPolicy) -> IngestOptions {
+        self.lang_policy = p;
         self
     }
 
@@ -335,6 +392,7 @@ impl Default for IngestOptions {
             agent,
             temperature: 0.0,
             normaliser: smysl_core::quote::Normaliser::V1,
+            lang_policy: LangPolicy::Source,
             max_output: 0,
             model: String::new(),
             prompt: None,
@@ -422,6 +480,23 @@ impl<'a> Ingestor<'a> {
             chunk::Window::for_context(caps.context_window, self.opts.output_budget(&caps));
         let chunks = chunk::chunk(input, window);
 
+        // D-10. The fence is derived from the input, so a document carrying a marker cannot
+        // close it — but it is still a document trying to speak in this tool's voice, and a
+        // reader wants to know. Reported once per input with the offset, not per chunk: the
+        // caller is looking for a place in their document.
+        let mut marker_notes: Vec<Diagnostic> = Vec::new();
+        if let Some(at) = input.find(prompt::MARKER_PREFIX) {
+            marker_notes.push(
+                Diagnostic::new(smysl_core::Code::W433)
+                    .with_message(format!(
+                        "input contains `{}` at byte {at}; it is sent inside a fence derived \
+                         from the input, so it cannot close one",
+                        prompt::MARKER_PREFIX
+                    ))
+                    .with_suggestion("check that the passage is the document's own text"),
+            );
+        }
+
         // The recipe names the template that is actually sent. It used to hardcode the
         // built-in id at version 1, which made the documented way to distinguish a deployment's
         // wording — change the id or the version — a change nothing read.
@@ -431,6 +506,8 @@ impl<'a> Ingestor<'a> {
             .with_granularity(&self.opts.granularity)
             .with_temperature(self.opts.temperature)
             .with_normaliser(self.opts.normaliser)
+            .with_lang_policy(self.opts.lang_policy)
+            .with_framing(prompt::FRAMING)
             .with_schemas(["smysl.kernel/0.1".to_string()])
             .with_path(choice.path);
         let conditions = match &self.opts.source {
@@ -447,6 +524,8 @@ impl<'a> Ingestor<'a> {
             model: Some(self.model_for(&caps).to_string()),
             ..IngestReport::default()
         };
+
+        report.diagnostics.append(&mut marker_notes);
 
         let mut units: Vec<UnitCore> = Vec::new();
         let mut relations: Vec<Relation> = Vec::new();

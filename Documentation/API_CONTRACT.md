@@ -34,8 +34,9 @@ regretted, and three gates that each know what they are blind to.
   `quote_support_span_with` and `QuoteNormaliser` — a second comparison form for the quote
   check, chosen by the caller. The four 1.3 names keep the normalisation 1.3 froze: `V1` is what
   they compare with, and that is the whole of why the new names exist rather than a flag on the
-  old ones. (F-3 of SMYSL-2.1.) The counts stand at **279 and 233** with those three; 1.9 is not
-  cut yet, and `tests/public-api.txt` is the number that binds either way.
+  old ones. (F-3 of SMYSL-2.1.) `LangPolicy` follows, for F-6: what language the model
+  writes in, recorded in the recipe. The counts stand at **280 and 233**; 1.9 is not cut yet,
+  and `tests/public-api.txt` is the number that binds either way.
 - **Every public item in each of the eleven library crates** — they share one version, all are
   published, and `make semver` enforces each of them individually. That is the larger and
   truer figure, and §0.2 of `ROAD_TO_1.0.md` explains why it is the one that binds.

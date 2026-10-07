@@ -51,6 +51,21 @@ pub struct Conditions {
     /// change every one of them for no change in what happened. Only `V2` is pushed, following
     /// the `source` precedent above.
     pub normaliser: Option<smysl_core::quote::Normaliser>,
+    /// The language policy the run was asked under (1.9).
+    ///
+    /// `None` for a run computed before the field existed, which is every recipe up to 1.8:
+    /// there was no policy then, and the templates said nothing about language. `Some` is
+    /// pushed, so 1.9's runs are distinguishable from 1.8's — which they are, because the
+    /// templates now carry `LANG_RULE` and the version bump says so too.
+    pub lang_policy: Option<crate::LangPolicy>,
+    /// The framing scheme the input was sent under (1.9).
+    ///
+    /// `Some("smysl/fence/1")` for every run 1.9 makes. It is recorded because a prompt
+    /// override's fingerprint covers only its own text, and the framing is applied by
+    /// `Template::render` rather than written in that text — so without this field an
+    /// override's recipe would not change when the framing did, and the framing is part of
+    /// what the model was asked under.
+    pub framing: Option<&'static str>,
 }
 
 impl Conditions {
@@ -66,6 +81,8 @@ impl Conditions {
             path: IngestPath::Surface,
             source: None,
             normaliser: None,
+            lang_policy: None,
+            framing: None,
         }
     }
 
@@ -91,6 +108,18 @@ impl Conditions {
 
     pub fn with_temperature(mut self, t: f32) -> Conditions {
         self.temperature = t;
+        self
+    }
+
+    /// The framing scheme the input was sent under.
+    pub fn with_framing(mut self, f: &'static str) -> Conditions {
+        self.framing = Some(f);
+        self
+    }
+
+    /// The language policy the run was asked under.
+    pub fn with_lang_policy(mut self, p: crate::LangPolicy) -> Conditions {
+        self.lang_policy = Some(p);
         self
     }
 
@@ -164,6 +193,16 @@ impl Conditions {
         if let Some(n) = self.normaliser {
             push(b, b"normaliser");
             push(b, n.id().as_bytes());
+        }
+        // Absent for a recipe computed before the field existed, like `source` and
+        // `normaliser` above. A policy is part of what the model was asked to do.
+        if let Some(p) = self.lang_policy {
+            push(b, b"lang-policy");
+            push(b, p.id().as_bytes());
+        }
+        if let Some(f) = self.framing {
+            push(b, b"framing");
+            push(b, f.as_bytes());
         }
     }
 }

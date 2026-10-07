@@ -145,7 +145,7 @@ pub use smysl_ingest::recipe::short as recipe_short;
 #[cfg(feature = "ingest")]
 pub use smysl_ingest::{
     attest, AttestOptions, AttestReport, IngestOptions, IngestPath, IngestReport, Ingestor,
-    Judgement, What, DEFAULT_REPAIR_ATTEMPTS,
+    Judgement, LangPolicy, What, DEFAULT_REPAIR_ATTEMPTS,
 };
 #[cfg(feature = "stage")]
 pub use smysl_ingest::{stage, Attesting, Staged};
@@ -216,8 +216,11 @@ mod tests {
         // with `SMY-W432`, the warning that has to ship a release before `lang` becomes a core
         // key, because the lint is the whole migration. 61 with `SMY-W435`: a chunk that
         // succeeded on a later attempt used to throw the earlier error away, which is the one
-        // a reader needs to know the model got it wrong first.
-        assert_eq!(Code::ALL.len(), 61);
+        // a reader needs to know the model got it wrong first. 62 with `SMY-W433`: an input
+        // carrying a marker this crate sends is reported rather than assumed innocent — the
+        // fence it would collide with is derived per input, so the collision is survivable, and
+        // a reader still wants to know the document tried.
+        assert_eq!(Code::ALL.len(), 62);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

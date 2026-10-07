@@ -107,6 +107,7 @@ pub use smysl::KernelType
 pub use smysl::Label
 pub use smysl::LabelBinding
 pub use smysl::LabelError
+pub use smysl::LangPolicy
 pub use smysl::LangTag
 pub use smysl::Ledger
 pub use smysl::LedgerEntry

@@ -289,6 +289,7 @@ registry! {
     }
     Provider => {
         W435 = "SMY-W435", Warn,  "A chunk succeeded on a later attempt; the earlier error is kept";
+        W433 = "SMY-W433", Warn,  "Ingest input contains a smysl prompt marker; sent inside a derived fence";
     }
 }
 
@@ -576,10 +577,11 @@ mod tests {
     /// the one a unit gave — numbered past `W306`, which stays retired rather than reused. 53 as
     /// of 1.4.0: `SMY-W056`, a withdrawal naming an edge 1.4 does not let anyone withdraw.
     /// 61 as of 1.9.0, the last of them `SMY-W435`: a repair that worked used to erase what it
-    /// repaired.
+    /// repaired. 62 with `SMY-W433`: an input carrying a prompt marker is told about rather than
+    /// trusted to be innocent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 61);
+        assert_eq!(Code::ALL.len(), 62);
     }
 
     #[test]

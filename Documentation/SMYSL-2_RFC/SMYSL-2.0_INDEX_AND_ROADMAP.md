@@ -108,7 +108,7 @@ scale. This set does that. It is **nine documents, one normative**:
 | phase | RFC | delivers | exit (summary) | depends on |
 |---|---|---|---|---|
 | S0 | 2.2 | extraction stability and proposition-trust spike with today's CLI | 2.2 decision table | — |
-| TX-P0 **part built** | 2.1 | **Built:** F-3, F-4, F-12, F-13, F-14, F-16, F-17, F-18, H-1 to H-4, H-7 to H-20. **Not built:** F-2 (deferred to 1.10.0 with A-9, OQ-31), F-6 (language policy), H-5 and H-6/D-10 (the §4.3.4 template bump and the injection guard), and `bundle --unknown keep\|drop` | partly met: F-16/F-17 reproductions fixed, the probes reversed, and suite, `make semver`, `api-check`, `doc-output` and `spec-tables` clean on every commit. The §4.3.3–4.3.5 group (one template bump) is outstanding. Departures from plan: 2.1 §10 | G−1 accepted in full |
+| TX-P0 **built** | 2.1 | Every item except **F-2**, deferred to 1.10.0 with A-9 while OQ-31 is open, and the `bundle --unknown keep\|drop` flag, which was separated from F-16 because only the closure was a defect | met: F-16/F-17 reproductions fixed, every probe reversed, and suite, `make semver`, `api-check`, `doc-output` and `spec-tables` clean on every commit. Departures from plan: 2.1 §10 | G−1 accepted in full |
 | TX-P1 | 2.4 | parts, readings, manifests, object store, first readers, structure, locators; `admission` opened (2.3 A-8.1) | GE-T1 (Bibles and JSON) | TX-P0, G0 |
 | TX-P2 | 2.4 | segmenter, analyzers, `lingua`, chat readers, `text append`, redaction (rule Z) | GE-T1 (chats), redaction survives a stale peer | TX-P1 |
 | TX-P3 | 2.4 | EDTF, `published`, datings, rule E engine, locks, `date` commands | GE-T13 | TX-P2 |
@@ -361,15 +361,10 @@ Coding speed cannot compress those.
 
 ## 9. Next actions
 
-1. **Finish TX-P0.** Most of it is built in 1.9.0-dev and 2.1 §10 records the departures. What
-   remains is one coherent group and one deferral:
-   - **§4.3.4 (F-6 language policy, H-5 gist bound) and §4.3.5
-     (D-10 injection guard, `SMY-W433`)** are a single template-version bump — 2.1 §6.1 step 9
-     deliberately groups them so one bump covers all three, and splitting them would cost three
-     bumps and three recipe changes. They are the last items before 1.9.0 is releasable as
-     specified.
-   - **F-2** stays deferred to 1.10.0 with A-9 while OQ-31 is open.
-   - **`bundle --unknown keep|drop`** was separated from F-16: only the closure was a defect.
+1. ~~**Finish TX-P0**~~ **Done**, except F-2, which stays deferred to 1.10.0 with A-9 while
+   OQ-31 is open, and `bundle --unknown keep|drop`, separated from F-16 because only the closure
+   was a defect. 2.1 §10 records every departure from the plan. **1.9.0 is releasable**: G−1 is
+   satisfied and the phase's exit conditions are met.
 2. **Run S0** from 2.2. *This is now the critical path* — G0 gates TX-P1 on it. It needs no code
    beyond 2.2's scripts, and two of its workarounds have disappeared now that 2.1 has landed:
    `-C` being ignored (H-8), and the model missing from the recipe (H-9). It needs live model
