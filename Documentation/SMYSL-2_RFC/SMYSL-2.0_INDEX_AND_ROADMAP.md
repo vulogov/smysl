@@ -57,12 +57,12 @@ scale. This set does that. It is **nine documents, one normative**:
 ## 1. The path
 
 ```
-   owner accepts 2.3 A-4, A-8.1, A-9, A-10 (items 2–3)   ← needed before 1.9.0 ships
+   owner accepts 2.3 A-4, A-8.1, A-9, A-10 (items 2–3)   ← done 2026-10-02, 1.9.0 releasable
             ┌─────────────── weeks 1–2 ───────────────┐
-            │  TX-P0  (2.1)  ‖  S0 spike  (2.2)        │   owner reviews the rest of 2.3
+            │  TX-P0 done   ‖  S0 spike done (2.2)     │   rest of 2.3 accepted 2026-10-07
             └──────────────┬──────────────┬────────────┘
                            │              │
-                    gate G0: spike decision table (2.2 §3.7) + 2.3 accepted
+              gate G0 PASSED 2026-10-07: decision table = continue + pivot; 2.3 accepted
                            │
             TX-P1 → TX-P2 → TX-P3 → TX-P4 → TX-P5          (2.4)   library, time, index, ingest
                                               │
@@ -96,10 +96,46 @@ scale. This set does that. It is **nine documents, one normative**:
 | gate | after | passes when | if it fails |
 |---|---|---|---|
 | **G−1** | before 1.9.0 is released | the owner accepts the parts of 2.3 that TX-P0 activates: A-4 (digest), A-8.1 (four enumerations opened, 255 reserved in five), A-9 (estimator key), A-10 items 2–3 (`lang` lint, strict `source`). Otherwise 1.9.0 ships wire behaviour no normative text covers. | TX-P0 ships without those items. |
-| **G0** | S0 + TX-P0 | 2.2's decision table (§3.7) returns *continue* or a stated pivot, and the owner accepts the rest of 2.3 that TX-P1 to TX-P5 activate (A-1, A-2, A-3, A-5, A-6, the `admission` opening in A-8.1, A-11 `x.text/v1`, A-12 rules E and Z, A-13) | 2.2 §3.7 names the pivot: consensus extraction (`attested:2`), narrative out of scope, or reordered phases. 2.4 onwards is re-planned before TX-P1. |
+| **G0** **passed 2026-10-07** | S0 + TX-P0 | ~~2.2's decision table (§3.7) returns *continue* or a stated pivot, and the owner accepts the rest of 2.3 that TX-P1 to TX-P5 activate~~ **both met.** S0 ran in full (365 runs) and its table returns *continue with a stated pivot*; the owner accepted A-1, A-2, A-3, A-5, A-6, the `admission` opening in A-8.1, A-11 `x.text/v1`, A-12 rules E and Z, A-13 on 2026-10-07. Evidence: `S0_RESULTS/`. | n/a — passed. The pivot it names is §1.1 below, and 2.4 is re-planned before TX-P1. |
 | **G1** | TX-P5 | GE-T1, GE-T4, GE-T13 and GE-T14 pass inside 2.4's phases, and the TX-P5 cost report replaces the planning figures | units are not written at scale until fixed. This is the last cheap point to change identity (A-1, A-2). |
 | **G2** | TX-P11 | GE-T15: P1, P2 and P3 hold on the whole matrix | TX-P13d does not start: export is the way out of a disk store and must be exact |
 | **G3** | TX-P13d | GE-T7 at library scale | the CBOR log stays primary, and redb stays an index |
+
+
+### 1.1 G0's outcome: continue, with a stated pivot
+
+S0 ran the full protocol — 365 runs (the 335 of 2.2 §3 plus 30 of the optional arm T), 29 inputs,
+five languages, two models — and its decision table fires eight rows: T1, T3, T6, T7, T8, T11,
+T13, T14. None is inconclusive and none is unmeasured. `S0_RESULTS/` holds the report, the table
+and the findings log.
+
+§3.7 binds the spike to reordering work or changing defaults, never to killing a phase. The pivot
+it names, and what each item changes before TX-P1:
+
+| # | change | from | why |
+|---|---|---|---|
+| 1 | **F-2 comes before TX-P1.** It leaves 1.10.0 and becomes TX-P1's precondition. | T11, T14, report §2 | The one change that removes a measured, reproducible loss of propositions, and it rests on no judged label. Hosted Russian degrades 12.67% of units; 579 `E022` across the corpus. Blocked on OQ-31, which is therefore promoted to a TX-P1 blocker (§4). |
+| 2 | **Extraction is consensus by default.** TX-P5 extracts twice per window; class measures default to `attested:2`; GE-T2 reruns under that policy. | T3 | J_class within model is 1.000 local but 0.327 hosted, against a 0.6 threshold. |
+| 3 | **Class measures ship as exploration only.** Cross-lingual classes wait for TX-P10's S1 embeddings; `anchored` alone is used for the Bibles. | T6, T7 | Precision at recall 0.7 reaches 0.835 same-language and 0.712 cross-lingual against a 0.9 bar, and that is under the better of two provisional golds. |
+| 4 | **Holder and mode become structural from TX-P5's first ingest**, with a probe-set gate in its exit tests. The holder paragraph does **not** go into the TX-P0 prompt. | T8, T9 | Reported speech is extracted as asserted in 11.1–24.5% of attribution-bearing units. The holder paragraph does not reduce that, and it introduces `E022` degradations in a local configuration that had none (findings MS-9, MS-11). |
+| 5 | **GE-T5 and GE-T2 thresholds are restated relative to α**, and TX-P7's exit test changes before TX-P7 starts. | T1 | α is 0.600 [0.550, 0.646] binary and 0.330 six-label over three model coders — below 0.667 on every pairing. |
+| 6 | **FC-6 weights are calibrated on S0's M5 data**, and the cost model is revised for non-English before TX-P5 is sized. | T13, T14 | `ceil(bytes/4)` predicts a 1.96x ru/en cost; measured is 1.84x local and 3.38x hosted. Hosted Russian runs 4.0x §6's per-chapter figure, English 1.4x. |
+
+Two further findings bear on 2.4 without being table rows:
+
+- **`temperature` is correctness-relevant, not a quality knob.** Arm L is bit-identical across all
+  145 runs at T=0, and shares no uid at all at T=0.7 on five of six inputs (MS-8). It belongs in
+  the recipe and in a uid's provenance, not in user configuration.
+- **The language policy F-6 added is an instruction with no verification**, and both models
+  violate it in opposite directions — the local model writes 78.6% of Russian gists in Latin
+  script, the hosted one wrote every gist of one English chapter in Chinese (MS-5). A
+  character-range count is cheap enough to be a diagnostic, and the byte ceiling currently
+  *rewards* the violation (MS-6).
+
+**What G0 does not settle.** The same-as and holder labels are three models', not two people's,
+so every row resting on them is provisional and GE-T9's human ceiling is still owed. A-7, A-10's
+remainder, A-11 `x.query/v1`, A-12 rule N and the proposition classes, and A-14 stay for
+discussion; OQ-7, OQ-23, OQ-35 and OQ-49 stay open with them.
 
 ---
 
@@ -108,8 +144,8 @@ scale. This set does that. It is **nine documents, one normative**:
 | phase | RFC | delivers | exit (summary) | depends on |
 |---|---|---|---|---|
 | S0 | 2.2 | extraction stability and proposition-trust spike with today's CLI | 2.2 decision table | — |
-| TX-P0 **built** | 2.1 | Every item except **F-2**, deferred to 1.10.0 with A-9 while OQ-31 is open, and the `bundle --unknown keep\|drop` flag, which was separated from F-16 because only the closure was a defect | met: F-16/F-17 reproductions fixed, every probe reversed, and suite, `make semver`, `api-check`, `doc-output` and `spec-tables` clean on every commit. Departures from plan: 2.1 §10 | G−1 accepted in full |
-| TX-P1 | 2.4 | parts, readings, manifests, object store, first readers, structure, locators; `admission` opened (2.3 A-8.1) | GE-T1 (Bibles and JSON) | TX-P0, G0 |
+| TX-P0 **built** | 2.1 | Every item except **F-2** — no longer a 1.10.0 deferral: G0's pivot makes it TX-P1's precondition (§1.1 item 1), still gated on OQ-31 — and the `bundle --unknown keep\|drop` flag, which was separated from F-16 because only the closure was a defect | met: F-16/F-17 reproductions fixed, every probe reversed, and suite, `make semver`, `api-check`, `doc-output` and `spec-tables` clean on every commit. Departures from plan: 2.1 §10 | G−1 accepted in full |
+| TX-P1 | 2.4 | parts, readings, manifests, object store, first readers, structure, locators; `admission` opened (2.3 A-8.1) | GE-T1 (Bibles and JSON) | TX-P0, G0 **passed**; F-2 first (§1.1) |
 | TX-P2 | 2.4 | segmenter, analyzers, `lingua`, chat readers, `text append`, redaction (rule Z) | GE-T1 (chats), redaction survives a stale peer | TX-P1 |
 | TX-P3 | 2.4 | EDTF, `published`, datings, rule E engine, locks, `date` commands | GE-T13 | TX-P2 |
 | TX-P4 | 2.4 | substrate index, persistent postings, `text` commands | `find` p95 < 200 ms at 155k units | TX-P3 |
@@ -165,8 +201,8 @@ Everything not listed here is either resolved (§3) or does not block anything.
 
 | must be answered before | open questions | owner |
 |---|---|---|
-| **S0 / TX-P0** | OQ-31 estimator reference and objective (F-2 may slip to 1.10.0) · OQ-34 licensing of model outputs as fixtures | 2.1, 2.2 |
-| **TX-P1** | **MSRV: OQ-40 = OQ-66** (redb 4.x needs Rust 1.90; the workspace declares 1.79 and does not test it). Proposal: raise `rust-version` to 1.90 at TX-P1, with an MSRV CI job. · OQ-36 lock mechanism · OQ-37 JSON parsing inside or outside the purity gate · OQ-39 physical erasure of text in plain logs | 2.4, 2.8 |
+| ~~**S0 / TX-P0**~~ **both done** | OQ-34 licensing of model outputs as fixtures — **partly answered by S0**: arm L's model is Apache 2.0, so its outputs are usable as fixtures; the hosted model's still needs the decision | 2.1, 2.2 |
+| **TX-P1** | **OQ-31 estimator reference and objective** — promoted here by G0's pivot, because F-2 now precedes TX-P1 (§1.1 item 1). S0 supplies the calibration data: `ceil(bytes/4)` predicts a 1.96x ru/en cost against 1.84x measured locally and 3.38x hosted. · **MSRV: OQ-40 = OQ-66** (redb 4.x needs Rust 1.90; the workspace declares 1.79 and does not test it). Proposal: raise `rust-version` to 1.90 at TX-P1, with an MSRV CI job. · OQ-36 lock mechanism · OQ-37 JSON parsing inside or outside the purity gate · OQ-39 physical erasure of text in plain logs | 2.4, 2.8 |
 | **TX-P3** | OQ-13 speaker and device selectors for datings (window targets are already in) | 2.4 |
 | **TX-P4** | OQ-4 source and licence of versification maps · OQ-14 default IDF scope | 2.4, 2.5 |
 | **TX-P5 (G1)** | OQ-41 `ingest:quote` removed from span-carrying units changes their uids · OQ-43 strictness of the digest-scoped reference check | 2.4 |
@@ -176,7 +212,7 @@ Everything not listed here is either resolved (§3) or does not block anything.
 | **TX-P11** | OQ-60 what P1 compares · OQ-62 `--format pack` and `-o DIR` · OQ-63 clock of exported attestations · OQ-64 threads spanning files · OQ-25, OQ-26, OQ-28 | 2.7 |
 | **TX-P12** | OQ-53 nested payload keys in lenses · OQ-24 always state the lens chain | 2.5 |
 | **TX-P13** | OQ-65 generic entry points vs `_in` twins · OQ-67 cross-process readers · OQ-68 home of library-wide tables · OQ-69 tiering policy · OQ-16 lazy contentions (proposal: lazy) | 2.8 |
-| **not blocking** | OQ-2 (stems only, settled in practice) · OQ-3 · OQ-5 · OQ-8 (2.4 stores 15 and 18 as objects) · OQ-9 (hand-rolled EDTF) · OQ-11 · OQ-18, OQ-19, OQ-20 · OQ-30 (rest) | various |
+| **not blocking** | OQ-2 (stems only, settled in practice) · ~~OQ-3~~ **answered by S0**: the chosen Synodal module contains one `ё` in the whole Bible, so the Russian F-3 measurement rests on model-introduced `ё`, not the source · OQ-5 · OQ-8 (2.4 stores 15 and 18 as objects) · OQ-9 (hand-rolled EDTF) · OQ-11 · OQ-18, OQ-19, OQ-20 · OQ-30 (rest) | various |
 
 ---
 
@@ -361,22 +397,35 @@ Coding speed cannot compress those.
 
 ## 9. Next actions
 
-1. ~~**Finish TX-P0**~~ **Done**, except F-2, which stays deferred to 1.10.0 with A-9 while
-   OQ-31 is open, and `bundle --unknown keep|drop`, separated from F-16 because only the closure
-   was a defect. 2.1 §10 records every departure from the plan. **1.9.0 is releasable**: G−1 is
-   satisfied and the phase's exit conditions are met.
-2. **Run S0** from 2.2. *This is now the critical path* — G0 gates TX-P1 on it. It needs no code
-   beyond 2.2's scripts, and two of its workarounds have disappeared now that 2.1 has landed:
-   `-C` being ignored (H-8), and the model missing from the recipe (H-9). It needs live model
-   calls, so it needs the owner's go-ahead rather than a free afternoon.
-3. **Owner review of 2.3 Appendix E and §3 of this document.** Confirm or overrule each decision.
-   The subset G0 needs is A-1, A-2, A-3, A-5, A-6, the `admission` opening in A-8.1, A-11
-   `x.text/v1`, A-12 (rules E and Z) and A-13 — nine decisions, none of which TX-P0 touched.
-4. **Answer the TX-P1 blockers** in §4, MSRV first. OQ-40 = OQ-66 (raise `rust-version` to 1.90
-   for redb 4.x, with an MSRV CI job) is the one with a dependency outside this repository, so
-   it is the one to settle first.
-5. **At G0, re-plan 2.4 if the spike's decision table (2.2 §3.7) says so**, then begin TX-P1.
+1. ~~**Finish TX-P0**~~ **Done**, except F-2 and `bundle --unknown keep|drop`. 2.1 §10 records
+   every departure from the plan. **1.9.0 is releasable**: G−1 is satisfied and the phase's exit
+   conditions are met.
+2. ~~**Run S0**~~ **Done 2026-10-07.** The full protocol ran — 365 runs, 29 inputs, five
+   languages, two models — and its decision table returns *continue with a stated pivot* (§1.1).
+   `S0_RESULTS/` holds the report, the table and the findings log.
+3. ~~**Owner review of 2.3 Appendix E and §3 of this document.**~~ **Done 2026-10-07.** The nine
+   amendments G0 needs are accepted: A-1, A-2, A-3, A-5, A-6, the `admission` opening in A-8.1,
+   A-11 `x.text/v1`, A-12 rules E and Z, A-13. 2.3's header records what that carries and what it
+   leaves open.
+4. ~~**G0**~~ **Passed 2026-10-07.** Both halves met.
+5. **Do F-2 first.** §1.1 item 1 makes it TX-P1's precondition rather than a 1.10.0 deferral. It
+   is blocked on **OQ-31**, so OQ-31 is now a TX-P1 blocker and the first question to settle.
+6. **Re-plan 2.4 against §1.1.** Six changes land before TX-P1 starts: consensus extraction by
+   default, class measures as exploration only, holder and mode structural from TX-P5, the
+   GE-T5/GE-T2 restatement against α, the FC-6 recalibration, and the non-English cost model.
+   TX-P5's and TX-P7's exit tests both change, so this is a re-plan and not an edit.
+7. **Answer the remaining TX-P1 blockers** in §4. MSRV first: OQ-40 = OQ-66 (raise
+   `rust-version` to 1.90 for redb 4.x, with an MSRV CI job) is the one with a dependency outside
+   this repository.
+8. **Decide whether to buy the human same-as measurement.** Every provisional row (T1, T3, T6,
+   T7, T8) rests on model coders, and no model coder reaches α 0.667 — the local 14B model agrees
+   with each hosted model better than the two hosted models agree with each other, and a single
+   coder does not agree with itself at the floor. GE-T9's ceiling cannot be established without
+   people, and TX-P7's exit test depends on it.
+9. **Fold the accepted amendments into the spec** as their phases land, extending
+   `scripts/verify-spec-tables.py` for each (A-14). A fold is not complete until that gate covers
+   its tables.
 
-**What is startable today without G0:** TX-P13a alone — the `StoreRead` trait and its consumers
-ported in memory (2.8 §§3–4), which §2's note marks as needing only TX-P0. Everything else in
-2.4 waits on the amendments in step 3.
+**What is startable now:** TX-P1 is unblocked by the gate but waits on F-2 and OQ-31 (step 5).
+TX-P13a remains independent of all of it — the `StoreRead` trait and its consumers
+ported in memory (2.8 §§3–4), which §2's note marks as needing only TX-P0.

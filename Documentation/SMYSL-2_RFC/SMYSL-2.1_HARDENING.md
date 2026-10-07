@@ -1,6 +1,9 @@
 # RFC SMYSL-2.1 — Hardening the 1.9 tree
 
-**Status:** draft 1, **built** except F-2 (deferred to 1.10.0 with A-9, OQ-31). TX-P0 shipped in
+**Status:** draft 1, **built** except F-2. F-2 was deferred to 1.10.0 with A-9 while OQ-31 is
+open; **G0's pivot of 2026-10-07 reschedules it ahead of TX-P1** (SMYSL-2.0 §1.1 item 1), on S0's
+measurement that the byte estimator costs 12.67% of hosted Russian units. It is still gated on
+OQ-31, which is now a TX-P1 blocker. TX-P0 shipped in
 1.9.0-dev; §10 says what is outstanding and records every place the implementation departed from
 this document, and why. Implementation RFC (non-normative);
 normative rules are in SMYSL-2.3.

@@ -1,6 +1,13 @@
 # RFC SMYSL-2.2 — Extraction and proposition spike
 
-**Status:** draft 1, for discussion. Experiment protocol (non-normative); normative rules are in SMYSL-2.3.
+**Status:** draft 1, **run in full on 2026-10-07**. Experiment protocol (non-normative); normative
+rules are in SMYSL-2.3. The run covered 365 runs — the 335 of §3 plus the optional arm T, which
+§3.3 gates on arm L being bit-identical at T=0 and which therefore qualified. Its decision table
+(§3.7) returns *continue with a stated pivot*; the pivot is SMYSL-2.0 §1.1 and the results are in
+`S0_RESULTS/`. The protocol was written against `d25ec9e`, before TX-P0, so several of its stated
+facts no longer hold and six of its observations (O-1 to O-6) were already resolved when it ran;
+`S0_RESULTS/S0_FINDINGS.md` records every departure, and `S0_REPORT.md` §5 the eight deviations
+from the method as written.
 **Author:** Vladimir Ulogov
 **Date:** 2026-10-02
 **Part of:** RFC set SMYSL-2 — see SMYSL-2.0 (index and roadmap).
@@ -281,9 +288,10 @@ set.
   - C0, identical `J_gist` key: auto-same, rung `computed`.
   - C1, `smysl find --json -n 5 --source in/<file> "<gist>" pool.cbor` (lexical, same language).
   - C2, the same with `--engine semantic --model $POTION`, where `$POTION` is the operator's copy
-    of `minishlab/potion-multilingual-128M`. Loading it through `model2vec-rs 0.2` is
-    **unverified** (F-11). The fallback is the Python `model2vec` package on the same files, top 5
-    by cosine, labelled as such.
+    of `minishlab/potion-multilingual-128M`. Loading it through `model2vec-rs 0.2` was
+    **unverified** (F-11); **the run verified it** — the model loads and ranks, and the Python
+    fallback was not needed. It does bridge en to ru, but at a markedly lower score than within
+    one language, so a single global threshold does not behave the same both ways.
   - C3, anchored: both quotes located in the same or adjacent verse (spans from `qcheck`).
 - *Cross-lingual* (P1, P3, P5): pairs en↔ru, en↔es, en↔fr and en↔de from C2 (with
   `--source in/<other file>`) and C3 (through `align.tsv`).
@@ -562,7 +570,7 @@ No new commands, flags, records or diagnostics.
 | Russian gists over 120 bytes degrade (`E022`, F-2) | Measured (T11). The prompt is not changed, because the spike measures today's tree. |
 | Arm R raw answers are not captured | M3b is reported for arm L only. Arm R reports survivor verdicts and repair rates. |
 | Candidate generation misses true pairs, and `J_class` falls | Control pairs bound the miss rate, which is reported beside `J_class`. |
-| Potion model does not load in `model2vec-rs 0.2` | Python `model2vec` fallback, labelled. Record the failure for F-11. |
+| ~~Potion model does not load in `model2vec-rs 0.2`~~ did not occur | F-11 verified in the run: it loads and ranks, no fallback used. |
 | Annotator drift or fatigue | Calibration round, blinding, sessions of at most 90 min, `seconds` logged. |
 | Model or tag changes during the runs | Model digest recorded (`ollama show`, hosted `model` echoed in the response). Runs are interleaved, so drift spreads across inputs. |
 | Prompt-injection content in inputs | All inputs are PD scripture, an essay and our own chat. The fence check is in `prep.py`. |

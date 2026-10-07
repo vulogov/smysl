@@ -1,7 +1,32 @@
 # RFC SMYSL-2.3 — Format amendment: library, time, schema evolution, round trip
 
-**Status:** draft 1, for discussion. **Normative** once accepted: its amendments are folded into
-`SMYSL_FORMAT_SPEC.md`, section by section, as the phases that need them land.
+**Status:** draft 1. **Partly accepted — normative for the accepted amendments**, which are
+folded into `SMYSL_FORMAT_SPEC.md`, section by section, as the phases that need them land. The
+amendments nothing has activated yet remain for discussion.
+
+| accepted | at | amendments |
+|---|---|---|
+| 2026-10-02 | **G−1**, before 1.9.0 | A-4, A-8.1 (four enumerations opened, 255 reserved in five), A-9, A-10 items 2–3 |
+| 2026-10-07 | **G0**, after S0 and TX-P0 | A-1, A-2, A-3, A-5, A-6, the `admission` opening in A-8.1, A-11 `x.text/v1`, A-12 rules **E** and **Z**, A-13 |
+| still for discussion | — | A-7, A-10 (the rest), A-11 `x.query/v1` and uid-typed payload keys, A-12 rule **N**, proposition classes and time contentions, A-14 |
+
+The G0 acceptance carries exactly the Appendix E decisions that sit inside the amendments it
+names: **D-1** (copy set, OQ-17), **D-3** (statuses of free constraints, OQ-10), **D-4**
+(scholarly datings take their basis's status, OQ-12), **D-6** (holder, mode and speaker stay in
+`x.text/v1`, OQ-6), **D-8** (conformance mapping), **D-9** for rules **E** and **Z** only, the
+chain-tightening rule (OQ-42, A-12.2 step 3), and the `admission` half of the code-255 decision
+(OQ-30). It does **not** carry D-5 (OQ-23) or D-7 (OQ-7), which live in A-12.1 and A-12.4 — rule
+N and the proposition classes — nor OQ-35 or OQ-49, which live in A-8.2 and A-11 `x.query/v1`.
+Those stay open. D-2 (OQ-1) and the estimator decision (OQ-29) were already accepted at G−1.
+
+A-14's registry and activation text is appended to the spec as each accepted amendment folds in,
+so A-14 itself stays open until the last fold; §8.1 and §8.3 already list the instances the
+accepted set creates.
+
+Acceptance makes these amendments normative text. It does not schedule them: each still activates
+in the phase its §1.2 row names, and folding one into the spec is not complete until
+`make spec-tables` covers its tables (A-14).
+
 **Author:** Vladimir Ulogov
 **Date:** 2026-10-02
 **Part of:** RFC set SMYSL-2. See SMYSL-2.0 for the index and roadmap.
