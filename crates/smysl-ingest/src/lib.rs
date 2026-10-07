@@ -93,15 +93,21 @@ impl LangPolicy {
     }
 
     /// Parse a policy name, refusing the one that is reserved.
-    pub fn parse(s: &str) -> Result<LangPolicy, ProviderError> {
+    ///
+    /// The error is a `String` rather than SMYSL-2.1's proposed `ProviderError::Config`:
+    /// `ProviderError` arrives with the `model` feature, and `Conditions` has to hold a policy
+    /// without the provider layer — `recipe` is reachable from `stage` alone. A conditional
+    /// error type for one message is worse than the message. The caller prefixes it, so what a
+    /// user sees is unchanged.
+    pub fn parse(s: &str) -> Result<LangPolicy, String> {
         match s {
             "source" => Ok(LangPolicy::Source),
-            p if p.starts_with("pivot:") => Err(ProviderError::Config(format!(
+            p if p.starts_with("pivot:") => Err(format!(
                 "`{p}` is reserved for a later release; only `source` is implemented"
-            ))),
-            other => Err(ProviderError::Config(format!(
+            )),
+            other => Err(format!(
                 "`{other}` is not a language policy; expected `source`"
-            ))),
+            )),
         }
     }
 }
