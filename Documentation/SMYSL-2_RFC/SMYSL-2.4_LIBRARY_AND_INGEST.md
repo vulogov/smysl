@@ -811,9 +811,10 @@ impl Store {
     pub fn datings_on(&self, target: &DatingTarget) -> Vec<&Did>;
     pub fn redactions(&self) -> impl Iterator<Item = (&Tid, &BTreeSet<Redaction>)>;
     pub fn is_redacted(&self, tid: &Tid) -> bool;
-    pub fn part_text(&self, tid: &Tid) -> Option<&PartText>;            // only for 15 held in a log
-    pub fn rewrite_redacted(&mut self) -> Result<RewriteReport, Error>;  // physical erasure, §4.3.2
 }
+// No `part_text` and no `rewrite_redacted`: a log holds neither 15 nor 18 (OQ-39), so there is
+// nothing for a `Store` to hand back and nothing for it to erase. `Library::part` is the
+// accessor, over the object store, and erasure is an unlink (§4.3.2).
 ```
 
 `smysl-text`:
@@ -905,9 +906,10 @@ pub fn summarise(&self, levels: &[Level], scope: &BTreeSet<Uid>) -> Result<Stage
 
 - **New state.** `manifests: BTreeMap<Mid, Manifest>`, `by_alias: BTreeMap<String, BTreeSet<Mid>>`,
   `superseded: BTreeSet<Mid>`, `datings: BTreeMap<Did, Dating>`, `datings_by_target`,
-  `redactions: BTreeMap<Tid, BTreeSet<Redaction>>`, `part_texts`/`readings` for 15/18 held in a log,
-  `by_tid: BTreeMap<Tid, BTreeSet<Uid>>`, `by_mid: BTreeMap<Mid, BTreeSet<Uid>>`. All derived in
-  `absorb`, all order-independent (maps of sets).
+  `redactions: BTreeMap<Tid, BTreeSet<Redaction>>`, `by_tid: BTreeMap<Tid, BTreeSet<Uid>>`,
+  `by_mid: BTreeMap<Mid, BTreeSet<Uid>>`. All derived in `absorb`, all order-independent (maps of
+  sets). **No `part_texts` or `readings` map**: draft 1 had both, "for 15/18 held in a log", and
+  OQ-39's answer is that no log holds either — so the maps could only ever have been empty.
 - **By-part lookups.** `absorb` parses `source.reference` once per new unit: if it starts with
   `t3:` and the next 52 characters parse as a `Tid`, the uid goes into `by_tid`; `source.manifest`
   feeds `by_mid`. `units_with_source_prefix` is unchanged (it is public contract since 1.5); the
@@ -916,8 +918,9 @@ pub fn summarise(&self, levels: &[Level], scope: &BTreeSet<Uid>) -> Result<Stage
   1. collect tids redacted by the store **or by this batch** (records 19 in `records`);
   2. drop from the batch every `PartText` / `PartReading` whose tid is in that set, counting them
      in `AppendReport.redacted` (new field; `AppendReport` is already `#[non_exhaustive]`, so
-     adding it is not a break);
-  3. after `absorb`, remove in-memory 15/18 for newly redacted tids from `part_texts`/`readings`.
+     adding it is not a break). This is the only step: there is no in-memory 15/18 to clear
+     afterwards, because none is kept, and the records would be refused by `E452` in any case —
+     the filter is what makes a *redacted* one a counted drop rather than an error.
   Because `merge` is `append` plus detection (§2.2), merge inherits the filter with no further
   change. The filtered union is commutative, associative and idempotent: the redaction set only
   grows, and the filter is applied to the union, whatever the order.
@@ -927,9 +930,11 @@ pub fn summarise(&self, levels: &[Level], scope: &BTreeSet<Uid>) -> Result<Stage
   written. It was correct and it was also the one operation that costs the log its own integrity
   evidence, and it existed for a case §3.1 now refuses outright: `append` rejects a record 15 or
   18 with `SMY-E452` rather than storing bytes it may later have to erase. Erasure is therefore
-  always an object unlink, the log stays append-only in the strong sense, and there is nothing to
-  migrate — records 14, 15, 17, 18 and 19 do not exist in 1.10.0, where the record enum stops at
-  13, so the choice is being made before any byte depends on it.
+  always an object unlink, the log stays append-only in the strong sense, and there was nothing to
+  migrate: when the question was answered the record enum stopped at 13, so the choice was made
+  before any byte depended on it. TX-P1 step 1 has since added 14, 15 and 18, and it added them
+  under this answer — the refusal is the first thing `Store::append` will do with a 15, not a
+  behaviour retrofitted onto records already in circulation.
 - **Heads and forks.** `heads(alias)` = mids of that alias not named by any other manifest's
   `supersedes`; more than one is `W418` (reported by `check`, not recorded).
 - **Adjacency cost.** `absorb` currently calls `rebuild_adjacency()` whatever arrived. It gains a
@@ -1238,12 +1243,31 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
 
 ### TX-P1 — library core
 
-1. `smysl-core`: `Tid`/`Mid`/`Rdid`, records 14, 15, 18, keys, envelope, surface `@manifest`.
-   *Exit:* round-trip and golden tests; `fixtures/library/wire` generated; key-table test green.
-1a. `smysl-core`: open `Admission` (SMYSL-2.3 A-8.1) with the same `Unknown` unit-variant design
+1. ~~`smysl-core`: `Tid`/`Mid`/`Rdid`, records 14, 15, 18, keys, envelope, surface `@manifest`.~~
+   **Done 2026-10-08.** All four identities (`Did` too — it costs nothing and TX-P3 needs it),
+   `types/library.rs`, the four key tables, encoders and decoders, the `@manifest` reserved word
+   with its parser and writer, and `fixtures/library/wire/` with `ids.json` carrying each
+   preimage, body and identity apart. The exit held, and two things were found while meeting it:
+   - the **format spec was silent** about records this build now writes. §2.6 was held open for
+     "the release that writes them" and that release is this one, so A-3 and A-5 are folded in,
+     `verify-spec-tables.py` now asserts codes 1..19, and the three C-Read implementations
+     carry the names.
+   - `is_known` in all three of those implementations was **derived from the name table** and
+     documented as whether the implementation understands the record. That was already false for
+     code 9 and harmless only because nothing emits a checkpoint; a manifest reported as *known*
+     by a reader that decodes none of it is the silence `SMY-W014` exists to break. The two
+     questions are now separate tables in each.
+1a. ~~`smysl-core`: open `Admission` (SMYSL-2.3 A-8.1) with the same `Unknown` unit-variant design
    that SMYSL-2.1 §4.3.6 uses for the four enumerations opened in 1.9.0; code 255 is already
-   reserved. *Exit:* `fixtures/conformance/codec/enum-unknown.cbor` gains an unknown admission
-   code that round-trips byte-identically, with `SMY-W409`.
+   reserved.~~ **Done 2026-10-08**, and it cost what reserving 255 in 1.9 promised: no registry
+   change, no renumbering, no new diagnostic. The raw code travels on `GranularityProfile`, as an
+   unknown source kind travels on `SourceRef`. The exit is met by a round-trip test rather than
+   by a new codec fixture: `fixtures/conformance/codec/` holds *defective* inputs with expected
+   diagnostics, and an unknown admission is a conforming one, so it belongs in
+   `tests/roundtrip.rs` beside the other four. `SMY-W409` is asserted in
+   `smysl-check/tests/unknown_codes.rs`, **with its control** — the same body still fails
+   `SMY-E040` under the admission this build knows, so a bug that disabled the check outright
+   cannot pass as the suspension this one requires.
 2. `smysl-text` skeleton: `norm`, `ids`, `objects`, `lock`, `limits`, `manifest`, `part`,
    `reading`, `structure`, `locator`. *Exit:* unit tests of §5.1 for these modules; limits suite.
 3. Readers `txt`, `md`, `usfm`, `osis`, `zefania`, `json`. *Exit:* `fixtures/library/readers`
@@ -1253,8 +1277,16 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
 5. `smysl-check` `Library` pass (E403, E404, W405, W418, E446, E452); `ConformanceClass::Library`.
    *Exit:* `fixtures/library/check` green.
 6. CLI `text add/ls/show`, `check --library`; purity gate with `smysl-text`; `cc` check in
-   `make crate-features`. *Exit:* gates green.
-7. Ports: C-Read for 14, 15, 18 and the ids. *Exit:* **GE-T1** on Bibles and a JSON series.
+   `make crate-features`; **the manual's surface chapter gains `@manifest`** — deferred from
+   step 1 deliberately, because until this step nothing can produce a manifest except by hand,
+   and a documented form with no command behind it is a form nobody can check their work
+   against. *Exit:* gates green.
+7. Ports: C-Read for 14, 15, 18 and the ids. Step 1 gave all three the **names** and nothing
+   else — the spec table reaches them through `verify-spec-tables.py`, and each now reports a
+   manifest as named but not understood. What is left is the part that matters: decoding the
+   bodies and **deriving tid, mid and rdid** from `fixtures/library/wire/ids.json`, which is the
+   first identity work in those implementations since uids, and the only way the domain-byte
+   separation gets a second reading. *Exit:* **GE-T1** on Bibles and a JSON series.
 
 ### TX-P2 — segments, languages, chats, redaction
 

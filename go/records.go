@@ -2,12 +2,33 @@ package smysl
 
 // Record framing and the unit core, per §2 and §3.1 of the format spec.
 
-// RecordNames is the table in §3.1. An unknown code is preserved verbatim and skipped
-// semantically, never rejected.
+// RecordNames is the table in §3.1: every code the format has allocated.
+//
+// A code is a permanent wire commitment the moment it is allocated, so the reserved and
+// not-yet-defined ones are named too — 9 is checkpoint, 16 is reserved, and 17 and 19 are
+// specified but land in later releases. Naming them is how a reader says *what* it met rather
+// than only that it met something.
 var RecordNames = map[uint64]string{
 	1: "unit", 2: "attestation", 3: "relation", 4: "thread", 5: "view",
 	6: "contention", 7: "pack_info", 8: "schema_decl", 9: "checkpoint", 10: "label_binding",
-	11: "withdrawal", 12: "resolution", 13: "commitment",
+	11: "withdrawal", 12: "resolution", 13: "commitment", 14: "manifest", 15: "part_text",
+	16: "reserved", 17: "dating", 18: "part_reading", 19: "redaction",
+}
+
+// understoodRecords holds the codes whose bodies this implementation decodes.
+//
+// Not the same question as RecordNames, and conflating the two was wrong before it was
+// consequential: IsKnown was derived from the name table and documented as whether this version
+// understands the record, which was already false for 9 — a checkpoint nothing has ever
+// implemented — and harmless only because nothing emits one. 1.10 writes manifests, part texts
+// and part readings, and a reader calling those known while interpreting none of them would be
+// exactly the silence SMY-W014 exists to break.
+//
+// An unknown record is still preserved verbatim and re-encoded byte for byte; that is C-Read
+// and it is unaffected.
+var understoodRecords = map[uint64]bool{
+	1: true, 2: true, 3: true, 4: true, 5: true, 6: true,
+	7: true, 8: true, 10: true, 11: true, 12: true, 13: true,
 }
 
 // UnitKeys is the table in §2.2. Anything at 9 or above is an unknown key that rule X says
@@ -32,10 +53,13 @@ func (r *Record) Name() string {
 	return "unknown(" + itoa(r.Code) + ")"
 }
 
-// IsKnown reports whether this version understands the record's type.
+// IsKnown reports whether this implementation decodes this record's body.
+//
+// A code the spec names but this reader does not interpret — a manifest, a checkpoint — is not
+// known. Name still answers, so a report can say "a manifest, which this build does not
+// interpret" rather than "something".
 func (r *Record) IsKnown() bool {
-	_, ok := RecordNames[r.Code]
-	return ok
+	return understoodRecords[r.Code]
 }
 
 // Reencode emits the record again. For a conformant decoder this equals Raw.

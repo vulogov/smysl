@@ -217,7 +217,10 @@ mod tests {
         // 52 as of 1.3.0, with `SMY-W309`; 53 as of 1.4.0, with `SMY-W056`; 54 as of 1.6.0,
         // with `SMY-E203`; 55, 56 and 57 as of 1.7.0, with `SMY-W111`, `SMY-W057` and
         // `SMY-W058`; 58 as of 1.9.0, with `SMY-W409` — the four enumerations opened in 1.9
-        // survive an unknown code, and this is how a reader hears that they met one. 59 with
+        // survive an unknown code, and this is how a reader hears that they met one. 1.10
+        // opened the fifth, `admission`, and needed no new code for it: the warning already
+        // said what it means, which is what an open enumeration costs when the first four were
+        // done properly. 59 with
         // `SMY-W434`: a bundle keeps records it cannot interpret, and the sender is told. 60
         // with `SMY-W432`, the warning that has to ship a release before `lang` becomes a core
         // key, because the lint is the whole migration. 61 with `SMY-W435`: a chunk that

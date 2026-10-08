@@ -51,6 +51,9 @@ pub enum LineClass {
     /// `@commit <unit> { level: …, agent: …, ts: […] }` — a `Commit` (1.7). At the end for the
     /// same reason as the two above.
     CommitStart,
+    /// `@manifest <alias> { lang: …, reader: …, parts: [ … ] }` — a `Manifest` (1.10). At the
+    /// end for the same reason as the three above: the discriminants are published API.
+    ManifestStart,
 }
 
 impl LineClass {
@@ -65,6 +68,7 @@ impl LineClass {
                 | LineClass::WithdrawStart
                 | LineClass::ResolveStart
                 | LineClass::CommitStart
+                | LineClass::ManifestStart
         )
     }
 }
@@ -149,6 +153,11 @@ fn classify(line: &str) -> LineClass {
             "resolve" => LineClass::ResolveStart,
             // Reserved in 1.7, in the same way.
             "commit" => LineClass::CommitStart,
+            // Reserved in 1.10 (SMYSL-2.3 A-10), in the same way. `@date` and `@redact`
+            // are reserved by the same amendment and land in TX-P3 and TX-P2; until then
+            // they lex as `Text`, which is what every one of these words did before its
+            // release and is why reserving a word is not the same as implementing it.
+            "manifest" => LineClass::ManifestStart,
             w if is_record_type(w) => LineClass::RecordStart,
             // A type this build does not know, which a later version may have added. The
             // writer emits exactly the type string it decoded - it has to, since the type

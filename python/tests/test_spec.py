@@ -176,7 +176,27 @@ def test_record_type_codes_match_the_table_in_3_1():
         11: "withdrawal",
         12: "resolution",
         13: "commitment",
+        14: "manifest",
+        15: "part_text",
+        16: "reserved",
+        17: "dating",
+        18: "part_reading",
+        19: "redaction",
     }
+
+
+def test_the_library_records_are_named_but_not_understood():
+    """§3.1: a code the spec names is not a code this implementation decodes.
+
+    1.10 writes manifests, part texts and part readings. This implementation is C-Read: it
+    preserves them verbatim and re-encodes them byte for byte, and it interprets none of them.
+    Saying so is the point — a reader that called them known while decoding nothing would be
+    exactly the silence ``SMY-W014`` exists to break. Code 9 was the same claim, and harmless
+    only because nothing has ever emitted a checkpoint.
+    """
+    named_not_understood = set(smysl.RECORD_NAMES) - smysl.UNDERSTOOD_RECORDS
+    assert named_not_understood == {9, 14, 15, 16, 17, 18, 19}
+    assert smysl.UNDERSTOOD_RECORDS <= set(smysl.RECORD_NAMES)
 
 
 def test_a_record_is_a_two_element_array():

@@ -21,13 +21,18 @@ pub enum Admission {
     SingleAssertion = 0,
     /// A topic per unit. Coarse granularity trades checkability for narrative flow.
     Topical = 1,
-    // 255 is reserved and MUST NOT be assigned (1.9).
-    //
-    // This enumeration stays **closed** in 1.9: an unknown admission still fails the decode,
-    // because `l0_max` and the granularity passes read it and a reader that guessed would
-    // report the wrong verdict. It opens in 1.10, and when it does, 255 is the code `Unknown`
-    // takes — reserving it now means that opening costs no registry change and no renumbering.
-    // `admission_255_stays_reserved` is what stops a later edit spending it.
+    /// A code this build does not know (1.10, SMYSL-2.3 A-8.1).
+    ///
+    /// The fifth enumeration to open, and the last. 1.9 reserved 255 here and kept the
+    /// enumeration closed, on the argument that `l0_max` and the granularity passes read
+    /// admission and a reader that guessed would report the wrong verdict. That argument was
+    /// right about guessing and wrong about the remedy: failing the decode does not avoid a
+    /// wrong verdict, it refuses to open the store at all (F-12). Treating the value as
+    /// unknown is what the argument actually asks for — the single-assertion check does not
+    /// run, which is not a verdict either way, and `SMY-W409` says so.
+    ///
+    /// The raw code lives on [`GranularityProfile`], not here, so it re-encodes unchanged.
+    Unknown = 255,
 }
 
 impl Admission {
@@ -41,6 +46,7 @@ impl Admission {
         match v {
             0 => Some(Admission::SingleAssertion),
             1 => Some(Admission::Topical),
+            255 => Some(Admission::Unknown),
             _ => None,
         }
     }
@@ -49,6 +55,7 @@ impl Admission {
         match self {
             Admission::SingleAssertion => "single-assertion",
             Admission::Topical => "topical",
+            Admission::Unknown => "unknown",
         }
     }
 
@@ -75,6 +82,13 @@ pub struct GranularityProfile {
     pub l1_min: u32,
     pub l1_max: u32,
     pub admission: Admission,
+    /// The wire code behind `admission`, when `admission` is `Unknown` (1.10).
+    ///
+    /// A view is not inside any uid, so this is not an identity hazard the way
+    /// `SourceRef.kind_code` is. It is a plain round-trip obligation: two peers that disagree
+    /// about whether to keep an admission code compute different record-set digests for the
+    /// same store, and rule U is stated on that digest.
+    admission_code: Option<u8>,
     /// How `l0_max` and `l1_range` are counted (F-2). `Unset` is the pre-F-2 meaning,
     /// `smysl_core::tokens`, and encodes to no key at all.
     pub estimator: ProfileEstimator,
@@ -99,6 +113,7 @@ impl GranularityProfile {
             l1_min: 120,
             l1_max: 400,
             admission: Admission::Topical,
+            admission_code: None,
             estimator: ProfileEstimator::Unset,
             extra: Extra::new(),
         }
@@ -112,6 +127,7 @@ impl GranularityProfile {
             l1_min: 40,
             l1_max: 120,
             admission: Admission::SingleAssertion,
+            admission_code: None,
             estimator: ProfileEstimator::Unset,
             extra: Extra::new(),
         }
@@ -125,6 +141,7 @@ impl GranularityProfile {
             l1_min: 20,
             l1_max: 60,
             admission: Admission::SingleAssertion,
+            admission_code: None,
             estimator: ProfileEstimator::Unset,
             extra: Extra::new(),
         }
@@ -137,6 +154,27 @@ impl GranularityProfile {
             "fine" => Some(GranularityProfile::fine()),
             _ => None,
         }
+    }
+
+    /// The wire code of `admission`: the raw byte for an unknown one, the discriminant else.
+    pub fn admission_code(&self) -> u8 {
+        self.admission_code
+            .unwrap_or_else(|| self.admission.as_u8())
+    }
+
+    /// Record an admission this build does not know, preserving its code (A-8.1).
+    ///
+    /// Refuses 255 itself, which is reserved and never assigned, and refuses a code this build
+    /// *does* know — those have a named variant and belong in `admission`. The same shape as
+    /// [`SourceRef::with_unknown_kind`](crate::types::epistemics::SourceRef::with_unknown_kind),
+    /// which is the point: five enumerations are open and one design serves all five.
+    pub fn with_unknown_admission(mut self, code: u8) -> Option<GranularityProfile> {
+        if code == 255 || Admission::from_u8(code).is_some() {
+            return None;
+        }
+        self.admission = Admission::Unknown;
+        self.admission_code = Some(code);
+        Some(self)
     }
 
     pub fn body_in_range(&self, tokens: u32) -> bool {

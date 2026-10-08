@@ -849,10 +849,11 @@ fn code_255_is_refused_as_an_unknown_code() {
 
 /// 255 is reserved in all five enumerations, and never assigned.
 ///
-/// Four of them opened in 1.9 and use 255 for `Unknown`. `Admission` stays closed — `l0_max`
-/// and the granularity passes read it, and a reader that guessed would report the wrong verdict
-/// — but 255 is held for it too, so opening it in 1.10 costs no registry change and no
-/// renumbering. This test is what stops a later edit spending the code.
+/// Four opened in 1.9 and the fifth, `Admission`, in 1.10 (SMYSL-2.3 A-8.1) — and it cost
+/// exactly what reserving the code in 1.9 promised it would: no registry change, no
+/// renumbering, and no new diagnostic. All five now read 255 as `Unknown`, and the half of
+/// this test that bites is the other one: no *named* variant of any of them may take 255,
+/// because every store written in between would read it as unknown.
 #[test]
 fn code_255_is_reserved_in_all_five_enumerations() {
     assert_eq!(
@@ -866,12 +867,18 @@ fn code_255_is_reserved_in_all_five_enumerations() {
 
     assert_eq!(
         Admission::from_u8(255),
-        None,
-        "admission stays closed in 1.9, so 255 is held rather than used"
+        Some(Admission::Unknown),
+        "admission opened in 1.10 and reads 255 as Unknown, as the other four do"
     );
     assert!(
-        Admission::ALL.iter().all(|a: &Admission| a.as_u8() != 255),
-        "and no admission variant may ever take it"
+        Admission::ALL
+            .iter()
+            .all(|a: &Admission| a.as_u8() != 255 || *a == Admission::Unknown),
+        "and no named admission variant may ever take it"
+    );
+    assert!(
+        !Admission::ALL.contains(&Admission::Unknown),
+        "`ALL` names what an author may write, and nobody writes `unknown` deliberately"
     );
 
     // Nor may any other variant of the four, which is the half that bites: if a later release
@@ -953,4 +960,45 @@ fn the_granularity_estimator_round_trips_known_and_unknown_ids() {
         !bytes(plain).windows(6).any(|w| w == b"smysl/"),
         "no estimator id is written for the default"
     );
+}
+
+/// An admission code this build does not know survives the round trip (1.10, A-8.1).
+///
+/// The fifth and last enumeration to open. 1.9 reserved 255 and kept it closed, arguing that
+/// the granularity passes read admission and a reader that guessed would report the wrong
+/// verdict. The argument was right about guessing and wrong about the remedy: failing the
+/// decode does not avoid a wrong verdict, it refuses to open the store (F-12). So the code is
+/// kept, the value is treated as unknown — the single-assertion check does not run, which is
+/// not a verdict either way — and `SMY-W409` says so.
+///
+/// A view is not inside a uid, so this is not an identity hazard. It is a plain C-Read
+/// obligation: two peers disagreeing about whether to keep the code compute different
+/// record-set digests for one store, and rule U is stated on that digest.
+#[test]
+fn an_unknown_admission_code_survives_the_round_trip() {
+    let mut v = View::new(ViewId::new("v/a").unwrap(), "test");
+    v.granularity = v.granularity.clone().with_unknown_admission(7).unwrap();
+    assert_eq!(v.granularity.admission, Admission::Unknown);
+    assert_eq!(v.granularity.admission_code(), 7);
+
+    let bytes = to_cbor(&Record::View(v.clone()));
+    let (back, n) = from_cbor(&bytes).unwrap();
+    assert_eq!(n, bytes.len());
+    let Record::View(v2) = &back else {
+        panic!("not a view")
+    };
+    assert_eq!(v2.granularity.admission, Admission::Unknown);
+    assert_eq!(
+        v2.granularity.admission_code(),
+        7,
+        "the code has to come back out as it went in"
+    );
+    assert_eq!(to_cbor(&back), bytes, "and the bytes with it");
+
+    // 255 itself is reserved and never assigned, and a code this build *does* know belongs in
+    // the named field. Both are refused, as `SourceRef::with_unknown_kind` refuses them.
+    let g = GranularityProfile::standard();
+    assert!(g.clone().with_unknown_admission(255).is_none());
+    assert!(g.clone().with_unknown_admission(0).is_none());
+    assert!(g.with_unknown_admission(1).is_none());
 }

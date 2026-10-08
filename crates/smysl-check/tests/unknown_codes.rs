@@ -129,3 +129,65 @@ fn a_document_without_a_lang_payload_key_is_quiet() {
         "the document header's lang is not a payload key and must not be flagged"
     );
 }
+
+/// An unknown admission is reported, and the single-assertion check does not run (1.10).
+///
+/// `admission` is the fifth enumeration to open and the only one whose value a *pass* reads:
+/// `SMY-E040` fires on a multi-assertion body under single-assertion admission. Treating an
+/// unknown code as single-assertion would report a breach of a rule no view stated, and
+/// treating it as topical would wave through a breach of one that may well have been stated.
+/// Neither is a verdict the store supports, so no verdict is given — and `SMY-W409` is what
+/// stops that silence from looking like a pass.
+#[test]
+fn an_unknown_admission_is_reported_and_suspends_the_single_assertion_check() {
+    let mut v = smysl_core::View::new(smysl_core::ViewId::new("v/a").unwrap(), "test");
+    v.granularity = v.granularity.clone().with_unknown_admission(7).unwrap();
+
+    // A body that is plainly two assertions, which `SMY-E040` fires on under
+    // single-assertion admission.
+    let u = UnitCoreBuilder::new(KernelType::Claim, "two things at once", Status::Speculative)
+        .body("The cache was cold.\n\nThe queue was full.")
+        .build()
+        .unwrap();
+
+    let store = Store::from_records(vec![Record::View(v), Record::Unit(u)]);
+    let report = check(&store, CheckOptions::strict());
+
+    let w409: Vec<_> = report.iter().filter(|d| d.code == Code::W409).collect();
+    assert_eq!(w409.len(), 1, "one unknown code, one report");
+    assert!(
+        w409[0].message.contains('7'),
+        "the message names the code: {}",
+        w409[0].message
+    );
+    assert!(
+        !report.iter().any(|d| d.code == Code::E040),
+        "the single-assertion check must not run against an admission nobody can name"
+    );
+}
+
+/// The same body under the admission this build *does* know still fails.
+///
+/// The control for the test above: without it, a bug that disabled `SMY-E040` outright would
+/// pass both.
+#[test]
+fn the_same_body_is_still_e040_under_single_assertion_admission() {
+    let v = smysl_core::View::new(smysl_core::ViewId::new("v/a").unwrap(), "test");
+    assert_eq!(
+        v.granularity.admission,
+        smysl_core::Admission::SingleAssertion,
+        "the default profile is the one E040 reads"
+    );
+    let u = UnitCoreBuilder::new(KernelType::Claim, "two things at once", Status::Speculative)
+        .body("The cache was cold.\n\nThe queue was full.")
+        .build()
+        .unwrap();
+
+    let store = Store::from_records(vec![Record::View(v), Record::Unit(u)]);
+    let report = check(&store, CheckOptions::strict());
+    assert!(
+        report.iter().any(|d| d.code == Code::E040),
+        "{:?}",
+        report.iter().map(|d| d.code).collect::<Vec<_>>()
+    );
+}

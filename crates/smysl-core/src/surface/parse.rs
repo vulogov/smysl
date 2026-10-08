@@ -18,12 +18,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::diag::{Code, Diagnostic, Span, Subject};
 use crate::error::ParseError;
 use crate::hash::canonical_uid;
-use crate::ids::{AgentId, ContentionId, Label, LangTag, SchemaId, ThreadId, Uid, ViewId};
+use crate::ids::{
+    is_alias, AgentId, ContentionId, Label, LangTag, Mid, Rdid, SchemaId, ThreadId, Tid, Uid,
+    ViewId,
+};
 use crate::surface::hjson::{parse_object_prefix, HObject, HValue, Spanned};
 use crate::surface::lex::{arrow_len, find_arrow, lex, Line, LineClass};
 use crate::surface::payload::object_to_payload;
 use crate::types::annex::SchemaDecl;
 use crate::types::epistemics::{Date, SourceKind, SourcePolicy, SourceRef, Status};
+use crate::types::library::{Calendar, Carry, Manifest, ParentKind, PartEntry};
 use crate::types::lifecycle::{Commit, Commitment, Resolution, ResolutionTarget, Withdrawal};
 use crate::types::provenance::Hlc;
 use crate::types::relation::{RelKind, Relation};
@@ -252,6 +256,7 @@ pub fn parse_surface_with(src: &str, opts: &ParseOptions) -> Result<ParseOutcome
         schemas: Vec::new(),
         lifecycle: Vec::new(),
         commits: Vec::new(),
+        manifests: Vec::new(),
         view: None,
     };
     p.run()?;
@@ -270,6 +275,7 @@ struct Parser<'a> {
     schemas: Vec<SchemaDecl>,
     lifecycle: Vec<RawLifecycle>,
     commits: Vec<RawCommit>,
+    manifests: Vec<Manifest>,
     view: Option<RawView>,
 }
 
@@ -339,6 +345,11 @@ impl<'a> Parser<'a> {
                 LineClass::CommitStart => {
                     if let Some(c) = self.commit_record() {
                         self.commits.push(c);
+                    }
+                }
+                LineClass::ManifestStart => {
+                    if let Some(m) = self.manifest_record() {
+                        self.manifests.push(m);
                     }
                 }
                 _ => {
@@ -1431,6 +1442,430 @@ impl<'a> Parser<'a> {
     }
 
     // -----------------------------------------------------------------------
+    // @manifest
+    // -----------------------------------------------------------------------
+
+    /// The keys a `@manifest` may carry, besides the alias in its header.
+    ///
+    /// Closed, as `source { }` is, and for a plainer reason than identity: a manifest is a
+    /// catalog entry, and the likeliest stray key is a misspelling of `part-policy` or
+    /// `licence` — both required. Passed over quietly, that writes a manifest claiming a
+    /// policy and a licence the author did not state.
+    ///
+    /// `raw` (key 16) is **not** here and has no surface spelling. It is whatever a reader
+    /// found and could not place in a named key, carried as opaque CBOR; spelling it would
+    /// mean this parser deciding what the bytes mean. A manifest carrying one is written as
+    /// CBOR only, which [`write::manifest_has_surface_form`] is what reports.
+    const MANIFEST_KEYS: &'static [&'static str] = &[
+        "parts",
+        "lang",
+        "reader",
+        "licence",
+        "carry",
+        "title",
+        "creators",
+        "published",
+        "identifiers",
+        "origin",
+        "parent",
+        "parent-kind",
+        "supersedes",
+        "versification",
+        "lossy",
+        "part-policy",
+        "calendar",
+    ];
+
+    /// `@manifest <alias> { lang: en, reader: osis/1, licence: public-domain, carry: text,
+    /// part-policy: "top/64Ki-4Mi", parts: [ … ] }` (1.10).
+    ///
+    /// Six things are required, because A-5 requires them: the alias, `lang`, `reader`,
+    /// `licence`, `carry` and `part-policy`. None has a defensible default. A missing `lang`
+    /// is not `und` — `und` is a claim that nobody knows, which is different from nobody
+    /// having said. A missing `carry` is not `none`, because `none` is a decision about
+    /// whether text may travel. A missing `part-policy` is the one that matters most: the
+    /// default changes when GE-T14 measures it at the end of TX-P2, and a manifest that
+    /// recorded no policy would silently mean a different cut of the same text afterwards.
+    ///
+    /// `parts` is the exception. It is required on the wire and may be empty, and writing
+    /// `parts: []` by hand to say "this is an import manifest" is noise, so an omitted
+    /// `parts` is an empty one. The writer omits an empty `parts` for the same reason, which
+    /// is what keeps the round trip a fixed point.
+    fn manifest_record(&mut self) -> Option<Manifest> {
+        let l = self.lines[self.i];
+        let rest = l.text.strip_prefix("@manifest").unwrap_or("").trim_start();
+        let alias = match rest.find('{') {
+            Some(p) => rest[..p].trim(),
+            None => {
+                self.err(
+                    Code::E001,
+                    l.span,
+                    "`@manifest` needs an alias and a header with `lang`, `reader`, \
+                     `licence`, `carry` and `part-policy`",
+                );
+                self.recover();
+                return None;
+            }
+        };
+        if !is_alias(alias) {
+            self.err(
+                Code::E001,
+                l.span,
+                format!(
+                    "`{alias}` is not an alias; an alias is lowercase ASCII segments joined \
+                     by `/` or `:`, at most 128 bytes, such as `kjv/1769`"
+                ),
+            );
+            self.recover();
+            return None;
+        }
+
+        let Ok((mut header, header_span)) = self.header_object(l) else {
+            self.recover();
+            return None;
+        };
+        self.advance_past(header_span.end.max(l.span.end));
+
+        for (k, _) in header.iter() {
+            if !Self::MANIFEST_KEYS.contains(&k.value.as_str()) {
+                self.err(
+                    Code::E001,
+                    k.span,
+                    format!(
+                        "`{}` is not a manifest key; `@manifest` accepts {}",
+                        k.value,
+                        Self::MANIFEST_KEYS.join(", ")
+                    ),
+                );
+                return None;
+            }
+        }
+
+        let lang = self.required_str(&mut header, l.span, "lang", "`lang` is a BCP-47 tag")?;
+        let Ok(lang) = LangTag::new(&lang) else {
+            self.err(
+                Code::E001,
+                l.span,
+                format!("`{lang}` is not a language tag"),
+            );
+            return None;
+        };
+        let reader = self.required_str(&mut header, l.span, "reader", "`reader` is a reader id")?;
+        let licence = self.required_str(
+            &mut header,
+            l.span,
+            "licence",
+            "`licence` is an SPDX id, `public-domain` or `unknown`",
+        )?;
+        let carry_txt = self.required_str(
+            &mut header,
+            l.span,
+            "carry",
+            "`carry` is `none`, `ref` or `text`",
+        )?;
+        let Some(carry) = Carry::parse(&carry_txt) else {
+            self.err(
+                Code::E001,
+                l.span,
+                format!("`{carry_txt}` is not a carry mode; it is `none`, `ref` or `text`"),
+            );
+            return None;
+        };
+        let part_policy = self.required_str(
+            &mut header,
+            l.span,
+            "part-policy",
+            "`part-policy` records the boundary rule and size targets the parts were cut by",
+        )?;
+
+        let mut m = Manifest::new(alias, lang, reader, licence, part_policy).with_carry(carry);
+
+        if let Some(v) = header.take("parts") {
+            let Some(items) = v.value.as_array() else {
+                self.err(Code::E001, v.span, "`parts` must be an array");
+                return None;
+            };
+            let mut parts = Vec::with_capacity(items.len());
+            for item in items {
+                parts.push(self.part_entry(item)?);
+            }
+            m.parts = parts;
+        }
+        if let Some(v) = header.take("title") {
+            m.title = Some(self.str_value(&v, "title")?.to_string());
+        }
+        if let Some(v) = header.take("creators") {
+            m.creators = self.strict_list(&v, "creators", |s: &str| Some(s.to_string()))?;
+        }
+        if let Some(v) = header.take("published") {
+            // Carried as written, not parsed: EDTF arrives in TX-P3, and "as recorded" means
+            // what the title page says even when this build cannot yet read it. An integer
+            // year is admitted because `published: 1769` is how anybody writes one, and HJSON
+            // reads it as an integer rather than as text.
+            m.published = Some(match v.value.as_str() {
+                Some(s) => s.to_string(),
+                None => match v.value.as_int() {
+                    Some(n) => n.to_string(),
+                    None => {
+                        self.err(
+                            Code::E001,
+                            v.span,
+                            "`published` is an EDTF date, as recorded",
+                        );
+                        return None;
+                    }
+                },
+            });
+        }
+        if let Some(v) = header.take("identifiers") {
+            let Some(o) = v.value.as_object() else {
+                self.err(
+                    Code::E001,
+                    v.span,
+                    "`identifiers` maps a name to a value, such as `{ url: \"…\" }`",
+                );
+                return None;
+            };
+            for (k, val) in o.iter() {
+                let Some(text) = val.value.as_str() else {
+                    self.err(
+                        Code::E001,
+                        val.span,
+                        format!("identifier `{}` must be text", k.value),
+                    );
+                    return None;
+                };
+                m.identifiers.insert(k.value.clone(), text.to_string());
+            }
+        }
+        if let Some(v) = header.take("origin") {
+            m.origin = Some(self.source(&v)?);
+        }
+        // Keys 11 and 12 are one field, because A-5 requires the second with the first and
+        // neither says anything alone. The surface spells them separately, so the pairing is
+        // checked here rather than left to the encoder.
+        let parent = match header.take("parent") {
+            None => None,
+            Some(v) => Some((self.mid_value(&v, "parent")?, v.span)),
+        };
+        let parent_kind = match header.take("parent-kind") {
+            None => None,
+            Some(v) => {
+                let txt = self.str_value(&v, "parent-kind")?.to_string();
+                match ParentKind::parse(&txt) {
+                    Some(k) => Some((k, v.span)),
+                    None => {
+                        self.err(
+                            Code::E001,
+                            v.span,
+                            format!(
+                                "`{txt}` is not a parent kind; it is `translation`, `edition`, \
+                                 `excerpt` or `transcription`"
+                            ),
+                        );
+                        return None;
+                    }
+                }
+            }
+        };
+        match (parent, parent_kind) {
+            (Some((mid, _)), Some((kind, _))) => m.parent = Some((mid, kind)),
+            (None, None) => {}
+            (Some((_, span)), None) => {
+                self.err(
+                    Code::E001,
+                    span,
+                    "`parent` needs `parent-kind`: `translation`, `edition`, `excerpt` or \
+                     `transcription`",
+                );
+                return None;
+            }
+            (None, Some((_, span))) => {
+                self.err(
+                    Code::E001,
+                    span,
+                    "`parent-kind` says how a manifest derives from its `parent`, and there \
+                     is no `parent` here",
+                );
+                return None;
+            }
+        }
+        if let Some(v) = header.take("supersedes") {
+            m.supersedes = Some(self.mid_value(&v, "supersedes")?);
+        }
+        if let Some(v) = header.take("versification") {
+            m.versification = Some(self.str_value(&v, "versification")?.to_string());
+        }
+        if let Some(v) = header.take("lossy") {
+            // Only `true`. `lossy: false` is the absence of the key on the wire, and admitting
+            // the word would give one manifest two spellings and two mids.
+            match v.value.as_bool() {
+                Some(true) => m.lossy = true,
+                _ => {
+                    self.err(
+                        Code::E001,
+                        v.span,
+                        "`lossy` is written only as `true`; a lossless manifest omits it",
+                    );
+                    return None;
+                }
+            }
+        }
+        if let Some(v) = header.take("calendar") {
+            let txt = self.str_value(&v, "calendar")?.to_string();
+            match Calendar::parse(&txt) {
+                Some(c) => m.calendar = Some(c),
+                None => {
+                    self.err(
+                        Code::E001,
+                        v.span,
+                        format!(
+                            "`{txt}` is not a calendar; only `julian` is named, and an absent \
+                             `calendar` means Gregorian"
+                        ),
+                    );
+                    return None;
+                }
+            }
+        }
+        Some(m)
+    }
+
+    /// `{ tid: t3:…, length: 4096, structure: b3:…, rdid: r3:…, lang: ru }`.
+    fn part_entry(&mut self, v: &Spanned<HValue>) -> Option<PartEntry> {
+        let Some(o) = v.value.as_object() else {
+            self.err(Code::E001, v.span, "a part entry is an object");
+            return None;
+        };
+        const PART_KEYS: &[&str] = &["tid", "length", "structure", "rdid", "lang"];
+        for (k, _) in o.iter() {
+            if !PART_KEYS.contains(&k.value.as_str()) {
+                self.err(
+                    Code::E001,
+                    k.span,
+                    format!(
+                        "`{}` is not a part key; a part entry takes {}",
+                        k.value,
+                        PART_KEYS.join(", ")
+                    ),
+                );
+                return None;
+            }
+        }
+        let field = |o: &HObject, k: &str| o.get(k).cloned();
+        let Some(tid) = field(o, "tid") else {
+            self.err(Code::E001, v.span, "a part entry needs `tid`");
+            return None;
+        };
+        let tid = self.id_value(&tid, "tid", Tid::parse)?;
+        let Some(length) = field(o, "length")
+            .and_then(|l| l.value.as_int())
+            .and_then(|n| u64::try_from(n).ok())
+        else {
+            self.err(
+                Code::E001,
+                v.span,
+                "a part entry needs `length`, the part's byte length",
+            );
+            return None;
+        };
+        let Some(structure) = field(o, "structure") else {
+            self.err(Code::E001, v.span, "a part entry needs `structure`");
+            return None;
+        };
+        // `b3:` rather than a prefix of its own, because the structure hash is not an
+        // identity: it is BLAKE3 over a table, with no domain byte, naming nothing that can
+        // be fetched. A prefix of its own would promise a lookup that does not exist.
+        let structure = self
+            .id_value(&structure, "structure", Uid::parse)?
+            .to_bytes();
+        let Some(rdid) = field(o, "rdid") else {
+            self.err(Code::E001, v.span, "a part entry needs `rdid`");
+            return None;
+        };
+        let rdid = self.id_value(&rdid, "rdid", Rdid::parse)?;
+        let mut e = PartEntry::new(tid, length, structure, rdid);
+        if let Some(lv) = field(o, "lang") {
+            let txt = self.str_value(&lv, "lang")?.to_string();
+            match LangTag::new(&txt) {
+                Ok(t) => e.lang = Some(t),
+                Err(_) => {
+                    self.err(
+                        Code::E001,
+                        lv.span,
+                        format!("`{txt}` is not a language tag"),
+                    );
+                    return None;
+                }
+            }
+        }
+        Some(e)
+    }
+
+    fn required_str(
+        &mut self,
+        header: &mut HObject,
+        span: Span,
+        key: &str,
+        why: &str,
+    ) -> Option<String> {
+        match header.take(key) {
+            Some(v) => match v.value.as_str() {
+                Some(s) => Some(s.to_string()),
+                None => {
+                    self.err(Code::E001, v.span, why.to_string());
+                    None
+                }
+            },
+            None => {
+                self.err(
+                    Code::E001,
+                    span,
+                    format!("`@manifest` needs `{key}`: {why}"),
+                );
+                None
+            }
+        }
+    }
+
+    fn str_value<'v>(&mut self, v: &'v Spanned<HValue>, key: &str) -> Option<&'v str> {
+        match v.value.as_str() {
+            Some(s) => Some(s),
+            None => {
+                self.err(Code::E001, v.span, format!("`{key}` must be text"));
+                None
+            }
+        }
+    }
+
+    fn id_value<T, E>(
+        &mut self,
+        v: &Spanned<HValue>,
+        key: &str,
+        f: impl Fn(&str) -> Result<T, E>,
+    ) -> Option<T> {
+        let Some(s) = v.value.as_str() else {
+            self.err(Code::E001, v.span, format!("`{key}` must be an identity"));
+            return None;
+        };
+        match f(s) {
+            Ok(t) => Some(t),
+            Err(_) => {
+                self.err(
+                    Code::E001,
+                    v.span,
+                    format!("`{s}` is not a well-formed `{key}`"),
+                );
+                None
+            }
+        }
+    }
+
+    fn mid_value(&mut self, v: &Spanned<HValue>, key: &str) -> Option<Mid> {
+        self.id_value(v, key, Mid::parse)
+    }
+
+    // -----------------------------------------------------------------------
     // resolution
     // -----------------------------------------------------------------------
 
@@ -1580,6 +2015,15 @@ impl<'a> Parser<'a> {
         // what keeps `parse -> write -> parse` a fixed point.
         for d in std::mem::take(&mut self.schemas) {
             self.out.records.push(Record::SchemaDecl(d));
+        }
+
+        // Manifests next, before the units. A manifest names nothing by label — its parts are
+        // tids and its parent a mid — so it needs no resolution pass, and from TX-P5 a unit's
+        // `source.manifest` names one. A reader of the record stream should meet the text
+        // before the claims drawn from it, and the writer emits them in the same place, which
+        // is what keeps `parse -> write -> parse` a fixed point.
+        for m in std::mem::take(&mut self.manifests) {
+            self.out.records.push(Record::Manifest(m));
         }
 
         for (i, core) in cores.into_iter().enumerate() {

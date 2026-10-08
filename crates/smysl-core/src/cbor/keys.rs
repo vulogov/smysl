@@ -141,6 +141,68 @@ pub mod resolution {
     pub const HIGHEST: u16 = NOTE;
 }
 
+/// Manifest (type code 14, SMYSL-2.3 A-5).
+///
+/// Nineteen keys, and the widest table in the format. They are the metadata a library catalog
+/// needs to answer "what is this text, and may I pass it on" without opening the text.
+pub mod manifest {
+    pub const ALIAS: u16 = 0;
+    pub const PARTS: u16 = 1;
+    pub const LANG: u16 = 2;
+    pub const READER: u16 = 3;
+    pub const LICENCE: u16 = 4;
+    pub const CARRY: u16 = 5;
+    pub const TITLE: u16 = 6;
+    pub const CREATORS: u16 = 7;
+    pub const PUBLISHED: u16 = 8;
+    pub const IDENTIFIERS: u16 = 9;
+    pub const ORIGIN: u16 = 10;
+    pub const PARENT: u16 = 11;
+    /// Required whenever [`PARENT`] is present.
+    pub const PARENT_KIND: u16 = 12;
+    pub const SUPERSEDES: u16 = 13;
+    pub const VERSIFICATION: u16 = 14;
+    /// Written only when true, so a lossless manifest encodes to no key at all.
+    pub const LOSSY: u16 = 15;
+    pub const RAW: u16 = 16;
+    pub const PART_POLICY: u16 = 17;
+    pub const CALENDAR: u16 = 18;
+    pub const HIGHEST: u16 = CALENDAR;
+}
+
+/// A part entry, nested inside a manifest under [`manifest::PARTS`].
+pub mod part_entry {
+    pub const TID: u16 = 0;
+    pub const LENGTH: u16 = 1;
+    /// BLAKE3-256 of the canonical CBOR of the reading's segment table.
+    pub const STRUCTURE: u16 = 2;
+    pub const RDID: u16 = 3;
+    /// Written only when this part's language differs from the manifest's.
+    pub const LANG: u16 = 4;
+    pub const HIGHEST: u16 = LANG;
+}
+
+/// Part text (type code 15, SMYSL-2.3 A-5).
+///
+/// Two keys, both required, and no surface form. The tid is carried rather than derived so
+/// that a record which does **not** hash to its tid can be decoded, reported (`SMY-E446`) and
+/// re-encoded unchanged — one bad record must not stop a store from opening.
+pub mod part_text {
+    pub const TID: u16 = 0;
+    pub const TEXT: u16 = 1;
+    pub const HIGHEST: u16 = TEXT;
+}
+
+/// Part reading (type code 18, SMYSL-2.3 A-5).
+pub mod part_reading {
+    pub const TID: u16 = 0;
+    pub const READER: u16 = 1;
+    /// The canonical CBOR of the segment table, carried opaquely at this layer.
+    pub const SEGMENTS: u16 = 2;
+    pub const RAW: u16 = 3;
+    pub const HIGHEST: u16 = RAW;
+}
+
 /// SourceRef, nested inside a unit under [`unit::SOURCE`].
 pub mod source {
     pub const KIND: u16 = 0;
@@ -307,6 +369,57 @@ mod tests {
                     commit::AGENT,
                     commit::TS,
                     commit::NOTE,
+                ],
+            ),
+            (
+                "manifest",
+                manifest::HIGHEST,
+                &[
+                    manifest::ALIAS,
+                    manifest::PARTS,
+                    manifest::LANG,
+                    manifest::READER,
+                    manifest::LICENCE,
+                    manifest::CARRY,
+                    manifest::TITLE,
+                    manifest::CREATORS,
+                    manifest::PUBLISHED,
+                    manifest::IDENTIFIERS,
+                    manifest::ORIGIN,
+                    manifest::PARENT,
+                    manifest::PARENT_KIND,
+                    manifest::SUPERSEDES,
+                    manifest::VERSIFICATION,
+                    manifest::LOSSY,
+                    manifest::RAW,
+                    manifest::PART_POLICY,
+                    manifest::CALENDAR,
+                ],
+            ),
+            (
+                "part_entry",
+                part_entry::HIGHEST,
+                &[
+                    part_entry::TID,
+                    part_entry::LENGTH,
+                    part_entry::STRUCTURE,
+                    part_entry::RDID,
+                    part_entry::LANG,
+                ],
+            ),
+            (
+                "part_text",
+                part_text::HIGHEST,
+                &[part_text::TID, part_text::TEXT],
+            ),
+            (
+                "part_reading",
+                part_reading::HIGHEST,
+                &[
+                    part_reading::TID,
+                    part_reading::READER,
+                    part_reading::SEGMENTS,
+                    part_reading::RAW,
                 ],
             ),
             (

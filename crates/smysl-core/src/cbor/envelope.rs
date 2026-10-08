@@ -15,13 +15,18 @@ use crate::cbor::keys;
 use crate::cbor::reader::Dec;
 use crate::cbor::writer::{enc, Enc, MapBuilder};
 use crate::error::CodecError;
-use crate::ids::{AgentId, ContentionId, Label, LangTag, SchemaId, ThreadId, ViewId};
+use crate::ids::{
+    AgentId, ContentionId, Label, LangTag, Mid, Rdid, SchemaId, ThreadId, Tid, ViewId,
+};
 use crate::types::annex::{
     Contention, ContentionStatus, Detected, DetectionKind, DropReason, LabelBinding, Optimality,
     PackInfo, PackMode, SchemaDecl,
 };
 use crate::types::epistemics::{Date, Lod, SourceKind, SourceRef, Status};
 use crate::types::estimate::ProfileEstimator;
+use crate::types::library::{
+    Calendar, Carry, Manifest, ParentKind, PartEntry, PartReading, PartText,
+};
 use crate::types::lifecycle::{Commit, Commitment, Resolution, ResolutionTarget, Withdrawal};
 use crate::types::provenance::{Attestation, Hlc, Op, Rung};
 use crate::types::record::{code, Record};
@@ -178,7 +183,7 @@ fn enc_granularity(e: &mut Enc, g: &GranularityProfile) {
     m.put(keys::granularity::L1_MIN, |e| e.uint(g.l1_min as u64));
     m.put(keys::granularity::L1_MAX, |e| e.uint(g.l1_max as u64));
     m.put(keys::granularity::ADMISSION, |e| {
-        e.uint(g.admission.as_u8() as u64)
+        e.uint(g.admission_code() as u64)
     });
     // Absent for the pre-F-2 default: writing it would change the bytes of every view that
     // predates F-2, which §8.1 forbids (A-9).
@@ -355,6 +360,155 @@ fn commit_bytes(c: &Commit) -> Vec<u8> {
     m.into_bytes()
 }
 
+/// `true` as a CBOR simple value.
+///
+/// A bool appears in exactly one kernel field — a manifest's `lossy` — and it is written only
+/// when true, so `false` has no encoding at all. That is what keeps one manifest to one byte
+/// string: admitting `0xF4` would give a lossless manifest two spellings.
+fn enc_true(e: &mut Enc) {
+    e.head(crate::cbor::major::SIMPLE, 21);
+}
+
+/// Write a pre-encoded CBOR item that this layer carries without interpreting.
+///
+/// `empty` is the item to write when the carried bytes are empty, and it is the reason this
+/// is a function. A reading's segment table is required and may be empty, and "empty" on the
+/// wire is an empty array, not zero bytes; writing nothing would emit a map with a key and no
+/// value and corrupt every record that followed it in the log. A caller that builds an empty
+/// table with `Vec::new()` is making an ordinary statement, not a mistake, so the encoder
+/// spells it rather than refusing it.
+fn enc_opaque(e: &mut Enc, bytes: &[u8], empty: u8) {
+    if bytes.is_empty() {
+        e.raw(&[empty]);
+    } else {
+        e.raw(bytes);
+    }
+}
+
+/// A CBOR map with text keys, sorted by encoded key bytes.
+///
+/// Not by the strings: constraint 4 orders a map by its encoded keys, and a text head carries
+/// its length first, so `"a" < "doi" < "isbn"` by bytes while `"doi" < "isbn" < "a"`… is what
+/// a `BTreeMap` iterates. Sorting the encoded pairs is the only order that agrees with what
+/// `skip_item` enforces when it meets the same map under an unknown key.
+fn enc_text_map<'a>(e: &mut Enc, entries: impl Iterator<Item = (&'a str, &'a str)>) {
+    let mut rows: Vec<(Vec<u8>, Vec<u8>)> = entries
+        .map(|(k, v)| (enc(|e| e.text(k)), enc(|e| e.text(v))))
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    debug_assert!(
+        rows.windows(2).all(|w| w[0].0 < w[1].0),
+        "duplicate text key in encoder output"
+    );
+    e.head(crate::cbor::major::MAP, rows.len() as u64);
+    for (k, v) in rows {
+        e.raw(&k);
+        e.raw(&v);
+    }
+}
+
+fn enc_part_entry(e: &mut Enc, p: &PartEntry) {
+    let mut m = MapBuilder::new();
+    m.put(keys::part_entry::TID, |e| e.bytes(p.tid.as_bytes()));
+    m.put(keys::part_entry::LENGTH, |e| e.uint(p.length));
+    m.put(keys::part_entry::STRUCTURE, |e| e.bytes(&p.structure));
+    m.put(keys::part_entry::RDID, |e| e.bytes(p.rdid.as_bytes()));
+    m.put_opt(keys::part_entry::LANG, p.lang.as_ref(), |e, l| {
+        e.text(l.as_str())
+    });
+    m.put_extra(&p.extra);
+    m.finish(e);
+}
+
+/// The canonical bytes of a manifest body — the mid's preimage after its domain byte (A-3).
+///
+/// Public for the same reason [`unit_core_bytes`] is: a second implementation derives a mid
+/// from these bytes, and a disagreement has to be attributable to the encoding or to the
+/// hashing rather than to the pair of them together.
+pub fn manifest_bytes(m: &Manifest) -> Vec<u8> {
+    let mut b = MapBuilder::new();
+    b.put(keys::manifest::ALIAS, |e| e.text(&m.alias));
+    // Not `put_array`: `parts` is required and may be empty. An import manifest records an
+    // expression whose text was never carried, and it has to encode to a key with an empty
+    // array rather than to no key at all.
+    b.put(keys::manifest::PARTS, |e| {
+        e.array(
+            m.parts
+                .iter()
+                .map(|p| enc(|e| enc_part_entry(e, p)))
+                .collect(),
+        )
+    });
+    b.put(keys::manifest::LANG, |e| e.text(m.lang.as_str()));
+    b.put(keys::manifest::READER, |e| e.text(&m.reader));
+    b.put(keys::manifest::LICENCE, |e| e.text(&m.licence));
+    b.put(keys::manifest::CARRY, |e| e.uint(m.carry.as_u8() as u64));
+    b.put_opt(keys::manifest::TITLE, m.title.as_ref(), |e, t| e.text(t));
+    b.put_array(
+        keys::manifest::CREATORS,
+        m.creators.iter().map(|c| enc(|e| e.text(c))).collect(),
+    );
+    b.put_opt(keys::manifest::PUBLISHED, m.published.as_ref(), |e, p| {
+        e.text(p)
+    });
+    if !m.identifiers.is_empty() {
+        b.put(keys::manifest::IDENTIFIERS, |e| {
+            enc_text_map(
+                e,
+                m.identifiers.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+            )
+        });
+    }
+    b.put_opt(keys::manifest::ORIGIN, m.origin.as_ref(), enc_source);
+    if let Some((mid, kind)) = &m.parent {
+        b.put(keys::manifest::PARENT, |e| e.bytes(mid.as_bytes()));
+        b.put(keys::manifest::PARENT_KIND, |e| e.text(kind.as_str()));
+    }
+    b.put_opt(keys::manifest::SUPERSEDES, m.supersedes.as_ref(), |e, s| {
+        e.bytes(s.as_bytes())
+    });
+    b.put_opt(
+        keys::manifest::VERSIFICATION,
+        m.versification.as_ref(),
+        |e, v| e.text(v),
+    );
+    if m.lossy {
+        b.put(keys::manifest::LOSSY, enc_true);
+    }
+    b.put_opt(keys::manifest::RAW, m.raw.as_ref(), |e, r| {
+        enc_opaque(e, r, 0xA0)
+    });
+    b.put(keys::manifest::PART_POLICY, |e| e.text(&m.part_policy));
+    b.put_opt(keys::manifest::CALENDAR, m.calendar.as_ref(), |e, c| {
+        e.text(c.as_str())
+    });
+    b.put_extra(&m.extra);
+    b.into_bytes()
+}
+
+fn part_text_bytes(p: &PartText) -> Vec<u8> {
+    let mut m = MapBuilder::new();
+    m.put(keys::part_text::TID, |e| e.bytes(p.tid.as_bytes()));
+    m.put(keys::part_text::TEXT, |e| e.bytes(&p.text));
+    m.put_extra(&p.extra);
+    m.into_bytes()
+}
+
+/// The canonical bytes of a reading body — the rdid's preimage after its domain byte (A-3).
+pub fn part_reading_bytes(r: &PartReading) -> Vec<u8> {
+    let mut m = MapBuilder::new();
+    m.put(keys::part_reading::TID, |e| e.bytes(r.tid.as_bytes()));
+    m.put(keys::part_reading::READER, |e| e.text(&r.reader));
+    m.put(keys::part_reading::SEGMENTS, |e| {
+        enc_opaque(e, &r.segments, 0x80)
+    });
+    m.put_opt(keys::part_reading::RAW, r.raw.as_ref(), |e, raw| {
+        enc_opaque(e, raw, 0xA0)
+    });
+    m.put_extra(&r.extra);
+    m.into_bytes()
+}
+
 /// Encode one record as a complete envelope.
 pub fn to_cbor(r: &Record) -> Vec<u8> {
     let payload = match r {
@@ -370,6 +524,9 @@ pub fn to_cbor(r: &Record) -> Vec<u8> {
         Record::Withdrawal(w) => withdrawal_bytes(w),
         Record::Resolution(r) => resolution_bytes(r),
         Record::Commit(c) => commit_bytes(c),
+        Record::Manifest(m) => manifest_bytes(m),
+        Record::PartText(p) => part_text_bytes(p),
+        Record::PartReading(r) => part_reading_bytes(r),
         Record::Unknown { payload, .. } => payload.clone(),
     };
     let mut e = Enc::with_capacity(payload.len() + 4);
@@ -769,6 +926,7 @@ fn dec_granularity(d: &mut Dec<'_>) -> Res<GranularityProfile> {
     // Collected into the profile, not a local: a key this build does not know has to leave
     // again in the bytes it arrived in (§8.1).
     let mut extra = Extra::new();
+    let raw_admission = &mut None;
     read_map(d, &mut extra, |d, k| match k {
         keys::granularity::PROFILE => {
             g.profile = d.text()?.to_string();
@@ -787,8 +945,12 @@ fn dec_granularity(d: &mut Dec<'_>) -> Res<GranularityProfile> {
             Ok(true)
         }
         keys::granularity::ADMISSION => {
-            g.admission = Admission::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(at))?)
-                .ok_or_else(|| bad(at))?;
+            // Open from 1.10 (A-8.1): a code this build cannot name is kept and treated as
+            // unknown, where until 1.9 it failed the whole decode. The raw byte goes back out
+            // through `with_unknown_admission`, below, once the profile is built.
+            let c = u8::try_from(d.uint()?).map_err(|_| bad(at))?;
+            *raw_admission = Some(c);
+            g.admission = Admission::from_u8(c).unwrap_or(Admission::Unknown);
             Ok(true)
         }
         keys::granularity::ESTIMATOR => {
@@ -801,6 +963,15 @@ fn dec_granularity(d: &mut Dec<'_>) -> Res<GranularityProfile> {
         _ => Ok(false),
     })?;
     g.extra = extra;
+    if g.admission == Admission::Unknown {
+        // The code has to leave again exactly as it arrived, or two peers compute different
+        // record-set digests for one store. `with_unknown_admission` refuses 255 and refuses
+        // a code we do know, so a profile that claims `Unknown` for a named code is rejected
+        // rather than re-encoded as something else.
+        g = g
+            .with_unknown_admission(raw_admission.ok_or_else(|| bad(at))?)
+            .ok_or_else(|| bad(at))?;
+    }
     Ok(g)
 }
 
@@ -1196,6 +1367,303 @@ fn dec_resolution(d: &mut Dec<'_>) -> Res<Resolution> {
     })
 }
 
+/// Read a 32-byte string into a fixed array.
+fn dec_32(d: &mut Dec<'_>) -> Res<[u8; 32]> {
+    let at = d.position();
+    d.bytes()?.try_into().map_err(|_| bad(at))
+}
+
+/// Read `true`, and only `true`.
+///
+/// `false` is not an encoding of anything here: the one bool in the format is written only
+/// when true (A-5, manifest key 15). Accepting `0xF4` would admit a second spelling of a
+/// lossless manifest, which is a different mid for the same facts.
+fn dec_true(d: &mut Dec<'_>) -> Res<bool> {
+    let at = d.position();
+    if d.peek_byte()? != 0xF5 {
+        return Err(bad(at));
+    }
+    d.advance(1);
+    Ok(true)
+}
+
+fn dec_text_map(d: &mut Dec<'_>) -> Res<std::collections::BTreeMap<String, String>> {
+    let at = d.position();
+    let n = d.map_head()?;
+    let mut out = std::collections::BTreeMap::new();
+    let mut prev: Option<Vec<u8>> = None;
+    for _ in 0..n {
+        let kstart = d.position();
+        // The key's own bytes, so the order check below compares what constraint 4 orders by.
+        // `skip_item` is what validates them — shortest-form head, valid UTF-8, NFC — and the
+        // text is read back out of them rather than decoded twice from the stream.
+        let kbytes = d.skip_item()?.to_vec();
+        let k = Dec::new(&kbytes)
+            .text()
+            .map_err(|_| bad(kstart))?
+            .to_string();
+        // Encoded-key order, which is what `skip_item` enforces for the same map when it
+        // arrives under a key this build does not know. Comparing the decoded strings instead
+        // would accept a map that a reader one version older rejects.
+        if let Some(p) = &prev {
+            if *p >= kbytes {
+                return Err(bad(kstart));
+            }
+        }
+        prev = Some(kbytes);
+        d.reject_null()?;
+        if out.insert(k, d.text()?.to_string()).is_some() {
+            return Err(bad(at));
+        }
+    }
+    Ok(out)
+}
+
+fn dec_part_entry(d: &mut Dec<'_>) -> Res<PartEntry> {
+    let at = d.position();
+    let mut tid = None;
+    let mut length = None;
+    let mut structure = None;
+    let mut rdid = None;
+    let mut lang = None;
+    let mut extra = Extra::new();
+    read_map(d, &mut extra, |d, k| match k {
+        keys::part_entry::TID => {
+            tid = Some(Tid::from_bytes(dec_32(d)?));
+            Ok(true)
+        }
+        keys::part_entry::LENGTH => {
+            length = Some(d.uint()?);
+            Ok(true)
+        }
+        keys::part_entry::STRUCTURE => {
+            structure = Some(dec_32(d)?);
+            Ok(true)
+        }
+        keys::part_entry::RDID => {
+            rdid = Some(Rdid::from_bytes(dec_32(d)?));
+            Ok(true)
+        }
+        keys::part_entry::LANG => {
+            lang = Some(LangTag::new(d.text()?).map_err(|_| bad(at))?);
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+    let mut p = PartEntry::new(
+        tid.ok_or_else(|| bad(at))?,
+        length.ok_or_else(|| bad(at))?,
+        structure.ok_or_else(|| bad(at))?,
+        rdid.ok_or_else(|| bad(at))?,
+    );
+    p.lang = lang;
+    p.extra = extra;
+    Ok(p)
+}
+
+fn dec_manifest(d: &mut Dec<'_>) -> Res<Manifest> {
+    let at = d.position();
+    let mut alias = None;
+    let mut parts = None;
+    let mut lang = None;
+    let mut reader = None;
+    let mut licence = None;
+    let mut carry = None;
+    let mut title = None;
+    let mut creators = Vec::new();
+    let mut published = None;
+    let mut identifiers = std::collections::BTreeMap::new();
+    let mut origin = None;
+    let mut parent = None;
+    let mut parent_kind = None;
+    let mut supersedes = None;
+    let mut versification = None;
+    let mut lossy = false;
+    let mut raw = None;
+    let mut part_policy = None;
+    let mut calendar = None;
+    let mut extra = Extra::new();
+
+    read_map(d, &mut extra, |d, k| match k {
+        keys::manifest::ALIAS => {
+            alias = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::manifest::PARTS => {
+            parts = Some(d.array(dec_part_entry)?);
+            Ok(true)
+        }
+        keys::manifest::LANG => {
+            lang = Some(LangTag::new(d.text()?).map_err(|_| bad(at))?);
+            Ok(true)
+        }
+        keys::manifest::READER => {
+            reader = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::manifest::LICENCE => {
+            licence = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::manifest::CARRY => {
+            // Closed, unlike `source.kind`: `bundle` reads it to decide whether text may
+            // travel (`SMY-E402`), and a code it had to guess at would be a permission
+            // granted or refused on a guess.
+            carry = Some(
+                Carry::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(at))?)
+                    .ok_or_else(|| bad(at))?,
+            );
+            Ok(true)
+        }
+        keys::manifest::TITLE => {
+            title = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::manifest::CREATORS => {
+            creators = d.array(|d| Ok(d.text()?.to_string()))?;
+            Ok(true)
+        }
+        keys::manifest::PUBLISHED => {
+            published = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::manifest::IDENTIFIERS => {
+            identifiers = dec_text_map(d)?;
+            Ok(true)
+        }
+        keys::manifest::ORIGIN => {
+            origin = Some(dec_source(d)?);
+            Ok(true)
+        }
+        keys::manifest::PARENT => {
+            parent = Some(Mid::from_bytes(dec_32(d)?));
+            Ok(true)
+        }
+        keys::manifest::PARENT_KIND => {
+            parent_kind = Some(ParentKind::parse(d.text()?).ok_or_else(|| bad(at))?);
+            Ok(true)
+        }
+        keys::manifest::SUPERSEDES => {
+            supersedes = Some(Mid::from_bytes(dec_32(d)?));
+            Ok(true)
+        }
+        keys::manifest::VERSIFICATION => {
+            versification = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::manifest::LOSSY => {
+            lossy = dec_true(d)?;
+            Ok(true)
+        }
+        keys::manifest::RAW => {
+            raw = Some(d.skip_item()?.to_vec());
+            Ok(true)
+        }
+        keys::manifest::PART_POLICY => {
+            part_policy = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::manifest::CALENDAR => {
+            calendar = Some(Calendar::parse(d.text()?).ok_or_else(|| bad(at))?);
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+
+    // Key 12 is required with key 11 and meaningless without it (A-5). Either half alone
+    // cannot be re-encoded as what was read, so it is refused rather than dropped.
+    let parent = match (parent, parent_kind) {
+        (Some(m), Some(k)) => Some((m, k)),
+        (None, None) => None,
+        _ => return Err(bad(at)),
+    };
+
+    let mut m = Manifest::new(
+        alias.ok_or_else(|| bad(at))?,
+        lang.ok_or_else(|| bad(at))?,
+        reader.ok_or_else(|| bad(at))?,
+        licence.ok_or_else(|| bad(at))?,
+        part_policy.ok_or_else(|| bad(at))?,
+    );
+    m.parts = parts.ok_or_else(|| bad(at))?;
+    m.carry = carry.ok_or_else(|| bad(at))?;
+    m.title = title;
+    m.creators = creators;
+    m.published = published;
+    m.identifiers = identifiers;
+    m.origin = origin;
+    m.parent = parent;
+    m.supersedes = supersedes;
+    m.versification = versification;
+    m.lossy = lossy;
+    m.raw = raw;
+    m.calendar = calendar;
+    m.extra = extra;
+    Ok(m)
+}
+
+fn dec_part_text(d: &mut Dec<'_>) -> Res<PartText> {
+    let at = d.position();
+    let mut tid = None;
+    let mut text = None;
+    let mut extra = Extra::new();
+    read_map(d, &mut extra, |d, k| match k {
+        keys::part_text::TID => {
+            tid = Some(Tid::from_bytes(dec_32(d)?));
+            Ok(true)
+        }
+        keys::part_text::TEXT => {
+            text = Some(d.bytes()?.to_vec());
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+    // The tid is **not** verified here, and that is deliberate (SMYSL-2.4 §4.3.1). A record
+    // whose bytes do not hash to its tid has to decode, so that the layer above can report
+    // `SMY-E446` and name the part. Failing the decode would let one bad record stop
+    // `Store::open` — which is F-12, and once was enough.
+    let mut p =
+        PartText::with_claimed_tid(tid.ok_or_else(|| bad(at))?, text.ok_or_else(|| bad(at))?);
+    p.extra = extra;
+    Ok(p)
+}
+
+fn dec_part_reading(d: &mut Dec<'_>) -> Res<PartReading> {
+    let at = d.position();
+    let mut tid = None;
+    let mut reader = None;
+    let mut segments = None;
+    let mut raw = None;
+    let mut extra = Extra::new();
+    read_map(d, &mut extra, |d, k| match k {
+        keys::part_reading::TID => {
+            tid = Some(Tid::from_bytes(dec_32(d)?));
+            Ok(true)
+        }
+        keys::part_reading::READER => {
+            reader = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::part_reading::SEGMENTS => {
+            segments = Some(d.skip_item()?.to_vec());
+            Ok(true)
+        }
+        keys::part_reading::RAW => {
+            raw = Some(d.skip_item()?.to_vec());
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+    let mut r = PartReading::new(
+        tid.ok_or_else(|| bad(at))?,
+        reader.ok_or_else(|| bad(at))?,
+        segments.ok_or_else(|| bad(at))?,
+    );
+    r.raw = raw;
+    r.extra = extra;
+    Ok(r)
+}
+
 /// Decode one record envelope, returning it and the number of bytes consumed.
 pub fn from_cbor(bytes: &[u8]) -> Res<(Record, usize)> {
     let mut d = Dec::new(bytes);
@@ -1217,6 +1685,9 @@ pub fn from_cbor(bytes: &[u8]) -> Res<(Record, usize)> {
         code::WITHDRAWAL => Record::Withdrawal(dec_withdrawal(&mut d)?),
         code::RESOLUTION => Record::Resolution(dec_resolution(&mut d)?),
         code::COMMIT => Record::Commit(dec_commit(&mut d)?),
+        code::MANIFEST => Record::Manifest(dec_manifest(&mut d)?),
+        code::PART_TEXT => Record::PartText(dec_part_text(&mut d)?),
+        code::PART_READING => Record::PartReading(dec_part_reading(&mut d)?),
         other => {
             // `SMY-W014`: preserved verbatim, skipped semantically. The payload is parsed
             // strictly, so an unknown record cannot smuggle in a non-deterministic encoding.

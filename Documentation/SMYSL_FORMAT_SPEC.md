@@ -218,12 +218,52 @@ text. `fixtures/wire/relation-id/cases.json` carries vectors, preimage and diges
 **Added in 1.4**, and no existing byte changed: every rid is a function of fields relations
 already carried.
 
-### 2.6 (held)
+### 2.6 Library identities
 
-Library identities — the part id, manifest id, reading id and dating id — are specified in RFC
-SMYSL-2.3 A-3 and are folded in here when the release that writes them lands. The number is held
-rather than reused so that §2.7 below keeps the number it was given, because a normative section
-that moves is a citation that silently retargets.
+Four identities are derived for the library records of §3.1. Each is a BLAKE3-256 digest over a
+one-byte domain prefix followed by a preimage, the convention §2.5 already uses for a rid.
+
+| identity | names | preimage | domain byte | text form |
+|---|---|---|---|---|
+| **tid** | a part text (record 15) | the part's normalised bytes | `0x0f` | `t3:` + base32 |
+| **mid** | a manifest (record 14) | the canonical CBOR of the manifest body | `0x0e` | `m3:` + base32 |
+| **did** | a dating (record 17) | the canonical CBOR of the dating body | `0x11` | `d3:` + base32 |
+| **rdid** | a part reading (record 18) | the canonical CBOR of the reading body | `0x12` | `r3:` + base32 |
+
+The domain byte is the record type code the identity names. A unit's preimage is a canonical
+CBOR map, whose first byte is `0xa0`–`0xbf`, so **no library identity can equal a uid, and no
+two kinds of identity can equal each other** however their preimages collide. That is what lets
+a record carry any of them in a 32-byte slot it defines as holding a uid — a withdrawal or a
+commitment naming a dating (§3.1), a contention position — without the kinds becoming
+confusable.
+
+The base32 alphabet, the bit order, and the rule that a canonical form is 52 characters while 26
+is a display abbreviation are §2.1's. A record carrying a 26-character form is `SMY-E071`, as it
+is for a uid.
+
+**Normalised bytes** of a part are UTF-8, NFC, line endings LF, no byte order mark. Nothing else
+is changed: no whitespace collapsing and no case folding. An implementation that accepts a part
+MUST verify both that its bytes are normalised and that they hash to the tid the record claims,
+and report `SMY-E446` if either fails. It MUST NOT fail the *decode* on a mismatch: a record
+that cannot be decoded cannot be reported, and one bad part would otherwise stop a whole store
+from opening. `SMY-E401` is the neighbouring case — a re-read part whose structure hash or rdid
+does not match its manifest's entry, where the bytes are intact and the reading changed.
+
+`SMY-E401`, `SMY-E446` and `SMY-E452` are **allocated** by RFC SMYSL-2.4 §8 and named here so
+that two implementations report the same condition under the same code. Each enters the
+reference implementation's registry with the pass that raises it, not before: a code nothing can
+trigger is worse than a missing one, because a reader waits for it.
+
+**None of these is hashed into a uid.** A tid appears inside a unit only as text in
+`source.reference` and as the referent of a span; a mid appears as `source.manifest`. So adding
+them moved no existing byte.
+
+`fixtures/library/wire/ids.json` carries vectors with the preimage, the body bytes and the
+identity apart, for the reason `fixtures/wire/uid/cases.json` does: deriving an identity is not
+reachable by reading a document, so an implementation that only reads could agree with every
+byte here and still have no derivation at all.
+
+**Added in 1.10**, specified by RFC SMYSL-2.3 A-3.
 
 ### 2.7 Record-set digest
 
@@ -346,6 +386,12 @@ Every record is a two-element array: `[type_code, body]`.
 | 11 | withdrawal |
 | 12 | resolution |
 | 13 | commitment |
+| 14 | manifest |
+| 15 | part text |
+| 16 | reserved |
+| 17 | dating |
+| 18 | part reading |
+| 19 | redaction |
 
 An **unknown type code MUST be preserved verbatim and skipped semantically** (`SMY-W014`),
 not rejected. Its body is still parsed strictly, so an unknown record cannot smuggle in a
@@ -412,6 +458,100 @@ the order records arrived in (rule U). A unit with no commitment record has **no
 which is not the same as `floated`. Taking the highest level ever asserted is NOT permitted: it
 would make a commitment impossible to walk back, so `retconned` could never take effect.
 
+Records 14, 15 and 18 were added in 1.10, in the same way again. Records 16, 17 and 19 are
+**allocated and not yet defined here**: 16 is reserved and MUST NOT be emitted until a later
+revision defines it, and 17 and 19 are specified by RFC SMYSL-2.3 A-5 and are folded in with the
+release that writes them. A decoder MUST treat all three as unknown type codes, which is what it
+already does with 9.
+
+The three together are a **library**: a manifest says that an expression, at one version, is
+these parts in this order, read this way; a part text carries one part's bytes; a part reading
+carries what one reader derived from one part. Their identities are §2.6's.
+
+**Where these records may rest** is normative, and it is the one rule here that is about storage
+rather than about bytes. A log MAY hold 14. A log MUST NOT hold 15 or 18; an implementation
+offered one for a log MUST refuse it with `SMY-E452`. Part texts and readings live in a content-
+addressed object store, as their record envelopes, so that a bundle or an export emits them
+verbatim and verification is decode-then-hash.
+
+The reason is what record 19 will ask for. Honouring a redaction means a store no longer holds
+the part, and for an object store that is deleting a file; for a log it would mean rewriting the
+log. That is the one operation an append-only log cannot survive as evidence, because it resets
+the same hash chain that would have shown a rewrite — afterwards the log cannot distinguish the
+redaction from an edit, so honouring the redaction and destroying the audit trail become the
+same act. Refusing the record at the point it would enter the log is therefore cheaper than it
+looks: a store with no library beside it can neither resolve a locator nor check a span, so all
+it could do with the bytes is hold them. The rule that governs redaction is folded in with
+record 19.
+
+**Manifest (14)** — an expression at one version.
+
+| key | field | type | presence |
+|---:|---|---|---|
+| 0 | alias | text, the expression alias | required |
+| 1 | parts | array of part entries, in reading order; MAY be empty | required |
+| 2 | lang | text, BCP-47; `mul` for mixed, `und` for unknown | required |
+| 3 | reader | text, a reader id and version, such as `osis/1` | required |
+| 4 | licence | text, an SPDX id, `public-domain` or `unknown` | required |
+| 5 | carry | unsigned: `0` none, `1` ref, `2` text | required |
+| 6 | title | text, as recorded | optional |
+| 7 | creators | array of text, as recorded | optional |
+| 8 | published | text, EDTF, as recorded | optional |
+| 9 | identifiers | map text → text | optional |
+| 10 | origin | a `source` map (§2.2) | optional |
+| 11 | parent | 32 bytes, the mid this derives from | optional |
+| 12 | parent-kind | text: `translation`, `edition`, `excerpt`, `transcription` | required with 11 |
+| 13 | supersedes | 32 bytes, the mid of the previous version of this expression | optional |
+| 14 | versification | text | optional |
+| 15 | lossy | bool, written **only** when true | optional |
+| 16 | raw | map, the reader's manifest-level metadata, verbatim | optional |
+| 17 | part-policy | text, the boundary rule and size targets | required |
+| 18 | calendar | text: `julian` when key 8 is a Julian date; absent means Gregorian | optional |
+
+Key 12 is required with key 11 and meaningless without it; either alone MUST be rejected, for
+the reason a resolution with one target is. Key 15 has no `false` encoding: an absent key is
+`false`, and a decoder MUST reject `false` on the wire, because admitting it would give one
+manifest two byte strings and therefore two mids.
+
+An **alias** is lowercase ASCII:
+
+```
+alias   = segment *( ( "/" / ":" ) segment )        ; at most 128 bytes
+segment = 1*( %x61-7A / DIGIT / "-" / "_" / "." )
+```
+
+`import:` is reserved in the alias namespace. An over-long alias is shortened by the tool that
+produces it, never rejected after the fact — so a decoder MUST NOT reject a record over its
+alias, and the grammar is checked where there is an author to tell.
+
+A **part entry** is `{0: tid, 1: length (unsigned), 2: structure hash (32 bytes), 3: rdid,
+4: lang (text, only when it differs from key 2)}`. The structure hash is BLAKE3-256 of the
+canonical CBOR of the segment table in the reading's key 2 — **over the table, with no domain
+byte**, because it names a table and not a record. So a reading that gains raw metadata keeps
+its structure hash and changes its rdid, which is why a part entry carries both.
+
+**Part text (15)** — `{0: tid (32 bytes), 1: text (bytes, the normalised text)}`, both required.
+It has no surface form: text is not written in surface syntax.
+
+**Part reading (18)** — what one reader derived from one part.
+
+| key | field | type | presence |
+|---:|---|---|---|
+| 0 | tid | 32 bytes | required |
+| 1 | reader | text, a reader id and version | required |
+| 2 | segments | canonical CBOR, one row per segment | required, MAY be empty |
+| 3 | raw | map, the reader's raw metadata for this part, verbatim | optional |
+
+A segment row is `{0: start, 1: end, 2: level (text), 3: locator (text), 4: lang?, 5: speaker?,
+6: observed?, 7: ids? (map text → text), 8: tz offset in minutes?}`. An empty table is an empty
+**array**, not an absent value. Record 18 has no surface form either.
+
+A **text-keyed map** — key 9 of a manifest, key 7 of a segment row, the `raw` maps — is ordered
+by its **encoded keys**, as §3 constraint 4 requires of any map. A text head carries its length
+first, so `"a"` precedes `"doi"` whatever the letters are. That is not string order, and a
+decoder MUST enforce the encoded order rather than the decoded one, or it accepts stores that a
+decoder treating the same map as an unknown value rejects.
+
 **Pack info (7)** gained key 7, `reserved`, in 1.6: an unsigned integer, what the caller set aside
 out of `budget` for the rest of the prompt a pack lands in. A new key in a record body above that
 record's highest, which §8.1 permits — an older reader preserves it verbatim.
@@ -423,8 +563,8 @@ and a zero re-encode to the same bytes, so every pack written before 1.6 keeps t
 A packer that reserves `r` out of `b` MUST solve against `b - r` and MUST report `budget` as `b`,
 so that `used + reserved <= budget` holds for any reader that checks it.
 
-**Open and closed enumerations.** Four of the format's enumerations are **open** from 1.9:
-`source` `kind` (§2.2), thread schema, step role, and detection kind.
+**Open and closed enumerations.** Five of the format's enumerations are **open**: `source`
+`kind` (§2.2), thread schema, step role and detection kind from 1.9, and `admission` from 1.10.
 
 - A decoder MUST preserve a code it does not know, re-encode it unchanged, and report
   `SMY-W409`. Wherever the value is interpreted it is treated as *unknown* — not as a default,
@@ -432,15 +572,23 @@ so that `used + reserved <= budget` holds for any reader that checks it.
   and correcting it is a tightening of readers rather than a change of format (§8.3): a document
   carrying a future code was always legal, and refusing it broke rule X one level below the
   record type, where nothing was watching.
-- **Code 255 is reserved in each of five and is never assigned**: the four above and
-  `admission`. An implementation MAY use it internally to mean "unknown" — except for
-  `source` `kind`, which is inside the uid (§2.2), where normalising an unrecognised code to 255
-  would give the unit a different identity and do it silently. There the raw code travels with
-  the container. It is reserved in `admission` while that enumeration is still closed, so that
-  opening it later needs no registry change and costs no code.
-- `status` (§2.2), `lod`, `op`, `rung`, `commitment` and `admission` stay **closed**. Rules M, T
-  and L read the first of these and an unknown value cannot be compared, so an unknown code in a
-  closed enumeration is still an error. A decoder MUST NOT invent a member of one.
+- **Code 255 is reserved in each of the five and is never assigned.** An implementation MAY use
+  it internally to mean "unknown" — except for `source` `kind`, which is inside the uid (§2.2),
+  where normalising an unrecognised code to 255 would give the unit a different identity and do
+  it silently. There the raw code travels with the container, and from 1.10 an unknown
+  `admission` travels with the granularity map the same way, for the weaker reason that two
+  readers disagreeing about whether to keep it compute different record-set digests (§2.7) for
+  one store.
+- **`admission` opened in 1.10 and cost nothing**, which is what reserving 255 for it in 1.9 was
+  for: no registry change, no renumbering and no new diagnostic. 1.9 held it closed on the
+  argument that the granularity bounds read it and a reader that guessed would report the wrong
+  verdict. The argument was right about guessing and wrong about the remedy: failing the decode
+  does not avoid a wrong verdict, it refuses to open the store. An unknown admission is
+  therefore preserved, reported, and **suspends** the checks that read it — which is not a
+  verdict in either direction.
+- `status` (§2.2), `lod`, `op`, `rung` and `commitment` stay **closed**. Rules M, T and L read
+  the first of these and an unknown value cannot be compared, so an unknown code in a closed
+  enumeration is still an error. A decoder MUST NOT invent a member of one.
 
 The *members* of these enumerations, beyond `status` and `source` `kind` in §2.2, are not
 specified here — the appendix says why. Their openness is, because preserving a member you do not
@@ -514,6 +662,17 @@ Consequences that are easy to get wrong, each of which has been a real defect:
   `level` is one of the five names above. `commit` is a reserved word in the same way, and unlike a
   withdrawal or a resolution a commitment always has a surface form, because a uid can always be
   written.
+- **`@manifest` spells record 14** (1.10), naming the expression alias in its header:
+  `@manifest kjv/1769 { lang: en, reader: osis/1, licence: public-domain, carry: text,
+  part-policy: "top/64Ki-4Mi", parts: [{ tid: t3:…, length: 97, structure: b3:…, rdid: r3:… }] }`.
+  `manifest` is a reserved word in the same way, as are `date` and `redact` for records 17 and
+  19. Records 15 and 18 have **no** surface form, so the set of records surface text cannot hold
+  grew with this release. The five required keys are named rather than defaulted: `part-policy`
+  in particular, because the policy a corpus was cut by is not recoverable from the parts and a
+  default that changes later would silently redefine every manifest that omitted it. `parts` is
+  the exception — omitting it means an empty one, which is an import manifest. A manifest
+  carrying key 16, `raw`, has no surface form: it is opaque reader metadata, and a writer
+  spelling it would be deciding what the bytes mean.
 - **`source { }` accepts a closed set of keys** (1.9): `kind`, `ref` or `reference`, `captured`
   and `observed`. Any other key is `SMY-E001`, a `captured` that is not a date is `SMY-E001`, an
   `observed` outside `u64` is `SMY-E001`, and a `source` that fails to parse refuses the unit —

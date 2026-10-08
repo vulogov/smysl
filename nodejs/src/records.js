@@ -2,7 +2,13 @@
 
 import { CborError, Decoder, encodeOne } from "./cbor.js";
 
-/** §3.1. An unknown code is preserved verbatim and skipped semantically, never rejected. */
+/** §3.1, every code the format has allocated.
+ *
+ * A code is a permanent wire commitment the moment it is allocated, so the reserved and
+ * not-yet-defined ones are named too: 9 is checkpoint, 16 is reserved, and 17 and 19 are
+ * specified but land in later releases. Naming them is how a reader says *what* it met rather
+ * than only that it met something.
+ */
 export const RECORD_NAMES = new Map([
   [1, "unit"],
   [2, "attestation"],
@@ -17,7 +23,27 @@ export const RECORD_NAMES = new Map([
   [11, "withdrawal"],
   [12, "resolution"],
   [13, "commitment"],
+  [14, "manifest"],
+  [15, "part_text"],
+  [16, "reserved"],
+  [17, "dating"],
+  [18, "part_reading"],
+  [19, "redaction"],
 ]);
+
+/** The codes whose **bodies** this implementation decodes.
+ *
+ * Not the same question as RECORD_NAMES, and conflating the two was wrong before it was
+ * consequential: `isKnown` was derived from the name table and documented as whether this
+ * version understands the record, which was already false for 9 — a checkpoint nothing has
+ * ever implemented — and harmless only because nothing emits one. 1.10 writes manifests, part
+ * texts and part readings, and a reader calling those "known" while interpreting none of them
+ * would be exactly the silence `SMY-W014` exists to break.
+ *
+ * An unknown record is still preserved verbatim and re-encoded byte for byte; that is C-Read
+ * and it is unaffected.
+ */
+export const UNDERSTOOD_RECORDS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]);
 
 /** §2.2. Anything at 9 or above is an unknown key that rule X says must survive verbatim. */
 export const UNIT_KEYS = new Map([
@@ -43,8 +69,14 @@ export class Record {
     return RECORD_NAMES.get(this.code) ?? `unknown(${this.code})`;
   }
 
+  /** Whether this implementation decodes this record's body.
+   *
+   * A code the spec names but this reader does not interpret — a manifest, a checkpoint — is
+   * **not** known. `name` still answers, so a report can say "a manifest, which this build does
+   * not interpret" rather than "something".
+   */
   get isKnown() {
-    return RECORD_NAMES.has(this.code);
+    return UNDERSTOOD_RECORDS.has(this.code);
   }
 
   /** The bytes this record was decoded from, or an encoding of its body if it was built here.

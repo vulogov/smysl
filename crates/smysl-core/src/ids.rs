@@ -190,6 +190,198 @@ impl UidPrefix {
 }
 
 // ---------------------------------------------------------------------------
+// Library identities (SMYSL-2.3 A-3)
+// ---------------------------------------------------------------------------
+
+/// A digest identity over a domain byte and a preimage, in the shape [`Uid`] has.
+///
+/// Four of these name library records. Each is `BLAKE3-256(domain ‖ preimage)`, where the
+/// domain byte is the record type code the identity names — the convention rid already
+/// followed when it pushed `0x03` before an edge's fields.
+///
+/// The domain byte is what keeps the kinds apart, and it is load-bearing in a way worth
+/// stating. A uid's preimage is a CBOR map, so its first byte is `0xa0`–`0xbf`; none of the
+/// bytes below is in that range, so no library identity can equal a uid however the
+/// preimages collide. Without it, a tid over a part whose bytes happened to be canonical
+/// CBOR could have equalled a mid, and a withdrawal naming one would have withdrawn the
+/// other. That is why [`as_uid`](Tid::as_uid) is safe: a withdrawal, a commitment or a
+/// contention position can hold any of these in the 32-byte slot it has for a uid, and the
+/// kinds still cannot be confused.
+macro_rules! digest_id {
+    ($name:ident, $prefix:literal, $domain:literal, $names:literal, $preimage:literal) => {
+        #[doc = concat!("The identity of ", $names, " (SMYSL-2.3 A-3).")]
+        ///
+        #[doc = concat!("`BLAKE3-256(", stringify!($domain), " + ", $preimage, ")`, written `", $prefix, "` followed by base32.")]
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        pub struct $name([u8; 32]);
+
+        impl $name {
+            /// The domain byte hashed before the preimage: the record type code this names.
+            pub const DOMAIN: u8 = $domain;
+            /// The textual prefix. Distinct per kind, so a mistyped identity is a parse error
+            /// rather than a lookup that finds nothing.
+            pub const PREFIX: &'static str = $prefix;
+            /// Characters in the short display form, as §2.1 defines it for a uid.
+            pub const SHORT_CHARS: usize = Uid::SHORT_CHARS;
+            /// Characters in the canonical display form.
+            pub const FULL_CHARS: usize = Uid::FULL_CHARS;
+
+            #[doc = concat!("Derive the identity of ", $names, " from ", $preimage, ".")]
+            pub fn of(preimage: &[u8]) -> $name {
+                let mut h = blake3::Hasher::new();
+                h.update(&[Self::DOMAIN]);
+                h.update(preimage);
+                $name(*h.finalize().as_bytes())
+            }
+
+            pub const fn from_bytes(b: [u8; 32]) -> $name {
+                $name(b)
+            }
+
+            pub const fn as_bytes(&self) -> &[u8; 32] {
+                &self.0
+            }
+
+            pub const fn to_bytes(self) -> [u8; 32] {
+                self.0
+            }
+
+            /// The same 256 bits in the slot a record has for a uid.
+            ///
+            /// For a withdrawal or a commitment key (A-6) and for a contention position. Not a
+            /// conversion of meaning: the domain byte is already inside the digest, so what
+            /// comes back can only be mistaken for a uid by a reader that ignores which key it
+            /// read it from.
+            pub const fn as_uid(&self) -> Uid {
+                Uid::from_bytes(self.0)
+            }
+
+            /// `PREFIX` + 26 base32 characters. Display form; not canonical.
+            pub fn short(&self) -> String {
+                self.encode(Self::SHORT_CHARS)
+            }
+
+            /// `PREFIX` + 52 base32 characters. The canonical text form.
+            pub fn canonical(&self) -> String {
+                self.encode(Self::FULL_CHARS)
+            }
+
+            fn encode(&self, chars: usize) -> String {
+                let mut s = String::with_capacity(Self::PREFIX.len() + chars);
+                s.push_str(Self::PREFIX);
+                for i in 0..chars {
+                    s.push(ALPHABET[five_bits_at(&self.0, i * 5)] as char);
+                }
+                s
+            }
+
+            /// Parse the canonical, full-width form. A short one is `SMY-E071`, for the reason
+            /// [`Uid::parse`] gives: an abbreviation in a record weakens identity silently.
+            pub fn parse(s: &str) -> Result<$name, IntegrityError> {
+                let err = || IntegrityError::TruncatedUid {
+                    found: s.to_string(),
+                };
+                let body = s.strip_prefix(Self::PREFIX).ok_or_else(err)?;
+                if body.len() != Self::FULL_CHARS {
+                    return Err(err());
+                }
+                let mut bytes = [0u8; 32];
+                for (i, c) in body.bytes().enumerate() {
+                    put_five_bits(&mut bytes, i * 5, decode_char(c).ok_or_else(err)?);
+                }
+                Ok($name(bytes))
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.short())
+            }
+        }
+
+        impl fmt::Debug for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}({})", stringify!($name), self.canonical())
+            }
+        }
+
+        impl FromStr for $name {
+            type Err = IntegrityError;
+            fn from_str(s: &str) -> Result<$name, IntegrityError> {
+                $name::parse(s)
+            }
+        }
+    };
+}
+
+digest_id!(
+    Tid,
+    "t3:",
+    0x0F,
+    "a part (record 15)",
+    "the part's normalised bytes"
+);
+digest_id!(
+    Mid,
+    "m3:",
+    0x0E,
+    "a manifest (record 14)",
+    "the canonical CBOR of the manifest body"
+);
+digest_id!(
+    Did,
+    "d3:",
+    0x11,
+    "a dating (record 17)",
+    "the canonical CBOR of the dating body"
+);
+digest_id!(
+    Rdid,
+    "r3:",
+    0x12,
+    "a part reading (record 18)",
+    "the canonical CBOR of the reading body"
+);
+
+impl Tid {
+    /// Derive a tid from bytes the caller has already normalised.
+    ///
+    /// Normalised means UTF-8, NFC, LF line endings, no byte order mark (A-3), and this
+    /// function cannot check it: `smysl-core` holds the identity, `smysl-text` holds the
+    /// normaliser. The guarantee is made one layer up, where `norm::Normalised` is the only
+    /// type that can reach this call — which is why the name says what the caller is
+    /// promising rather than leaving it to a doc comment nobody reads.
+    pub fn from_normalised_bytes(b: &[u8]) -> Tid {
+        Tid::of(b)
+    }
+}
+
+/// An expression alias (SMYSL-2.3 A-3).
+///
+/// ```text
+/// alias   = segment *( ( "/" / ":" ) segment )        ; at most 128 bytes
+/// segment = 1*( %x61-7A / DIGIT / "-" / "_" / "." )
+/// ```
+///
+/// Lowercase ASCII, because an alias is typed by hand into a command line and compared by
+/// bytes: `KJV` and `kjv` naming two expressions would be a trap, and case folding at
+/// comparison time would make the manifest key non-canonical. Over-long is not rejected
+/// here — A-3 puts the shortening on the producing tool (SMYSL-2.7's slug rule), so a
+/// 130-byte alias is a bug in whatever built it, caught at construction rather than after
+/// the fact.
+pub fn is_alias(s: &str) -> bool {
+    if s.is_empty() || s.len() > 128 {
+        return false;
+    }
+    s.split(['/', ':']).all(|seg| {
+        !seg.is_empty()
+            && seg.bytes().all(|c| {
+                c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'-' | b'_' | b'.')
+            })
+    })
+}
+
+// ---------------------------------------------------------------------------
 // String-shaped identifiers
 // ---------------------------------------------------------------------------
 

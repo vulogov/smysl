@@ -30,16 +30,17 @@ pub use error::{
 };
 pub use hash::{canonical_uid, hash_bytes, verify, Rolling};
 pub use ids::{
-    AgentId, AgentKind, ContentionId, KernelType, Label, LangTag, SchemaId, ThreadId, Uid,
-    UidPrefix, ViewId,
+    is_alias, AgentId, AgentKind, ContentionId, Did, KernelType, Label, LangTag, Mid, Rdid,
+    SchemaId, ThreadId, Tid, Uid, UidPrefix, ViewId,
 };
 pub use types::{
-    json_escape, quantise, tokens, Admission, Attestation, Commit, Commitment, Contention,
-    ContentionStatus, Date, Detected, DetectionKind, DropReason, Extra, Fidelity,
-    GranularityProfile, Hlc, LabelBinding, Lod, Op, Optimality, PackInfo, PackMode,
-    ProfileEstimator, Record, RelKind, Relation, Resolution, ResolutionTarget, Role, Rung,
-    SchemaDecl, SourceKind, SourcePolicy, SourceRef, Status, Step, Thread, ThreadSchema,
-    TokenEstimator, Unit, UnitCore, UnitCoreBuilder, View, Withdrawal,
+    json_escape, quantise, tokens, Admission, Attestation, Calendar, Carry, Commit, Commitment,
+    Contention, ContentionStatus, Date, Detected, DetectionKind, DropReason, Extra, Fidelity,
+    GranularityProfile, Hlc, LabelBinding, Lod, Manifest, Op, Optimality, PackInfo, PackMode,
+    ParentKind, PartEntry, PartReading, PartText, ProfileEstimator, Record, RelKind, Relation,
+    Resolution, ResolutionTarget, Role, Rung, SchemaDecl, SourceKind, SourcePolicy, SourceRef,
+    Status, Step, Thread, ThreadSchema, TokenEstimator, Unit, UnitCore, UnitCoreBuilder, View,
+    Withdrawal,
 };
 
 /// Format versions this implementation accepts in a `@doc` header (§11).

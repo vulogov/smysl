@@ -240,7 +240,8 @@ func TestRecordTypeCodesMatchTheTable(t *testing.T) {
 	want := map[uint64]string{
 		1: "unit", 2: "attestation", 3: "relation", 4: "thread", 5: "view",
 		6: "contention", 7: "pack_info", 8: "schema_decl", 9: "checkpoint", 10: "label_binding",
-		11: "withdrawal", 12: "resolution", 13: "commitment",
+		11: "withdrawal", 12: "resolution", 13: "commitment", 14: "manifest", 15: "part_text",
+		16: "reserved", 17: "dating", 18: "part_reading", 19: "redaction",
 	}
 	if len(smysl.RecordNames) != len(want) {
 		t.Fatalf("code count: got %d, want %d", len(smysl.RecordNames), len(want))
@@ -248,6 +249,31 @@ func TestRecordTypeCodesMatchTheTable(t *testing.T) {
 	for k, v := range want {
 		if smysl.RecordNames[k] != v {
 			t.Errorf("code %d: got %q, want %q", k, smysl.RecordNames[k], v)
+		}
+	}
+}
+
+// §3.1: a code the spec names is not a code this implementation decodes.
+//
+// 1.10 writes manifests, part texts and part readings. This implementation is C-Read: it
+// preserves them verbatim and re-encodes them byte for byte, and it interprets none of them.
+// Saying so is the point — a reader that called them known while decoding nothing would be
+// exactly the silence SMY-W014 exists to break. Code 9 was the same claim, and harmless only
+// because nothing has ever emitted a checkpoint.
+func TestTheLibraryRecordsAreNamedButNotUnderstood(t *testing.T) {
+	for _, code := range []uint64{9, 14, 15, 16, 17, 18, 19} {
+		r := smysl.Record{Code: code}
+		if r.IsKnown() {
+			t.Errorf("code %d is named but must not be reported as understood", code)
+		}
+		if strings.HasPrefix(r.Name(), "unknown(") {
+			t.Errorf("code %d is in the table, so it should have a name: %q", code, r.Name())
+		}
+	}
+	for _, code := range []uint64{1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13} {
+		r := smysl.Record{Code: code}
+		if !r.IsKnown() {
+			t.Errorf("code %d is decoded here and must be reported as understood", code)
 		}
 	}
 }

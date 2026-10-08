@@ -4,6 +4,7 @@
 //! registration, more compact, and determinism is easier to guarantee.
 
 use crate::types::annex::{Contention, LabelBinding, PackInfo, SchemaDecl};
+use crate::types::library::{Manifest, PartReading, PartText};
 use crate::types::lifecycle::{Commit, Resolution, Withdrawal};
 use crate::types::provenance::Attestation;
 use crate::types::relation::Relation;
@@ -39,6 +40,21 @@ pub mod code {
     /// verbatim and reports `SMY-W014`, so a ledger written by 1.7 round-trips through an
     /// older build without loss — it simply cannot read how settled anything is.
     pub const COMMIT: u64 = 13;
+    /// A manifest: an expression, at one version, is these parts (1.10, SMYSL-2.3 A-5).
+    pub const MANIFEST: u64 = 14;
+    /// A part's normalised text (1.10). Lives in a library's object store, never in a log
+    /// (`SMY-E452`): rewriting an append-only log to honour a redaction resets the hash chain
+    /// that would have shown the rewrite.
+    pub const PART_TEXT: u64 = 15;
+    /// Reserved: hold (telemetry). MUST NOT be emitted until a later amendment defines it,
+    /// so it decodes to [`super::Record::Unknown`] exactly as code 9 does.
+    pub const HOLD: u64 = 16;
+    /// A statement about when something happened (TX-P3). Not yet decoded by this build.
+    pub const DATING: u64 = 17;
+    /// What one reader derived from one part (1.10).
+    pub const PART_READING: u64 = 18;
+    /// A redaction, whose meaning is rule Z (TX-P2). Not yet decoded by this build.
+    pub const REDACTION: u64 = 19;
 
     pub const KNOWN: &[u64] = &[
         UNIT_CORE,
@@ -53,6 +69,9 @@ pub mod code {
         WITHDRAWAL,
         RESOLUTION,
         COMMIT,
+        MANIFEST,
+        PART_TEXT,
+        PART_READING,
     ];
 }
 
@@ -76,6 +95,13 @@ pub enum Record {
     Resolution(Resolution),
     /// A commitment to a unit (1.7).
     Commit(Commit),
+    /// An expression, at one version, as an ordered list of parts (1.10).
+    Manifest(Manifest),
+    /// A part's normalised text (1.10). Carries no surface form: text is not written in
+    /// surface syntax.
+    PartText(PartText),
+    /// What one reader derived from one part (1.10). No surface form either.
+    PartReading(PartReading),
     /// A record type this build does not know (`SMY-W014`).
     ///
     /// Preserved verbatim - payload bytes exactly as they arrived - and skipped
@@ -102,6 +128,9 @@ impl Record {
             Record::Withdrawal(_) => code::WITHDRAWAL,
             Record::Resolution(_) => code::RESOLUTION,
             Record::Commit(_) => code::COMMIT,
+            Record::Manifest(_) => code::MANIFEST,
+            Record::PartText(_) => code::PART_TEXT,
+            Record::PartReading(_) => code::PART_READING,
             Record::Unknown { code, .. } => *code,
         }
     }
@@ -120,6 +149,9 @@ impl Record {
             Record::Withdrawal(_) => "withdrawal",
             Record::Resolution(_) => "resolution",
             Record::Commit(_) => "commitment",
+            Record::Manifest(_) => "manifest",
+            Record::PartText(_) => "parttext",
+            Record::PartReading(_) => "partreading",
             Record::Unknown { .. } => "unknown",
         }
     }
@@ -172,6 +204,27 @@ mod tests {
         assert!(!code::KNOWN.contains(&code::CHECKPOINT));
     }
 
+    /// 16 is A-5's reserved telemetry slot. Reserving it in the amendment and then adding it
+    /// to `KNOWN` would make this build claim to decode a record whose layout nobody has
+    /// written — the one thing a permanent wire code cannot be taken back from.
+    #[test]
+    fn hold_is_reserved_not_known() {
+        assert_eq!(code::HOLD, 16);
+        assert!(!code::KNOWN.contains(&code::HOLD));
+    }
+
+    /// Codes 17 and 19 are allocated by SMYSL-2.3 and land in TX-P3 and TX-P2. Until then
+    /// they decode to `Unknown` and round-trip, which is what makes them additions rather
+    /// than a version break — asserted here so that adding the variant without adding the
+    /// code to `KNOWN`, or the reverse, fails a test instead of shipping.
+    #[test]
+    fn dating_and_redaction_are_allocated_but_not_yet_decoded() {
+        assert_eq!(code::DATING, 17);
+        assert_eq!(code::REDACTION, 19);
+        assert!(!code::KNOWN.contains(&code::DATING));
+        assert!(!code::KNOWN.contains(&code::REDACTION));
+    }
+
     /// Ascending, and with a hole. Codes 1-8 are 0.1's records; 9 stays reserved for
     /// checkpointing, whose format interacts with content addressing and must not be
     /// retrofitted; 10 is 0.2's label binding; 11 and 12 are 1.4's withdrawal and resolution;
@@ -180,7 +233,10 @@ mod tests {
     /// and free of duplicates is, since a code is a permanent wire commitment.
     #[test]
     fn known_codes_ascend_and_skip_the_reserved_slot() {
-        assert_eq!(code::KNOWN, &[1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]);
+        assert_eq!(
+            code::KNOWN,
+            &[1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 18]
+        );
         assert!(code::KNOWN.windows(2).all(|w| w[0] < w[1]));
     }
 

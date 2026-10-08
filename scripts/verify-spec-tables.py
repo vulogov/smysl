@@ -211,8 +211,12 @@ def main() -> int:
     # Six since 1.7's `node`, which the spec's table did not gain until 1.8 — found by this gate
     # once `observed` forced a look at the same section.
     check("§2.2 has six source kinds", sorted(source_kind), list(range(6)))
-    # 11 and 12 since 1.4: withdrawal and resolution.
-    check("§3.1 record codes are 1..13", sorted(record_codes), list(range(1, 14)))
+    # 11 and 12 since 1.4: withdrawal and resolution. 14-19 since 1.10, the library records
+    # of RFC SMYSL-2.3 A-5 — of which 14, 15 and 18 are defined and written, while 16 is
+    # reserved and 17 and 19 are allocated for later phases. All six are in the table because a
+    # code is a permanent wire commitment the moment it is allocated, and a table that names
+    # only what is implemented would let a later release spend one twice.
+    check("§3.1 record codes are 1..19", sorted(record_codes), list(range(1, 20)))
 
     # -- python/ -------------------------------------------------------------
     py_records = read("python/smysl/records.py")
@@ -395,16 +399,18 @@ def main() -> int:
                                   "pub mod granularity {", "\n}")).group(1)),
               int(spec_gran.group(1)))
 
-    # A-8.1. The opening has no table — the members of three of the four enumerations are not
-    # in this document at all (§3.1 says why) — but the reserved code is a constant, and it is
-    # the one an implementation has to agree on to open an enumeration later without a break.
-    spec_reserved = re.search(r"\*\*Code (\d+) is reserved in each of five", text)
+    # A-8.1. The opening has no table — the members of most of these enumerations are not in
+    # this document at all (§3.1 says why) — but the reserved code is a constant, and it is the
+    # one an implementation has to agree on to open an enumeration later without a break. All
+    # five are open as of 1.10, `admission` being the last.
+    spec_reserved = re.search(r"\*\*Code (\d+) is reserved in each of the five", text)
     check("§3.1 reserves a code in the open enumerations", bool(spec_reserved), True)
     if spec_reserved:
         want = int(spec_reserved.group(1))
         for rel, enum in [("crates/smysl-core/src/types/epistemics.rs", "SourceKind"),
                           ("crates/smysl-core/src/types/thread.rs", "ThreadSchema"),
-                          ("crates/smysl-core/src/types/annex.rs", "DetectionKind")]:
+                          ("crates/smysl-core/src/types/annex.rs", "DetectionKind"),
+                          ("crates/smysl-core/src/types/view.rs", "Admission")]:
             got = [int(m) for m in re.findall(r"^    Unknown = (\d+),$", read(rel), re.M)]
             check(f"rust: §3.1 reserved code in {rel}", sorted(set(got)), [want],
                   "an `Unknown` at any other code would make a future addition a break")

@@ -2696,6 +2696,9 @@ fn persist(
                 Record::Resolution(x) => smysl::surface::resolution_has_surface_form(x),
                 // A commitment always has one: it names a unit, and a uid can always be written.
                 Record::Commit(_) => true,
+                // A manifest usually has one (1.10); the predicate names the cases it does
+                // not, among them an alias the parser would not read back.
+                Record::Manifest(m) => smysl::surface::manifest_has_surface_form(m),
                 _ => false,
             };
             if !expressible {
@@ -3748,6 +3751,11 @@ fn warn_surface_omissions(
             Record::Unit(u) => !smysl::surface::unit_has_surface_form(u),
             Record::Thread(t) => !smysl::surface::thread_has_surface_form(t),
             Record::Commit(c) => !smysl::surface::commit_has_surface_form(c),
+            // `@manifest` since 1.10, on the same terms — and listed here for the reason H-16
+            // records: a record the writer emits while the count calls it omitted is a
+            // guaranteed over-count on every store carrying one. Part texts and readings have
+            // no surface form at all and fall to the catch-all, correctly.
+            Record::Manifest(m) => !smysl::surface::manifest_has_surface_form(m),
             Record::View(v) => Some(&v.id) != emitted,
             Record::LabelBinding(b) => ctx.labels.get(&b.uid) != Some(&b.label),
             // Spelled `@schema` since 1.3, unless it carries what surface text cannot.

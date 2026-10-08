@@ -15,13 +15,21 @@ a uid is; this package now derives them, over a hand-rolled BLAKE3, and reproduc
 
 from .blake3 import blake3
 from .cbor import CborError, decode_one, encode_one
-from .records import RECORD_NAMES, UNIT_KEYS, Record, decode_store, encode_store
+from .records import (
+    RECORD_NAMES,
+    UNDERSTOOD_RECORDS,
+    UNIT_KEYS,
+    Record,
+    decode_store,
+    encode_store,
+)
 from .uid import Source, UnitCore
 
 __all__ = [
     "CborError",
     "Record",
     "RECORD_NAMES",
+    "UNDERSTOOD_RECORDS",
     "Source",
     "UNIT_KEYS",
     "UnitCore",

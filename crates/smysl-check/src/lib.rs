@@ -218,8 +218,15 @@ fn store_granularity(store: &Store) -> GranularityProfile {
                 g.l0_max = g.l0_max.max(p.l0_max);
                 g.l1_min = g.l1_min.min(p.l1_min);
                 g.l1_max = g.l1_max.max(p.l1_max);
-                if p.admission == smysl_core::Admission::Topical {
-                    g.admission = smysl_core::Admission::Topical;
+                // Widest also means: any admission that is not `single-assertion` disables
+                // the single-assertion check, and from 1.10 that includes one this build
+                // cannot name (A-8.1). Keeping `single-assertion` in the merged profile
+                // because the only other view used an unknown code would check units against
+                // a rule no view in the store stated.
+                if g.admission == smysl_core::Admission::SingleAssertion
+                    && p.admission != smysl_core::Admission::SingleAssertion
+                {
+                    g.admission = p.admission;
                 }
             }
             g

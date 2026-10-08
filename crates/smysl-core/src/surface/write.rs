@@ -111,6 +111,15 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
             }
         }
     }
+    // Manifests after the declarations and before the units, where the parser emits them: a
+    // reader meets the text before the claims drawn from it.
+    for r in records {
+        if let Record::Manifest(m) = r {
+            if manifest_has_surface_form(m) {
+                write_manifest(&mut out, m);
+            }
+        }
+    }
     let mut known = ctx.relations.clone();
     for r in records {
         if let Record::Relation(rel) = r {
@@ -216,6 +225,131 @@ pub fn thread_has_surface_form(t: &Thread) -> bool {
 /// Whether a commitment can be spelled `@commit` without losing anything.
 pub fn commit_has_surface_form(c: &crate::types::lifecycle::Commit) -> bool {
     c.extra.is_empty()
+}
+
+/// Whether a manifest can be spelled `@manifest` without losing anything.
+///
+/// `raw` (key 16) is the reader's own metadata as opaque CBOR — writing it would mean this
+/// module deciding what the bytes mean — and `extra`, here and on each part entry, holds keys a
+/// later version added. A manifest carrying either travels as CBOR only and is counted with the
+/// other records a surface rendering cannot hold, rather than written back smaller than it was
+/// read.
+///
+/// An unknown source kind on `origin` is the next case, and it is not this function's to decide
+/// twice: `source { }` parses `kind:` against the named set, so a kind the wire preserved has no
+/// spelling here either.
+///
+/// **The alias is the one that is easy to miss.** A decoder does not apply the alias grammar —
+/// a later version may widen it, and refusing a store over an alias is refusing to open it — so
+/// a manifest in hand may carry an alias this parser will not accept. The header writes it
+/// unquoted, because every conforming alias is safe unquoted, and there is nowhere else to put
+/// it: the alias is the header word, not a key. Without this check the writer would emit a
+/// `@manifest` line that its own parser rejects, and `fmt` would drop the record while
+/// reporting nothing — the same defect as writing a unit whose payload key collides with a
+/// header word, which `unit_has_surface_form` already guards.
+pub fn manifest_has_surface_form(m: &crate::types::library::Manifest) -> bool {
+    if m.raw.is_some() || !m.extra.is_empty() || !m.alias_is_valid() {
+        return false;
+    }
+    if let Some(o) = &m.origin {
+        if !o.extra.is_empty() || o.kind == crate::SourceKind::Unknown {
+            return false;
+        }
+    }
+    m.parts.iter().all(|p| p.extra.is_empty())
+}
+
+fn write_manifest(out: &mut String, m: &crate::types::library::Manifest) {
+    // The five required keys in A-5's key order, then the optional ones in the same order, so
+    // a reader comparing a file against the amendment reads them down the page together.
+    out.push_str(&format!(
+        "@manifest {} {{ lang: {}, reader: {}, licence: {}, carry: {}, part-policy: {}",
+        m.alias,
+        quoteless_or_quoted(m.lang.as_str()),
+        quoteless_or_quoted(&m.reader),
+        quoteless_or_quoted(&m.licence),
+        m.carry,
+        quoteless_or_quoted(&m.part_policy),
+    ));
+    if let Some(t) = &m.title {
+        out.push_str(&format!(", title: {}", quoteless_or_quoted(t)));
+    }
+    if !m.creators.is_empty() {
+        let cs: Vec<String> = m.creators.iter().map(|c| quoteless_or_quoted(c)).collect();
+        out.push_str(&format!(", creators: [{}]", cs.join(", ")));
+    }
+    if let Some(p) = &m.published {
+        out.push_str(&format!(", published: {}", quoteless_or_quoted(p)));
+    }
+    if !m.identifiers.is_empty() {
+        let ids: Vec<String> = m
+            .identifiers
+            .iter()
+            .map(|(k, v)| format!("{}: {}", quoted_key(k), quoteless_or_quoted(v)))
+            .collect();
+        out.push_str(&format!(", identifiers: {{ {} }}", ids.join(", ")));
+    }
+    if let Some(o) = &m.origin {
+        out.push_str(&format!(
+            ", origin: {{ kind: {}, ref: {}",
+            o.kind,
+            quoteless_or_quoted(&o.reference)
+        ));
+        if let Some(c) = &o.captured {
+            out.push_str(&format!(", captured: {c}"));
+        }
+        if let Some(ms) = o.observed {
+            out.push_str(&format!(", observed: {ms}"));
+        }
+        out.push_str(" }");
+    }
+    if let Some((mid, kind)) = &m.parent {
+        out.push_str(&format!(
+            ", parent: {}, parent-kind: {kind}",
+            mid.canonical()
+        ));
+    }
+    if let Some(s) = &m.supersedes {
+        out.push_str(&format!(", supersedes: {}", s.canonical()));
+    }
+    if let Some(v) = &m.versification {
+        out.push_str(&format!(", versification: {}", quoteless_or_quoted(v)));
+    }
+    // Only when true, as the wire writes it. `lossy: false` has no encoding, so writing the
+    // word would produce a document whose re-parse is a different manifest.
+    if m.lossy {
+        out.push_str(", lossy: true");
+    }
+    if let Some(c) = &m.calendar {
+        out.push_str(&format!(", calendar: {c}"));
+    }
+    // Omitted when empty, which is what the parser reads an absent `parts` as — an import
+    // manifest. Writing `parts: []` instead would be equally correct and is not what the
+    // parser's default says, and the two have to agree for the round trip to be a fixed point.
+    if !m.parts.is_empty() {
+        let ps: Vec<String> = m
+            .parts
+            .iter()
+            .map(|p| {
+                let mut row = format!(
+                    "{{ tid: {}, length: {}, structure: {}, rdid: {}",
+                    p.tid.canonical(),
+                    p.length,
+                    // `b3:`, because the structure hash is a digest over a table and not an
+                    // identity that names a record. `Uid`'s spelling is the generic one.
+                    crate::Uid::from_bytes(p.structure).canonical(),
+                    p.rdid.canonical()
+                );
+                if let Some(l) = &p.lang {
+                    row.push_str(&format!(", lang: {}", quoteless_or_quoted(l.as_str())));
+                }
+                row.push_str(" }");
+                row
+            })
+            .collect();
+        out.push_str(&format!(", parts: [{}]", ps.join(", ")));
+    }
+    out.push_str(" }\n\n");
 }
 
 /// An edge by its endpoints when the writer knows it, else by its rid.

@@ -12,7 +12,10 @@ from typing import Any
 
 from .cbor import CborError, Decoder, encode_one
 
-#: §3.1. An unknown code is preserved verbatim and skipped semantically, never rejected.
+#: §3.1, every code the format has allocated. A code is a permanent wire commitment the moment
+#: it is allocated, so this table names the reserved and not-yet-defined ones too: 9 is
+#: checkpoint, 16 is reserved, and 17 and 19 are specified but land in later releases. Naming
+#: them is how a reader says *what* it met rather than only that it met something.
 RECORD_NAMES = {
     1: "unit",
     2: "attestation",
@@ -27,7 +30,26 @@ RECORD_NAMES = {
     11: "withdrawal",
     12: "resolution",
     13: "commitment",
+    14: "manifest",
+    15: "part_text",
+    16: "reserved",
+    17: "dating",
+    18: "part_reading",
+    19: "redaction",
 }
+
+#: The codes whose **bodies** this implementation decodes.
+#:
+#: Not the same question as :data:`RECORD_NAMES`, and conflating the two was wrong before it
+#: was consequential. `is_known` was derived from the name table and documented as whether this
+#: version understands the record — which was already false for 9, a checkpoint nothing has
+#: ever implemented, and harmless only because nothing emits one. 1.10 writes manifests, part
+#: texts and part readings, and a reader that called those "known" while interpreting none of
+#: them would be exactly the silence ``SMY-W014`` exists to break.
+#:
+#: An unknown record is still preserved verbatim and re-encoded byte for byte; that is C-Read
+#: and it is unaffected.
+UNDERSTOOD_RECORDS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13})
 
 #: §2.2, the unit core's integer keys. Anything at 9 or above is an unknown key that rule X
 #: says must survive a round trip verbatim.
@@ -58,7 +80,13 @@ class Record:
 
     @property
     def is_known(self) -> bool:
-        return self.code in RECORD_NAMES
+        """Whether this implementation decodes this record's body.
+
+        A code the spec names but this reader does not interpret — a manifest, a checkpoint —
+        is **not** known. :attr:`name` still answers, so a report can say "a manifest, which
+        this build does not interpret" rather than "something".
+        """
+        return self.code in UNDERSTOOD_RECORDS
 
     def reencode(self) -> bytes:
         return encode_one([self.code, self.body])

@@ -46,7 +46,75 @@ run, eight rows of its table fire, and two of the six pivot items do not survive
 their own evidence in the form they were written.
 
 **One decision still open.** OQ-34 for the hosted model's outputs as fixtures — the local model is
-Apache 2.0 and settled, the hosted one is not. Nothing else blocks TX-P1.
+Apache 2.0 and settled, the hosted one is not. It blocks nothing that has started.
+
+**TX-P1 has started.** The library wire is in: three new record types, four new identities, and
+the first of them to be hashed over something other than a CBOR map.
+
+### The library has a wire, and two readers were calling records known that they cannot read
+
+Records 14 (manifest), 15 (part text) and 18 (part reading) are on the wire, with the four
+identities of SMYSL-2.3 A-3 — tid, mid, did and rdid. TX-P1 step 1, and the first phase of the
+text work to touch the format rather than the plan.
+
+Each identity is `BLAKE3-256(domain_byte ‖ preimage)`, where the domain byte is the record code
+it names. A tid hashes the part's **normalised bytes**, which makes it the only identity in the
+format whose preimage is not canonical CBOR — and the reason the domain byte is load-bearing
+rather than tidy: a uid's preimage is a CBOR map, so its first byte is `0xa0`–`0xbf`, and none of
+`0x0e`, `0x0f`, `0x11`, `0x12` is. A tid over a part that happened to *be* canonical CBOR still
+cannot equal a mid or a uid. That is what lets a withdrawal or a commitment name a dating in the
+32-byte slot it defines as holding a uid (A-6) without the kinds becoming confusable.
+
+`@manifest` is the surface spelling, with the five keys A-5 requires named rather than defaulted.
+`part-policy` is the one worth stating: the default part size changes when GE-T14 measures it at
+the end of TX-P2, so a manifest that recorded no policy would silently come to mean a different
+cut of the same text. Records 15 and 18 have no surface form at all — a megabyte of someone
+else's prose inside a quoted string is neither readable nor diffable, and the object store
+already addresses it by content.
+
+Two things turned up while meeting the step's exit test, and both were older than this release.
+
+**The specification was silent about records the build now writes.** §2.6 had been held open with
+a note saying library identities are "folded in here when the release that writes them lands" —
+and that release is this one. So A-3 and A-5 are now spec text: the identity table, the
+normalised-bytes rule, the manifest and reading layouts, the alias grammar, and the storage rule
+that a log may hold a manifest and must refuse a part text (`SMY-E452`, OQ-39). `verify-spec-tables.py`
+asserts codes 1..19 where it asserted 1..13, which is how the gap surfaced: the gate compares the
+document against `python/`, `go/` and `nodejs/` in **both** directions, so adding rows failed it
+until all three carried them. That is the gate working as designed — it exists because in 1.2.0
+three implementations "agreed" by all reading the same fixture.
+
+**And `is_known` was answering the wrong question in all three.** It was derived from the record
+*name* table and documented as whether the implementation understands the record. That had been
+false since 0.1 for code 9, a checkpoint nothing has ever implemented, and it was harmless only
+because nothing emits one. Records 14, 15 and 18 are emitted. A C-Read reader that reports a
+manifest as *known* while decoding none of its nineteen keys is precisely the silence `SMY-W014`
+exists to break — a reader handed a document it cannot fully interpret, and told nothing. The two
+questions are now two tables in each implementation: what the format has allocated, and what this
+code decodes. Preservation is untouched; an unknown record still re-encodes byte for byte.
+
+`admission` is open (step 1a, A-8.1), the fifth and last enumeration to open, and it cost what
+reserving code 255 for it in 1.9 promised: no registry change, no renumbering, no new diagnostic.
+1.9 held it closed arguing that the granularity passes read it and a reader that guessed would
+report the wrong verdict. The argument was right about guessing and wrong about the remedy —
+failing the decode does not avoid a wrong verdict, it refuses to open the store (F-12). An
+unknown admission is now preserved, reported as `SMY-W409`, and **suspends** `SMY-E040` rather
+than deciding it either way; `check`'s merged "widest envelope" profile treats it as it treats
+`topical`, because keeping `single-assertion` on the strength of a code nobody can name would
+check units against a rule no view in the store stated.
+
+Also corrected in `smysl-graph`'s plan, which OQ-39 had left self-contradictory: the `part_texts`
+and `readings` maps "for 15/18 held in a log" are gone, along with `Store::part_text` and
+`rewrite_redacted`, because no log holds either record and the maps could only ever have been
+empty.
+
+The gate caught one more thing before CI could: `fixtures/library/wire/` is produced **and
+checked** by a plain test rather than an `#[ignore]`d generator, so a change to the encoder fails
+the suite instead of leaving three implementations compared against bytes this build no longer
+produces. `ids.json` carries each preimage, each body and each identity separately, for the
+reason `fixtures/wire/uid/cases.json` does: deriving an identity is unreachable by reading a
+document, so an implementation that only reads could match every byte and have no derivation at
+all.
 
 ### The plan caught up with the spike, and two of the pivot's own items were wrong
 

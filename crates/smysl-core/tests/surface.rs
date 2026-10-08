@@ -2007,3 +2007,225 @@ fn a_record_with_no_surface_form_is_not_written() {
         "one carrying an unknown key is not"
     );
 }
+
+// ---------------------------------------------------------------------------
+// @manifest (1.10, SMYSL-2.3 A-10)
+// ---------------------------------------------------------------------------
+
+/// The keys a manifest requires have no defensible default, so each one is named.
+///
+/// `part-policy` is the one that matters most: the default part size changes when GE-T14
+/// measures it at the end of TX-P2, and a manifest that recorded no policy would silently
+/// mean a different cut of the same text afterwards. A missing `lang` is not `und` either —
+/// `und` is a claim that nobody knows, which differs from nobody having said.
+#[test]
+fn a_manifest_names_every_key_it_requires() {
+    for (src, missing) in [
+        (
+            "@manifest kjv { reader: osis/1, licence: unknown, carry: none, part-policy: none }",
+            "lang",
+        ),
+        (
+            "@manifest kjv { lang: en, licence: unknown, carry: none, part-policy: none }",
+            "reader",
+        ),
+        (
+            "@manifest kjv { lang: en, reader: osis/1, carry: none, part-policy: none }",
+            "licence",
+        ),
+        (
+            "@manifest kjv { lang: en, reader: osis/1, licence: unknown, part-policy: none }",
+            "carry",
+        ),
+        (
+            "@manifest kjv { lang: en, reader: osis/1, licence: unknown, carry: none }",
+            "part-policy",
+        ),
+    ] {
+        let out = parse_surface(src).unwrap();
+        assert!(
+            out.diagnostics.iter().any(|d| d.message.contains(missing)),
+            "a manifest with no `{missing}` must say so: {:?}",
+            out.diagnostics
+        );
+        assert!(
+            !out.records.iter().any(|r| matches!(r, Record::Manifest(_))),
+            "and must not produce a manifest"
+        );
+    }
+}
+
+/// A key the parser does not define is an error, not something to skip.
+///
+/// The likeliest stray key is a misspelling of one of the required five, and passed over
+/// quietly that writes a manifest claiming a policy and a licence the author did not state.
+#[test]
+fn an_unknown_manifest_key_is_an_error() {
+    let out = parse_surface(
+        "@manifest kjv { lang: en, reader: osis/1, licence: unknown, carry: none, \
+         part-policy: none, part_policy: none }",
+    )
+    .unwrap();
+    assert!(
+        out.diagnostics
+            .iter()
+            .any(|d| d.message.contains("part_policy")),
+        "{:?}",
+        out.diagnostics
+    );
+}
+
+/// An alias is lowercase ASCII (A-3), and the parser is where that is enforced.
+///
+/// Not the decoder's job: a later version may widen the grammar, and refusing a store over an
+/// alias is refusing to open it. Surface text has an author to tell.
+#[test]
+fn a_malformed_alias_is_refused_at_the_surface() {
+    let out = parse_surface(
+        "@manifest KJV/1769 { lang: en, reader: osis/1, licence: unknown, carry: none, \
+         part-policy: none }",
+    )
+    .unwrap();
+    assert!(
+        out.diagnostics.iter().any(|d| d.message.contains("alias")),
+        "{:?}",
+        out.diagnostics
+    );
+}
+
+/// `lossy: false` has no spelling, because it has no encoding.
+///
+/// The wire writes key 15 only when true, so admitting the word at the surface would give one
+/// manifest two documents and two mids.
+#[test]
+fn a_false_lossy_flag_is_refused_at_the_surface() {
+    let base = "@manifest kjv { lang: en, reader: osis/1, licence: unknown, carry: none, \
+                part-policy: none";
+    let yes = parse_surface(&format!("{base}, lossy: true }}")).unwrap();
+    assert!(yes.diagnostics.is_empty(), "{:?}", yes.diagnostics);
+
+    let no = parse_surface(&format!("{base}, lossy: false }}")).unwrap();
+    assert!(
+        no.diagnostics.iter().any(|d| d.message.contains("lossy")),
+        "{:?}",
+        no.diagnostics
+    );
+}
+
+/// `parent` and `parent-kind` are required together at the surface as on the wire.
+#[test]
+fn a_parent_needs_its_kind_at_the_surface() {
+    let mid = smysl_core::Mid::of(b"p").canonical();
+    let base = "@manifest kjv { lang: en, reader: osis/1, licence: unknown, carry: none, \
+                part-policy: none";
+
+    let both = parse_surface(&format!(
+        "{base}, parent: {mid}, parent-kind: translation }}"
+    ))
+    .unwrap();
+    assert!(both.diagnostics.is_empty(), "{:?}", both.diagnostics);
+
+    for tail in [
+        format!(", parent: {mid} }}"),
+        ", parent-kind: translation }".to_string(),
+    ] {
+        let out = parse_surface(&format!("{base}{tail}")).unwrap();
+        assert!(
+            out.diagnostics.iter().any(|d| d.message.contains("parent")),
+            "{tail}: {:?}",
+            out.diagnostics
+        );
+    }
+}
+
+/// A manifest carrying the reader's own raw metadata has no surface form.
+///
+/// `raw` is opaque CBOR — whatever a reader found and could not place in a named key — so
+/// spelling it would mean the writer deciding what the bytes mean. The manifest travels as
+/// CBOR and is counted among the records a surface rendering cannot hold, rather than written
+/// back smaller than it was read.
+#[test]
+fn a_manifest_with_raw_metadata_has_no_surface_form() {
+    let mut m = smysl_core::Manifest::new(
+        "kjv",
+        smysl_core::LangTag::new("en").unwrap(),
+        "osis/1",
+        "unknown",
+        "none",
+    );
+    assert!(smysl_core::surface::manifest_has_surface_form(&m));
+    m.raw = Some(vec![0xA0]);
+    assert!(
+        !smysl_core::surface::manifest_has_surface_form(&m),
+        "opaque reader metadata has no spelling"
+    );
+
+    let mut m2 = smysl_core::Manifest::new(
+        "kjv",
+        smysl_core::LangTag::new("en").unwrap(),
+        "osis/1",
+        "unknown",
+        "none",
+    );
+    m2.extra.insert(31, vec![0x01]);
+    assert!(
+        !smysl_core::surface::manifest_has_surface_form(&m2),
+        "nor does a key from a later version"
+    );
+    assert_eq!(
+        write_surface(None, &[Record::Manifest(m2)], &WriteContext::default()),
+        "",
+        "and the writer emits nothing rather than something smaller"
+    );
+}
+
+/// Every EDTF shape a manifest's `published` can carry survives the round trip.
+///
+/// `published` is **as recorded** (A-5 key 8): a string this build does not yet parse, because
+/// EDTF arrives in TX-P3. So the surface has to carry shapes the writer's quoting rules were
+/// not designed for, and two of these would have been plausible losses — `0001` read as an
+/// integer comes back as `1`, and `[1769,1770]` unquoted is an array. Neither happens, and this
+/// is what keeps it that way when the EDTF parser lands and starts producing them.
+#[test]
+fn every_edtf_shape_of_published_is_a_fixed_point() {
+    for v in [
+        "1769",
+        "1769-01",
+        "1769-01-12",
+        "1769/1770",
+        "19XX",
+        "-0500",
+        "1769?",
+        "1769~",
+        "[1769,1770]",
+        "0001",
+    ] {
+        let src = format!(
+            "@manifest kjv {{ lang: en, reader: osis/1, licence: unknown, carry: none, \
+             part-policy: none, published: \"{v}\" }}\n"
+        );
+        let out = parse_surface(&src).unwrap();
+        assert!(out.diagnostics.is_empty(), "{v}: {:?}", out.diagnostics);
+        let Some(Record::Manifest(m)) = out.records.first() else {
+            panic!("{v}: no manifest")
+        };
+        assert_eq!(
+            m.published.as_deref(),
+            Some(v),
+            "{v} was not carried as written"
+        );
+
+        let text = write_surface(None, &out.records, &WriteContext::default());
+        let again = parse_surface(&text).unwrap();
+        assert!(again.diagnostics.is_empty(), "{v}: {:?}", again.diagnostics);
+        assert_eq!(
+            again.records, out.records,
+            "{v} changed through a round trip"
+        );
+        assert_eq!(
+            write_surface(None, &again.records, &WriteContext::default()),
+            text,
+            "{v}: the second write moved the document"
+        );
+    }
+}

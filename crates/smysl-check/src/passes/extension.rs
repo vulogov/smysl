@@ -133,8 +133,9 @@ pub fn run(store: &Store, profile: Option<&ConsumerProfile>, report: &mut Report
 
     // `SMY-W409` - an enumeration *code* this build does not know, which is W014's argument
     // one level down. 1.9 opened four enumerations so that an unrecognised code no longer
-    // fails the decode; preserving it silently would repeat the mistake W014 was added to fix,
-    // where a reader is given a document it cannot fully interpret and told nothing.
+    // fails the decode, and 1.10 opened the fifth, `admission`; preserving it silently would
+    // repeat the mistake W014 was added to fix, where a reader is given a document it cannot
+    // fully interpret and told nothing.
     //
     // The code is reported, not the value: `Unknown` is what the build calls it, and the raw
     // byte is the only thing that identifies which future kind was meant.
@@ -168,6 +169,15 @@ pub fn run(store: &Store, profile: Option<&ConsumerProfile>, report: &mut Report
                         )));
                     }
                 }
+            }
+            smysl_core::Record::View(v)
+                if v.granularity.admission == smysl_core::Admission::Unknown =>
+            {
+                report.push(Diagnostic::new(Code::W409).with_message(format!(
+                    "admission {} is not known to this build; preserved verbatim, and the \
+                     single-assertion check does not run for this profile",
+                    v.granularity.admission_code()
+                )));
             }
             smysl_core::Record::Contention(c)
                 if c.detected.kind == smysl_core::DetectionKind::Unknown =>
