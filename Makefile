@@ -52,7 +52,7 @@ MATRIX := \
 .DEFAULT_GOAL := help
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix crate-features gates purity update seed-fuzz fuzz-build \
         determinism conformance eval live-ollama live-hosted doc fuzz clean sweep \
-        commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables dep-versions seed-fuzz fuzz-long
+        commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables dep-versions msrv seed-fuzz fuzz-long
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -330,6 +330,13 @@ doc-cargo: ## Replay the manual's `cargo` transcripts and check its feature tabl
 dep-versions: ## Fail if an internal crate requirement is behind the workspace version
 	python3 scripts/verify-dep-versions.py
 
+msrv: ## Fail if a crate's declared rust-version is not the one its dependencies require
+	@# `rust-version = "1.79"` stood for eleven releases, was false in every selection, and
+	@# nothing tested it. The pure core could not be built at 1.79 at all: `blake3` pulls
+	@# `constant_time_eq` 0.4.2, whose manifest is edition 2024, so a 1.79 Cargo cannot parse
+	@# it. An untested MSRV is a decoration, not a promise.
+	python3 scripts/verify-msrv.py
+
 spec-tables: ## Fail if the format's constants and the document that defines them disagree
 	@# The gate 1.2.0 needed and did not have. Four facts a C-Produce implementer cannot
 	@# proceed without — the status integers, the source sub-map's layout, the kind enum and
@@ -471,7 +478,7 @@ commit: ## Commit with aic and push
 # Everything
 # ---------------------------------------------------------------------------
 
-ci: lint doc-gate api-check test-matrix crate-features gates conformance fuzz-build doc-cargo spec-tables dep-versions ## Everything CI runs, bar the jobs needing a server
+ci: lint doc-gate api-check test-matrix crate-features gates conformance fuzz-build doc-cargo spec-tables dep-versions msrv ## Everything CI runs, bar the jobs needing a server
 	@echo
 	@echo "ci: green."
 	@echo "Not covered here: the ollama job (needs a running server - see make live-ollama)"

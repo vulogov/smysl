@@ -3,7 +3,8 @@ name        = "smysl-ingest"
 description = "smysl ingest boundary: staging, repair, trust ceiling, recipes"
 version.workspace      = true
 edition.workspace      = true
-rust-version.workspace = true
+# Above the workspace base, via `smysl-provider`, and through it the `icu_*` 2.2 chain under `ureq`.
+rust-version           = "1.86"
 license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true

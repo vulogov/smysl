@@ -23,6 +23,11 @@ unmade.
 TX-P0's four amendments are now spec text and covered by the gate. The five accepted at G0 whose
 phases have not shipped stay out until they do, which is what A-14 asks for rather than a gap.
 
+**An MSRV nobody tested** — *answered by measurement, see below.* Not on 1.9's list, because
+nobody had looked: it was the next TX-P1 blocker and the only one depending on anything outside
+this repository. The declared floor was false, the pure core could not be parsed at it, and
+there is a gate now.
+
 **A ceiling no code can establish.** Every same-as and holder figure the spike reports rests on
 model coders, and no model coder reaches the protocol's α 0.667 on any pairing: 0.600 over three,
 0.544 and 0.624 and 0.636 pairwise, and 0.584 for a single coder against *itself* in a different
@@ -34,6 +39,62 @@ people, and five rows of the S0 decision table stay provisional until it has the
 is Apache 2.0 and settled, the hosted one is not. And the re-plan of SMYSL-2.4 against the pivot
 of SMYSL-2.0 §1.1, which moves TX-P5's and TX-P7's exit tests and so is a re-plan rather than an
 edit, with TX-P1's MSRV question (OQ-40 = OQ-66) first because it is the only one that depends on
+anything outside this repository.
+
+### The declared MSRV was false, and the pure core could not be parsed at it
+
+`rust-version = "1.79"` had been in the workspace table for eleven releases. CI builds `stable`
+and `nightly`, so nothing tested it, and RFC SMYSL-2.8 recorded that as an observation
+(`rust-version` is declared, the declared MSRV is not tested). The consequence turned out to be
+larger than the observation sounds.
+
+**At 1.79, `cargo check -p smysl-core --no-default-features` does not fail to compile. It fails
+to *parse*.** `blake3` depends on `constant_time_eq` 0.4.2, whose manifest is edition 2024, and a
+1.79 Cargo refuses the manifest: *feature `edition2024` is required.* The format's hash function
+is what the claim fell over on, in the crate that defines the format, with no feature enabled.
+
+OQ-40 and OQ-66 asked whether to raise `rust-version` to 1.90 for `redb` 4.x, and whether to
+*keep* 1.79 for builds without `store-redb`. The second option never existed. OQ-66's own last
+sentence — *whether a 1.79 toolchain can even resolve a lockfile containing an edition-2024
+optional dependency is unverified* — asked the right question, and the answer is no, and not
+because of an optional dependency.
+
+Measured by compiling at each floor and at the version below it:
+
+| selection | floor | set by |
+|---|---|---|
+| the nine pure-path crates, `--no-default-features` | **1.85** | `constant_time_eq` 0.4.2 via `blake3` |
+| `smysl-provider`, `smysl-ingest` | **1.86** | `icu_*` 2.2 via `idna_adapter` ← `idna` ← `url` ← `ureq` |
+| `smysl-tui`, and the facade with `tui` | **1.88** | `instability` 0.3.12 and `darling` 0.23 via `ratatui` |
+
+Each crate now declares its own. Cargo has no per-feature `rust-version`, so a package's number
+has to be its maximum over every feature combination — which is why the facade declares 1.88
+although its default features need 1.86, and why the honest arrangement is per crate rather than
+one workspace number. The base is 1.85, which is the floor of the ten crates that carry the pure
+path, and that is the surface an embedder takes.
+
+**`make msrv`** is the gate, and it fails in **both** directions. It reads `cargo metadata` and
+compares each crate's declared floor against the highest its transitive dependencies require,
+excluding dev-dependencies (which a dependent never compiles) and platform-gated ones (which
+Cargo does not weigh either). A floor below what the dependencies need is the false claim. A
+floor above it is one nobody has a reason for, which rots into the first the moment somebody
+trusts it; raising one needs an entry in the script's `EXCEEDS` table naming the language feature
+that forces it, and that table is empty.
+
+The gate disagreed with the compiler once while being written, and the compiler was right:
+it reported `smysl-embed` as needing 1.87 for `wasip2`, which sits behind
+`cfg(target_arch = "wasm32", target_os = "wasi")` and is never built here. Cargo's own check
+ignores platform-gated edges, so this one does too — with the cost stated rather than hidden,
+because a cross-compile to such a target can need more than any floor the gate prints. The one
+gated dependency above the base is printed on every run.
+
+It needs no second toolchain, so it runs in seconds. What it cannot see is our own source using a
+language feature newer than any dependency needs, so the CI job runs the script and then compiles
+the base tier at 1.85.
+
+`redb` 4.x's 1.90 becomes a one-line bump on `smysl-graph` when `store-redb` lands — and because
+the gate fails in both directions, forgetting it is a red build rather than a false claim. That
+closes OQ-40, OQ-66 and omission E-13, and it was the only remaining TX-P1 blocker depending on
 anything outside this repository.
 
 ### The spec catches up with its wire (A-14)

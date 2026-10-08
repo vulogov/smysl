@@ -43,8 +43,11 @@ piece is tested, and in what order it lands.
   `prompt.rs` is extended to windows, ledger digests and linker pairs; references a model may
   write are limited to its digest and batch; one writer per shard behind a lock file.
 - **Measured risks found here**: `redb` 4.3 declares `rust-version = 1.90` against the
-  workspace's `1.79`; `DetectionKind` is a closed enumeration, so time contentions cannot be
-  written to a log yet; `unicode-segmentation` 1.13.3, already in `Cargo.lock`, declares 1.85.
+  workspace's — which was `1.79` when this was written and is `1.85` since **OQ-40 was answered
+  by measurement in 1.10.0**, where the 1.79 claim turned out to be false already and in every
+  selection (§4.5); `DetectionKind` is a closed enumeration, so time contentions cannot be
+  written to a log yet; `unicode-segmentation` 1.13.3, already in `Cargo.lock`, declares 1.85 —
+  which is now the base rather than above it.
 
 Diagnostics allocated here: `SMY-E440`–`SMY-W451`. Open questions: OQ-35–OQ-44.
 
@@ -158,7 +161,9 @@ Every statement below was read from the tree. `cargo test --offline -p smysl-cor
 
 - Root `Cargo.toml`: features `default = ["cli", "local", "render-typst"]`, `cli`, `tui`,
   `semantic`, `providers`, `stage`, `ingest`, `local`, `remote`, `render-*`, `exact-pack`,
-  `tls-pure`. Workspace `rust-version = "1.79"`, `resolver = "2"`, `fuzz` excluded.
+  `tls-pure`. Workspace `rust-version = "1.85"` since 1.10.0 — `1.79` when this was written,
+  and false then (§4.5, OQ-40) — with `smysl-provider` and `smysl-ingest` declaring 1.86 and
+  `smysl-tui` and the facade 1.88. `resolver = "2"`, `fuzz` excluded.
 - `src/main.rs`: `enum Purity { Pure, Mixed, Model }`; `struct Cmd { name, about, purity, phase }`;
   `const COMMANDS` (26 rows; `ingest`, `attest` are `Model`, `thread` is `Mixed`; the comment in `tests/cli-surface.txt` still says twenty-two). `cli()` builds
   one subcommand per row and adds arguments in a `match c.name`; `tests/cli-surface.txt` records
@@ -196,8 +201,12 @@ Every statement below was read from the tree. `cargo test --offline -p smysl-cor
 | `caseless` | 0.2.2 | not declared | MIT | |
 | `quick-xml` | 0.42.0 | **1.86** | MIT | |
 
-Read from crates.io on 2026-10-02. Three declare a `rust-version` above the workspace's 1.79; the
-consequence is in §7 and OQ-40.
+Read from crates.io on 2026-10-02. Three declare a `rust-version` above the workspace's `1.79`;
+the consequence is in §7 and OQ-40 — **answered in 1.10.0**, and not in the direction this table
+implies. The question was never whether these three exceed the declared floor. It was whether the
+declared floor was true of anything, and it was not: `blake3` has pulled `constant_time_eq` 0.4.2
+for some time, whose manifest is edition 2024, so a 1.79 Cargo could not parse the dependency
+tree of `smysl-core` — let alone compile it. See §4.5.
 
 ---
 
@@ -904,8 +913,28 @@ Root `Cargo.toml`: `text = ["dep:smysl-text", "smysl-check/text", "smysl-retriev
   languages), `redb`, `pdf-extract`, `mail-parser`, `rbook`, `html2text`. Not re-verified at this
   commit; TX-P1's exit adds `cargo tree -e normal -i cc` for the `cli` feature set to `make
   crate-features` so the claim is checked rather than cited.
-- **MSRV.** `redb` 4.3 (1.90), `quick-xml` 0.42 (1.86), `unicode-segmentation` 1.13 (1.85) exceed
-  `rust-version = "1.79"`. OQ-40.
+- **MSRV — OQ-40, answered by measurement in 1.10.0.** The declared `rust-version = "1.79"` was
+  false in every selection and had been for releases, and the three crates named here were not
+  why. Measured floors, each confirmed by compiling at it and at the version below:
+
+  | selection | floor | set by |
+  |---|---|---|
+  | the nine pure-path crates, `--no-default-features` | **1.85** | `constant_time_eq` 0.4.2 via `blake3` — manifest edition 2024, which a 1.79 Cargo cannot parse |
+  | `smysl-provider`, `smysl-ingest` | **1.86** | `icu_*` 2.2 via `idna_adapter` ← `idna` ← `url` ← `ureq` |
+  | `smysl-tui`, and the facade with `tui` | **1.88** | `instability` 0.3.12 and `darling` 0.23 via `ratatui` |
+
+  Those are now declared: the workspace base is 1.85 and the four crates above it carry their
+  own, because Cargo has no per-feature `rust-version` and a package's number must therefore be
+  its maximum. `redb` 4.3's 1.90 becomes an ordinary bump when `store-redb` lands, not a policy
+  question — and OQ-66's alternative, *keep 1.79 for builds without `store-redb`*, was never
+  available, because no build reached 1.79.
+
+  **`make msrv`** (`scripts/verify-msrv.py`) compares every crate's declared floor against the
+  maximum its transitive non-dev, non-platform-gated dependencies require, and fails in **both**
+  directions: a floor below what the dependencies need is the false claim, and a floor above it
+  is one nobody has a reason for, which rots into the first. The CI job runs it and then compiles
+  the base tier at 1.85, because the script cannot see our own source using a newer language
+  feature than any dependency needs.
 - **Crate size.** `lingua` language models are large (unverified figure); five features only, and
   the per-language model crates are downloaded only with `text`.
 
@@ -1136,7 +1165,7 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
 
 | risk | consequence | mitigation |
 |---|---|---|
-| MSRV: `redb` 4.3 needs 1.90, `quick-xml` 0.42 needs 1.86, `unicode-segmentation` 1.13 needs 1.85; workspace says 1.79 | `cargo` refuses or the claimed MSRV is false for `cli` | decide OQ-40 before TX-P1: raise `rust-version`, or pin older majors (`redb` 2.6 needs 1.85, 1.5 needs 1.70) and check each with `cargo +1.79 check` in CI |
+| ~~MSRV~~ **closed 1.10.0.** The claimed MSRV was already false for every crate, not just `cli` | — | OQ-40 answered by measurement: base 1.85, provider and ingest 1.86, tui and facade 1.88, each declared and gated by `make msrv` plus a CI job compiling the base tier. `redb` 4.3's 1.90 is a normal bump when `store-redb` lands |
 | a time contention written as record 6 | stores unreadable to readers older than SMYSL-2.1's fixes | never written: SMYSL-2.3 A-8.2 forbids kinds 4 and 5 in record 6 (OQ-35 resolved) |
 | readers drift (a dependency changes output across versions) | mids change, GE-T1 fails later | reader id includes the reader's own version; dependency versions pinned with `=` for readers; GE-T1 rerun on every dependency bump of a reader |
 | `lingua` detection changes between versions | segment languages in readings change → rdid changes | `lingua` pinned exactly; its version is part of the reader id for `mul` manifests |
@@ -1201,7 +1230,7 @@ meanings and are not repeated here.
 | OQ-37 | JSON readers: `serde_json` behind features (outside the purity gate), or a strict-JSON mode of `smysl-core`'s hand-rolled HJSON parser, which would keep `json/1` and `telegram/1` inside the gate? |
 | OQ-38 | Is a deterministic fuel cap enough, so the wall-time watchdog can be dropped, or is the watchdog worth keeping as a backstop? |
 | OQ-39 | Physical erasure when record 15 sits in a plain log: rewrite the log (as proposed), or refuse 15/18 in logs entirely and keep them only as objects? |
-| OQ-40 | MSRV: raise `rust-version` to 1.90 (redb 4.x) or pin older crate majors at 1.79? |
+| ~~OQ-40~~ | **Answered 1.10.0, and the question was wrong.** Neither: 1.79 was already false everywhere — the pure core cannot be *parsed* by a 1.79 Cargo, because `blake3` pulls an edition-2024 `constant_time_eq`. The measured floors (1.85 / 1.86 / 1.88) are declared per crate and gated by `make msrv`. `redb` 4.x's 1.90 is an ordinary bump in the release that ships it. §4.5 |
 | OQ-41 | Removing `ingest:quote` from span-carrying text units changes their uids relative to prose ingest of the same text. Accept, or keep the quote and accept duplicate uids per span? |
 | OQ-42 | **Resolved in SMYSL-2.3 A-12.2:** strata by status; a chain tightens at its weakest link's status. §3.3 implements exactly that. |
 | OQ-43 | Should the digest-scoped reference check (`E442`) also admit units of the same expression not shown in the digest (a model that remembers an earlier window), or stay strict? |

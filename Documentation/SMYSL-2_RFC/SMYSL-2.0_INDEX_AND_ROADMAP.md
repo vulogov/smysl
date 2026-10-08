@@ -202,7 +202,7 @@ Everything not listed here is either resolved (§3) or does not block anything.
 | must be answered before | open questions | owner |
 |---|---|---|
 | ~~**S0 / TX-P0**~~ **both done** | OQ-34 licensing of model outputs as fixtures — **partly answered by S0**: arm L's model is Apache 2.0, so its outputs are usable as fixtures; the hosted model's still needs the decision | 2.1, 2.2 |
-| **TX-P1** | ~~OQ-31~~ **answered, and F-2 is built** (2026-10-07): faithful for cost, content-fair for a bound — 2.1 §4.3.2. · **MSRV: OQ-40 = OQ-66** (redb 4.x needs Rust 1.90; the workspace declares 1.79 and does not test it). Proposal: raise `rust-version` to 1.90 at TX-P1, with an MSRV CI job. · OQ-36 lock mechanism · OQ-37 JSON parsing inside or outside the purity gate · OQ-39 physical erasure of text in plain logs | 2.4, 2.8 |
+| **TX-P1** | ~~OQ-31~~ **answered, and F-2 is built** (2026-10-07): faithful for cost, content-fair for a bound — 2.1 §4.3.2. · ~~**MSRV: OQ-40 = OQ-66**~~ **answered 1.10.0 by measurement**: 1.79 was already false everywhere — a 1.79 Cargo cannot parse this tree, because `blake3` pulls an edition-2024 `constant_time_eq`. Floors declared per crate (1.85 base, 1.86 provider and ingest, 1.88 tui and facade), `make msrv` gates both directions, and the CI job exists. redb 4.x's 1.90 is an ordinary bump when `store-redb` lands. · OQ-36 lock mechanism · OQ-37 JSON parsing inside or outside the purity gate · OQ-39 physical erasure of text in plain logs | 2.4, 2.8 |
 | **TX-P3** | OQ-13 speaker and device selectors for datings (window targets are already in) | 2.4 |
 | **TX-P4** | OQ-4 source and licence of versification maps · OQ-14 default IDF scope | 2.4, 2.5 |
 | **TX-P5 (G1)** | OQ-41 `ingest:quote` removed from span-carrying units changes their uids · OQ-43 strictness of the digest-scoped reference check | 2.4 |
@@ -352,7 +352,7 @@ Found while writing the set. **The set is authoritative where it differs.**
 | E-10 | `--seed-check` asserts reproducibility | it is accepted but read by nothing. `find` and `pack` are labelled pure even with model-dependent engines (H-19, H-20). | 2.5, 2.6 → 2.1 |
 | E-11 | ingest staging reused for imports | ingest staging rewrites units and loses records, so import staging is CBOR-only | 2.7 |
 | E-12 | `strict` classes informally specified | a seed-and-grow greedy partition in uid order (2.3 A-12.4) | 2.4, 2.3 |
-| E-13 | the toolchain was not considered | MSRV: redb 4.x needs 1.90, quick-xml 0.42 needs 1.86, unicode-segmentation 1.13 needs 1.85. The workspace declares 1.79 and does not test it (OQ-40 = OQ-66). | 2.4, 2.8 |
+| E-13 | the toolchain was not considered | ~~MSRV: redb 4.x needs 1.90, quick-xml 0.42 needs 1.86, unicode-segmentation 1.13 needs 1.85. The workspace declares 1.79 and does not test it.~~ **Closed 1.10.0**, and the gap was larger than the omission suggested: the declared 1.79 was false for every crate already, and the named three were not why. Measured floors declared per crate, gated by `make msrv` and an MSRV CI job (OQ-40 = OQ-66). | 2.4, 2.8 |
 | E-14 | `derive_thread` scales | it is quadratic: 24.5 s at 171k units, 0.55 s after a one-arm fix with byte-identical output (H-18) | 2.8 → 2.1 |
 
 **Defects in today's tree** that the set documents and 2.1 fixes:
@@ -416,9 +416,14 @@ Coding speed cannot compress those.
    default, class measures as exploration only, holder and mode structural from TX-P5, the
    GE-T5/GE-T2 restatement against α, the FC-6 recalibration, and the non-English cost model.
    TX-P5's and TX-P7's exit tests both change, so this is a re-plan and not an edit.
-7. **Answer the remaining TX-P1 blockers** in §4. MSRV first: OQ-40 = OQ-66 (raise
-   `rust-version` to 1.90 for redb 4.x, with an MSRV CI job) is the one with a dependency outside
-   this repository.
+7. **Answer the remaining TX-P1 blockers** in §4. ~~MSRV first: OQ-40 = OQ-66~~ **done
+   2026-10-07.** It was the one with a dependency outside this repository, and measuring it
+   turned the question inside out: there was no 1.79 build to preserve, and redb was not the
+   reason. The floors are 1.85 for the nine pure-path crates, 1.86 for `smysl-provider` and
+   `smysl-ingest`, 1.88 for `smysl-tui` and the facade; each is declared on its own crate,
+   `make msrv` fails in both directions, and a CI job compiles the base tier at 1.85.
+   **Still open for TX-P1:** OQ-36 lock mechanism, OQ-37 JSON parsing inside or outside the
+   purity gate, OQ-39 physical erasure of text in plain logs — all three decidable here.
 8. **Decide whether to buy the human same-as measurement.** Every provisional row (T1, T3, T6,
    T7, T8) rests on model coders, and no model coder reaches α 0.667 — the local 14B model agrees
    with each hosted model better than the two hosted models agree with each other, and a single

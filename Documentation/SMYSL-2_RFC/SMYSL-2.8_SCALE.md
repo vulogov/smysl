@@ -165,7 +165,8 @@ batches of 100.
 Both say lazy rebuilding "was not done" because it needs interior mutability and "would make
 `Store` no longer `Sync`". That holds for `RefCell`/`Cell`. It does not hold for
 `std::sync::OnceLock`, which is `Sync` when its contents are `Send + Sync` and is stable since
-Rust 1.70 (the workspace declares `rust-version = "1.79"`). I checked by compiling an
+Rust 1.70 (the workspace declared `rust-version = "1.79"` when this was written; it declares
+1.85 since 1.10.0, and the 1.79 was false — OQ-66). I checked by compiling an
 assertion against `d25ec9e`: `Store: Send + Sync` and `OnceLock<Adjacency>: Send + Sync` both
 hold. No test in the tree asserts that `Store` is `Sync`; nothing would notice if it stopped
 being.
@@ -289,8 +290,13 @@ and `App::store() -> &Store`; `smysl-eval` (unpublished) has eight.
   method set is frozen; every method added after 1.0 needs a default, or it is a 2.0.
 - `cargo-semver-checks` and `cargo-public-api` are not installed in the environment I verified
   in, so semver claims below about what the tool reports are **(unverified)**.
-- `rust-version = "1.79"` is declared; CI uses `stable` and `nightly` only, so the declared
-  MSRV is not tested **(observed in `.github/workflows/ci.yml`)**.
+- ~~`rust-version = "1.79"` is declared; CI uses `stable` and `nightly` only, so the declared
+  MSRV is not tested **(observed in `.github/workflows/ci.yml`)**.~~ **This observation was
+  right and the consequence was worse than it sounds.** 1.10.0 measured it: the claim was false
+  for every crate in the workspace, and the pure core could not be *parsed* at 1.79, because
+  `blake3` pulls an edition-2024 `constant_time_eq`. The floors are now declared per crate
+  (1.85 base, 1.86 for provider and ingest, 1.88 for tui and the facade) and there is an MSRV
+  CI job. OQ-66.
 - redb 4.3.0 (2026-09-15) declares `rust-version = 1.90`, edition 2024, MIT OR Apache-2.0. Its
   only normal dependency on Linux and macOS is `libc` (no `cc`, no C toolchain). Its
   multi-process modes are behind the `experimental-multiprocess` feature; by default a writer
@@ -892,9 +898,11 @@ Integration with the `Cmd` table in `src/main.rs`; no new subcommand in this RFC
 - **No C toolchain**: redb 4.3's normal dependencies are `libc` on Linux/macOS/WASI and three
   optional crates not enabled here (§2.7). `cargo tree -e normal --features store-redb | grep
   -E '^.*\bcc\b'` is part of the step's exit test.
-- **MSRV**: redb 4.x needs Rust 1.90 and edition 2024; the workspace declares 1.79 and does not
-  test it. Proposal: raise `rust-version` to 1.90 in the release that ships `store-redb`, and
-  add an MSRV CI job (OQ-66).
+- **MSRV**: redb 4.x needs Rust 1.90 and edition 2024. The workspace declares **1.85** since
+  1.10.0, and the MSRV CI job that OQ-66 proposed exists (`make msrv`). So this is now an
+  ordinary bump of `smysl-graph`'s own `rust-version` in the release that ships `store-redb` —
+  and because the gate fails in both directions, forgetting to raise it is a red build rather
+  than a false claim. OQ-66 is answered.
 - `make crate-features` gains `smysl-graph` with `store-redb` alone.
 
 ## 5. Tests, fixtures and harnesses
@@ -1052,7 +1060,7 @@ suite (§5.1) for every implementation that exists by then.
 | Union semantics differ from a merged store | duplicate uids across shards, attestations split across shards | `get` on a duplicated uid unions attestations; proptest over partitions asserts union ≡ `from_records(all)` |
 | Crash leaves redb ahead of the log | write ordering | log first, `fsync`, then redb commit (§3.5.5); kill and fault-injection tests |
 | Cross-process reader blocked by a writer | redb default locking (§2.7) | bounded wait, then the CBOR log (`W504`); short writer sessions; OQ-67 |
-| MSRV jump to 1.90 | redb 4.x | feature-gated; propose raising `rust-version` with an MSRV job (OQ-66) |
+| MSRV jump to 1.90 | redb 4.x | the MSRV job exists since 1.10.0 (`make msrv`), so raise `smysl-graph`'s own `rust-version` with the feature and let the gate check it; OQ-66 answered |
 | Lazy adjacency hides cost in the first read | one rebuild after appends | documented on `append`; `Store::prepare()` (a no-op read) lets a caller pay it at a chosen time |
 | Disk-primary loses records | export is the only way out | P13d gated on GE-T15; `lib verify` digest check (`E505`); index mode default until GE-T7 reruns on primary |
 | Scope creep into SMYSL-2.4's index | both use redb | separate files, separate tables, one shared workspace redb version; only `uid_shard` is added to `index.redb` |
@@ -1080,7 +1088,7 @@ SMY-*506–509 are unallocated.
 |---|---|---|
 | **OQ-16** (draft 3) | Virtual union: are contentions computed lazily per query enough, or does the library need a materialised contention index? | Lazy. Detection reads only the interpretive layer, which the union materialises (§3.7). Materialise only if GE-T7 measures detection over the full union above 1 s at 10⁶ units. |
 | **OQ-65** | Generalise the public entry points in place (`fn check<S: StoreRead + ?Sized>`), accepting that a caller's own `Deref<Target = Store>` type stops coercing, or add `_in` twins for the twelve contract operations and leave their signatures alone? | In place, with blanket impls and the §5.2 compile test; twins only if `make semver` flags it or the owner rules the `Deref` case a break. |
-| **OQ-66** | redb 4.x needs Rust 1.90 (edition 2024); the workspace declares 1.79 and does not test it. Raise `rust-version` for everyone, or keep 1.79 for builds without `store-redb`? | Raise to 1.90 in the release that ships `store-redb`, and add an MSRV CI job; Cargo cannot express a per-feature MSRV, and an untested 1.79 claim is already not a promise. Whether a 1.79 toolchain can even resolve a lockfile containing an edition-2024 optional dependency is unverified. |
+| ~~**OQ-66**~~ | **Answered 1.10.0 by measurement, and the second option never existed.** There was no 1.79 build to keep: a 1.79 Cargo cannot resolve this tree at all — the last sentence of the old answer asked exactly that, and the answer is no, and not because of an *optional* dependency but because of `blake3`, via `constant_time_eq` 0.4.2 at edition 2024. Measured floors: 1.85 for the nine pure-path crates, 1.86 for `smysl-provider` and `smysl-ingest` (`icu_*` 2.2 under `ureq`), 1.88 for `smysl-tui` and the facade (`instability`, `darling` under `ratatui`). Each is declared on its own crate, since Cargo has no per-feature MSRV and a package's number must be its maximum. `make msrv` compares each declaration against what its dependencies require and fails in both directions; a CI job runs it and compiles the base tier at 1.85. redb 4.x's 1.90 is now a one-line bump on `smysl-graph` when `store-redb` lands. |
 | **OQ-67** | Cross-process readers: wait-then-read-the-log (this RFC), or adopt redb's `experimental-multiprocess` single-writer mode? | Wait and fall back now; revisit when the feature leaves `experimental`. |
 | **OQ-68** | Where do library-wide derived tables live: `uid_shard` and the `observed` instant index (draft 3 §14.2 lists `observed` in `index.redb`; this RFC has a per-shard `observed` table for `StoreRead`)? | Per-shard tables are the source; SMYSL-2.4's library-wide `observed` and this RFC's `uid_shard` are derived from them, in `index.redb`. SMYSL-2.4 to confirm. |
 | **OQ-69** | Tiering policy: pin interpretive cores by status (`speculative`/`inferred`/`derived` + relation endpoints, §3.5.4), by source kind (`doc`/`file`/`node` cold), or by kernel type? And GE-T7's "library build" — does it include model extraction or only readers, segmentation and indexes? | Status-based pinning, default core cache 64 MiB; GE-T7 build excludes model extraction (it is measured by TX-P5's cost report). Both to be revisited after the first GE-T7 run. |

@@ -6,7 +6,13 @@ resolver = "2"
 [workspace.package]
 version      = "1.10.0"
 edition      = "2021"
-rust-version = "1.79"
+# The floor the nine pure-path crates actually build at, measured rather than declared:
+# `blake3` pulls `constant_time_eq` 0.4.2, whose manifest is edition 2024, so a Cargo older
+# than this cannot parse it. `scripts/verify-msrv.py` holds the whole story — this number was
+# `1.79` for eleven releases, was false in every selection, and nothing tested it.
+# The crates needing more declare it themselves: `smysl-provider` and `smysl-ingest` 1.86,
+# `smysl-tui` and this facade 1.88. Cargo has no per-feature MSRV, so each is its maximum.
+rust-version = "1.85"
 license      = "MPL-2.0"
 authors      = ["Vladimir Ulogov"]
 repository   = "https://github.com/vulogov/smysl"
@@ -44,7 +50,10 @@ name         = "smysl"
 description  = "An AI<->AI<->Human data interchange format, library, and CLI"
 version.workspace      = true
 edition.workspace      = true
-rust-version.workspace = true
+# Not the workspace base: with `tui` the facade pulls `ratatui` and therefore `instability`.
+# A package's `rust-version` is one number for every feature combination, so it has to be the
+# maximum — 1.88 here, where the default features alone would be 1.86.
+rust-version           = "1.88"
 license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
