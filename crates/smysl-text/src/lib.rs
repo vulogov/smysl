@@ -17,9 +17,9 @@
 //! crate. A reader's only side channel is its [`limits::Budget`], and fuel is deterministic,
 //! so a refusal happens at the same byte on every machine.
 //!
-//! # What is here as of TX-P1 step 2
+//! # What is here as of TX-P1 step 3
 //!
-//! The substrate, with no file format in it yet:
+//! The substrate, and the six readers that stand on it:
 //!
 //! | module | what it settles |
 //! |---|---|
@@ -33,12 +33,18 @@
 //! | [`manifest`] | the licence gate (`SMY-E402`), and which manifests are heads |
 //! | [`objects`] | `objects/{t3,r3}/…`, staged and renamed, verified on read (`SMY-E446`) |
 //! | [`lock`] | one writer per shard, named (`SMY-E445`) |
+//! | [`readers`] | the six TX-P1 readers, one behind each `reader-*` feature |
 //!
-//! The readers (`txt`, `md`, `usfm`, `osis`, `zefania`, `json`) are step 3; the `Library`
-//! handle that ties a `Store` to an object store arrives with the store work in step 4, which
-//! is why there is no `Library` type here yet. Nothing in this crate opens a library: every
-//! piece of it is a function of its arguments, which is also why all of it is testable without
-//! a corpus.
+//! Each reader is a function from bytes to a text and a table over it — no clock, no
+//! environment, no filesystem, and no name for the input — so two libraries given the same
+//! file name the same part. Three of them read scripture out of three unrelated syntaxes and
+//! agree to the byte, which `crates/smysl-text/tests/readers.rs` asserts with one tid over
+//! three fixtures.
+//!
+//! The `Library` handle that ties a `Store` to an object store arrives with the store work in
+//! step 4, which is why there is no `Library` type here yet. Nothing in this crate opens a
+//! library: every piece of it is a function of its arguments, which is also why all of it is
+//! testable without a corpus.
 
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
@@ -51,6 +57,7 @@ pub mod manifest;
 pub mod norm;
 pub mod objects;
 pub mod part;
+pub mod readers;
 pub mod reading;
 pub mod structure;
 
@@ -62,19 +69,20 @@ pub use manifest::{carry_allowed, heads, ManifestBuilder};
 pub use norm::Normalised;
 pub use objects::{ObjectKind, ObjectStore};
 pub use part::{group, PartPlan, Policy};
+pub use readers::{reader, Input, NoReader, Params, ReadOutput, Reader};
 pub use reading::{Level, Reading, Segment};
 pub use smysl_core::error::LibError;
 pub use smysl_core::ids::Tid;
 pub use structure::{Defect, Node, Structure, StructureError};
 
-/// The reader ids this crate will answer to, in the phase they arrive.
+/// The reader ids this crate answers to, in the phase they arrive.
 ///
-/// Here from the start, and empty of implementations on purpose: the id is what a manifest
-/// records (key 3) and what `SMY-E401` compares against when a corpus is re-read, so the list
-/// of names is part of the format's surface even before the code behind each name exists. A
-/// reader whose id is not here is a reader this build did not write.
+/// The id is what a manifest records (key 3) and what `SMY-E401` compares against when a
+/// corpus is re-read, so the list of names is part of the format's surface. A reader whose id
+/// is not here is a reader this build did not write; which of these a given *binary* has is
+/// [`readers::available`], because each sits behind its own feature.
 pub const READERS: &[&str] = &[
-    // TX-P1 step 3.
+    // TX-P1 step 3, all six built.
     "txt/1",
     "md/1",
     "usfm/1",

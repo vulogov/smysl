@@ -17,6 +17,16 @@ smysl-graph = { path = "../crates/smysl-graph" }
 smysl-pack = { path = "../crates/smysl-pack", features = ["branch-and-bound"] }
 smysl-thread = { path = "../crates/smysl-thread" }
 smysl-check = { path = "../crates/smysl-check" }
+# Every reader, so one target covers all six and the purity gate's feature split is exercised
+# by the fuzzer rather than only by the test suite.
+smysl-text = { path = "../crates/smysl-text", features = [
+    "reader-txt",
+    "reader-md",
+    "reader-usfm",
+    "reader-osis",
+    "reader-zefania",
+    "reader-json",
+] }
 
 # A library in the fuzz crate, so the store generator is shared by every algebra target
 # rather than copied into each one. Copies drift, and a generator that differs between
@@ -58,5 +68,11 @@ doc = false
 [[bin]]
 name = "pack_exact"
 path = "fuzz_targets/pack_exact.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "readers"
+path = "fuzz_targets/readers.rs"
 test = false
 doc = false

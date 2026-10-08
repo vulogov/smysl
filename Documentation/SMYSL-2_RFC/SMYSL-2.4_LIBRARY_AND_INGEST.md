@@ -364,9 +364,9 @@ bytes, not a path). The `Budget` (§3.9.1) is the only side channel, and it is d
 | reader | feature | phase | crate dependency | note |
 |---|---|---|---|---|
 | `txt/1` | `reader-txt` | TX-P1 | std | |
-| `md/1` | `reader-md` | TX-P1 | `pulldown-cmark` | MSRV and licence unverified |
+| `md/1` | `reader-md` | TX-P1 | `pulldown-cmark` | **verified in step 3**: 0.13.4, MIT, rustc 1.71.1 |
 | `usfm/1` | `reader-usfm` | TX-P1 | hand-rolled | |
-| `osis/1`, `zefania/1` | `reader-osis`, `reader-zefania` | TX-P1 | `quick-xml` | DTDs refused (§3.9.1) |
+| `osis/1`, `zefania/1` | `reader-osis`, `reader-zefania` | TX-P1 | `quick-xml` | DTDs refused (§3.9.1); pinned `=0.41.0`, see step 3 |
 | `json/1` | `reader-json` | TX-P1 | `serde_json` (OQ-37 answered: yes) | JSON Pointer locators |
 | `telegram/1`, `slack/1` | `reader-telegram`, `reader-slack` | TX-P2 | `serde_json`; Slack also a zip reader (unverified choice) | |
 | `whatsapp/1` | `reader-whatsapp` | TX-P2 | hand-rolled | date pattern is a required parameter |
@@ -408,8 +408,19 @@ chosen against what the six TX-P1 readers have to be able to say rather than inv
 | range | `Gen.1.1-Gen.1.3`, `L10-L14` | canonical or line ends, never pointers |
 
 The canonical form is deliberately OSIS-shaped: the five Bibles of GE-T1 are distributed with
-those identifiers and the spike's alignment table is keyed by them (`Ex.20.1`), so a locator that
-had to be translated out of the source's own vocabulary would be one nobody could check by eye.
+those identifiers, so a locator that had to be translated out of the source's own vocabulary
+would be one nobody could check by eye.
+
+**The vocabulary, settled in step 3, and one claim above withdrawn.** The sentence this
+paragraph used to end with cited the spike's `in/align.tsv` as keyed by OSIS identifiers,
+"(`Ex.20.1`)". It is not: the spike keys its rows `Ex.20.1`, `Ecc.1`, `1Ki.3` and `Jas.2`,
+where OSIS writes `Exod`, `Eccl`, `1Kgs` and `Jas` — three of those four differ, so the
+parenthetical was evidence for a conclusion it did not support. The conclusion stands on the
+other ground: OSIS is the only one of the four vocabularies in play (OSIS, USFM's three-letter
+codes, Zefania's book numbers, the spike's abbreviations) that is published and standardised
+rather than local to a file format, and it is the one `osis/1` needs no table for. `books.rs`
+holds the 66 rows and the two mappings into them. The spike is an input to an experiment and
+not a corpus, so the table is what moves: GE-T1 re-keys it or carries a mapping.
 Three decisions worth recording, because each is a refusal rather than a convenience:
 
 - **One spelling per place.** `Gen.01.1` does not parse rather than parsing as `Gen.1.1`; a
@@ -767,7 +778,8 @@ crates/smysl-text/
     limits.rs       Budget, Caps, defaults, fuel accounting (E440)
 ```
 
-Dependencies as of TX-P1 step 2: `smysl-core` and `unicode-normalization`, and nothing else.
+Dependencies as of TX-P1 step 3: `smysl-core`, `unicode-normalization`, and behind the reader
+features `quick-xml` (`=0.41.0`), `pulldown-cmark` (`=0.13.4`), `serde` and `serde_json`.
 The rest arrive with the modules that need them, which is the only way a purity gate over this
 crate means anything — a dependency list written ahead of its callers is a list nobody can
 check. The full set when the crate is finished: `smysl-core`, `smysl-graph`, `smysl-retrieve`,
@@ -1340,8 +1352,80 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
    watched from this commit all the same (`Makefile`'s new `UNPUBLISHED` list feeds
    `api-check`, which needs no registry, while `semver` keeps a list of crates that have a
    published baseline to compare against).
-3. Readers `txt`, `md`, `usfm`, `osis`, `zefania`, `json`. *Exit:* `fixtures/library/readers`
-   expected mids; reader fuzz targets run 10 minutes each with no finding.
+3. ~~Readers `txt`, `md`, `usfm`, `osis`, `zefania`, `json`. *Exit:* `fixtures/library/readers`
+   expected mids; reader fuzz targets run 10 minutes each with no finding.~~ **Done
+   2026-10-08.** All six, each behind its own feature, with `fixtures/library/readers/`
+   pinning every identity — the tid of each part, the structure hash, the rdid and the mid —
+   generated and checked by one plain test, as the wire fixtures are. The fuzz target found a
+   defect in the first minute (below). What was decided or found:
+   - **`Input`, `Params`, `ReadOutput` and `ReadError` were names only.** §3.2 gave the trait
+     signature and §4.1 listed the module; nothing said what any of them held. Designed here,
+     as the locator grammar was in step 2. `Input` carries bytes and **no name**, so two
+     copies of one file under different names name the same part; `ReadError` is not a type at
+     all but two code-less `LibError` variants, because every code in `E440`–`W459` is about a
+     *corpus* and a reader that cannot read its input is a refusal to begin.
+   - **A reader's parameters are recorded nowhere.** `Manifest.reader` is `osis/1` and there is
+     no parameters key, so a parameter — which changes a reader's output — would be the
+     `part_policy` defect over again: a corpus that means something else on re-read. Key 3 can
+     carry them exactly as key 17 carries the part policy, and `reader_field` /
+     `parse_reader_field` do that round trip. **No spec change in step 3**, because none of the
+     six TX-P1 readers takes a parameter and a format grammar should not widen before anything
+     can produce a value for it. A test asserts that every reader in `READERS` declares no
+     parameters, so it fails at the TX-P2 commit where `whatsapp/1`'s date pattern arrives and
+     the spec, the three ports and this crate have to move together.
+   - **A part policy whose boundary level names no node cuts a text into no parts at all.**
+     The default level is `chapter` and `txt/1` has no chapters, so `ReadOutput` names the
+     reader's own top level and grouping refuses a level that matches nothing. A text that
+     silently becomes nothing is worse than a refusal.
+   - **The vocabulary question, and one sentence of §3.2 withdrawn** — see §3.2.
+   - **`quick-xml` 0.42 declares rustc 1.86**, above the pure tier's 1.85, and cargo quietly
+     resolves to 0.41 to keep the floor. Pinned `=0.41.0` with the reason written down: an XML
+     parser is not a reason to move the floor of eleven crates. Licences and MSRVs measured
+     rather than assumed — `quick-xml` 0.41.0 MIT/1.79, `pulldown-cmark` 0.13.4 MIT/1.71.1,
+     `serde` and `serde_json` 1.71 — which closes the "MSRV and licence unverified" note §3.2
+     carried for `md/1` since draft 1. All four pinned with `=` per §7.
+   - **`serde_json::Value` sorts object keys.** Parsing a chat export into a `Value` would
+     assemble its text in alphabetical key order, and the tid would be over a text no reader of
+     the source would recognise. The `preserve_order` feature is not available either: features
+     unify across a build and `smysl-provider` serialises prompts with the same crate, so a
+     flag set for a reader would change what a provider sends. `json/1` therefore walks the
+     deserialiser, where entries arrive in the order the bytes have them.
+   - **A row that takes its start at the marker which opened it holds its predecessor's
+     separator.** One byte, invisible in a two-verse test, and under every span and alignment
+     downstream. Found in `usfm/1` by a test that sliced the text instead of comparing one
+     expected string; the fix is that a row starts at its first text and ends at its last, and
+     it lives in one shared builder so the three structured readers cannot each get it wrong.
+   - **The fuzzer's finding, in the first minute: a source may state one address twice.** A
+     Zefania file with two verses numbered 1 (a mutation of this repository's own Luther
+     fixture) produced two rows with one locator — a table `Structure::build` refuses, so the
+     reader was emitting a reading nothing downstream could open. Refused now by the builder,
+     naming the address and the offset of the second one. Not merged: merging two verses would
+     be this crate deciding which of them a corpus holds.
+   - **`pulldown-cmark` 0.13.4 panics on untrusted input, in the one API `md/1` needs.** Its
+     `OffsetIter` — the iterator that carries source offsets, which is what the locators are
+     made of — reaches `tree.cur().unwrap()` on a `None` while ending a tight paragraph
+     (`parse.rs:2199`). The smallest input found is `` "- [:]:`\n \t\t" ``, eleven bytes, and
+     the crate's *plain* iterator reads it without complaint, so the defect is the offset API
+     alone. A library in this workspace may not panic on bytes somebody else wrote, so the
+     parse is wrapped in `catch_unwind` and the panic becomes the refusal it should have been,
+     naming the dependency so an operator knows it is not their text that is wrong. The
+     alternative was hand-rolling CommonMark's block structure, which is new code in the one
+     place untrusted bytes arrive — the argument OQ-37 settled the other way for JSON. The
+     wrapper and the `=0.13.4` pin come off together when the upstream fix lands; until then
+     the pin is load-bearing in a second sense, because a later 0.13.x could move the panic
+     without fixing it. **To report upstream**, with that eleven-byte reproducer.
+
+     This narrows the step's exit, and the narrowing is stated rather than glossed. The fuzz
+     target drives **five** of the six readers: `libfuzzer-sys` installs a panic hook that
+     aborts before unwinding — deliberately, so a target cannot swallow a panic — so a
+     *contained* panic is still an abort under the fuzzer, and `md/1` would report the
+     dependency's defect on every run for as long as it is unfixed. `md/1`'s containment is
+     covered by a unit test instead, and it rejoins the target at the commit that drops the
+     pin.
+   - **`md/1`'s sections are flat and its locators are source lines**, both deliberate and both
+     recorded in the module. Nesting sections by heading depth needs a level name per depth,
+     and then the level a part boundary falls on would depend on which depth a document happens
+     to start at; `md/2` is the place for hierarchy, which is what a versioned reader id is for.
 4. `smysl-graph` manifest state, heads, by-part maps, adjacency flag. *Exit:* store tests; 1.8
    append timing unchanged for unit batches, manifest-only append `O(batch)`.
 5. `smysl-check` `Library` pass (E403, E404, W405, W418, E446, E452); `ConformanceClass::Library`.

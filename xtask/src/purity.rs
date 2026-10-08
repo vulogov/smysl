@@ -56,10 +56,29 @@ const NEVER: &[&str] = &[
 /// measured against the inputs a JSON reader meets, that is new code rather than a narrowing,
 /// and it is new code in the place where untrusted bytes arrive. The answer is `serde_json`
 /// behind `reader-json`, and this list is where that answer is written down.
-const NOT_IN_THE_CORE: &[(&str, &str)] = &[(
-    "serde_json",
-    "only through a `reader-*` feature of `smysl-text` (SMYSL-2.4 OQ-37)",
-)];
+/// The three that arrived with TX-P1 step 3 are the readers' parsers, and each was measured
+/// before it was adopted rather than after: `quick-xml` 0.41.0 is MIT and declares 1.79,
+/// `pulldown-cmark` 0.13.4 is MIT and declares 1.71.1, `serde` and `serde_json` declare 1.71 —
+/// all below this workspace's 1.85 base, so none of them raises a floor. (0.42 of `quick-xml`
+/// declares 1.86 and is therefore **not** the pinned version: an XML parser is not a reason to
+/// move the pure tier.) All four are pinned with `=` in the workspace manifest, because a
+/// reader's output is a corpus's identity and a parser that changed its mind between patch
+/// releases would change every tid taken with it.
+const NOT_IN_THE_CORE: &[(&str, &str)] = &[
+    (
+        "serde_json",
+        "only through a `reader-*` feature of `smysl-text` (SMYSL-2.4 OQ-37)",
+    ),
+    (
+        "serde",
+        "only through `reader-json` of `smysl-text`: `serde_json`'s own seam",
+    ),
+    (
+        "quick-xml",
+        "only through `reader-osis` and `reader-zefania` of `smysl-text`",
+    ),
+    ("pulldown-cmark", "only through `reader-md` of `smysl-text`"),
+];
 
 /// The pure crates. Every operation they expose is a bit-reproducible function of its
 /// inputs (rule D), so none of them may reach the network or link a runtime.

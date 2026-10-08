@@ -739,6 +739,32 @@ pub enum LibError {
     NotText { at: usize },
     /// An expression alias that does not satisfy A-3's grammar.
     BadAlias { alias: String },
+    /// A reader could not read its input: the bytes are not the format the reader was asked
+    /// to read, at a byte offset into them.
+    ///
+    /// No code, and deliberately not one of `SMY-E440`-`W459`'s unallocated numbers. Every
+    /// code in that range is about a *corpus* — what a store holds, what a check can report
+    /// later. This is a refusal to begin: nothing was ingested, no record was written, and
+    /// there is no artefact for `check` to be asked about afterwards. `NotText` above is the
+    /// same shape for the same reason.
+    Unreadable {
+        /// The reader id, so a message names which reader refused.
+        reader: String,
+        /// Byte offset into the input, as the reader counted it.
+        at: usize,
+        /// What the reader expected, in its own words.
+        what: String,
+    },
+    /// A reader parameter this reader does not have, or a value it cannot use.
+    ///
+    /// Refused rather than ignored: a parameter is recorded in the manifest beside the reader
+    /// id, so a typo that was silently dropped would be a corpus built under settings nobody
+    /// chose, and no later read could tell.
+    BadParam {
+        reader: String,
+        key: String,
+        reason: String,
+    },
     /// The filesystem refused. The message is the operating system's; the path is named
     /// relative to the library root, never absolutely, so a diagnostic can be pasted into a
     /// bug report.
@@ -753,7 +779,11 @@ impl LibError {
             LibError::Limit { .. } => Some(Code::E440),
             LibError::Locked { .. } => Some(Code::E445),
             LibError::ObjectCorrupt { .. } => Some(Code::E446),
-            LibError::NotText { .. } | LibError::BadAlias { .. } | LibError::Io { .. } => None,
+            LibError::NotText { .. }
+            | LibError::BadAlias { .. }
+            | LibError::Unreadable { .. }
+            | LibError::BadParam { .. }
+            | LibError::Io { .. } => None,
         }
     }
 
@@ -808,6 +838,16 @@ impl fmt::Display for LibError {
             }
             LibError::NotText { at } => write!(f, "input is not valid UTF-8 at byte {at}"),
             LibError::BadAlias { alias } => write!(f, "`{alias}` is not a valid alias"),
+            LibError::Unreadable { reader, at, what } => {
+                write!(f, "{reader}: byte {at}: expected {what}")
+            }
+            LibError::BadParam {
+                reader,
+                key,
+                reason,
+            } => {
+                write!(f, "{reader}: parameter `{key}`: {reason}")
+            }
             LibError::Io { at, message } => write!(f, "{at}: {message}"),
         }
     }

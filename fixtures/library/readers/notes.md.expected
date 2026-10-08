@@ -1,0 +1,30 @@
+file      notes.md
+reader    md/1
+alias     notes-md
+licence   CC0-1.0
+policy    smysl/parts/1 level=section min=65536 max=4194304
+top-level section
+lossy     false
+title     Reading a text into a library
+lang      -
+text      466 bytes
+nodes     7
+parts     1
+
+part 0
+  range     0..466
+  tid       t3:y2hmm7kwc4xlhqekmjufjyqkvu
+  structure 5aaa23d4669fec1e4202aa1147e789ecaf1ddbf595bf3355cb0b661d501e2262
+  rdid      r3:37bzba73dhlog5ostrapxdqfjh
+  segments  7
+
+mid       m3:vhfjf4om4tqehz4kq3jn4gt4lv
+
+locators
+  section   L1 0..188
+  paragraph L3 30..188
+  section   L6 189..466
+  paragraph L8 204..409
+  paragraph L12 410..427
+  paragraph L13 428..449
+  paragraph L14 450..466

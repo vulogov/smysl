@@ -237,16 +237,23 @@ impl Structure {
     /// [`Structure::resolve_containing`] is where a coarser answer can be asked for
     /// deliberately.
     pub fn resolve(&self, loc: &Locator) -> Option<Range<u64>> {
+        // The exact table first, whatever shape the locator has. A range is not only a way of
+        // asking for the hull of two nodes — it is also the *address of a node*, because a
+        // verse bridge (`\v 1-2`, or an `osisID` naming two verses) is one span of text whose
+        // own locator is a range. Decomposing first meant a bridge could not be resolved by
+        // the address it was emitted under unless both of its ends happened to be separate
+        // nodes, which in a bridge they never are. Found by fuzzing `osis/1`, which emitted
+        // `Gen.0.3-s` and could not then resolve it.
+        if let Some(i) = self.by_locator.get(loc) {
+            return Some(self.nodes[*i as usize].range.clone());
+        }
         match loc {
             Locator::Range(a, b) => {
                 let lo = self.resolve(a)?;
                 let hi = self.resolve(b)?;
                 Some(lo.start..hi.end)
             }
-            exact => self
-                .by_locator
-                .get(exact)
-                .map(|i| self.nodes[*i as usize].range.clone()),
+            _ => None,
         }
     }
 
@@ -345,6 +352,59 @@ mod tests {
             seg(30, 60, "verse", "Gen.1.2"),
             seg(60, 90, "verse", "Gen.1.3"),
         ]
+    }
+
+    /// A node whose own address is a range resolves to itself, not to its ends.
+    ///
+    /// A verse bridge is one span of text addressed `Gen.1.1-Gen.1.2`, and neither end is a
+    /// node of its own — so a resolver that always decomposed a range could never find it.
+    /// Found by fuzzing a reader, fixed here, because the defect is the resolver's.
+    #[test]
+    fn a_range_that_is_itself_a_node_resolves_to_that_node() {
+        let rows = vec![
+            Segment::new(
+                0,
+                20,
+                Level::new("chapter").expect("level"),
+                "Exod.20".parse().expect("locator"),
+            ),
+            Segment::new(
+                0,
+                20,
+                Level::new("verse").expect("level"),
+                "Exod.20.1-Exod.20.2".parse().expect("locator"),
+            ),
+        ];
+        let mut budget = Budget::new(Caps::DEFAULT, 1 << 10).expect("budget");
+        let structure = Structure::build(&rows, 20, &mut budget).expect("a valid table");
+        let bridge: Locator = "Exod.20.1-Exod.20.2".parse().expect("locator");
+        assert_eq!(structure.resolve(&bridge), Some(0..20));
+        // Neither end is a node, so asking for one of them alone still finds nothing.
+        let one: Locator = "Exod.20.1".parse().expect("locator");
+        assert_eq!(structure.resolve(&one), None);
+    }
+
+    /// A range nobody emitted is still the hull of its two ends.
+    #[test]
+    fn a_range_of_two_nodes_is_still_their_hull() {
+        let rows = vec![
+            Segment::new(
+                0,
+                10,
+                Level::new("verse").expect("level"),
+                "Gen.1.1".parse().expect("locator"),
+            ),
+            Segment::new(
+                11,
+                20,
+                Level::new("verse").expect("level"),
+                "Gen.1.2".parse().expect("locator"),
+            ),
+        ];
+        let mut budget = Budget::new(Caps::DEFAULT, 1 << 10).expect("budget");
+        let structure = Structure::build(&rows, 20, &mut budget).expect("a valid table");
+        let span: Locator = "Gen.1.1-Gen.1.2".parse().expect("locator");
+        assert_eq!(structure.resolve(&span), Some(0..20));
     }
 
     #[test]

@@ -301,7 +301,7 @@ test-matrix: ## Every feature combination CI builds
 		RUSTFLAGS="-D warnings" $(CARGO) test --workspace $$args; \
 	done
 
-FEATURED := smysl-provider smysl-ingest smysl-render smysl-pack
+FEATURED := smysl-provider smysl-ingest smysl-render smysl-pack smysl-text
 
 crate-features: ## Each crate with features, alone, at its defaults and with none
 	@set -e; for c in $(FEATURED); do \
@@ -309,6 +309,13 @@ crate-features: ## Each crate with features, alone, at its defaults and with non
 			echo "==> cargo test -p $$c $$args"; \
 			RUSTFLAGS="-D warnings" $(CARGO) test -p $$c $$args; \
 		done; \
+	done
+	@# One reader at a time. `--all-features` cannot catch a module whose `cfg` list is
+	@# missing a feature that uses it: `reader-md` and `reader-json` alone failed to compile
+	@# because the shared row builder's list named three of the five readers that use it.
+	@set -e; for r in txt md usfm osis zefania json; do \
+		echo "==> cargo test -p smysl-text --no-default-features --features reader-$$r"; \
+		RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-text --no-default-features --features reader-$$r; \
 	done
 	@# One mapper at a time: `--features gemini` alone warned on an unused `bearer`, and
 	@# `ingest` alone on an unused `Emitter`, while every multi-mapper row was clean.

@@ -308,3 +308,211 @@ fn a_budget_does_not_recover() {
     }
     assert_eq!(b.fuel_remaining(), 0);
 }
+
+// ---------------------------------------------------------------------------
+// One crafted input per reader (TX-P1 step 3)
+//
+// Behind a `cfg`, because at default features this crate has no readers at all: a suite that
+// asked for one would fail, and a suite that skipped silently would pass while covering
+// nothing. The guard inside is what keeps it honest — every reader this build *has* must have
+// a case here, so adding a reader without an over-limit input for it fails the suite.
+#[cfg(any(
+    feature = "reader-txt",
+    feature = "reader-md",
+    feature = "reader-usfm",
+    feature = "reader-osis",
+    feature = "reader-zefania",
+    feature = "reader-json"
+))]
+mod readers {
+    use super::*;
+    use smysl_text::readers::{self, Input, Params};
+    // ---------------------------------------------------------------------------
+    //
+    // §5.1 asks for "one crafted input per cap per reader". The cases above cover every cap once,
+    // with the arithmetic pinned; what the readers add is the half that needs a reader to exist —
+    // that a cap refuses *before* the memory is spent, and that a refusal carries `SMY-E440` out
+    // through a parser rather than becoming that parser's own error on the way.
+    //
+    // The last part is the one worth a suite. `json/1` walks `serde_json`, whose visitor can only
+    // fail with a `serde` error, so a cap refusal has to be carried out of the walk and restored.
+    // A reader that reported "invalid value" where the format specifies `SMY-E440` would be a
+    // reader whose refusals no operator could act on.
+
+    /// A deeply nested JSON document, for the nesting cap.
+    fn nested_json(depth: usize) -> String {
+        let mut s = String::with_capacity(depth * 2 + 8);
+        for _ in 0..depth {
+            s.push('[');
+        }
+        s.push_str("\"x\"");
+        for _ in 0..depth {
+            s.push(']');
+        }
+        s
+    }
+
+    /// Every reader refuses an over-limit input with `SMY-E440`, naming the cap and its flag.
+    #[test]
+    fn every_reader_refuses_a_crafted_input_with_e440() {
+        // (reader, input, the cap the input is built to exceed, the caps to run it under)
+        let cases: Vec<(&str, String, &str, Caps)> = vec![
+            (
+                "txt/1",
+                "a\nb\nc\nd\ne\nf\n".to_string(),
+                "nodes",
+                Caps {
+                    nodes: 3,
+                    ..Caps::DEFAULT
+                },
+            ),
+            (
+                "md/1",
+                "one\n\ntwo\n\nthree\n\nfour\n".to_string(),
+                "nodes",
+                Caps {
+                    nodes: 2,
+                    ..Caps::DEFAULT
+                },
+            ),
+            (
+                "usfm/1",
+                "\\id GEN\n\\c 1\n\\v 1 a\n\\v 2 b\n\\v 3 c\n".to_string(),
+                "nodes",
+                Caps {
+                    nodes: 3,
+                    ..Caps::DEFAULT
+                },
+            ),
+            (
+                "osis/1",
+                r#"<osis><osisText><div type="book" osisID="Gen"><chapter osisID="Gen.1">
+                   <verse osisID="Gen.1.1">a</verse><verse osisID="Gen.1.2">b</verse>
+                   </chapter></div></osisText></osis>"#
+                    .to_string(),
+                "nodes",
+                Caps {
+                    nodes: 2,
+                    ..Caps::DEFAULT
+                },
+            ),
+            (
+                "zefania/1",
+                r#"<XMLBIBLE><BIBLEBOOK bnumber="1"><CHAPTER cnumber="1">
+                   <VERS vnumber="1">a</VERS><VERS vnumber="2">b</VERS>
+                   </CHAPTER></BIBLEBOOK></XMLBIBLE>"#
+                    .to_string(),
+                "nodes",
+                Caps {
+                    nodes: 2,
+                    ..Caps::DEFAULT
+                },
+            ),
+            (
+                "json/1",
+                nested_json(40),
+                "nesting",
+                Caps {
+                    nesting: 8,
+                    ..Caps::DEFAULT
+                },
+            ),
+            // The input cap, which is charged before a single byte is parsed: every reader shares
+            // it, and `txt/1` is the one with nothing else in the way of it.
+            (
+                "txt/1",
+                "a".repeat(64),
+                "input_bytes",
+                Caps {
+                    input_bytes: 16,
+                    ..Caps::DEFAULT
+                },
+            ),
+        ];
+
+        // Every reader this build has must appear above. A reader added without a crafted
+        // input would otherwise be a reader whose caps nothing exercises.
+        for id in readers::available() {
+            assert!(
+                cases.iter().any(|(name, ..)| *name == id),
+                "{id} has no crafted over-limit input in this suite"
+            );
+        }
+
+        for (id, input, cap, caps) in cases {
+            // Each reader is behind its own feature, so a build may not have this one. The
+            // guard above is what keeps the skipping honest: every reader this build *does*
+            // have must appear in the list.
+            let Ok(reader) = readers::reader(id) else {
+                continue;
+            };
+            // `Budget::new` is where `input_bytes` is checked, so a case for that cap refuses here
+            // and the rest refuse inside the reader. Both are `SMY-E440`; that is the point.
+            let err = match Budget::new(caps, input.len() as u64) {
+                Err(e) => e,
+                Ok(mut budget) => readers::read_with(
+                    reader,
+                    &Input::new(input.as_bytes()),
+                    &Params::new(),
+                    &mut budget,
+                )
+                .map(|_| ())
+                .expect_err(&format!("{id} should refuse its {cap} case")),
+            };
+            match err {
+                LibError::Limit {
+                    cap: named,
+                    flag,
+                    limit,
+                    saw,
+                } => {
+                    assert_eq!(named, cap, "{id} named the wrong cap");
+                    assert_eq!(
+                        err_code(&LibError::Limit {
+                            cap: named,
+                            flag,
+                            limit,
+                            saw,
+                        }),
+                        "SMY-E440",
+                        "{id}"
+                    );
+                    assert!(saw > limit || limit == 0, "{id}: saw {saw}, limit {limit}");
+                }
+                other => panic!("{id}: expected a cap refusal, got {other:?}"),
+            }
+        }
+    }
+
+    fn err_code(err: &LibError) -> String {
+        err.code().map(|c| c.to_string()).unwrap_or_default()
+    }
+
+    /// A reader that refuses has written nothing, which is what `SMY-E440`'s message promises.
+    ///
+    /// Checked the only way it can be at this layer: the refusal returns no `ReadOutput` at all,
+    /// so there is nothing for a caller to have written. The object store half of the promise —
+    /// that `objects/` is unchanged — is `objects.rs`'s, and the two together are what the
+    /// sentence "nothing was written" means.
+    #[cfg(feature = "reader-json")]
+    #[test]
+    fn a_refused_read_yields_no_output() {
+        let reader = readers::reader("json/1").expect("built");
+        let input = nested_json(40);
+        let mut budget = Budget::new(
+            Caps {
+                nesting: 4,
+                ..Caps::DEFAULT
+            },
+            input.len() as u64,
+        )
+        .expect("a budget");
+        let result = readers::read_with(
+            reader,
+            &Input::new(input.as_bytes()),
+            &Params::new(),
+            &mut budget,
+        );
+        assert!(result.is_err(), "the cap should refuse");
+    }
+}

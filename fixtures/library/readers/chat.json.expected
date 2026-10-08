@@ -1,0 +1,34 @@
+file      chat.json
+reader    json/1
+alias     exchange
+licence   CC0-1.0
+policy    smysl/parts/1 level=entry min=65536 max=4194304
+top-level entry
+lossy     false
+title     -
+lang      -
+text      258 bytes
+nodes     11
+parts     1
+
+part 0
+  range     0..258
+  tid       t3:2ruhul6f4o3a735poauxd3snjd
+  structure e3f2641fbf66074093a716278c85488178d07598719f5828bbd381ee0cfb2c72
+  rdid      r3:xivaa5nedhycfirtqjgc3eetr5
+  segments  11
+
+mid       m3:q4455torkchgczoet47iizqscu
+
+locators
+  entry     /name 0..16
+  entry     /messages 17..258
+  field     /messages/0/from 17..20
+  field     /messages/0/date 21..41
+  field     /messages/0/text 42..98
+  field     /messages/1/from 99..102
+  field     /messages/1/date 103..123
+  field     /messages/1/text 124..196
+  field     /messages/2/from 197..200
+  field     /messages/2/date 201..221
+  field     /messages/2/text 222..258

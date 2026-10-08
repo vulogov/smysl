@@ -52,6 +52,97 @@ Apache 2.0 and settled, the hosted one is not. It blocks nothing that has starte
 the first of them to be hashed over something other than a CBOR map. Step 2 adds the crate that
 interprets them, and the locator grammar the plan pointed at a document nobody has.
 
+### Six readers, and the fuzzer found four defects — one of them in a dependency
+
+`smysl-text` reads the six formats of TX-P1 step 3: `txt`, `md`, `usfm`, `osis`, `zefania` and
+`json`, each behind its own feature, none of them able to reach a clock, the environment or the
+filesystem. A reader is a function from bytes to a text and a table over it, and `Input` carries
+no file name, so two libraries given the same bytes name the same part however the file was
+called.
+
+**Three formats, one identity.** `fixtures/library/readers/` holds the same five verses of the
+King James Version as USFM, as container OSIS and as milestone OSIS — three unrelated syntaxes,
+and all three produce `t3:rzmgkk46zz6hvqsysq2fuayq4l`. That is what the normalisation and the
+identity rules are *for*: a library that received this chapter from three publishers holds it
+once. It is also the sharpest test of the readers' spacing, because a single byte of
+disagreement anywhere makes three tids out of one. Every identity each sample produces — the
+tid of each part, the structure hash, the rdid, the mid — is pinned in a file beside it,
+generated and checked by the same plain test.
+
+**One vocabulary, and a sentence of the RFC withdrawn.** Three of the readers read scripture and
+each source names books its own way: `\id EXO`, `bnumber="2"`, `osisID="Exod.20.1"`. Left alone
+that is three locators for one verse and nothing downstream can align them. OSIS is now the
+vocabulary, with one table of 66 rows and two mappings into it — chosen because it is the only
+one of the four that is published rather than local to a file format, and because `osis/1` then
+needs no mapping at all. The RFC had claimed the spike's alignment table was keyed by OSIS
+identifiers, citing `Ex.20.1`; it is not, since OSIS writes `Exod`, and the same disagreement
+holds for `Ecc`/`Eccl` and `1Ki`/`1Kgs`. The spike is an input to an experiment, so the table is
+what moves.
+
+**A reader's parameters are recorded nowhere, and that is a format question deferred on
+purpose.** A parameter changes a reader's output, so an unrecorded one is a corpus that means
+something else on re-read — the defect the part policy's required key already fixed once.
+Manifest key 3 can carry an id and its settings exactly as key 17 does, and the plumbing for
+that round trip is here. The spec does not widen yet, because none of the six readers takes a
+parameter and a grammar should not grow a form nothing can produce. A test asserts that every
+reader declares no parameters, so it fails at the commit where TX-P2's `whatsapp/1` arrives with
+its required date pattern — which is where the spec, the three C-Read implementations and this
+crate have to move together.
+
+**`serde_json` sorts object keys.** Reading a chat export into a `Value` would assemble its text
+in alphabetical key order, and the tid would be over a text no reader of the source would
+recognise. The `preserve_order` feature is not an option either: features unify across a build
+and `smysl-provider` serialises prompts with the same crate, so a flag set to fix a reader would
+quietly change what a provider sends. `json/1` walks the deserialiser instead, where entries
+arrive in the order the bytes have them.
+
+Two defects, both found rather than reasoned about.
+
+**A row that takes its start at the marker which opened it carries its predecessor's
+separator.** One byte, at the front of every verse after the first in a chapter, under every
+span and every alignment that would ever be measured against it. The test that found it slices
+the text rather than comparing against one expected string — the version that compares passes
+while the second verse is wrong. A row now starts at its first text and ends at its last, in one
+shared builder, so the three structured readers cannot each get it wrong separately.
+
+**And the fuzz target found two more in its first minute**, both of them readers emitting tables
+they could not read back. A Zefania file with two verses numbered 1 — a mutation of this
+repository's own Luther fixture — produced two rows with one locator, which `Structure::build`
+refuses; a source that states one address twice is now a refusal naming the address and the
+offset of the second one, rather than a merge that would have this crate deciding which of two
+verses a corpus holds. Then a markdown document with an empty heading and an empty list item
+produced rows **out of document order**: an empty row is placed where the parser stands while its
+empty parent is placed when its first text arrives, so the child began before the parent. Empty
+rows are gone, and the better argument is the simpler one — a node is a range of text, a
+zero-length range sits wherever the parser happened to be, and that is not a fact about the text.
+What the source declared and left empty is a fact about the *source*, and a check over the source
+is where it belongs.
+
+**And a reader's dependency panics on untrusted input.** `pulldown-cmark` 0.13.4's offset
+iterator — the one `md/1` needs, because the locators are made of source offsets — reaches
+`tree.cur().unwrap()` on a `None` while ending a tight paragraph. The input is eleven bytes,
+`` "- [:]:`\n \t\t" ``, and the crate's plain iterator reads it without complaint, so the defect
+is in the offset API alone. A library here may not panic on bytes somebody else wrote, so the
+parse is wrapped and the panic becomes the refusal it should have been, naming the dependency so
+that an operator knows it is not their text that is wrong. Hand-rolling CommonMark's block
+structure was the alternative, and it is new code in the one place untrusted bytes arrive — which
+is the argument OQ-37 settled the other way for JSON. The wrapper comes off with the pin when the
+fix lands upstream, and until then the pin does double duty: a later 0.13.x could move the panic
+without fixing it.
+
+That narrows what the fuzzer can claim, so the claim is narrowed explicitly: the target drives
+five of the six readers. `libfuzzer-sys` aborts on a panic before it unwinds — on purpose, so
+that a target cannot swallow one — which means a *contained* panic is still an abort under the
+fuzzer, and `md/1` would report the dependency's defect on every run until it is fixed. `md/1`'s
+containment has a unit test instead, and it rejoins the target at the commit that drops the pin.
+
+`quick-xml` is pinned `=0.41.0` and not 0.42, because 0.42 declares rustc 1.86 and the pure tier
+is 1.85: an XML parser is not a reason to move the floor of eleven crates. Every reader
+dependency is pinned with `=` (SMYSL-2.4 §7, a reader's output being a corpus's identity), and
+all four were measured rather than assumed — `quick-xml` 0.41.0 MIT/1.79, `pulldown-cmark`
+0.13.4 MIT/1.71.1, `serde` and `serde_json` 1.71 — which closes the "MSRV and licence unverified"
+note the plan had carried for `md/1` since its first draft.
+
 ### A new crate for texts, and a grammar that was a pointer to a missing appendix
 
 `smysl-text` exists: ten modules, no file format in any of them, 112 tests. TX-P1 step 2. What

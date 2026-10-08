@@ -22,6 +22,21 @@ all-features = true
 [features]
 default = []
 
+# One feature per reader, as the gate's second list requires: a dependency that enters with a
+# reader is recorded against that reader rather than against the crate. `reader-txt` needs
+# nothing but std, which is why it is the one step 3 starts with — the contract gets tested
+# before any parser is argued about.
+reader-txt = []
+reader-usfm = []
+reader-md = ["dep:pulldown-cmark"]
+reader-json = ["dep:serde", "dep:serde_json"]
+reader-osis = ["dep:quick-xml"]
+reader-zefania = ["dep:quick-xml"]
+
 [dependencies]
 smysl-core            = { workspace = true }
 unicode-normalization = { workspace = true }
+pulldown-cmark        = { workspace = true, optional = true }
+serde                 = { workspace = true, optional = true }
+serde_json            = { workspace = true, optional = true }
+quick-xml             = { workspace = true, optional = true }
