@@ -202,7 +202,7 @@ Everything not listed here is either resolved (§3) or does not block anything.
 | must be answered before | open questions | owner |
 |---|---|---|
 | ~~**S0 / TX-P0**~~ **both done** | OQ-34 licensing of model outputs as fixtures — **partly answered by S0**: arm L's model is Apache 2.0, so its outputs are usable as fixtures; the hosted model's still needs the decision | 2.1, 2.2 |
-| **TX-P1** | ~~OQ-31~~ **answered, and F-2 is built** (2026-10-07): faithful for cost, content-fair for a bound — 2.1 §4.3.2. · ~~**MSRV: OQ-40 = OQ-66**~~ **answered 1.10.0 by measurement**: 1.79 was already false everywhere — a 1.79 Cargo cannot parse this tree, because `blake3` pulls an edition-2024 `constant_time_eq`. Floors declared per crate (1.85 base, 1.86 provider and ingest, 1.88 tui and facade), `make msrv` gates both directions, and the CI job exists. redb 4.x's 1.90 is an ordinary bump when `store-redb` lands. · OQ-36 lock mechanism · OQ-37 JSON parsing inside or outside the purity gate · OQ-39 physical erasure of text in plain logs | 2.4, 2.8 |
+| **TX-P1** | ~~OQ-31~~ **answered, and F-2 is built** (2026-10-07): faithful for cost, content-fair for a bound — 2.1 §4.3.2. · ~~**MSRV: OQ-40 = OQ-66**~~ **answered 1.10.0 by measurement**: 1.79 was already false everywhere — a 1.79 Cargo cannot parse this tree, because `blake3` pulls an edition-2024 `constant_time_eq`. Floors declared per crate (1.85 base, 1.86 provider and ingest, 1.88 tui and facade), `make msrv` gates both directions, and the CI job exists. redb 4.x's 1.90 is an ordinary bump when `store-redb` lands. · ~~OQ-36~~ **answered** (2026-10-07): `create_new`, not advisory locks — `File::lock` is unstable at 1.88, and a kernel lock names no holder and dies with the crash it was evidence of. · ~~OQ-37~~ **answered**: `serde_json` behind `reader-json`; a strict HJSON mode is new code, not a narrowing, and the purity gate's single list was two claims with only the weaker enforced. · ~~OQ-39~~ **answered**: refuse 15/18 in a log (`E452`); a log that can be rewritten is not append-only, and nothing depends on the bytes yet. **No planning blockers left here.** | 2.4, 2.8 |
 | **TX-P3** | OQ-13 speaker and device selectors for datings (window targets are already in) | 2.4 |
 | **TX-P4** | OQ-4 source and licence of versification maps · OQ-14 default IDF scope | 2.4, 2.5 |
 | **TX-P5 (G1)** | OQ-41 `ingest:quote` removed from span-carrying units changes their uids · OQ-43 strictness of the digest-scoped reference check | 2.4 |
@@ -422,8 +422,18 @@ Coding speed cannot compress those.
    reason. The floors are 1.85 for the nine pure-path crates, 1.86 for `smysl-provider` and
    `smysl-ingest`, 1.88 for `smysl-tui` and the facade; each is declared on its own crate,
    `make msrv` fails in both directions, and a CI job compiles the base tier at 1.85.
-   **Still open for TX-P1:** OQ-36 lock mechanism, OQ-37 JSON parsing inside or outside the
-   purity gate, OQ-39 physical erasure of text in plain logs — all three decidable here.
+   ~~OQ-36, OQ-37, OQ-39~~ **done 2026-10-07**, and each turned out to be a question about
+   something already written rather than about the thing being planned. The lock: `create_new`,
+   because `File::lock` is unstable at 1.88 — the MSRV work above priced the parenthesis — and
+   because a kernel lock cannot name its holder and vanishes on the crash it was the only record
+   of. JSON: `serde_json` behind `reader-json`, because a strict mode of the HJSON parser is new
+   code and not a narrowing (it refuses a surrogate pair, turns an id past i64 into a float, and
+   misparses malformed JSON silently) — and because the purity gate's one list was carrying two
+   claims and enforcing only the weaker, which TX-P1's feature-per-reader crate would have
+   widened into a hole. Erasure: refuse 15/18 in a log, because the rewrite that honours a
+   redaction resets the same hash chain that would have shown an edit, and nothing yet depends on
+   the bytes — the record enum stops at 13. **§4's TX-P1 column is now empty**, so the planning
+   blockers for TX-P1 are step 6 alone. 2.4 §9.
 8. **Decide whether to buy the human same-as measurement.** Every provisional row (T1, T3, T6,
    T7, T8) rests on model coders, and no model coder reaches α 0.667 — the local 14B model agrees
    with each hosted model better than the two hosted models agree with each other, and a single
@@ -433,7 +443,7 @@ Coding speed cannot compress those.
    `scripts/verify-spec-tables.py` for each (A-14). A fold is not complete until that gate covers
    its tables.
 
-**What is startable now:** TX-P1 is unblocked — the gate passed and F-2 landed — and waits only
-on the re-plan of step 6 and the remaining blockers of step 7.
+**What is startable now:** TX-P1 is unblocked — the gate passed, F-2 landed, and step 7 is
+finished — and waits only on the re-plan of step 6.
 TX-P13a remains independent of all of it — the `StoreRead` trait and its consumers
 ported in memory (2.8 §§3–4), which §2's note marks as needing only TX-P0.

@@ -35,11 +35,82 @@ order. The local 14B model agrees with each hosted model better than the two hos
 with each other, so this is a property of the task and not of a provider. GE-T9's ceiling needs
 people, and five rows of the S0 decision table stay provisional until it has them.
 
+**Three TX-P1 questions nobody could answer without looking** — *answered, see below.* The lock
+mechanism, where JSON is parsed, and what physical erasure means in a log. Each had stood as a
+choice between two designs, and in each case measuring turned it into a statement about code that
+already exists.
+
 **Two decisions still open.** OQ-34 for the hosted model's outputs as fixtures — the local model
 is Apache 2.0 and settled, the hosted one is not. And the re-plan of SMYSL-2.4 against the pivot
 of SMYSL-2.0 §1.1, which moves TX-P5's and TX-P7's exit tests and so is a re-plan rather than an
-edit, with TX-P1's MSRV question (OQ-40 = OQ-66) first because it is the only one that depends on
-anything outside this repository.
+edit. With TX-P1's own blockers now closed, that re-plan is the only planning work left before
+TX-P1 can start.
+
+### Three TX-P1 blockers, and the purity gate was enforcing half of a claim
+
+RFC SMYSL-2.4 left OQ-36, OQ-37 and OQ-39 as choices between two designs. Answering them needed
+no new code except one gate change, because each question was really about something already
+written.
+
+**OQ-36, the lock: `create_new`, not an advisory OS lock.** The RFC's parenthesis said
+`std::fs::File::lock` "needs a newer toolchain", and after the MSRV work above that is a number:
+it is unstable at 1.88 (`rustc +1.88` reports *use of unstable library feature `file_lock`*) and
+compiles at 1.92, so a pure-path crate using it would declare a floor four releases above
+anything its dependencies need — an `EXCEEDS` entry in `scripts/verify-msrv.py`, argued for a
+lock file. `fs4` buys the same thing for a dependency. But two properties settle it without
+reference to cost. An advisory lock cannot name its holder, and `SMY-E445` is specified to print
+pid, host and command. And a lock the kernel releases when the process dies destroys the only
+evidence that a writer died mid-append: the stale lock *is* the crash notice, `--break-lock` is
+where an operator says they have read it, and the truncated tail it warns about is already
+tolerated by `from_cbor_seq`. Self-cleaning locks would make the common case quieter and the
+interesting case invisible. SMYSL-2.8 §3.8 said "advisory lock" while the question was open; it
+no longer does.
+
+**OQ-37, JSON: `serde_json` behind `reader-json`.** The alternative was a strict-JSON mode of
+`smysl-core`'s hand-rolled HJSON parser, which would have kept `json/1` and `telegram/1` inside
+the purity gate. Measured against what a JSON reader actually meets, that is not a narrowing of
+the parser that exists — it is new code, in the one place untrusted bytes arrive. Today's
+`parse_object`:
+
+| input | result | strict JSON requires |
+|---|---|---|
+| `"\uD83D\uDE00"` | **refused**, `invalid code point` | the pair combines to U+1F600 — and this is how `json.dumps` writes every emoji by default |
+| `9223372036854775808` | `Float(9.223372036854776e18)` | an exact integer; a message id silently stops being an id |
+| `1e400` | `Float(inf)` | a number, or an error |
+| `nope` | `Str("nope")` | an error |
+| `{ "t": 1 "u": 2 }` | `Str("1 \"u\": 2")` | an error — the quoteless rule swallows the rest of the line |
+
+The last is the worst of them: malformed JSON parsed silently into a plausible string, where a
+reader owes a refusal. And `serde_json` is not what rule B is about — it links no runtime, opens
+no socket, reads no clock, is deterministic, and declares 1.71, below this workspace's base, so
+it raises no floor.
+
+**The gate change.** `xtask/src/purity.rs` had one `FORBIDDEN_DEPS` list with `serde_json` beside
+`tokio`, and the two are not the same claim. Rule B says the library is synchronous and offline,
+which is not a property that can hold at default features and fail behind a flag; keeping a serde
+stack out of the pure core is a narrower and real thing to want. One list could only be checked
+one way, and it was checked the weaker way: **a pure crate could have put `tokio` behind a
+non-default feature and the gate would have passed it.** There are now two lists with their
+reasons — `NEVER`, checked at default features *and* `--all-features`, and `NOT_IN_THE_CORE`,
+checked at default features with the feature allowed to pull it recorded beside it. Both halves
+were verified by breaking them: a feature-gated `tokio` on `smysl-retrieve` now fails naming the
+`--all-features` tree, and a default `serde_json` fails naming the default tree and the facade's.
+TX-P1 would have widened the hole rather than found it — `smysl-text` joins the pure list with
+`default = []` and a feature per reader, so "clean at default features" was about to stop being
+much of a claim.
+
+**OQ-39, erasure: refuse records 15 and 18 in a log.** The proposal was `Store::rewrite_redacted`
+— write the log again without the record, reset the hash chain, rebuild the sidecar. It would
+have worked, and it is the one operation an append-only log cannot survive as evidence: honouring
+the redaction resets exactly the chain that would have shown an edit, so afterwards the log
+cannot tell the two apart. What refusing costs is almost nothing. A plain `Store` holding carried
+text can neither resolve a locator nor check a span — both need `smysl-text` — so all it could do
+with the bytes is hold them. And nothing has to be migrated: records 14, 15, 17, 18 and 19 do not
+exist in 1.10.0, where the record enum stops at 13, so the decision lands before any byte depends
+on it. `SMY-E452`, and `rewrite_redacted` is never written.
+
+RFC SMYSL-2.0 §4's TX-P1 column is empty as a result, and §7 step 7 is finished. The re-plan of
+step 6 is the only planning work left before TX-P1 starts.
 
 ### The declared MSRV was false, and the pure core could not be parsed at it
 

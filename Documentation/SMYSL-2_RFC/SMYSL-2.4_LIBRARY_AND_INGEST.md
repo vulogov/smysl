@@ -49,7 +49,7 @@ piece is tested, and in what order it lands.
   written to a log yet; `unicode-segmentation` 1.13.3, already in `Cargo.lock`, declares 1.85 —
   which is now the base rather than above it.
 
-Diagnostics allocated here: `SMY-E440`–`SMY-W451`. Open questions: OQ-35–OQ-44.
+Diagnostics allocated here: `SMY-E440`–`SMY-E452`. Open questions: OQ-35–OQ-44.
 
 ---
 
@@ -168,10 +168,13 @@ Every statement below was read from the tree. `cargo test --offline -p smysl-cor
   `const COMMANDS` (26 rows; `ingest`, `attest` are `Model`, `thread` is `Mixed`; the comment in `tests/cli-surface.txt` still says twenty-two). `cli()` builds
   one subcommand per row and adds arguments in a `match c.name`; `tests/cli-surface.txt` records
   every `command argument` pair and `command_table_matches_section_23` checks the table.
-- `xtask/src/purity.rs`: `FORBIDDEN_DEPS` (incl. `serde_json`, `clap`, `tokio`, `ureq`) checked on
-  `cargo tree -p smysl --no-default-features` **and** on `cargo tree -p <crate> -e normal` for each
-  of `PURE_CRATES = [smysl-core, smysl-graph, smysl-check, smysl-pack, smysl-thread, smysl-render,
-  smysl-retrieve]` — at the crate's **default** features. `FORBIDDEN_SYMBOLS` greps sources for
+- `xtask/src/purity.rs`: two lists since 1.10 (OQ-37). `NEVER` (`clap`, `tokio`, `ureq`,
+  `ratatui`, …) is rule B and the not-a-front-end claim, checked on
+  `cargo tree -p smysl --no-default-features` **and**, for each of
+  `PURE_CRATES = [smysl-core, smysl-graph, smysl-check, smysl-pack, smysl-thread, smysl-render,
+  smysl-retrieve]`, at both default features and `--all-features`. `NOT_IN_THE_CORE`
+  (`serde_json`, with the feature allowed to pull it) is the weaker claim and is checked at
+  **default** features only. `FORBIDDEN_SYMBOLS` greps sources for
   `std::net`, `TcpStream`, `async fn` and runtimes. Rule A: nothing in `src/` but `lib.rs` may
   name a sibling crate.
 - `xtask/src/determinism.rs`: runs registered pure operations under `LC_ALL ∈ {C, ru_RU.UTF-8}`,
@@ -227,8 +230,15 @@ interprets them (normalising text, reading files, deriving structure, writing ob
 - Part texts (15) and readings (18) live in the object store as their **record envelopes**: the
   file `objects/t3/ab/cd…` holds exactly `to_cbor(&Record::PartText(..))`. A bundle or export can
   then emit them verbatim, and verification is decode-then-hash.
-- A plain `Store` (no library) that receives 15/18 in a bundle keeps them in its log, as it keeps
-  any record. `smysl text add` never writes them to a log.
+- **A log never holds 15 or 18** (OQ-39, answered 1.10.0). `smysl text add` never wrote them
+  there; now nothing may. A bundle carrying text is absorbed into the receiving library's object
+  store, and a plain `Store` with no library beside it refuses the record with `SMY-E452` naming
+  `text init` as the fix. The reason is that the alternative — rewriting the log to honour a
+  redaction — is the one operation an append-only log cannot survive as evidence: it resets the
+  same hash chain that would have shown tampering, so afterwards the log cannot distinguish the
+  redaction from an edit. What the refusal costs is small and bounded: a plain `Store` holding
+  carried text can neither resolve a locator nor check a span, both of which need `smysl-text`,
+  so all it could do with the bytes is hold them.
 
 **Normalisation** (`norm`): UTF-8 validation, BOM strip, CRLF and lone CR → LF, NFC
 (`unicode-normalization`, already a core dependency). A `Normalised` newtype is the only input
@@ -275,7 +285,7 @@ bytes, not a path). The `Budget` (§3.9.1) is the only side channel, and it is d
 | `md/1` | `reader-md` | TX-P1 | `pulldown-cmark` | MSRV and licence unverified |
 | `usfm/1` | `reader-usfm` | TX-P1 | hand-rolled | |
 | `osis/1`, `zefania/1` | `reader-osis`, `reader-zefania` | TX-P1 | `quick-xml` | DTDs refused (§3.9.1) |
-| `json/1` | `reader-json` | TX-P1 | `serde_json` (OQ-37) | JSON Pointer locators |
+| `json/1` | `reader-json` | TX-P1 | `serde_json` (OQ-37 answered: yes) | JSON Pointer locators |
 | `telegram/1`, `slack/1` | `reader-telegram`, `reader-slack` | TX-P2 | `serde_json`; Slack also a zip reader (unverified choice) | |
 | `whatsapp/1` | `reader-whatsapp` | TX-P2 | hand-rolled | date pattern is a required parameter |
 | `mbox/1`, `epub/1`, `html/1`, `pdf/1` | `reader-mbox` … | TX-P2 (opt-in) | `mail-parser`, `rbook`, `html2text`, `pdf-extract` | not in `cli` |
@@ -511,8 +521,17 @@ provider playing an obedient model and assert the guard (§5.2). A canary test r
 
 - **One writer per shard.** `log/<shard>.lock` is created with `OpenOptions::create_new(true)`
   and holds pid, host and command. A second writer fails with `SMY-E445` naming the holder.
-  `--break-lock` removes a lock explicitly; nothing removes one by timeout. No new dependency;
-  advisory OS locks are OQ-36.
+  `--break-lock` removes a lock explicitly; nothing removes one by timeout. No new dependency.
+  **OQ-36 answered 1.10.0: this, not advisory OS locks.** `std::fs::File::lock` is unstable at
+  1.88 (`rustc +1.88` says so; it compiles at 1.92), so it would put the floor of a pure-path
+  crate above anything its dependencies need — an `EXCEEDS` entry in `scripts/verify-msrv.py`,
+  argued for a lock — and `fs4` buys the same thing for a dependency. Two properties decide it
+  without reference to that cost. An advisory lock cannot name its holder, and `SMY-E445` is
+  specified to. And a lock the kernel releases on process death destroys the only evidence that
+  a writer died mid-append: the stale lock *is* the crash notice, `--break-lock` is where an
+  operator says they have read it, and the truncated tail it warns about is already tolerated by
+  `from_cbor_seq`. A lock that cleans itself up would make the common case quieter and the
+  interesting case invisible.
 - **Library-wide operations** (`text add`, `text append`, `text redact`, index rebuild) take
   `<library>/lock` first, then shard locks in name order, so two such operations cannot deadlock.
 - **Readers take no lock.** Logs are append-only and `from_cbor_seq` stops at a truncated tail;
@@ -769,12 +788,15 @@ pub fn summarise(&self, levels: &[Level], scope: &BTreeSet<Uid>) -> Result<Stage
   Because `merge` is `append` plus detection (§2.2), merge inherits the filter with no further
   change. The filtered union is commutative, associative and idempotent: the redaction set only
   grows, and the filter is applied to the union, whatever the order.
-- **Physical erasure.** A log that already holds a record 15 for a tid redacted later still has the
-  bytes on disk. `Store::rewrite_redacted` writes a new log without them to `<log>.tmp`, fsyncs,
-  renames over the log, resets `log_hasher`/`log_len`, and leaves the sidecar to be rebuilt
-  (`W110`). It drops the hashes of the removed records from `record_hashes` so they are not
-  "already present"; they are refused anyway by step 2. `text redact` calls it under the shard
-  lock. A library's own logs never hold 15/18, so in the common case this is a no-op (OQ-39).
+- **Physical erasure is an unlink, because no log holds the bytes** (OQ-39, answered 1.10.0).
+  Earlier drafts gave `Store` a `rewrite_redacted` that wrote the log again without the record,
+  reset `log_hasher`/`log_len` and left the sidecar to be rebuilt (`W110`). That method is not
+  written. It was correct and it was also the one operation that costs the log its own integrity
+  evidence, and it existed for a case §3.1 now refuses outright: `append` rejects a record 15 or
+  18 with `SMY-E452` rather than storing bytes it may later have to erase. Erasure is therefore
+  always an object unlink, the log stays append-only in the strong sense, and there is nothing to
+  migrate — records 14, 15, 17, 18 and 19 do not exist in 1.10.0, where the record enum stops at
+  13, so the choice is being made before any byte depends on it.
 - **Heads and forks.** `heads(alias)` = mids of that alias not named by any other manifest's
   `supersedes`; more than one is `W418` (reported by `check`, not recorded).
 - **Adjacency cost.** `absorb` currently calls `rebuild_adjacency()` whatever arrived. It gains a
@@ -794,7 +816,7 @@ New passes appended after `CommitmentSupport`, as the enum's comment requires:
 
 | pass | number | codes | needs |
 |---|---|---|---|
-| `Library` | 12 | `E403` malformed tid/mid/did/rdid in a record or `source.manifest`; `E404` span past the part's length (length from the named manifest's part entry, so no object access); `W405` locator disagrees with span (needs a `PartResolver`); `W406` holder/speaker uid not in `deps`; `W418` two heads; `E446` record 15 held in the log whose text does not hash to its tid | store; resolver optional |
+| `Library` | 12 | `E403` malformed tid/mid/did/rdid in a record or `source.manifest`; `E404` span past the part's length (length from the named manifest's part entry, so no object access); `W405` locator disagrees with span (needs a `PartResolver`); `W406` holder/speaker uid not in `deps`; `W418` two heads; `E452` a record 15 or 18 in a log (OQ-39); `E446` an object whose bytes do not hash to its tid | store; resolver optional |
 | `Time` | 13 | `E410` malformed EDTF (in `published`, manifest key 8, dating values, `text:when`); `W411` `observed` outside the `published` interval; `W412`/`W413` from the engine, reported as derived contentions; `W449` | `smysl-text` (feature `text`) |
 
 - `CheckOptions` gains `parts: Option<Arc<dyn PartResolver + Send + Sync>>`; `smysl-text`
@@ -902,13 +924,19 @@ Root `Cargo.toml`: `text = ["dep:smysl-text", "smysl-check/text", "smysl-retriev
 `cli` enables `text` and `reader-{txt,md,usfm,osis,zefania,json,telegram,slack,whatsapp}` and
 `substrate-redb` (draft 3 §18); `epub`, `html`, `mbox`, `pdf` opt-in.
 
-- **Purity gate.** `xtask/src/purity.rs` checks each `PURE_CRATES` entry with
-  `cargo tree -p <crate> -e normal` at **default** features. `smysl-text` joins the list with
-  `default = []`, so its checked tree has no `serde_json`; the readers needing it are outside
-  the gate, as providers are. `smysl-text` must also pass the `FORBIDDEN_SYMBOLS` grep, which is
-  why the wall-time watchdog lives in `src/main.rs`, not in the crate.
+- **Purity gate** (OQ-37, answered 1.10.0). `smysl-text` joins `PURE_CRATES` with
+  `default = []`, so its default tree has no `serde_json` and the readers needing it are outside
+  the gate, as providers are. That was the plan before 1.10 and it was not enough on its own:
+  with a feature per reader, "clean at default features" is barely a claim about this crate, and
+  a runtime added behind `reader-slack` would have passed. So the gate now holds two lists. The
+  runtime and socket crates are checked at `--all-features` as well, because an offline library
+  is offline however it is configured; `serde_json` is checked at default features, where the
+  claim is that the pure core carries no serde stack. `smysl-text` must also pass the
+  `FORBIDDEN_SYMBOLS` grep, which is why the wall-time watchdog lives in `src/main.rs`, not in
+  the crate.
 - **`--no-default-features` facade tree** stays free of `serde_json`: `text` is not default for
-  the library (only through `cli`).
+  the library (only through `cli`). Enforced against both lists, since that tree is the library
+  a consumer gets without asking for anything.
 - **No C toolchain.** Research builds cited in draft 3 §18 found no `cc` for `lingua` (5
   languages), `redb`, `pdf-extract`, `mail-parser`, `rbook`, `html2text`. Not re-verified at this
   commit; TX-P1's exit adds `cargo tree -e normal -i cc` for the `cli` feature set to `make
@@ -968,8 +996,9 @@ Root `Cargo.toml`: `text = ["dep:smysl-text", "smysl-check/text", "smysl-retriev
   time; earlier tids reused (no object write), `supersedes` chain, one head; a concurrent second
   head gives `W418`.
 - **Redaction** (`tests/cmd_redact.rs`): redact a tid; objects gone; units, manifests and spans
-  remain; a merge with a stale peer that still holds record 15 does not bring it back; a plain
-  store that held 15 in its log is rewritten without it (`rewrite_redacted`).
+  remain; a merge with a stale peer that still holds record 15 does not bring it back; a bundle
+  carrying a record 15 into a plain store is refused with `E452` and the log is byte-identical
+  afterwards.
 - **Time** (`tests/cmd_date.rs`): draft 3 §19.2's clock fault: one window-target dating with
   `offset:-93000` and basis `cited` re-times exactly the messages in the window, the reply-order
   `W413` disappears, no uid moves; the same dating with an `inferred` basis gives `W412` and is not
@@ -1198,8 +1227,9 @@ meanings and are not repeated here.
 | `SMY-W449` | EDTF value outside the index's representable range; indexed as an open bound | time engine, `check` |
 | `SMY-E450` | appending to a pseudonymised expression without its pseudonym key | `text append` |
 | `SMY-W451` | an alignment scheme does not cover a locator; the pair is left unaligned and counted | `text align`, `anchored` engine |
+| `SMY-E452` | a record 15 or 18 was offered to a log; text lives in the object store (OQ-39) | `append`, `check` |
 
-`452`–`459` are unallocated. SMYSL-2.3 may adopt `E446` as a C-Library obligation.
+`453`–`459` are unallocated. SMYSL-2.3 may adopt `E446` as a C-Library obligation.
 
 ---
 
@@ -1226,10 +1256,10 @@ meanings and are not repeated here.
 | id | question |
 |---|---|
 | OQ-35 | **Resolved in SMYSL-2.3 A-8.2:** `DetectionKind` is opened by SMYSL-2.1, and time contentions stay derived; kinds 4 and 5 are never written to record 6. |
-| OQ-36 | Lock files by `create_new` with explicit breaking, or OS advisory locks (`std::fs::File::lock` needs a newer toolchain; `fs4` adds a dependency)? |
-| OQ-37 | JSON readers: `serde_json` behind features (outside the purity gate), or a strict-JSON mode of `smysl-core`'s hand-rolled HJSON parser, which would keep `json/1` and `telegram/1` inside the gate? |
+| ~~OQ-36~~ | **Answered 1.10.0: `create_new`, and the parenthesis is now measured.** `File::lock` is unstable at 1.88 and compiles at 1.92, so it would raise a pure-path floor above anything the dependencies need — an `EXCEEDS` entry argued for a lock — and `fs4` pays a dependency for the same thing. Independently of cost: an advisory lock cannot name its holder and `E445` must, and a lock the kernel drops on process death erases the only evidence that a writer died mid-append. §3.9.3 |
+| ~~OQ-37~~ | **Answered 1.10.0: `serde_json` behind `reader-json`, and the purity gate's list was the thing that needed fixing.** A strict mode of the HJSON parser is not a narrowing of what is there; measured against today's `parse_object`, it is five pieces of new code in the place untrusted bytes arrive. A surrogate pair `\uD83D\uDE00` is **refused** (`invalid code point`), which is how `json.dumps` writes every emoji by default. `9223372036854775808` becomes `Float(9.223372036854776e18)`, so a message id silently stops being an id. `1e400` becomes `Float(inf)`. A bare `nope` becomes `Str("nope")`. And `{ "t": 1 "u": 2 }` — malformed JSON — parses as `Str("1 \"u\": 2")`, the quoteless rule swallowing the rest of the line; a silent misparse where a reader owes an error is worse than the refusal. `serde_json` meanwhile is not what rule B is about: no runtime, no socket, no clock, deterministic, floor 1.71 — below this workspace's base, so it raises nothing. It was on `FORBIDDEN_DEPS` for a real reason (no serde stack in the pure core) that the list did not record, beside crates forbidden for a different one. `xtask/src/purity.rs` now holds two lists with their reasons, and checks the stronger one at `--all-features` as well — a hole the single list left, and one TX-P1 would have widened. §3.2, §4.5 |
 | OQ-38 | Is a deterministic fuel cap enough, so the wall-time watchdog can be dropped, or is the watchdog worth keeping as a backstop? |
-| OQ-39 | Physical erasure when record 15 sits in a plain log: rewrite the log (as proposed), or refuse 15/18 in logs entirely and keep them only as objects? |
+| ~~OQ-39~~ | **Answered 1.10.0: refuse, and `rewrite_redacted` is never written.** An append-only log that can be rewritten is not append-only, and the rewrite is unauditable — the operation that honours the redaction resets the same hash chain that would have shown an edit, so the log can no longer tell the two apart. The capability given up is nearly empty: a plain `Store` holding carried text can neither resolve a locator nor check a span, so it can only hold the bytes. And nothing has to be migrated, because records 14, 15, 17, 18 and 19 do not exist in 1.10.0 — the record enum stops at 13 — so this is decided before any byte depends on it. `SMY-E452`; §3.1, §4.3.2 |
 | ~~OQ-40~~ | **Answered 1.10.0, and the question was wrong.** Neither: 1.79 was already false everywhere — the pure core cannot be *parsed* by a 1.79 Cargo, because `blake3` pulls an edition-2024 `constant_time_eq`. The measured floors (1.85 / 1.86 / 1.88) are declared per crate and gated by `make msrv`. `redb` 4.x's 1.90 is an ordinary bump in the release that ships it. §4.5 |
 | OQ-41 | Removing `ingest:quote` from span-carrying text units changes their uids relative to prose ingest of the same text. Accept, or keep the quote and accept duplicate uids per span? |
 | OQ-42 | **Resolved in SMYSL-2.3 A-12.2:** strata by status; a chain tightens at its weakest link's status. §3.3 implements exactly that. |

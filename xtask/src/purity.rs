@@ -4,7 +4,10 @@
 //!
 //! 1. **Dependency graph.** `cargo tree --no-default-features` for the facade must not
 //!    contain an async runtime, an HTTP client, an argument parser, or a TUI library.
-//!    This is rule B stated as a fact about the build, not an intention.
+//!    This is rule B stated as a fact about the build, not an intention. Each pure crate is
+//!    checked on its own as well, and for the runtime and socket crates at `--all-features`
+//!    too — see `NEVER` and `NOT_IN_THE_CORE`, which 1.10 split apart because one list was
+//!    carrying two different claims and only the weaker of the two was being enforced.
 //! 2. **Source grep.** The pure crates must not name a runtime or a socket, even
 //!    transitively through a dependency they could add later. A dependency check alone
 //!    would pass a crate that spawned threads and opened sockets by hand.
@@ -18,8 +21,16 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Crates that MUST NOT appear in `--no-default-features` builds (rule B).
-const FORBIDDEN_DEPS: &[&str] = &[
+/// Crates a pure crate must not link **under any feature combination**.
+///
+/// Rule B is "the library stays synchronous and offline", and a claim of that shape is not
+/// true at default features and false behind a flag: an offline library is offline however it
+/// is configured. So this set is checked at `--all-features` as well, which is what the single
+/// list below did not do — a pure crate could have put `tokio` behind a non-default feature and
+/// the gate would have passed it. `clap`, `ratatui` and `crossterm` are here for the adjacent
+/// claim that the library is not a front end; a library that grew an argument parser behind a
+/// feature would have the same problem.
+const NEVER: &[&str] = &[
     "tokio",
     "ureq",
     "clap",
@@ -30,8 +41,25 @@ const FORBIDDEN_DEPS: &[&str] = &[
     "async-std",
     "smol",
     "rustls",
-    "serde_json",
 ];
+
+/// Crates that must not be in a pure crate's **default** tree, but may be reached through a
+/// named non-default feature — with the reason, and the feature that is allowed to pull them.
+///
+/// `serde_json` sat in the single list beside `tokio` for releases, and the two are not the
+/// same claim. It links no runtime, opens no socket, reads no clock and is deterministic; its
+/// `rust-version` is 1.71, below this workspace's base. What keeping it out buys is a pure core
+/// with no serde stack in it, which is worth having and is not rule B.
+///
+/// SMYSL-2.4 OQ-37 is what forced the distinction. The alternative was a strict-JSON mode of
+/// `smysl-core`'s HJSON parser, so that `json/1` and `telegram/1` could stay inside the gate;
+/// measured against the inputs a JSON reader meets, that is new code rather than a narrowing,
+/// and it is new code in the place where untrusted bytes arrive. The answer is `serde_json`
+/// behind `reader-json`, and this list is where that answer is written down.
+const NOT_IN_THE_CORE: &[(&str, &str)] = &[(
+    "serde_json",
+    "only through a `reader-*` feature of `smysl-text` (SMYSL-2.4 OQ-37)",
+)];
 
 /// The pure crates. Every operation they expose is a bit-reproducible function of its
 /// inputs (rule D), so none of them may reach the network or link a runtime.
@@ -87,14 +115,24 @@ pub fn run(root: &Path) -> Result<(), String> {
     let mut failures = Vec::new();
 
     // --- 1. dependency graph -----------------------------------------------
+    // The facade with nothing enabled is the library a consumer gets by default, so both
+    // claims apply to it.
     let tree = cargo_tree(
         root,
         &["-p", "smysl", "--no-default-features", "-e", "normal"],
     )?;
-    for dep in FORBIDDEN_DEPS {
+    for dep in NEVER {
         if tree.iter().any(|c| c == dep) {
             failures.push(format!(
                 "rule B: `{dep}` is in the --no-default-features dependency tree of `smysl`"
+            ));
+        }
+    }
+    for (dep, allowance) in NOT_IN_THE_CORE {
+        if tree.iter().any(|c| c == dep) {
+            failures.push(format!(
+                "`{dep}` is in the --no-default-features dependency tree of `smysl`; it is \
+                 permitted {allowance}, which is not a default"
             ));
         }
     }
@@ -105,17 +143,40 @@ pub fn run(root: &Path) -> Result<(), String> {
 
     // Each pure crate must also be clean on its own, so a future edit cannot hide a
     // runtime behind a facade feature.
+    //
+    // Twice over, because the two lists are checked against different trees. The default tree
+    // is the pure core, and `NOT_IN_THE_CORE` is a statement about it. `NEVER` is a statement
+    // about the crate, so it is checked at `--all-features` too: this is the hole the single
+    // list left, and TX-P1 is about to widen it — `smysl-text` joins this list with
+    // `default = []` and a feature per reader, so "clean at default features" would stop being
+    // much of a claim about it.
     for krate in PURE_CRATES {
-        let tree = cargo_tree(root, &["-p", krate, "-e", "normal"])?;
-        for dep in FORBIDDEN_DEPS {
-            if tree.iter().any(|c| c == dep) {
+        let default_tree = cargo_tree(root, &["-p", krate, "-e", "normal"])?;
+        for (dep, allowance) in NOT_IN_THE_CORE {
+            if default_tree.iter().any(|c| c == dep) {
                 failures.push(format!(
-                    "rule B: `{dep}` is in the dependency tree of `{krate}`"
+                    "`{dep}` is in the default dependency tree of `{krate}`; it is permitted \
+                     {allowance}, which is not a default"
                 ));
             }
         }
+        let all_tree = cargo_tree(root, &["-p", krate, "-e", "normal", "--all-features"])?;
+        for dep in NEVER {
+            // Reported against whichever tree holds it, so the message says where to look.
+            let where_ = if default_tree.iter().any(|c| c == dep) {
+                "dependency tree"
+            } else if all_tree.iter().any(|c| c == dep) {
+                "--all-features dependency tree"
+            } else {
+                continue;
+            };
+            failures.push(format!("rule B: `{dep}` is in the {where_} of `{krate}`"));
+        }
     }
-    println!("  pure crates: {} checked", PURE_CRATES.len());
+    println!(
+        "  pure crates: {} checked, at default features and at --all-features",
+        PURE_CRATES.len()
+    );
 
     // --- 2. source grep -----------------------------------------------------
     let mut scanned = 0usize;

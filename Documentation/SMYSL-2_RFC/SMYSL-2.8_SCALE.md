@@ -683,10 +683,13 @@ report as `check(&Store::from_records(s.records ++ batch))`.
 
 D-10 assigns the library lock to SMYSL-2.4 and asks this RFC to revisit it for redb.
 
-- **One writer per shard.** A writer takes `store/<shard>.lock` (an exclusive advisory lock
-  held for the process's write session, as SMYSL-2.4's library lock), then opens the shard's
-  redb read-write. A second writer fails fast with `SMY-E445` (SMYSL-2.4's "shard locked by another writer"; one meaning, one code), naming the holder's pid if the
-  lock file records it.
+- **One writer per shard.** A writer creates `store/<shard>.lock` with `create_new`, holding it
+  for the process's write session, as SMYSL-2.4's library lock does. **Not an advisory OS lock**:
+  OQ-36 was answered in 1.10.0 against them, and this paragraph said "advisory" while that
+  question was still open. A second writer fails fast with `SMY-E445` (SMYSL-2.4's "shard locked
+  by another writer"; one meaning, one code), naming the holder's pid, host and command — which
+  the lock file records, and which is half the reason the answer went that way, since the kernel
+  will not tell you who holds a flock.
 - **Readers in the same process**: redb read transactions are MVCC snapshots. A `RedbStore`
   opened for reading holds one read transaction for its lifetime, so every answer it gives is
   from one snapshot (one moment, in `NodeId`'s sense). Writers in the same process do not

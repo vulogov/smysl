@@ -1064,7 +1064,7 @@ cannot promise anything about.
 ```
 xtask check-purity (rules A, B)
   dependency tree (--no-default-features): 31 crates, none forbidden
-  pure crates: 7 checked
+  pure crates: 7 checked, at default features and at --all-features
   source scan: 78 files, 7 symbols
   rule A: 2 CLI files reach only the facade
 ok
@@ -1080,6 +1080,17 @@ betray a socket or a runtime even if no crate dependency ever named one — a
 thread spawned and a raw `TcpStream` opened by hand would pass the first
 check and fail the second. Either alone is escapable; both together are the
 actual guarantee.
+
+The dependency walk is done twice over each pure crate, at its default
+features and again at `--all-features`, and the two passes do not check the
+same list. "Synchronous and network-free" is not a property that can hold by
+default and fail behind a flag, so the runtime and socket crates are forbidden
+under every feature combination. A second, narrower list — `serde_json` is its
+only entry — is forbidden only from the default tree, where the claim is that
+the pure core carries no serde stack; a reader feature outside the core is
+allowed to pull it, and the gate records which one. Until 1.10 there was one
+list checked one way, which meant a runtime hidden behind a non-default
+feature would have passed.
 
 #whatsnext[
   Verification is complete at this point, in the sense this Part set out to
