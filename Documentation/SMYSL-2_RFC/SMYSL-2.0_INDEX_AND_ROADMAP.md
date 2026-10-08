@@ -96,7 +96,7 @@ scale. This set does that. It is **nine documents, one normative**:
 | gate | after | passes when | if it fails |
 |---|---|---|---|
 | **G−1** | before 1.9.0 is released | the owner accepts the parts of 2.3 that TX-P0 activates: A-4 (digest), A-8.1 (four enumerations opened, 255 reserved in five), A-9 (estimator key), A-10 items 2–3 (`lang` lint, strict `source`). Otherwise 1.9.0 ships wire behaviour no normative text covers. | TX-P0 ships without those items. |
-| **G0** **passed 2026-10-07** | S0 + TX-P0 | ~~2.2's decision table (§3.7) returns *continue* or a stated pivot, and the owner accepts the rest of 2.3 that TX-P1 to TX-P5 activate~~ **both met.** S0 ran in full (365 runs) and its table returns *continue with a stated pivot*; the owner accepted A-1, A-2, A-3, A-5, A-6, the `admission` opening in A-8.1, A-11 `x.text/v1`, A-12 rules E and Z, A-13 on 2026-10-07. Evidence: `S0_RESULTS/`. | n/a — passed. The pivot it names is §1.1 below, and 2.4 is re-planned before TX-P1. |
+| **G0** **passed 2026-10-07** | S0 + TX-P0 | ~~2.2's decision table (§3.7) returns *continue* or a stated pivot, and the owner accepts the rest of 2.3 that TX-P1 to TX-P5 activate~~ **both met.** S0 ran in full (365 runs) and its table returns *continue with a stated pivot*; the owner accepted A-1, A-2, A-3, A-5, A-6, the `admission` opening in A-8.1, A-11 `x.text/v1`, A-12 rules E and Z, A-13 on 2026-10-07. Evidence: `S0_RESULTS/`. | n/a — passed. The pivot it names is §1.1 below, and 2.4 was re-planned against it on 2026-10-08 (draft 2, §0.1) before TX-P1. |
 | **G1** | TX-P5 | GE-T1, GE-T4, GE-T13 and GE-T14 pass inside 2.4's phases, and the TX-P5 cost report replaces the planning figures | units are not written at scale until fixed. This is the last cheap point to change identity (A-1, A-2). |
 | **G2** | TX-P11 | GE-T15: P1, P2 and P3 hold on the whole matrix | TX-P13d does not start: export is the way out of a disk store and must be exact |
 | **G3** | TX-P13d | GE-T7 at library scale | the CBOR log stays primary, and redb stays an index |
@@ -115,17 +115,20 @@ it names, and what each item changes before TX-P1:
 | # | change | from | why |
 |---|---|---|---|
 | 1 | ~~F-2 comes before TX-P1~~ **done 2026-10-07.** It left 1.10.0, OQ-31 was answered, and it is built. | T11, T14, report §2 | The one change that removes a measured, reproducible loss of propositions, and it rested on no judged label. Hosted Russian degraded 12.67% of units; 579 `E022` across the corpus. `smysl/content/1` closes draft 3 §22's en/ru gap from 68.5% to 3.2% relative, with the English budget unmoved. |
-| 2 | **Extraction is consensus by default.** TX-P5 extracts twice per window; class measures default to `attested:2`; GE-T2 reruns under that policy. | T3 | J_class within model is 1.000 local but 0.327 hosted, against a 0.6 threshold. |
-| 3 | **Class measures ship as exploration only.** Cross-lingual classes wait for TX-P10's S1 embeddings; `anchored` alone is used for the Bibles. | T6, T7 | Precision at recall 0.7 reaches 0.835 same-language and 0.712 cross-lingual against a 0.9 bar, and that is under the better of two provisional golds. |
-| 4 | **Holder and mode become structural from TX-P5's first ingest**, with a probe-set gate in its exit tests. The holder paragraph does **not** go into the TX-P0 prompt. | T8, T9 | Reported speech is extracted as asserted in 11.1–24.5% of attribution-bearing units. The holder paragraph does not reduce that, and it introduces `E022` degradations in a local configuration that had none (findings MS-9, MS-11). |
-| 5 | **GE-T5 and GE-T2 thresholds are restated relative to α**, and TX-P7's exit test changes before TX-P7 starts. | T1 | α is 0.600 [0.550, 0.646] binary and 0.330 six-label over three model coders — below 0.667 on every pairing. |
-| 6 | **FC-6 weights are calibrated on S0's M5 data**, and the cost model is revised for non-English before TX-P5 is sized. | T13, T14 | `ceil(bytes/4)` predicts a 1.96x ru/en cost; measured is 1.84x local and 3.38x hosted. Hosted Russian runs 4.0x §6's per-chapter figure, English 1.4x. |
+| 2 | **Extraction is consensus by default.** TX-P5 extracts twice per window; class measures default to `attested:2`; GE-T2 reruns under that policy. ~~**Landed 2026-10-08**~~, *narrowed*: the agreement is `identical-span` only, because the broader form needs the judge item 5 found unreliable. 2.4 §0.1, §3.4. | T3 | J_class within model is 1.000 local but 0.327 hosted, against a 0.6 threshold. |
+| 3 | **Class measures ship as exploration only.** Cross-lingual classes wait for TX-P10's S1 embeddings; `anchored` alone is used for the Bibles. ~~**Landed 2026-10-08**~~ as written; adjacency (C3) is kept as load-bearing rather than a filter. 2.4 §3.6. | T6, T7 | Precision at recall 0.7 reaches 0.835 same-language and 0.712 cross-lingual against a 0.9 bar, and that is under the better of two provisional golds. |
+| 4 | **Holder and mode become structural from TX-P5's first ingest**, with a probe-set gate in its exit tests. The holder paragraph does **not** go into the TX-P0 prompt. ~~**Landed 2026-10-08**~~ as written; the gate is a new phase-exit clause at below 10%. 2.4 §3.4, §6. | T8, T9 | Reported speech is extracted as asserted in 11.1–24.5% of attribution-bearing units. The holder paragraph does not reduce that, and it introduces `E022` degradations in a local configuration that had none (findings MS-9, MS-11). |
+| 5 | **GE-T5 and GE-T2 thresholds are restated relative to α**, and TX-P7's exit test changes before TX-P7 starts. ~~**Landed 2026-10-08**~~: an engine passes by joining the coder pool, not by beating it, and the 0.9 bar turned out to be unattainable rather than failed. 2.4 §5.5, §6. | T1 | α is 0.600 [0.550, 0.646] binary and 0.330 six-label over three model coders — below 0.667 on every pairing. |
+| 6 | **FC-6 weights are calibrated on S0's M5 data**, and the cost model is revised for non-English before TX-P5 is sized. ~~**Landed 2026-10-08**~~, *corrected*: no weight changes — the gap is the repair loop, not tokenization — and the model gains a retry term, re-measured after F-2. 2.4 §0.1, §3.7. | T13, T14 | `ceil(bytes/4)` predicts a 1.96x ru/en cost; measured is 1.84x local and 3.38x hosted. Hosted Russian runs 4.0x §6's per-chapter figure, English 1.4x. |
 
 Two further findings bear on 2.4 without being table rows:
 
 - **`temperature` is correctness-relevant, not a quality knob.** Arm L is bit-identical across all
   145 runs at T=0, and shares no uid at all at T=0.7 on five of six inputs (MS-8). It belongs in
-  the recipe and in a uid's provenance, not in user configuration.
+  the recipe and in a uid's provenance, not in user configuration. It is already in the recipe
+  (`recipe.rs`); what the re-plan adds is that it is now a *precondition of item 2* — two passes
+  at T>0 cannot agree by `identical-span` except by accident, so `ingest --text` refuses a
+  non-zero temperature unless `--single-pass` is given. 2.4 §3.4.
 - **The language policy F-6 added is an instruction with no verification**, and both models
   violate it in opposite directions — the local model writes 78.6% of Russian gists in Latin
   script, the hosted one wrote every gist of one English chapter in Chinese (MS-5). A
@@ -146,12 +149,12 @@ discussion; OQ-7, OQ-23, OQ-35 and OQ-49 stay open with them.
 | S0 | 2.2 | extraction stability and proposition-trust spike with today's CLI | 2.2 decision table | — |
 | TX-P0 **complete** | 2.1 | Every item, including **F-2** — which G0's pivot pulled out of 1.10.0 and which landed 2026-10-07 with OQ-31 answered (§1.1 item 1) — and F-16's `bundle --unknown keep\|drop` flag, which had been separated because only the closure was a defect | met: F-16/F-17 reproductions fixed, every probe reversed, and suite, `make semver`, `api-check`, `doc-output` and `spec-tables` clean on every commit. Departures from plan: 2.1 §10 | G−1 accepted in full |
 | TX-P1 | 2.4 | parts, readings, manifests, object store, first readers, structure, locators; `admission` opened (2.3 A-8.1) | GE-T1 (Bibles and JSON) | TX-P0, G0 **passed**; F-2 **done** (§1.1) |
-| TX-P2 | 2.4 | segmenter, analyzers, `lingua`, chat readers, `text append`, redaction (rule Z) | GE-T1 (chats), redaction survives a stale peer | TX-P1 |
+| TX-P2 | 2.4 | segmenter, analyzers, `lingua`, chat readers, `text append`, redaction (rule Z), **and the class core** (`strict`, `component`, `attested:n`) moved here from TX-P7 so TX-P5's consensus output can be read | GE-T1 (chats), redaction survives a stale peer, strict class counts match the Python reference | TX-P1 |
 | TX-P3 | 2.4 | EDTF, `published`, datings, rule E engine, locks, `date` commands | GE-T13 | TX-P2 |
 | TX-P4 | 2.4 | substrate index, persistent postings, `text` commands | `find` p95 < 200 ms at 155k units | TX-P3 |
-| TX-P5 | 2.4 | ingest over texts, owned-range spans, ledger digest, journal, FC-1/FC-3, entities without span | G1 | TX-P4 |
+| TX-P5 | 2.4 | ingest over texts, owned-range spans, ledger digest, journal, FC-1/FC-3, entities without span, **consensus extraction** and **structural holder/mode** | G1, plus the probe-set gate and GE-T2 rerun the pivot adds (2.4 §6) | TX-P4, TX-P2's class core |
 | TX-P6 | 2.5 | `sq` core (pure) | `--seed-check` on every pure query | TX-P5 |
-| TX-P7 | 2.4 | same-as, `strict` classes, linker, summary tree | GE-T5, GE-T11 | TX-P5 |
+| TX-P7 | 2.4 | same-as engines, linker, summary tree (`strict` classes moved to TX-P2) | GE-T5 **under the α-relative threshold** (2.4 §5.5), GE-T11 | TX-P5 |
 | TX-P8 | 2.5 + 2.6 | dossiers, saved queries, thread schemas 6–8; measures T1–T7 | GE-T10 | TX-P6, TX-P7 |
 | TX-P9 | 2.6 | assertion, channel, dialogue and temporal measures; `assess` | GE-T3, GE-T6 | TX-P8 |
 | TX-P10 | 2.5 | S0/S1 embeddings, semantic sources and bridges, NL front end | GE-T5 cross-lingual arm, GE-T12 | TX-P6 |
@@ -412,10 +415,33 @@ Coding speed cannot compress those.
    content-fair for a bound — and F-2 is built with `smysl/content/1`: Russian gains 51% of its
    gist budget, English moves 2%, and draft 3 §22's en/ru gap closes from 68.5% to 3.2%
    relative. TX-P0 is now complete except `bundle --unknown keep|drop`. 2.1 §4.3.2 and §10.
-6. **Re-plan 2.4 against §1.1.** Six changes land before TX-P1 starts: consensus extraction by
-   default, class measures as exploration only, holder and mode structural from TX-P5, the
-   GE-T5/GE-T2 restatement against α, the FC-6 recalibration, and the non-English cost model.
-   TX-P5's and TX-P7's exit tests both change, so this is a re-plan and not an edit.
+6. ~~**Re-plan 2.4 against §1.1.**~~ **done 2026-10-08.** 2.4 is draft 2, with the pivot landed in
+   §0.1 and in §§3.4, 3.6, 3.7, 5.5 and 6. It was a re-plan rather than an edit for more than the
+   two exit tests: a step moved between phases, and **two of the six items did not survive contact
+   with the evidence in the form §1.1 states them**.
+
+   *Item 2 is circular as written.* "Extract twice per window and keep what both produce" needs a
+   relation that says two units are the same proposition. At uid level there is none — S0 found
+   zero shared uids between the models anywhere, and the hosted model does not reproduce itself at
+   T=0. At class level it is same-as, which items 3 and 5 have just declared unreliable at α 0.600.
+   So TX-P5's consensus gate is stated on `identical-span` alone, which is computed rather than
+   judged; the broader claim waits for TX-P7 and GE-T9. Both passes are staged and nothing is
+   deduplicated during ingest, which doubles the unit count — a cost item 6 then has to carry.
+
+   *Item 6 names the wrong remedy.* FC-6's weights are not what is miscalibrated: S0 says in as
+   many words that the 73% hosted gap is "the repair loop itself, not tokenization", and against
+   the model that never enters that loop the estimator is 6% over. Calibrating weights on pre-F-2
+   Russian would have fitted the estimator to a defect 1.10.0 removed and then measured it as
+   correct. So no weight changes; the cost model gains an explicit per-language retry term read
+   from the journal, and the non-English figures are re-measured after F-2 before TX-P5 is sized.
+
+   Two consequences worth naming. **TX-P7 step 1 moves to TX-P2 step 5** — `proposition::classes`
+   is pure, needs only records, and TX-P5's consensus output cannot be read before it exists; this
+   is the smallest form of the reordering S0's report §6 asks for and §1.1's item 2 omits, and T4,
+   the row that would have mandated a full reorder, did not fire. And **GE-T5's 0.9 bar could not
+   have been passed**: a gold whose own binary α is 0.600 cannot support a 0.9 precision bar, so
+   the pilot's 0.835 and 0.712 measure the gold, not the engines. The restatement is not a
+   loosening. 2.4 §0.1.
 7. **Answer the remaining TX-P1 blockers** in §4. ~~MSRV first: OQ-40 = OQ-66~~ **done
    2026-10-07.** It was the one with a dependency outside this repository, and measuring it
    turned the question inside out: there was no 1.79 build to preserve, and redb was not the
@@ -433,7 +459,7 @@ Coding speed cannot compress those.
    widened into a hole. Erasure: refuse 15/18 in a log, because the rewrite that honours a
    redaction resets the same hash chain that would have shown an edit, and nothing yet depends on
    the bytes — the record enum stops at 13. **§4's TX-P1 column is now empty**, so the planning
-   blockers for TX-P1 are step 6 alone. 2.4 §9.
+   blockers for TX-P1 were step 6 alone — and that is done too (step 6 above). 2.4 §9.
 8. **Decide whether to buy the human same-as measurement.** Every provisional row (T1, T3, T6,
    T7, T8) rests on model coders, and no model coder reaches α 0.667 — the local 14B model agrees
    with each hosted model better than the two hosted models agree with each other, and a single
@@ -443,7 +469,10 @@ Coding speed cannot compress those.
    `scripts/verify-spec-tables.py` for each (A-14). A fold is not complete until that gate covers
    its tables.
 
-**What is startable now:** TX-P1 is unblocked — the gate passed, F-2 landed, and step 7 is
-finished — and waits only on the re-plan of step 6.
+**What is startable now:** **TX-P1 — nothing is left before it.** The gate passed, F-2 landed,
+step 7 answered the last of its open questions and step 6's re-plan is done, so 2.4 draft 2 is the
+plan to build from. What step 6 leaves downstream rather than blocking: TX-P5 is sized from a
+measurement taken after F-2 rather than from a planning figure, and GE-T5's absolute bar waits on
+step 8's human α — neither of which TX-P1 touches.
 TX-P13a remains independent of all of it — the `StoreRead` trait and its consumers
 ported in memory (2.8 §§3–4), which §2's note marks as needing only TX-P0.

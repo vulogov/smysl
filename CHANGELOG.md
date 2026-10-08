@@ -40,11 +40,79 @@ mechanism, where JSON is parsed, and what physical erasure means in a log. Each 
 choice between two designs, and in each case measuring turned it into a statement about code that
 already exists.
 
-**Two decisions still open.** OQ-34 for the hosted model's outputs as fixtures — the local model
-is Apache 2.0 and settled, the hosted one is not. And the re-plan of SMYSL-2.4 against the pivot
-of SMYSL-2.0 §1.1, which moves TX-P5's and TX-P7's exit tests and so is a re-plan rather than an
-edit. With TX-P1's own blockers now closed, that re-plan is the only planning work left before
-TX-P1 can start.
+**A plan written before the evidence arrived** — *re-planned, see below.* SMYSL-2.4 names the
+spike as the thing that will decide whether its ingest phase starts as designed. The spike has
+run, eight rows of its table fire, and two of the six pivot items do not survive contact with
+their own evidence in the form they were written.
+
+**One decision still open.** OQ-34 for the hosted model's outputs as fixtures — the local model is
+Apache 2.0 and settled, the hosted one is not. Nothing else blocks TX-P1.
+
+### The plan caught up with the spike, and two of the pivot's own items were wrong
+
+G0 passed on a *stated pivot*: SMYSL-2.0 §1.1 lists six changes that had to land in SMYSL-2.4
+before TX-P1 could start. 2.4 is now draft 2 and the pivot is in it. It was a re-plan rather than
+an edit because two phase exit tests change, a step moves between phases, and two of the six items
+prescribe the wrong thing.
+
+**Item 2 was circular.** "Extraction is consensus by default — TX-P5 extracts twice per window"
+needs some relation that says two units are the same proposition. At uid level there is none to
+have: a uid covers label, gist, status and quote, and S0 found **zero shared uids between the two
+models anywhere in the corpus**, with the hosted model failing to reproduce even itself at
+temperature 0 (J_uid 0.182 on English). At class level the relation is same-as — which items 3
+and 5 of the same pivot have just declared unreliable, at a model-judge α of 0.600 with no cell of
+the cosine proposer reaching its precision bar. The pivot's remedy for unstable extraction rested
+on the layer the same spike trusted least.
+
+What survives is the part that needs no judge: `identical-span`, same tid and span and gist, is
+computed rather than judged, and two passes that attach the same span and write the same gist
+agree by construction. So TX-P5's consensus gate is stated on that alone, both passes are staged
+with nothing deduplicated during ingest, and the broader claim waits for TX-P7 under the restated
+threshold. The cost is that the unit count per window doubles — which item 6 then has to carry.
+
+**Item 6 named the wrong remedy.** "FC-6 weights are calibrated on S0's M5 data" reads as though
+the estimator were mis-weighted. S0 says otherwise in as many words: the hosted ru/en cost ratio
+is 3.38x against the estimator's 1.96x, 73% under, and *"the difference is the repair loop itself,
+not tokenization."* Against the model that never enters the repair loop the estimator is 6% over,
+and the arm R regression agrees with it to 2%. Worse, every Russian figure in that data was taken
+under the byte-based bound **F-2 has since replaced** — so calibrating weights on it would have
+fitted the estimator to a defect this release removed, and then measured the estimator as correct.
+No weight changes. The cost model gains an explicit per-language retry term read from the journal,
+and the non-English figures are re-measured after F-2 before TX-P5 is sized.
+
+**A step moves.** `proposition::classes` — strict, `component`, `attested:n` — is pure, needs only
+records, and TX-P5's consensus output cannot be read before it exists. It moves from TX-P7 step 1
+to TX-P2 step 5. That is the smallest form of the reordering S0's report asks for in its one-line
+plan state and that §1.1's item 2 omits; T4, the row that would have mandated a full reorder, did
+not fire, so the full reorder is not taken.
+
+**And GE-T5's bar could not have been passed.** "Precision ≥ 0.9 at recall 0.7" was set without
+reference to what its gold can support. S0's gold is a majority of three model coders whose binary
+α is 0.600 [0.550, 0.646], best-agreeing pair 0.636, raw agreement between the hosted pair 61.7%.
+A perfect engine scored against a gold that disagrees with itself at that rate cannot reach 0.9,
+so the pilot's 0.835 same-language and 0.712 cross-lingual are not evidence about the engines —
+they are a measurement of the gold. Restated: an engine passes by **joining the coder pool**, not
+by beating it, and the absolute bar returns when GE-T9 supplies a human α. That is not a
+loosening; it replaces a number that could not be reached with one that can.
+
+Items 3 and 4 land as written. Class measures ship as exploration only, with adjacency kept as
+load-bearing rather than a filter (it lifts cross-lingual precision 0.427 → 0.712). Holder and
+mode are written from structure rather than asked of the model, with a new phase-exit clause
+requiring the asserted-as-reported rate below 10% — the threshold S0 measured at 11.1–24.5% across
+every model and coder pairing, and which adding a holder paragraph to the prompt did not improve
+(23.8% and 16.7%) while introducing `E022` degradations into a configuration that had none.
+
+`temperature` is now a precondition rather than a note: two passes at T > 0 cannot agree by
+`identical-span` except by accident — arm L was bit-identical across all 145 runs at T=0 and
+shared no uid at all at T=0.7 on five of six inputs — so `ingest --text` refuses a non-zero
+temperature unless `--single-pass` is given. The other finding outside the table, the unverified
+language policy, closed in code earlier in this release as `SMY-W436`.
+
+Draft 1's premises were also pre-TX-P0 throughout, which the re-plan says once in §2 rather than
+leaving the reader to discover: it was verified against `d25ec9e`, and the estimator id it names,
+`smysl/script-aware/1`, is not the one that shipped.
+
+**TX-P1 now has nothing in front of it.**
 
 ### Three TX-P1 blockers, and the purity gate was enforcing half of a claim
 

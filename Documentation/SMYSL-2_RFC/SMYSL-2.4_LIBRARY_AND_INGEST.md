@@ -1,17 +1,21 @@
 # RFC SMYSL-2.4 — Library and ingest
 
-**Status:** draft 1, for discussion. Implementation RFC (non-normative); normative rules are in SMYSL-2.3.
+**Status:** draft 2 — re-planned against G0's pivot (SMYSL-2.0 §1.1) on 2026-10-08.
+Implementation RFC (non-normative); normative rules are in SMYSL-2.3.
 **Author:** Vladimir Ulogov
-**Date:** 2026-10-02
+**Date:** 2026-10-02, re-planned 2026-10-08
 **Part of:** RFC set SMYSL-2 — see SMYSL-2.0 (index and roadmap).
-**For:** crate `1.9.0-dev` (`d25ec9e`), format `smysl/1.0`, kernel `smysl.kernel/0.1`.
+**For:** crate `1.10.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. Draft 1 was written
+against `1.9.0-dev` (`d25ec9e`), before TX-P0 and before the spike; §0.1 records what that
+costs the reader.
 **Derived from:** RFC SMYSL-2 draft 3, §3, §4, §5, §6 (implementation of the time engine), §7, §8,
 §9, §10 (except §10.4), §14.1–14.3, §19.1–19.4, §20; phases of §22.
 **Phases:** TX-P1, TX-P2, TX-P3, TX-P4, TX-P5, TX-P7.
 **Depends on:** SMYSL-2.3 (records 14–19, ids, FC-1/2/3/5, rules E, N, Z, copy and omission
 rules, `strict` classes); SMYSL-2.1 (TX-P0: F-13/F-14 surface fixes, normaliser v2, script-aware
 estimator, opened enumerations, record-set digest, today's prompt-injection guard); SMYSL-2.2
-(spike S0, whose GE-T2/GE-T5 readings decide whether TX-P5 starts as planned).
+(spike S0 — **which has now run**: its GE-T2 and GE-T5 pilot readings did not come out as draft 1
+assumed, and §0.1 is the consequence).
 
 Section numbers of the form "draft 3 §N" refer to the design source. They are kept unchanged:
 FC-n, records 14–19, GE-Tn, OQ-n and TX-Pn mean what draft 3 says they mean.
@@ -35,10 +39,12 @@ piece is tested, and in what order it lands.
 - **`Store` changes little.** It learns the new records, enforces redaction on every append
   (rule Z), keeps a by-part map, and stops rebuilding the adjacency for batches that cannot change
   it. `StoreRead` and sharded stores stay in SMYSL-2.8.
-- **Ingest changes in six places** (draft 3 §7.7), plus two found while verifying the code: a
+- **Ingest changes in six places** (draft 3 §7.7), plus two found while verifying the code — a
   unit with no grounds cannot be capped at `inferred` (the constructor refuses it), and the
   `ingest:quote` payload key is inside identity today, so text units drop it once a span is
-  attached.
+  attached — plus **two more from G0's pivot** (§0.1): extraction runs twice per window by
+  default, and `text:holder`/`text:mode` are written from structure rather than asked of the
+  model.
 - **Security (D-10)**: reader limits are hard caps with diagnostics; the existing fence in
   `prompt.rs` is extended to windows, ledger digests and linker pairs; references a model may
   write are limited to its digest and batch; one writer per shard behind a lock file.
@@ -50,6 +56,75 @@ piece is tested, and in what order it lands.
   which is now the base rather than above it.
 
 Diagnostics allocated here: `SMY-E440`–`SMY-E452`. Open questions: OQ-35–OQ-44.
+
+### 0.1 Re-planned against G0's pivot (2026-10-08)
+
+Draft 1 was written before the spike ran, and names S0 as the thing that "decides whether TX-P5
+starts as planned". S0 has now run — 365 runs, 29 inputs, five languages, two models — and eight
+rows of its decision table fire. SMYSL-2.0 §1.1 states the pivot; this is where it lands. The
+reason this is a re-plan and not an edit is that two phase exit tests change (TX-P5's and
+TX-P7's), one step moves between phases, and one of the pivot's own six items turns out to
+prescribe the wrong remedy for the thing it measured.
+
+| # | §1.1 item | lands in | what the re-plan found |
+|---|---|---|---|
+| 1 | F-2 before TX-P1 | *done* — 1.10.0 | — |
+| 2 | extraction is consensus by default | §3.4, §6 TX-P5 | **the remedy as stated is circular**, and the usable form is narrower. See below. |
+| 3 | class measures ship as exploration only | §3.6, §5.5 | lands as written; `anchored` becomes the only Bible engine, and adjacency (C3) is load-bearing where draft 1 treated it as a filter |
+| 4 | holder and mode structural from TX-P5's first ingest | §3.4, §6 TX-P5 | lands as written; the probe-set gate is a new exit clause, and the holder paragraph stays out of the prompt |
+| 5 | GE-T5 and GE-T2 restated relative to α | §5.5, §6 TX-P7 | **the 0.9 bar was never attainable** against a gold of α 0.600, so restating it is not a loosening |
+| 6 | FC-6 weights calibrated on M5; cost model revised | §3.7, §6 TX-P5 | **the weights are not what is miscalibrated.** S0 names the mechanism and it is the repair loop. Calibrating weights on pre-F-2 data would fit the estimator to a defect 1.10.0 removed. |
+
+**Item 2: consensus extraction cannot be validated by the machinery that would judge it.**
+"Extract twice per window and keep what both runs produce" needs a relation that says two units
+are the same proposition. At uid level there is none to have: a uid covers label, gist, status and
+quote, and S0 found **zero shared uids between the two models anywhere in the corpus**, the hosted
+model failing to reproduce even itself at temperature 0 (J_uid 0.182 en). At class level the
+relation is same-as — which items 3 and 5 have just declared unreliable, with a model-judge α of
+0.600 and no cell of the cosine proposer reaching its precision bar. So the pivot's remedy for
+unstable extraction rests on the one layer the same spike found least trustworthy.
+
+What survives is the part that needs no judge. `identical-span` — same tid, same span, same gist —
+is an exact relation, computed, not judged. Two runs that attach the same span and write the same
+gist agree by construction. So **TX-P5's consensus gate is stated on `identical-span` agreement
+only**, which is measurable at its own exit, and judged agreement waits for TX-P7 under item 5's
+restated threshold. The second extraction is **not** deduplicated during ingest: both runs' units
+are staged, and the consensus is read afterwards. That doubles the unit count per window, which is
+a cost item 6 has to carry.
+
+**A step moves.** Because of the above, `attested:n` and the class core must exist before TX-P5's
+output can be read at all. TX-P7 step 1 — `proposition::classes`, strict and `component` and
+`attested:n` — is pure, needs only `Store` and records, and depends on no ingest, no text and no
+model. It moves to **TX-P2 step 5** (§6). This is the smallest form of the reordering S0's report
+§6 asks for in its one-line plan state ("TX-P7's same-as core and F-2 move ahead of further ingest
+work") and that §1.1's item 2 does not carry; T4, the row that would have mandated a full reorder,
+did not fire, so the full reorder is not taken.
+
+**Item 5: the bar could not have been passed.** GE-T5's "precision ≥ 0.9 at recall 0.7" was set
+without reference to what its gold can support. S0's gold is a majority of three model coders
+whose binary α is 0.600 [0.550, 0.646], and whose best-agreeing pair reaches 0.636; raw agreement
+between the hosted pair is 61.7%. A perfect engine scored against a gold that disagrees with
+itself at that rate cannot reach 0.9, so the measured 0.835 same-language and 0.712 cross-lingual
+are not evidence that the engines are below the bar — they are evidence that the bar measures the
+gold. The restatement in §5.5 is therefore not a loosening: it replaces a number that could not be
+reached with one that can be, and the absolute bar returns only when GE-T9 supplies a human α.
+
+**Item 6: the estimator is not the thing to recalibrate.** T13 fires because the hosted ru/en cost
+ratio is 3.38x against the estimator's 1.96x — 73% under. But S0's own analysis names the cause:
+*"The difference is the repair loop itself, not tokenization."* Against the model that never
+enters that loop the estimator is 6% over, and the regression on arm R agrees with it to 2%. The
+73% is retries, and the retries were caused by a byte-based bound that F-2 has since replaced. So
+FC-6's weights are **not** changed on this data; what changes is that the cost model gains an
+explicit retry term, and that the non-English figures are **re-measured after F-2** before TX-P5
+is sized (§6 TX-P5 step 5). Fitting weights to pre-F-2 Russian would have baked a fixed defect
+into the estimator and then measured the estimator as correct.
+
+**Two findings outside the table.** `temperature` is correctness-relevant (MS-8: bit-identical at
+T=0 over 145 runs, no shared uid at all at T=0.7 on five of six inputs), which §3.4 now states as
+a precondition of item 2 rather than as a configuration note — consensus over two runs means
+nothing at a temperature where a single run shares nothing with itself. And the language policy
+F-6 added was an instruction with no verification (MS-5/MS-6); 1.10.0's `SMY-W436` counts
+character ranges, so that one is closed in code rather than in this plan.
 
 ---
 
@@ -66,9 +141,10 @@ Diagnostics allocated here: `SMY-E440`–`SMY-E452`. Open questions: OQ-35–OQ-
   span, text ingest, the language policy.
 - Linking (§8): ledger digest, linker pass, summary tree, thread-following windows for chats.
 - Proposition layer (§9): same-as staging, class derivation, engines `identical-span`, `lexical`,
-  `anchored`.
+  `anchored`. Class derivation lands in TX-P2 rather than TX-P7 (§0.1), and class measures ship as
+  exploration only (§3.6).
 - Languages (§10.1–10.3, §10.5): `lingua` with five languages, analyzer chains, wiring of the
-  script-aware estimator that SMYSL-2.1 adds.
+  content-aware estimator (`smysl/content/1`) that SMYSL-2.1 added and 1.10.0 shipped.
 - Substrate index (§14.1–14.3): the redb tables this phase set needs, persistent postings.
 - Security gaps owned by this RFC under D-10.
 
@@ -86,6 +162,12 @@ Diagnostics allocated here: `SMY-E440`–`SMY-E452`. Open questions: OQ-35–OQ-
 ---
 
 ## 2. What exists today (verified against `d25ec9e`)
+
+> **Re-plan note (2026-10-08).** This section was verified against `d25ec9e`, which is pre-TX-P0.
+> 1.10.0 has since shipped TX-P0 in full, including F-2, F-16's `bundle --unknown`, the record-set
+> digest, the four opened enumerations and `SMY-W436`. Where a statement here reads as a present
+> fact about the tree, it is a fact about `d25ec9e`; §0.1 lists the premises the pivot changed, and
+> the MSRV figures in §0 and §4.5 are the 1.10.0 ones.
 
 Every statement below was read from the tree. `cargo test --offline -p smysl-core -p smysl-graph
 -p smysl-retrieve -p smysl-check` passes at `d25ec9e` (rustc 1.95.0 on the build host).
@@ -397,6 +479,32 @@ receive a span, ingest removes `ingest:quote` (and the new `ingest:node`) from t
 attaching the span; the verdict (`Present`/`Loose`) and the quote go into the journal. Units that
 get no span keep the quote so a reviewer can see what was claimed (OQ-41).
 
+**Consensus extraction** (§1.1 item 2, re-planned in §0.1). `ingest --text` extracts each window
+**twice** by default — two models where two are configured, otherwise two runs of one — and stages
+**both** results. Nothing is deduplicated during ingest: the agreement is read afterwards, because
+the only relation that can establish it without a judge is `identical-span` (same tid, same span,
+same gist), and that is computed over staged units, not during the call. `--single-pass` opts out
+and is recorded in the recipe, since a corpus built one way is not comparable with one built the
+other.
+
+Two consequences the plan has to carry. The unit count per window roughly doubles, and so does
+cost; §6 TX-P5 step 5 sizes it from the journal after F-2 rather than from a planning figure. And
+**the second pass is worthless above temperature 0**: MS-8 measured arm L bit-identical across all
+145 runs at T=0 and sharing *no uid at all* at T=0.7 on five of six inputs, so two runs at T>0
+cannot agree by `identical-span` except by accident. `ingest --text` therefore refuses
+`--temperature` above 0 unless `--single-pass` is given — `temperature` is a correctness
+parameter, not a quality knob, and it is already inside the recipe (`recipe.rs`), so a corpus
+records which it was.
+
+**Holder and mode are structural from the first ingest** (§1.1 item 4). Draft 1 left this to the
+prompt. S0 measured reported speech extracted as asserted in 11.1–24.5% of attribution-bearing
+units across every model and coder pairing, every cell above the 10% threshold (T8), and the arm
+that *added* a holder paragraph to the prompt did no better (23.8% and 16.7%, T9 does not hold)
+while introducing `E022` degradations into a configuration that had none (MS-9, MS-11). So the
+paragraph stays out of the prompt, `text:holder` and `text:mode` are written by the converter from
+structure — reported-speech spans the reader marks, not the model's self-report — and TX-P5's exit
+gains a probe-set gate (§6).
+
 **Absent quotes (behaviour change).** For `ingest --text` only: repair is attempted first, within
 the existing budget. If the quote is still `Absent`, the unit is staged with no span and its status
 capped at `inferred` **when it has grounds**, `speculative` when it has none — `UnitCoreBuilder`
@@ -433,7 +541,20 @@ inferred" cannot be built. Reported as `SMY-W441`. Prose ingest keeps `E307` non
   unassigned unit opens a class and admits later units adjacent to every member; class id = smallest
   uid. `component` (union-find, reported with diameter) and `attested:n` (strict over edges with
   ≥ n distinct attesting agents) are tool-level. Withdrawn edges are excluded through
-  `Store::is_withdrawn`.
+  `Store::is_withdrawn`. **The class core moves to TX-P2** (§0.1): it is pure, needs only records,
+  and TX-P5's consensus output cannot be read until it exists.
+- **Class measures ship as exploration only** (§1.1 item 3). Not a quality judgement on the
+  implementation — a statement about what has been measured. S0's cosine proposer reached
+  precision 0.789 same-language and 0.427 cross-lingual at recall 0.7 against a 0.9 bar, 0.835 and
+  0.712 with adjacency, and **no cell reached the bar under either provisional gold**. Corpus
+  measures over classes therefore default to `attested:2`, every reported class figure carries the
+  gold's α, and SMYSL-2.6 reports no class-derived `A*` as settled until GE-T5 runs under §5.5's
+  restated threshold.
+- **Cross-lingual classes wait for TX-P10's S1 embeddings**, and `anchored` alone is used for the
+  Bibles — where it is also the right engine, since a versification alignment is exact where a
+  cosine is not. Adjacency (C3) turned out to be load-bearing rather than a filter: it lifts
+  cross-lingual precision 0.427 → 0.712 by shrinking a candidate set cosine ranks badly across
+  languages, so the `lexical` engine keeps it even once embeddings land.
 - **Engines.** `identical-span` (same tid, span and gist under different manifests; pure),
   `lexical` (BM25 neighbours within the same `lang`, through `smysl-retrieve`; pure; proposes, a
   judge or threshold policy accepts — OQ-44), `anchored` (units grounded on aligned spans via the
@@ -453,7 +574,19 @@ inferred" cannot be built. Reported as `SMY-W441`. Prose ingest keeps `E307` non
 - `smysl-retrieve` gains an `Analyze` seam that `Tokenizer` implements; text stores default to the
   unit's language chain (unit `lang`, falling back to the view's). `fold_suffix` is gated to `en`
   by SMYSL-2.1.
-- The estimator from SMYSL-2.1 (`smysl/script-aware/1`) is what text ingest uses to fill windows.
+- The estimator from SMYSL-2.1 is what text ingest uses to fill windows. Its id is
+  **`smysl/content/1`**, not the `smysl/script-aware/1` draft 1 wrote: F-2 shipped in 1.10.0 under
+  the registered id, and SMYSL-2.3 A-9 was corrected to match the wire.
+- **The cost model, revised** (§1.1 item 6, and see §0.1 for why the weights are not touched).
+  Draft 1 planned against "≈ 1.6k in + ≈ 1.2k out, ×1.3 for repairs" per chapter, a figure only
+  ever given for English. S0 measured 1.42x that for hosted English and **3.96x for hosted
+  Russian** (3.05x including the repair allowance), and the ru/en ratio at 3.38x against the
+  estimator's 1.96x. The gap is not tokenization: against the model that never enters the repair
+  loop the estimator is 6% over, and the arm R regression agrees with it to 2%. So the model gains
+  a **retry term** — cost per window is `base(tokens) × (1 + r)` where `r` is the measured retry
+  rate per language, recorded in the journal rather than assumed — and the per-language figures
+  are re-measured after F-2, because every Russian number S0 has was taken under the byte-based
+  bound F-2 replaced. No FC-6 weight changes on this data.
 
 ### 3.8 Substrate index (draft 3 §14.1–14.3)
 
@@ -885,7 +1018,7 @@ Cmd { name: "same-as",   about: "Propose same-as edges; derive classes",        
 | `date set <target>` | `--axis said\|composed\|about --value EDTF\|offset:MS\|<allen>:<target> [--basis UID]` | pure | P3 |
 | `date order <a> before <b>` | `[--basis UID]` (sugar for a relative `date set`) | pure | P3 |
 | `date show <target>` | `[--axis A] [--why]` | pure | P3 |
-| `ingest --text <alias\|mid>[#range]` | `--lang-policy source\|pivot:L [--reextract] [--digest-budget N] [--window-level L]` | model | P5 |
+| `ingest --text <alias\|mid>[#range]` | `--lang-policy source\|pivot:L [--reextract] [--digest-budget N] [--window-level L] [--single-pass]` | model | P5 |
 | `link` | `--scope <alias\|mid…> [--budget N]` (an `sq` scope once SMYSL-2.5 lands) | model | P7 |
 | `summarise` | `--scope … --levels chapter,book` | model | P7 |
 | `same-as propose` | `--engine identical-span\|lexical\|anchored [--scope …]` (`semantic` reserved for SMYSL-2.5) | pure per engine; mixed as a command | P7 |
@@ -1082,7 +1215,8 @@ The `.expected` format is the existing one (`fixtures/README.md`): exact code se
 | **GE-T4** (attribution fairness) | before TX-P5 | 200 hand-checked units per tier-1 language under normaliser v1 and v2 (SMYSL-2.1); v2 false-`Absent` > 1% in any language blocks TX-P5 |
 | **GE-T13** (effective time) | TX-P3 | synthetic chats with planted skews plus a public chronology with known relative orders; P-E4/P-E5 on real data; any planted skew undetected, or any false contested interval on consistent data, blocks TX-P4 |
 | **GE-T14** (part size) | end of TX-P2 | real chats, revised articles, Bibles at 64 KiB–4 MiB; object count, reuse on revision, redaction granularity; the curve is recorded and the default fixed before TX-P3 |
-| GE-T5 within-language arm, GE-T11 | TX-P7 | as draft 3 §23; the cross-lingual arm of GE-T5 is SMYSL-2.5 |
+| **GE-T2** (extraction stability) | rerun at TX-P5 | under the consensus policy (§3.4), not the single-pass policy draft 3 assumed. Stability is measured as `identical-span` agreement between the two passes — computed, not judged — and reported per language. The judged `J_class` form of GE-T2 waits for GE-T9 with GE-T5, for the reason in the row below. S0's pilot: `J_class` 1.000 local, 0.327 hosted, against a 0.6 threshold. |
+| GE-T5 within-language arm, GE-T11 | TX-P7 | as draft 3 §23, **except the threshold** (§1.1 item 5, argued in §0.1). Draft 3's "precision ≥ 0.9 at recall 0.7" is measured against a gold, and S0's gold is three model coders whose binary α is 0.600 [0.550, 0.646] — so 0.9 is above what that gold can support, and the pilot's 0.835 and 0.712 measure the gold rather than the engines. Restated: an engine passes when its agreement with the pooled gold, scored on the coders' own scale, is **not distinguishable from the coders' agreement with each other** — it joins the pool rather than beating it. The absolute bar returns when **GE-T9** supplies a human α, which is still owed; until then every class figure is reported against the model-model ceiling, and `attested:2` is the default (§3.6). The cross-lingual arm of GE-T5 is SMYSL-2.5 and waits for TX-P10's S1 embeddings. |
 
 ### 5.6 Cross-implementation (C-Read additions, D-8)
 
@@ -1116,7 +1250,7 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
    expected mids; reader fuzz targets run 10 minutes each with no finding.
 4. `smysl-graph` manifest state, heads, by-part maps, adjacency flag. *Exit:* store tests; 1.8
    append timing unchanged for unit batches, manifest-only append `O(batch)`.
-5. `smysl-check` `Library` pass (E403, E404, W405, W418, E446); `ConformanceClass::Library`.
+5. `smysl-check` `Library` pass (E403, E404, W405, W418, E446, E452); `ConformanceClass::Library`.
    *Exit:* `fixtures/library/check` green.
 6. CLI `text add/ls/show`, `check --library`; purity gate with `smysl-text`; `cc` check in
    `make crate-features`. *Exit:* gates green.
@@ -1130,9 +1264,15 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
 2. Readers `telegram`, `slack`, `whatsapp` with `--pseudonymise`; opt-in `mbox`, `epub`, `html`,
    `pdf`. *Exit:* chat round trip with `raw` intact; `E450` test; fuzz targets.
 3. `text append`. *Exit:* growth test (§5.2).
-4. Record 19, rule Z in `Store::append`, `rewrite_redacted`, `text redact`, `@redact`. *Exit:*
-   redaction test; P-Z1–P-Z4 harness green; ports decode 19.
-5. *Exit for the phase:* **GE-T1** on two chat exports; **GE-T14** curve recorded and default part
+4. Record 19, rule Z in `Store::append`, `text redact`, `@redact`; `E452` refuses a 15 or 18
+   offered to a log (OQ-39, so there is no `rewrite_redacted` to write). *Exit:* redaction test;
+   P-Z1–P-Z4 harness green; ports decode 19.
+5. `proposition::classes` — strict per SMYSL-2.3, `component` with diameter, `attested:n` —
+   **moved here from TX-P7 step 1** by §0.1. It is pure, needs only `Store` and records, and
+   TX-P5's consensus output cannot be read before it exists. *Exit:* strict class counts match a
+   fixture computed by the Python reference (SMYSL-2.3 conformance) and are invariant under record
+   order.
+6. *Exit for the phase:* **GE-T1** on two chat exports; **GE-T14** curve recorded and default part
    policy fixed.
 
 ### TX-P3 — time
@@ -1168,25 +1308,42 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    `provenance` (`ref: "alias:<alias>"`). *Exit:* the same entity from 50 windows is one uid.
 3. Windows, owned ranges, node hint, span attachment, `Absent` behaviour, payload quote removal.
    *Exit:* §5.1 ingest tests.
+3a. **Consensus extraction** (§3.4): two passes per window by default, both staged, nothing
+   deduplicated during ingest; `--single-pass` recorded in the recipe; `--temperature` above 0
+   refused unless `--single-pass` is given. *Exit:* a window extracted twice at T=0 by the
+   `Scripted` provider yields the `identical-span` agreement the fixture states, and the same
+   window at T=0.7 is refused rather than silently producing two disjoint sets.
+3b. **Holder and mode written from structure** (§3.4), not from the prompt, and the holder
+   paragraph is not added to the template. *Exit:* the probe set — attribution-bearing passages
+   with known reported speech — shows the asserted-as-reported rate **below 10%**, which is the
+   threshold T8 fired on at 11.1–24.5%. This is a new phase-exit clause, not a refinement.
 4. Ledger digest, `E442`, journal, language policy, recipe fields, prompt templates with fences.
    *Exit:* red-team suite; resume test.
-5. *Exit for the phase (draft 3 §22):* resume after kill loses ≤ one batch; ≥ 95% of units carry a
-   span; entity duplication < 2% across windows; a **cost report** from the journal (tokens per call,
-   per language) replaces draft 3 §7.7's planning figures.
+5. *Exit for the phase (draft 3 §22, and changed by §1.1 items 2, 4 and 6):* resume after kill
+   loses ≤ one batch; ≥ 95% of units carry a span; entity duplication < 2% across windows; the
+   probe-set gate of 3b; **GE-T2 rerun** under the consensus policy (§5.5); and a **cost report**
+   from the journal that replaces draft 3 §7.7's planning figures — now with a per-language retry
+   rate as a separate term (§3.7), measured **after** F-2, since every non-English figure S0 has
+   was taken under the bound F-2 replaced. The phase is not sized from a planning number at all.
 
 ### TX-P7 — proposition layer and linking
 
 (TX-P6, `sq`, is SMYSL-2.5. `link` and `summarise` accept alias/mid scopes until it lands.)
 
-1. `proposition::classes` (strict per SMYSL-2.3, component, attested:n). *Exit:* strict class
-   counts match a fixture computed by the Python reference (SMYSL-2.3 conformance) and are
-   invariant under record order.
-2. Engines `identical-span`, `lexical`, `anchored`; `same-as propose/classes`. *Exit:* anthology
-   test: a paragraph reprinted under two expressions forms one class by `identical-span`.
+1. ~~`proposition::classes`~~ — **moved to TX-P2 step 5** (§0.1), because TX-P5's consensus
+   output needs it first.
+2. Engines `identical-span`, `lexical` (with adjacency, which S0 showed is load-bearing rather
+   than a filter), `anchored`; `same-as propose/classes`. *Exit:* anthology test — a paragraph
+   reprinted under two expressions forms one class by `identical-span`.
 3. Linker and summary tree. *Exit:* GE-T11 (recall ≥ 0.6 on 50 planted far contradictions at the
    default candidate budget); summary nodes capped by rule M (asserted).
-4. *Exit for the phase:* **GE-T5** within-language arm (precision ≥ 0.9 at recall 0.7, else class
-   measures ship as exploration only).
+4. *Exit for the phase:* **GE-T5** within-language arm under §5.5's restated threshold — the
+   engine's agreement with the pooled gold is not distinguishable from the coders' agreement with
+   each other. Draft 1's "precision ≥ 0.9 at recall 0.7, else class measures ship as exploration
+   only" is replaced on both halves. The bar was unattainable against a gold of α 0.600 (§0.1),
+   and the *else* branch is no longer a branch: class measures ship as exploration only either
+   way, by §1.1 item 3, until GE-T9 supplies a human α. What this exit decides is whether the
+   engines are at the ceiling, not whether the measures are publishable.
 
 ---
 
@@ -1205,6 +1362,9 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
 | physical erasure leaves copies (old peers, backups, sidecars, staged files) | erasure is incomplete | `text redact` also scans `<library>/stage/` and the redb tables; the limit for pre-RFC peers is stated in draft 3 §4.8 and in `text redact --help` |
 | lock files left by a crash | writes refused | explicit `--break-lock`, holder printed; no automatic breaking |
 | fuel caps refuse a legitimate large input | user friction | defaults sized on the five Bibles and a multi-year chat; every cap has a flag; the diagnostic names the flag |
+| consensus extraction doubles cost and the agreement it buys is only `identical-span` | TX-P5 costs twice as much for a narrower claim than §1.1 item 2 implies | stated rather than mitigated (§0.1): the broader claim needs a judge, and S0 measured the judges at α 0.600. `--single-pass` exists and is recorded in the recipe, so the choice is visible in a corpus rather than assumed |
+| the retry term is measured on a corpus built after F-2, and F-2 may not remove every retry | TX-P5 sized from an optimistic `r` | `r` comes from the journal per language, not from a constant, so an underestimate shows up as a measured rate rather than as a budget overrun; the first TX-P5 corpus is sized after the measurement, not before |
+| GE-T9's human α never gets bought | GE-T5's restated threshold has no absolute form, and every class figure stays provisional indefinitely | the dependency is stated at both ends (§5.5, SMYSL-2.0 §7 step 8) rather than hidden in a default; `attested:2` and exploration-only shipping are safe in the meantime, and nothing downstream claims a settled class measure |
 
 ---
 
