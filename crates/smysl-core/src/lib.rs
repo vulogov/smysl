@@ -25,8 +25,8 @@ pub use cbor::envelope::unit_core_bytes;
 pub use cbor::{from_cbor, from_cbor_seq, to_cbor, to_cbor_seq};
 pub use diag::{Code, Diagnostic, Group, Report, Severity, Span, Subject};
 pub use error::{
-    CodecError, Error, ExitCode, IdError, IntegrityError, MergeError, NonDetReason, PackError,
-    ParseError, ProviderError, RenderError, ShapeError,
+    CodecError, Error, ExitCode, IdError, IntegrityError, LibError, MergeError, NonDetReason,
+    PackError, ParseError, ProviderError, RenderError, ShapeError,
 };
 pub use hash::{canonical_uid, hash_bytes, verify, Rolling};
 pub use ids::{

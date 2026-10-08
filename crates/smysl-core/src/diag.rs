@@ -180,7 +180,7 @@ macro_rules! registry {
 }
 
 registry! {
-    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider }
+    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library }
 
     // --- Parse and encoding ------------------------------------------------
     Parse => {
@@ -296,6 +296,20 @@ registry! {
     }
     Provider => {
         W436 = "SMY-W436", Warn,  "A unit is not in the script of the passage it came from (language policy)";
+    }
+    // --- The library (RFC SMYSL-2.4), in the order `smysl-text` raises them -------------------
+    //
+    // Registered with the code that raises them, not with the RFC that allocated them: the
+    // range `E440`-`W459` holds twelve allocations and this build can trigger five. A code
+    // nothing can trigger is worse than a missing one, because a reader who greps for it finds
+    // a promise with nothing behind it. The other seven arrive with their readers, their
+    // ingest path and their check pass.
+    Library => {
+        E401 = "SMY-E401", Error, "Structure hash or rdid does not match the part entry on re-read";
+        E402 = "SMY-E402", Error, "Carrying text is refused by the licence recorded in the manifest";
+        E440 = "SMY-E440", Error, "Reader resource cap exceeded; nothing was written";
+        E445 = "SMY-E445", Error, "The library or a shard is locked by another writer";
+        E446 = "SMY-E446", Error, "An object does not hash to the identity it is stored under";
     }
 }
 
@@ -588,10 +602,13 @@ mod tests {
     /// evaluate. 64 as of 1.10.0: `SMY-W436`, a unit written in a different script from its
     /// passage — numbered at the end of the ingest run rather than in the `W30x` block it
     /// belongs to semantically, because the free number there is `W306` and that one is
-    /// retired.
+    /// retired. 69, also 1.10.0, with the first five of RFC SMYSL-2.4's library codes —
+    /// `E401`, `E402`, `E440`, `E445`, `E446` — in a ninth group. Five and not the twelve that
+    /// RFC allocates: these are the ones `smysl-text` can raise as it stands, and the rest
+    /// arrive with the code that raises them.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 64);
+        assert_eq!(Code::ALL.len(), 69);
     }
 
     #[test]
@@ -602,7 +619,7 @@ mod tests {
                 "group {g} has no codes"
             );
         }
-        assert_eq!(Group::ALL.len(), 8);
+        assert_eq!(Group::ALL.len(), 9);
     }
 
     #[test]

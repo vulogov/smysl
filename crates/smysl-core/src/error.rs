@@ -680,6 +680,142 @@ impl fmt::Display for ProviderError {
 impl std::error::Error for ProviderError {}
 
 // ---------------------------------------------------------------------------
+// Library (RFC SMYSL-2.4)
+// ---------------------------------------------------------------------------
+
+/// What can go wrong in a library: reading text into it, naming it, locking it, or getting a
+/// part back out of its object store.
+///
+/// The variants that have a diagnostic code carry exactly what the code's message promises to
+/// name, because a refusal an operator cannot act on is a refusal they will work around. A
+/// resource cap says which cap, what the limit was, what the input asked for and which flag
+/// raises it; a lock says who holds it.
+///
+/// Three variants have no code. Malformed input text, a bad alias and an I/O failure are not
+/// diagnostics about a *corpus* — they are refusals to begin, and `check` cannot be asked to
+/// report them later, because without them there is nothing to report on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LibError {
+    /// `SMY-E401` - the text still hashes to its tid, but the reading over it changed. What
+    /// this catches is a reader upgraded under a corpus: same bytes, different segmentation.
+    StructureChanged {
+        /// The part, in text form.
+        tid: String,
+        /// Which of the two identities moved, `structure` or `rdid`.
+        which: &'static str,
+    },
+    /// `SMY-E402` - `carry: text` under a licence that does not permit redistribution. There
+    /// is no override flag, by decision (SMYSL-2.4 §3.1): the one thing a flag would buy is
+    /// the ability to ship someone else's text by accident.
+    CarryRefused { licence: String },
+    /// `SMY-E440` - a resource cap. `saw` is what the input asked for, which is not always
+    /// one more than the limit: a declared length can ask for a gigabyte at the first byte.
+    Limit {
+        cap: &'static str,
+        limit: u64,
+        saw: u64,
+        /// The flag that raises this cap, where one exists. `nesting` has none on purpose: it
+        /// is `cbor::MAX_NESTING`, and a reader that nested deeper than the format's own
+        /// encoder could not round-trip what it read.
+        flag: Option<&'static str>,
+    },
+    /// `SMY-E445` - another writer holds the lock, named rather than guessed at. The holder
+    /// is read from the lock file; `held_by` is empty when the file could not be read, which
+    /// is still a refusal, because a lock whose contents are unreadable is a lock.
+    Locked {
+        /// The lock's own name, `library` or a shard name - never a path.
+        what: String,
+        held_by: String,
+    },
+    /// `SMY-E446` - the object store handed back bytes that do not hash to the name they were
+    /// stored under.
+    ObjectCorrupt {
+        /// The identity asked for, in text form.
+        id: String,
+    },
+    /// Input that is not text at all: invalid UTF-8 at a byte offset. No code, because
+    /// nothing was ingested and there is nothing to diagnose later.
+    NotText { at: usize },
+    /// An expression alias that does not satisfy A-3's grammar.
+    BadAlias { alias: String },
+    /// The filesystem refused. The message is the operating system's; the path is named
+    /// relative to the library root, never absolutely, so a diagnostic can be pasted into a
+    /// bug report.
+    Io { at: String, message: String },
+}
+
+impl LibError {
+    pub const fn code(&self) -> Option<Code> {
+        match self {
+            LibError::StructureChanged { .. } => Some(Code::E401),
+            LibError::CarryRefused { .. } => Some(Code::E402),
+            LibError::Limit { .. } => Some(Code::E440),
+            LibError::Locked { .. } => Some(Code::E445),
+            LibError::ObjectCorrupt { .. } => Some(Code::E446),
+            LibError::NotText { .. } | LibError::BadAlias { .. } | LibError::Io { .. } => None,
+        }
+    }
+
+    /// The exit code the CLI reports. A corrupt object is a hash verification failure, which
+    /// the CLI already has a number for and which scripts already watch for.
+    pub const fn code_exit(&self) -> ExitCode {
+        match self {
+            LibError::ObjectCorrupt { .. } | LibError::StructureChanged { .. } => {
+                ExitCode::HashVerification
+            }
+            _ => ExitCode::Failure,
+        }
+    }
+}
+
+impl fmt::Display for LibError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LibError::StructureChanged { tid, which } => {
+                write!(f, "{}: {tid} re-read with a different {which}", Code::E401)
+            }
+            LibError::CarryRefused { licence } => write!(
+                f,
+                "{}: licence `{licence}` does not permit carrying the text",
+                Code::E402
+            ),
+            LibError::Limit {
+                cap,
+                limit,
+                saw,
+                flag,
+            } => match flag {
+                Some(flag) => write!(
+                    f,
+                    "{}: {cap} limit {limit} exceeded by {saw} (raise it with {flag})",
+                    Code::E440
+                ),
+                None => write!(f, "{}: {cap} limit {limit} exceeded by {saw}", Code::E440),
+            },
+            LibError::Locked { what, held_by } if held_by.is_empty() => {
+                write!(
+                    f,
+                    "{}: {what} is locked, by an unreadable holder",
+                    Code::E445
+                )
+            }
+            LibError::Locked { what, held_by } => {
+                write!(f, "{}: {what} is locked by {held_by}", Code::E445)
+            }
+            LibError::ObjectCorrupt { id } => {
+                write!(f, "{}: {id} does not hash to its name", Code::E446)
+            }
+            LibError::NotText { at } => write!(f, "input is not valid UTF-8 at byte {at}"),
+            LibError::BadAlias { alias } => write!(f, "`{alias}` is not a valid alias"),
+            LibError::Io { at, message } => write!(f, "{at}: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for LibError {}
+
+// ---------------------------------------------------------------------------
 // The unified error
 // ---------------------------------------------------------------------------
 
@@ -696,6 +832,7 @@ pub enum Error {
     Merge(MergeError),
     Render(RenderError),
     Provider(ProviderError),
+    Lib(LibError),
     Io(std::io::Error),
 }
 
@@ -714,6 +851,7 @@ impl Error {
             Error::Merge(MergeError::ContentionsPresent { .. }) => ExitCode::Contentions,
             Error::Provider(ProviderError::OfflineViolation) => ExitCode::Offline,
             Error::Provider(_) => ExitCode::Provider,
+            Error::Lib(e) => e.code_exit(),
             _ => ExitCode::Failure,
         }
     }
@@ -737,6 +875,7 @@ impl fmt::Display for Error {
             Error::Merge(e) => write!(f, "{e}"),
             Error::Render(e) => write!(f, "{e}"),
             Error::Provider(e) => write!(f, "{e}"),
+            Error::Lib(e) => write!(f, "{e}"),
             Error::Io(e) => write!(f, "{e}"),
         }
     }
@@ -754,6 +893,7 @@ impl std::error::Error for Error {
             Error::Merge(e) => Some(e),
             Error::Render(e) => Some(e),
             Error::Provider(e) => Some(e),
+            Error::Lib(e) => Some(e),
             Error::Io(e) => Some(e),
             Error::Check(_) => None,
         }
@@ -778,6 +918,7 @@ from_impl! {
     MergeError => Merge,
     RenderError => Render,
     ProviderError => Provider,
+    LibError => Lib,
 }
 
 impl From<std::io::Error> for Error {

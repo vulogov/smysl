@@ -373,15 +373,56 @@ bytes, not a path). The `Budget` (§3.9.1) is the only side channel, and it is d
 | `mbox/1`, `epub/1`, `html/1`, `pdf/1` | `reader-mbox` … | TX-P2 (opt-in) | `mail-parser`, `rbook`, `html2text`, `pdf-extract` | not in `cli` |
 
 **Structure.** `Structure` is an arena tree: `Node { level, range: Range<u64> (bytes in the
-part), locator: Locator, children: Range<u32>, meta: Option<u32> (row in the segment table) }`.
-Ranges of siblings are disjoint and ordered. The structure hash is computed over its canonical
-CBOR encoding as SMYSL-2.3 defines it; rdid is computed over record 18's body.
+part), locator: Locator, children: Range<u32>, parent: Option<u32> }`. Ranges of siblings are
+disjoint and ordered. The structure hash is computed over its canonical CBOR encoding as
+SMYSL-2.3 defines it; rdid is computed over record 18's body.
 
-**Locators.** `locator::parse` implements draft 3 Appendix B as a hand-written recursive-descent
-parser (no regex dependency). Resolution is through the structure tree only:
+**Built in TX-P1 step 2, with one field fewer than this sketch.** `meta: Option<u32> (row in
+the segment table)` presumed a structure table and a segment table side by side. There is one
+table: A-5 says the structure hash covers "the canonical CBOR of the structure table carried in
+the reading's segments (record 18 key 2)", so the rows *are* the nodes and the row index is the
+node index — `meta` would have been a node's own index, which is nothing. `parent` is there
+instead, because the tree is **derived** from the rows by containment rather than stored beside
+them: one statement of the structure, and it is the one that is hashed. The cost is one pass
+with a stack at `Structure::build`, which is also where a defect in the table is caught — a
+*partial* overlap, which is what an off-by-one in a verse boundary produces and which nothing
+downstream has the information to notice.
+
+**Locators.** `locator::parse` is a hand-written recursive-descent parser (no regex
+dependency). Resolution is through the structure tree only:
 `Structure::resolve(&Locator) -> Option<Range<u64>>`; a range locator resolves to the hull of its
 two ends. `Locator::to_string` is canonical (round-trip tested), so a locator in a `ref` is
 written one way.
+
+**The grammar is this crate's, not draft 3's** (found in TX-P1 step 2). This section pointed at
+"draft 3 Appendix B". Draft 3 is the design record, it is not in the repository, and the set that
+supersedes it carries no locator grammar — so there was nothing to implement against, and the
+grammar is now written down in `smysl-text/src/locator.rs` and tested both ways. Four forms,
+chosen against what the six TX-P1 readers have to be able to say rather than invented:
+
+| form | example | reader |
+|---|---|---|
+| canonical | `Gen.1.1`, `1John.3`, `Ps.136` | `usfm`, `osis`, `zefania` |
+| line | `L412` | `txt` |
+| JSON Pointer (RFC 6901, `~0`/`~1`) | `/messages/3/text` | `json` |
+| range | `Gen.1.1-Gen.1.3`, `L10-L14` | canonical or line ends, never pointers |
+
+The canonical form is deliberately OSIS-shaped: the five Bibles of GE-T1 are distributed with
+those identifiers and the spike's alignment table is keyed by them (`Ex.20.1`), so a locator that
+had to be translated out of the source's own vocabulary would be one nobody could check by eye.
+Three decisions worth recording, because each is a refusal rather than a convenience:
+
+- **One spelling per place.** `Gen.01.1` does not parse rather than parsing as `Gen.1.1`; a
+  parser that accepted both would put both into a corpus and only the writer would know which
+  was meant. The sole normalisation is a range whose ends are equal, which *collapses* to the
+  single locator, so no corpus can hold `L7-L7` and `L7` as two things.
+- **No pointer range syntax at all.** A pointer is the whole string or none of it (`-` is a
+  legal character in a reference token), so `/a-/b` is one pointer. A range of pointers has no
+  meaning this crate is willing to invent, and `Locator::range` refuses it.
+- **`#` is not a locator character**, because a reference is `t3:…#<locator>` and a locator
+  holding a `#` could not be read back out of one. Whitespace and controls are out for the
+  related reason: they survive a CBOR text string and then make two locators that look identical
+  two different keys.
 
 **Segmentation.** `segment::Segmenter` = UAX #29 sentence boundaries (`unicode-segmentation`) plus
 per-language abbreviation lists in `smysl-text/data/abbr/<lang>.txt`, compiled in with
@@ -726,8 +767,12 @@ crates/smysl-text/
     limits.rs       Budget, Caps, defaults, fuel accounting (E440)
 ```
 
-Dependencies: `smysl-core`, `smysl-graph`, `smysl-retrieve`, `unicode-segmentation`, `caseless`,
-`rust-stemmers`, `lingua` (`default-features = false`, five language features); optional
+Dependencies as of TX-P1 step 2: `smysl-core` and `unicode-normalization`, and nothing else.
+The rest arrive with the modules that need them, which is the only way a purity gate over this
+crate means anything — a dependency list written ahead of its callers is a list nobody can
+check. The full set when the crate is finished: `smysl-core`, `smysl-graph`, `smysl-retrieve`,
+`unicode-segmentation`, `caseless`, `rust-stemmers`, `lingua` (`default-features = false`, five
+language features); optional
 `quick-xml`, `serde_json`, `pulldown-cmark`, `redb`, `mail-parser`, `rbook`, `html2text`,
 `pdf-extract`, a zip reader (unverified choice, must be pure Rust). No `smysl-check` dependency, so
 `smysl-check` may depend on `smysl-text` without a cycle.
@@ -1062,7 +1107,8 @@ Root `Cargo.toml`: `text = ["dep:smysl-text", "smysl-check/text", "smysl-retriev
 `cli` enables `text` and `reader-{txt,md,usfm,osis,zefania,json,telegram,slack,whatsapp}` and
 `substrate-redb` (draft 3 §18); `epub`, `html`, `mbox`, `pdf` opt-in.
 
-- **Purity gate** (OQ-37, answered 1.10.0). `smysl-text` joins `PURE_CRATES` with
+- **Purity gate** (OQ-37, answered 1.10.0; **done in TX-P1 step 2**). `smysl-text` joins
+  `PURE_CRATES` with
   `default = []`, so its default tree has no `serde_json` and the readers needing it are outside
   the gate, as providers are. That was the plan before 1.10 and it was not enough on its own:
   with a feature per reader, "clean at default features" is barely a claim about this crate, and
@@ -1268,8 +1314,32 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
    `smysl-check/tests/unknown_codes.rs`, **with its control** — the same body still fails
    `SMY-E040` under the admission this build knows, so a bug that disabled the check outright
    cannot pass as the suspension this one requires.
-2. `smysl-text` skeleton: `norm`, `ids`, `objects`, `lock`, `limits`, `manifest`, `part`,
-   `reading`, `structure`, `locator`. *Exit:* unit tests of §5.1 for these modules; limits suite.
+2. ~~`smysl-text` skeleton: `norm`, `ids`, `objects`, `lock`, `limits`, `manifest`, `part`,
+   `reading`, `structure`, `locator`. *Exit:* unit tests of §5.1 for these modules; limits
+   suite.~~ **Done 2026-10-08.** All ten modules, 112 tests, and the crate holds no file
+   format yet — every function in it is a function of its arguments, which is why all of it is
+   testable without a corpus. Four things were decided or found while meeting the exit:
+   - **The locator grammar did not exist** anywhere this repository can reach (§3.2). It is
+     written down now, with the three refusals it turns on.
+   - **`Node.meta` was a node's own index** once the single-table reading of A-5 is taken
+     seriously (§3.2). Dropped; `parent` is there instead.
+   - **The §5.1 exit as written cannot be met in this step.** "One crafted input per cap per
+     reader" needs readers, which are step 3. What `tests/limits.rs` holds instead is one case
+     per *cap*, with the arithmetic pinned and two properties asserted across all ten: every
+     refusal is `SMY-E440` naming its cap and its flag, and a refusal is reproducible to the
+     unit. A reader's crafted input joins that file in step 3 rather than replacing it.
+   - **The purity gate got `smysl-text` here rather than in step 6**, where this plan put it.
+     The readers land in step 3, and a gate that arrives after the code it is meant to
+     constrain is a gate that has to be argued with instead of obeyed. Step 6 keeps the rest:
+     the `cc` check in `make crate-features`, and the CLI.
+
+   Two further deferrals, deliberate. There is **no `Library` handle** yet: §4.2's sketch has
+   it opening a `Store` and an object store together, and the store work is step 4 — a handle
+   written now would be a handle to half a library. And `smysl-text` is **not re-exported by
+   the facade**, which is §4.3.6 and belongs with the CLI in step 6; its public surface is
+   watched from this commit all the same (`Makefile`'s new `UNPUBLISHED` list feeds
+   `api-check`, which needs no registry, while `semver` keeps a list of crates that have a
+   published baseline to compare against).
 3. Readers `txt`, `md`, `usfm`, `osis`, `zefania`, `json`. *Exit:* `fixtures/library/readers`
    expected mids; reader fuzz targets run 10 minutes each with no finding.
 4. `smysl-graph` manifest state, heads, by-part maps, adjacency flag. *Exit:* store tests; 1.8
@@ -1422,6 +1492,13 @@ meanings and are not repeated here.
 | `SMY-E452` | a record 15 or 18 was offered to a log; text lives in the object store (OQ-39) | `append`, `check` |
 
 `453`–`459` are unallocated. SMYSL-2.3 may adopt `E446` as a C-Library obligation.
+
+**Registered as of TX-P1 step 2:** `E401`, `E402`, `E440`, `E445` and `E446`, in a ninth
+diagnostic group (`Group::Library`) and in the manual's Appendix B. Five of the twelve above,
+because those are the five this build can raise; the rest enter the registry with the pass,
+reader or ingest path that raises them. That is the repository's own rule — a code nothing can
+trigger is worse than a missing one, because a reader greps for it and finds a promise with
+nothing behind it.
 
 ---
 

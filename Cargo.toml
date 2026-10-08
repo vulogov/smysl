@@ -29,6 +29,7 @@ smysl-embed    = { path = "crates/smysl-embed",    version = "1.10.0" }
 smysl-provider = { path = "crates/smysl-provider", version = "1.10.0" }
 smysl-ingest   = { path = "crates/smysl-ingest",   version = "1.10.0", default-features = false }
 smysl-tui      = { path = "crates/smysl-tui",      version = "1.10.0" }
+smysl-text     = { path = "crates/smysl-text",     version = "1.10.0" }
 
 # `pure` keeps the C SIMD backend out of the build: zero C in the core path (§13).
 blake3                = { version = "1", default-features = false, features = ["std", "pure"] }

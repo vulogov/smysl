@@ -75,6 +75,13 @@ const PURE_CRATES: &[&str] = &[
     // than asserting — a semantic backend added later would break it the moment it landed,
     // which is exactly when someone should have to think about it.
     "smysl-retrieve",
+    // The library layer (SMYSL-2.4 §4.5, OQ-37). `default = []`, so its default tree has no
+    // serde stack, and the readers that need one arrive each behind its own `reader-*`
+    // feature — outside the default tree and inside the `--all-features` one, which is why
+    // this list is now checked against both. Registered in TX-P1 step 2 rather than step 6,
+    // where the plan put it: the readers land in step 3, and a gate that arrives after the
+    // code it is meant to constrain is a gate that has to be argued with instead of obeyed.
+    "smysl-text",
 ];
 
 /// Rule A, as `src/lib.rs` states it: *"no CLI capability may be unreachable from here, and

@@ -236,7 +236,12 @@ mod tests {
         // model answering Russian passages in English in 78.6% of its gists, staged without a
         // remark. The check is by script rather than by language, and by the passage rather than
         // by a declared tag, because `View::lang` defaults to `en` and ingest never sets it.
-        assert_eq!(Code::ALL.len(), 64);
+        // 69, also 1.10.0, with the library's first five: `SMY-E401`, `SMY-E402`, `SMY-E440`,
+        // `SMY-E445` and `SMY-E446`, raised by `smysl-text` (RFC SMYSL-2.4, TX-P1 step 2).
+        // Five of that RFC's twelve allocations, because these are the five this build can
+        // trigger — the rest arrive with the readers, the ingest path and the check pass that
+        // raise them.
+        assert_eq!(Code::ALL.len(), 69);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

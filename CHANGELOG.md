@@ -49,7 +49,66 @@ their own evidence in the form they were written.
 Apache 2.0 and settled, the hosted one is not. It blocks nothing that has started.
 
 **TX-P1 has started.** The library wire is in: three new record types, four new identities, and
-the first of them to be hashed over something other than a CBOR map.
+the first of them to be hashed over something other than a CBOR map. Step 2 adds the crate that
+interprets them, and the locator grammar the plan pointed at a document nobody has.
+
+### A new crate for texts, and a grammar that was a pointer to a missing appendix
+
+`smysl-text` exists: ten modules, no file format in any of them, 112 tests. TX-P1 step 2. What
+is in it is the substrate the readers will stand on — normalisation, the identities, resource
+caps, locators, the segment table, the structure over it, part grouping, the licence gate, the
+object store, and the lock — and every function in it is a function of its arguments, so all of
+it is testable without a corpus.
+
+**Normalisation is a type, not a convention.** A tid is `BLAKE3-256(0x0F ‖ the part's normalised
+bytes)`, and nothing in that formula says what happens when the bytes are not normalised: the
+hash still computes, the identity is still well formed, and two libraries that received the same
+document with different line endings name it differently and never find out. `Normalised` is the
+only way to get a tid in this crate — UTF-8 validated, BOM stripped, CRLF and lone CR to LF,
+NFC — and because `smysl-core`'s constructor has to keep taking raw bytes (the decoder must be
+able to build the *bad* part text that `SMY-E446` reports), the guarantee is a source-level
+check: one file names that constructor, and a test fails on the next call site wherever somebody
+adds one. The same technique the purity gate uses for `tokio`, for the same reason — the
+property is about what the source says.
+
+**The locator grammar did not exist.** The RFC says `locator::parse` "implements draft 3
+Appendix B". Draft 3 is the design record, it is not in this repository, and the RFC set that
+supersedes it carries no locator grammar at all — so there was nothing to implement against.
+The grammar is written down now and tested both ways: canonical (`Gen.1.1`, OSIS-shaped, because
+that is what the five Bibles are distributed with and what the spike's alignment table is keyed
+by), line (`L412`), JSON Pointer (`/messages/3/text`, with `~0`/`~1`), and a range over two ends
+of one kind. One spelling per place, enforced by refusing the others: `Gen.01.1` does not parse
+rather than parsing as `Gen.1.1`, because a parser that accepted both would put both in a corpus
+and only the writer would know which was meant.
+
+**Fuel, not time, inside a reader.** The caps are the RFC's eleven, minus the wall clock, which
+stays in the CLI. A reader that measured wall time would refuse a file on a slow machine and
+accept it on a fast one — the same input both valid and invalid depending on whose laptop read
+it, which is a format with no conformance to speak of. Fuel is charged per byte scanned, per
+node created and per entry opened, so it runs out at the same point every time; the suite asserts
+that as a property rather than trusting it.
+
+**A defect readers will have, caught at the reader.** A segment table's rows are nodes, and the
+tree is derived from their ranges rather than stored beside them — one statement of the
+structure, and it is the one A-5 hashes. Deriving it is what makes the check possible: siblings
+disjoint, children inside parents, and therefore no *partial* overlap. That last one is what an
+off-by-one in a verse boundary produces, every span attached to either node is then quietly
+wrong, and nothing downstream has the information to notice. `Structure::build` refuses it,
+naming the row.
+
+Five diagnostics are registered with the code that raises them, not with the RFC that allocated
+them: `SMY-E401` (a reader upgraded under a corpus), `SMY-E402` (carrying text under a licence
+that does not permit it, with no override flag), `SMY-E440` (a resource cap, naming the cap, the
+limit, what was asked for and the flag), `SMY-E445` (locked, by *whom*) and `SMY-E446` (an object
+that does not hash to its name). The other seven of SMYSL-2.4's range stay unregistered until
+something can trigger them.
+
+The purity gate took `smysl-text` now rather than in step 6 as planned — the readers land in
+step 3, and a gate arriving after the code it constrains is a gate that gets argued with. There
+is no `Library` handle yet and the facade does not re-export the crate: both need the store work
+of step 4 and the CLI of step 6. Its public surface is recorded from this commit anyway, through
+a new `UNPUBLISHED` list in the `Makefile` — `api-check` needs no registry, and a crate whose
+API is unrecorded until its first release is a crate whose API nobody chose.
 
 ### The library has a wire, and two readers were calling records known that they cannot read
 

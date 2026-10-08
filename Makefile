@@ -115,8 +115,18 @@ BASELINE  := 1.9.0
 PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-render \
              smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl
 
-# The library crates behind the facade: everything published except the facade itself.
-LIBRARIES := $(filter-out smysl,$(PUBLISHED))
+# Crates that exist here but are not on crates.io yet, so `semver` has no baseline to fetch
+# for them and would report "version not found in registry" — a red job saying nothing. They
+# join PUBLISHED at the release that first publishes them.
+#
+# `smysl-text` is new in 1.10.0 (RFC SMYSL-2.4, TX-P1).
+UNPUBLISHED := smysl-text
+
+# The library crates behind the facade: everything published except the facade itself, plus
+# the ones not published yet. Their *surface* is watched from the first commit — `api-check`
+# needs no registry — because a crate whose public API is unrecorded until its first release
+# is a crate whose API nobody chose.
+LIBRARIES := $(filter-out smysl,$(PUBLISHED)) $(UNPUBLISHED)
 
 # The twenty-six subcommands, for `cli-surface`. Written out rather than read from `--help`,
 # for the same reason `tests/dispatch.rs` writes them out: a list derived from the binary
