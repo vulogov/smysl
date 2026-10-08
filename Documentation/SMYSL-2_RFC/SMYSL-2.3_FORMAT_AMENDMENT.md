@@ -27,6 +27,26 @@ Acceptance makes these amendments normative text. It does not schedule them: eac
 in the phase its §1.2 row names, and folding one into the spec is not complete until
 `make spec-tables` covers its tables (A-14).
 
+**Folded so far**, in 1.10.0. A fold is the amendment's text in `SMYSL_FORMAT_SPEC.md` *and* the
+`spec-tables` gate reading its constants out of the document (A-14); anything less leaves the
+document and the wire free to drift, which is the condition §2.2 of the spec records four times.
+
+| amendment | spec section | gate covers |
+|---|---|---|
+| A-4 record-set digest | new §2.7 | the prefix `smysl/rsd/1` and the domain byte, against the one function that computes it |
+| A-8.1 opening | §3.1, §8.3 | the reserved code, against the `Unknown` discriminant of each enumeration that has one |
+| A-9 estimator | §3.1, §8.1 | the registry's ids against `TokenEstimator::id`, and granularity key 5 against `keys::granularity` |
+| A-10 item 3 strict `source` | §4, §8.3 | — (a parser rule, with no constant to compare) |
+
+Those are the amendments whose phase has landed: TX-P0 shipped in 1.9.0, so its four fold now.
+The rest wait for theirs, and the spec says nothing about them in the meantime — which is correct
+rather than a gap, since spec §8.1 makes every one of them an addition an older reader already
+round-trips.
+
+**§2.6 is held, not skipped.** A-3's library identities were given it, and A-4 was given §2.7;
+folding A-4 first would have renumbered A-3's section if §2.6 were filled in, so the spec carries
+§2.6 as a held heading naming what arrives there.
+
 **Author:** Vladimir Ulogov
 **Date:** 2026-10-02
 **Part of:** RFC set SMYSL-2. See SMYSL-2.0 for the index and roadmap.
@@ -491,10 +511,26 @@ Resolves OQ-29 as a **wire field**.
 | id | count of a text `t` | notes |
 |---|---|---|
 | `smysl/utf8-div4` | `ceil(utf8_len(t) / 4)` | the default; what check has always counted. Pack adds `+2` framing per item for every estimator, and the framing is not part of the id. |
-| `smysl/script-aware/1` | `ceil(Σ_c n_c(t) · w_c / 1000)`, with integer milli-weights `w_c` per character class | the classes, ranges and weights are fixed by `fixtures/estimator/script-aware-1.json`, whose BLAKE3 the registry entry will record when the weights are frozen (SMYSL-2.1 §4.3.2). An id never changes: new weights are `/2`. |
+| `smysl/content/1` | `ceil(Σ_c n_c(t) · w_c / 1000)`, with integer milli-weights `w_c` per character class | the classes and weights are fixed by `fixtures/estimator/content-1.json`, calibrated over 7,932 verses present in all seven editions of a parallel corpus and pinned by a test. An id never changes: new weights are a new id. |
 
-A reader that does not know an estimator id preserves it. It evaluates `l0_max` with the default
-and reports `SMY-W409`.
+A reader that does not know an estimator id preserves it and treats `l0_max` as **unevaluable**,
+reporting `SMY-W025`. It MUST NOT evaluate the bound with the default count.
+
+**Two departures from this amendment as accepted at G−1, both made when F-2 shipped in 1.9.0.**
+Draft 1 called the second estimator `smysl/script-aware/1` and said an unknown id is evaluated
+with the default and reported as `SMY-W409`. Neither survived building it:
+
+- The id is `smysl/content/1`. "Script-aware" named the mechanism; what the weights buy is that
+  one proposition costs the same in either language, so the id names the property a bound is
+  stated in. The weights are a calibration over a corpus, and `/1` is the calibration, which is
+  what an id has to be pinned to.
+- An unknown id leaves the bound **unevaluable**, not evaluated with the default. Evaluating it
+  under a different count returns a verdict on a question nobody asked, and a verdict is harder
+  to ignore than a gap — a reader cannot tell a bound that was met from one that was measured
+  wrong. `SMY-W409` is the wrong code for the same reason: it says a value was preserved and
+  treated as unknown, and this is a bound that was not checked, which is `SMY-W025`.
+
+The amendment text above is the corrected version; `SMYSL_FORMAT_SPEC.md` §3.1 carries it.
 
 ---
 
@@ -776,7 +812,8 @@ A fold is not complete until the gate covers it.
 **New enumeration codes:** thread schemas 5–8; roles 24–48 (49–63 reserved for `timeline`);
 detection kinds 4–5 (A-8.2).
 
-**Estimator ids:** `smysl/utf8-div4`, `smysl/script-aware/1` (A-9).
+**Estimator ids:** `smysl/utf8-div4`, `smysl/content/1` (A-9; the second was
+`smysl/script-aware/1` in draft 1).
 
 **Rules:** N, E, Z (A-12), alongside M, T, L, R, U, I, S, V1/V2, X, D, P.
 

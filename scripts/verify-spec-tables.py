@@ -351,6 +351,64 @@ def main() -> int:
         check(f"{rel}: every §-citation resolves", bogus, [],
               "the format spec has sections " + " ".join(sorted(exists, key=_num)))
 
+    # -- The folds of SMYSL-2.3 (A-14) --------------------------------------
+    #
+    # A-14 asks for a fold to be covered by this gate before it counts as folded, and the
+    # reason is the one the module docstring gives: the spec grew a section whose constants
+    # nothing compared against the code, which is how §2.2's four gaps happened. These are the
+    # constants the 1.9 folds put in the document.
+    check("the spec has §2.7, the record-set digest", "2.7" in exists, True)
+
+    # A-4. The digest's two literals, against the one place that computes it. Both are
+    # preimage, so a disagreement about either is a disagreement about whether two stores have
+    # converged — and it would show up as a permanent failure to converge, not as an error.
+    store_rs = read("crates/smysl-graph/src/store/mod.rs")
+    rsd = re.search(r"rsd = BLAKE3-256\( \"([^\"]+)\" ‖ (0x[0-9A-Fa-f]{2})", text)
+    check("§2.7 gives the record-set digest a prefix and a domain byte", bool(rsd), True)
+    if rsd:
+        check("rust: §2.7 digest prefix",
+              re.search(r'h\.update\(b"([^"]+)"\);', store_rs).group(1), rsd.group(1))
+        check("rust: §2.7 digest domain byte",
+              re.search(r"h\.update\(&\[(0x[0-9A-Fa-f]{2})\]\);", store_rs).group(1).lower(),
+              rsd.group(2).lower())
+
+    # A-9. The estimator registry, which is the one table either 1.9 fold brought with it. The
+    # ids are wire values written to granularity key 5, so an id in the code that the document
+    # does not list is exactly the case this gate was built for.
+    estimate_rs = read("crates/smysl-core/src/types/estimate.rs")
+    spec_ids = re.findall(r"^\| `(smysl/[a-z0-9/-]+)` \|", text, re.M)
+    rust_ids = re.findall(r'TokenEstimator::\w+ => "(smysl/[a-z0-9/-]+)",', estimate_rs)
+    check("§3.1 estimator registry lists every id the reference writes",
+          sorted(rust_ids), sorted(spec_ids),
+          "an id reaches granularity key 5; one the spec omits is a wire value nobody documented")
+    check("§3.1 names the default estimator", "smysl/utf8-div4" in spec_ids, True)
+
+    # A-9's wire fact, as opposed to its registry: *which* key the id travels under.
+    spec_gran = re.search(r"granularity map gained key (\d+), `estimator`", text)
+    check("§3.1 names the granularity key the estimator id travels under", bool(spec_gran), True)
+    if spec_gran:
+        check("rust: §3.1 granularity estimator key",
+              # Scoped to the module: `packinfo` has an `ESTIMATOR` too, at a different
+              # number, and an unscoped search finds that one and reports the spec wrong.
+              int(re.search(r"pub const ESTIMATOR: u16 = (\d+);",
+                            block(read("crates/smysl-core/src/cbor/keys.rs"),
+                                  "pub mod granularity {", "\n}")).group(1)),
+              int(spec_gran.group(1)))
+
+    # A-8.1. The opening has no table — the members of three of the four enumerations are not
+    # in this document at all (§3.1 says why) — but the reserved code is a constant, and it is
+    # the one an implementation has to agree on to open an enumeration later without a break.
+    spec_reserved = re.search(r"\*\*Code (\d+) is reserved in each of five", text)
+    check("§3.1 reserves a code in the open enumerations", bool(spec_reserved), True)
+    if spec_reserved:
+        want = int(spec_reserved.group(1))
+        for rel, enum in [("crates/smysl-core/src/types/epistemics.rs", "SourceKind"),
+                          ("crates/smysl-core/src/types/thread.rs", "ThreadSchema"),
+                          ("crates/smysl-core/src/types/annex.rs", "DetectionKind")]:
+            got = [int(m) for m in re.findall(r"^    Unknown = (\d+),$", read(rel), re.M)]
+            check(f"rust: §3.1 reserved code in {rel}", sorted(set(got)), [want],
+                  "an `Unknown` at any other code would make a future addition a break")
+
     # -- The gate cannot have quietly stopped checking -----------------------
     #
     # Every assertion above is `check`, and a `check` that never runs is indistinguishable from

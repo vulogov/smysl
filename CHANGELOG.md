@@ -19,12 +19,9 @@ never return a different verdict — the disagreement set is empty. The span def
 is *fixed below*; the empty disagreement set stands, so the case for defaulting to V2 is still
 unmade.
 
-**A spec a release behind its wire.** 1.9 put granularity key 5 and an estimator id on the wire,
-and `SMYSL_FORMAT_SPEC.md` still says it describes crate 1.8.0 and does not mention granularity,
-`l0_max`, tokens or an estimator anywhere. That is permitted — the spec says everything it does
-not say is a free choice — but A-14 asks each accepted amendment to be folded as its phase lands,
-and a fold is not complete until `verify-spec-tables` covers its tables. Nine amendments were
-accepted at G0 and none has been folded.
+**A spec a release behind its wire** — *the folds whose phase has landed are in, see below.*
+TX-P0's four amendments are now spec text and covered by the gate. The five accepted at G0 whose
+phases have not shipped stay out until they do, which is what A-14 asks for rather than a gap.
 
 **A ceiling no code can establish.** Every same-as and holder figure the spike reports rests on
 model coders, and no model coder reaches the protocol's α 0.667 on any pairing: 0.600 over three,
@@ -38,6 +35,72 @@ is Apache 2.0 and settled, the hosted one is not. And the re-plan of SMYSL-2.4 a
 of SMYSL-2.0 §1.1, which moves TX-P5's and TX-P7's exit tests and so is a re-plan rather than an
 edit, with TX-P1's MSRV question (OQ-40 = OQ-66) first because it is the only one that depends on
 anything outside this repository.
+
+### The spec catches up with its wire (A-14)
+
+`SMYSL_FORMAT_SPEC.md` said it described crate 1.8.0. 1.9 had put granularity key 5 and an
+estimator id on the wire, opened four enumerations, computed a record-set digest and made
+`source { }` strict, and the normative document mentioned none of it — so the format's contract
+was a release behind the bytes four implementations exchange.
+
+That was *permitted*: the spec's own line is that everything it does not say is a free choice,
+and every one of those changes is an addition §8.1 already obliges an older reader to round-trip.
+It is still the exact condition §2.2 records happening four times in 1.2.0, where two
+implementations reached C-Produce by decoding a fixture to learn things the document did not say,
+and neither recorded that it had guessed. A fixture carrying normative content is not a fixture.
+
+Four amendments fold in, which is TX-P0's whole accepted set:
+
+- **§2.7, the record-set digest** (A-4). `BLAKE3-256("smysl/rsd/1" ‖ 0x00 ‖ h₁ ‖ … ‖ hₙ)` over
+  deduplicated, byte-ordered per-record hashes, framing included. It covers record types the
+  reader does not understand, which is the property it exists for and the one a digest over
+  derived state cannot have — the reference's own derived-state hash ignored commitments, schema
+  declarations, pack infos and unknown records, so two stores differing in any of those compared
+  equal.
+- **§3.1, the open enumerations** (A-8.1): four open from 1.9, an unrecognised code preserved,
+  re-encoded and reported (`SMY-W409`) rather than failing the store, 255 reserved in five, and
+  the closed set named with the reason it is closed. With the departure 1.9 already made and the
+  RFC does not: for `source` `kind` the raw code is identity-bearing, so the permission to use
+  255 internally for "unknown" does not reach it.
+- **§3.1, granularity key 5 and the estimator registry** (A-9), written only when it is not
+  `smysl/utf8-div4`, so no view's bytes moved; an id this build lacks leaves the bound
+  unevaluable rather than evaluated under a count it was not written for.
+- **§4 and §8.3, strict `source { }`** (A-10 item 3). The tightening that actually stops
+  documents loading, stated where §8.3 says such a thing is owed a notice.
+
+§8.1 and §8.3 also gain the lists A-14 asks for: every addition and every tightening made, with
+the release. Keeping them is cheap insurance against precisely the rediscovery-by-fixture above.
+
+**A fold is not a fold until the gate reads it.** `verify-spec-tables` now parses the digest's
+prefix and domain byte, the estimator registry's ids, the granularity key the id travels under,
+and the reserved code, and compares each against the code — 50 comparisons, up from 38. Each of
+the four was checked by breaking the document and watching it fail, because a gate that would
+pass on a wrong spec is the thing this one was built to replace.
+
+**One thing the lists found on being written.** §8.1's bullets did not cover a new key in the
+`source` sub-map, and 1.8 added one — `observed`, key 3. Read quickly, §8.2's first line forbids
+it: *changing the meaning, type, or key number of anything in §2.2.* Adding above the highest key
+changes none of those, and the addition was safe for the reasons the format always relies on — a
+source without the key encodes to the bytes it always did, and `SourceRef::extra` has preserved
+unknown keys inside `source` since 1.7. But no bullet said so, so for two releases the register
+of permitted changes did not permit a change that had been made. §8.1 now has the bullet, with
+the care a hashed sub-map needs spelled out, and says it arrived a release late. Writing the
+register down is what found it; that is the argument for the register.
+
+**Two departures from A-9 as accepted**, corrected in the RFC rather than left to disagree with
+the spec. The second estimator is `smysl/content/1`, not `smysl/script-aware/1`: "script-aware"
+named the mechanism, and an id has to name the calibration a bound is stated in. And an unknown
+id leaves `l0_max` unevaluable (`SMY-W025`), where the amendment said to evaluate it with the
+default and report `SMY-W409` — a verdict under the wrong count is harder to ignore than no
+verdict, because nothing downstream can tell it from a real one.
+
+**§2.6 is a held heading.** A-3's library identities were allocated it and A-4 §2.7; filling 2.6
+early would renumber A-3's section when it lands, and a normative section that moves is a
+citation that silently retargets.
+
+The five amendments accepted at G0 whose phases have not landed — A-1, A-2, A-3, A-5, A-6,
+A-11 `x.text/v1`, A-12 **E** and **Z**, A-13 — stay out of the spec until they do. RFC SMYSL-2.3
+now carries a fold table saying which are in and what the gate covers for each.
 
 ### The quote span stops at the match (MS-4)
 
@@ -262,8 +325,11 @@ record-set digests for the same store.
 `UnitCore`, `SourceRef` and `Attestation` already use. The regression test asserts both halves —
 the key is kept, and the record re-encodes to identical bytes.
 
-This is SMYSL-2.1's H-1. The estimator key it was a prerequisite for (A-9, F-2) waits for 1.10,
-where the counter that would give the registry a second entry is actually calibrated.
+This is SMYSL-2.1's H-1. The estimator key it was a prerequisite for (A-9, F-2) landed in this
+release too, above — the sentence here said it waited for 1.10, which was true when it was
+written and stopped being true when the S0 decision table reordered F-2 ahead of everything
+else. Corrected in 1.10.0, while folding A-9 into the format spec made somebody read both
+paragraphs at once.
 
 ### Four enumerations opened, so a later code is an addition rather than a break
 

@@ -3,7 +3,7 @@
 **Status:** normative. This document is the contract.
 **Format version:** `smysl/1.0` — `smysl/0.1` is also accepted and always will be (§8.6).
 **Kernel schema:** `smysl.kernel/0.1`.
-**Describes:** crate `1.8.0`.
+**Describes:** crate `1.10.0`.
 
 This is the whole of what a second implementation must obey to interoperate. It is
 deliberately short. Everything it does not say is a free choice.
@@ -218,6 +218,44 @@ text. `fixtures/wire/relation-id/cases.json` carries vectors, preimage and diges
 **Added in 1.4**, and no existing byte changed: every rid is a function of fields relations
 already carried.
 
+### 2.6 (held)
+
+Library identities — the part id, manifest id, reading id and dating id — are specified in RFC
+SMYSL-2.3 A-3 and are folded in here when the release that writes them lands. The number is held
+rather than reused so that §2.7 below keeps the number it was given, because a normative section
+that moves is a citation that silently retargets.
+
+### 2.7 Record-set digest
+
+The **record-set digest** of a set of records is
+
+```
+rsd = BLAKE3-256( "smysl/rsd/1" ‖ 0x00 ‖ h₁ ‖ h₂ ‖ … ‖ hₙ )
+```
+
+where each `hᵢ` is the BLAKE3-256 digest of one record's canonical encoding, §3.1 framing
+included, duplicates are removed, and `h₁ < h₂ < … < hₙ` in byte order. It is therefore
+independent of the order records arrived in and of duplicate delivery, which is what rule U
+asks of any convergence test.
+
+It covers **every record type, including types the implementation does not understand.** That is
+the property it exists for, and the one a digest over derived state cannot have: derived state is
+only as complete as the code that derives it, so a record the deriving code skips is a record the
+digest cannot see.
+
+Two stores **converge** (rule U) when their record-set digests are equal. An implementation MAY
+also compare digests of derived state — salience, labels — and MAY require both to agree, which
+makes a disagreement about derivation visible rather than silent. It MUST NOT report convergence
+on derived state **alone**: the reference implementation's derived-state hash ignored
+commitments, schema declarations, pack infos and records of unknown type, so two stores differing
+in any of those compared equal, which is the opposite of what rule U needs.
+
+**Added in 1.9, and no byte changed.** The digest is a function of records a store already held,
+and it is written nowhere — no record carries it and no header declares it. So §8 does not reach
+it in either direction: there is no byte added for an older reader to preserve, and nothing for a
+format version to gate. What it is instead is a *test* this document can state, in place of the
+one rule U needed and did not have.
+
 ## 3. Deterministic CBOR
 
 A conformant encoder MUST satisfy all of the following. A conformant decoder MUST reject
@@ -385,6 +423,62 @@ and a zero re-encode to the same bytes, so every pack written before 1.6 keeps t
 A packer that reserves `r` out of `b` MUST solve against `b - r` and MUST report `budget` as `b`,
 so that `used + reserved <= budget` holds for any reader that checks it.
 
+**Open and closed enumerations.** Four of the format's enumerations are **open** from 1.9:
+`source` `kind` (§2.2), thread schema, step role, and detection kind.
+
+- A decoder MUST preserve a code it does not know, re-encode it unchanged, and report
+  `SMY-W409`. Wherever the value is interpreted it is treated as *unknown* — not as a default,
+  and not as an error. Failing the whole store on an unrecognised code is what this replaces,
+  and correcting it is a tightening of readers rather than a change of format (§8.3): a document
+  carrying a future code was always legal, and refusing it broke rule X one level below the
+  record type, where nothing was watching.
+- **Code 255 is reserved in each of five and is never assigned**: the four above and
+  `admission`. An implementation MAY use it internally to mean "unknown" — except for
+  `source` `kind`, which is inside the uid (§2.2), where normalising an unrecognised code to 255
+  would give the unit a different identity and do it silently. There the raw code travels with
+  the container. It is reserved in `admission` while that enumeration is still closed, so that
+  opening it later needs no registry change and costs no code.
+- `status` (§2.2), `lod`, `op`, `rung`, `commitment` and `admission` stay **closed**. Rules M, T
+  and L read the first of these and an unknown value cannot be compared, so an unknown code in a
+  closed enumeration is still an error. A decoder MUST NOT invent a member of one.
+
+The *members* of these enumerations, beyond `status` and `source` `kind` in §2.2, are not
+specified here — the appendix says why. Their openness is, because preserving a member you do not
+recognise is a round-trip obligation and therefore interoperability rather than product.
+
+A new code in an open enumeration is an addition §8.1 permits. A new code in a closed one is not.
+
+**The view's granularity map gained key 5, `estimator`, in 1.9**: text, the id of the estimator
+whose count the map's size bounds are stated in. A new key in a record body above the highest
+that body defines, which §8.1 permits — an older reader preserves it verbatim.
+
+What those bounds *are* is a product decision, and the appendix omits it. Which count they are
+read in is not, because two readers that disagree about the count reach different verdicts on
+one document while both believing themselves conformant — the §2.2 failure mode, one level out
+from identity.
+
+It is written **only when it is not `smysl/utf8-div4`**, so every view written before 1.9 encodes
+to the bytes it had, and a decoder that does not find the key MUST read it as `smysl/utf8-div4`.
+That is the second case where the rule above — a decoder MUST NOT supply a default for a field the
+encoder always writes — does not apply, and for the same reason as `reserved`: the encoder does
+not always write it, and a missing key and the default re-encode to the same bytes.
+
+A bound and the number compared against it MUST come from one estimator:
+
+| id | count of a text `t` | notes |
+|---|---|---|
+| `smysl/utf8-div4` | `ceil(utf8_len(t) / 4)` | the default, and the meaning of an absent key |
+| `smysl/content/1` | `ceil( Σ_c n_c(t) · w_c / 1000 )`, with integer milli-weights `w_c` per character class | the classes and weights are fixed by `fixtures/estimator/content-1.json` |
+
+An id names one count for ever: changed weights are a **new id**, never a redefinition, because a
+bound written against the old weights would otherwise start meaning something else without
+moving a byte.
+
+A reader that does not know an id preserves it and treats every bound counted with it as
+**unevaluable**. It MUST NOT substitute the default count. The bound is then neither met nor
+breached and the reader says so — evaluating it under an estimator it was not written for would
+return a verdict on a question nobody asked, which is worse than returning none.
+
 ## 4. Canonical surface form
 
 Surface syntax is the human-facing form. It is **not** the identity-bearing form — uids come
@@ -420,6 +514,14 @@ Consequences that are easy to get wrong, each of which has been a real defect:
   `level` is one of the five names above. `commit` is a reserved word in the same way, and unlike a
   withdrawal or a resolution a commitment always has a surface form, because a uid can always be
   written.
+- **`source { }` accepts a closed set of keys** (1.9): `kind`, `ref` or `reference`, `captured`
+  and `observed`. Any other key is `SMY-E001`, a `captured` that is not a date is `SMY-E001`, an
+  `observed` outside `u64` is `SMY-E001`, and a `source` that fails to parse refuses the unit —
+  none of the four is a silent drop. `source` is inside the uid (§2.2), so a key the parser
+  ignored was a key that never reached the encoder: the unit written back was a *different unit*
+  from the one the document described, carrying an identity nothing else refers to. Forward
+  compatibility inside `source` is the wire's business, where an unknown key is preserved
+  verbatim; surface text has an author to tell, which is the asymmetry rule X does not cover.
 - **A body or detail line opening `#`, `//` or `\` MUST be escaped with a leading `\`.** A
   line starting with a comment marker is a comment wherever it sits, so an unescaped one is
   read as a comment and the content is lost. Only those three sequences, and only at the
@@ -570,10 +672,37 @@ already obliges every reader to cope with them:
   not the identity-bearing form (§4), so this is a cost to state rather than a break.
 - **A new value in an open enumeration** where this document says unknown values are
   preserved rather than rejected.
+- **A new key in the `source` sub-map (§2.2)**, above its highest. This one needs the care a
+  core key needs, because `source` is *inside* the uid: a source that does not carry the new key
+  MUST encode to the bytes it always did, and an older reader MUST preserve one that does.
+  `observed` (key 3, in 1.8) is the instance, and the preservation it relies on has been there
+  since 1.7. **Stated in 1.10**, which is a release after the addition it permits — the list
+  above had no bullet covering it, and §8.2's first line, read quickly, forbids it. Adding a key
+  above the highest is not *changing* the meaning, type or number of anything already in §2.2,
+  which is what §8.2 names; the two sections only looked as though they disagreed.
 
 The test of "permitted" is mechanical: a reader written against this document at the *older*
 revision must still round-trip a document containing the addition, byte for byte. If it
 cannot, the change is a break however small it looks.
+
+**The additions actually made**, so that the list above is checkable against something rather
+than read as a policy nobody exercised:
+
+| release | addition | kind |
+|---|---|---|
+| 0.2 | record type 10, label binding | new record type |
+| 1.3 | `@schema` | new reserved word |
+| 1.4 | record types 11 and 12, withdrawal and resolution | new record types |
+| 1.4 | `@withdraw`, `@resolve` | new reserved words |
+| 1.6 | pack info key 7, `reserved` | new key above a body's highest |
+| 1.7 | record type 13, commitment; `@commit` | new record type, new reserved word |
+| 1.8 | `source` key 3, `observed` | new key above a sub-map's highest |
+| 1.9 | granularity key 5, `estimator` | new key above a body's highest |
+| 1.9 | four enumerations opened (§3.1) | not an addition itself but a §8.3 tightening — it is what makes a later code in one of them an addition at all |
+
+Keeping this list is what RFC SMYSL-2.3 A-14 asks for, and it is cheap insurance: an addition
+nobody wrote down is an addition the next implementer rediscovers by decoding a fixture, which
+§2.2 records happening four times in one release.
 
 ### 8.2 What requires a new format version
 
@@ -604,6 +733,23 @@ load may stop loading — and "it was never legal" is true and unhelpful to whoe
 The converse also holds, and is the harder discipline: if an implementation is more
 permissive than this document and the permissive behaviour turns out to be *wanted*, the fix
 is to change this document and bump, not to leave the two disagreeing.
+
+**The tightenings actually made**, named because this section's own paragraph above says a
+changelog entry is owed to whoever has stored documents:
+
+- **0.5** — a decoder stopped accepting records it should never have accepted.
+- **0.10** — `skip_item` stopped accepting seven classes of §3 violation inside extension
+  payloads, after nine releases of accepting them.
+- **1.9** — an unrecognised code in one of the four open enumerations is preserved and reported
+  (`SMY-W409`) instead of failing the store (§3.1). This one runs the other way: the reader became
+  *more* accepting, and it belongs here anyway, because what it stopped doing was rejecting
+  documents that were always conformant. No document stops loading; some start.
+- **1.9** — the surface parser rejects an unknown key in `source { }`, a malformed `captured` and
+  an out-of-range `observed`, and refuses the unit rather than building it without its source
+  (§4). **This is the case the paragraph above is about:** surface documents that load today stop
+  loading, and "they were never conformant" is true and no help to whoever holds one. What they
+  were producing was a unit whose provenance differed from what its author wrote, with a uid to
+  match.
 
 ### 8.4 Deprecation
 
@@ -682,9 +828,16 @@ conformance suite did not move.
 
 ## Appendix: what this document deliberately omits
 
-Command-line surface, exit codes, thread schemas, rendering profiles, salience weights, the
-packing algorithm and its constraints C1–C8, the diagnostic registry, ingest and provider
-behaviour.
+Command-line surface, exit codes, rendering profiles, salience weights, the packing algorithm
+and its constraints C1–C8, the diagnostic registry, ingest and provider behaviour.
+
+Also the *members* of three enumerations §3.1 calls open — thread schema, step role and
+detection kind — and of `lod`, `op`, `rung` and `admission`. What each code means is a product
+decision: two implementations that disagree about whether code 6 is `exposition` still exchange
+documents byte for byte, and each reports the codes it cannot name. What is **not** omitted is
+whether those enumerations are open, and the reserved code, because preserving a member you do
+not recognise is a round-trip obligation. `status` and `source` `kind` are in §2.2 instead, for
+the one reason that overrides this: they are inside the uid.
 
 None of it is required for interoperability. All of it is in the manual, and an
 implementation is free to do any of it differently — or not at all — and still be conformant
