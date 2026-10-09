@@ -1,4 +1,4 @@
-//! Library records: manifest (14), part text (15) and part reading (18).
+//! Library records: manifest (14), part text (15), part reading (18) and redaction (19).
 //!
 //! SMYSL-2.3 A-5 defines them; this module is only the types and their identities. What
 //! *interprets* them — normalising text, reading files, deriving structure, resolving a
@@ -16,8 +16,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::ids::{is_alias, LangTag, Mid, Rdid, Tid};
+use crate::ids::{is_alias, AgentId, LangTag, Mid, Rdid, Tid, Uid};
 use crate::types::epistemics::SourceRef;
+use crate::types::provenance::Hlc;
 use crate::types::unit::Extra;
 
 /// What a manifest permits to travel with it (manifest key 5).
@@ -497,6 +498,61 @@ pub enum Resolved {
 pub trait PartResolver: core::fmt::Debug {
     /// What is stored under `tid`.
     fn part(&self, tid: &Tid) -> Resolved;
+}
+
+/// A redaction: this part's text is to be held no longer (record 19, rule Z).
+///
+/// The record says *that* a part was redacted and by whom; it does not carry the part. What
+/// honouring it means is deletion — of an object, from an object store — and the record is
+/// what makes the deletion auditable: a store that no longer holds a part can still say why,
+/// and a peer that never saw the part learns not to accept one.
+///
+/// # Why this is a record and not a flag
+///
+/// A redaction has to survive a merge, and it has to survive it in one direction only. Rule Z
+/// is enforced over the **union** of every participant's redactions, so a peer that still holds
+/// the bytes cannot reintroduce them by merging into a store that has let them go — the
+/// redaction set grows and the filter is applied to the union, whatever the order records
+/// arrive in. That is what makes the filtered merge commutative, associative and idempotent
+/// (`P-Z1`–`P-Z4`), and none of it is available to a mutable flag on a part that is no longer
+/// there.
+///
+/// # What it does not do
+///
+/// It does not rewrite a log. A log never holds a 15 or an 18 (`SMY-E452`, OQ-39), so there is
+/// nothing in a log to erase and no reason to reset the hash chain that would have shown an
+/// erasure. The bytes live in an object store, and erasing them there is an unlink.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub struct Redaction {
+    /// The part whose text is redacted.
+    pub tid: Tid,
+    pub agent: AgentId,
+    pub ts: Hlc,
+    /// A unit saying why, as a withdrawal's `reason` is.
+    ///
+    /// Optional, and a redaction with none is still a redaction: a legal demand arrives before
+    /// anybody writes it down, and a store that refused the record until the paperwork existed
+    /// would hold the text for as long as the paperwork took.
+    pub reason: Option<Uid>,
+    pub extra: Extra,
+}
+
+impl Redaction {
+    pub fn new(tid: Tid, agent: AgentId, ts: Hlc) -> Redaction {
+        Redaction {
+            tid,
+            agent,
+            ts,
+            reason: None,
+            extra: Extra::new(),
+        }
+    }
+
+    pub fn with_reason(mut self, reason: Uid) -> Redaction {
+        self.reason = Some(reason);
+        self
+    }
 }
 
 #[cfg(test)]

@@ -105,11 +105,24 @@ test("the record fixture round trips and names every library code", () => {
   const rs = records();
   assert.deepEqual([...smysl.encodeStore(rs)], [...RECORDS]);
   const codes = new Set(rs.map((r) => r.code));
-  for (const code of [14, 15, 18]) assert.ok(codes.has(code), `record ${code} is not in it`);
+  for (const code of [14, 15, 18, 19]) {
+    assert.ok(codes.has(code), `record ${code} is not in it`);
+  }
   // The fixture also carries codes this implementation still does not understand, which keeps
   // the distinction in UNDERSTOOD_RECORDS an observed fact rather than a claim.
-  assert.ok([16, 17, 19].some((c) => codes.has(c)));
+  assert.ok([16, 17].some((c) => codes.has(c)));
   for (const r of rs) assert.equal(r.isKnown, smysl.UNDERSTOOD_RECORDS.has(r.code));
+});
+
+test("a redaction decodes into its named fields", () => {
+  // Record 19, rule Z. The part it names is **not** in the fixture, which is the state
+  // honouring a redaction leaves behind: the record remains and the bytes are gone.
+  const r = smysl.Redaction.decode(only(19)[0]);
+  assert.equal(toHex(r.tid), IDS.redaction.tid_hex);
+  assert.equal(r.agent, IDS.redaction.agent);
+  assert.equal(r.reason, null);
+  const parts = new Set(IDS.parts.map((p) => p.tid_hex));
+  assert.ok(!parts.has(IDS.redaction.tid_hex), "the part it names is not in the fixture");
 });
 
 test("a manifest decodes into its named fields", () => {

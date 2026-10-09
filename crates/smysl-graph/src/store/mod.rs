@@ -365,6 +365,14 @@ impl Store {
         // chain that would have shown the rewrite. The refusal is the first thing that happens
         // to one, rather than a repair afterwards — and the whole batch is refused, so a
         // caller cannot half-append a delivery and be told about it later.
+        //
+        // **And this is why rule Z needs no filter here**, although SMYSL-2.4 §4.3.2 puts one
+        // in this method: a filter that dropped a *redacted* 15 or 18 before the refusal would
+        // be unreachable code in the only direction that matters, because the refusal below
+        // catches every 15 and 18 whether anything is redacted or not. Rule Z is enforced
+        // where text actually rests — `smysl-text`'s object store — and a store's job here is
+        // to hold the redactions so that the object store can ask. See `Store::is_redacted`
+        // and `smysl_text::library::Library::redact`.
         for r in records {
             let code = match r {
                 Record::PartText(_) => Some(record::code::PART_TEXT as u8),
@@ -1130,6 +1138,7 @@ impl Store {
                     self.commits.entry(c.unit).or_default().insert(c.clone());
                 }
                 Record::Manifest(m) => self.library.absorb_manifest(m),
+                Record::Redaction(r) => self.library.absorb_redaction(r),
                 _ => {}
             }
         }
@@ -1156,11 +1165,13 @@ impl Store {
         // edge in the release that wrote it, and a build that skipped the rebuild for it would
         // be deciding, on the strength of not understanding the bytes, that they carry none.
         //
-        // What is on the list is text — a manifest, a part text, a part reading. None of them
-        // names a unit as an endpoint, so none can appear in `adjacency` or in `unfounded`
-        // however many of them arrive. A dating (record 17, TX-P3) and a redaction (19, TX-P2)
-        // belong here too and are absent because the enum does not hold them yet; each joins
-        // the list in the release that adds the variant, and until then it cannot arrive.
+        // What is on the list is text — a manifest, a part text, a part reading, a redaction.
+        // None of them names a unit as an endpoint, so none can appear in `adjacency` or in
+        // `unfounded` however many of them arrive. A dating (record 17, TX-P3) belongs here too
+        // and is absent because the enum does not hold it yet; it joins the list in the release
+        // that adds the variant, and until then it cannot arrive. A redaction joined it in
+        // TX-P2 step 4, in the commit that added the variant, which is the rule this comment
+        // asks for applied rather than restated.
         //
         // Pending attestations are retried inside `rebuild_adjacency`, and skipping the
         // rebuild cannot delay one indefinitely: an attestation lands when its subject
@@ -1168,7 +1179,10 @@ impl Store {
         let moves_edges = !records.iter().all(|r| {
             matches!(
                 r,
-                Record::Manifest(_) | Record::PartText(_) | Record::PartReading(_)
+                Record::Manifest(_)
+                    | Record::PartText(_)
+                    | Record::PartReading(_)
+                    | Record::Redaction(_)
             )
         });
         self.records.extend(records);

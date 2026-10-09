@@ -144,6 +144,10 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
                 write_resolution(&mut out, res, &known, ctx)
             }
             Record::Commit(c) if commit_has_surface_form(c) => write_commit(&mut out, c, ctx),
+            // Last of all, where the parser resolves them: a redaction's `reason` names a unit
+            // the reader has met, and the writer's order has to be the parser's or the round
+            // trip is not a fixed point.
+            Record::Redaction(r) => write_redaction(&mut out, r, ctx),
             // Records with no surface form travel as CBOR only.
             _ => {}
         }
@@ -423,6 +427,25 @@ fn write_commit(out: &mut String, c: &crate::types::lifecycle::Commit, ctx: &Wri
     ));
     if let Some(u) = &c.note {
         out.push_str(&format!(", note: {}", ctx.reference(u)));
+    }
+    out.push_str(" }\n\n");
+}
+
+/// `@redact <tid> { agent: …, ts: […] }` (1.10, rule Z).
+///
+/// Always has a surface form. A part text has none and a redaction does, which is the
+/// asymmetry rule Z is made of: the bytes never travel as text, and the statement that they
+/// are to be held no longer always can — including into a store that never had them.
+fn write_redaction(out: &mut String, r: &crate::types::library::Redaction, ctx: &WriteContext) {
+    out.push_str(&format!(
+        "@redact {} {{ agent: {}, ts: [{}, {}]",
+        r.tid.canonical(),
+        quoteless_or_quoted(r.agent.as_str()),
+        r.ts.wall_ms,
+        r.ts.counter
+    ));
+    if let Some(u) = &r.reason {
+        out.push_str(&format!(", reason: {}", ctx.reference(u)));
     }
     out.push_str(" }\n\n");
 }

@@ -13,6 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::ids::{Mid, Tid};
+use smysl_core::types::library::Redaction;
 use smysl_core::types::Manifest;
 use smysl_core::Uid;
 
@@ -35,6 +36,12 @@ pub(super) struct Library {
     pub(super) superseded: BTreeSet<Mid>,
     /// Units whose source reference names a part, by that part's tid.
     pub(super) by_tid: BTreeMap<Tid, BTreeSet<Uid>>,
+    /// Redactions, by the tid each names (rule Z, record 19).
+    ///
+    /// A **set** per tid rather than one redaction: two peers may each redact the same part,
+    /// and both records are facts. Keeping both is also what makes the merge idempotent
+    /// without a tie-break — a set union needs no rule about which of two agents to believe.
+    pub(super) redactions: BTreeMap<Tid, BTreeSet<Redaction>>,
     //
     // **No `by_mid`**, though §4.3.2 lists one. It would be fed from `source.manifest`, and
     // that field arrives in TX-P5 (§4.3.1) — so a map built now could only ever be empty,
@@ -55,6 +62,15 @@ impl Library {
             self.superseded.insert(previous);
         }
         self.manifests.entry(mid).or_insert_with(|| m.clone());
+    }
+
+    /// Record a redaction. Idempotent, and the set only ever grows.
+    ///
+    /// Which is the whole of rule Z's algebra: the union of two stores' redactions does not
+    /// depend on the order they merged in, and a store that has let a part go cannot be talked
+    /// back into holding it by a peer that still has it.
+    pub(super) fn absorb_redaction(&mut self, r: &Redaction) {
+        self.redactions.entry(r.tid).or_default().insert(r.clone());
     }
 
     /// Index a unit by the part and the manifest its source names.
@@ -104,6 +120,25 @@ impl Store {
     /// How many manifests the store holds.
     pub fn manifest_count(&self) -> usize {
         self.library.manifests.len()
+    }
+
+    /// Every redaction the store holds, by the part each names (rule Z).
+    pub fn redactions(&self) -> impl Iterator<Item = (&Tid, &BTreeSet<Redaction>)> + '_ {
+        self.library.redactions.iter()
+    }
+
+    /// Whether any redaction in this store names this part.
+    ///
+    /// The question rule Z is enforced by, and the reason it is a question about the **store**
+    /// rather than about a record: a part is redacted if *anybody* whose records reached here
+    /// said so, and a merge only ever adds to that.
+    pub fn is_redacted(&self, tid: &Tid) -> bool {
+        self.library.redactions.contains_key(tid)
+    }
+
+    /// How many parts this store holds a redaction for.
+    pub fn redacted_count(&self) -> usize {
+        self.library.redactions.len()
     }
 
     /// Every expression alias the store has a manifest for, in order.

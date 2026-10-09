@@ -262,6 +262,64 @@ const OPS: &[Op] = &[
         ]),
     },
     Op {
+        name: "text_redact",
+        // Rule Z (TX-P2 step 4): record 19 into the catalog, then the objects unlinked. What is
+        // compared is stdout — the tid, the agent, how many objects went and how many manifests
+        // still name the part — so an unlink that found a different number of objects, or a
+        // record that encoded differently, shows up here.
+        //
+        // `--at` is given, because without it this reads a clock and a clock is not a function
+        // of its arguments. That is not a weakening: what rule D is about is everything *else*
+        // in the operation, and pinning the one input that is a wall clock is how the other
+        // registered writing operations are compared too.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "text",
+            "redact",
+            // The tid of `fixtures/library/readers/gen1.usfm`'s only part, which the setup
+            // below adds. Written out rather than read back from the setup's output, because an
+            // operation whose argument came from the previous command's stdout would be
+            // comparing the pair rather than this one.
+            "t3:rzmgkk46zz6hvqsysq2fuayq4lbqkwqc2c7t4c2ee5yoa5heh67q",
+            "-s",
+            SCRATCH,
+            "--as",
+            "human:vu",
+            "--at",
+            "1726500000000",
+        ],
+        setup: Some(&[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "text",
+            "add",
+            "fixtures/library/readers/gen1.usfm",
+            "-s",
+            SCRATCH,
+            "--reader",
+            "usfm/1",
+            "--alias",
+            "kjv/gen",
+            "--licence",
+            "public-domain",
+            "--carry",
+            "text",
+            "--lang",
+            "en",
+        ]),
+    },
+    Op {
         name: "text_append",
         // A second version of an expression (TX-P2 step 3): the head manifest read back, the
         // reader and the policy taken from it, the new text cut, and the `supersedes` chain.

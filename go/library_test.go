@@ -37,7 +37,13 @@ type libVectors struct {
 		MidHex  string `json:"mid_hex"`
 		BodyHex string `json:"body_hex"`
 	} `json:"manifest"`
-	Parts       []libPart         `json:"parts"`
+	Parts     []libPart `json:"parts"`
+	Redaction struct {
+		TidHex  string `json:"tid_hex"`
+		Agent   string `json:"agent"`
+		TsMs    uint64 `json:"ts_ms"`
+		BodyHex string `json:"body_hex"`
+	} `json:"redaction"`
 	DomainBytes map[string]uint64 `json:"domain_bytes"`
 }
 
@@ -200,7 +206,7 @@ func TestTheRecordFixtureRoundTripsAndNamesEveryLibraryCode(t *testing.T) {
 	if !bytes.Equal(out, data) {
 		t.Error("the fixture did not round-trip")
 	}
-	for _, code := range []uint64{14, 15, 18} {
+	for _, code := range []uint64{14, 15, 18, 19} {
 		if len(of(records, code)) == 0 {
 			t.Errorf("record %d is not in the fixture", code)
 		}
@@ -208,7 +214,7 @@ func TestTheRecordFixtureRoundTripsAndNamesEveryLibraryCode(t *testing.T) {
 	// The fixture also carries codes this implementation still does not understand, which keeps
 	// the distinction in understoodRecords an observed fact rather than a claim.
 	var unknown int
-	for _, code := range []uint64{16, 17, 19} {
+	for _, code := range []uint64{16, 17} {
 		unknown += len(of(records, code))
 	}
 	if unknown == 0 {
@@ -217,6 +223,33 @@ func TestTheRecordFixtureRoundTripsAndNamesEveryLibraryCode(t *testing.T) {
 	for _, r := range records {
 		if r.IsKnown() != understoodRecords[r.Code] {
 			t.Errorf("record %d: IsKnown disagrees with the table", r.Code)
+		}
+	}
+}
+
+// Record 19, rule Z (1.10).
+//
+// The part it names is deliberately **not** in the fixture, which is the state honouring a
+// redaction leaves behind: the record remains and the bytes are gone. A reader that expected the
+// two to travel together would have nothing to decode here.
+func TestARedactionDecodesIntoItsNamedFields(t *testing.T) {
+	v, records := libFixtures(t)
+	r, err := DecodeRedaction(of(records, 19)[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hex.EncodeToString(r.Tid) != v.Redaction.TidHex {
+		t.Errorf("tid %s, want %s", hex.EncodeToString(r.Tid), v.Redaction.TidHex)
+	}
+	if r.Agent != v.Redaction.Agent {
+		t.Errorf("agent %q, want %q", r.Agent, v.Redaction.Agent)
+	}
+	if r.Reason != nil {
+		t.Error("this redaction names no reason")
+	}
+	for _, p := range v.Parts {
+		if p.TidHex == v.Redaction.TidHex {
+			t.Error("the part it names must not be in the fixture")
 		}
 	}
 }

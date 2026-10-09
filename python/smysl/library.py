@@ -100,6 +100,17 @@ PART_READING_KEYS = {
     3: "raw",
 }
 
+#: §3.1, redaction (19). Rule Z: the part this names is to be held no longer.
+#:
+#: The same four keys a withdrawal has, in the same order — both say "this is no longer to be
+#: acted on", by whom, when, and optionally why.
+REDACTION_KEYS = {
+    0: "tid",
+    1: "agent",
+    2: "ts",
+    3: "reason",
+}
+
 #: §3.1, a segment row inside a reading's key 2.
 SEGMENT_KEYS = {
     0: "start",
@@ -417,3 +428,46 @@ def decode_library_record(code: int, body: Any):
     if code == 18:
         return PartReading.decode(body)
     raise CborError(f"record {code} is not a library record this module decodes")
+
+
+@dataclass(frozen=True)
+class Redaction:
+    """Record 19, rule Z: this part's text is to be held no longer.
+
+    No identity of its own — a redaction is a statement *about* a part, named by that part's
+    tid — so there is no ``redaction_id`` here and nothing to derive. What a reader of a store
+    does with it is refuse to hold a record 15 or 18 for that tid, including one arriving from a
+    peer that never saw the redaction.
+    """
+
+    tid: bytes
+    agent: str
+    ts: Any
+    reason: Optional[bytes] = None
+    extra: dict[int, Any] = field(default_factory=dict)
+    body: Any = None
+
+    @classmethod
+    def decode(cls, body: Any) -> "Redaction":
+        if not isinstance(body, dict):
+            raise LibraryError("a redaction body is a map")
+        for required in (0, 1, 2):
+            if required not in body:
+                raise LibraryError(
+                    f"a redaction needs key {required} ({REDACTION_KEYS[required]})"
+                )
+        if not isinstance(body[0], bytes) or len(body[0]) != 32:
+            raise LibraryError("a redaction's tid is 32 bytes")
+        if not isinstance(body[1], str):
+            raise LibraryError("a redaction's agent is text")
+        reason = body.get(3)
+        if reason is not None and (not isinstance(reason, bytes) or len(reason) != 32):
+            raise LibraryError("a redaction's reason is a uid")
+        return cls(
+            tid=body[0],
+            agent=body[1],
+            ts=body[2],
+            reason=reason,
+            extra={k: v for k, v in body.items() if k > 3},
+            body=body,
+        )

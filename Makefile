@@ -460,11 +460,17 @@ live-hosted: ## Live ingest gate against whichever hosted providers have keys se
 	SMYSL_INGEST_LIVE=1 $(CARGO) test -p smysl-ingest --features gemini,deepseek,openai,anthropic \
 		--test providers_live -- --nocapture --test-threads=1
 
-# The two parser targets, plus three that fuzz the *algebra*: rule U's join-semilattice
-# laws, pack's constraints C1-C7, and rule L with guarantee A1 across the pipeline. The
-# properties are the ones the seeded tests already assert; what changes is that coverage
-# feedback drives the search instead of a fixed seed and 200 blind rounds.
-FUZZ_TARGETS := surface cbor merge_algebra pack_constraints pipeline pack_exact
+# The parser targets, plus the ones that fuzz the *algebra*: rule U's join-semilattice laws,
+# pack's constraints C1-C7, rule L with guarantee A1 across the pipeline, and rule Z's
+# redaction set. The properties are the ones the seeded tests already assert; what changes is
+# that coverage feedback drives the search instead of a fixed seed and 200 blind rounds.
+#
+# **`readers` was missing from this list until TX-P2 step 4**, which is why it is worth a line:
+# the target has existed since TX-P1 step 3, `make fuzz-build` compiled it, `make seed-fuzz`
+# seeds it, and `make fuzz` never ran it. A target nothing runs is the same defect as a gate
+# nothing runs, found the same way — by reading the list rather than by a failure.
+FUZZ_TARGETS := surface cbor merge_algebra pack_constraints pipeline pack_exact readers \
+                redaction_merge
 
 # Seeds, not a corpus. The repo already holds inputs worth starting from — the corpus
 # fixtures are real `.smy` documents, and `fuzz/artifacts/` holds every input that has ever

@@ -515,7 +515,7 @@ command says so rather than pretending.
 
 #section("text")
 
-*Library: add, append, list and show texts.* Pure · TX-P1.
+*Library: add, append, list, show and redact texts.* Pure · TX-P1.
 
 The store argument is a **library root** rather than a log — a directory with a `LIBRARY`
 marker file in it, which `text add` creates. There is no separate flag for it: every command
@@ -526,8 +526,8 @@ keeps the meaning it has always had.
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
-    ([`ACTION`], [positional, required], [`add`, `append`, `ls` or `show`.]),
-    ([`TARGET`], [positional], [The file, for `add` and `append`; `<alias|mid>#<locator>` for `show`.]),
+    ([`ACTION`], [positional, required], [`add`, `append`, `ls`, `show` or `redact`.]),
+    ([`TARGET`], [positional], [The file, for `add` and `append`; `<alias|mid>#<locator>` for `show`; a tid for `redact`.]),
     ([`--reader`], [`R`], [Reader id, such as `txt/1` or `osis/1`. Required by `add`, and recorded in the manifest: it is what `SMY-E401` compares against when a corpus is re-read. Nine in a default build: `txt/1`, `md/1`, `usfm/1`, `osis/1`, `zefania/1`, `json/1`, `telegram/1`, `slack/1`, `whatsapp/1`.]),
     ([`--alias`], [`A`], [The alias the expression is catalogued under. Required by `add`.]),
     ([`--licence`], [`SPDX`], [The licence the text is under. Required by `add`; a missing one is not `unknown`, it is a decision nobody made.]),
@@ -539,6 +539,9 @@ keeps the meaning it has always had.
     ([`--forks`], [—], [`ls`: show only the aliases with more than one head (`SMY-W418`).]),
     ([`--raw`], [—], [`show`: print the passage's bytes with no heading.]),
     ([`--segments`], [—], [`show`: list the segments the passage covers, with their levels and locators — and, where the reader filled them, the speaker and the timestamp. A chat reading is the first one where those are not empty.]),
+    ([`--as`], [`AGENT`], [`redact`: the agent issuing the redaction. Required — a redaction is an act by somebody, and a default would invent one.]),
+    ([`--at`], [`MS`], [`redact`: the wall clock for the record, in milliseconds. Defaults to now.]),
+    ([`--reason`], [`UID`], [`redact`: a unit saying why. Optional, because a legal demand arrives before anybody writes it down and a store that waited for the paperwork would hold the text for as long as the paperwork took.]),
   ),
 )
 
@@ -573,6 +576,30 @@ appended message would get a second pseudonym for somebody already in the corpus
 failure `SMY-E450` exists to prevent, reached by way of the flag meant to prevent it. An append
 to a pseudonymised expression without the flag is `SMY-E450`; with it, and with no key file, it
 is a refusal that says `text add --pseudonymise` is what creates one.
+
+*`text redact`.* `text redact <tid> --as AGENT` is **rule Z**: this part's text is to be held no
+longer. It writes record 19 into the catalog and then unlinks the bytes — the part's object and
+the reading of it — in that order, because a process killed between the two then leaves a catalog
+that has said what it is doing and an object store that has not caught up, and opening the library
+is where that is put right. The other order leaves bytes gone with nothing to say why, which is
+indistinguishable from loss.
+
+What it does *not* do is retract anything. The manifests that name the part stay, the units drawn
+from it stay, their spans and uids stay, and `check` is still clean afterwards. A text that may no
+longer be held does not stop having been read, and a corpus that quietly dropped the claims made
+from it would be answering a demand by falsifying its own history. Asking for the passage
+afterwards says the part has been redacted rather than naming a missing file.
+
+A redaction only ever spreads. Adding the source file again does not bring the bytes back: the
+objects are withheld and the command says so, while the manifest is still written. Merging a peer
+that never heard of the redaction does not bring them back either — the rule is enforced over the
+union of what every participant has said, which is what makes the merge of two libraries the same
+library whatever order they meet in. And a part this library never held can be redacted too: that
+is the case the record exists for, because it is what stops the part arriving later.
+
+The tid is spelled in full, as `text add` and `text show` print it. The 26-character short form is
+refused here as everywhere, and here the cost of an abbreviation would be a redaction that names
+no part or the wrong one.
 
 `ls` prints a fork as a fork rather than resolving it, and `show` refuses an alias with two
 heads instead of picking one — printing the lower-sorting identity would make the answer depend

@@ -83,7 +83,7 @@ specific older reader, the amendment says so and states the cost.
 | A-9 | spec §3.1 | granularity key 5 `estimator`; estimator registry | FC-6 | TX-P0 |
 | A-10 | spec §4 | surface: reserved words, `lang`, `source` keys, `@schema` fields and lenses, strict `source` | — | per construct |
 | A-11 | spec §5 | standard extension schemas `x.text/v1`, `x.query/v1`; uid-typed payload keys | FC-5 | TX-P5, TX-P8 |
-| A-12 | spec §6 | rules **N** (naming), **E** (effective time), **Z** (redaction); proposition classes; time contentions | — | TX-P2 (Z), TX-P3 (E), TX-P7 (classes), TX-P12 (N) |
+| A-12 | spec §6 | rules **N** (naming), **E** (effective time), **Z** (redaction); proposition classes; time contentions | — | TX-P2 (Z, **folded in at step 4**: §6's rule table and §3.1's record 19 both carry it), TX-P3 (E), TX-P7 (classes), TX-P12 (N) |
 | A-13 | spec §7 | conformance: C-Read additions, new class **C-Library**, C-Produce and C-Merge additions | — | per phase |
 | A-14 | spec §8 | registry and activation | — | at acceptance |
 

@@ -20,20 +20,21 @@ var RecordNames = map[uint64]string{
 // Not the same question as RecordNames, and conflating the two was wrong before it was
 // consequential: IsKnown was derived from the name table and documented as whether this version
 // understands the record, which was already false for 9 — a checkpoint nothing has ever
-// implemented — and harmless only because nothing emits one. 1.10 writes manifests, part texts
-// and part readings, and a reader calling those known while interpreting none of them would be
-// exactly the silence SMY-W014 exists to break.
+// implemented — and harmless only because nothing emits one. 1.10 writes manifests, part texts,
+// part readings and redactions, and a reader calling those known while interpreting none of them
+// would be exactly the silence SMY-W014 exists to break.
 //
 // An unknown record is still preserved verbatim and re-encoded byte for byte; that is C-Read
 // and it is unaffected.
-// 14, 15 and 18 joined in 1.10: library.go decodes their bodies and derives the four
-// identities over them. 9, 16, 17 and 19 are still named and not understood — nothing emits a
-// checkpoint, 16 is reserved, and 17 and 19 land with the releases that write them. The
+// 14, 15, 18 and 19 joined in 1.10: library.go decodes their bodies and derives the four
+// identities over the first three — a redaction has none, being a statement about a part rather
+// than a thing the format refers to. 9, 16 and 17 are still named and not understood: nothing
+// emits a checkpoint, 16 is reserved, and 17 lands with the release that writes it. The
 // separation above is what makes that sentence sayable.
 var understoodRecords = map[uint64]bool{
 	1: true, 2: true, 3: true, 4: true, 5: true, 6: true,
 	7: true, 8: true, 10: true, 11: true, 12: true, 13: true,
-	14: true, 15: true, 18: true,
+	14: true, 15: true, 18: true, 19: true,
 }
 
 // UnitKeys is the table in §2.2. Anything at 9 or above is an unknown key that rule X says

@@ -25,7 +25,7 @@ use crate::types::annex::{
 use crate::types::epistemics::{Date, Lod, SourceKind, SourceRef, Status};
 use crate::types::estimate::ProfileEstimator;
 use crate::types::library::{
-    Calendar, Carry, Manifest, ParentKind, PartEntry, PartReading, PartText,
+    Calendar, Carry, Manifest, ParentKind, PartEntry, PartReading, PartText, Redaction,
 };
 use crate::types::lifecycle::{Commit, Commitment, Resolution, ResolutionTarget, Withdrawal};
 use crate::types::provenance::{Attestation, Hlc, Op, Rung};
@@ -509,6 +509,23 @@ pub fn part_reading_bytes(r: &PartReading) -> Vec<u8> {
     m.into_bytes()
 }
 
+/// The canonical bytes of a redaction body (record 19, rule Z).
+///
+/// No identity of its own, and that is a decision rather than an omission: a redaction is not
+/// a thing the format refers to. A withdrawal has none either, for the same reason — both are
+/// statements about something else, named by the identity of that something else.
+pub fn redaction_bytes(r: &Redaction) -> Vec<u8> {
+    let mut m = MapBuilder::new();
+    m.put(keys::redaction::TID, |e| e.bytes(r.tid.as_bytes()));
+    m.put(keys::redaction::AGENT, |e| e.text(r.agent.as_str()));
+    m.put(keys::redaction::TS, |e| enc_hlc(e, &r.ts));
+    m.put_opt(keys::redaction::REASON, r.reason.as_ref(), |e, u| {
+        e.bytes(u.as_bytes())
+    });
+    m.put_extra(&r.extra);
+    m.into_bytes()
+}
+
 /// Encode one record as a complete envelope.
 pub fn to_cbor(r: &Record) -> Vec<u8> {
     let payload = match r {
@@ -527,6 +544,7 @@ pub fn to_cbor(r: &Record) -> Vec<u8> {
         Record::Manifest(m) => manifest_bytes(m),
         Record::PartText(p) => part_text_bytes(p),
         Record::PartReading(r) => part_reading_bytes(r),
+        Record::Redaction(r) => redaction_bytes(r),
         Record::Unknown { payload, .. } => payload.clone(),
     };
     let mut e = Enc::with_capacity(payload.len() + 4);
@@ -1664,6 +1682,42 @@ fn dec_part_reading(d: &mut Dec<'_>) -> Res<PartReading> {
     Ok(r)
 }
 
+fn dec_redaction(d: &mut Dec<'_>) -> Res<Redaction> {
+    let at = d.position();
+    let mut tid = None;
+    let mut agent = None;
+    let mut ts = None;
+    let mut reason = None;
+    let mut extra = Extra::new();
+    read_map(d, &mut extra, |d, k| match k {
+        keys::redaction::TID => {
+            tid = Some(Tid::from_bytes(dec_32(d)?));
+            Ok(true)
+        }
+        keys::redaction::AGENT => {
+            agent = Some(AgentId::new(d.text()?).map_err(|_| bad(at))?);
+            Ok(true)
+        }
+        keys::redaction::TS => {
+            ts = Some(dec_hlc(d)?);
+            Ok(true)
+        }
+        keys::redaction::REASON => {
+            reason = Some(d.uid()?);
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+    let mut r = Redaction::new(
+        tid.ok_or_else(|| bad(at))?,
+        agent.ok_or_else(|| bad(at))?,
+        ts.ok_or_else(|| bad(at))?,
+    );
+    r.reason = reason;
+    r.extra = extra;
+    Ok(r)
+}
+
 /// Decode one record envelope, returning it and the number of bytes consumed.
 pub fn from_cbor(bytes: &[u8]) -> Res<(Record, usize)> {
     let mut d = Dec::new(bytes);
@@ -1688,6 +1742,7 @@ pub fn from_cbor(bytes: &[u8]) -> Res<(Record, usize)> {
         code::MANIFEST => Record::Manifest(dec_manifest(&mut d)?),
         code::PART_TEXT => Record::PartText(dec_part_text(&mut d)?),
         code::PART_READING => Record::PartReading(dec_part_reading(&mut d)?),
+        code::REDACTION => Record::Redaction(dec_redaction(&mut d)?),
         other => {
             // `SMY-W014`: preserved verbatim, skipped semantically. The payload is parsed
             // strictly, so an unknown record cannot smuggle in a non-deterministic encoding.

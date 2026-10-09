@@ -546,7 +546,7 @@ ui         --verbose
 ui         --seed-check
 ui         --help
 text       <ACTION>
-text       [possible values: add, append, ls, show]
+text       [possible values: add, append, ls, show, redact]
 text       [TARGET]
 text       --config
 text       --reader
@@ -566,11 +566,14 @@ text       --no-color
 text       --param
 text       --noprogress
 text       --pseudonymise
-text       --forks
+text       --as
 text       --json
+text       --at
 text       --quiet
+text       --reason
+text       --verbose
+text       --forks
+text       --seed-check
 text       --raw
 text       --segments
-text       --verbose
-text       --seed-check
 text       --help

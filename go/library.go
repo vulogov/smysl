@@ -69,6 +69,15 @@ var PartReadingKeys = map[uint64]string{
 	0: "tid", 1: "reader", 2: "segments", 3: "raw",
 }
 
+// RedactionKeys is record 19's key table (§3.1). Rule Z: the part this names is to be held no
+// longer.
+//
+// The same four keys a withdrawal has, in the same order — both say "this is no longer to be
+// acted on", by whom, when, and optionally why.
+var RedactionKeys = map[uint64]string{
+	0: "tid", 1: "agent", 2: "ts", 3: "reason",
+}
+
 // SegmentKeys is a segment row's key table, inside a reading's key 2 (§3.1).
 var SegmentKeys = map[uint64]string{
 	0: "start", 1: "end", 2: "level", 3: "locator", 4: "lang",
@@ -459,6 +468,58 @@ func DecodePartReading(r *Record) (*PartReading, error) {
 			return nil, err
 		}
 		g.BodyRaw = b
+	}
+	return g, nil
+}
+
+// Redaction is record 19: this part's text is to be held no longer (rule Z).
+//
+// No identity of its own — a redaction is a statement about a part, named by that part's tid —
+// so there is nothing here to derive. What a reader of a store does with it is refuse to hold a
+// record 15 or 18 for that tid, including one arriving from a peer that never saw the redaction.
+type Redaction struct {
+	Tid    []byte
+	Agent  string
+	Ts     any
+	Reason []byte
+	Extra  map[uint64]any
+	Body   *Map
+}
+
+// DecodeRedaction decodes a record 19 body.
+func DecodeRedaction(r *Record) (*Redaction, error) {
+	body, ok := r.Body.(*Map)
+	if !ok {
+		return nil, libErr("a redaction body is a map")
+	}
+	tid, err := mapBytes(body, 0, 32, "a redaction's tid")
+	if err != nil {
+		return nil, err
+	}
+	agentAny, ok := body.Get(uint64(1))
+	if !ok {
+		return nil, libErr("a redaction needs key 1 (agent)")
+	}
+	agent, ok := agentAny.(string)
+	if !ok {
+		return nil, libErr("a redaction's agent is text")
+	}
+	ts, ok := body.Get(uint64(2))
+	if !ok {
+		return nil, libErr("a redaction needs key 2 (ts)")
+	}
+	g := &Redaction{Tid: tid, Agent: agent, Ts: ts, Body: body, Extra: map[uint64]any{}}
+	if _, ok := body.Get(uint64(3)); ok {
+		reason, err := mapBytes(body, 3, 32, "a redaction's reason")
+		if err != nil {
+			return nil, err
+		}
+		g.Reason = reason
+	}
+	for _, e := range body.Entries {
+		if k, ok := e.Key.(uint64); ok && k > 3 {
+			g.Extra[k] = e.Value
+		}
 	}
 	return g, nil
 }

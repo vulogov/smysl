@@ -27,7 +27,7 @@ use crate::surface::lex::{arrow_len, find_arrow, lex, Line, LineClass};
 use crate::surface::payload::object_to_payload;
 use crate::types::annex::SchemaDecl;
 use crate::types::epistemics::{Date, SourceKind, SourcePolicy, SourceRef, Status};
-use crate::types::library::{Calendar, Carry, Manifest, ParentKind, PartEntry};
+use crate::types::library::{Calendar, Carry, Manifest, ParentKind, PartEntry, Redaction};
 use crate::types::lifecycle::{Commit, Commitment, Resolution, ResolutionTarget, Withdrawal};
 use crate::types::provenance::Hlc;
 use crate::types::relation::{RelKind, Relation};
@@ -201,6 +201,19 @@ struct RawCommit {
     span: Span,
 }
 
+/// `@redact <tid> { agent: …, ts: […] }` (1.10, rule Z).
+///
+/// Raw for one reason only: `reason` names a unit, and a unit the document declares is not
+/// known by uid until the labels are resolved. The *target* needs no resolution — it is a tid,
+/// which is a hash of bytes and spelled in full.
+struct RawRedaction {
+    tid: Tid,
+    agent: AgentId,
+    ts: Hlc,
+    reason: Option<Spanned<Ref>>,
+    span: Span,
+}
+
 struct RawThread {
     id: ThreadId,
     schema: ThreadSchema,
@@ -256,6 +269,7 @@ pub fn parse_surface_with(src: &str, opts: &ParseOptions) -> Result<ParseOutcome
         schemas: Vec::new(),
         lifecycle: Vec::new(),
         commits: Vec::new(),
+        redactions: Vec::new(),
         manifests: Vec::new(),
         view: None,
     };
@@ -275,6 +289,7 @@ struct Parser<'a> {
     schemas: Vec<SchemaDecl>,
     lifecycle: Vec<RawLifecycle>,
     commits: Vec<RawCommit>,
+    redactions: Vec<RawRedaction>,
     manifests: Vec<Manifest>,
     view: Option<RawView>,
 }
@@ -350,6 +365,11 @@ impl<'a> Parser<'a> {
                 LineClass::ManifestStart => {
                     if let Some(m) = self.manifest_record() {
                         self.manifests.push(m);
+                    }
+                }
+                LineClass::RedactStart => {
+                    if let Some(r) = self.redact_record() {
+                        self.redactions.push(r);
                     }
                 }
                 _ => {
@@ -1491,6 +1511,99 @@ impl<'a> Parser<'a> {
     /// `parts: []` by hand to say "this is an import manifest" is noise, so an omitted
     /// `parts` is an empty one. The writer omits an empty `parts` for the same reason, which
     /// is what keeps the round trip a fixed point.
+    /// `@redact <tid> { agent: …, ts: […][, reason: <unit>] }` (1.10, rule Z).
+    ///
+    /// A part text has no surface form and a redaction does, which looks inconsistent and is
+    /// not: the record says *that* a part is to be held no longer, by whom and when, and that
+    /// is exactly the half a person reads, writes and audits. The bytes it is about are the
+    /// half that never had a surface form.
+    ///
+    /// The tid is spelled in full. `Tid::parse` refuses the 26-character short form for the
+    /// reason `Uid::parse` does — an abbreviated identity weakens identity silently — and here
+    /// the cost of an abbreviation would be a redaction that names a part nobody can find, or
+    /// worse, the wrong one.
+    fn redact_record(&mut self) -> Option<RawRedaction> {
+        let l = self.lines[self.i];
+        let rest = l.text.strip_prefix("@redact").unwrap_or("").trim_start();
+        let target_txt = match rest.find('{') {
+            Some(p) => rest[..p].trim(),
+            None => {
+                self.err(
+                    Code::E001,
+                    l.span,
+                    "`@redact` needs a tid and a header with `agent` and `ts`",
+                );
+                self.recover();
+                return None;
+            }
+        };
+        let tid = match Tid::parse(target_txt) {
+            Ok(t) => t,
+            Err(_) => {
+                self.err(
+                    Code::E403,
+                    l.span,
+                    format!("`@redact` names a part by its full tid, not `{target_txt}`"),
+                );
+                self.recover();
+                return None;
+            }
+        };
+
+        let Ok((mut header, header_span)) = self.header_object(l) else {
+            self.recover();
+            return None;
+        };
+        self.advance_past(header_span.end.max(l.span.end));
+
+        let Some(agent) = header
+            .take("agent")
+            .and_then(|v| v.value.as_str().and_then(|s| AgentId::new(s).ok()))
+        else {
+            self.err(Code::E001, l.span, "`@redact` needs a valid `agent`");
+            return None;
+        };
+        let Some(ts) = header.take("ts").and_then(|v| self.hlc(&v, &agent)) else {
+            self.err(
+                Code::E001,
+                l.span,
+                "`@redact` needs `ts: [wall_ms, counter]`",
+            );
+            return None;
+        };
+        let reason = match header.take("reason") {
+            None => None,
+            Some(v) => match v.value.as_str().and_then(parse_ref) {
+                Some(r) => Some(Spanned::new(r, v.span)),
+                None => {
+                    self.err(Code::E001, v.span, "`reason` names a unit");
+                    return None;
+                }
+            },
+        };
+        // Any other key is an error, as it is for every record with a brace header: the
+        // likeliest stray one is `note:` for `reason:`, and passed over quietly it would drop
+        // the only account of why a part was redacted.
+        if let Some((k, _)) = header.iter().next() {
+            self.err(
+                Code::E001,
+                k.span,
+                format!(
+                    "`@redact` has no key `{}`; it takes `agent`, `ts` and `reason`",
+                    k.value
+                ),
+            );
+            return None;
+        }
+        Some(RawRedaction {
+            tid,
+            agent,
+            ts,
+            reason,
+            span: l.span,
+        })
+    }
+
     fn manifest_record(&mut self) -> Option<Manifest> {
         let l = self.lines[self.i];
         let rest = l.text.strip_prefix("@manifest").unwrap_or("").trim_start();
@@ -2146,6 +2259,23 @@ impl<'a> Parser<'a> {
             let mut commit = Commit::new(unit, c.level, c.agent, c.ts);
             commit.note = note;
             self.out.records.push(Record::Commit(commit));
+        }
+
+        // Redactions after the commitments, which is after everything that can be named: a
+        // `reason` is a unit the document may declare, and the resolution order here is the
+        // emission order the writer has to reproduce for the round trip to be a fixed point.
+        for r in std::mem::take(&mut self.redactions) {
+            let reason = match &r.reason {
+                None => None,
+                Some(u) => match lookup(&u.value, &mut self.out, u.span) {
+                    Some(uid) => Some(uid),
+                    None => continue,
+                },
+            };
+            let mut redaction = Redaction::new(r.tid, r.agent.clone(), r.ts);
+            redaction.reason = reason;
+            let _ = r.span;
+            self.out.records.push(Record::Redaction(redaction));
         }
 
         if let Some(v) = &self.view {

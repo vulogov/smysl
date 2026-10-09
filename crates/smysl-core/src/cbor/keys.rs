@@ -203,6 +203,19 @@ pub mod part_reading {
     pub const HIGHEST: u16 = RAW;
 }
 
+/// Redaction (type code 19, rule Z, SMYSL-2.4 §4.3.2).
+///
+/// The same four keys a withdrawal has, in the same order, and deliberately so: both say "this
+/// thing is no longer to be acted on", by whom, when, and optionally why. A reader who knows
+/// one knows the other.
+pub mod redaction {
+    pub const TID: u16 = 0;
+    pub const AGENT: u16 = 1;
+    pub const TS: u16 = 2;
+    pub const REASON: u16 = 3;
+    pub const HIGHEST: u16 = REASON;
+}
+
 /// SourceRef, nested inside a unit under [`unit::SOURCE`].
 pub mod source {
     pub const KIND: u16 = 0;

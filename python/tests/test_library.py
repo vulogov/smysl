@@ -124,11 +124,11 @@ def test_the_record_fixture_round_trips_and_names_every_library_code():
     records = _records()
     assert smysl.encode_store(records) == RECORDS
     codes = [r.code for r in records]
-    for code in (14, 15, 18):
+    for code in (14, 15, 18, 19):
         assert code in codes, f"record {code} is not in the fixture"
     # The fixture also carries codes this implementation still does not understand, which is
     # what keeps the distinction in `UNDERSTOOD_RECORDS` an observed fact rather than a claim.
-    assert {16, 17, 19} & set(codes)
+    assert {16, 17} & set(codes)
     for r in records:
         assert r.is_known == (r.code in smysl.UNDERSTOOD_RECORDS)
 
@@ -148,6 +148,29 @@ def test_a_manifest_decodes_into_its_named_fields():
         assert entry.length == expected["length"]
         assert entry.structure.hex() == expected["structure_hex"]
         assert entry.rdid.hex() == expected["rdid_hex"]
+
+
+def test_a_redaction_decodes_into_its_named_fields():
+    """Record 19, rule Z (1.10).
+
+    The part it names is **not** in the fixture, which is the state honouring a redaction leaves
+    behind: the record remains and the bytes are gone. A reader that expected the two to travel
+    together would have nothing to decode here.
+    """
+    expected = IDS["redaction"]
+    redaction = next(
+        smysl.Redaction.decode(r.body) for r in _records() if r.code == 19
+    )
+    assert redaction.tid.hex() == expected["tid_hex"]
+    assert redaction.agent == expected["agent"]
+    assert redaction.reason is None
+    # The body re-encodes to the bytes the fixture carries, which is the half a hash would
+    # otherwise be hiding: a redaction has no identity of its own, so the encoding is the only
+    # thing two implementations can disagree about.
+    assert smysl.encode_one(redaction.body).hex() == expected["body_hex"]
+    # And the part it names is nowhere in the fixture.
+    tids = {p["tid_hex"] for p in IDS["parts"]}
+    assert expected["tid_hex"] not in tids
 
 
 def test_the_mid_is_derived_from_the_body_this_implementation_re_encodes():

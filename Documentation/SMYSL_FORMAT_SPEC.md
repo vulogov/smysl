@@ -474,15 +474,15 @@ offered one for a log MUST refuse it with `SMY-E452`. Part texts and readings li
 addressed object store, as their record envelopes, so that a bundle or an export emits them
 verbatim and verification is decode-then-hash.
 
-The reason is what record 19 will ask for. Honouring a redaction means a store no longer holds
+The reason is what record 19 asks for. Honouring a redaction means a store no longer holds
 the part, and for an object store that is deleting a file; for a log it would mean rewriting the
 log. That is the one operation an append-only log cannot survive as evidence, because it resets
 the same hash chain that would have shown a rewrite — afterwards the log cannot distinguish the
 redaction from an edit, so honouring the redaction and destroying the audit trail become the
 same act. Refusing the record at the point it would enter the log is therefore cheaper than it
 looks: a store with no library beside it can neither resolve a locator nor check a span, so all
-it could do with the bytes is hold them. The rule that governs redaction is folded in with
-record 19.
+it could do with the bytes is hold them. The rule that governs redaction is **rule Z**, folded in
+with record 19 below.
 
 **Manifest (14)** — an expression at one version.
 
@@ -565,6 +565,41 @@ It has no surface form: text is not written in surface syntax.
 A segment row is `{0: start, 1: end, 2: level (text), 3: locator (text), 4: lang?, 5: speaker?,
 6: observed?, 7: ids? (map text → text), 8: tz offset in minutes?}`. An empty table is an empty
 **array**, not an absent value. Record 18 has no surface form either.
+
+**Redaction (19)** — this part's text is to be held no longer.
+
+| key | field | type | presence |
+|---:|---|---|---|
+| 0 | tid | 32 bytes, the part whose text is redacted | required |
+| 1 | agent | text, an agent id | required |
+| 2 | ts | `[wall_ms, counter]`, as every record with an `agent` carries | required |
+| 3 | reason | 32 bytes, the uid of a unit saying why | optional |
+
+A redaction has **no identity of its own**: it is a statement about a part, named by that part's
+tid, as a withdrawal is a statement about an edge. Its surface form is
+`@redact <tid> { agent: …, ts: […][, reason: <unit>] }`, and the tid is spelled in full — the
+26-character short form is refused here as it is everywhere, because an abbreviated identity in a
+redaction names either no part or the wrong one.
+
+**Rule Z** is normative and is about storage, like the rule above it:
+
+> A store MUST NOT hold a record 15 or 18 whose tid any redaction in that store names. An
+> implementation offered one MUST drop it rather than refuse the batch, and MUST count what it
+> dropped. The rule is enforced over the **union** of the redactions a store holds and those
+> arriving in the same batch.
+
+Dropped rather than refused, and the distinction carries the whole design. A peer that never saw
+a redaction will offer the part text in good faith on every merge; refusing the batch would make
+one redaction anywhere in a network a permanent merge failure, and the obvious workaround is to
+stop merging. Dropping makes the union of two stores the same store whatever order they merge in,
+and keeps a redaction a fact that only ever spreads. (`SMY-E452` is the *other* case and stays a
+refusal: a record 15 or 18 offered to a log is refused whether or not anything is redacted,
+because a log is not where text may rest.)
+
+Honouring a redaction is therefore an **unlink in an object store** and never a rewrite of a log,
+which is the point of the paragraph above: a log that held text would one day have to be rewritten
+to honour one of these, and rewriting an append-only log resets the hash chain that would have
+shown the rewrite.
 
 A **text-keyed map** — key 9 of a manifest, key 7 of a segment row, the `raw` maps — is ordered
 by its **encoded keys**, as §3 constraint 4 requires of any map. A text head carries its length
@@ -735,6 +770,7 @@ are the format-level obligations.
 | **S** | Staging — ingested units are staged, not committed, until accepted. |
 | **V1/V2** | Rendering — provenance and contentions are shown or suppressed per profile, never silently. |
 | **X** | Extensions survive (§5). |
+| **Z** | Redaction — a store holding a redaction for a tid holds no part text or reading for it, on any merge (§3.1, record 19). |
 | **D** | Determinism — pure operations are bit-reproducible functions of their inputs. |
 | **P** | On a pipe, stdout defaults to CBOR. |
 

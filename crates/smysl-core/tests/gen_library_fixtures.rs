@@ -23,6 +23,7 @@ use smysl_core::cbor::envelope::{manifest_bytes, part_reading_bytes};
 use smysl_core::cbor::writer::MapBuilder;
 use smysl_core::cbor::Enc;
 use smysl_core::surface::{parse_surface, write_surface, WriteContext};
+use smysl_core::types::library::Redaction;
 use smysl_core::{from_cbor_seq, to_cbor_seq, Manifest, PartReading, PartText, Record, Tid, Uid};
 
 fn hex(b: &[u8]) -> String {
@@ -41,6 +42,12 @@ fn dir() -> PathBuf {
 const PART_ONE: &str = "In the beginning God created the heaven and the earth.\n\
                         And the earth was without form, and void.\n";
 const PART_TWO: &str = "В начале сотворил Бог небо и землю.\n";
+
+/// The bytes of the part the fixture's redaction names — and does **not** carry.
+///
+/// Here only so that the tid is derived from something rather than invented: a fixture holding
+/// a 32-byte constant nobody can reproduce is a fixture whose first mismatch is unattributable.
+const GONE: &str = "A third part, redacted before this fixture was written.\n";
 
 /// One segment row, as `smysl-text` will build it: `{0: start, 1: end, 2: level, 3: locator}`.
 ///
@@ -66,6 +73,13 @@ struct Built {
     manifest: Manifest,
     texts: Vec<PartText>,
     readings: Vec<PartReading>,
+    /// The redaction, over a part this fixture deliberately does **not** hold.
+    ///
+    /// Which is the state rule Z leaves behind: the record remains and the bytes are gone. A
+    /// redaction naming one of the two parts here would make the fixture a record sequence that
+    /// `Store::append` filters — a conformance fixture whose records a conforming store drops is
+    /// a fixture nobody can check against.
+    redaction: Redaction,
     /// The surface document the manifest was parsed from, with the real identities in it.
     surface: String,
 }
@@ -107,6 +121,14 @@ fn build() -> Built {
         part_row(&texts[1], &readings[1], Some("ru")),
     );
 
+    // The redaction goes in the same document, so that the record and the text it is parsed
+    // from cannot drift: a change to either rewrites the committed `.smy`.
+    let gone = Tid::of(GONE.as_bytes());
+    let surface = format!(
+        "{surface}\n@redact {} {{ agent: human:vu, ts: [1726500000000, 0] }}\n",
+        gone.canonical()
+    );
+
     let out = parse_surface(&surface).unwrap();
     assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
     let manifest = out
@@ -117,11 +139,20 @@ fn build() -> Built {
             _ => None,
         })
         .expect("the document declares a manifest");
+    let redaction = out
+        .records
+        .iter()
+        .find_map(|r| match r {
+            Record::Redaction(r) => Some(r.clone()),
+            _ => None,
+        })
+        .expect("the document declares a redaction");
 
     Built {
         manifest,
         texts,
         readings,
+        redaction,
         surface,
     }
 }
@@ -144,13 +175,17 @@ fn part_row(t: &PartText, r: &PartReading, lang: Option<&str>) -> String {
 
 /// Records this build does not decode, to prove they survive it.
 ///
-/// 16 is A-5's reserved telemetry slot, which no amendment has defined; 17 and 19 are allocated
-/// and land in TX-P3 and TX-P2. All three must decode to `Record::Unknown`, re-encode byte for
-/// byte and be reported as `SMY-W014`. That is the whole argument for why adding records 14, 15
-/// and 18 is an addition rather than a version break, and it is worth asserting from the side
-/// that will actually meet them: a 1.10 build reading a 1.11 store.
+/// 16 is A-5's reserved telemetry slot, which no amendment has defined; 17 is allocated and
+/// lands in TX-P3. Both must decode to `Record::Unknown`, re-encode byte for byte and be
+/// reported as `SMY-W014`. That is the whole argument for why adding records 14, 15, 18 and 19
+/// is an addition rather than a version break, and it is worth asserting from the side that
+/// will actually meet them: a 1.10 build reading a 1.11 store.
+///
+/// **19 left this list in TX-P2 step 4.** It is a redaction now, and the fixture carries a real
+/// one — which is the better test of the same property anyway: three other implementations have
+/// to decode it, and until step 4 they were being checked against a map with one key in it.
 fn forward_records() -> Vec<Record> {
-    [16u64, 17, 19]
+    [16u64, 17]
         .into_iter()
         .map(|code| {
             let mut m = MapBuilder::new();
@@ -171,6 +206,7 @@ fn records(b: &Built) -> Vec<Record> {
     for r in &b.readings {
         v.push(Record::PartReading(r.clone()));
     }
+    v.push(Record::Redaction(b.redaction.clone()));
     v.extend(forward_records());
     v
 }
@@ -179,7 +215,7 @@ fn ids_json(b: &Built) -> String {
     let mut s = String::new();
     s.push_str("{\n");
     s.push_str(
-        "  \"purpose\": \"Records 14, 15 and 18 with their canonical body bytes and the \
+        "  \"purpose\": \"Records 14, 15, 18 and 19 with their canonical body bytes and the \
          identities derived from them (SMYSL-2.3 A-3). Each identity is BLAKE3-256 over a \
          one-byte domain prefix and a preimage: tid over the part's normalised bytes (0x0f), \
          mid over the manifest body (0x0e), rdid over the reading body (0x12). The body bytes \
@@ -208,6 +244,20 @@ fn ids_json(b: &Built) -> String {
         ));
     }
     s.push_str("  ],\n");
+    // The redaction (record 19, rule Z). No identity of its own — a redaction is a statement
+    // about a part, named by the part's tid — so what the ports have to agree on is the body
+    // bytes and the tid inside them. The part itself is deliberately absent from the fixture:
+    // that is the state a honoured redaction leaves behind.
+    s.push_str(&format!(
+        "  \"redaction\": {{ \"tid_hex\": \"{}\", \"agent\": \"{}\", \
+         \"ts_ms\": {}, \"body_hex\": \"{}\", \
+         \"note\": \"the part this names is not in the fixture, which is what honouring a \
+         redaction leaves behind\" }},\n",
+        hex(b.redaction.tid.as_bytes()),
+        b.redaction.agent.as_str(),
+        b.redaction.ts.wall_ms,
+        hex(&smysl_core::cbor::envelope::redaction_bytes(&b.redaction)),
+    ));
     s.push_str(&format!(
         "  \"domain_bytes\": {{ \"tid\": {}, \"mid\": {}, \"did\": {}, \"rdid\": {} }}\n",
         Tid::DOMAIN,

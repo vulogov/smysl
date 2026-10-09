@@ -48,13 +48,66 @@ their own evidence in the form they were written.
 **One decision still open.** OQ-34 for the hosted model's outputs as fixtures — the local model is
 Apache 2.0 and settled, the hosted one is not. It blocks nothing that has started.
 
-**TX-P1 is complete and TX-P2 is three steps in.** The library wire is in — three new record
+**TX-P1 is complete and TX-P2 is four steps in.** The library wire is in — three new record
 types, four new identities, and the first of them to be hashed over something other than a CBOR
 map — and so is everything that interprets it: the crate, now **nine** readers, the locator
 grammar the plan pointed at a document nobody has, the check pass, the CLI, and the three
 ports. One thing TX-P1 owes is a corpus rather than code, and TX-P2's first step added a second
 of exactly the same kind; its second step closed the chat half of the first. The sections below
 are newest first.
+
+### A redaction is a record, and the rule it carries lives where the bytes do
+
+**TX-P2 step 4.** Record 19, rule Z, `@redact`, and `text redact <tid> --as AGENT`. A redaction
+says that a part's text is to be held no longer: it goes into the catalog as a record, and then
+the bytes are unlinked — in that order, because a process killed between the two leaves a catalog
+that has said what it is doing and an object store that has not caught up, and opening the library
+is where that is put right. The other order leaves bytes gone with nothing to say why, which is
+indistinguishable from loss.
+
+**It is not a retraction, and that is the half worth testing.** The manifests that name the part
+stay. The units drawn from it stay, with their spans and their uids. `check` is clean afterwards.
+A text that may no longer be held does not stop having been read, and a corpus that quietly
+dropped the claims made from it would be answering a legal demand by falsifying its own history.
+
+**Rule Z's enforcement point moved one layer down, and the RFC's own sentence is why.** SMYSL-2.4
+§4.3.2 puts a filter in `Store::append` that drops a *redacted* record 15 or 18 and counts it —
+and ends with "the records would be refused by `E452` in any case". That clause is true
+unconditionally: `append` refuses **every** 15 and 18 whether anything is redacted or not, because
+a log is not where text rests. So the filter could never change an outcome and its counter could
+never be anything but zero. What a `Store` gained instead is the redaction *set* — `is_redacted`,
+`redactions`, `redacted_count` — which is the half that has to be there, because the object store
+is what asks. The drop-and-count is in `Library::add`, where the bytes are: re-adding the source
+file of a redacted part writes the manifest, withholds the objects, and says so.
+
+**Drop rather than refuse, which is the whole reason this survives a network.** A peer that never
+heard of a redaction offers the bytes in good faith on every merge. Refusing would make one
+redaction anywhere a permanent merge failure, and the workaround for that is to stop merging.
+Dropping makes the union of two libraries the same library whatever order they meet in, and keeps
+a redaction a fact that only ever spreads. `P-Z1`–`P-Z4` assert it, and they moved too: two of the
+four are about records 15 and 18, a `Store` holds neither, so in a store they were vacuously
+true — the harness is now in `smysl-text`, where there is a filesystem to hold the bytes the rule
+is about, and the fuzz target keeps the record-level half (70,459 runs, nothing found).
+
+**Three smaller decisions.** A reading goes with its part: rule Z is about 15 **and** 18, and
+although a reading holds no text it holds the offsets, the speakers and the ids the text was read
+into. "A redaction violation" gets **no diagnostic code**, which §4.3.3 left unnamed: opening a
+library unlinks any object a redaction names, so a `check` can never meet one — the violation is
+unrepresentable rather than reportable, and a code nothing can raise is worse than a missing one.
+And a redacted passage is now a sentence (`t3:… has been redacted; this library no longer holds
+its text`) where it would have been `No such file or directory` and an object path, which reads as
+a corrupt library rather than as a corpus doing what it was told.
+
+The wire fixture carries a **real** record 19 in place of the `Unknown { code: 19 }` placeholder
+it had, over a part the fixture deliberately does not hold — which is the state honouring a
+redaction leaves behind, and a better test of the same forward-compatibility property anyway: all
+three ports decode it, and `make spec-tables` now compares its key table against theirs (72
+comparisons, up from 68).
+
+Also: **`make fuzz` never ran the `readers` target.** It has existed since TX-P1 step 3,
+`fuzz-build` compiled it, `seed-fuzz` seeds it, and `FUZZ_TARGETS` did not name it — found by
+reading the list while adding `redaction_merge` to it. Both are in it now, which makes nine
+targets and nine registered determinism operations.
 
 ### Growth costs one part, not the corpus
 

@@ -4,7 +4,7 @@
 //! registration, more compact, and determinism is easier to guarantee.
 
 use crate::types::annex::{Contention, LabelBinding, PackInfo, SchemaDecl};
-use crate::types::library::{Manifest, PartReading, PartText};
+use crate::types::library::{Manifest, PartReading, PartText, Redaction};
 use crate::types::lifecycle::{Commit, Resolution, Withdrawal};
 use crate::types::provenance::Attestation;
 use crate::types::relation::Relation;
@@ -53,7 +53,7 @@ pub mod code {
     pub const DATING: u64 = 17;
     /// What one reader derived from one part (1.10).
     pub const PART_READING: u64 = 18;
-    /// A redaction, whose meaning is rule Z (TX-P2). Not yet decoded by this build.
+    /// A redaction: this part's text is to be held no longer (rule Z, TX-P2 step 4).
     pub const REDACTION: u64 = 19;
 
     pub const KNOWN: &[u64] = &[
@@ -72,6 +72,7 @@ pub mod code {
         MANIFEST,
         PART_TEXT,
         PART_READING,
+        REDACTION,
     ];
 }
 
@@ -102,6 +103,8 @@ pub enum Record {
     PartText(PartText),
     /// What one reader derived from one part (1.10). No surface form either.
     PartReading(PartReading),
+    /// A part's text is to be held no longer (1.10, rule Z).
+    Redaction(Redaction),
     /// A record type this build does not know (`SMY-W014`).
     ///
     /// Preserved verbatim - payload bytes exactly as they arrived - and skipped
@@ -131,6 +134,7 @@ impl Record {
             Record::Manifest(_) => code::MANIFEST,
             Record::PartText(_) => code::PART_TEXT,
             Record::PartReading(_) => code::PART_READING,
+            Record::Redaction(_) => code::REDACTION,
             Record::Unknown { code, .. } => *code,
         }
     }
@@ -152,6 +156,7 @@ impl Record {
             Record::Manifest(_) => "manifest",
             Record::PartText(_) => "parttext",
             Record::PartReading(_) => "partreading",
+            Record::Redaction(_) => "redaction",
             Record::Unknown { .. } => "unknown",
         }
     }
@@ -213,29 +218,32 @@ mod tests {
         assert!(!code::KNOWN.contains(&code::HOLD));
     }
 
-    /// Codes 17 and 19 are allocated by SMYSL-2.3 and land in TX-P3 and TX-P2. Until then
-    /// they decode to `Unknown` and round-trip, which is what makes them additions rather
-    /// than a version break — asserted here so that adding the variant without adding the
-    /// code to `KNOWN`, or the reverse, fails a test instead of shipping.
+    /// Codes 17 and 19 are allocated by SMYSL-2.3 and land in TX-P3 and TX-P2. **19 has
+    /// landed** (TX-P2 step 4, rule Z); 17 has not, so it still decodes to `Unknown` and
+    /// round-trips, which is what makes it an addition rather than a version break — asserted
+    /// here so that adding the variant without adding the code to `KNOWN`, or the reverse,
+    /// fails a test instead of shipping.
     #[test]
-    fn dating_and_redaction_are_allocated_but_not_yet_decoded() {
+    fn dating_is_allocated_and_not_yet_decoded_and_redaction_now_is() {
         assert_eq!(code::DATING, 17);
         assert_eq!(code::REDACTION, 19);
         assert!(!code::KNOWN.contains(&code::DATING));
-        assert!(!code::KNOWN.contains(&code::REDACTION));
+        assert!(code::KNOWN.contains(&code::REDACTION));
     }
 
     /// Ascending, and with a hole. Codes 1-8 are 0.1's records; 9 stays reserved for
     /// checkpointing, whose format interacts with content addressing and must not be
     /// retrofitted; 10 is 0.2's label binding; 11 and 12 are 1.4's withdrawal and resolution;
-    /// 13 is 1.7's commitment. The list was contiguous until the hole
+    /// 13 is 1.7's commitment; 14, 15, 18 and 19 are 1.10's library records, and the two holes
+    /// at 16 and 17 are a reserved slot and a code whose phase has not landed. The list was
+    /// contiguous until the hole
     /// became real, and contiguity was never the property that mattered - being ascending
     /// and free of duplicates is, since a code is a permanent wire commitment.
     #[test]
     fn known_codes_ascend_and_skip_the_reserved_slot() {
         assert_eq!(
             code::KNOWN,
-            &[1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 18]
+            &[1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 18, 19]
         );
         assert!(code::KNOWN.windows(2).all(|w| w[0] < w[1]));
     }

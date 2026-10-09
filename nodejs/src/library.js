@@ -85,6 +85,18 @@ export const PART_READING_KEYS = new Map([
   [3, "raw"],
 ]);
 
+/** §3.1, redaction (19). Rule Z: the part this names is to be held no longer.
+ *
+ * The same four keys a withdrawal has, in the same order — both say "this is no longer to be
+ * acted on", by whom, when, and optionally why.
+ */
+export const REDACTION_KEYS = new Map([
+  [0, "tid"],
+  [1, "agent"],
+  [2, "ts"],
+  [3, "reason"],
+]);
+
 export const SEGMENT_KEYS = new Map([
   [0, "start"],
   [1, "end"],
@@ -436,7 +448,43 @@ export class PartReading {
   }
 }
 
-/** Decode a record 14, 15 or 18. Anything else is not this module's business. */
+/** Record 19, rule Z: this part's text is to be held no longer.
+ *
+ * No identity of its own — a redaction is a statement *about* a part, named by that part's tid
+ * — so there is nothing here to derive. What a reader of a store does with it is refuse to hold
+ * a record 15 or 18 for that tid, including one arriving from a peer that never saw the
+ * redaction.
+ */
+export class Redaction {
+  constructor(fields) {
+    Object.assign(this, fields);
+  }
+
+  static decode(record) {
+    const body = record instanceof Map ? record : record.body;
+    if (!(body instanceof Map)) throw new LibraryError("a redaction body is a map");
+    for (const key of [0, 1, 2]) {
+      if (!body.has(key)) {
+        throw new LibraryError(`a redaction needs key ${key} (${REDACTION_KEYS.get(key)})`);
+      }
+    }
+    if (typeof body.get(1) !== "string") {
+      throw new LibraryError("a redaction's agent is text");
+    }
+    const extra = new Map();
+    for (const [k, v] of body) if (k > 3) extra.set(k, v);
+    return new Redaction({
+      tid: needBytes(body, 0, 32, "a redaction's tid"),
+      agent: body.get(1),
+      ts: body.get(2),
+      reason: body.has(3) ? needBytes(body, 3, 32, "a redaction's reason") : null,
+      extra,
+      body,
+    });
+  }
+}
+
+/** Decode a record 14, 15, 18 or 19. Anything else is not this module's business. */
 export function decodeLibraryRecord(record) {
   switch (record.code) {
     case 14:
@@ -445,6 +493,8 @@ export function decodeLibraryRecord(record) {
       return PartText.decode(record);
     case 18:
       return PartReading.decode(record);
+    case 19:
+      return Redaction.decode(record);
     default:
       throw new CborError(`record ${record.code} is not a library record this module decodes`);
   }

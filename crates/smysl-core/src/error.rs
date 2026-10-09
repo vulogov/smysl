@@ -807,6 +807,20 @@ pub enum LibError {
         key: String,
         reason: String,
     },
+    /// The part asked for has been redacted (rule Z).
+    ///
+    /// **No code**, and the reason is the one `NotText` and `NoParts` give in the other
+    /// direction: nothing is wrong. A redacted part is absent *by design*, the catalog says so,
+    /// and a command asking for its bytes is asking for something the store is forbidden to
+    /// hold. There is no defect for a later `check` to be asked about — a corpus in exactly
+    /// this state is a correct one.
+    ///
+    /// It exists so that the refusal is a sentence rather than `No such file or directory` and
+    /// an object path, which is what a caller saw before TX-P2 step 4 wired it in.
+    Redacted {
+        /// The part, in text form.
+        tid: String,
+    },
     /// The filesystem refused. The message is the operating system's; the path is named
     /// relative to the library root, never absolutely, so a diagnostic can be pasted into a
     /// bug report.
@@ -828,6 +842,7 @@ impl LibError {
             | LibError::Unreadable { .. }
             | LibError::NoParts { .. }
             | LibError::BadParam { .. }
+            | LibError::Redacted { .. }
             | LibError::Io { .. } => None,
         }
     }
@@ -893,6 +908,10 @@ impl fmt::Display for LibError {
                 f,
                 "{}: record {record} does not belong in a log; text lives in the object store",
                 Code::E452
+            ),
+            LibError::Redacted { tid } => write!(
+                f,
+                "{tid} has been redacted; this library no longer holds its text"
             ),
             LibError::BadAlias { alias } => write!(f, "`{alias}` is not a valid alias"),
             LibError::Unreadable { reader, at, what } => {

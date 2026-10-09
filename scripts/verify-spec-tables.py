@@ -227,6 +227,9 @@ def main() -> int:
     manifest_keys = canon_map(
         table_after(text[text.find("**Manifest (14)**"):], "| key | field | type | presence |", 0, 1)
     )
+    redaction_keys = canon_map(
+        table_after(text[text.find("**Redaction (19)**"):], "| key | field | type | presence |", 0, 1)
+    )
     reading_keys = canon_map(
         table_after(
             text[text.find("**Part reading (18)**"):], "| key | field | type | presence |", 0, 1
@@ -234,6 +237,7 @@ def main() -> int:
     )
     check("§3.1 manifest keys are 0..18", sorted(manifest_keys), list(range(19)))
     check("§3.1 part reading keys are 0..3", sorted(reading_keys), [0, 1, 2, 3])
+    check("§3.1 redaction keys are 0..3", sorted(redaction_keys), [0, 1, 2, 3])
 
     # §2.6's domain bytes, from the identity table rather than from prose. The spec writes them
     # as `0x0f`; the ports write them as integers, so the comparison is on the number.
@@ -307,6 +311,13 @@ def main() -> int:
         canon_map(pairs(block(py_library, "PART_READING_KEYS = {", "\n}"), PY_ROW)),
         reading_keys,
     )
+    # Record 19 since TX-P2 step 4. Checked in all three ports for the reason the others are:
+    # the table is transcribed four times, and four copies of a wire commitment drift.
+    check(
+        "python: §3.1 redaction keys",
+        canon_map(pairs(block(py_library, "REDACTION_KEYS = {", "\n}"), PY_ROW)),
+        redaction_keys,
+    )
     check(
         "python: §2.6 domain bytes",
         {
@@ -358,6 +369,10 @@ def main() -> int:
           canon_map(pairs(block(go_library, "PartReadingKeys = map[uint64]string{", "\n}"),
                           GO_ROW)),
           reading_keys)
+    check("go: §3.1 redaction keys",
+          canon_map(pairs(block(go_library, "RedactionKeys = map[uint64]string{", "\n}"),
+                          GO_ROW)),
+          redaction_keys)
     check("go: §2.6 domain bytes",
           {name: int(re.search(rf"^\t{name.title()}Domain\s+byte = (0x[0-9a-fA-F]+)$",
                                go_library, re.M).group(1), 16)
@@ -400,6 +415,9 @@ def main() -> int:
     check("nodejs: §3.1 part reading keys",
           canon_map(pairs(block(js_library, "PART_READING_KEYS = new Map([", "\n]);"), JS_ROW)),
           reading_keys)
+    check("nodejs: §3.1 redaction keys",
+          canon_map(pairs(block(js_library, "REDACTION_KEYS = new Map([", "\n]);"), JS_ROW)),
+          redaction_keys)
     check("nodejs: §2.6 domain bytes",
           {name: int(re.search(rf"^export const {name.upper()}_DOMAIN = (0x[0-9a-fA-F]+);$",
                                js_library, re.M).group(1), 16)

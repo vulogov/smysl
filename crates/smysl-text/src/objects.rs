@@ -223,6 +223,21 @@ impl ObjectStore {
         }
     }
 
+    /// Delete a reading's bytes: rule Z, with the part's.
+    ///
+    /// A reading goes with its part and not after it. Record 18 holds no text, but it holds the
+    /// offsets, the speakers and the ids the text was read into — and the spec's rule is about
+    /// 15 **and** 18 for that reason: a reading whose part is gone is a map of something nobody
+    /// may hold, and it is the half that names people.
+    pub fn remove_reading(&self, rdid: &Rdid) -> Result<bool, LibError> {
+        let path = self.reading_path(rdid);
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(io(rel(&self.root, &path), &e)),
+        }
+    }
+
     /// Write bytes to `path` through `objects/tmp/`, atomically.
     fn write(&self, path: &Path, bytes: &[u8]) -> Result<bool, LibError> {
         if path.is_file() {

@@ -79,3 +79,9 @@ name = "readers"
 path = "fuzz_targets/readers.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "redaction_merge"
+path = "fuzz_targets/redaction_merge.rs"
+test = false
+doc = false

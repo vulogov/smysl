@@ -383,6 +383,36 @@ sorted SPDX list; changing it is a code change with a test). `SMY-E402`, no over
 the catalog log, so a crash between the two is repaired on the next open (the open path enforces
 Z against the object store).
 
+**Built in TX-P2 step 4, and the rule moved one layer down.** Record 19 is decoded by this build
+and by the three ports, it has a surface form (`@redact <tid> { agent, ts[, reason] }`), rule Z is
+normative text in the format spec beside the record's key table, and `text redact` writes it.
+Five things the step settled:
+
+1. **Rule Z's enforcement point is the object store, not `Store::append`.** §4.3.2 puts a filter
+   in `append` that drops a *redacted* 15 or 18 and counts it. That filter cannot run: `append`
+   refuses **every** 15 and 18 with `SMY-E452` before it, redacted or not, because a log is not
+   where text rests (OQ-39). So the drop-and-count belongs where the bytes actually are —
+   `Library::add` withholds the objects for a redacted part, counts them in
+   `Added.objects_redacted`, and still writes the manifest. `Store`'s job is to hold the
+   redactions so the object store can ask: `is_redacted`, `redactions`, `redacted_count`.
+2. **Drop rather than refuse, and that asymmetry is the design.** A peer that never heard of a
+   redaction will offer the bytes in good faith on every merge; refusing would make one
+   redaction anywhere in a network a permanent merge failure, and the workaround for that is to
+   stop merging. The spec says so in rule Z's own words.
+3. **Opening a library is a write, in exactly one case.** `redact` appends the record and *then*
+   unlinks, so a process killed between the two leaves a catalog that has said what it is doing
+   and bytes that have not caught up. `Library::open` is where that is put right, which also
+   answers §4.3.3's "a redaction violation" with **no code**: the violation is unrepresentable
+   rather than reportable — a `check` that opened the library would find the objects already
+   gone — and a code nothing can raise is worse than none.
+4. **A reading goes with its part.** Rule Z is about 15 **and** 18. A reading holds no text, but
+   it holds the offsets, the speakers and the ids the text was read into, and it is the half
+   that names people.
+5. **A redacted passage is a sentence, not a missing file.** `LibError::Redacted` (no code, for
+   the reason `NotText` has none: nothing is wrong) is what `text show` prints, where before it
+   would have printed `No such file or directory` and an object path — which reads as a corrupt
+   library rather than as a corpus doing what it was told.
+
 ### 3.2 Readers, structure, locators (draft 3 §5)
 
 **Reader contract.**
@@ -1147,6 +1177,15 @@ pub fn summarise(&self, levels: &[Level], scope: &BTreeSet<Uid>) -> Result<Stage
   Because `merge` is `append` plus detection (§2.2), merge inherits the filter with no further
   change. The filtered union is commutative, associative and idempotent: the redaction set only
   grows, and the filter is applied to the union, whatever the order.
+
+  **Not built, and the paragraph above says why in its own last clause** (TX-P2 step 4). "The
+  records would be refused by `E452` in any case" is true *unconditionally*: `append` refuses
+  every 15 and 18 whether or not anything is redacted, so a filter placed before that refusal
+  would never change an outcome — it would be a drop nothing can reach, and `AppendReport.redacted`
+  a counter that is always zero. What `Store` gained instead is the redaction **set**
+  (`is_redacted`, `redactions`, `redacted_count`) and its absorb, which is the half that has to
+  be here; the drop-and-count is in `Library::add`, where the bytes are (`Added.objects_redacted`).
+  The algebra in the last sentence is unchanged and is now tested — `P-Z1`–`P-Z4`, §5.3.
 - **Physical erasure is an unlink, because no log holds the bytes** (OQ-39, answered 1.10.0).
   Earlier drafts gave `Store` a `rewrite_redacted` that wrote the log again without the record,
   reset `log_hasher`/`log_len` and left the sidecar to be rebuilt (`W110`). That method is not
@@ -1197,7 +1236,10 @@ New passes appended after `CommitmentSupport`, as the enum's comment requires:
   ordinary and an unreadable object is `E446`. Without a resolver the object codes are skipped
   and the report says so (as `Pass::IMPLEMENTED` does for passes this build does not run).
 - `ConformanceClass::Library` (`"C-Library"`, D-8): branches like `Merge`; forbids `E401`, `E403`,
-  `E404`, `E446`, **`E452`** and a redaction violation; does not subsume `Produce`. `ALL` gains it
+  `E404`, `E446`, **`E452`** and a redaction violation; does not subsume `Produce`. **"A redaction
+  violation" has no code, decided in TX-P2 step 4:** opening a library unlinks any object a
+  redaction names, so a `check` can never meet one — the violation is unrepresentable rather than
+  reportable, and a code nothing can raise is worse than a missing one. `ALL` gains it
   at the end, and `Full` gains the family. `E452` was added to this list in step 5: a log holding
   text is precisely what OQ-39 refused, so a C-Library consumer must not accept it. `E402` stays
   outside the family — a licence refusing to let text travel describes a correct store.
@@ -1262,7 +1304,7 @@ Cmd { name: "same-as",   about: "Propose same-as edges; derive classes",        
 | `text ls` | `[--alias A] [--forks]` | pure | P1 |
 | `text show <alias\|mid>#<locator>[-<locator>]` | `[--raw] [--segments]` | pure | P1 |
 | `text align <a> <b>` | `--scheme S` | pure | P4 |
-| `text redact <tid>` | `[--reason UID]` | pure | P2 |
+| `text redact <tid>` | `--as AGENT [--at MS] [--reason UID]` | pure | P2 (built, step 4) |
 | `date set <target>` | `--axis said\|composed\|about --value EDTF\|offset:MS\|<allen>:<target> [--basis UID]` | pure | P3 |
 | `date order <a> before <b>` | `[--basis UID]` (sugar for a relative `date set`) | pure | P3 |
 | `date show <target>` | `[--axis A] [--why]` | pure | P3 |
@@ -1442,8 +1484,11 @@ withdrawals, commitments and resolutions; optionally planted skews and contradic
 | P-E7 withdrawal | withdrawing a dating returns the output to that of the store without it |
 | P-E8 monotone evidence | adding a live dating at a status no higher than all bounds it touches never changes an applied bound; it only adds contention |
 
-**Redaction merge** (`crates/smysl-graph/tests/redaction_algebra.rs`,
-`fuzz/fuzz_targets/redaction_merge.rs`). Generator: stores with parts, readings, manifests, units,
+**Redaction merge** (~~`crates/smysl-graph/tests/redaction_algebra.rs`~~
+`crates/smysl-text/tests/redaction_algebra.rs`, `fuzz/fuzz_targets/redaction_merge.rs`). Moved in
+TX-P2 step 4: `P-Z2` and `P-Z3` are about records 15 and 18, a `Store` holds neither, and the
+place they have content is an object store — which is `smysl-text`'s. The fuzz target keeps the
+record-level half, where a filesystem would only slow the search down. Generator: stores with parts, readings, manifests, units,
 and redactions spread across peers, including peers that never saw a redaction.
 
 | property | statement |
@@ -1932,9 +1977,32 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
      `Library::add` produces; it pinned nothing wrong until step 2, because until the chat
      samples arrived no sample was lossy. Both are fixed, and the library-level cross-check now
      uses a parameterised reader instead of `notes.txt`, which has neither property.
-4. Record 19, rule Z in `Store::append`, `text redact`, `@redact`; `E452` refuses a 15 or 18
+4. ~~Record 19, rule Z in `Store::append`, `text redact`, `@redact`; `E452` refuses a 15 or 18
    offered to a log (OQ-39, so there is no `rewrite_redacted` to write). *Exit:* redaction test;
-   P-Z1–P-Z4 harness green; ports decode 19.
+   P-Z1–P-Z4 harness green; ports decode 19.~~ **Built, with rule Z one layer down from where
+   this said it would be.**
+   - Record 19 decodes in this build and in all three ports, which now carry its key table and
+     are checked against the spec's by `make spec-tables` (72 comparisons, up from 68). The wire
+     fixture carries a **real** redaction instead of the `Unknown { code: 19 }` placeholder it
+     had — over a part the fixture deliberately does not hold, which is the state honouring a
+     redaction leaves behind.
+   - `@redact` parses, writes and round-trips; `text redact <tid> --as AGENT [--at MS]
+     [--reason UID]`; `xtask determinism` registers `text_redact` as its ninth operation and
+     fourth that writes.
+   - The exit is met: `tests/cmd_redact.rs` is the redaction test, `P-Z1`–`P-Z4` are green in
+     `crates/smysl-text/tests/redaction_algebra.rs` — **moved there from `smysl-graph`**, because
+     two of the four are about records 15 and 18 and a `Store` never holds one, so in a store
+     they are vacuously true — and `fuzz/fuzz_targets/redaction_merge.rs` fuzzes the record-level
+     half (70,459 runs, nothing found).
+   - Five findings in §3.1, of which the load-bearing one is that §4.3.2's filter in
+     `Store::append` is unreachable: `SMY-E452` already refuses every 15 and 18 before it. The
+     others: a reading goes with its part; opening a library is a write in exactly one case;
+     "a redaction violation" needs no diagnostic code because the open path makes it
+     unrepresentable; and a redacted passage is now a sentence rather than a missing file.
+   - And one gap that was not this step's: **`make fuzz` never ran the `readers` target.** It has
+     existed since TX-P1 step 3, `fuzz-build` compiled it and `seed-fuzz` seeded it, and the
+     `FUZZ_TARGETS` list did not name it. Found by reading the list while adding
+     `redaction_merge` to it.
 5. `proposition::classes` — strict per SMYSL-2.3, `component` with diameter, `attested:n` —
    **moved here from TX-P7 step 1** by §0.1. It is pure, needs only `Store` and records, and
    TX-P5's consensus output cannot be read before it exists. *Exit:* strict class counts match a

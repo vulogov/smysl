@@ -386,10 +386,10 @@ fn cli() -> Command {
                     Arg::new("action")
                         .required(true)
                         .value_name("ACTION")
-                        .value_parser(["add", "append", "ls", "show"])
+                        .value_parser(["add", "append", "ls", "show", "redact"])
                         .help(
                             "add a file, append a new version of one, list the catalog, \
-                             or show a passage",
+                             show a passage, or redact a part",
                         ),
                 )
                 .arg(
@@ -401,7 +401,10 @@ fn cli() -> Command {
                     // records as correct.
                     Arg::new("target")
                         .value_name("TARGET")
-                        .help("the file for `add` and `append`, or `<alias|mid>#<locator>` for `show`"),
+                        .help(
+                            "the file for `add` and `append`, `<alias|mid>#<locator>` for \
+                             `show`, or a tid for `redact`",
+                        ),
                 )
                 .arg(
                     Arg::new("reader")
@@ -452,6 +455,25 @@ fn cli() -> Command {
                         .long("pseudonymise")
                         .help("Replace each speaker with a keyed pseudonym (`add`, `append`)")
                         .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("as")
+                        .long("as")
+                        .value_name("AGENT")
+                        .help("The agent issuing the redaction (`redact`)"),
+                )
+                .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .value_name("MS")
+                        .help("Wall clock for the record, in milliseconds (`redact`)")
+                        .value_parser(clap::value_parser!(u64)),
+                )
+                .arg(
+                    Arg::new("reason")
+                        .long("reason")
+                        .value_name("UID")
+                        .help("A unit saying why (`redact`)"),
                 )
                 .arg(
                     Arg::new("forks")
@@ -6052,8 +6074,11 @@ fn cmd_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "append" => text_append(m, &root),
         "ls" => text_ls(m, &root),
         "show" => text_show(m, &root),
+        "redact" => text_redact(m, &root),
         other => {
-            eprintln!("smysl text: `{other}` is not an action; it is add, append, ls or show");
+            eprintln!(
+                "smysl text: `{other}` is not an action; it is add, append, ls, show or redact"
+            );
             ExitCode::Usage
         }
     }
@@ -6186,6 +6211,15 @@ fn text_add(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
                 println!("  part {i}  {}", tid.canonical());
             }
             println!("objects   {} written", added.objects_written);
+            // Rule Z. Said out loud because `objects 0 written` otherwise reads as "already
+            // there", and the two are opposite facts: one means the library holds the text, the
+            // other that it is forbidden to.
+            if added.objects_redacted > 0 {
+                println!(
+                    "redacted  {} object(s) withheld: this text holds a part somebody redacted",
+                    added.objects_redacted
+                );
+            }
             if added.lossy {
                 println!("lossy     the reader dropped something the source carried");
             }
@@ -6309,6 +6343,13 @@ fn text_append(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
                 // says how much of the corpus this append touched, and the answer for a growing
                 // text is "one part" however long the text is.
                 println!("objects   {} written", added.objects_written);
+                if added.objects_redacted > 0 {
+                    println!(
+                        "redacted  {} object(s) withheld: this text holds a part somebody \
+                         redacted",
+                        added.objects_redacted
+                    );
+                }
                 if added.lossy {
                     println!("lossy     the reader dropped something the source carried");
                 }
@@ -6332,6 +6373,94 @@ fn text_append(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
         },
         Err(e) => {
             eprintln!("smysl text append: {e}");
+            e.code_exit()
+        }
+    }
+}
+
+/// `smysl text redact <tid> --as AGENT` — rule Z (SMYSL-2.4 §3.1, §4.3.2).
+///
+/// Writes record 19 and then unlinks the bytes, in that order: a process killed between the two
+/// leaves a catalog that has said what it is doing and an object store that has not caught up,
+/// and opening the library is where that is put right.
+///
+/// What it does **not** do is retract anything. The manifests that name the part stay, the units
+/// drawn from it stay, their spans and uids stay. A text that may no longer be held does not
+/// stop having been read, and a corpus that quietly dropped the claims made from it would be
+/// answering a legal demand by falsifying its own history.
+#[cfg(feature = "text")]
+fn text_redact(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
+    use smysl::text::library::Library;
+
+    let Some(target) = m.get_one::<String>("target") else {
+        eprintln!("smysl text redact: no tid given");
+        return ExitCode::Usage;
+    };
+    let tid = match smysl::Tid::parse(target) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("smysl text redact: `{target}` is not a tid: {e}");
+            eprintln!("  the full 52-character form, as `text add` and `text show` print it:");
+            eprintln!("  an abbreviated identity in a redaction names no part or the wrong one");
+            return ExitCode::Usage;
+        }
+    };
+    let Some(agent_raw) = m.get_one::<String>("as") else {
+        eprintln!("smysl text redact: --as names the agent issuing the redaction");
+        eprintln!("  a redaction is an act by somebody, and a default would invent one");
+        return ExitCode::Usage;
+    };
+    let agent = match AgentId::new(agent_raw) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl text redact: `{agent_raw}` is not an agent id: {e}");
+            return ExitCode::Usage;
+        }
+    };
+
+    let mut library = match Library::open(root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl text redact: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    let reason = match m
+        .get_one::<String>("reason")
+        .map(|r| resolve(library.store(), r))
+    {
+        None => None,
+        Some(Ok(u)) => Some(u),
+        Some(Err(e)) => {
+            eprintln!("smysl text redact: --reason: {e}");
+            return e.code;
+        }
+    };
+
+    let shards = library.shards();
+    let _locks = match smysl::text::lock::acquire_all(root, &shards, "text redact") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl text redact: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let at = record_time(m);
+    let ts = smysl::Hlc::new(at, 0, agent.clone());
+    match library.redact(&tid, &agent, ts, reason) {
+        Ok(done) => {
+            println!("redacted  {}", done.tid.canonical());
+            println!("agent     {agent}");
+            println!("objects   {} unlinked", done.objects_removed);
+            println!("manifests {} still name this part", done.manifests);
+            if done.already {
+                println!("already   this part was redacted before this call");
+            }
+            ExitCode::Success
+        }
+        Err(e) => {
+            eprintln!("smysl text redact: {e}");
             e.code_exit()
         }
     }

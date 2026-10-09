@@ -35,8 +35,9 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use smysl_core::error::LibError;
-use smysl_core::ids::{LangTag, Mid, Rdid, Tid};
-use smysl_core::types::library::{PartResolver, Resolved};
+use smysl_core::ids::{AgentId, LangTag, Mid, Rdid, Tid, Uid};
+use smysl_core::types::library::{PartResolver, Redaction, Resolved};
+use smysl_core::types::provenance::Hlc;
 use smysl_core::types::{Carry, PartEntry, PartText, Record};
 use smysl_graph::Store;
 
@@ -148,6 +149,13 @@ pub struct Added {
     /// Objects actually written. Fewer than `2 * parts.len()` means some were already there,
     /// which is what re-adding an unchanged text looks like.
     pub objects_written: usize,
+    /// Objects **not** written because rule Z forbids them: a part this library has redacted,
+    /// and its reading, counted as two.
+    ///
+    /// Non-zero means the file held a part somebody has redacted. The manifest was still
+    /// written — see `Library::add`'s rule Z comment for why — so this is the number that says
+    /// the corpus will not resolve every locator the manifest names.
+    pub objects_redacted: usize,
     /// The normalised length of the whole text.
     pub bytes: u64,
     /// The reader dropped something the source carried.
@@ -158,6 +166,27 @@ pub struct Added {
     /// printing it, and the one place that knows whether this was a growth or a first add is the
     /// call that did it.
     pub supersedes: Option<Mid>,
+}
+
+/// What [`Library::redact`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Redacted {
+    pub tid: Tid,
+    /// Objects unlinked: the part, and a reading for each manifest entry that named it.
+    ///
+    /// Zero is an ordinary outcome and not a failure: the library may never have held the
+    /// bytes. A redaction is still worth recording there — it is what stops the part arriving
+    /// later from a peer that has not heard.
+    pub objects_removed: usize,
+    /// How many part entries, across every manifest, name this part.
+    ///
+    /// Printed rather than acted on. The manifests stay: an expression that was read from a
+    /// text does not stop having been read from it, and a manifest with an unresolvable part is
+    /// the honest record of a redacted corpus.
+    pub manifests: usize,
+    /// This part was already redacted before this call.
+    pub already: bool,
 }
 
 /// One resolved passage: the part it came from, the byte range in it, and the text.
@@ -233,10 +262,107 @@ impl Library {
             message: e.to_string(),
         })?;
         let objects = ObjectStore::open(&root.join("objects"))?;
-        Ok(Library {
+        let mut library = Library {
             root: root.to_path_buf(),
             store,
             objects,
+        };
+        library.enforce_z()?;
+        Ok(library)
+    }
+
+    /// Rule Z, on the way in: no object for a part this library's catalog has redacted.
+    ///
+    /// **Opening a library is a write in exactly one case**, and this is it. `redact` appends
+    /// the record before it unlinks the objects, so a process killed between the two leaves a
+    /// catalog that says a part is redacted and an object store that still holds it — and the
+    /// next open is where that is put right. Doing it here rather than offering a `repair`
+    /// command is the difference between a rule and a suggestion: there is no way to open this
+    /// library and see the bytes.
+    ///
+    /// It is also why no diagnostic code was allocated for "a store holds a redacted part".
+    /// SMYSL-2.4 §4.3.3 lists `C-Library` as forbidding "a redaction violation" and names no
+    /// code for it; the answer this step gives is that the violation is **unrepresentable**
+    /// rather than reportable — a `check` that opened the library would find the objects
+    /// already gone, so a code for it would be one nothing can raise, which is worse than none.
+    ///
+    /// A failure to unlink is returned rather than swallowed. A library that says a part is
+    /// redacted and cannot stop holding it is the one state an operator has to hear about, and
+    /// the error names the path relative to the root as every `LibError::Io` here does.
+    fn enforce_z(&mut self) -> Result<(), LibError> {
+        if self.store.redacted_count() == 0 {
+            return Ok(());
+        }
+        // The rdids to unlink come from the manifests, which is the only place a reading's
+        // identity is written down: an object store is addressed by identity and cannot be
+        // asked which readings are *of* a part.
+        let redacted: Vec<Tid> = self.store.redactions().map(|(tid, _)| *tid).collect();
+        let mut readings: Vec<Rdid> = Vec::new();
+        for (_, manifest) in self.store.manifests() {
+            for entry in &manifest.parts {
+                if redacted.contains(&entry.tid) {
+                    readings.push(entry.rdid);
+                }
+            }
+        }
+        for tid in &redacted {
+            self.objects.remove_part(tid)?;
+        }
+        for rdid in &readings {
+            self.objects.remove_reading(rdid)?;
+        }
+        Ok(())
+    }
+
+    /// Redact a part: record 19, then the bytes (rule Z).
+    ///
+    /// The record goes into the catalog **before** the objects are unlinked, and the order is
+    /// the whole of the crash story: a process killed between the two leaves a catalog that has
+    /// said what it is doing and an object store that has not caught up, which [`Library::open`]
+    /// repairs. The other order leaves bytes gone with nothing to say why, which is
+    /// indistinguishable from loss.
+    ///
+    /// What stays: the manifests that name the part, the units drawn from it, their spans and
+    /// their uids. A redaction is not a retraction — the claims made from a text do not stop
+    /// having been made because the text may no longer be held — and §5.2's redaction test is
+    /// written around exactly that.
+    pub fn redact(
+        &mut self,
+        tid: &Tid,
+        agent: &AgentId,
+        ts: Hlc,
+        reason: Option<Uid>,
+    ) -> Result<Redacted, LibError> {
+        let mut readings: Vec<Rdid> = Vec::new();
+        let mut manifests = 0usize;
+        for (_, manifest) in self.store.manifests() {
+            for entry in &manifest.parts {
+                if &entry.tid == tid {
+                    manifests += 1;
+                    readings.push(entry.rdid);
+                }
+            }
+        }
+        readings.sort();
+        readings.dedup();
+
+        let mut record = Redaction::new(*tid, agent.clone(), ts);
+        record.reason = reason;
+        let already = self.store.is_redacted(tid);
+        self.append_records(&[Record::Redaction(record)])?;
+
+        let part = self.objects.remove_part(tid)?;
+        let mut removed = usize::from(part);
+        for rdid in &readings {
+            if self.objects.remove_reading(rdid)? {
+                removed += 1;
+            }
+        }
+        Ok(Redacted {
+            tid: *tid,
+            objects_removed: removed,
+            manifests,
+            already,
         })
     }
 
@@ -490,6 +616,7 @@ impl Library {
         }
 
         let mut written = 0usize;
+        let mut redacted = 0usize;
         let mut tids = Vec::with_capacity(plans.len());
         let mut entries: Vec<PartEntry> = Vec::with_capacity(plans.len());
         for plan in &plans {
@@ -510,12 +637,26 @@ impl Library {
             entries.push(reading.entry(plan.len()));
             tids.push(text.tid);
 
-            if self.objects.put_part(&text)? {
-                written += 1;
-            }
-            let (_, wrote) = self.objects.put_reading(&reading.to_record())?;
-            if wrote {
-                written += 1;
+            // **Rule Z, where text actually rests.** A part this library has redacted is not
+            // written back by re-adding the file it came from. Dropped and counted rather than
+            // refused, which is what the spec's rule says and what makes it survive a merge: a
+            // peer that never heard of the redaction will offer the bytes in good faith, and a
+            // refusal would turn one redaction anywhere into a permanent failure for everybody.
+            //
+            // The manifest is still written. An expression that was read from a text does not
+            // stop having been read from it, and a manifest naming a part whose bytes are not
+            // held is the honest record of a redacted corpus — `text show` reports the absence
+            // rather than inventing the text.
+            if self.store.is_redacted(&text.tid) {
+                redacted += 2;
+            } else {
+                if self.objects.put_part(&text)? {
+                    written += 1;
+                }
+                let (_, wrote) = self.objects.put_reading(&reading.to_record())?;
+                if wrote {
+                    written += 1;
+                }
             }
         }
 
@@ -537,6 +678,7 @@ impl Library {
                         mid: previous,
                         parts: tids,
                         objects_written: written,
+                        objects_redacted: redacted,
                         bytes: out.text.len() as u64,
                         lossy: out.lossy,
                         supersedes: None,
@@ -553,6 +695,7 @@ impl Library {
             mid,
             parts: tids,
             objects_written: written,
+            objects_redacted: redacted,
             bytes: out.text.len() as u64,
             lossy: out.lossy,
             supersedes,
@@ -580,7 +723,22 @@ impl Library {
 
     /// A part's text, verified against the tid it is stored under (`SMY-E446`).
     pub fn part(&self, tid: &Tid) -> Result<PartText, LibError> {
+        self.refuse_if_redacted(tid)?;
         self.objects.get_part(tid)
+    }
+
+    /// Rule Z, on the way out: say the part is redacted rather than that a file is missing.
+    ///
+    /// The objects are already gone — [`Library::open`] sees to that — so without this a caller
+    /// asking for a redacted passage got `No such file or directory` and an object path, which
+    /// reads as a corrupt library rather than as a corpus doing what it was told.
+    fn refuse_if_redacted(&self, tid: &Tid) -> Result<(), LibError> {
+        if self.store.is_redacted(tid) {
+            return Err(LibError::Redacted {
+                tid: tid.canonical(),
+            });
+        }
+        Ok(())
     }
 
     /// A reading, by rdid.
@@ -599,6 +757,7 @@ impl Library {
     /// one where the difference is visible to anybody, which is why this exists now and did not
     /// before: `text show --segments` has a speaker to print.
     pub fn part_reading(&self, mid: &Mid, tid: &Tid) -> Result<Reading, LibError> {
+        self.refuse_if_redacted(tid)?;
         let entry = self.entry_of(mid, tid)?;
         let reading = self.reading(&entry.rdid)?;
         reading.verify_entry(&entry)?;
@@ -607,6 +766,7 @@ impl Library {
 
     /// The structure of one part of one manifest, checked against the entry (`SMY-E401`).
     pub fn structure(&self, mid: &Mid, tid: &Tid, caps: &Caps) -> Result<Structure, LibError> {
+        self.refuse_if_redacted(tid)?;
         let entry = self.entry_of(mid, tid)?;
         let reading = self.reading(&entry.rdid)?;
         reading.verify_entry(&entry)?;

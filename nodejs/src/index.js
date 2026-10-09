@@ -32,6 +32,8 @@ export {
   PartText,
   RDID_DOMAIN,
   RDID_PREFIX,
+  REDACTION_KEYS,
+  Redaction,
   SEGMENT_KEYS,
   TID_DOMAIN,
   TID_PREFIX,
