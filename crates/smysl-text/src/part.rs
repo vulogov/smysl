@@ -25,6 +25,7 @@ use smysl_core::error::LibError;
 use crate::limits::Budget;
 use crate::norm::Normalised;
 use crate::reading::Level;
+use crate::reading::Segment;
 use smysl_core::types::library::PartText;
 
 /// The boundary rule and the size targets.
@@ -226,6 +227,28 @@ pub fn group(
     Ok(parts)
 }
 
+/// A reader's rows, restricted to one part and shifted to the part's own offsets.
+///
+/// The shift is the whole point and the reason this is a named function with a test. A row's
+/// `start`/`end` are offsets into **the part**, and a reader produces one table over the whole
+/// text; a part that begins at byte 70,000 would otherwise carry rows pointing past its own
+/// end, `Structure::build` would refuse the table, and the structure hash — which is over the
+/// table — would be a hash of the wrong thing in the manifest entry.
+///
+/// Nothing caught this until now because every reader fixture in the tree produces exactly one
+/// part, and for one part the shift is zero.
+pub fn local_rows(rows: &[Segment], range: &std::ops::Range<u64>) -> Vec<Segment> {
+    rows.iter()
+        .filter(|r| r.start >= range.start && r.end <= range.end)
+        .map(|r| {
+            let mut row = r.clone();
+            row.start -= range.start;
+            row.end -= range.start;
+            row
+        })
+        .collect()
+}
+
 /// Carve a part's text out of the whole, as a part text with its tid.
 ///
 /// `None` when the range is not a normalised slice of the text — out of bounds, inside a
@@ -250,6 +273,15 @@ mod tests {
 
     fn even(n: usize, size: u64) -> Vec<std::ops::Range<u64>> {
         (0..n as u64).map(|i| i * size..(i + 1) * size).collect()
+    }
+
+    fn row(start: u64, end: u64, loc: &str) -> Segment {
+        Segment::new(
+            start,
+            end,
+            Level::new("line").expect("a level"),
+            crate::locator::parse(loc).expect("a locator"),
+        )
     }
 
     #[test]
@@ -350,6 +382,33 @@ mod tests {
     /// whatever sat before the first node and after the last. A part is addressed by the hash
     /// of its bytes, so a text whose parts do not concatenate back to it has spans that mean
     /// nothing across a cut.
+    /// The shift, stated as the property the manifest entry depends on: a part's rows start at
+    /// zero and end at the part's length, whatever the part's place in the text.
+    #[test]
+    fn a_parts_rows_are_its_own_offsets() {
+        let rows = vec![row(0, 10, "L1"), row(10, 25, "L2"), row(25, 40, "L3")];
+        let second = local_rows(&rows, &(10..40));
+        assert_eq!(second.len(), 2);
+        assert_eq!((second[0].start, second[0].end), (0, 15));
+        assert_eq!((second[1].start, second[1].end), (15, 30));
+
+        // The first part is the case that hid this: its shift is zero.
+        let first = local_rows(&rows, &(0..10));
+        assert_eq!((first[0].start, first[0].end), (0, 10));
+    }
+
+    /// A row straddling a boundary belongs to neither part.
+    ///
+    /// It cannot happen from `group`, which cuts on whole nodes, and the filter is written to
+    /// be total anyway: a row half in a part would otherwise be shifted to a negative offset
+    /// and panic in a debug build.
+    #[test]
+    fn a_straddling_row_is_in_no_part() {
+        let rows = vec![row(0, 20, "L1")];
+        assert!(local_rows(&rows, &(10..20)).is_empty());
+        assert!(local_rows(&rows, &(0..10)).is_empty());
+    }
+
     #[test]
     fn the_parts_cover_every_byte_including_the_gaps_between_nodes() {
         let policy = Policy::new(Level::new("line").unwrap(), 10, 30);

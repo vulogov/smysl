@@ -1043,18 +1043,32 @@ asserts byte-identical output across all sixteen runs per operation:
 ```
 xtask determinism (rule D)
   matrix: 8 permutations
-  5 of 5 operations registered
+  7 operations registered: rule D's five, and 2 since
   pack: identical across 16 runs
   salience: identical across 16 runs
   merge: identical across 16 runs
   derive_thread: identical across 16 runs
+  text_add: identical across 16 runs
+  text_show: identical across 16 runs
   render: identical across 16 runs
 ok
 ```
 ]
 
 All five of rule D's named operations are registered and passing in this
-build. The permutation matrix targets the four things that quietly break
+build, and `text add` and `text show` have joined them (1.10.0). Those two
+are the first registered operations that *write*, which the harness could not
+compare at all until it gained a scratch directory: running one fixed command
+twice over the same library makes the second run see what the first did, and
+`text add` reports how many objects it wrote — two into an empty library, none
+into one that already holds the text, both correct and different output. Each
+of the sixteen captures now gets a directory made fresh and removed
+afterwards, so the question is the one it should always have been: the same
+input *and the same starting state* give the same bytes. `text show` needs a
+library to exist at all, so it declares `text add` as its setup, whose output
+is discarded and whose failure is not — a setup that silently did nothing
+would leave the real command printing the same refusal sixteen times and
+passing. The permutation matrix targets the four things that quietly break
 determinism in practice and nowhere else: locale-dependent collation and
 case folding, timezone-dependent date formatting, and hash-seed-dependent
 iteration order over an unordered collection — the class of bug that passes

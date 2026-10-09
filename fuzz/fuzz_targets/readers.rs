@@ -18,6 +18,7 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use smysl_text::limits::{Budget, Caps};
+use smysl_text::part::{self, Policy};
 use smysl_text::readers::{self, Input, Params};
 use smysl_text::structure::Structure;
 
@@ -86,5 +87,81 @@ fuzz_target!(|data: &[u8]| {
             "{id}: {} does not resolve to its own node",
             row.locator
         );
+    }
+
+    // Cutting the text into parts, which until now this target never did.
+    //
+    // The run that re-ran this after TX-P1 step 6 found nothing in fourteen million
+    // executions, and then reading the target back showed why: it stopped here, over the whole
+    // text, so none of the part-cutting arithmetic was reachable from it. Step 6's defect —
+    // parts bounded by their nodes, dropping the separator at every cut and the text's head and
+    // tail — was found by the first hand-written multi-part test instead, and would have been
+    // found here years earlier if the target had gone this far.
+    //
+    // The policy is sized for fuzz inputs rather than for a Bible: the default `target_min` is
+    // 64 KiB, so every input under that is one part, which is exactly the case that hid the
+    // defect.
+    let policy = Policy::new(out.top_level.clone(), 16, 64);
+    let boundaries: Vec<std::ops::Range<u64>> =
+        structure.at_level(&out.top_level).map(|n| n.range.clone()).collect();
+    if boundaries.is_empty() {
+        // A reader whose own top level names no node is a refusal in `Library::add`, not a
+        // defect here.
+        return;
+    }
+    let Ok(plans) = part::group(&boundaries, &policy, text.len() as u64, &mut budget) else {
+        // A cap refusal is as valid an outcome as any other.
+        return;
+    };
+
+    // **The parts partition the text.** Every byte is in exactly one part, including the ones
+    // no node claims.
+    assert!(!plans.is_empty(), "{id}: boundaries but no parts");
+    assert_eq!(plans[0].range.start, 0, "{id}: the first part does not start at 0");
+    assert_eq!(
+        plans[plans.len() - 1].range.end,
+        text.len() as u64,
+        "{id}: the last part does not end at the text"
+    );
+    for pair in plans.windows(2) {
+        assert_eq!(
+            pair[0].range.end, pair[1].range.start,
+            "{id}: a byte is in no part, or in two"
+        );
+    }
+
+    for plan in &plans {
+        // A part's rows are its own offsets, and a structure built from them has exactly the
+        // part's length. This is the assertion the absolute-offset defect would have failed:
+        // a part beginning at byte 70 whose rows still said 70 would build a table reaching
+        // past its own end, and `Structure::build` would refuse it.
+        let rows = part::local_rows(&out.rows, &plan.range);
+        let mut part_budget = Budget::new(Caps::DEFAULT, plan.len()).expect("a budget");
+        let part_structure = Structure::build(&rows, plan.len(), &mut part_budget)
+            .unwrap_or_else(|e| panic!("{id}: a part's own rows are not a structure: {e}"));
+        for row in &rows {
+            assert_eq!(
+                part_structure.resolve(&row.locator),
+                Some(row.range()),
+                "{id}: {} does not resolve inside its own part",
+                row.locator
+            );
+        }
+
+        // And the part's bytes are a normalised slice, or cutting it is refused. `text_of`
+        // returning `None` is the refusal `Library::add` turns into an error, so it is an
+        // outcome rather than a failure — what must not happen is a part whose text exists and
+        // does not hash to the tid the manifest would record for it.
+        if let Some(part_text) = part::text_of(&out.text, plan.range.clone()) {
+            assert!(
+                part_text.verify(),
+                "{id}: a part's bytes do not hash to its own tid"
+            );
+            assert_eq!(
+                part_text.text.len() as u64,
+                plan.len(),
+                "{id}: a part's length disagrees with its range"
+            );
+        }
     }
 });

@@ -215,8 +215,23 @@ jobs:
   # touches §2.3 — status is part of identity. C-Read never derives a uid, so this is the job
   # that checks the format's central claim against something other than the implementation
   # that defined it.
+  # **Two platforms, which is GE-T1's second half** (RFC SMYSL-2.4 §6). The criterion asks for
+  # each implementation to be built on Linux x86-64 and one other platform, and until 1.10 every
+  # job here was `ubuntu-latest`, so the second platform did not exist and the plan said so.
+  #
+  # What a second runner tests is worth naming, because it is *not* the identities: BLAKE3 over
+  # bytes and canonical CBOR are platform-independent by construction, and three implementations
+  # already agree on every vector on one machine. What varies across platforms is **reading
+  # files** — line endings, NFC through a different Unicode table version, path behaviour — and
+  # the normalisation rule a part's identity depends on is exactly that code. A BOM check that
+  # passed on Linux and failed on macOS would be the same class of defect as the one the Node
+  # port had, and this is what would catch it.
   conformance-python:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -305,7 +320,11 @@ jobs:
   # uid from — including one where it says the opposite of what the encoder does — all four now
   # written into the document and marked `SPEC:` in `nodejs/src/uid.js`.
   conformance-node:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -321,7 +340,11 @@ jobs:
   # rests on — this job failing on `uid_test.go` means two implementations disagree about what
   # a unit *is*, not merely about how to spell it.
   conformance-go:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

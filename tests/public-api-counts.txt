@@ -34,4 +34,4 @@ smysl-embed      62
 smysl-provider   726
 smysl-ingest     629
 smysl-tui        216
-smysl-text       1773
+smysl-text       1774

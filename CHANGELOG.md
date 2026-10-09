@@ -52,6 +52,57 @@ Apache 2.0 and settled, the hosted one is not. It blocks nothing that has starte
 the first of them to be hashed over something other than a CBOR map. Step 2 adds the crate that
 interprets them, and the locator grammar the plan pointed at a document nobody has.
 
+### A clean fuzz run over code the target could not reach
+
+The reader fuzz target was re-run after the part-cutting change: fourteen million executions,
+no finding. Reading the target back afterwards showed why — it stopped at building a structure
+over the whole text and never cut the text into parts, so none of the arithmetic that had just
+changed was reachable from it. The byte-dropping defect this release fixed was found by a
+hand-written test instead, and would have been found years earlier if the target had gone one
+step further.
+
+A clean run over code a target cannot reach is the most expensive kind of silence, so the
+target now cuts parts too, under a policy sized for fuzz inputs: the default minimum part size
+is 64 KiB, which makes every fuzz input a single part — precisely the case that hid the defect.
+It asserts that the parts partition the text, that each part's own rows build a structure of
+exactly that part's length with every locator resolving inside it, and that a part whose bytes
+exist hashes to the identity a manifest would record for it. Coverage rose from 5,431 features
+to 5,728, and 13,928,763 executions found nothing.
+
+### A determinism gate that could not check a command that writes
+
+`cargo xtask determinism` ran each registered operation twice under eight environment
+permutations and compared the bytes. Every operation it could check was a *reader*: rule D names
+five and all five print a store. `text add` writes one, and running it twice over the same
+library compares the second run against a world the first run changed — it reports two objects
+written into an empty library and none into one that already holds the text, both correct and
+different output. So it was left unregistered when it landed, with the exemption written down.
+
+The fix is a scratch directory per capture: a token in the operation's arguments that becomes a
+directory made fresh for each of the sixteen runs and removed afterwards, outside the
+repository. Rule D's question for an operation that writes is then the one it should always have
+been — the same input *and the same starting state* give the same bytes. An operation that needs
+a world built first, like `text show`, declares a setup command whose output is discarded and
+whose failure is not: a setup that quietly did nothing would leave the real command printing the
+same refusal sixteen times and passing.
+
+Seven operations are registered now, and `text add` and `text show` are identical across all
+sixteen runs each — which puts the reader, the normalisation, the part cut, the four identities,
+and locator resolution under the `ru_RU.UTF-8` permutation that would betray anything that case
+folded or collated along the way.
+
+### The second platform in CI, which a determinism criterion had been asking for
+
+The three independent implementations now run on macOS as well as Linux. Every job had been
+Linux, and the format's own cross-platform criterion asks for two.
+
+What that tests is worth naming, because it is not the identities: hashing bytes and canonical
+CBOR are platform-independent by construction, and three implementations already agreed on
+every vector on one machine. What varies between platforms is *reading files* — line endings,
+Unicode normalisation through a different table version, path behaviour — and that is exactly
+the code a text's identity depends on. The byte-order-mark defect found in the JavaScript port
+this release is the same class of bug one platform can hide from another.
+
 ### Three implementations now derive the library identities, and one of them had a defect
 
 Python, JavaScript and Go decode records 14, 15 and 18 and derive the four identities over them

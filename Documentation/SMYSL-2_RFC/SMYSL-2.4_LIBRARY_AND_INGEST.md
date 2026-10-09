@@ -1297,7 +1297,7 @@ The `.expected` format is the existing one (`fixtures/README.md`): exact code se
 
 | experiment | phase | how |
 |---|---|---|
-| **GE-T1** (determinism) | TX-P1 (5 Bibles, JSON series), TX-P2 (2 chat exports) | build each library on Linux x86-64 and one other platform (CI matrix, unverified availability); compare mids, structure hashes, rdids; Python, JavaScript and Go recompute tid/rdid/mid from the emitted records and agree. They do not re-implement readers. Any mismatch blocks the next phase. **Partly met at TX-P1 step 7:** the three ports derive every identity in `fixtures/library/wire/ids.json` and agree, and that half is done. Two halves are owed and neither is a port's. The **five Bibles and the JSON series** are a corpus this repository does not hold, so what is checked is a two-part fixture (one Latin, one Cyrillic) — enough to exercise NFC, not enough to be the criterion. The **second platform does not exist**: all eighteen jobs in CI are `ubuntu-latest`. What a second runner would test is worth naming, because it is not the identities — BLAKE3 over bytes and canonical CBOR are platform-independent by construction — it is *reading files*: line endings, NFC through a different Unicode table version, path behaviour. So both outstanding halves are reader risks and they arrive together, with the corpus, in TX-P2. |
+| **GE-T1** (determinism) | TX-P1 (5 Bibles, JSON series), TX-P2 (2 chat exports) | build each library on Linux x86-64 and one other platform (CI matrix, unverified availability); compare mids, structure hashes, rdids; Python, JavaScript and Go recompute tid/rdid/mid from the emitted records and agree. They do not re-implement readers. Any mismatch blocks the next phase. **Partly met at TX-P1 step 7:** the three ports derive every identity in `fixtures/library/wire/ids.json` and agree, and that half is done. Two halves are owed and neither is a port's. The **five Bibles and the JSON series** are a corpus this repository does not hold, so what is checked is a two-part fixture (one Latin, one Cyrillic) — enough to exercise NFC, not enough to be the criterion. The **second platform now exists** (1.10.0): the three port jobs run on `ubuntu-latest` and `macos-latest`, where before every job in CI was Linux. Worth naming what that tests, because it is not the identities — BLAKE3 over bytes and canonical CBOR are platform-independent by construction — it is *reading files*: line endings, NFC through a different Unicode table version, path behaviour, which is exactly the code a part's identity depends on. The python job also regenerates the uid fixtures and requires no diff, so that check is now made on both. **What remains owed is the corpus**, and it is a reader risk, so it arrives with the readers' own fixtures in TX-P2. |
 | **GE-T4** (attribution fairness) | before TX-P5 | 200 hand-checked units per tier-1 language under normaliser v1 and v2 (SMYSL-2.1); v2 false-`Absent` > 1% in any language blocks TX-P5 |
 | **GE-T13** (effective time) | TX-P3 | synthetic chats with planted skews plus a public chronology with known relative orders; P-E4/P-E5 on real data; any planted skew undetected, or any false contested interval on consistent data, blocks TX-P4 |
 | **GE-T14** (part size) | end of TX-P2 | real chats, revised articles, Bibles at 64 KiB–4 MiB; object count, reuse on revision, redaction granularity; the curve is recorded and the default fixed before TX-P3 |
@@ -1558,6 +1558,20 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
      to cut through. **Nothing had ever run this**, because all eight reader fixtures produce
      exactly one part and for one part the shift is zero; it took step 6's first multi-part test.
      One fixture's identities moved (`notes.txt`, by one byte), which is the blast radius.
+
+     **And the fuzz target could not have found it, which was worth discovering.** Re-run after
+     the step — 14,014,150 executions, no finding — and then read back: it stopped at
+     `Structure::build` over the whole text and never cut a part, so none of the arithmetic this
+     step changed was reachable from it. A clean run over code a target cannot reach is the most
+     expensive kind of silence. The target now groups the text under a policy sized for fuzz
+     inputs (`target_min` 16, where the default 64 KiB makes every input one part — the case
+     that hid the defect) and asserts three things: that the parts partition the text, that each
+     part's own rows build a structure of exactly the part's length with every locator resolving
+     inside it — which is the assertion the absolute-offset version would have failed outright —
+     and that a part whose bytes exist hashes to the tid a manifest would record for it.
+     Coverage went from 5,431 features to 5,728, and 13,928,763 executions found nothing.
+     `part_local_rows` moved from `library.rs` to `part::local_rows` to be reachable, which is
+     its right home anyway: `part.rs` is the module that owns how a text becomes parts.
    - **A reading's offsets are part-local and the only code that built one kept them absolute.**
      Same cause, different symptom: `tests/readers.rs` filters a reader's rows into a part
      without shifting them, which is correct for a part starting at zero and nothing else. The
@@ -1573,15 +1587,21 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
      union. A sharding scheme written here would be one chosen before anything can measure it,
      so the marker file carries a layout version instead and `Library::shards()` is the one place
      the lock set is named.
-   - **`xtask determinism` registers neither `text add` nor `text show`**, which §4.4 asks for,
-     and the reason is in the harness: it runs one fixed argv twice and compares stdout. `text
-     add` is a *write*, so its second run legitimately prints `objects 0 written` — the first
-     run made them — and `text show` needs a library on disk, which the repository would have to
-     commit as binary objects. What determinism they have is pinned harder than the harness
-     could: `fixtures/library/readers/` holds every identity for eight inputs across six
-     readers, and `tests/library.rs` asserts the library's own pipeline reproduces them. The
-     harness needs a setup hook before a writing command can join it; TX-P3's `date set` has the
-     same shape, and is the right place to pay for it.
+   - **`xtask determinism` could not register a command that writes**, so `text add` and `text
+     show` — which §4.4 asks for — were left out of it at this step. The harness ran one fixed
+     argv twice and compared stdout, and `text add` is a *write*: its second run legitimately
+     prints `objects 0 written`, because the first run made them. Both are correct and the bytes
+     differ. `text show` has the neighbouring problem, needing a library that exists.
+
+     **Fixed straight after the step** rather than deferred to TX-P3, because the fix is small
+     and the exemption was the kind that outlives its reason. `Op` gained a `%SCRATCH%` token,
+     replaced by a directory created fresh for each of the sixteen captures and removed
+     afterwards, and a `setup` command run in the same directory whose output is discarded and
+     whose *failure* is not — a setup that silently did nothing would leave the real command
+     printing the same refusal sixteen times and passing. Rule D's question for a writing
+     operation is then the one it should always have been: the same input *and the same starting
+     state* give the same bytes. Seven operations registered, all identical across sixteen runs.
+     TX-P3's `date set` has the same shape and now needs nothing.
    - **Four gates were wrong, and two of them were wrong in the direction that passes.**
      Adding a command and a feature walked into all four:
      - `make cli-surface` records a positional by matching `[A-Z.]+` inside brackets, so the
@@ -1647,21 +1667,23 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
      recompute identities from the records the reference *emits*. Three parsers of USFM
      agreeing with each other would be a different and much weaker claim, with nothing to
      appeal to when they disagreed.
-   - **GE-T1 is not fully met and this step cannot meet it.** The port half is: Python,
-     JavaScript and Go recompute tid, mid, rdid and the structure hash from the emitted records
-     and agree. Two halves are outstanding. The criterion asks for the comparison on **five
-     Bibles and a JSON series**, a corpus this repository does not hold and whose licensing is
-     TX-P2's problem; what is checked here is the two-part fixture, one Latin and one Cyrillic,
-     which is enough to exercise NFC and not enough to be the criterion. And it asks for each
-     library to be built **on Linux x86-64 and one other platform**, against a CI matrix the
-     plan recorded as unverified: all eighteen jobs in `.github/workflows/ci.yml` are
-     `ubuntu-latest`, so the second platform does not exist yet. Worth being precise about what
-     it would test — BLAKE3 over bytes and canonical CBOR are platform-independent by
-     construction, so what a second runner exercises is *reading files*: line-ending handling,
-     NFC through a different Unicode table version, and path behaviour. That is a real risk and
-     it is a reader risk, which is why it belongs with the corpus rather than with the
-     identities. Both are recorded on GE-T1's own row in §6, so the next phase inherits them
-     where it will look for them rather than in a step record it has no reason to re-read.
+   - **GE-T1 is now met except for its corpus.** The port half is done: Python, JavaScript and
+     Go recompute tid, mid, rdid and the structure hash from the emitted records and agree. The
+     **second platform** was outstanding when this step landed and is not any more — the three
+     port jobs run on `ubuntu-latest` and `macos-latest`, where every job in CI had been Linux,
+     and the python job's uid-fixture regeneration is therefore checked on both. Worth being
+     precise about what that buys, because it is not the identities: BLAKE3 over bytes and
+     canonical CBOR are platform-independent by construction, so what a second runner exercises
+     is *reading files* — line endings, NFC through a different Unicode table version, path
+     behaviour — which is exactly the code a part's identity depends on, and exactly the shape
+     of the defect the Node port had. (The ports were in fact developed and run on
+     darwin/arm64, so the Linux leg is the one CI was already providing; what changed is that
+     both are now required rather than one being incidental.) What is still owed is the
+     **five Bibles and the JSON series**: a corpus this repository does not hold, whose
+     licensing is TX-P2's problem, and what is checked here instead is a two-part fixture, one
+     Latin and one Cyrillic, which exercises NFC and is not the criterion. It is a reader risk
+     and arrives with the readers' own fixtures. Recorded on GE-T1's row in §6, where the next
+     phase will look for it rather than in a step record it has no reason to re-read.
 
 ### TX-P2 — segments, languages, chats, redaction
 

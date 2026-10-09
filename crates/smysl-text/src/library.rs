@@ -47,7 +47,7 @@ use crate::norm::Normalised;
 use crate::objects::ObjectStore;
 use crate::part::{self, Policy};
 use crate::readers::{read_with, reader, Input, Params};
-use crate::reading::{Reading, Segment};
+use crate::reading::Reading;
 use crate::structure::Structure;
 
 /// The marker file that says a directory is a library.
@@ -338,7 +338,7 @@ impl Library {
                     what: "a part boundary on a character boundary".to_string(),
                 }
             })?;
-            let rows = part_local_rows(&out.rows, &plan.range);
+            let rows = part::local_rows(&out.rows, &plan.range);
             let reading = Reading::new(text.tid, &spec.reader, rows);
             entries.push(reading.entry(plan.len()));
             tids.push(text.tid);
@@ -541,73 +541,5 @@ impl Library {
 impl PartResolver for Library {
     fn part(&self, tid: &Tid) -> Resolved {
         self.objects.part(tid)
-    }
-}
-
-/// A reader's rows, restricted to one part and shifted to the part's own offsets.
-///
-/// The shift is the whole point and the reason this is a named function with a test. A row's
-/// `start`/`end` are offsets into **the part**, and a reader produces one table over the whole
-/// text; a part that begins at byte 70,000 would otherwise carry rows pointing past its own
-/// end, `Structure::build` would refuse the table, and the structure hash — which is over the
-/// table — would be a hash of the wrong thing in the manifest entry.
-///
-/// Nothing caught this until now because every reader fixture in the tree produces exactly one
-/// part, and for one part the shift is zero.
-fn part_local_rows(rows: &[Segment], range: &Range<u64>) -> Vec<Segment> {
-    rows.iter()
-        .filter(|r| r.start >= range.start && r.end <= range.end)
-        .map(|r| {
-            let mut row = r.clone();
-            row.start -= range.start;
-            row.end -= range.start;
-            row
-        })
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::reading::Level;
-
-    fn level(s: &str) -> Level {
-        Level::new(s).expect("a level")
-    }
-
-    fn row(start: u64, end: u64, loc: &str) -> Segment {
-        Segment::new(
-            start,
-            end,
-            level("line"),
-            crate::locator::parse(loc).expect("a locator"),
-        )
-    }
-
-    /// The shift, stated as the property the manifest entry depends on: a part's rows start at
-    /// zero and end at the part's length, whatever the part's place in the text.
-    #[test]
-    fn a_parts_rows_are_its_own_offsets() {
-        let rows = vec![row(0, 10, "L1"), row(10, 25, "L2"), row(25, 40, "L3")];
-        let second = part_local_rows(&rows, &(10..40));
-        assert_eq!(second.len(), 2);
-        assert_eq!((second[0].start, second[0].end), (0, 15));
-        assert_eq!((second[1].start, second[1].end), (15, 30));
-
-        // The first part is the case that hid this: its shift is zero.
-        let first = part_local_rows(&rows, &(0..10));
-        assert_eq!((first[0].start, first[0].end), (0, 10));
-    }
-
-    /// A row straddling a boundary belongs to neither part.
-    ///
-    /// It cannot happen from `group`, which cuts on whole nodes, and the filter is written to
-    /// be total anyway: a row half in a part would otherwise be shifted to a negative offset
-    /// and panic in a debug build.
-    #[test]
-    fn a_straddling_row_is_in_no_part() {
-        let rows = vec![row(0, 20, "L1")];
-        assert!(part_local_rows(&rows, &(10..20)).is_empty());
-        assert!(part_local_rows(&rows, &(0..10)).is_empty());
     }
 }
