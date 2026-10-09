@@ -2055,6 +2055,49 @@ fn a_manifest_names_every_key_it_requires() {
     }
 }
 
+/// A reader field with parameters survives the surface round trip.
+///
+/// TX-P2 step 2 made key 3 "a reader id **and its parameters**" — `whatsapp/1 date-format=dmy`
+/// — because `03/04/2024` is two different days and the file does not say which. The field now
+/// holds a space, which is the one character the surface form of a brace header has an opinion
+/// about: the writer has to quote it and the parser has to give it back unquoted, or a manifest
+/// that `text add` wrote could not be printed and read again. Checked both directions, because
+/// the failure mode is asymmetric — a writer that forgot the quotes produces a line that
+/// parses as something else rather than failing.
+#[test]
+fn a_reader_field_with_parameters_round_trips_through_the_surface_form() {
+    const FIELD: &str = "whatsapp/1 date-format=dmy tz=+0300";
+    let src = format!(
+        "@manifest chat {{ lang: mul, reader: \"{FIELD}\", licence: CC0-1.0, carry: text, \
+         part-policy: none }}"
+    );
+    let out = parse_surface(&src).unwrap();
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let manifest = out
+        .records
+        .iter()
+        .find_map(|r| match r {
+            Record::Manifest(m) => Some(m.clone()),
+            _ => None,
+        })
+        .expect("a manifest");
+    assert_eq!(manifest.reader, FIELD);
+
+    let written = write_surface(None, &out.records, &WriteContext::default());
+    let again = parse_surface(&written).unwrap();
+    assert!(again.diagnostics.is_empty(), "{:?}", again.diagnostics);
+    let back = again
+        .records
+        .iter()
+        .find_map(|r| match r {
+            Record::Manifest(m) => Some(m.clone()),
+            _ => None,
+        })
+        .expect("a manifest");
+    assert_eq!(back.reader, FIELD, "the written form is: {written}");
+    assert_eq!(back.mid(), manifest.mid(), "one manifest, one identity");
+}
+
 /// A key the parser does not define is an error, not something to skip.
 ///
 /// The likeliest stray key is a misspelling of one of the required five, and passed over

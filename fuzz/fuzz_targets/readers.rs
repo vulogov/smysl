@@ -1,4 +1,4 @@
-//! Every TX-P1 reader, over arbitrary bytes, under a budget.
+//! Every reader, over arbitrary bytes, under a budget.
 //!
 //! What this target asserts is not "no crash" — libfuzzer gets that for free — but the three
 //! properties a reader's callers rely on and which a malformed input is the likeliest way to
@@ -12,8 +12,18 @@
 //! 3. **Every locator resolves to its own node.** An address a reader emits and the structure
 //!    cannot resolve points at nothing in a corpus.
 //!
-//! The first byte picks the reader, so one corpus feeds all six and a finding names the reader
-//! in its own input. A refusal is a pass: these readers are specified to refuse.
+//! The first byte picks the reader, so one corpus feeds all of them and a finding names the
+//! reader in its own input. A refusal is a pass: these readers are specified to refuse.
+//!
+//! # The chat readers, and the one of them that is a parser of a container
+//!
+//! TX-P2 step 2 added three. `whatsapp/1` needs its date order, so the first byte picks that
+//! too — `choice / READERS.len() % 3` — rather than the target always passing `dmy` and never
+//! reaching the other two orderings. `slack/1` is the first target input that is an **archive**,
+//! which is the one shape where arbitrary bytes get nowhere on their own: a random string is
+//! not a zip, so without a seeded corpus this target would spend its whole budget being
+//! refused by the four-byte magic. `make seed-fuzz` therefore writes every reader fixture into
+//! this target's corpus once per choice byte.
 
 #![no_main]
 use libfuzzer_sys::fuzz_target;
@@ -36,7 +46,20 @@ use smysl_text::structure::Structure;
 /// five readers are fuzzed, and `md/1`'s containment is covered by
 /// `an_input_that_panics_the_parser_is_a_refusal`. `md/1` comes back into this list with the
 /// upstream fix, at the same commit that removes the `=0.13.4` pin and the wrapper.
-const READERS: &[&str] = &["txt/1", "usfm/1", "osis/1", "zefania/1", "json/1"];
+const READERS: &[&str] = &[
+    "txt/1",
+    "usfm/1",
+    "osis/1",
+    "zefania/1",
+    "json/1",
+    "telegram/1",
+    "whatsapp/1",
+    "slack/1",
+];
+
+/// The date orders `whatsapp/1` accepts. Each is a different partition of the same transcript
+/// into days, so each is a different reading and worth reaching.
+const ORDERS: &[&str] = &["dmy", "mdy", "ymd"];
 
 fuzz_target!(|data: &[u8]| {
     let Some((choice, body)) = data.split_first() else {
@@ -46,6 +69,16 @@ fuzz_target!(|data: &[u8]| {
     let Ok(reader) = readers::reader(id) else {
         return;
     };
+    // The parameters the chosen reader needs. Required ones only: an optional `tz` is covered
+    // by the unit tests, and a target that varied everything would spend its corpus on
+    // combinations rather than on inputs.
+    let mut params = Params::new();
+    if id == "whatsapp/1" {
+        let order = ORDERS[(*choice as usize / READERS.len()) % ORDERS.len()];
+        params
+            .set(id, "date-format", order)
+            .expect("a declared parameter");
+    }
     // A small input cap keeps the corpus small and the runs fast; it is not what is being
     // tested, and a refusal from it is as valid an outcome as any other.
     let caps = Caps {
@@ -55,7 +88,7 @@ fuzz_target!(|data: &[u8]| {
     let Ok(mut budget) = Budget::new(caps, body.len() as u64) else {
         return;
     };
-    let Ok(out) = readers::read_with(reader, &Input::new(body), &Params::new(), &mut budget) else {
+    let Ok(out) = readers::read_with(reader, &Input::new(body), &params, &mut budget) else {
         // Refusing is the specified behaviour for input that is not the format.
         return;
     };

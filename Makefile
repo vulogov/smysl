@@ -313,7 +313,13 @@ crate-features: ## Each crate with features, alone, at its defaults and with non
 	@# One reader at a time. `--all-features` cannot catch a module whose `cfg` list is
 	@# missing a feature that uses it: `reader-md` and `reader-json` alone failed to compile
 	@# because the shared row builder's list named three of the five readers that use it.
-	@set -e; for r in txt md usfm osis zefania json; do \
+	@#
+	@# It happened again in TX-P2 step 2, which is the argument for this loop existing. The
+	@# three chat readers share `readers/chat.rs`, and every reader alone failed: `md` on a
+	@# builder method only a chat reader calls, `slack` on the calendar arithmetic only the two
+	@# timestamp-parsing readers use, `whatsapp` on the CBOR helper only the two JSON readers
+	@# use. Nine builds, nine chances for a `cfg` list to be one feature short.
+	@set -e; for r in txt md usfm osis zefania json telegram slack whatsapp; do \
 		echo "==> cargo test -p smysl-text --no-default-features --features reader-$$r"; \
 		RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-text --no-default-features --features reader-$$r; \
 	done
@@ -487,7 +493,13 @@ seed-fuzz: ## Copy the repo's own inputs into each fuzz corpus
 		cp -f fuzz/artifacts/$$t/* fuzz/corpus/$$t/ 2>/dev/null || true; \
 	done; \
 	mkdir -p fuzz/corpus/surface; cp -f fixtures/corpus/*.smy fuzz/corpus/surface/ 2>/dev/null || true
-	@echo "seeded from fixtures/corpus and fuzz/artifacts"
+	@# The readers target's first byte picks the reader, so a fixture cannot be copied in as
+	@# it stands: it would always be read by whichever reader byte zero happens to name. Each
+	@# one goes in once per choice byte instead. Without this the `slack/1` arm is effectively
+	@# unreachable — random bytes are not a zip, so the target would be refused at the magic
+	@# on every execution and the archive path would never run.
+	@set -e; mkdir -p fuzz/corpus/readers; 	for f in fixtures/library/readers/*; do 		case "$$f" in *.expected|*README*) continue;; esac; 		for i in 0 1 2 3 4 5 6 7; do 			printf "$$(printf '\\%03o' $$i)" > fuzz/corpus/readers/$$i-$$(basename $$f); 			cat "$$f" >> fuzz/corpus/readers/$$i-$$(basename $$f); 		done; 	done
+	@echo "seeded from fixtures/corpus, fixtures/library/readers and fuzz/artifacts"
 
 fuzz: seed-fuzz ## Fuzz every target for 60s each, as CI does (nightly)
 	@echo "The parser targets existed from the start and nothing ran them, which is how two"

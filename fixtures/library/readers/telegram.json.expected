@@ -1,0 +1,32 @@
+file      telegram.json
+reader    telegram/1
+alias     reading-group-telegram
+licence   CC0-1.0
+reader-field telegram/1
+policy    smysl/parts/1 level=day min=65536 max=4194304
+top-level day
+lossy     true
+title     Reading group
+lang      -
+text      349 bytes
+nodes     7
+parts     1
+raw       53 bytes a36269646a31323334353637383930646e616d656d52656164696e672067726f757064747970656d707269766174655f67726f7570
+
+part 0
+  range     0..349
+  tid       t3:2xiicmkhwjfdpacpeu4qhlntfpdosfnw6iapkkaohvbtlidfhgka
+  structure 416bbf69e0f8c8ad5ec169c3fe1c44f59dc487bd9547ff03e36744bbdd5c88f6
+  rdid      r3:etqmcseyn73vx2leksl2gshik4mfs2iib6hqyswuaqwzb2ufv2wq
+  segments  7
+
+mid       m3:p35gb7h4hza7h6xetbg5m3j4sm7m6i5vxphrfclcnsta34hqeimq
+
+locators
+  day       chat.20240115 0..235
+  message   chat.20240115.1 0..71 spk=user111 at=1705314225000 msg=2
+  message   chat.20240115.2 72..100 spk=user222 at=1705314662000 msg=3 reply=2
+  message   chat.20240115.3 101..235 spk=user111 at=1705314859000 msg=4
+  day       chat.20240116 236..349
+  message   chat.20240116.1 236..317 spk=user333 at=1705392330000 msg=6
+  message   chat.20240116.2 318..349 spk=user111 at=1705392707000 msg=7 reply=6

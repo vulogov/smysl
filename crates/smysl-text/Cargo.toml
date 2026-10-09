@@ -33,6 +33,14 @@ reader-json = ["dep:serde", "dep:serde_json"]
 reader-osis = ["dep:quick-xml"]
 reader-zefania = ["dep:quick-xml"]
 
+# The chat readers (SMYSL-2.4 §3.2, TX-P2 step 2). `telegram` and `slack` parse JSON, so they
+# pay the same `serde_json` seam `reader-json` does; `whatsapp` reads a text file and needs
+# nothing. `slack` additionally reads the export **archive**, and that choice was measured
+# rather than taken: see the workspace manifest's `zip` pin for the version it forced.
+reader-telegram = ["dep:serde", "dep:serde_json"]
+reader-slack = ["dep:serde", "dep:serde_json", "dep:zip", "dep:flate2"]
+reader-whatsapp = []
+
 # Language identification (SMYSL-2.4 §3.7). Its own feature, and off by default, because
 # measuring `lingua` is what TX-P2 step 1 did: five language features bring **57 crates** and
 # 14.4 MB of compiled-in models, among them `rayon`, `getrandom` and `wasm-bindgen`. None of
@@ -53,6 +61,12 @@ stem = ["dep:rust-stemmers"]
 
 [dependencies]
 smysl-core            = { workspace = true }
+# `speaker.rs` derives a pseudonym with `blake3::keyed_hash`. No new crate in any tree:
+# `smysl-core` already links it for every identity in the format, and the `pure` feature keeps
+# the C SIMD backend out. A keyed hash is the one primitive a pseudonym needs that the id
+# module cannot lend — `digest_id!` hashes a domain byte and a preimage, and the whole point of
+# a pseudonym is that the preimage is not enough to reproduce it.
+blake3                = { workspace = true }
 # `library.rs` opens a catalog log into a `Store`: a library is a store and an object store
 # together, and either half alone cannot resolve a locator (SMYSL-2.4 §4.2). Both crates are in
 # the pure tier and `smysl-graph` does not depend on this one, so the edge adds no floor and no
@@ -73,6 +87,8 @@ pulldown-cmark        = { workspace = true, optional = true }
 serde                 = { workspace = true, optional = true }
 serde_json            = { workspace = true, optional = true }
 quick-xml             = { workspace = true, optional = true }
+zip                   = { workspace = true, optional = true }
+flate2                = { workspace = true, optional = true }
 
 # `tests/object_check.rs` runs `check`'s library pass against a real object store: this crate
 # owns the only `PartResolver` implementation, and `smysl-check` may not depend on it (the

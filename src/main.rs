@@ -445,6 +445,12 @@ fn cli() -> Command {
                         .help("A reader parameter, recorded in the manifest beside the reader id"),
                 )
                 .arg(
+                    Arg::new("pseudonymise")
+                        .long("pseudonymise")
+                        .help("Replace each speaker with a keyed pseudonym (`add`)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
                     Arg::new("forks")
                         .long("forks")
                         .help("List only the aliases with more than one head (`ls`)")
@@ -6125,6 +6131,27 @@ fn text_add(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
     }
     spec.params = params;
 
+    // The key is read, or created, before the library is opened: creating it is the one part of
+    // `--pseudonymise` the library layer deliberately cannot do (`smysl::text::secrets` says
+    // why), and finding out that it cannot be written is better before a corpus is half added
+    // than after.
+    if m.get_flag("pseudonymise") {
+        let fresh = || {
+            let mut bytes = [0u8; 32];
+            // A failure here is the operating system saying it has no randomness, which is not
+            // a thing to paper over with a weaker key: the process ends instead.
+            getrandom::fill(&mut bytes).expect("the operating system's randomness");
+            bytes
+        };
+        match smysl::text::secrets::load_or_create(root, fresh) {
+            Ok(key) => spec.pseudonym_key = Some(key),
+            Err(e) => {
+                eprintln!("smysl text add: --pseudonymise: {e}");
+                return ExitCode::Failure;
+            }
+        }
+    }
+
     let mut library = match Library::create(root) {
         Ok(l) => l,
         Err(e) => {
@@ -6157,6 +6184,14 @@ fn text_add(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
             println!("objects   {} written", added.objects_written);
             if added.lossy {
                 println!("lossy     the reader dropped something the source carried");
+            }
+            if spec.pseudonym_key.is_some() {
+                // The file, never the key. The path is relative to the library, which is also
+                // what a refusal from `secrets` prints.
+                println!(
+                    "speakers  pseudonymised under {}",
+                    smysl::text::secrets::PSEUDONYM
+                );
             }
             ExitCode::Success
         }
@@ -6264,19 +6299,30 @@ fn text_show(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
     println!("{}", passage.text);
 
     if m.get_flag("segments") {
-        match library.structure(&passage.mid, &passage.tid, &Caps::DEFAULT) {
-            Ok(structure) => {
+        // The reading rather than the structure: a node is a range, and a row is a range plus
+        // who said it and when. For the six TX-P1 readers the two print alike, because none of
+        // them fills those fields; for a chat reading the speaker is the thing somebody came
+        // here to see, and a pseudonym is what `--pseudonymise` put there.
+        match library.part_reading(&passage.mid, &passage.tid) {
+            Ok(reading) => {
                 println!();
                 println!("segments");
-                for node in structure.nodes() {
-                    if node.range.start >= passage.range.start
-                        && node.range.end <= passage.range.end
-                    {
-                        println!(
-                            "  {:<9} {} {}..{}",
-                            node.level, node.locator, node.range.start, node.range.end
-                        );
+                for row in &reading.rows {
+                    if row.start < passage.range.start || row.end > passage.range.end {
+                        continue;
                     }
+                    let mut extra = String::new();
+                    if let Some(who) = &row.speaker {
+                        extra.push_str("  ");
+                        extra.push_str(who);
+                    }
+                    if let Some(at) = row.observed {
+                        extra.push_str(&format!("  {at}"));
+                    }
+                    println!(
+                        "  {:<9} {} {}..{}{extra}",
+                        row.level, row.locator, row.start, row.end
+                    );
                 }
             }
             Err(e) => {

@@ -1,0 +1,32 @@
+file      whatsapp.txt
+reader    whatsapp/1
+alias     reading-group-whatsapp
+licence   CC0-1.0
+reader-field whatsapp/1 date-format=dmy
+policy    smysl/parts/1 level=day min=65536 max=4194304
+top-level day
+lossy     true
+title     -
+lang      -
+text      270 bytes
+nodes     8
+parts     1
+
+part 0
+  range     0..270
+  tid       t3:xpyapdrvw7huyqujplegcwrjhemmy6rb6cxjdecinf3k66sjlkfa
+  structure d31a53f04995b6294fc615b6a9d79cd2c25f1bfa00093df1ea8160548d775474
+  rdid      r3:oqzeufujy57saar2dljml6roqcotizqt2cs7o7d5sdg3wzqf72eq
+  segments  8
+
+mid       m3:uoasnrqcllqgqysfs3ocb524adckq5tlzbx5vywj4fzougdsvriq
+
+locators
+  day       chat.20240115 0..156
+  message   chat.20240115.1 0..71 spk=Ada at=1705314225000
+  message   chat.20240115.2 72..100 spk=Bruno at=1705314662000
+  message   chat.20240115.3 101..140 spk=Ada at=1705314859000
+  message   chat.20240115.4 141..156 spk=Bruno at=1705358400000
+  day       chat.20240116 157..270
+  message   chat.20240116.1 157..238 spk=Clara at=1705392330000
+  message   chat.20240116.2 239..270 spk=Ada at=1705392707000

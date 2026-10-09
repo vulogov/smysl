@@ -48,12 +48,102 @@ their own evidence in the form they were written.
 **One decision still open.** OQ-34 for the hosted model's outputs as fixtures — the local model is
 Apache 2.0 and settled, the hosted one is not. It blocks nothing that has started.
 
-**TX-P1 is complete and TX-P2 has started.** The library wire is in — three new record types,
-four new identities, and the first of them to be hashed over something other than a CBOR map —
-and so is everything that interprets it: the crate, the six readers, the locator grammar the
-plan pointed at a document nobody has, the check pass, the CLI, and the three ports. One thing
-TX-P1 owes is a corpus rather than code, and TX-P2's first step has now added a second of
-exactly the same kind. The sections below are newest first.
+**TX-P1 is complete and TX-P2 is two steps in.** The library wire is in — three new record
+types, four new identities, and the first of them to be hashed over something other than a CBOR
+map — and so is everything that interprets it: the crate, now **nine** readers, the locator
+grammar the plan pointed at a document nobody has, the check pass, the CLI, and the three
+ports. One thing TX-P1 owes is a corpus rather than code, and TX-P2's first step added a second
+of exactly the same kind; its second step closed the chat half of the first. The sections below
+are newest first.
+
+### Three chat readers, and a pseudonym that changes no byte of the text
+
+**TX-P2 step 2.** `telegram/1`, `slack/1` and `whatsapp/1`, with `text add --pseudonymise`.
+Nine readers now, and the first three whose subject is a conversation rather than a document:
+one segment per message, grouped by **UTC day**, addressed `general.20240115.7` — the
+conversation, the day, and the message's ordinal within it.
+
+**The speaker is never in the text, and that is the whole design.** A chat reader could
+perfectly well write `Alice: hello` into the prose; it is what the transcript looks like, and
+it is what somebody reading the output expects. It would also mean that `--pseudonymise`
+produced a *different document* — different bytes, different tid, different objects — so a
+library could not hold one conversation two ways, and no pseudonymised corpus could ever be
+compared with the plain one it came from. So the speaker is a field of a segment row, the text
+is the prose alone, and pseudonymising changes no tid at all: the same parts, the same objects,
+one changed field in the reading. `pseudonymising_changes_the_reading_and_not_a_byte_of_the_text`
+asserts it across two libraries rather than reasoning about it.
+
+The honest consequence of that, stated rather than buried: **names inside the prose are
+untouched.** A mention, a signature, `<@U024BE7LH>`. Those belong to `text redact` and rule Z,
+which is right — removing a name from the text *does* change the tid, so it has to be recorded
+as a redaction and not as a setting.
+
+**The pseudonym is keyed, and the library cannot mint the key.** `spk:` plus 26 base32
+characters of `blake3::keyed_hash` over the platform's user id: keyed, because a user id is a
+short string out of a small space and an unkeyed hash of it is a lookup table away from being
+the id. The key lives in `secrets/pseudonym.key`, thirty-two bytes, mode 0600 set in the same
+call that creates the file — a `set_permissions` afterwards leaves a window, and a window is
+all a secret needs to stop being one. But `AddSpec` takes the *key*, not a `bool`, because a
+`bool` would make `smysl-text` find the key, which means creating one, which means a randomness
+source in the pure tier's default tree — the exact claim step 1 had just written into the purity
+gate when `lingua` brought `getrandom` with it. So the facade's `text` feature mints it and the
+library layer stays a function of its arguments. It costs no crate: `ureq` already links
+`getrandom`.
+
+**Four things the formats do that the plan did not say.**
+
+- **A Telegram `date` is not UTC.** It is the local wall clock of the machine the export was
+  taken on, with no offset in it, and only `date_unixtime` is an instant. A reader that took
+  `date` for UTC would put messages on the wrong day for most of the world — and a day is a
+  part, and a part is a tid. Exports from before 2021 have no `date_unixtime`, so those are
+  refused until the caller says `--param tz=±HHMM`, because guessing UTC is choosing the one
+  thing the field is not.
+- **A Slack file name is not a day either.** The export is one JSON file per channel per
+  *local* day, so `2024-01-15.json` holds messages belonging to two UTC days. A channel's files
+  are concatenated and the day comes from each message's own `ts`; the fixture has a `02:00Z`
+  message in the previous day's file to keep it that way.
+- **`03/04/2024` is two different days**, and a WhatsApp transcript does not say which. Both
+  readings are complete conversations that differ in how the text is cut into parts, so
+  `date-format` is **required** — which makes `whatsapp/1` the first reader in this format to
+  take a parameter, and therefore the reason manifest key 3 now records a reader's *settings*
+  and not just its id. The format spec has the grammar, a test asserts the field survives the
+  surface round trip (it needs quoting — it has a space in it), and the test that used to assert
+  "no reader takes a parameter" is now the stronger claim that names the two that do.
+- **`zip` 9.0.0 cannot be used, and 4.3.0 can.** A Slack export is an archive, which SMYSL-2.4
+  called an unverified choice. 9.0.0 declares rustc 1.88 and `smysl-text` is in the pure tier at
+  1.85, so adopting it would raise the floor of the eleven crates the MSRV job compiles, for one
+  reader. 4.3.0 declares 1.82 and the highest floor anywhere in its tree is `hashbrown` 0.17's
+  1.85 — exactly the base. Eleven crates, no `cc`. And its own `deflate-flate2` feature is
+  `dep:flate2` with no backend, which **does not compile**: fifteen errors about a missing
+  `MZ_DEFAULT_WINDOW_BITS`. So the inflater is this project's choice, and it is `miniz_oxide`.
+
+**Two places a reader refuses to guess.** WhatsApp's `<Media omitted>` is localised
+(`<Без медиафайлов>`, `<Medien ausgeschlossen>`), so it is kept as text and the read is *not*
+marked lossy — it was the exporter that dropped the photo, and a list of placeholders is wrong
+for the next locale. And a display name is never a speaker: Slack's `users.json` is not read for
+one, and Telegram's `forwarded_from` — a second person's name with no id beside it to key — is
+dropped with the read marked lossy.
+
+**Two things measuring contradicted.** The structure hash **moves when a pseudonym does**: A-5
+defines it over the whole segment table, which holds the speaker, so `SMY-E401`'s
+`which: "structure"` means "the table changed" rather than "the segmentation changed". Recorded
+as OQ-70 against SMYSL-2.3 rather than fixed here, because narrowing A-5 would move every
+structure hash ever computed. And "one part per UTC day" is a *boundary level*, not a part
+count: the policy's 64 KiB minimum groups whole days, so a quiet month is one part — a day is
+never split, which is what cutting on the day level actually buys.
+
+**`SMY-E450` is not in this release**, deliberately. It refuses an append to a pseudonymised
+expression without its key, `text append` is step 3, and the rule in force is that a code
+nothing can trigger is worse than a missing one. What this step settled is that it needs no new
+manifest key: a reading whose speakers are pseudonyms says so in its own rows.
+
+Also: `text show --segments` prints a row's speaker and timestamp where a reader filled them,
+which needed a library method beside `Library::structure` — a node is a range, and a row is a
+range plus who said it. `make seed-fuzz` writes every reader fixture into the `readers` corpus
+once per choice byte, because random bytes are not a zip and the `slack/1` arm would otherwise
+never be reached. And one refusal was **deleted** after a test showed it could not fire: `zip`
+keys its central directory by name, so an archive holding `general/2024-01-15.json` twice
+arrives with one member, and the check for the second was a refusal nothing could trigger.
 
 ### The abbreviation lists were one rule of four, and a stemmer brought serde with it
 

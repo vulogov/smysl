@@ -101,6 +101,26 @@ fn five_bits_at(bytes: &[u8; 32], off: usize) -> usize {
     v
 }
 
+/// The first `chars` base32 characters of a 32-byte digest, in §2.1's alphabet.
+///
+/// Public because a second alphabet would be a second spelling. The pseudonym a chat reader
+/// writes into a segment row is `spk:` followed by 26 of these characters — the same shape and
+/// the same width as a uid's short form (SMYSL-2.4 §3.2) — and it is keyed BLAKE3 of a
+/// platform user id, which is not an identity this module can mint. So the *token* is shared
+/// and the derivation is not: one encoder, one way to write 130 bits, and no table of letters
+/// copied into another crate to drift.
+///
+/// `chars` is clamped to [`Uid::FULL_CHARS`]; past it there are no bits left to encode, and a
+/// caller asking for more has made an arithmetic mistake rather than a request.
+pub fn base32(bytes: &[u8; 32], chars: usize) -> String {
+    let chars = chars.min(Uid::FULL_CHARS);
+    let mut s = String::with_capacity(chars);
+    for i in 0..chars {
+        s.push(ALPHABET[five_bits_at(bytes, i * 5)] as char);
+    }
+    s
+}
+
 /// Write 5 bits at bit offset `off`, MSB-first. Bits past 256 are discarded, which is
 /// what makes the 52nd character's four padding bits inert.
 fn put_five_bits(bytes: &mut [u8; 32], off: usize, v: u8) {

@@ -2,6 +2,7 @@ file      notes.md
 reader    md/1
 alias     notes-md
 licence   CC0-1.0
+reader-field md/1
 policy    smysl/parts/1 level=section min=65536 max=4194304
 top-level section
 lossy     false

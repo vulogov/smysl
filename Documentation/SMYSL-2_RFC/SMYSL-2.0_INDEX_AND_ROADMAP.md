@@ -329,6 +329,7 @@ lands.
 | OQ-55–OQ-59 | 2.6 |
 | OQ-60–OQ-64 | 2.7 |
 | OQ-65–OQ-69 | 2.8 |
+| OQ-70 | 2.4 (found in TX-P2 step 2; the decision is an SMYSL-2.3 A-5 amendment) |
 
 ### 6.3 Format registry
 

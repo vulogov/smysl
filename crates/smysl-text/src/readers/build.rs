@@ -229,6 +229,32 @@ impl Doc {
         }
     }
 
+    /// Put something on the innermost open row, after its text has landed.
+    ///
+    /// The metadata half of a chat reading — speaker, timestamp, the platform's own ids — is
+    /// known when a message is read and belongs on the row that message produced. The
+    /// alternative was to widen [`Doc::open`] with five more parameters that five of the eight
+    /// readers would pass `None` for.
+    ///
+    /// Nothing happens when no level is open, which is the same shape as
+    /// [`Doc::close_level`]: a caller that annotates before opening has written no text either,
+    /// so there is no row for the annotation to be wrong about.
+    ///
+    /// Gated on the three chat readers, which are its only callers. `--all-features` cannot
+    /// catch a `cfg` list that is missing a feature, which is why `make crate-features` builds
+    /// each reader alone — and why this attribute is here rather than an `allow(dead_code)`:
+    /// the question "does anything call this?" stays worth asking.
+    #[cfg(any(
+        feature = "reader-telegram",
+        feature = "reader-slack",
+        feature = "reader-whatsapp"
+    ))]
+    pub(crate) fn annotate(&mut self, f: impl FnOnce(&mut Segment)) {
+        if let Some(open) = self.stack.last() {
+            f(&mut self.rows[open.row]);
+        }
+    }
+
     /// The text and the rows, with the text checked for the one thing that could be wrong.
     ///
     /// The ranges were measured against the string this builder assembled. If that string is

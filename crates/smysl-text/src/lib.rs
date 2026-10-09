@@ -17,9 +17,9 @@
 //! crate. A reader's only side channel is its [`limits::Budget`], and fuel is deterministic,
 //! so a refusal happens at the same byte on every machine.
 //!
-//! # What is here as of TX-P1 step 3
+//! # What is here as of TX-P2 step 2
 //!
-//! The substrate, and the six readers that stand on it:
+//! The substrate, and the nine readers that stand on it:
 //!
 //! | module | what it settles |
 //! |---|---|
@@ -34,16 +34,20 @@
 //! | [`objects`] | `objects/{t3,r3}/…`, staged and renamed, verified on read (`SMY-E446`) |
 //! | [`lock`] | one writer per shard, named (`SMY-E445`) |
 //! | [`library`] | the catalog and the objects, opened together: `add`, `resolve`, `passage` |
-//! | [`readers`] | the six TX-P1 readers, one behind each `reader-*` feature |
+//! | [`readers`] | nine readers, one behind each `reader-*` feature |
 //! | [`segment`] | sentences, where no file format marks one (TX-P2) |
 //! | [`analyze`] | terms, folded and stemmed per language (TX-P2) |
 //! | `lang` | which language a text is in, behind feature `detect` (TX-P2) |
+//! | [`speaker`] | pseudonyms: `spk:` + keyed BLAKE3 of a platform user id (TX-P2) |
+//! | [`secrets`] | `secrets/pseudonym.key`, the one file in a library that is not a corpus |
 //!
 //! Each reader is a function from bytes to a text and a table over it — no clock, no
 //! environment, no filesystem, and no name for the input — so two libraries given the same
 //! file name the same part. Three of them read scripture out of three unrelated syntaxes and
 //! agree to the byte, which `crates/smysl-text/tests/readers.rs` asserts with one tid over
-//! three fixtures.
+//! three fixtures. Three more read conversations, where the same property has to hold over an
+//! **archive**: a Slack export zipped in another order is the same reading, because the entries
+//! are sorted before a row is built rather than read in the order they happen to be in.
 //!
 //! [`library`] is the one module that touches a directory, added in step 6 once step 4 had
 //! given a `Store` manifests to hold — a handle written earlier would have been a handle to
@@ -67,7 +71,9 @@ pub mod objects;
 pub mod part;
 pub mod readers;
 pub mod reading;
+pub mod secrets;
 pub mod segment;
+pub mod speaker;
 pub mod structure;
 
 pub use analyze::Chain;
@@ -101,6 +107,10 @@ pub const READERS: &[&str] = &[
     "osis/1",
     "zefania/1",
     "json/1",
+    // TX-P2 step 2, the chat readers.
+    "telegram/1",
+    "whatsapp/1",
+    "slack/1",
 ];
 
 #[cfg(test)]

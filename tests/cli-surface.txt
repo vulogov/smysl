@@ -510,11 +510,12 @@ text       --offline
 text       --part-policy
 text       --no-color
 text       --param
-text       --forks
 text       --noprogress
+text       --pseudonymise
+text       --forks
 text       --json
-text       --raw
 text       --quiet
+text       --raw
 text       --segments
 text       --verbose
 text       --seed-check

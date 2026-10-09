@@ -1,0 +1,78 @@
+{
+ "name": "Reading group",
+ "type": "private_group",
+ "id": 1234567890,
+ "messages": [
+  {
+   "id": 1,
+   "type": "service",
+   "date": "2024-01-15T09:58:00",
+   "date_unixtime": "1705312680",
+   "actor": "Ada",
+   "actor_id": "user111",
+   "action": "create_group",
+   "title": "Reading group"
+  },
+  {
+   "id": 2,
+   "type": "message",
+   "date": "2024-01-15T10:23:45",
+   "date_unixtime": "1705314225",
+   "from": "Ada",
+   "from_id": "user111",
+   "text": "I finished the first chapter last night. It is shorter than I expected."
+  },
+  {
+   "id": 3,
+   "type": "message",
+   "date": "2024-01-15T10:31:02",
+   "date_unixtime": "1705314662",
+   "from": "Bruno",
+   "from_id": "user222",
+   "text": "And what did you make of it?",
+   "reply_to_message_id": 2
+  },
+  {
+   "id": 4,
+   "type": "message",
+   "date": "2024-01-15T10:34:19",
+   "date_unixtime": "1705314859",
+   "from": "Ada",
+   "from_id": "user111",
+   "text": [
+    "Mostly that the narrator is unreliable. There is a note about it here: ",
+    {"type": "link", "text": "https://example.org/notes"},
+    " — worth reading before chapter two."
+   ]
+  },
+  {
+   "id": 5,
+   "type": "message",
+   "date": "2024-01-15T22:40:00",
+   "date_unixtime": "1705358400",
+   "from": "Bruno",
+   "from_id": "user222",
+   "photo": "photos/photo_1@15-01-2024_22-40-00.jpg",
+   "text": ""
+  },
+  {
+   "id": 6,
+   "type": "message",
+   "date": "2024-01-16T08:05:30",
+   "date_unixtime": "1705392330",
+   "from": "Clara",
+   "from_id": "user333",
+   "text": "Можно присоединиться? Я прочитала две главы."
+  },
+  {
+   "id": 7,
+   "type": "message",
+   "date": "2024-01-16T08:11:47",
+   "date_unixtime": "1705392707",
+   "from": "Ada",
+   "from_id": "user111",
+   "text": "Of course. We meet on Thursday.",
+   "reply_to_message_id": 6
+  }
+ ]
+}

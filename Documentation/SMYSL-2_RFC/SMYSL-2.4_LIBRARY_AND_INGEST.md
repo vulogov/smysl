@@ -368,8 +368,8 @@ bytes, not a path). The `Budget` (§3.9.1) is the only side channel, and it is d
 | `usfm/1` | `reader-usfm` | TX-P1 | hand-rolled | |
 | `osis/1`, `zefania/1` | `reader-osis`, `reader-zefania` | TX-P1 | `quick-xml` | DTDs refused (§3.9.1); pinned `=0.41.0`, see step 3 |
 | `json/1` | `reader-json` | TX-P1 | `serde_json` (OQ-37 answered: yes) | JSON Pointer locators |
-| `telegram/1`, `slack/1` | `reader-telegram`, `reader-slack` | TX-P2 | `serde_json`; Slack also a zip reader (unverified choice) | |
-| `whatsapp/1` | `reader-whatsapp` | TX-P2 | hand-rolled | date pattern is a required parameter |
+| `telegram/1`, `slack/1` | `reader-telegram`, `reader-slack` | TX-P2 | `serde_json`; Slack also `zip` — **verified in step 2**: `=4.3.0`, not 9.0.0, which declares rustc 1.88 against this tier's 1.85 | built |
+| `whatsapp/1` | `reader-whatsapp` | TX-P2 | hand-rolled | built; the date order **is** a required parameter, and it is why manifest key 3 now records a reader's settings |
 | `mbox/1`, `epub/1`, `html/1`, `pdf/1` | `reader-mbox` … | TX-P2 (opt-in) | `mail-parser`, `rbook`, `html2text`, `pdf-extract` | not in `cli` |
 
 **Structure.** `Structure` is an arena tree: `Node { level, range: Range<u64> (bytes in the
@@ -464,6 +464,67 @@ Reply and thread ids go into the segment table as substrate edges. Pseudonymisat
 read from `<library>/secrets/pseudonym.key` (created with 32 random bytes on first use, mode 0600,
 never logged). `text append` to a pseudonymised expression without the key is `SMY-E450`, because
 new messages from the same person would otherwise get a different speaker.
+
+**Built in TX-P2 step 2, with six corrections to the paragraph above.** The structure is
+`day` → `message`, or `channel` → `day` → `message` for Slack, whose export is one archive
+holding every conversation. The locator is `head.yyyymmdd.n` — `general.20240115.7` — where `n`
+is the message's ordinal **within that UTC day**: Telegram has a message id and Slack has a
+timestamp that works like one, but WhatsApp has nothing of the kind, and a locator a person
+types in a citation cannot be `1705314225.000200`. The platform's own id is kept in the row's
+`ids` instead.
+
+1. **"One part per UTC day" is a boundary level, not a part count.** The part policy's
+   `target_min` is 64 KiB, so whole days are *grouped* into parts and a quiet month is one
+   part. A day is never split; that is what cutting on the day level buys. The sentence above
+   reads as a promise about parts and is a statement about boundaries.
+2. **The day cannot come from the file.** Slack's export is one JSON file per channel per
+   **local** day, so a `2024-01-15.json` holds messages belonging to two UTC days — the
+   fixture has one at `02:00Z`. A reader that trusted the file name would cut a part on a
+   boundary that is in no field of the data, so a channel's files are concatenated and the day
+   is taken from each message's own timestamp. Telegram has the same trap in a different shape:
+   its `date` field is a **local wall clock with no offset**, and only `date_unixtime` is an
+   instant.
+3. **Pseudonymisation does not change a single tid**, because the speaker is a field of a row
+   and never a byte of the text. A pseudonymised library and a plain one hold the same parts
+   and the same objects; only the reading differs. That is a design decision and not a
+   consequence — the reader a person would naturally write renders `Alice: hello` into the
+   text, and then `--pseudonymise` would be a different ingest of a different document. It also
+   means **names inside the prose are untouched**: a mention, a signature, `<@U024BE7LH>`.
+   Those are `text redact` and rule Z's business (step 4), which is right, because removing a
+   name from the text *does* change the tid and therefore has to be recorded as a redaction
+   rather than as a setting.
+4. **It changes the `structure` hash as well as the `rdid`**, which was not expected. A-5
+   defines `structure` as the hash of "the canonical CBOR of the structure table carried in the
+   reading's segments", and that table is one row per node with every field a reader filled —
+   including the speaker. So `structure` is a hash of the whole reading table rather than of the
+   tree, and `SMY-E401`'s `which: "structure"` means "the table changed" rather than "the
+   segmentation changed". Narrowing A-5 to the tree alone would be an amendment to the
+   normative document and would move every structure hash ever computed, so it is recorded here
+   as an open question (**OQ-70**) rather than decided in a reader's commit.
+5. **The library layer cannot mint the key**, so it does not. `AddSpec` takes a
+   `pseudonym_key`, not the `bool` §4.2's sketch has: a `bool` would mean `smysl-text` has to
+   find the key, which means creating it when absent, which means a randomness source in the
+   pure tier's default tree — the claim TX-P2 step 1 wrote into the purity gate when `lingua`
+   brought `getrandom` with it. `smysl_text::secrets` knows where the key lives and what shape
+   it has; the facade's `text` feature supplies the thirty-two bytes. A library that is a
+   function of its arguments cannot invent a secret.
+6. **`SMY-E450` waits for `text append`** (step 3), because the registry's rule in force is
+   that a code nothing can trigger is worse than a missing one. The detection needs no new
+   manifest key, which is worth recording now: a reading whose speakers are pseudonyms says so
+   in its own rows (`speaker::is_pseudonym`), so step 4 can ask the corpus rather than a flag.
+
+Two things the readers deliberately do **not** do, both for the same reason — a reader that
+guessed would be undetectably wrong:
+
+- **WhatsApp's media placeholders are kept as text.** `<Media omitted>` is localised
+  (`<Без медиафайлов>`, `<Medien ausgeschlossen>`), so a list of them is wrong for the next
+  locale, and it was the *exporter* that dropped the photo. `lossy` means "the reader dropped
+  something the source carried", and the source carries a placeholder.
+- **A display name is never a speaker.** Slack's `users.json` maps `U024BE7LH` to a name and is
+  not read for it; Telegram's `forwarded_from` is a second person's name with no id beside it to
+  key, so it is dropped and the read marked lossy. The speaker is the platform's id, which is
+  what a pseudonym can be derived from and what does not change when somebody renames
+  themselves.
 
 ### 3.3 Time engine (draft 3 §6; rules are SMYSL-2.3's)
 
@@ -798,11 +859,15 @@ crates/smysl-text/
     readers/
       mod.rs        trait Reader, ReaderId, Input, Params, ReadOutput, registry by feature
       txt.rs  md.rs  usfm.rs  osis.rs  zefania.rs  json.rs              (TX-P1)
-      telegram.rs  slack.rs  whatsapp.rs  mbox.rs  epub.rs  html.rs  pdf.rs  (TX-P2)
-      zip.rs        archive access under Budget (Slack, EPUB)
+      telegram.rs  slack.rs  whatsapp.rs                                 (TX-P2 step 2)
+      mbox.rs  epub.rs  html.rs  pdf.rs                                  (TX-P2, opt-in)
+      build.rs      where a row begins, shared by every nesting reader    (TX-P1 step 3)
+      chat.rs       day/message rows, the UTC calendar, the locator head  (TX-P2 step 2)
     structure.rs    arena tree, structure hash, resolve(locator)
     locator.rs      draft 3 Appendix B grammar; canonical Display
     segment.rs      seg-uax29+abbr/1
+    speaker.rs      spk: + keyed BLAKE3 of a platform user id            (TX-P2 step 2)
+    secrets.rs      secrets/pseudonym.key: load, create 0600, never log  (TX-P2 step 2)
     lang.rs         lingua with 5 languages; manifest/segment detection
     analyze.rs      per-language chains; implements smysl_retrieve::Analyze
     provenance.rs   stamp(): the D-1 copy set onto a UnitCoreBuilder
@@ -944,6 +1009,9 @@ impl Library {
 }
 pub struct AddSpec { pub reader: ReaderId, pub params: Params, pub alias: String, pub lang: Option<LangTag>,
     pub licence: String, pub carry: Carry, pub pseudonymise: bool, pub policy: part::Policy }
+    // As built (TX-P2 step 2): `pseudonym_key: Option<speaker::Key>`, not `pseudonymise: bool`.
+    // A `bool` makes this crate find the key, which makes it create one, which puts a
+    // randomness source in the pure tier's default tree. See §3.2, correction 5.
 
 pub mod time {
     pub fn effective(store: &Store, lib: Option<&Library>, axis: Axis, scope: &Scope) -> Effective;
@@ -1160,6 +1228,14 @@ Cmd { name: "same-as",   about: "Propose same-as edges; derive classes",        
 | `find` | `--lang L --analyzer A` added | pure | P4 |
 | `check` | `--library` resolves parts for `W405` | pure | P1 |
 
+- **`text add --pseudonymise`** (P2, built). Creates `secrets/pseudonym.key` on first use and
+  reads it afterwards, prints the *file's* name and never the key, and reports
+  `speakers  pseudonymised under secrets/pseudonym.key`. **`text show --segments` now prints a
+  row's speaker and timestamp** where the reader filled them, which is new in TX-P2 step 2 and
+  needed a library method beside `Library::structure`: a node is a range, and a row is a range
+  plus who said it. For the six TX-P1 readers the two print alike, because none of them fills
+  those fields.
+
 - **Library path.** No new global flag: `-s/--store` accepts a library directory, recognised by
   a `<dir>/LIBRARY` marker file holding the layout version. A plain file path keeps today's
   meaning.
@@ -1180,8 +1256,9 @@ Cmd { name: "same-as",   about: "Propose same-as edges; derive classes",        
 default = []                                         # the core the purity gate checks
 reader-txt = []   reader-md = ["dep:pulldown-cmark"]   reader-usfm = []
 reader-osis = ["dep:quick-xml"]   reader-zefania = ["dep:quick-xml"]
-reader-json = ["dep:serde_json"]  reader-telegram = ["dep:serde_json"]
-reader-slack = ["dep:serde_json", "zip"]   reader-whatsapp = []
+reader-json = ["dep:serde_json"]  reader-telegram = ["dep:serde", "dep:serde_json"]
+reader-slack = ["dep:serde", "dep:serde_json", "dep:zip", "dep:flate2"]
+reader-whatsapp = []                                 # as built, TX-P2 step 2
 reader-mbox = ["dep:mail-parser"]  reader-epub = ["dep:rbook", "zip"]
 reader-html = ["dep:html2text"]    reader-pdf = ["dep:pdf-extract"]
 substrate-redb = ["dep:redb"]
@@ -1190,6 +1267,16 @@ substrate-redb = ["dep:redb"]
 Root `Cargo.toml`: `text = ["dep:smysl-text", "smysl-check/text", "smysl-retrieve/…"]`;
 `cli` enables `text` and `reader-{txt,md,usfm,osis,zefania,json,telegram,slack,whatsapp}` and
 `substrate-redb` (draft 3 §18); `epub`, `html`, `mbox`, `pdf` opt-in.
+
+**As built, with two corrections.** `text` also carries `dep:getrandom`, which is the pseudonym
+key's thirty-two bytes and costs no crate at all (`ureq`'s TLS stack already links it); the
+reason it is in the facade rather than in `smysl-text` is correction 5 of §3.2. And
+`reader-slack` needs `flate2` **named explicitly**: `zip`'s own `deflate-flate2` feature is
+`dep:flate2` and nothing else, and `flate2` with no backend feature does not compile — fifteen
+errors about a missing `MZ_DEFAULT_WINDOW_BITS`. So the inflater is a choice this project makes,
+and it is `rust_backend` (`miniz_oxide`), which keeps §13's "zero C in the core path" true and
+is what `make crate-features` checks. The gate's `NOT_IN_THE_CORE` list gained rows for both, so
+a later edit that made `reader-slack` a default feature has to be argued rather than merged.
 
 - **Purity gate** (OQ-37, answered 1.10.0; **done in TX-P1 step 2**). `smysl-text` joins
   `PURE_CRATES` with
@@ -1352,7 +1439,7 @@ The `.expected` format is the existing one (`fixtures/README.md`): exact code se
 
 | experiment | phase | how |
 |---|---|---|
-| **GE-T1** (determinism) | TX-P1 (5 Bibles, JSON series), TX-P2 (2 chat exports) | build each library on Linux x86-64 and one other platform (CI matrix, unverified availability); compare mids, structure hashes, rdids; Python, JavaScript and Go recompute tid/rdid/mid from the emitted records and agree. They do not re-implement readers. Any mismatch blocks the next phase. **Partly met at TX-P1 step 7:** the three ports derive every identity in `fixtures/library/wire/ids.json` and agree, and that half is done. Two halves are owed and neither is a port's. The **five Bibles and the JSON series** are a corpus this repository does not hold, so what is checked is a two-part fixture (one Latin, one Cyrillic) — enough to exercise NFC, not enough to be the criterion. The **second platform now exists** (1.10.0): the three port jobs run on `ubuntu-latest` and `macos-latest`, where before every job in CI was Linux. Worth naming what that tests, because it is not the identities — BLAKE3 over bytes and canonical CBOR are platform-independent by construction — it is *reading files*: line endings, NFC through a different Unicode table version, path behaviour, which is exactly the code a part's identity depends on. The python job also regenerates the uid fixtures and requires no diff, so that check is now made on both. **What remains owed is the corpus**, and it is a reader risk, so it arrives with the readers' own fixtures in TX-P2. TX-P2 step 1 adds a **second** corpus to the same debt: the 500-sentence sentence-boundary gold set per tier-1 language that step's exit asks for. Its harness exists and takes a directory (`SMYSL_SEG_GOLD`); what is missing is prose nobody here wrote, annotated by someone who did not write the segmenter. Both are the same shape of gap — a measurement whose instrument is built and whose material is not — and neither is met by anything this repository can author. |
+| **GE-T1** (determinism) | TX-P1 (5 Bibles, JSON series), TX-P2 (2 chat exports) | build each library on Linux x86-64 and one other platform (CI matrix, unverified availability); compare mids, structure hashes, rdids; Python, JavaScript and Go recompute tid/rdid/mid from the emitted records and agree. They do not re-implement readers. Any mismatch blocks the next phase. **Partly met at TX-P1 step 7:** the three ports derive every identity in `fixtures/library/wire/ids.json` and agree, and that half is done. Two halves are owed and neither is a port's. The **five Bibles and the JSON series** are a corpus this repository does not hold, so what is checked is a two-part fixture (one Latin, one Cyrillic) — enough to exercise NFC, not enough to be the criterion. The **second platform now exists** (1.10.0): the three port jobs run on `ubuntu-latest` and `macos-latest`, where before every job in CI was Linux. Worth naming what that tests, because it is not the identities — BLAKE3 over bytes and canonical CBOR are platform-independent by construction — it is *reading files*: line endings, NFC through a different Unicode table version, path behaviour, which is exactly the code a part's identity depends on. The python job also regenerates the uid fixtures and requires no diff, so that check is now made on both. **What remains owed is the corpus**, and it is a reader risk, so it arrives with the readers' own fixtures in TX-P2. TX-P2 step 1 adds a **second** corpus to the same debt: the 500-sentence sentence-boundary gold set per tier-1 language that step's exit asks for. Its harness exists and takes a directory (`SMYSL_SEG_GOLD`); what is missing is prose nobody here wrote, annotated by someone who did not write the segmenter. Both are the same shape of gap — a measurement whose instrument is built and whose material is not — and neither is met by anything this repository can author. **TX-P2 step 2 closes the chat half of the first gap, in the one way it can be closed honestly:** `fixtures/library/readers/{telegram.json,whatsapp.txt,slack.zip}` are two chat exports in three formats, written for the purpose, with every identity pinned in a `.expected` file beside them. They are small and they are ours, so they are an instrument and not a measurement of real traffic — what they do establish is the half GE-T1 asks of a *reader*: that the same bytes produce the same tids, structure hashes, rdids and mid on re-read, and that the readings do not depend on the order a zip happens to be written in. |
 | **GE-T4** (attribution fairness) | before TX-P5 | 200 hand-checked units per tier-1 language under normaliser v1 and v2 (SMYSL-2.1); v2 false-`Absent` > 1% in any language blocks TX-P5 |
 | **GE-T13** (effective time) | TX-P3 | synthetic chats with planted skews plus a public chronology with known relative orders; P-E4/P-E5 on real data; any planted skew undetected, or any false contested interval on consistent data, blocks TX-P4 |
 | **GE-T14** (part size) | end of TX-P2 | real chats, revised articles, Bibles at 64 KiB–4 MiB; object count, reuse on revision, redaction granularity; the curve is recorded and the default fixed before TX-P3 |
@@ -1760,8 +1847,29 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
      whole algorithm; `rust-stemmers` hard-depends on `serde` and had to be gated; `lingua`'s
      cost is 57 crates and 14.4 MB; and detection cannot be automatic, because a manifest's
      language is part of its mid.
-2. Readers `telegram`, `slack`, `whatsapp` with `--pseudonymise`; opt-in `mbox`, `epub`, `html`,
-   `pdf`. *Exit:* chat round trip with `raw` intact; `E450` test; fuzz targets.
+2. ~~Readers `telegram`, `slack`, `whatsapp` with `--pseudonymise`; opt-in `mbox`, `epub`,
+   `html`, `pdf`. *Exit:* chat round trip with `raw` intact; `E450` test; fuzz targets.~~
+   **The three chat readers and `--pseudonymise` are built; the four opt-in readers and the
+   `E450` test are not, and the second of those is deliberate.**
+   - The exit's first and third parts are met: `a_chat_export_round_trips_with_its_raw_metadata_intact`
+     adds each fixture through `Library::add` and compares the manifest's key 16 against the
+     bytes the reader produced, and all three readers are in the `readers` fuzz target — which
+     `make seed-fuzz` now seeds from `fixtures/library/readers/`, once per choice byte, because
+     random bytes are not a zip and the `slack/1` arm would otherwise never be reached.
+   - **`E450` moves to step 3**, where `text append` exists. The registry rule in force is that
+     a code nothing can trigger is worse than a missing one, and nothing can trigger this one
+     until there is an append to refuse. What step 2 settled is that it needs no new manifest
+     key: a reading whose speakers are pseudonyms says so in its own rows.
+   - **The opt-in four (`mbox`, `epub`, `html`, `pdf`) are not built.** They are opt-in, in no
+     feature `cli` turns on, and each brings a parser of its own to measure; the three the phase
+     is named for are the ones a chat corpus needs. Recorded as outstanding here rather than
+     quietly dropped.
+   - Six corrections and two deliberate refusals, all in §3.2: the day is a boundary level and
+     not a part count; the day cannot come from a Slack file name or a Telegram `date`;
+     pseudonymisation changes no tid, and therefore no name in the prose; it does change the
+     `structure` hash (**OQ-70**); the key is an argument because a pure crate cannot mint a
+     secret; and `whatsapp/1`'s date order is the parameter that widened manifest key 3's
+     grammar in the format spec.
 3. `text append`. *Exit:* growth test (§5.2).
 4. Record 19, rule Z in `Store::append`, `text redact`, `@redact`; `E452` refuses a 15 or 18
    offered to a log (OQ-39, so there is no `rewrite_redacted` to write). *Exit:* redaction test;
@@ -1884,7 +1992,7 @@ meanings and are not repeated here.
 | `SMY-W447` | a structure node larger than the window was split at sentence boundaries | `ingest --text` |
 | `SMY-W448` | a reply or quotation constraint names a message or unit not found; constraint skipped | time engine |
 | `SMY-W449` | EDTF value outside the index's representable range; indexed as an open bound | time engine, `check` |
-| `SMY-E450` | appending to a pseudonymised expression without its pseudonym key | `text append` |
+| `SMY-E450` | appending to a pseudonymised expression without its pseudonym key | `text append` (step 3: `--pseudonymise` landed in step 2, and nothing can trigger this code until there is an append to refuse) |
 | `SMY-W451` | an alignment scheme does not cover a locator; the pair is left unaligned and counted | `text align`, `anchored` engine |
 | `SMY-E452` | a record 15 or 18 was offered to a log; text lives in the object store (OQ-39) | `append`, `check` |
 
@@ -1933,3 +2041,4 @@ nothing behind it.
 | OQ-42 | **Resolved in SMYSL-2.3 A-12.2:** strata by status; a chain tightens at its weakest link's status. §3.3 implements exactly that. |
 | OQ-43 | Should the digest-scoped reference check (`E442`) also admit units of the same expression not shown in the digest (a model that remembers an earlier window), or stay strict? |
 | OQ-44 | `lexical` same-as proposals: auto-accept above a threshold at rung `computed`, or always require a judge (model or human)? |
+| OQ-70 | **Found in TX-P2 step 2.** A part entry's `structure` is A-5's hash of the whole segment table, so it moves when a row's *metadata* moves — a speaker, a timestamp, an id — and not only when the segmentation does. `SMY-E401` then reports `which: "structure"` for a change that is not structural. Should A-5 narrow the hash to the tree (level, range, locator) and leave the rest to the rdid, which already covers it? It is an amendment to the normative document and it would move every structure hash ever computed, so it is a question for SMYSL-2.3 rather than for a reader's commit. The cost of leaving it: pseudonymising a corpus re-identifies every part *entry* — no part, no object, no tid. §3.2 |

@@ -48,6 +48,7 @@ use crate::objects::ObjectStore;
 use crate::part::{self, Policy};
 use crate::readers::{read_with, reader, Input, Params};
 use crate::reading::Reading;
+use crate::speaker;
 use crate::structure::Structure;
 
 /// The marker file that says a directory is a library.
@@ -84,6 +85,16 @@ pub struct AddSpec {
     pub carry: Carry,
     pub policy: Option<Policy>,
     pub title: Option<String>,
+    /// Replace every speaker in the reading with a pseudonym under this key.
+    ///
+    /// The key and not a `bool`, which is what SMYSL-2.4 §3.2's sketch had. A `bool` would mean
+    /// this crate had to **find** the key, and finding it means creating it when it is absent,
+    /// and creating it means thirty-two random bytes — a randomness source in the pure tier's
+    /// default tree, which is the claim TX-P2 step 1 wrote into the purity gate when `lingua`
+    /// brought `getrandom` with it. So the key is an argument: [`crate::secrets`] knows where
+    /// it lives and what shape it has, the facade's `text` feature supplies the randomness, and
+    /// this crate stays a function of what it was given.
+    pub pseudonym_key: Option<speaker::Key>,
 }
 
 impl AddSpec {
@@ -101,7 +112,14 @@ impl AddSpec {
             carry: Carry::default(),
             policy: None,
             title: None,
+            pseudonym_key: None,
         }
+    }
+
+    /// Pseudonymise the speakers under this key.
+    pub fn pseudonymised(mut self, key: speaker::Key) -> AddSpec {
+        self.pseudonym_key = Some(key);
+        self
     }
 
     pub fn with_lang(mut self, lang: LangTag) -> AddSpec {
@@ -259,7 +277,16 @@ impl Library {
             reason: e.to_string(),
         })?;
         let mut budget = Budget::new(*caps, input.len() as u64)?;
-        let out = read_with(reader, input, &spec.params, &mut budget)?;
+        let mut out = read_with(reader, input, &spec.params, &mut budget)?;
+
+        // Before the structure, the parts or any identity: pseudonymisation rewrites the
+        // reading's speakers, and a reading's rdid is taken over the table that holds them. It
+        // changes **no byte of the text**, so every tid below is the same as it would have been
+        // without it — see [`crate::speaker`] for why that is the point rather than a detail.
+        if let Some(key) = &spec.pseudonym_key {
+            speaker::pseudonymise(&mut out.rows, key);
+        }
+        let out = out;
 
         let structure =
             Structure::build(&out.rows, out.text.len() as u64, &mut budget).map_err(|e| {
@@ -389,6 +416,20 @@ impl Library {
         Reading::from_record(&record).map_err(|e| LibError::ObjectCorrupt {
             id: format!("{} ({e})", rdid.canonical()),
         })
+    }
+
+    /// The reading of one part of one manifest, checked against the entry (`SMY-E401`).
+    ///
+    /// Beside [`Library::structure`] rather than replacing it: a structure is the tree, and a
+    /// reading is the rows — which carry what the tree does not, because a node is a range and
+    /// a row is a range *plus* who said it, when, and under what id. A chat corpus is the first
+    /// one where the difference is visible to anybody, which is why this exists now and did not
+    /// before: `text show --segments` has a speaker to print.
+    pub fn part_reading(&self, mid: &Mid, tid: &Tid) -> Result<Reading, LibError> {
+        let entry = self.entry_of(mid, tid)?;
+        let reading = self.reading(&entry.rdid)?;
+        reading.verify_entry(&entry)?;
+        Ok(reading)
     }
 
     /// The structure of one part of one manifest, checked against the entry (`SMY-E401`).

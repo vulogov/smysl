@@ -316,17 +316,31 @@ fn a_budget_does_not_recover() {
 // asked for one would fail, and a suite that skipped silently would pass while covering
 // nothing. The guard inside is what keeps it honest — every reader this build *has* must have
 // a case here, so adding a reader without an over-limit input for it fails the suite.
+// Every reader, so that a build with one of them runs that one's case. The three chat readers
+// joined the list in TX-P2 step 2; `make crate-features` is what notices when a `cfg` list like
+// this one is short, because `--all-features` never can.
 #[cfg(any(
     feature = "reader-txt",
     feature = "reader-md",
     feature = "reader-usfm",
     feature = "reader-osis",
     feature = "reader-zefania",
-    feature = "reader-json"
+    feature = "reader-json",
+    feature = "reader-telegram",
+    feature = "reader-slack",
+    feature = "reader-whatsapp"
 ))]
 mod readers {
+    use std::path::Path;
+
     use super::*;
     use smysl_text::readers::{self, Input, Params};
+
+    /// One crafted input: the reader, the bytes, the cap they exceed, the caps, the parameters.
+    ///
+    /// A named type because the tuple is five wide and `clippy::type_complexity` is right about
+    /// it. It grew from four when `whatsapp/1` arrived needing a date order.
+    type Case<'a> = (&'a str, Vec<u8>, &'a str, Caps, &'a [(&'a str, &'a str)]);
     // ---------------------------------------------------------------------------
     //
     // §5.1 asks for "one crafted input per cap per reader". The cases above cover every cap once,
@@ -352,81 +366,196 @@ mod readers {
         s
     }
 
+    /// A Telegram export of `n` messages, for the node cap.
+    fn chat_json(n: usize) -> String {
+        let mut s = String::from(r#"{"name":"x","messages":["#);
+        for i in 0..n {
+            if i > 0 {
+                s.push(',');
+            }
+            // One per day, so that each message brings a day node with it and the cap is met
+            // sooner than the message count alone would suggest.
+            let at = 1_705_314_225 + i as u64 * 86_400;
+            s.push_str(&format!(
+                r#"{{"id":{i},"type":"message","date_unixtime":"{at}","from_id":"u{i}","text":"m{i}"}}"#
+            ));
+        }
+        s.push_str("]}");
+        s
+    }
+
+    /// A WhatsApp transcript of `n` messages, one per day.
+    fn chat_txt(n: usize) -> String {
+        let mut s = String::new();
+        for i in 0..n {
+            s.push_str(&format!(
+                "{:02}/01/2024, 10:00:00 - A: message {i}\n",
+                i % 28 + 1
+            ));
+        }
+        s
+    }
+
+    /// The Slack export fixture, which is the only input in this suite that is an archive.
+    ///
+    /// Read from `fixtures/library/readers/` rather than built here: a zip assembled by the
+    /// test would be a zip written by the same understanding of the format that reads it, and
+    /// this one came out of `zipfile` with deflate and the UTF-8 name flag set, like an export.
+    fn slack_export() -> Vec<u8> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("the workspace root is two levels up")
+            .join("fixtures/library/readers/slack.zip");
+        std::fs::read(&path).expect("fixtures/library/readers/slack.zip")
+    }
+
     /// Every reader refuses an over-limit input with `SMY-E440`, naming the cap and its flag.
     #[test]
     fn every_reader_refuses_a_crafted_input_with_e440() {
-        // (reader, input, the cap the input is built to exceed, the caps to run it under)
-        let cases: Vec<(&str, String, &str, Caps)> = vec![
+        // (reader, input, the cap the input is built to exceed, the caps, the parameters)
+        //
+        // Bytes rather than a `String` since TX-P2 step 2: `slack/1` reads an archive, so its
+        // crafted input is not text. Parameters for the same reason — `whatsapp/1` refuses
+        // without a date order, and a case that got `BadParam` where it expected `SMY-E440`
+        // would have been a test asserting the wrong refusal.
+        let cases: Vec<Case<'_>> = vec![
             (
                 "txt/1",
-                "a\nb\nc\nd\ne\nf\n".to_string(),
+                b"a\nb\nc\nd\ne\nf\n".to_vec(),
                 "nodes",
                 Caps {
                     nodes: 3,
                     ..Caps::DEFAULT
                 },
+                &[],
             ),
             (
                 "md/1",
-                "one\n\ntwo\n\nthree\n\nfour\n".to_string(),
+                b"one\n\ntwo\n\nthree\n\nfour\n".to_vec(),
                 "nodes",
                 Caps {
                     nodes: 2,
                     ..Caps::DEFAULT
                 },
+                &[],
             ),
             (
                 "usfm/1",
-                "\\id GEN\n\\c 1\n\\v 1 a\n\\v 2 b\n\\v 3 c\n".to_string(),
+                b"\\id GEN\n\\c 1\n\\v 1 a\n\\v 2 b\n\\v 3 c\n".to_vec(),
                 "nodes",
                 Caps {
                     nodes: 3,
                     ..Caps::DEFAULT
                 },
+                &[],
             ),
             (
                 "osis/1",
                 r#"<osis><osisText><div type="book" osisID="Gen"><chapter osisID="Gen.1">
                    <verse osisID="Gen.1.1">a</verse><verse osisID="Gen.1.2">b</verse>
                    </chapter></div></osisText></osis>"#
-                    .to_string(),
+                    .as_bytes()
+                    .to_vec(),
                 "nodes",
                 Caps {
                     nodes: 2,
                     ..Caps::DEFAULT
                 },
+                &[],
             ),
             (
                 "zefania/1",
                 r#"<XMLBIBLE><BIBLEBOOK bnumber="1"><CHAPTER cnumber="1">
                    <VERS vnumber="1">a</VERS><VERS vnumber="2">b</VERS>
                    </CHAPTER></BIBLEBOOK></XMLBIBLE>"#
-                    .to_string(),
+                    .as_bytes()
+                    .to_vec(),
                 "nodes",
                 Caps {
                     nodes: 2,
                     ..Caps::DEFAULT
                 },
+                &[],
             ),
             (
                 "json/1",
-                nested_json(40),
+                nested_json(40).into_bytes(),
                 "nesting",
                 Caps {
                     nesting: 8,
                     ..Caps::DEFAULT
                 },
+                &[],
             ),
             // The input cap, which is charged before a single byte is parsed: every reader shares
             // it, and `txt/1` is the one with nothing else in the way of it.
             (
                 "txt/1",
-                "a".repeat(64),
+                "a".repeat(64).into_bytes(),
                 "input_bytes",
                 Caps {
                     input_bytes: 16,
                     ..Caps::DEFAULT
                 },
+                &[],
+            ),
+            // The chat readers. Each is a `nodes` case, which is the cap a conversation meets
+            // first; `slack/1` adds the one cap no reader had exercised before an archive
+            // existed to exercise it.
+            (
+                "telegram/1",
+                chat_json(6).into_bytes(),
+                "nodes",
+                Caps {
+                    nodes: 3,
+                    ..Caps::DEFAULT
+                },
+                &[],
+            ),
+            (
+                "whatsapp/1",
+                chat_txt(6).into_bytes(),
+                "nodes",
+                Caps {
+                    nodes: 3,
+                    ..Caps::DEFAULT
+                },
+                &[("date-format", "dmy")],
+            ),
+            (
+                "slack/1",
+                slack_export(),
+                "entries",
+                Caps {
+                    entries: 2,
+                    ..Caps::DEFAULT
+                },
+                &[],
+            ),
+            // And the archive caps that only an archive reader can reach. `entry_bytes` is
+            // charged from the central directory, so it refuses before a byte is inflated —
+            // which is the property that makes a zip bomb a refusal rather than a memory
+            // problem.
+            (
+                "slack/1",
+                slack_export(),
+                "entry_bytes",
+                Caps {
+                    entry_bytes: 32,
+                    ..Caps::DEFAULT
+                },
+                &[],
+            ),
+            (
+                "slack/1",
+                slack_export(),
+                "decompressed_bytes",
+                Caps {
+                    decompressed_bytes: 64,
+                    ..Caps::DEFAULT
+                },
+                &[],
             ),
         ];
 
@@ -439,7 +568,7 @@ mod readers {
             );
         }
 
-        for (id, input, cap, caps) in cases {
+        for (id, input, cap, caps, pairs) in cases {
             // Each reader is behind its own feature, so a build may not have this one. The
             // guard above is what keeps the skipping honest: every reader this build *does*
             // have must appear in the list.
@@ -448,16 +577,17 @@ mod readers {
             };
             // `Budget::new` is where `input_bytes` is checked, so a case for that cap refuses here
             // and the rest refuse inside the reader. Both are `SMY-E440`; that is the point.
+            let mut params = Params::new();
+            for (key, value) in pairs {
+                params.set(id, *key, *value).expect("a parameter");
+            }
             let err = match Budget::new(caps, input.len() as u64) {
                 Err(e) => e,
-                Ok(mut budget) => readers::read_with(
-                    reader,
-                    &Input::new(input.as_bytes()),
-                    &Params::new(),
-                    &mut budget,
-                )
-                .map(|_| ())
-                .expect_err(&format!("{id} should refuse its {cap} case")),
+                Ok(mut budget) => {
+                    readers::read_with(reader, &Input::new(&input), &params, &mut budget)
+                        .map(|_| ())
+                        .expect_err(&format!("{id} should refuse its {cap} case"))
+                }
             };
             match err {
                 LibError::Limit {

@@ -491,7 +491,7 @@ record 19.
 | 0 | alias | text, the expression alias | required |
 | 1 | parts | array of part entries, in reading order; MAY be empty | required |
 | 2 | lang | text, BCP-47; `mul` for mixed, `und` for unknown | required |
-| 3 | reader | text, a reader id and version, such as `osis/1` | required |
+| 3 | reader | text, a reader id and version, and its parameters: `osis/1`, `whatsapp/1 date-format=dmy` | required |
 | 4 | licence | text, an SPDX id, `public-domain` or `unknown` | required |
 | 5 | carry | unsigned: `0` none, `1` ref, `2` text | required |
 | 6 | title | text, as recorded | optional |
@@ -512,6 +512,26 @@ Key 12 is required with key 11 and meaningless without it; either alone MUST be 
 the reason a resolution with one target is. Key 15 has no `false` encoding: an absent key is
 `false`, and a decoder MUST reject `false` on the wire, because admitting it would give one
 manifest two byte strings and therefore two mids.
+
+The **reader field** (key 3, and key 1 of a part reading) is the reader's id followed by the
+parameters it was run with, which is why it is not an id alone: a parameter changes a reader's
+output, so a corpus that recorded only the id would mean something else on re-read. A WhatsApp
+transcript is the case that forced it — `03/04/2024` is the third of April or the fourth of
+March, the file does not say which, and both readings are complete conversations that differ in
+which **day** each message falls on, and therefore in how the text is cut into parts.
+
+```
+reader-field = reader-id *( SP parameter )          ; parameters in key order
+reader-id    = name "/" 1*DIGIT                     ; name is lowercase ASCII and "-"
+parameter    = key "=" value
+key          = %x61-7A *( %x61-7A / DIGIT / "-" )
+value        = 1*( %x21-7E )                        ; no space, no "="
+```
+
+Parameters MUST be in ascending key order, and a key MUST appear at most once: a field whose
+spelling depended on the order a caller happened to pass its settings in would give one corpus
+two manifest identities. A reader that takes no parameters writes the id alone, which is every
+reader before `telegram/1` and `whatsapp/1`.
 
 An **alias** is lowercase ASCII:
 
@@ -538,7 +558,7 @@ It has no surface form: text is not written in surface syntax.
 | key | field | type | presence |
 |---:|---|---|---|
 | 0 | tid | 32 bytes | required |
-| 1 | reader | text, a reader id and version | required |
+| 1 | reader | text, a reader id and version, and its parameters, as manifest key 3 | required |
 | 2 | segments | canonical CBOR, one row per segment | required, MAY be empty |
 | 3 | raw | map, the reader's raw metadata for this part, verbatim | optional |
 

@@ -20,10 +20,15 @@
 //! id and its settings exactly as `Policy::id` does, `"whatsapp/1 date-format=dmy"`, which is
 //! what [`reader_field`] renders and [`parse_reader_field`] reads back.
 //!
-//! None of the six TX-P1 readers takes a parameter, so this build cannot write such a field —
-//! and `no_reader_in_this_phase_takes_a_parameter` asserts that, because the format spec still
-//! describes manifest key 3 as an id alone. The release that adds a parameterised reader is the release that widens the spec;
-//! the test is what makes those two things happen in the same commit.
+//! None of the six TX-P1 readers took a parameter, and a test asserted it, because the format
+//! spec described manifest key 3 as an id alone. **`whatsapp/1` is the reader that changed
+//! that** (TX-P2 step 2): `03/04/2024` is two different days and the file does not say which,
+//! so the date order is a required parameter — and a manifest that recorded `whatsapp/1`
+//! without it would name a corpus that cannot be reproduced. So key 3's grammar widened in the
+//! same commit as the reader, the spec says so, and the test that asserted "none" is now
+//! `the_readers_that_take_parameters_are_these_and_no_others`, which is the stronger claim: the
+//! set is part of the format's surface, so a seventh reader growing a parameter fails a test
+//! rather than passing quietly.
 
 use std::collections::BTreeMap;
 
@@ -315,6 +320,9 @@ pub const FEATURES: &[(&str, &str)] = &[
     ("osis/1", "reader-osis"),
     ("zefania/1", "reader-zefania"),
     ("json/1", "reader-json"),
+    ("telegram/1", "reader-telegram"),
+    ("whatsapp/1", "reader-whatsapp"),
+    ("slack/1", "reader-slack"),
 ];
 
 /// Why a reader id did not produce a reader.
@@ -383,6 +391,12 @@ fn built(id: &str) -> Option<&'static dyn Reader> {
         "osis/1" => Some(&osis::Osis),
         #[cfg(feature = "reader-zefania")]
         "zefania/1" => Some(&zefania::Zefania),
+        #[cfg(feature = "reader-telegram")]
+        "telegram/1" => Some(&telegram::Telegram),
+        #[cfg(feature = "reader-whatsapp")]
+        "whatsapp/1" => Some(&whatsapp::Whatsapp),
+        #[cfg(feature = "reader-slack")]
+        "slack/1" => Some(&slack::Slack),
         _ => None,
     }
 }
@@ -398,9 +412,22 @@ pub mod books;
     feature = "reader-usfm",
     feature = "reader-osis",
     feature = "reader-zefania",
-    feature = "reader-json"
+    feature = "reader-json",
+    feature = "reader-telegram",
+    feature = "reader-slack",
+    feature = "reader-whatsapp"
 ))]
 mod build;
+
+/// What the three chat readers share. Behind the same `any`, for the reason `build` is: a
+/// module compiled only at `--all-features` is a module `make crate-features` catches and
+/// `--all-features` never does.
+#[cfg(any(
+    feature = "reader-telegram",
+    feature = "reader-slack",
+    feature = "reader-whatsapp"
+))]
+mod chat;
 
 #[cfg(any(feature = "reader-osis", feature = "reader-zefania"))]
 mod xml;
@@ -419,6 +446,15 @@ pub mod osis;
 
 #[cfg(feature = "reader-usfm")]
 pub mod usfm;
+
+#[cfg(feature = "reader-slack")]
+pub mod slack;
+
+#[cfg(feature = "reader-telegram")]
+pub mod telegram;
+
+#[cfg(feature = "reader-whatsapp")]
+pub mod whatsapp;
 
 #[cfg(feature = "reader-zefania")]
 pub mod zefania;
@@ -518,20 +554,64 @@ mod tests {
         }
     }
 
-    /// No TX-P1 reader takes a parameter, which is what keeps manifest key 3 an id alone.
+    /// Which readers take parameters, named one by one.
     ///
-    /// The format spec describes key 3 as "a reader id and version, such as `osis/1`". A
-    /// parameter would have to be recorded there (see this module's header), and that is a
-    /// spec change. This test fails on the commit that adds a parameterised reader, which is
-    /// the commit where the spec, the three ports and this crate move together.
+    /// Until TX-P2 step 2 this test asserted that **none** did, which is what kept manifest key
+    /// 3 an id alone; it failed on the commit that added `whatsapp/1`, which is the commit
+    /// where the spec's grammar for key 3, the three ports and this crate moved together. It is
+    /// now the inverse claim, and it is the stronger one: a parameter is recorded in a manifest
+    /// and therefore in a mid, so the set of readers that have any is part of the format's
+    /// surface and not an implementation detail. Adding one to a seventh reader fails here.
     #[test]
-    fn no_reader_in_this_phase_takes_a_parameter() {
+    fn the_readers_that_take_parameters_are_these_and_no_others() {
+        let expected: &[(&str, &[(&str, bool)])] = &[
+            ("telegram/1", &[("tz", false)]),
+            ("whatsapp/1", &[("date-format", true), ("tz", false)]),
+        ];
         for id in available() {
             let r = reader(id).expect("built");
-            assert!(
-                r.params().is_empty(),
-                "{id} declares parameters; manifest key 3's grammar has to widen first"
-            );
+            let specs = r.params();
+            match expected.iter().find(|(name, _)| *name == id) {
+                Some((_, want)) => {
+                    let got: Vec<(&str, bool)> =
+                        specs.iter().map(|s| (s.key, s.required)).collect();
+                    assert_eq!(got, want.to_vec(), "{id}");
+                    for spec in specs {
+                        assert!(
+                            !spec.what.is_empty(),
+                            "{id}: `{}` has no description, and a refusal prints it",
+                            spec.key
+                        );
+                    }
+                }
+                None => assert!(
+                    specs.is_empty(),
+                    "{id} declares parameters and is not in this test's list; manifest key 3                      records them, so the list is the format's surface"
+                ),
+            }
+        }
+    }
+
+    /// Every parameter a reader declares survives the field a manifest records it in.
+    ///
+    /// The grammar is narrow (no whitespace, no `=`) and the field is space-separated, so a
+    /// reader could declare a key that cannot be written down. Checked over the real readers
+    /// rather than over a made-up one, because the made-up one is the case that already passes.
+    #[test]
+    fn every_declared_parameter_can_be_written_in_the_field_and_read_back() {
+        for id in available() {
+            let r = reader(id).expect("built");
+            if r.params().is_empty() {
+                continue;
+            }
+            let mut params = Params::new();
+            for spec in r.params() {
+                params.set(id, spec.key, "x").expect(spec.key);
+            }
+            let field = reader_field(id, &params);
+            let (back_id, back) = parse_reader_field(&field).expect(&field);
+            assert_eq!(back_id, id);
+            assert_eq!(back, params, "{field}");
         }
     }
 

@@ -30,6 +30,13 @@ struct Sample {
     alias: &'static str,
     lang: &'static str,
     licence: &'static str,
+    /// The reader's parameters, which are part of what produced the sample.
+    ///
+    /// Empty for the six TX-P1 readers. `whatsapp/1` is why the field exists: its date order is
+    /// required, so a sample read without it is not a sample at all — and the field a manifest
+    /// records is `whatsapp/1 date-format=dmy`, which means the expectation below pins the
+    /// settings along with the identities.
+    params: &'static [(&'static str, &'static str)],
 }
 
 const SAMPLES: &[Sample] = &[
@@ -39,6 +46,7 @@ const SAMPLES: &[Sample] = &[
         alias: "kjv1769",
         lang: "en",
         licence: "public-domain",
+        params: &[],
     },
     // A verse bridge, which is the only place a reader emits a *range* locator. It is here
     // because a bridge is a node whose own address is a range, and the resolver used to
@@ -50,6 +58,7 @@ const SAMPLES: &[Sample] = &[
         alias: "kjv1769-exodus",
         lang: "en",
         licence: "public-domain",
+        params: &[],
     },
     Sample {
         file: "gen1.osis",
@@ -57,6 +66,7 @@ const SAMPLES: &[Sample] = &[
         alias: "kjv1769-osis",
         lang: "en",
         licence: "public-domain",
+        params: &[],
     },
     Sample {
         file: "gen1-milestone.osis",
@@ -64,6 +74,7 @@ const SAMPLES: &[Sample] = &[
         alias: "kjv1769-milestone",
         lang: "en",
         licence: "public-domain",
+        params: &[],
     },
     Sample {
         file: "gen1.zefania",
@@ -71,6 +82,7 @@ const SAMPLES: &[Sample] = &[
         alias: "luther1912",
         lang: "de",
         licence: "public-domain",
+        params: &[],
     },
     Sample {
         file: "notes.md",
@@ -78,6 +90,7 @@ const SAMPLES: &[Sample] = &[
         alias: "notes-md",
         lang: "en",
         licence: "CC0-1.0",
+        params: &[],
     },
     Sample {
         file: "notes.txt",
@@ -85,6 +98,7 @@ const SAMPLES: &[Sample] = &[
         alias: "notes-txt",
         lang: "en",
         licence: "CC0-1.0",
+        params: &[],
     },
     Sample {
         file: "chat.json",
@@ -92,6 +106,34 @@ const SAMPLES: &[Sample] = &[
         alias: "exchange",
         lang: "en",
         licence: "CC0-1.0",
+        params: &[],
+    },
+    // The three chat readers (TX-P2 step 2). `mul` rather than `en`: each sample holds English
+    // and Russian messages, which is the shape a chat export actually has and the reason
+    // segment key 4 (a row's own language) exists.
+    Sample {
+        file: "telegram.json",
+        reader: "telegram/1",
+        alias: "reading-group-telegram",
+        lang: "mul",
+        licence: "CC0-1.0",
+        params: &[],
+    },
+    Sample {
+        file: "whatsapp.txt",
+        reader: "whatsapp/1",
+        alias: "reading-group-whatsapp",
+        lang: "mul",
+        licence: "CC0-1.0",
+        params: &[("date-format", "dmy")],
+    },
+    Sample {
+        file: "slack.zip",
+        reader: "slack/1",
+        alias: "reading-group-slack",
+        lang: "mul",
+        licence: "CC0-1.0",
+        params: &[],
     },
 ];
 
@@ -146,8 +188,14 @@ fn read(sample: &Sample) -> (ReadOutput, u64) {
         .unwrap_or_else(|e| panic!("fixtures/library/readers/{}: {e}", sample.file));
     let reader =
         readers::reader(sample.reader).unwrap_or_else(|e| panic!("{}: {e}", sample.reader));
+    let mut params = Params::new();
+    for (key, value) in sample.params {
+        params
+            .set(sample.reader, *key, *value)
+            .unwrap_or_else(|e| panic!("{}: --param {key}={value}: {e}", sample.file));
+    }
     let mut budget = Budget::new(Caps::DEFAULT, bytes.len() as u64).expect("a budget");
-    let out = readers::read_with(reader, &Input::new(&bytes), &Params::new(), &mut budget)
+    let out = readers::read_with(reader, &Input::new(&bytes), &params, &mut budget)
         .unwrap_or_else(|e| panic!("{}: {e}", sample.file));
     (out, bytes.len() as u64)
 }
@@ -179,10 +227,19 @@ fn describe(sample: &Sample, out: &ReadOutput) -> String {
         .unwrap_or_else(|e| panic!("{}: grouping: {e}", sample.file));
 
     let lang = LangTag::new(sample.lang).expect("a language tag");
+    // The field a manifest records is the id **with its settings** (key 3), not the id. A
+    // fixture that pinned the bare id would pin a mid no `text add` could reproduce.
+    let mut params = Params::new();
+    for (key, value) in sample.params {
+        params
+            .set(sample.reader, *key, *value)
+            .expect("a parameter");
+    }
+    let reader_field = readers::reader_field(sample.reader, &params);
     let mut manifest = ManifestBuilder::new(
         sample.alias,
         lang.clone(),
-        sample.reader,
+        &reader_field,
         sample.licence,
         &policy,
     )
@@ -191,12 +248,19 @@ fn describe(sample: &Sample, out: &ReadOutput) -> String {
     if let Some(title) = &out.title {
         manifest = manifest.title(title.clone());
     }
+    // `raw` is inside the manifest and therefore inside the mid, so the chat round trip
+    // SMYSL-2.4 asks for — "with `raw` intact" — is pinned by the mid below as well as by the
+    // bytes printed with it.
+    if let Some(raw) = &out.raw {
+        manifest = manifest.raw(raw.clone());
+    }
 
     let mut rendered = String::new();
     writeln!(rendered, "file      {}", sample.file).expect("write");
     writeln!(rendered, "reader    {}", sample.reader).expect("write");
     writeln!(rendered, "alias     {}", sample.alias).expect("write");
     writeln!(rendered, "licence   {}", sample.licence).expect("write");
+    writeln!(rendered, "reader-field {reader_field}").expect("write");
     writeln!(rendered, "policy    {}", policy.id()).expect("write");
     writeln!(rendered, "top-level {}", out.top_level).expect("write");
     writeln!(rendered, "lossy     {}", out.lossy).expect("write");
@@ -215,6 +279,9 @@ fn describe(sample: &Sample, out: &ReadOutput) -> String {
     writeln!(rendered, "text      {} bytes", out.text.len()).expect("write");
     writeln!(rendered, "nodes     {}", out.rows.len()).expect("write");
     writeln!(rendered, "parts     {}", plans.len()).expect("write");
+    if let Some(raw) = &out.raw {
+        writeln!(rendered, "raw       {} bytes {}", raw.len(), bytes_hex(raw)).expect("write");
+    }
 
     for (index, plan) in plans.iter().enumerate() {
         let text = part::text_of(&out.text, plan.range.clone())
@@ -264,14 +331,38 @@ fn describe(sample: &Sample, out: &ReadOutput) -> String {
 
     writeln!(rendered, "\nlocators").expect("write");
     for row in &out.rows {
+        // The metadata half of a row — who, when, and the platform's own ids — is printed only
+        // where a reader filled it, so the six TX-P1 expectations are unchanged by its arrival
+        // and the three chat ones say what a chat reading holds.
+        let mut extra = String::new();
+        if let Some(who) = &row.speaker {
+            write!(extra, " spk={who}").expect("write");
+        }
+        if let Some(at) = row.observed {
+            write!(extra, " at={at}").expect("write");
+        }
+        if let Some(tz) = row.tz_offset {
+            write!(extra, " tz={tz}").expect("write");
+        }
+        for (key, value) in &row.ids {
+            write!(extra, " {key}={value}").expect("write");
+        }
         writeln!(
             rendered,
-            "  {:<9} {:<28} {}..{}",
+            "  {:<9} {:<28} {}..{}{extra}",
             row.level, row.locator, row.start, row.end
         )
         .expect("write");
     }
     rendered
+}
+
+fn bytes_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        write!(out, "{b:02x}").expect("write");
+    }
+    out
 }
 
 fn hex(bytes: &[u8; 32]) -> String {

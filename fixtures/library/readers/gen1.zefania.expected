@@ -2,6 +2,7 @@ file      gen1.zefania
 reader    zefania/1
 alias     luther1912
 licence   public-domain
+reader-field zefania/1
 policy    smysl/parts/1 level=chapter min=65536 max=4194304
 top-level chapter
 lossy     false

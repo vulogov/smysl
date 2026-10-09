@@ -78,6 +78,10 @@ pub const LEVELS: &[&str] = &[
     "message",
     "day",
     "page",
+    // TX-P2 step 2: a Slack export holds many conversations in one archive, so a chat reading
+    // can have a level above the days. Telegram and WhatsApp export one conversation per file
+    // and have none.
+    "channel",
 ];
 
 impl Level {

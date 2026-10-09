@@ -2,6 +2,7 @@ file      notes.txt
 reader    txt/1
 alias     notes-txt
 licence   CC0-1.0
+reader-field txt/1
 policy    smysl/parts/1 level=line min=65536 max=4194304
 top-level line
 lossy     false

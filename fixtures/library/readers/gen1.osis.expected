@@ -2,6 +2,7 @@ file      gen1.osis
 reader    osis/1
 alias     kjv1769-osis
 licence   public-domain
+reader-field osis/1
 policy    smysl/parts/1 level=chapter min=65536 max=4194304
 top-level chapter
 lossy     false

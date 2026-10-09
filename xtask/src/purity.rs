@@ -78,6 +78,20 @@ const NOT_IN_THE_CORE: &[(&str, &str)] = &[
         "only through `reader-osis` and `reader-zefania` of `smysl-text`",
     ),
     ("pulldown-cmark", "only through `reader-md` of `smysl-text`"),
+    // A Slack export is an archive, and TX-P2 step 2 is where that stopped being a plan. Both
+    // are here for the reason the parsers are: a reader's dependency is recorded against the
+    // reader, and a later edit that made `reader-slack` a default feature would put a zip
+    // parser and an inflater in the pure core's default tree — which is a decision about every
+    // pure crate, and this is where it would have to be argued.
+    //
+    // Measured before adoption, like the others: `zip` 4.3.0 (not 9.0.0, which declares rustc
+    // 1.88 against this tier's 1.85), eleven crates, no `cc`, and the highest floor in the tree
+    // is `hashbrown` 0.17's 1.85 — exactly the base.
+    ("zip", "only through `reader-slack` of `smysl-text`"),
+    (
+        "flate2",
+        "only through `reader-slack` of `smysl-text`: the deflate backend `zip` does not name",
+    ),
     // The four that `lingua` brings, each naming a different thing a pure crate's default
     // tree should not contain. None of them is on `NEVER`: threads and randomness are not a
     // runtime or a socket, and rule B is about the network. What they are is a claim — "the
@@ -89,7 +103,8 @@ const NOT_IN_THE_CORE: &[(&str, &str)] = &[
     ),
     (
         "getrandom",
-        "only through `detect` of `smysl-text`, transitively under `lingua`",
+        "only through `detect` of `smysl-text` (under `lingua`) and the facade's own `text` \
+         feature, which mints a pseudonym key — the library layer cannot invent a secret",
     ),
     (
         "wasm-bindgen",

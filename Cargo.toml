@@ -42,6 +42,10 @@ tokio                 = { version = "1", features = ["rt", "sync", "macros"] }
 ureq                  = { version = "2", default-features = false }
 serde                 = { version = "1", features = ["derive"] }
 serde_json            = "1"
+# The pseudonym key's thirty-two bytes. Not pinned with `=`: nothing derived from it is an
+# identity anybody re-derives — the key is a secret, and a corpus is reproducible from the key
+# and not from the generator that made it. Declares 1.63, below this workspace's base.
+getrandom             = "0.3"
 
 # Reader dependencies, pinned exactly. SMYSL-2.4 §7 requires it: a reader's output *is* a
 # corpus's identity, so a parser that changed its mind between patch releases would change
@@ -69,6 +73,23 @@ rust-stemmers         = { version = "=1.2.0" }
 # would change identities nobody re-derived. Five language features, not the 75 defaults.
 lingua = { version = "=1.8.0", default-features = false, features = ["english", "russian", "spanish", "french", "german"] }
 pulldown-cmark        = { version = "=0.13.4", default-features = false }
+# A Slack export is a zip, so `reader-slack` reads one (SMYSL-2.4 §3.2 called the choice
+# unverified; TX-P2 step 2 verified it). `=4.3.0` and not 9.0.0, which is the current release:
+# 9 declares rustc 1.88, and `smysl-text` is in the pure tier at 1.85. 4.3.0 declares 1.82, and
+# the highest floor anywhere in its tree is `hashbrown` 0.17's **1.85** — exactly the base,
+# which is why the pin is exact in both crates rather than a caret. Eleven crates, no C, and
+# none of `NEVER`.
+#
+# `default-features = false` drops eight codecs. A Slack archive is deflate or stored, and
+# `aes-crypto` would have put `getrandom` into the pure tier's default-feature neighbourhood
+# for an encryption nobody's export uses.
+zip                   = { version = "=4.3.0", default-features = false, features = ["deflate-flate2"] }
+# The backend `zip`'s own `deflate-flate2` does not name. Measured, not assumed: that feature
+# is `dep:flate2` alone, and `flate2` with no backend feature **does not compile** — fifteen
+# errors about a missing `MZ_DEFAULT_WINDOW_BITS`. So the choice of inflater is ours to make,
+# and `rust_backend` is `miniz_oxide`: pure Rust, no `cc` in the tree, which is what §13's "zero
+# C in the core path" asks for and what `make crate-features` checks.
+flate2                = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
 
 # ---------------------------------------------------------------------------
 # Facade crate: [lib] + [[bin]] (RFC SMYSL-1 §12.1)
@@ -137,11 +158,22 @@ cli       = [
     "smysl-text/reader-osis",
     "smysl-text/reader-zefania",
     "smysl-text/reader-json",
+    # The three chat readers. In `cli` for the reason the others are: a `text add --reader
+    # telegram/1` that can only refuse is not a command.
+    "smysl-text/reader-telegram",
+    "smysl-text/reader-slack",
+    "smysl-text/reader-whatsapp",
     # Stemming. Free here and nowhere else: `reader-json` has already put `serde` in this
     # tree, so the one thing `smysl-text/stem` costs a CLI build is the stemmer itself.
     "smysl-text/stem",
 ]
-text      = ["dep:smysl-text"]
+# `dep:getrandom` is here and not in `smysl-text`, and the reason is the whole shape of
+# pseudonymisation (SMYSL-2.4 §3.2): the key under `<library>/secrets/pseudonym.key` is
+# thirty-two random bytes, and the pure tier has no randomness source in its default tree — that
+# is the claim TX-P2 step 1 put in the purity gate when `lingua` brought `getrandom` with it. So
+# the library layer knows where the key lives and what shape it has, and the facade mints one.
+# Free in this tree: `ureq`'s TLS stack already links it, so the feature adds no crate at all.
+text      = ["dep:smysl-text", "dep:getrandom"]
 # Language identification. Not in `cli` and not in `text`: it is 57 crates and 14.4 MB of
 # `lingua` models (SMYSL-2.4 §3.7, measured in TX-P2 step 1), and nothing in the CLI asks for
 # a guess yet — a manifest's language comes from the reader or from `--lang`, and a fallback
@@ -189,6 +221,7 @@ smysl-ingest   = { workspace = true, optional = true }
 smysl-tui      = { workspace = true, optional = true }
 smysl-embed    = { workspace = true, optional = true }
 clap           = { workspace = true, optional = true }
+getrandom      = { workspace = true, optional = true }
 
 [dev-dependencies]
 # The global-flag matrix test parses `--json` output with a real parser rather than
