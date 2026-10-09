@@ -42,8 +42,13 @@ export const RECORD_NAMES = new Map([
  *
  * An unknown record is still preserved verbatim and re-encoded byte for byte; that is C-Read
  * and it is unaffected.
+ *
+ * 14, 15 and 18 joined in 1.10: `library.js` decodes their bodies and derives the four
+ * identities over them. 9, 16, 17 and 19 are still named and not understood — nothing emits a
+ * checkpoint, 16 is reserved, and 17 and 19 land with the releases that write them. The
+ * separation above is what makes that sentence sayable.
  */
-export const UNDERSTOOD_RECORDS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]);
+export const UNDERSTOOD_RECORDS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 18]);
 
 /** §2.2. Anything at 9 or above is an unknown key that rule X says must survive verbatim. */
 export const UNIT_KEYS = new Map([

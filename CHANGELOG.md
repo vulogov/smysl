@@ -52,6 +52,47 @@ Apache 2.0 and settled, the hosted one is not. It blocks nothing that has starte
 the first of them to be hashed over something other than a CBOR map. Step 2 adds the crate that
 interprets them, and the locator grammar the plan pointed at a document nobody has.
 
+### Three implementations now derive the library identities, and one of them had a defect
+
+Python, JavaScript and Go decode records 14, 15 and 18 and derive the four identities over them
+— tid, mid, did and rdid — reproducing every vector the reference emits. TX-P1 step 7, which
+completes the phase. Before this they had the *names* of those records and nothing else:
+preserved verbatim, re-encoded byte for byte, each reporting a manifest as named but not
+understood. That is honest C-Read, and it left the domain-byte separation checked by the one
+implementation that specified it.
+
+**The Node port accepted a byte order mark**, which the format forbids outright. The
+normalisation check was the same five lines in all three ports and wrong in exactly one:
+JavaScript's `TextDecoder` *strips* a leading BOM unless `ignoreBOM` is set — the flag is named
+for what it does to the output, not for what it ignores — so the function decoded the three
+bytes away and then truthfully reported that the text did not begin with U+FEFF. A part
+carrying one would have verified, and two libraries given the same text would have named two
+different parts. All three now check the bytes before decoding. Python's `bytes.decode` keeps
+the BOM and its identical lines were right, which is the entire argument for a second and third
+reading of a specification.
+
+**A manifest's identity is taken from the body's own bytes, not from a re-encode**, and that is
+forced by the same language. JavaScript has one number type, so a `binary32` zero re-encodes as
+an integer — the reason its record type already returns the bytes it read rather than
+re-encoding — and a manifest may carry a reader's metadata verbatim, an arbitrary map that can
+hold a float. A re-encoded body would be a different identity for the same manifest in that
+language alone. So all three slice the body out of the record, which is exactly the preimage the
+spec names, and ask separately whether their own encoder reproduces those bytes. Two questions,
+two answers, neither borrowed from the other.
+
+**And the gate that keeps the four implementations' tables in step could not read a hyphen.**
+Its row patterns matched field names with `\w`, and no field in any table was hyphenated before
+1.10, so the pattern had always matched everything. The manifest table has `parent-kind` and
+`part-policy`; the gate skipped both rows and then reported them as keys the implementations
+were missing. It now covers the manifest and reading key tables in all three ports, the four
+domain bytes — each asserted to equal the record code it names, and all of them below the first
+byte a CBOR map can start with, which is what makes an identity unmistakable for a uid — and the
+fixture's own copy of that table.
+
+No reader was ported, deliberately. The question is whether three implementations agree on the
+identity of a record, not whether three parsers of OSIS agree with each other — which would be
+a weaker claim with nothing to appeal to when they disagreed.
+
 ### A text cut into two parts was losing a byte at the cut
 
 `smysl text add`, `text ls` and `text show`: a library is a directory now, with a catalogue, an

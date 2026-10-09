@@ -1297,7 +1297,7 @@ The `.expected` format is the existing one (`fixtures/README.md`): exact code se
 
 | experiment | phase | how |
 |---|---|---|
-| **GE-T1** (determinism) | TX-P1 (5 Bibles, JSON series), TX-P2 (2 chat exports) | build each library on Linux x86-64 and one other platform (CI matrix, unverified availability); compare mids, structure hashes, rdids; Python, JavaScript and Go recompute tid/rdid/mid from the emitted records and agree. They do not re-implement readers. Any mismatch blocks the next phase. |
+| **GE-T1** (determinism) | TX-P1 (5 Bibles, JSON series), TX-P2 (2 chat exports) | build each library on Linux x86-64 and one other platform (CI matrix, unverified availability); compare mids, structure hashes, rdids; Python, JavaScript and Go recompute tid/rdid/mid from the emitted records and agree. They do not re-implement readers. Any mismatch blocks the next phase. **Partly met at TX-P1 step 7:** the three ports derive every identity in `fixtures/library/wire/ids.json` and agree, and that half is done. Two halves are owed and neither is a port's. The **five Bibles and the JSON series** are a corpus this repository does not hold, so what is checked is a two-part fixture (one Latin, one Cyrillic) — enough to exercise NFC, not enough to be the criterion. The **second platform does not exist**: all eighteen jobs in CI are `ubuntu-latest`. What a second runner would test is worth naming, because it is not the identities — BLAKE3 over bytes and canonical CBOR are platform-independent by construction — it is *reading files*: line endings, NFC through a different Unicode table version, path behaviour. So both outstanding halves are reader risks and they arrive together, with the corpus, in TX-P2. |
 | **GE-T4** (attribution fairness) | before TX-P5 | 200 hand-checked units per tier-1 language under normaliser v1 and v2 (SMYSL-2.1); v2 false-`Absent` > 1% in any language blocks TX-P5 |
 | **GE-T13** (effective time) | TX-P3 | synthetic chats with planted skews plus a public chronology with known relative orders; P-E4/P-E5 on real data; any planted skew undetected, or any false contested interval on consistent data, blocks TX-P4 |
 | **GE-T14** (part size) | end of TX-P2 | real chats, revised articles, Bibles at 64 KiB–4 MiB; object count, reuse on revision, redaction granularity; the curve is recorded and the default fixed before TX-P3 |
@@ -1602,12 +1602,66 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
      - `every_command_names_the_phase_that_wires_it` accepted `SM-P*` or a release number, so
        `TX-P1` failed it. There are two RFCs with two phase vocabularies now, and the test knew
        about one.
-7. Ports: C-Read for 14, 15, 18 and the ids. Step 1 gave all three the **names** and nothing
+7. ~~Ports: C-Read for 14, 15, 18 and the ids. Step 1 gave all three the **names** and nothing
    else — the spec table reaches them through `verify-spec-tables.py`, and each now reports a
    manifest as named but not understood. What is left is the part that matters: decoding the
    bodies and **deriving tid, mid and rdid** from `fixtures/library/wire/ids.json`, which is the
    first identity work in those implementations since uids, and the only way the domain-byte
-   separation gets a second reading. *Exit:* **GE-T1** on Bibles and a JSON series.
+   separation gets a second reading.~~ **Done 2026-10-08.** `python/smysl/library.py`,
+   `nodejs/src/library.js`, `go/library.go`, each with its own test file: 180 tests in Python,
+   166 in Node, 92 in Go, and every vector in `ids.json` reproduced by all three. The
+   domain-separation claim is exercised rather than transcribed — one preimage under all four
+   identities, asserted to give four different digests — and the identity of each record is
+   derived twice over, once from the hex preimage the fixture supplies and once from the record
+   as decoded.
+
+   *Exit:* **GE-T1 is partly met, and the part that is not is stated below** rather than
+   claimed. Five findings:
+   - **The Node port accepted a byte order mark**, which §2.6 forbids outright.
+     `isNormalised` was the same five lines in all three ports and wrong in exactly one:
+     JavaScript's `TextDecoder` *strips* a leading BOM unless `ignoreBOM` is set — the flag is
+     named for what it does to the output, not for what it ignores — so the function decoded
+     `EF BB BF` away and then truthfully reported that the text did not begin with U+FEFF. A
+     part carrying a BOM would have verified. All three now test the bytes before decoding,
+     which has no such default to know about. Python's `bytes.decode` keeps the BOM and its
+     identical lines were right, which is the whole argument for a second and third reading.
+   - **A mid cannot be taken from a re-encoded body in JavaScript**, and so is taken from the
+     body's own bytes in all three. `Record.reencode()` already returns the original bytes
+     there, because the language has one number type and a `binary32` zero re-encodes as an
+     integer; a manifest's key 16 is the reader's metadata *verbatim*, an arbitrary map that
+     may hold a float, so a re-encoded body would be a different mid for the same manifest in
+     that language alone. The body is a slice of the record, which is exactly the preimage
+     §2.6 names, and whether the port's own encoder reproduces those bytes is asked separately
+     — the producer's question, with its own answer. All three pass both.
+   - **`verify-spec-tables.py` could not see a hyphenated field name.** Its row patterns matched
+     `(\w+)`, and no field in any table was hyphenated before 1.10 — so the pattern had always
+     matched everything and dropped nothing. The manifest table has `parent-kind` and
+     `part-policy`, and the gate skipped both rows, then reported them as *keys the
+     implementation was missing*. Widened in all three language patterns. The gate now also
+     covers the manifest and reading key tables in each port, the four domain bytes — asserting
+     each equals the record code it names, and that every one is below `0xa0`, so none can
+     collide with the head of a CBOR map and therefore with a uid — and `ids.json`'s own copy
+     of that table. 68 comparisons.
+   - **No reader was ported, deliberately**, and this plan says so already; it is restated
+     because it is the question a reader of the ports will ask. The exit asks these three to
+     recompute identities from the records the reference *emits*. Three parsers of USFM
+     agreeing with each other would be a different and much weaker claim, with nothing to
+     appeal to when they disagreed.
+   - **GE-T1 is not fully met and this step cannot meet it.** The port half is: Python,
+     JavaScript and Go recompute tid, mid, rdid and the structure hash from the emitted records
+     and agree. Two halves are outstanding. The criterion asks for the comparison on **five
+     Bibles and a JSON series**, a corpus this repository does not hold and whose licensing is
+     TX-P2's problem; what is checked here is the two-part fixture, one Latin and one Cyrillic,
+     which is enough to exercise NFC and not enough to be the criterion. And it asks for each
+     library to be built **on Linux x86-64 and one other platform**, against a CI matrix the
+     plan recorded as unverified: all eighteen jobs in `.github/workflows/ci.yml` are
+     `ubuntu-latest`, so the second platform does not exist yet. Worth being precise about what
+     it would test — BLAKE3 over bytes and canonical CBOR are platform-independent by
+     construction, so what a second runner exercises is *reading files*: line-ending handling,
+     NFC through a different Unicode table version, and path behaviour. That is a real risk and
+     it is a reader risk, which is why it belongs with the corpus rather than with the
+     identities. Both are recorded on GE-T1's own row in §6, so the next phase inherits them
+     where it will look for them rather than in a step record it has no reason to re-read.
 
 ### TX-P2 — segments, languages, chats, redaction
 

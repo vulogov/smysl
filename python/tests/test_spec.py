@@ -185,17 +185,19 @@ def test_record_type_codes_match_the_table_in_3_1():
     }
 
 
-def test_the_library_records_are_named_but_not_understood():
+def test_a_named_record_is_not_the_same_as_an_understood_one():
     """§3.1: a code the spec names is not a code this implementation decodes.
 
-    1.10 writes manifests, part texts and part readings. This implementation is C-Read: it
-    preserves them verbatim and re-encodes them byte for byte, and it interprets none of them.
-    Saying so is the point — a reader that called them known while decoding nothing would be
-    exactly the silence ``SMY-W014`` exists to break. Code 9 was the same claim, and harmless
-    only because nothing has ever emitted a checkpoint.
+    1.10 added five library codes to the name table and this implementation now decodes three
+    of them — a manifest, a part text and a part reading, with the four identities over them
+    (`test_library.py`). Four are still named and not understood, and that is what the two
+    tables exist to be able to say: 9 is a checkpoint nothing has ever emitted, 16 is reserved,
+    and 17 and 19 land with the releases that write them. A reader that called those known
+    while decoding none of them would be exactly the silence ``SMY-W014`` exists to break.
     """
     named_not_understood = set(smysl.RECORD_NAMES) - smysl.UNDERSTOOD_RECORDS
-    assert named_not_understood == {9, 14, 15, 16, 17, 18, 19}
+    assert named_not_understood == {9, 16, 17, 19}
+    assert {14, 15, 18} <= smysl.UNDERSTOOD_RECORDS
     assert smysl.UNDERSTOOD_RECORDS <= set(smysl.RECORD_NAMES)
 
 

@@ -49,7 +49,12 @@ RECORD_NAMES = {
 #:
 #: An unknown record is still preserved verbatim and re-encoded byte for byte; that is C-Read
 #: and it is unaffected.
-UNDERSTOOD_RECORDS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13})
+#:
+#: 14, 15 and 18 joined in 1.10: :mod:`smysl.library` decodes their bodies and derives the four
+#: identities over them. 9, 16, 17 and 19 are still named and not understood — nothing emits a
+#: checkpoint, 16 is reserved, and 17 and 19 land with the releases that write them. The
+#: separation the paragraph above is about is what makes that sentence sayable.
+UNDERSTOOD_RECORDS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 18})
 
 #: §2.2, the unit core's integer keys. Anything at 9 or above is an unknown key that rule X
 #: says must survive a round trip verbatim.

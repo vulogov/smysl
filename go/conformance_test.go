@@ -255,13 +255,14 @@ func TestRecordTypeCodesMatchTheTable(t *testing.T) {
 
 // §3.1: a code the spec names is not a code this implementation decodes.
 //
-// 1.10 writes manifests, part texts and part readings. This implementation is C-Read: it
-// preserves them verbatim and re-encodes them byte for byte, and it interprets none of them.
-// Saying so is the point — a reader that called them known while decoding nothing would be
-// exactly the silence SMY-W014 exists to break. Code 9 was the same claim, and harmless only
-// because nothing has ever emitted a checkpoint.
-func TestTheLibraryRecordsAreNamedButNotUnderstood(t *testing.T) {
-	for _, code := range []uint64{9, 14, 15, 16, 17, 18, 19} {
+// 1.10 added five library codes to the name table and this implementation now decodes three of
+// them — a manifest, a part text and a part reading, with the four identities over them
+// (library_test.go). Four are still named and not understood, and that is what the two tables
+// exist to be able to say: 9 is a checkpoint nothing has ever emitted, 16 is reserved, and 17
+// and 19 land with the releases that write them. A reader that called those known while
+// decoding none of them would be exactly the silence SMY-W014 exists to break.
+func TestANamedRecordIsNotTheSameAsAnUnderstoodOne(t *testing.T) {
+	for _, code := range []uint64{9, 16, 17, 19} {
 		r := smysl.Record{Code: code}
 		if r.IsKnown() {
 			t.Errorf("code %d is named but must not be reported as understood", code)
@@ -270,7 +271,7 @@ func TestTheLibraryRecordsAreNamedButNotUnderstood(t *testing.T) {
 			t.Errorf("code %d is in the table, so it should have a name: %q", code, r.Name())
 		}
 	}
-	for _, code := range []uint64{1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13} {
+	for _, code := range []uint64{1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 18} {
 		r := smysl.Record{Code: code}
 		if !r.IsKnown() {
 			t.Errorf("code %d is decoded here and must be reported as understood", code)

@@ -37,6 +37,7 @@ document" described something that did not happen.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -218,11 +219,62 @@ def main() -> int:
     # only what is implemented would let a later release spend one twice.
     check("§3.1 record codes are 1..19", sorted(record_codes), list(range(1, 20)))
 
+    # -- The library tables of §2.6 and §3.1, added in 1.10 ------------------
+    #
+    # Three ports now decode records 14, 15 and 18 and derive the four identities over them
+    # (TX-P1 step 7), which means four more key tables and a domain-byte table are transcribed
+    # in four places. This is the gate that keeps them one table.
+    manifest_keys = canon_map(
+        table_after(text[text.find("**Manifest (14)**"):], "| key | field | type | presence |", 0, 1)
+    )
+    reading_keys = canon_map(
+        table_after(
+            text[text.find("**Part reading (18)**"):], "| key | field | type | presence |", 0, 1
+        )
+    )
+    check("§3.1 manifest keys are 0..18", sorted(manifest_keys), list(range(19)))
+    check("§3.1 part reading keys are 0..3", sorted(reading_keys), [0, 1, 2, 3])
+
+    # §2.6's domain bytes, from the identity table rather than from prose. The spec writes them
+    # as `0x0f`; the ports write them as integers, so the comparison is on the number.
+    domain_rows = {}
+    at = text.find("| identity | names | preimage | domain byte | text form |")
+    if at < 0:
+        fail("the spec has no §2.6 identity table")
+    for line in text[at:].splitlines():
+        row = line.strip()
+        if not row.startswith("|"):
+            if domain_rows:
+                break
+            continue
+        cells = [c.strip().strip("`").strip("*") for c in row.strip("|").split("|")]
+        if len(cells) < 5 or not cells[3].startswith("0x"):
+            continue
+        domain_rows[cells[0]] = int(cells[3], 16)
+    check("§2.6 names four identities", sorted(domain_rows), ["did", "mid", "rdid", "tid"])
+    # The claim the table is *for*: a domain byte is the record code the identity names, and
+    # every one of them is below the first byte of a CBOR map, so no identity can equal a uid.
+    for name, code in (("tid", 15), ("mid", 14), ("did", 17), ("rdid", 18)):
+        check(f"§2.6 {name}'s domain byte is record {code}", domain_rows.get(name), code)
+    for name, byte in domain_rows.items():
+        if byte >= 0xA0:
+            fail(f"§2.6 {name}'s domain byte {byte:#x} collides with a CBOR map head")
+
+    # The vectors carry the same table, and a fixture that drifted from the spec would make
+    # every port agree with the wrong thing.
+    with open("fixtures/library/wire/ids.json") as fh:
+        ids = json.load(fh)
+    check("fixtures/library/wire/ids.json domain bytes", ids["domain_bytes"], domain_rows)
+
     # -- python/ -------------------------------------------------------------
     py_records = read("python/smysl/records.py")
     py_uid = read("python/smysl/uid.py")
     py_cbor = read("python/smysl/cbor.py")
-    PY_ROW = r"^\s+(\d+): \"(\w+)\","
+    # `[\w-]`, not `\w`: a field name may be hyphenated. Until 1.10 none was, so the narrower
+    # pattern matched everything and dropped nothing; the manifest table has `parent-kind` and
+    # `part-policy`, and the pattern silently skipped both rows — which a comparison reads as
+    # "the implementation is missing two keys", not as "the gate cannot see them".
+    PY_ROW = r"^\s+(\d+): \"([\w-]+)\","
     check(
         "python: §2.2 unit core keys",
         canon_map(pairs(block(py_records, "UNIT_KEYS = {", "\n}"), PY_ROW)),
@@ -244,6 +296,26 @@ def main() -> int:
           int(re.search(r"^MAX_NESTING = (\d+)", py_cbor, re.M).group(1)), 128)
     check("python: §2.1 digest width",
           int(re.search(r"^UID_LEN = (\d+)", py_uid, re.M).group(1)), 32)
+    py_library = read("python/smysl/library.py")
+    check(
+        "python: §3.1 manifest keys",
+        canon_map(pairs(block(py_library, "MANIFEST_KEYS = {", "\n}"), PY_ROW)),
+        manifest_keys,
+    )
+    check(
+        "python: §3.1 part reading keys",
+        canon_map(pairs(block(py_library, "PART_READING_KEYS = {", "\n}"), PY_ROW)),
+        reading_keys,
+    )
+    check(
+        "python: §2.6 domain bytes",
+        {
+            name: int(re.search(rf"^{name.upper()}_DOMAIN = (0x[0-9a-fA-F]+)$", py_library,
+                                re.M).group(1), 16)
+            for name in ("tid", "mid", "did", "rdid")
+        },
+        domain_rows,
+    )
 
     # -- go/ -----------------------------------------------------------------
     go_records = read("go/records.go")
@@ -257,7 +329,7 @@ def main() -> int:
           {k: "key" + v for k, v in unit_keys.items()})
     # Unanchored: gofmt packs several entries onto one line, so a `^\t`-anchored row regex
     # sees only the first of each and reports the rest as missing from the implementation.
-    GO_ROW = r"(\d+): \"(\w+)\""
+    GO_ROW = r"(\d+): \"([\w-]+)\""
     check("go: §3.1 record codes",
           canon_map(pairs(block(go_records, "RecordNames = map[uint64]string{", "\n}"), GO_ROW)),
           record_codes)
@@ -278,6 +350,19 @@ def main() -> int:
           {k: "keysource" + v for k, v in source_keys.items()})
     check("go: §3 constraint 9 nesting bound",
           int(re.search(r"^const MaxNesting = (\d+)", go_cbor, re.M).group(1)), 128)
+    go_library = read("go/library.go")
+    check("go: §3.1 manifest keys",
+          canon_map(pairs(block(go_library, "ManifestKeys = map[uint64]string{", "\n}"), GO_ROW)),
+          manifest_keys)
+    check("go: §3.1 part reading keys",
+          canon_map(pairs(block(go_library, "PartReadingKeys = map[uint64]string{", "\n}"),
+                          GO_ROW)),
+          reading_keys)
+    check("go: §2.6 domain bytes",
+          {name: int(re.search(rf"^\t{name.title()}Domain\s+byte = (0x[0-9a-fA-F]+)$",
+                               go_library, re.M).group(1), 16)
+           for name in ("tid", "mid", "did", "rdid")},
+          domain_rows)
     check("go: §2.1 digest width",
           int(re.search(r"^const UidLen = (\d+)", go_uid, re.M).group(1)), 32)
 
@@ -285,7 +370,9 @@ def main() -> int:
     js_records = read("nodejs/src/records.js")
     js_uid = read("nodejs/src/uid.js")
     js_cbor = read("nodejs/src/cbor.js")
-    JS_ROW = r"^\s+\[(\d+), \"(\w+)\"\],"
+    # `[\w-]` for the same reason `PY_ROW` has it: a hyphenated field name is skipped by `\w`,
+    # and a skipped row reads as a missing key rather than as an unreadable table.
+    JS_ROW = r"^\s+\[(\d+), \"([\w-]+)\"\],"
     JS_ENUM = r"^  (\w+): (\d),$"
     check("nodejs: §2.2 unit core keys",
           canon_map(pairs(block(js_records, "UNIT_KEYS = new Map([", "\n]);"), JS_ROW)),
@@ -306,6 +393,18 @@ def main() -> int:
           int(re.search(r"MAX_NESTING = (\d+)", js_cbor).group(1)), 128)
     check("nodejs: §2.1 digest width",
           int(re.search(r"^const UID_BYTES = (\d+);", js_uid, re.M).group(1)), 32)
+    js_library = read("nodejs/src/library.js")
+    check("nodejs: §3.1 manifest keys",
+          canon_map(pairs(block(js_library, "MANIFEST_KEYS = new Map([", "\n]);"), JS_ROW)),
+          manifest_keys)
+    check("nodejs: §3.1 part reading keys",
+          canon_map(pairs(block(js_library, "PART_READING_KEYS = new Map([", "\n]);"), JS_ROW)),
+          reading_keys)
+    check("nodejs: §2.6 domain bytes",
+          {name: int(re.search(rf"^export const {name.upper()}_DOMAIN = (0x[0-9a-fA-F]+);$",
+                               js_library, re.M).group(1), 16)
+           for name in ("tid", "mid", "did", "rdid")},
+          domain_rows)
 
     # -- §2.1's base32, which the spec did not name until 1.2 ----------------
     spec_alphabet = re.search(r"`(abcdefghijklmnopqrstuvwxyz234567)`", text)

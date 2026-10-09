@@ -26,9 +26,14 @@ var RecordNames = map[uint64]string{
 //
 // An unknown record is still preserved verbatim and re-encoded byte for byte; that is C-Read
 // and it is unaffected.
+// 14, 15 and 18 joined in 1.10: library.go decodes their bodies and derives the four
+// identities over them. 9, 16, 17 and 19 are still named and not understood — nothing emits a
+// checkpoint, 16 is reserved, and 17 and 19 land with the releases that write them. The
+// separation above is what makes that sentence sayable.
 var understoodRecords = map[uint64]bool{
 	1: true, 2: true, 3: true, 4: true, 5: true, 6: true,
 	7: true, 8: true, 10: true, 11: true, 12: true, 13: true,
+	14: true, 15: true, 18: true,
 }
 
 // UnitKeys is the table in §2.2. Anything at 9 or above is an unknown key that rule X says

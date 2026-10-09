@@ -6,7 +6,46 @@
 // reading is worth more than a second one, and for what this still does not reach.
 
 export { CborError, MAX_NESTING, decodeOne, encodeOne } from "./cbor.js";
-export { RECORD_NAMES, Record, UNIT_KEYS, decodeStore, encodeStore } from "./records.js";
+export {
+  RECORD_NAMES,
+  Record,
+  UNDERSTOOD_RECORDS,
+  UNIT_KEYS,
+  decodeStore,
+  encodeStore,
+} from "./records.js";
+export {
+  CARRY,
+  DID_DOMAIN,
+  DID_PREFIX,
+  LibraryError,
+  MANIFEST_KEYS,
+  MANIFEST_REQUIRED,
+  MID_DOMAIN,
+  MID_PREFIX,
+  Manifest,
+  PART_ENTRY_KEYS,
+  PART_READING_KEYS,
+  PART_TEXT_KEYS,
+  PartEntry,
+  PartReading,
+  PartText,
+  RDID_DOMAIN,
+  RDID_PREFIX,
+  SEGMENT_KEYS,
+  TID_DOMAIN,
+  TID_PREFIX,
+  bodyBytes,
+  canonicalBodyMatches,
+  decodeLibraryRecord,
+  did,
+  identityText,
+  isNormalised,
+  mid,
+  rdid,
+  structureHash,
+  tid,
+} from "./library.js";
 export { Blake3, blake3 } from "./blake3.js";
 export {
   SOURCE_KIND,
