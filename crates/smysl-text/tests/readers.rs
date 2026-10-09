@@ -240,9 +240,13 @@ fn describe(sample: &Sample, out: &ReadOutput) -> String {
             plan.range.start, plan.range.end
         )
         .expect("write");
-        writeln!(rendered, "  tid       {}", text.tid).expect("write");
+        // The canonical 52-character form, not `Display`'s 26-character short one. `Tid::parse`
+        // refuses an abbreviation for the reason `Uid::parse` does — an abbreviated identity
+        // weakens identity silently — so a fixture that pinned the short form would be pinning
+        // something no reader of the corpus could parse back.
+        writeln!(rendered, "  tid       {}", text.tid.canonical()).expect("write");
         writeln!(rendered, "  structure {}", hex(&reading.structure_hash())).expect("write");
-        writeln!(rendered, "  rdid      {}", reading.rdid()).expect("write");
+        writeln!(rendered, "  rdid      {}", reading.rdid().canonical()).expect("write");
         writeln!(rendered, "  segments  {}", reading.rows.len()).expect("write");
         // The entry is what the manifest carries, and verifying it here is what makes the
         // pinned hashes a claim about the *round trip* rather than about one computation.
@@ -256,7 +260,7 @@ fn describe(sample: &Sample, out: &ReadOutput) -> String {
         .build()
         .unwrap_or_else(|e| panic!("{}: building the manifest: {e}", sample.file));
     writeln!(rendered).expect("write");
-    writeln!(rendered, "mid       {}", manifest.mid()).expect("write");
+    writeln!(rendered, "mid       {}", manifest.mid().canonical()).expect("write");
 
     writeln!(rendered, "\nlocators").expect("write");
     for row in &out.rows {

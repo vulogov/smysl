@@ -10,11 +10,13 @@
 //! join-semilattice (rule U).
 
 pub mod index;
+mod library;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use smysl_core::diag::{Code, Diagnostic, Report, Subject};
+use smysl_core::types::record;
 use smysl_core::{
     canonical_uid, from_cbor_seq, hash_bytes, to_cbor, AgentId, Attestation, Commit, Commitment,
     Contention, ContentionStatus, DetectionKind, Error, IntegrityError, Record, RelKind, Relation,
@@ -113,6 +115,17 @@ pub struct Store {
     /// reads (1.4, rule R). Derived on every rebuild, like the adjacency.
     unfounded: BTreeSet<Uid>,
     adjacency: Adjacency,
+    /// How many times the adjacency has been rebuilt.
+    ///
+    /// Here so that "a manifest-only append does not rebuild the adjacency" is a property a
+    /// test can assert rather than a timing a benchmark can suggest. Comparing the adjacency
+    /// before and after cannot do it: a rebuild that changes nothing leaves it equal, so the
+    /// assertion passes whether or not the work was done. Private, and read only by the test
+    /// in this module — a counter in the public surface would be a promise about how often
+    /// this crate rebuilds, which is not a promise worth making.
+    adjacency_rebuilds: u64,
+    /// Manifests, heads and the by-part indexes (RFC SMYSL-2.4 §4.3.2).
+    library: library::Library,
 }
 
 impl Default for Store {
@@ -184,6 +197,8 @@ impl Store {
             rids: BTreeMap::new(),
             record_hashes: BTreeSet::new(),
             unfounded: BTreeSet::new(),
+            adjacency_rebuilds: 0,
+            library: library::Library::default(),
             adjacency: Adjacency::default(),
         }
     }
@@ -321,11 +336,47 @@ impl Store {
     /// So a producer with a stream of single records — a detector emitting one reading at a time
     /// — should buffer. Fifty is already within a factor of five of the floor.
     ///
+    /// **Text does not pay for it** (1.10, TX-P1 step 4). A manifest, a part text and a part
+    /// reading name no unit as an endpoint, so they cannot appear in the adjacency or in
+    /// `unfounded`; a batch of nothing but those is `O(batch)` whatever the store holds.
+    /// Everything else rebuilds, which is the exemption stated as what it skips rather than as
+    /// what it catches — a record type added later and forgotten then costs a rebuild it did
+    /// not need, instead of leaving a traversal unable to see an edge. Re-measured on the same
+    /// harness as the table above (`tests/append_timing.rs`, `--release`), one record per call:
+    ///
+    /// | store size | a manifest | a unit |
+    /// |---:|---:|---:|
+    /// | 1,000 | 7.9 µs | 38.0 µs |
+    /// | 5,000 | 5.4 µs | 268.6 µs |
+    /// | 20,000 | 4.0 µs | ~1123 µs |
+    ///
+    /// The manifest column does not grow; the unit column is the cost of the store. That is
+    /// what makes `text add` affordable one text at a time, and the behaviour is pinned by a
+    /// rebuild counter in a test rather than by these figures, which depend on the machine.
+    ///
     /// Rebuilding lazily instead, on the first read after an append, was considered and not
     /// done: `adjacency` is `&self`, so deferring the work needs interior mutability, and that
     /// would make `Store` no longer `Sync` — which a pipeline holding one behind an `Arc` would
     /// notice far more than it notices this.
     pub fn append(&mut self, records: &[Record]) -> Result<AppendReport, Error> {
+        // Before the duplicate check, before a byte is written: a log does not hold text
+        // (OQ-39, `SMY-E452`). A part text or a reading in a log would one day have to be
+        // erased to honour a redaction, and rewriting an append-only log resets the very hash
+        // chain that would have shown the rewrite. The refusal is the first thing that happens
+        // to one, rather than a repair afterwards — and the whole batch is refused, so a
+        // caller cannot half-append a delivery and be told about it later.
+        for r in records {
+            let code = match r {
+                Record::PartText(_) => Some(record::code::PART_TEXT as u8),
+                Record::PartReading(_) => Some(record::code::PART_READING as u8),
+                _ => None,
+            };
+            if let Some(code) = code {
+                return Err(Error::Lib(smysl_core::error::LibError::TextInLog {
+                    record: code,
+                }));
+            }
+        }
         let mut report = AppendReport::default();
         let mut fresh = Vec::new();
         let mut bytes = Vec::new();
@@ -846,6 +897,26 @@ impl Store {
                 // forwarding what you cannot inspect is a decision and should be a visible one
                 // — and `--unknown drop` is how a sender who must not forward it says so.
                 Record::Unknown { .. } => unknown == UnknownRecords::Keep,
+                // An expression manifest travels with the units that came out of its text.
+                //
+                // SMYSL-2.4 §4.3.2 says record 14 travels *always*. It is narrowed here, and
+                // the narrowing is the point: a bundle is outbound, and a manifest names an
+                // expression the sender holds — so "always" would put the sender's whole
+                // library inventory into every bundle, including texts the bundle has not one
+                // unit from. That is a disclosure nobody asked for. The recipient needs the
+                // manifest of a text a kept unit *came from* (its licence, its carry rule, the
+                // length a span is checked against), and the by-part index is what makes that
+                // question answerable — it did not exist when "always" was written.
+                //
+                // Ancestors do not travel: a superseded manifest is not needed to read a span
+                // against the one that superseded it. A recipient reconstructing a chain asks
+                // for it.
+                Record::Manifest(m) => m.parts.iter().any(|part| {
+                    self.library
+                        .by_tid
+                        .get(&part.tid)
+                        .is_some_and(|units| units.iter().any(|u| keep.contains(u)))
+                }),
                 // A pack manifest is about a whole store rather than any unit in it, so there
                 // is no `keep` question to ask.
                 _ => false,
@@ -1058,11 +1129,52 @@ impl Store {
                 Record::Commit(c) => {
                     self.commits.entry(c.unit).or_default().insert(c.clone());
                 }
+                Record::Manifest(m) => self.library.absorb_manifest(m),
                 _ => {}
             }
         }
+        // A unit's source is indexed after the units are in, so the pass order does not
+        // matter; `absorb_unit` is idempotent on a set.
+        for r in &records {
+            if let Record::Unit(u) = r {
+                self.library
+                    .absorb_unit(canonical_uid(u), u.source.as_ref());
+            }
+        }
+        // Rebuild the adjacency only for what can change it.
+        //
+        // `absorb` used to rebuild on every batch whatever arrived, which charged a manifest
+        // the cost of the whole store — 1336 µs a record at 1.8's single-append figure.
+        //
+        // **A deny-list, and that is the whole design.** The first version of this named the
+        // four records that *do* move an edge, which is the shorter list and reads better.
+        // It is also the one that fails silently: a record type added in a later release and
+        // forgotten here would leave the adjacency stale, and nothing would say so — a
+        // traversal would simply not see the edge. Named the other way round, the same
+        // omission costs a rebuild nobody needed. SMYSL-2.4 §7's risk table words it this way
+        // for that reason, down to `Unknown`: a record this build cannot decode may well be an
+        // edge in the release that wrote it, and a build that skipped the rebuild for it would
+        // be deciding, on the strength of not understanding the bytes, that they carry none.
+        //
+        // What is on the list is text — a manifest, a part text, a part reading. None of them
+        // names a unit as an endpoint, so none can appear in `adjacency` or in `unfounded`
+        // however many of them arrive. A dating (record 17, TX-P3) and a redaction (19, TX-P2)
+        // belong here too and are absent because the enum does not hold them yet; each joins
+        // the list in the release that adds the variant, and until then it cannot arrive.
+        //
+        // Pending attestations are retried inside `rebuild_adjacency`, and skipping the
+        // rebuild cannot delay one indefinitely: an attestation lands when its subject
+        // arrives, and a subject is a unit or a relation — neither of which is on the list.
+        let moves_edges = !records.iter().all(|r| {
+            matches!(
+                r,
+                Record::Manifest(_) | Record::PartText(_) | Record::PartReading(_)
+            )
+        });
         self.records.extend(records);
-        self.rebuild_adjacency();
+        if moves_edges {
+            self.rebuild_adjacency();
+        }
     }
 
     /// Attach an attestation to its unit, or to the relation its uid is the rid of (1.4). An
@@ -1087,6 +1199,7 @@ impl Store {
     }
 
     fn rebuild_adjacency(&mut self) {
+        self.adjacency_rebuilds += 1;
         // Attestations may have arrived before their units; retry the ones still waiting.
         // Rescanning the whole log here made every append cost the store: on twenty thousand
         // records it was the largest single term.

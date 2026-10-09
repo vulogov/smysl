@@ -734,6 +734,16 @@ pub enum LibError {
         /// The identity asked for, in text form.
         id: String,
     },
+    /// `SMY-E452` - a record 15 or 18 was offered to a log (OQ-39).
+    ///
+    /// Text lives in the object store. A log that held it would one day have to be rewritten
+    /// to honour a redaction, and rewriting an append-only log resets the hash chain that
+    /// would have shown the rewrite — so the refusal is at the door rather than a repair
+    /// afterwards.
+    TextInLog {
+        /// The record code offered, 15 or 18, so a message names what was refused.
+        record: u8,
+    },
     /// Input that is not text at all: invalid UTF-8 at a byte offset. No code, because
     /// nothing was ingested and there is nothing to diagnose later.
     NotText { at: usize },
@@ -779,6 +789,7 @@ impl LibError {
             LibError::Limit { .. } => Some(Code::E440),
             LibError::Locked { .. } => Some(Code::E445),
             LibError::ObjectCorrupt { .. } => Some(Code::E446),
+            LibError::TextInLog { .. } => Some(Code::E452),
             LibError::NotText { .. }
             | LibError::BadAlias { .. }
             | LibError::Unreadable { .. }
@@ -837,6 +848,11 @@ impl fmt::Display for LibError {
                 write!(f, "{}: {id} does not hash to its name", Code::E446)
             }
             LibError::NotText { at } => write!(f, "input is not valid UTF-8 at byte {at}"),
+            LibError::TextInLog { record } => write!(
+                f,
+                "{}: record {record} does not belong in a log; text lives in the object store",
+                Code::E452
+            ),
             LibError::BadAlias { alias } => write!(f, "`{alias}` is not a valid alias"),
             LibError::Unreadable { reader, at, what } => {
                 write!(f, "{reader}: byte {at}: expected {what}")

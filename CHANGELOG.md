@@ -52,6 +52,63 @@ Apache 2.0 and settled, the hosted one is not. It blocks nothing that has starte
 the first of them to be hashed over something other than a CBOR map. Step 2 adds the crate that
 interprets them, and the locator grammar the plan pointed at a document nobody has.
 
+### A manifest stops paying for the whole store
+
+A store holds manifests now: by mid, by alias, with the superseded set that makes a *head* a
+manifest nothing supersedes. TX-P1 step 4. Two heads under one alias are both returned, because
+a fork is a fact about a corpus and `check` reports it (`SMY-W418`) — picking a winner here
+would make the fact unreportable, which is the argument that keeps a contention a record rather
+than an error. A truncated chain has no head rather than an invented one.
+
+**A manifest-only append no longer rebuilds the adjacency.** `absorb` rebuilt it on every batch
+whatever arrived, so appending one manifest cost the whole store: 1336 µs a record at 1.8's
+single-append figure, growing with the store. Text — a manifest, a part text, a part reading —
+names no unit as an endpoint, so it cannot appear in the adjacency or in `unfounded` however much
+of it arrives, and only text is exempt. Everything else rebuilds, including a record this build
+cannot decode: skipping the rebuild for one would be deciding, on the strength of not
+understanding the bytes, that they carry no edge. The exemption is written as the list of what is
+skipped rather than the list of what rebuilds, which is the longer of the two and the one whose
+omissions cost a wasted rebuild instead of a traversal that cannot see an edge. Measured, one
+record per call:
+
+| store size | a manifest | a unit |
+|---:|---:|---:|
+| 1,000 | 7.9 µs | 38.0 µs |
+| 5,000 | 5.4 µs | 268.6 µs |
+| 20,000 | 4.0 µs | ~1123 µs |
+
+The manifest column does not grow; the unit column is the cost of the store, as documented. Unit
+batching is unchanged against 1.8's table, so nothing was traded away to get this. What the test
+suite pins is not the timing but a **rebuild counter**: comparing the adjacency before and after
+an append cannot detect a rebuild that changed nothing, so the assertion would have passed
+whether or not the work was skipped.
+
+**`SMY-E452`: a log refuses text.** A part text or a reading offered to `append` is refused —
+whole batch, before a byte is written. The reason is the log's own integrity: a log holding text
+would one day have to be rewritten to honour a redaction, and rewriting an append-only log resets
+exactly the hash chain that would have shown the rewrite (OQ-39). Erasure is therefore always an
+object unlink. The code is registered now because this is the release where something can raise
+it, which is the sixth of SMYSL-2.4's twelve.
+
+Three things the plan said that this step did not do.
+
+**A `by_mid` map could only have been empty.** §4.3.2 lists one, fed from `source.manifest`, and
+that field belongs to TX-P5. An index with no source of values is precisely what OQ-39's answer
+deleted from this plan when it removed the `part_texts` and `readings` maps — so the same
+argument applies to a map the plan *adds*. It arrives with the field that fills it.
+
+**A manifest does not travel in every bundle.** The plan says record 14 always travels; it now
+travels with the units that came out of its text. A bundle is outbound, and "always" would tell
+every recipient the alias of every text the sender holds, including the ones the bundle has no
+unit from. The by-part index makes the narrower question answerable and did not exist when that
+sentence was written.
+
+**And the step-3 fixtures were pinning the short form of each identity.** `Display` writes 26
+base32 characters and says of itself that it is not canonical; `Tid::parse` refuses it, for the
+reason `Uid::parse` does — an abbreviated identity in a record weakens identity silently. The
+expectation files were therefore pinning something nothing could parse back. Regenerated against
+the 52-character canonical form.
+
 ### Six readers, and the fuzzer found four defects — one of them in a dependency
 
 `smysl-text` reads the six formats of TX-P1 step 3: `txt`, `md`, `usfm`, `osis`, `zefania` and

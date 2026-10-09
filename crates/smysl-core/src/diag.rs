@@ -310,6 +310,7 @@ registry! {
         E440 = "SMY-E440", Error, "Reader resource cap exceeded; nothing was written";
         E445 = "SMY-E445", Error, "The library or a shard is locked by another writer";
         E446 = "SMY-E446", Error, "An object does not hash to the identity it is stored under";
+        E452 = "SMY-E452", Error, "A record 15 or 18 was offered to a log; text lives in the object store";
     }
 }
 
@@ -605,10 +606,12 @@ mod tests {
     /// retired. 69, also 1.10.0, with the first five of RFC SMYSL-2.4's library codes —
     /// `E401`, `E402`, `E440`, `E445`, `E446` — in a ninth group. Five and not the twelve that
     /// RFC allocates: these are the ones `smysl-text` can raise as it stands, and the rest
-    /// arrive with the code that raises them.
+    /// arrive with the code that raises them. 70, still 1.10.0, with `SMY-E452` — the sixth,
+    /// registered in TX-P1 step 4 because that is the step where `Store::append` can raise it:
+    /// a log is offered a record 15 or 18 and refuses it (OQ-39).
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 69);
+        assert_eq!(Code::ALL.len(), 70);
     }
 
     #[test]

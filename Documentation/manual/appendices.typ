@@ -710,9 +710,10 @@ measured the default. And where either side has no majority script it reports no
 
 #subsection("Library — texts, parts and the object store")
 
-The first five of the library's codes, new in 1.10.0. They are raised by `smysl-text`, the crate
-RFC SMYSL-2.4 adds for reading texts into a library; the rest of that RFC's range arrives with
-the code that raises it, because a code nothing can trigger is worse than a missing one.
+The first six of the library's codes, new in 1.10.0. Five are raised by `smysl-text`, the crate
+RFC SMYSL-2.4 adds for reading texts into a library, and the sixth by the store; the rest of that
+RFC's range arrives with the code that raises it, because a code nothing can trigger is worse
+than a missing one.
 
 #dtable(
   (auto, auto, 1fr),
@@ -723,6 +724,7 @@ the code that raises it, because a code nothing can trigger is worse than a miss
     ([`SMY-E440`], [error], [A reader resource cap was exceeded. The message names the cap, its limit, what the input asked for and the flag that raises it; nothing was written. Inside a reader the budget is *fuel* rather than wall time, so a refusal happens at the same byte on every machine.]),
     ([`SMY-E445`], [error], [The library or one of its shards is locked by another writer, named: pid, host and command. Nothing removes a lock by timeout — a stale lock is the notice that a writer died mid-append, and `--break-lock` is where an operator says they have read it.]),
     ([`SMY-E446`], [error], [An object in the store does not hash to the identity it is stored under. Objects are content-addressed, so this is a corrupted or substituted file rather than a stale one.]),
+    ([`SMY-E452`], [error], [A part text or a part reading was offered to a log, and a log does not hold text. Text lives in the object store, and the whole batch is refused before a byte is written. The reason is the log's own integrity: a log holding text would one day have to be rewritten to honour a redaction, and rewriting an append-only log resets exactly the hash chain that would have shown the rewrite. Erasure is therefore always an unlink.]),
   ),
 )
 

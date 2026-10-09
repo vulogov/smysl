@@ -240,8 +240,9 @@ mod tests {
         // `SMY-E445` and `SMY-E446`, raised by `smysl-text` (RFC SMYSL-2.4, TX-P1 step 2).
         // Five of that RFC's twelve allocations, because these are the five this build can
         // trigger — the rest arrive with the readers, the ingest path and the check pass that
-        // raise them.
-        assert_eq!(Code::ALL.len(), 69);
+        // raise them. 70 with `SMY-E452`, which TX-P1 step 4 made raisable: a log offered a
+        // record 15 or 18 refuses it, because text lives in the object store (OQ-39).
+        assert_eq!(Code::ALL.len(), 70);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

@@ -995,10 +995,18 @@ pub fn summarise(&self, levels: &[Level], scope: &BTreeSet<Uid>) -> Result<Stage
 - **Heads and forks.** `heads(alias)` = mids of that alias not named by any other manifest's
   `supersedes`; more than one is `W418` (reported by `check`, not recorded).
 - **Adjacency cost.** `absorb` currently calls `rebuild_adjacency()` whatever arrived. It gains a
-  flag: rebuild only if the batch held a unit, relation, withdrawal or attestation (pending
-  attestations are retried there). A `text add` that appends one manifest, or a `date set`, then
-  costs `O(batch)` instead of the 1336 µs/record single-append figure of 1.8. Verified by a test
-  that asserts `adjacency` is untouched after a manifest-only append, and by the 1.8 timing harness.
+  flag, written as a **deny-list**: the rebuild is skipped only when every record in the batch is
+  text — a manifest, a part text, a part reading, and from the releases that add them a dating
+  and a redaction — and taken for everything else, `Unknown` included (pending attestations are
+  retried there). A `text add` that appends one manifest, or a `date set`, then costs `O(batch)`
+  instead of the 1336 µs/record single-append figure of 1.8. Verified by a test that asserts
+  `adjacency` is untouched after a manifest-only append, and by the 1.8 timing harness.
+
+  This sentence said "rebuild only if the batch held a unit, relation, withdrawal or attestation"
+  until step 4 implemented it, which is the same rule stated as an allow-list and is **not**
+  equivalent: the two differ for every record type nobody has listed, and they differ in the
+  direction of failure. §7's risk table already said deny-list, with the argument; the two
+  sentences contradicted each other and this is the one that was wrong.
 - **Withdrawals and commitments naming a did** need no change: both maps are keyed by `Uid` for
   targets "whether or not [they have] arrived", and `Did::as_uid` supplies the key.
 - **`emit`** is SMYSL-2.1's (F-16). This RFC adds the arms: 14 and 19 always travel; 17 travels
@@ -1426,8 +1434,50 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
      recorded in the module. Nesting sections by heading depth needs a level name per depth,
      and then the level a part boundary falls on would depend on which depth a document happens
      to start at; `md/2` is the place for hierarchy, which is what a versioned reader id is for.
-4. `smysl-graph` manifest state, heads, by-part maps, adjacency flag. *Exit:* store tests; 1.8
-   append timing unchanged for unit batches, manifest-only append `O(batch)`.
+4. ~~`smysl-graph` manifest state, heads, by-part maps, adjacency flag. *Exit:* store tests; 1.8
+   append timing unchanged for unit batches, manifest-only append `O(batch)`.~~ **Done
+   2026-10-08.** `store/library.rs`: manifests by mid, by alias, the superseded set, heads,
+   and the by-part index; `SMY-E452` raised by `append`; the adjacency rebuilt only for what
+   can move an edge. Both halves of the exit measured:
+
+   | one record per call | a manifest | a unit |
+   |---:|---:|---:|
+   | at 1,000 records | 7.9 µs | 38.0 µs |
+   | at 5,000 | 5.4 µs | 268.6 µs |
+   | at 20,000 | 4.0 µs | ~1123 µs |
+
+   The manifest column does not grow with the store; the unit column *is* the store, as 1.8
+   documented. Unit batching is unchanged against 1.8's table (1 → 1123 µs against 1336,
+   50 → 24.1 against 25, 1000 → 2.9 against 5), so nothing regressed to buy this.
+   `tests/append_timing.rs` is the harness, `#[ignore]`d because a timing assertion in CI is a
+   flake generator; what the suite pins is a **rebuild counter**, because comparing the
+   adjacency before and after cannot detect a rebuild that changes nothing. Four findings:
+   - **`by_mid` could only have been empty**, so it is not here. §4.3.2 lists it, fed from
+     `source.manifest` — and §4.3.1 gives that field to TX-P5. A map with no source of values
+     is exactly what OQ-39's answer removed when it deleted `part_texts` and `readings` from
+     this plan, so the same argument applies to a map this plan adds. It arrives with the
+     field, in the commit that can test it.
+   - **Record 14 does not travel "always".** §4.3.2 says it does; narrowed to the manifests of
+     texts a kept unit came from. A bundle is outbound, and "always" would put the sender's
+     whole library inventory — the aliases of every text they hold — into a bundle that has not
+     one unit from most of them. The by-part index is what makes the narrower question
+     answerable, and it did not exist when the sentence was written. Ancestors do not travel
+     either: a superseded manifest is not needed to read a span against its successor.
+   - **The whole batch is refused on `SMY-E452`**, not the records before the offending one. A
+     half-appended delivery would leave a store whose sender cannot say what landed.
+   - **The step-3 fixtures pinned the short form of each identity.** `Display` writes 26 base32
+     characters and is documented as "not canonical"; `Tid::parse` refuses it, for the reason
+     `Uid::parse` does. So the expectations were pinning something nothing could parse back.
+     Regenerated against `canonical()`, 52 characters.
+   - **The adjacency flag was written as an allow-list, and §4.3.2 told it to be.** Four record
+     types rebuild, the rest do not — shorter, and the version this plan asked for. §7's risk
+     table asks for the opposite shape, naming what does *not* rebuild, and the two are not the
+     same rule: they disagree about every record type neither sentence mentions, which is to say
+     about every one added after it was written. The allow-list's omission is a stale adjacency
+     and silence; the deny-list's is a rebuild nobody needed. Inverted, §4.3.2 corrected, and the
+     test gained the control that distinguishes them — a view, which moves no edge today and must
+     rebuild anyway. Found by reading the implementation back against §7 rather than by a failure,
+     which is the only way this one shows up: an allow-list is correct until the day it is not.
 5. `smysl-check` `Library` pass (E403, E404, W405, W418, E446, E452); `ConformanceClass::Library`.
    *Exit:* `fixtures/library/check` green.
 6. CLI `text add/ls/show`, `check --library`; purity gate with `smysl-text`; `cc` check in

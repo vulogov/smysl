@@ -23,8 +23,8 @@
 # A change here is not a failure. It is a question: did you mean to?
 #
 # Regenerate with `make api`. Check with `make api-check`.
-smysl-core       8445
-smysl-graph      2469
+smysl-core       8451
+smysl-graph      2489
 smysl-check      246
 smysl-pack       544
 smysl-thread     259
