@@ -765,6 +765,23 @@ pub enum LibError {
         /// What the reader expected, in its own words.
         what: String,
     },
+    /// The part policy's boundary level names no node in the reading, so the text would be cut
+    /// into no parts at all.
+    ///
+    /// No code, for the reason [`LibError::Unreadable`] gives: nothing was written, so there is
+    /// no corpus for a later `check` to be asked about. A refusal rather than an empty
+    /// manifest, because a text that silently becomes nothing is the worse of the two — the
+    /// manifest would be valid, the licence recorded, the alias taken, and not one byte of the
+    /// text reachable. The default boundary level is `chapter` and `txt/1` has no chapters,
+    /// which is how this case comes up without anybody doing anything unusual.
+    NoParts {
+        /// The level the policy asked to cut on.
+        level: String,
+        /// The level the reader said its own top is, which is usually the right answer.
+        top: String,
+        /// The reader id, so the message says whose nodes were looked at.
+        reader: String,
+    },
     /// A reader parameter this reader does not have, or a value it cannot use.
     ///
     /// Refused rather than ignored: a parameter is recorded in the manifest beside the reader
@@ -793,6 +810,7 @@ impl LibError {
             LibError::NotText { .. }
             | LibError::BadAlias { .. }
             | LibError::Unreadable { .. }
+            | LibError::NoParts { .. }
             | LibError::BadParam { .. }
             | LibError::Io { .. } => None,
         }
@@ -856,6 +874,13 @@ impl fmt::Display for LibError {
             LibError::BadAlias { alias } => write!(f, "`{alias}` is not a valid alias"),
             LibError::Unreadable { reader, at, what } => {
                 write!(f, "{reader}: byte {at}: expected {what}")
+            }
+            LibError::NoParts { level, top, reader } => {
+                write!(
+                    f,
+                    "the part policy cuts on `{level}` and {reader} produced no node at that \
+                     level; its own top level is `{top}`"
+                )
             }
             LibError::BadParam {
                 reader,

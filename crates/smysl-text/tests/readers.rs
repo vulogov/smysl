@@ -175,7 +175,7 @@ fn describe(sample: &Sample, out: &ReadOutput) -> String {
         sample.file,
         out.top_level
     );
-    let plans = part::group(&boundaries, &policy, &mut budget)
+    let plans = part::group(&boundaries, &policy, out.text.len() as u64, &mut budget)
         .unwrap_or_else(|e| panic!("{}: grouping: {e}", sample.file));
 
     let lang = LangTag::new(sample.lang).expect("a language tag");

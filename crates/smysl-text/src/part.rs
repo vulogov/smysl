@@ -144,49 +144,84 @@ impl PartPlan {
     }
 }
 
-/// Group consecutive boundary-level nodes into parts.
+/// Group consecutive boundary-level nodes into parts, partitioning the text.
 ///
-/// `nodes` are the boundary-level nodes' byte ranges, in document order, covering the text
-/// without gaps or overlaps — which is what [`crate::structure::Structure::at_level`] over a
-/// reader's top level gives. Each part is charged against
-/// [`crate::limits::Caps::part_bytes`], so an input whose single node exceeds the hard
-/// ceiling is `SMY-E440` here rather than at the object store.
+/// `nodes` are the boundary-level nodes' byte ranges, in document order and ascending — what
+/// [`crate::structure::Structure::at_level`] over a reader's top level gives. Each part is
+/// charged against [`crate::limits::Caps::part_bytes`], so an input whose single node exceeds
+/// the hard ceiling is `SMY-E440` here rather than at the object store.
 ///
-/// The rule, in order: add nodes while the part is below `target_min`; stop once adding the
-/// next node would take it past `target_max`; never emit an empty part; a single node over
-/// `target_max` is its own part.
+/// The grouping rule, in order: add nodes while the part is below `target_min`; stop once
+/// adding the next node would take it past `target_max`; never emit an empty part; a single
+/// node over `target_max` is its own part.
+///
+/// # The parts partition the text, and the nodes do not
+///
+/// This function used to take each part's range straight from its nodes' extent, on a stated
+/// premise that the nodes cover the text “without gaps or overlaps”. **They do not.** A row
+/// starts at its first text byte and ends at its last (TX-P1 step 3 made it so, to stop a row
+/// carrying its predecessor's separator), so every byte *between* two nodes — a newline, a
+/// blank line, the whitespace between two chapters — is in no node at all. Node-bounded parts
+/// therefore dropped those bytes at each cut, and dropped the text's head and tail outright:
+/// the committed `notes.txt` fixture is 471 bytes and its one part was `0..470`.
+///
+/// Dropped bytes are not a cosmetic loss. A part is addressed by the hash of its bytes, so the
+/// concatenation of a text's parts has to *be* the text or no span, alignment or locator range
+/// that crosses a cut means what it says, and `text show` of such a range would quietly be
+/// missing a byte. So the boundaries are now: the first part starts at 0, each later part
+/// starts where the previous one ended, and the last ends at `length`. The cut lands in the
+/// gap between two nodes, which is exactly where there is nothing to cut through.
+///
+/// `length` is the normalised length of the whole text. Nodes past it are kept inside the last
+/// part rather than refused: this is a total function over input that may break its contract,
+/// for the reason the loop below gives.
 pub fn group(
     nodes: &[std::ops::Range<u64>],
     policy: &Policy,
+    length: u64,
     budget: &mut Budget,
 ) -> Result<Vec<PartPlan>, LibError> {
     let mut parts: Vec<PartPlan> = Vec::new();
     let mut i = 0usize;
+    // Where the next part begins: the text's start, then each part's end.
+    let mut start = 0u64;
     while i < nodes.len() {
-        let start = nodes[i].start;
+        let extent = nodes[i].start;
         let mut end = nodes[i].end;
         let first = i;
         i += 1;
         // The first node is always in, whatever its size: the alternative is an empty part.
         //
-        // Every size here is a saturating subtraction and `end` only ever grows. `nodes` is
-        // documented as ascending and gapless, which is what `Structure::at_level` gives —
-        // but a total function is the right shape for a library: input that breaks the
-        // contract gets whole-node parts and an odd grouping, rather than a panic in a
-        // release build and a wrong answer in a debug one.
+        // The size tests are on the *nodes'* extent rather than on the part's stretched range,
+        // because what the targets are about is how much text a part holds, and the separators
+        // between nodes are not text anybody asked for. Every size here is a saturating
+        // subtraction and `end` only ever grows — input that breaks the ascending contract gets
+        // whole-node parts and an odd grouping, rather than a panic in a release build and a
+        // wrong answer in a debug one.
         while i < nodes.len() {
-            let would_be = nodes[i].end.saturating_sub(start);
-            if end.saturating_sub(start) >= policy.target_min || would_be > policy.target_max {
+            let would_be = nodes[i].end.saturating_sub(extent);
+            if end.saturating_sub(extent) >= policy.target_min || would_be > policy.target_max {
                 break;
             }
             end = end.max(nodes[i].end);
             i += 1;
         }
-        budget.part(end.saturating_sub(start))?;
+        // The part runs to the next group's first node, or to the end of the text. Clamped to
+        // at least `start`, which only ever binds on input that breaks the ascending contract:
+        // a later node that begins before an earlier one would otherwise make a part end before
+        // it began, and `Range` does not forbid that — it just makes `len()` zero and every
+        // slice of it `None`, which is a wrong answer where a strange one will do.
+        let stop = match nodes.get(i) {
+            Some(next) => next.start.max(end),
+            None => length.max(end),
+        }
+        .max(start);
+        budget.part(stop.saturating_sub(start))?;
         parts.push(PartPlan {
-            range: start..end,
+            range: start..stop,
             nodes: first..i,
         });
+        start = stop;
     }
     Ok(parts)
 }
@@ -247,7 +282,7 @@ mod tests {
     fn grouping_fills_to_the_minimum_and_stops_before_the_maximum() {
         let policy = Policy::new(Level::new("chapter").unwrap(), 100, 250);
         let nodes = even(10, 40);
-        let parts = group(&nodes, &policy, &mut budget()).unwrap();
+        let parts = group(&nodes, &policy, 400, &mut budget()).unwrap();
         // 40-byte nodes, minimum 100: three nodes reach 120, which is over the minimum, so
         // each part is three nodes until the tail.
         assert_eq!(
@@ -268,7 +303,7 @@ mod tests {
     fn a_node_larger_than_the_maximum_is_its_own_part() {
         let policy = Policy::new(Level::new("chapter").unwrap(), 100, 250);
         let nodes = vec![0..10, 10..1_000, 1_000..1_010];
-        let parts = group(&nodes, &policy, &mut budget()).unwrap();
+        let parts = group(&nodes, &policy, 1_010, &mut budget()).unwrap();
         assert_eq!(parts.len(), 3);
         assert_eq!(parts[1].range, 10..1_000);
         assert_eq!(parts[1].nodes, 1..2, "alone, rather than split");
@@ -279,7 +314,7 @@ mod tests {
         let policy = Policy::new(Level::new("verse").unwrap(), 100, 250);
         // Three empty nodes and one with content: an empty verse is legal.
         let nodes = vec![0..0, 0..0, 0..0, 0..10];
-        let parts = group(&nodes, &policy, &mut budget()).unwrap();
+        let parts = group(&nodes, &policy, 10, &mut budget()).unwrap();
         assert!(!parts.is_empty());
         assert_eq!(parts.iter().map(|p| p.nodes.len()).sum::<usize>(), 4);
         assert_eq!(parts.last().unwrap().range.end, 10);
@@ -287,7 +322,7 @@ mod tests {
 
     #[test]
     fn nothing_to_group_is_no_parts_and_not_one_empty_part() {
-        let parts = group(&[], &Policy::default(), &mut budget()).unwrap();
+        let parts = group(&[], &Policy::default(), 0, &mut budget()).unwrap();
         assert!(parts.is_empty(), "an import manifest has no parts");
     }
 
@@ -302,10 +337,52 @@ mod tests {
             1 << 20,
         )
         .unwrap();
-        let e = group(&[0..101, 101..110], &policy, &mut b).unwrap_err();
+        let e = group(&[0..101, 101..110], &policy, 110, &mut b).unwrap_err();
         assert_eq!(e.code(), Some(smysl_core::Code::E440));
         assert!(e.to_string().contains("part_bytes"), "{e}");
         assert!(e.to_string().contains("--max-part"), "{e}");
+    }
+
+    /// The bytes between two nodes belong to a part, and the text's head and tail do too.
+    ///
+    /// The case that was wrong until TX-P1 step 6: a row ends at its last text byte, so every
+    /// separator is outside every node, and node-bounded parts dropped one byte per cut plus
+    /// whatever sat before the first node and after the last. A part is addressed by the hash
+    /// of its bytes, so a text whose parts do not concatenate back to it has spans that mean
+    /// nothing across a cut.
+    #[test]
+    fn the_parts_cover_every_byte_including_the_gaps_between_nodes() {
+        let policy = Policy::new(Level::new("line").unwrap(), 10, 30);
+        // Three nodes with a one-byte separator after each, inside a 34-byte text: two bytes
+        // of preamble, and a trailing newline nothing claims.
+        let nodes = vec![2..12, 13..23, 24..33];
+        let parts = group(&nodes, &policy, 34, &mut budget()).unwrap();
+
+        assert!(parts.len() >= 2, "the minimum should force a cut");
+        assert_eq!(parts[0].range.start, 0, "the preamble is in the first part");
+        assert_eq!(
+            parts.last().unwrap().range.end,
+            34,
+            "the trailing byte is in the last part"
+        );
+        for w in parts.windows(2) {
+            assert_eq!(w[0].range.end, w[1].range.start, "no byte is in no part");
+        }
+        assert_eq!(
+            parts.iter().map(|p| p.len()).sum::<u64>(),
+            34,
+            "the parts partition the text"
+        );
+        // Each node still sits inside the part that claims it.
+        for part in &parts {
+            for node in &nodes[part.nodes.clone()] {
+                assert!(
+                    node.start >= part.range.start && node.end <= part.range.end,
+                    "{node:?} is not inside {:?}",
+                    part.range
+                );
+            }
+        }
     }
 
     /// Input that breaks the ascending-and-gapless contract still produces whole-node parts
@@ -313,7 +390,7 @@ mod tests {
     #[test]
     fn nodes_out_of_order_do_not_panic() {
         let policy = Policy::new(Level::new("line").unwrap(), 10, 20);
-        let parts = group(&[100..110, 0..10, 50..60], &policy, &mut budget()).unwrap();
+        let parts = group(&[100..110, 0..10, 50..60], &policy, 110, &mut budget()).unwrap();
         assert_eq!(
             parts.iter().map(|p| p.nodes.len()).sum::<usize>(),
             3,

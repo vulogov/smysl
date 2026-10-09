@@ -134,7 +134,7 @@ fn every_cap_refusal() -> Vec<(&'static str, LibError)> {
     let policy = Policy::new(Level::new("chapter").unwrap(), 1, 10);
     out.push((
         "part_bytes",
-        part::group(&[0..1_001, 1_001..1_010], &policy, &mut b).unwrap_err(),
+        part::group(&[0..1_001, 1_001..1_010], &policy, 1_010, &mut b).unwrap_err(),
     ));
 
     // Raw metadata: the per-item cap, which is the one a single pathological segment hits.
@@ -246,7 +246,7 @@ fn a_refused_grouping_returns_no_plan() {
     .unwrap();
     let policy = Policy::new(Level::new("chapter").unwrap(), 10, 20);
     // The first two nodes would group fine; the third is over the ceiling on its own.
-    let r = part::group(&[0..10, 10..20, 20..200], &policy, &mut b);
+    let r = part::group(&[0..10, 10..20, 20..200], &policy, 200, &mut b);
     assert!(r.is_err(), "and the two good parts are not returned either");
     assert_eq!(cap_of(&r.unwrap_err()), "part_bytes");
 }

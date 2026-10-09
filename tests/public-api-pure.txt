@@ -32,6 +32,8 @@ pub use smysl::Bm25
 pub use smysl::BuildOptions
 pub use smysl::BundleReport
 pub use smysl::Cached
+pub use smysl::Calendar
+pub use smysl::Carry
 pub use smysl::CheckOptions
 pub use smysl::Code
 pub use smysl::CodecError
@@ -54,6 +56,7 @@ pub use smysl::Detected
 pub use smysl::DetectionContext
 pub use smysl::DetectionKind
 pub use smysl::Diagnostic
+pub use smysl::Did
 pub use smysl::DropReason
 pub use smysl::Edge
 pub use smysl::EdgeKind
@@ -89,10 +92,12 @@ pub use smysl::LineageNode
 pub use smysl::Lod
 pub use smysl::LodPlan
 pub use smysl::MIN_LETTERS
+pub use smysl::Manifest
 pub use smysl::Matcher
 pub use smysl::MergeError
 pub use smysl::MergeOptions
 pub use smysl::MergeReport
+pub use smysl::Mid
 pub use smysl::NodeId
 pub use smysl::NonDetReason
 pub use smysl::Note
@@ -105,8 +110,13 @@ pub use smysl::PackError
 pub use smysl::PackInfo
 pub use smysl::PackMode
 pub use smysl::PackRequest
+pub use smysl::ParentKind
 pub use smysl::ParseError
 pub use smysl::ParseOutcome
+pub use smysl::PartEntry
+pub use smysl::PartReading
+pub use smysl::PartResolver
+pub use smysl::PartText
 pub use smysl::Pass
 pub use smysl::PayloadFilter
 pub use smysl::Person
@@ -117,6 +127,7 @@ pub use smysl::QUOTE_KEY
 pub use smysl::Query
 pub use smysl::QuoteNormaliser
 pub use smysl::QuoteSupport
+pub use smysl::Rdid
 pub use smysl::Reason
 pub use smysl::RecipeChange
 pub use smysl::RecipeChangeKind
@@ -130,6 +141,7 @@ pub use smysl::RenderMeta
 pub use smysl::Report
 pub use smysl::Resolution
 pub use smysl::ResolutionTarget
+pub use smysl::Resolved
 pub use smysl::RetractionAuthority
 pub use smysl::RetractionPlan
 pub use smysl::RetractionPolicy
@@ -169,6 +181,7 @@ pub use smysl::Target
 pub use smysl::Thread
 pub use smysl::ThreadId
 pub use smysl::ThreadSchema
+pub use smysl::Tid
 pub use smysl::TokenEstimator
 pub use smysl::Tokenizer
 pub use smysl::TopoOrder

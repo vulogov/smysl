@@ -33,6 +33,7 @@
 //! | [`manifest`] | the licence gate (`SMY-E402`), and which manifests are heads |
 //! | [`objects`] | `objects/{t3,r3}/…`, staged and renamed, verified on read (`SMY-E446`) |
 //! | [`lock`] | one writer per shard, named (`SMY-E445`) |
+//! | [`library`] | the catalog and the objects, opened together: `add`, `resolve`, `passage` |
 //! | [`readers`] | the six TX-P1 readers, one behind each `reader-*` feature |
 //!
 //! Each reader is a function from bytes to a text and a table over it — no clock, no
@@ -41,15 +42,16 @@
 //! agree to the byte, which `crates/smysl-text/tests/readers.rs` asserts with one tid over
 //! three fixtures.
 //!
-//! The `Library` handle that ties a `Store` to an object store arrives with the store work in
-//! step 4, which is why there is no `Library` type here yet. Nothing in this crate opens a
-//! library: every piece of it is a function of its arguments, which is also why all of it is
-//! testable without a corpus.
+//! [`library`] is the one module that touches a directory, added in step 6 once step 4 had
+//! given a `Store` manifests to hold — a handle written earlier would have been a handle to
+//! half a library. Everything else here is still a function of its arguments, which is why all
+//! of it is testable without a corpus.
 
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
 pub mod ids;
+pub mod library;
 pub mod limits;
 pub mod locator;
 pub mod lock;
@@ -62,6 +64,7 @@ pub mod reading;
 pub mod structure;
 
 pub use ids::{Did, Mid, Rdid};
+pub use library::{AddSpec, Added, Library, Passage};
 pub use limits::{Budget, Caps, Fuel};
 pub use locator::{Locator, LocatorError};
 pub use lock::{Holder, Lock};

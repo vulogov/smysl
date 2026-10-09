@@ -134,7 +134,7 @@ LIBRARIES := $(filter-out smysl,$(PUBLISHED)) $(UNPUBLISHED)
 # absence as if it were the intent.
 COMMAND_NAMES := fmt check pack merge diff trace view bundle thread salience find retract \
                  withdraw resolve review commit render import relink compact ingest attest providers \
-                 usage reindex ui
+                 usage reindex ui text
 
 DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE SMYSL_RATIONALE_PRESENTATION
 
@@ -323,6 +323,27 @@ crate-features: ## Each crate with features, alone, at its defaults and with non
 		echo "==> cargo test -p smysl-provider --features $$m"; \
 		RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-provider --features $$m; \
 	done
+	@# No C toolchain in the CLI's tree (SMYSL-2.4 §4.5, TX-P1's exit). Draft 3 §18 *cited*
+	@# research builds finding no `cc` for the readers and the substrate; a citation is not a
+	@# check, and the day a reader dependency grows a build script is the day a `cargo install`
+	@# starts needing a compiler on machines that have never had one.
+	@#
+	@# The exit code cannot carry this. `cargo tree -i` on a package that is not in the tree
+	@# prints "nothing to print" and exits **0** — so a test on the status alone reports a C
+	@# toolchain that is not there, which is how this was first written. The output is what
+	@# says, and the run has to have succeeded, or a `cargo tree` that failed for some other
+	@# reason would print no `cc` line and pass. The pattern was checked in the direction that
+	@# matters by running it against a package that *is* in the tree (`-i memchr` prints
+	@# `memchr v2.8.3` as its first line and matches), because a grep that never matches
+	@# anything is indistinguishable from a clean tree.
+	@set -e; out=$$($(CARGO) tree -e normal -i cc --no-default-features --features cli 2>&1) || { \
+		echo "crate-features: cargo tree failed:"; echo "$$out"; exit 1; }; \
+	if echo "$$out" | grep -qE '^cc v'; then \
+		echo "crate-features: a C toolchain is in the cli tree:"; \
+		echo "$$out"; \
+		exit 1; \
+	fi; \
+	echo "crate-features: no cc in the cli tree"
 
 purity: ## Rules A and B: the library stays synchronous and offline
 	$(CARGO) xtask check-purity

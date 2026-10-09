@@ -1538,17 +1538,70 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
      the chapter that documents passes. Twelve and nine now, with both new rows. Found by
      adding a pass, not by a gate — `doc-output` replays transcripts and `spec-tables` compares
      tables, and a sentence counting the rows of a hand-written table is neither.
-6. CLI `text add/ls/show`, `check --library`; purity gate with `smysl-text`; `cc` check in
-   `make crate-features`; **the facade re-exports the library types** — found in step 5: the
-   facade exports `Record` but none of `Manifest`, `PartText`, `PartEntry`, `PartReading`,
-   `Tid`, `Mid`, `Did`, `Rdid`, `PartResolver`, so `Record::Manifest`'s payload is unnameable
-   through `smysl` and `tests/library_check.rs` reaches past the facade to the crates that
-   define them. Step 1 added the types and nothing re-exported them; this is the step that owns
-   the facade surface, so it is listed here rather than retrofitted;
-   **the manual's surface chapter gains `@manifest`** — deferred from
-   step 1 deliberately, because until this step nothing can produce a manifest except by hand,
-   and a documented form with no command behind it is a form nobody can check their work
-   against. *Exit:* gates green.
+6. ~~CLI `text add/ls/show`, `check --library`; purity gate with `smysl-text`; `cc` check in
+   `make crate-features`; the facade re-exports the library types; **the manual's surface
+   chapter gains `@manifest`**.~~ **Done 2026-10-08.** `smysl-text/src/library.rs` (the handle
+   deferred from step 2), the `text` command with its three actions, `check --library`, the
+   `text` feature on the facade, the `cc` check, and chapter 6's `@manifest` section. Six
+   findings, and the first is the one that mattered:
+   - **A text cut into more than one part dropped a byte at every cut, and the whole tree was
+     blind to it.** `part::group` took each part's range from its nodes' extent, on a stated
+     premise that the boundary nodes cover the text "without gaps or overlaps". They do not: a
+     row starts at its first text byte and ends at its last (step 3 made it so, to stop a row
+     carrying its predecessor's separator), so every separator between two nodes is in no node
+     at all. Node-bounded parts therefore lost those bytes at each cut, and lost the text's head
+     and tail outright — `notes.txt` is 471 bytes and its one part was `0..470`. A part is
+     addressed by the hash of its bytes, so a text whose parts do not concatenate back to it has
+     no span, alignment or locator range that means what it says across a cut. Parts now
+     partition the text: the first starts at 0, each later one starts where the previous ended,
+     and the last ends at the text's length, so the cut lands in the gap where there is nothing
+     to cut through. **Nothing had ever run this**, because all eight reader fixtures produce
+     exactly one part and for one part the shift is zero; it took step 6's first multi-part test.
+     One fixture's identities moved (`notes.txt`, by one byte), which is the blast radius.
+   - **A reading's offsets are part-local and the only code that built one kept them absolute.**
+     Same cause, different symptom: `tests/readers.rs` filters a reader's rows into a part
+     without shifting them, which is correct for a part starting at zero and nothing else. The
+     shift now lives in one function in `library.rs` with a test, and `tests/library.rs` asserts
+     that `Library::add` reproduces the four identities the fixture files pin — so the two
+     implementations of this arithmetic cannot drift apart again.
+   - **`-s/--store` taking a library root is one function, not one per command.** §4.4 says the
+     flag accepts a library directory; the way to make that true for `check`, `trace` and
+     everything else at once is for the two store readers to map a root to its catalog log.
+     Recognised by the `LIBRARY` marker rather than by being a directory, so a mistyped path is
+     still an error rather than an empty library.
+   - **One log, not one per shard.** §14.2's layout is per-shard and SMYSL-2.8 owns the sharded
+     union. A sharding scheme written here would be one chosen before anything can measure it,
+     so the marker file carries a layout version instead and `Library::shards()` is the one place
+     the lock set is named.
+   - **`xtask determinism` registers neither `text add` nor `text show`**, which §4.4 asks for,
+     and the reason is in the harness: it runs one fixed argv twice and compares stdout. `text
+     add` is a *write*, so its second run legitimately prints `objects 0 written` — the first
+     run made them — and `text show` needs a library on disk, which the repository would have to
+     commit as binary objects. What determinism they have is pinned harder than the harness
+     could: `fixtures/library/readers/` holds every identity for eight inputs across six
+     readers, and `tests/library.rs` asserts the library's own pipeline reproduces them. The
+     harness needs a setup hook before a writing command can join it; TX-P3's `date set` has the
+     same shape, and is the right place to pay for it.
+   - **Four gates were wrong, and two of them were wrong in the direction that passes.**
+     Adding a command and a feature walked into all four:
+     - `make cli-surface` records a positional by matching `[A-Z.]+` inside brackets, so the
+       value name `FILE|REF` was recorded as **nothing** — a missing line, which the gate reads
+       as correct. Renamed `TARGET`.
+     - `scripts/verify-doc-cargo.py` split `[features]` into *physical* lines, so a feature
+       whose array spans several lines (`cli` does now) gave `cli = [` with no quoted strings
+       and the manifest side came out empty. It failed loudly here only because the manual's
+       row was not also empty; a row naming nothing would have compared equal to nothing and
+       passed. Parsed by bracket depth now.
+     - the **`cc` check this step was supposed to add** was itself written wrong: `cargo tree
+       -i <absent package>` prints "nothing to print" and exits **0**, so testing the exit
+       status reported a C toolchain that is not there. It reads the output now, requires the
+       run to have succeeded, and the pattern was checked against a package that *is* in the
+       tree (`-i memchr`) — a grep that never matches is indistinguishable from a clean tree.
+       The answer, once it could be asked: no `cc` in the `cli` tree, which draft 3 §18 had
+       only ever cited.
+     - `every_command_names_the_phase_that_wires_it` accepted `SM-P*` or a release number, so
+       `TX-P1` failed it. There are two RFCs with two phase vocabularies now, and the test knew
+       about one.
 7. Ports: C-Read for 14, 15, 18 and the ids. Step 1 gave all three the **names** and nothing
    else — the spec table reaches them through `verify-spec-tables.py`, and each now reports a
    manifest as named but not understood. What is left is the part that matters: decoding the

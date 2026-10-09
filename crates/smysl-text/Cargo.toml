@@ -35,6 +35,11 @@ reader-zefania = ["dep:quick-xml"]
 
 [dependencies]
 smysl-core            = { workspace = true }
+# `library.rs` opens a catalog log into a `Store`: a library is a store and an object store
+# together, and either half alone cannot resolve a locator (SMYSL-2.4 §4.2). Both crates are in
+# the pure tier and `smysl-graph` does not depend on this one, so the edge adds no floor and no
+# cycle.
+smysl-graph           = { workspace = true }
 unicode-normalization = { workspace = true }
 pulldown-cmark        = { workspace = true, optional = true }
 serde                 = { workspace = true, optional = true }

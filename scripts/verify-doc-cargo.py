@@ -148,10 +148,24 @@ def check_feature_table():
     with open('Cargo.toml') as fh:
         manifest = fh.read()
     feats = manifest.split('[features]', 1)[1].split('\n[', 1)[0]
-    real = {}
+    # Logical lines, not physical ones. A feature's array may span several lines — `cli` does,
+    # since 1.10 — and reading physically gave `cli = [` with no quoted strings in it, so the
+    # manifest side came out **empty**. That failed loudly here only because the manual's row
+    # was not also empty; a row that named nothing would have compared equal to nothing and
+    # passed, which is the direction this check exists to catch.
+    logical, depth, buf = [], 0, ''
     for line in feats.split('\n'):
-        line = line.split('#')[0].strip()
-        if not line or '=' not in line:
+        line = line.split('#')[0]
+        if not line.strip() and depth == 0:
+            continue
+        buf += ' ' + line.strip()
+        depth += line.count('[') - line.count(']')
+        if depth <= 0:
+            logical.append(buf.strip())
+            buf, depth = '', 0
+    real = {}
+    for line in logical:
+        if '=' not in line:
             continue
         name, rest = line.split('=', 1)
         real[name.strip()] = set(re.findall(r'"([^"]+)"', rest))

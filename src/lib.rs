@@ -78,6 +78,22 @@ pub use smysl_core::{
     FORMAT_VERSION_DEFAULT, KERNEL_MAJOR, KERNEL_SCHEMA,
 };
 
+/// The library records, and the four identities over them (RFC SMYSL-2.4, TX-P1).
+///
+/// Unconditional, where [`text`] is behind a feature, and the line between them is the line
+/// the RFC draws: a manifest, a part text and a reading are *the format*, decoded by the
+/// envelope and held by a `Store` in any build, while reading a file into them needs a reader.
+///
+/// Step 1 added these types and nothing re-exported them, which made `Record::Manifest`'s
+/// payload unnameable through this crate: a consumer could match the variant and not write
+/// down what it had. Found in step 5, when a test in this repository had to reach past the
+/// facade to the crate that defines them — the clearest possible statement that rule A was
+/// not being met.
+pub use smysl_core::ids::{Did, Mid, Rdid, Tid};
+pub use smysl_core::types::{
+    Calendar, Carry, Manifest, ParentKind, PartEntry, PartReading, PartResolver, PartText, Resolved,
+};
+
 // ---- check ----------------------------------------------------------------
 pub use smysl_check::{
     check, check_and_fail_on, conformance, fidelity, granularity_distribution, CheckOptions,
@@ -200,6 +216,20 @@ pub use smysl_provider::{
 /// `ratatui` and `crossterm` cost stays behind `--features tui`, exactly as before.
 #[cfg(feature = "tui")]
 pub use smysl_tui as tui;
+
+/// The library layer: a catalog and an object store, the readers, and everything that
+/// *interprets* the records [`Manifest`] and friends describe (RFC SMYSL-2.4 §4.3.6).
+///
+/// A module rather than a list of names, for the reason `tui` is one: a library is one
+/// capability with several entry points, and `Library` without `Locator`, `Structure` or the
+/// reader registry would be rule A's gap in a smaller form.
+///
+/// Behind `text`, which `cli` turns on. Not in the library's default tree, deliberately: the
+/// readers bring `quick-xml`, `pulldown-cmark` and `serde_json`, and the claim that a
+/// `--no-default-features` build of this crate carries no serde stack is one the purity gate
+/// checks. An embedder who wants to read files asks for it.
+#[cfg(feature = "text")]
+pub use smysl_text as text;
 
 /// The crate version, as a convenience for embedders recording provenance.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

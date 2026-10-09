@@ -107,7 +107,22 @@ required-features = ["cli"]
 # every default build is a cost an embedder who only calls the library never opted into.
 # `--features tui` for anyone who wants the browser; free for everyone else.
 default   = ["cli", "local", "render-typst"]
-cli       = ["dep:clap"]
+# `text` is the library layer of RFC SMYSL-2.4: a catalog, an object store, and the readers.
+# It is **not** in the library's default tree and arrives only through `cli`, which is what
+# keeps the claim that `--no-default-features` carries no serde stack true (§4.5). `cli` turns
+# on all six TX-P1 readers, because a `text add` with no reader built is a command that can
+# only refuse.
+cli       = [
+    "dep:clap",
+    "text",
+    "smysl-text/reader-txt",
+    "smysl-text/reader-md",
+    "smysl-text/reader-usfm",
+    "smysl-text/reader-osis",
+    "smysl-text/reader-zefania",
+    "smysl-text/reader-json",
+]
+text      = ["dep:smysl-text"]
 tui       = ["dep:smysl-tui", "cli"]
 # Semantic retrieval. Off by default: it needs a model file the operator supplies, and a
 # build that cannot use one should not pay for `tokenizers` in its dependency tree.
@@ -140,6 +155,7 @@ smysl-core     = { workspace = true }
 smysl-graph    = { workspace = true }
 smysl-retrieve = { workspace = true }
 smysl-check    = { workspace = true }
+smysl-text     = { workspace = true, optional = true }
 smysl-pack     = { workspace = true }
 smysl-thread   = { workspace = true }
 smysl-render   = { workspace = true }

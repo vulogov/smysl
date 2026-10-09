@@ -150,6 +150,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "usage",     about: "Token and cost ledger",                               purity: Purity::Pure,  phase: "SM-P13" , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "reindex",   about: "Rebuild the derived index from the log alone",        purity: Purity::Pure,  phase: "SM-P3"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "ui",        about: "Terminal UI",                                         purity: Purity::Pure,  phase: "SM-P15" , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "text",      about: "Library: add, list and show texts",                   purity: Purity::Pure,  phase: "TX-P1"  , impure_when: None , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -266,6 +267,15 @@ fn cli() -> Command {
                 ),
             "check" => sub
                 .arg(
+                    Arg::new("library")
+                        .long("library")
+                        .help(
+                            "Treat the store as a library root and resolve its parts, so the \
+                             library pass can verify objects",
+                        )
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
                     Arg::new("conformance")
                         .long("conformance")
                         .value_name("CLASS")
@@ -371,6 +381,87 @@ fn cli() -> Command {
                         .action(ArgAction::SetTrue),
                 )
                 .arg(Arg::new("store").value_name("PATH")),
+            "text" => sub
+                .arg(
+                    Arg::new("action")
+                        .required(true)
+                        .value_name("ACTION")
+                        .value_parser(["add", "ls", "show"])
+                        .help("add a file, list the catalog, or show a passage"),
+                )
+                .arg(
+                    // `TARGET` rather than `FILE|REF`, which is what it is: `make
+                    // cli-surface` records a positional by matching `[A-Z.]+` inside
+                    // brackets, so a value name with a `|` in it is recorded as nothing and
+                    // the gate goes blind to the argument. Found by reading the regenerated
+                    // file rather than by a failure, because a missing line is what the gate
+                    // records as correct.
+                    Arg::new("target")
+                        .value_name("TARGET")
+                        .help("the file for `add`, or `<alias|mid>#<locator>` for `show`"),
+                )
+                .arg(
+                    Arg::new("reader")
+                        .long("reader")
+                        .value_name("R")
+                        .help("Reader id, such as `txt/1` or `osis/1` (`add`)"),
+                )
+                .arg(
+                    Arg::new("alias")
+                        .long("alias")
+                        .value_name("A")
+                        .help("The alias this expression is catalogued under"),
+                )
+                .arg(
+                    Arg::new("lang")
+                        .long("lang")
+                        .value_name("L")
+                        .help("BCP-47 tag, when the source does not say"),
+                )
+                .arg(
+                    Arg::new("licence")
+                        .long("licence")
+                        .value_name("SPDX")
+                        .help("The licence the text is under (`add`)"),
+                )
+                .arg(
+                    Arg::new("carry")
+                        .long("carry")
+                        .value_name("MODE")
+                        .value_parser(["none", "ref", "text"])
+                        .help("Whether the text itself may travel with a bundle"),
+                )
+                .arg(
+                    Arg::new("part-policy")
+                        .long("part-policy")
+                        .value_name("P")
+                        .help("The boundary rule and size targets parts are cut by"),
+                )
+                .arg(
+                    Arg::new("param")
+                        .long("param")
+                        .value_name("K=V")
+                        .action(ArgAction::Append)
+                        .help("A reader parameter, recorded in the manifest beside the reader id"),
+                )
+                .arg(
+                    Arg::new("forks")
+                        .long("forks")
+                        .help("List only the aliases with more than one head (`ls`)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("raw")
+                        .long("raw")
+                        .help("Print the passage's bytes with no heading (`show`)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("segments")
+                        .long("segments")
+                        .help("Print the segments the passage covers (`show`)")
+                        .action(ArgAction::SetTrue),
+                ),
             "view" => sub
                 .arg(
                     Arg::new("roots")
@@ -1515,6 +1606,18 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         if !passes.is_empty() {
             opts = opts.only(passes.clone());
         }
+        // `--library`: the object half of the library pass. Without a resolver `SMY-E446` and
+        // `SMY-E401` are not checked and the report says so, which is the honest answer — a
+        // log holds no text (OQ-39), so there is nothing to check the manifests against.
+        if let Some(parts) = library_resolver(m, &path) {
+            opts = match parts {
+                Ok(p) => opts.with_parts(p),
+                Err(code) => {
+                    bar.abandon();
+                    return code;
+                }
+            };
+        }
         if let Some(f) = &consumer {
             opts = opts.as_consumer(f.clone());
         }
@@ -1694,7 +1797,45 @@ fn read_bytes(path: &str) -> Result<Vec<u8>, String> {
             .map_err(|e| e.to_string())?;
         return Ok(b);
     }
-    std::fs::read(path).map_err(|e| e.to_string())
+    std::fs::read(store_file(path)?).map_err(|e| e.to_string())
+}
+
+/// The file a `-s/--store` argument names.
+///
+/// Itself, for a path to a log or a surface document — which is what it has meant since 1.0,
+/// and §4.4 keeps. A **library root** names its catalog log instead, recognised by the
+/// `LIBRARY` marker rather than by being a directory, so that every command which takes a
+/// store works on a library without a second flag and a mistyped directory is still an error.
+///
+/// One function, called by both readers, because the alternative is each command deciding for
+/// itself and `check -s <library>` working while `trace -s <library>` does not.
+#[cfg(feature = "text")]
+fn store_file(path: &str) -> Result<std::path::PathBuf, String> {
+    use smysl::text::library::{Library, CATALOG};
+    let p = std::path::Path::new(path);
+    if Library::is_library(p) {
+        return Ok(p.join(CATALOG));
+    }
+    if p.is_dir() {
+        return Err(format!(
+            "is a directory and has no `{}` marker, so it is not a library",
+            smysl::text::library::MARKER
+        ));
+    }
+    Ok(p.to_path_buf())
+}
+
+#[cfg(not(feature = "text"))]
+fn store_file(path: &str) -> Result<std::path::PathBuf, String> {
+    let p = std::path::Path::new(path);
+    if p.is_dir() {
+        return Err(
+            "is a directory; reading a library needs the library layer (build with \
+             --features text)"
+                .to_string(),
+        );
+    }
+    Ok(p.to_path_buf())
 }
 
 /// Read a store from surface text or a CBOR log, whichever it turns out to be.
@@ -1708,7 +1849,8 @@ fn load_store(
             .map_err(|e| e.to_string())?;
         b
     } else {
-        std::fs::read(path).map_err(|e| format!("{path}: {e}"))?
+        let file = store_file(path).map_err(|e| format!("{path}: {e}"))?;
+        std::fs::read(&file).map_err(|e| format!("{path}: {e}"))?
     };
 
     if looks_like_surface(&bytes) {
@@ -5802,6 +5944,7 @@ fn main() -> ProcExitCode {
         "relink" => cmd_relink(sub, &matches),
         "compact" => cmd_compact(sub, &matches),
         "ui" => cmd_ui(sub, &matches),
+        "text" => cmd_text(sub, &matches),
         _ => {
             // Unreachable while every command in `COMMANDS` has an arm above, which
             // `command_table_matches_section_23` enforces. Kept as the honest answer if one
@@ -5818,6 +5961,327 @@ fn main() -> ProcExitCode {
         }
     };
     ProcExitCode::from(code.as_i32() as u8)
+}
+
+/// The resolver `check --library` supplies, or `None` when the flag was not given.
+///
+/// `Some(Err(..))` rather than a silent fall-back when the flag is given and the path is not a
+/// library: a caller who asked for the objects to be verified and got a report that did not
+/// verify them would read it as "the objects are fine".
+#[cfg(feature = "text")]
+fn library_resolver(
+    m: &ArgMatches,
+    path: &str,
+) -> Option<Result<std::sync::Arc<dyn smysl::PartResolver + Send + Sync>, ExitCode>> {
+    use smysl::text::library::Library;
+    if !m.get_flag("library") {
+        return None;
+    }
+    let root = std::path::Path::new(path);
+    Some(match Library::open(root) {
+        Ok(l) => Ok(std::sync::Arc::new(l)),
+        Err(e) => {
+            eprintln!("smysl check: --library {path}: {e}");
+            Err(ExitCode::Usage)
+        }
+    })
+}
+
+#[cfg(not(feature = "text"))]
+fn library_resolver(
+    m: &ArgMatches,
+    _path: &str,
+) -> Option<Result<std::sync::Arc<dyn smysl::PartResolver + Send + Sync>, ExitCode>> {
+    if m.get_flag("library") {
+        eprintln!("smysl check: --library needs the library layer (build with --features text)");
+        return Some(Err(ExitCode::Usage));
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// `text` — the library (RFC SMYSL-2.4, TX-P1 step 6)
+// ---------------------------------------------------------------------------
+
+/// `-s/--store` pointing at a library root rather than at a log.
+///
+/// No new global flag, per §4.4: a library is recognised by its `LIBRARY` marker, and a plain
+/// file path keeps the meaning it has had since 1.0. The marker is a file rather than a naming
+/// convention precisely so a mistyped directory is an error instead of an empty library.
+#[cfg(feature = "text")]
+fn library_root(
+    m: &ArgMatches,
+    global: &ArgMatches,
+    cmd: &str,
+) -> Result<std::path::PathBuf, ExitCode> {
+    let path = store_path(m, global, cmd)?;
+    Ok(std::path::PathBuf::from(path))
+}
+
+#[cfg(feature = "text")]
+fn cmd_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let action = m
+        .get_one::<String>("action")
+        .map(String::as_str)
+        .unwrap_or("ls");
+    let root = match library_root(m, global, "text") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    match action {
+        "add" => text_add(m, &root),
+        "ls" => text_ls(m, &root),
+        "show" => text_show(m, &root),
+        other => {
+            eprintln!("smysl text: `{other}` is not an action; it is add, ls or show");
+            ExitCode::Usage
+        }
+    }
+}
+
+#[cfg(feature = "text")]
+fn text_add(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
+    use smysl::text::library::{AddSpec, Library};
+    use smysl::text::limits::Caps;
+    use smysl::text::part::Policy;
+    use smysl::text::readers::{Input, Params};
+
+    let Some(file) = m.get_one::<String>("target") else {
+        eprintln!("smysl text add: no file given");
+        return ExitCode::Usage;
+    };
+    let (Some(reader), Some(alias), Some(licence)) = (
+        m.get_one::<String>("reader"),
+        m.get_one::<String>("alias"),
+        m.get_one::<String>("licence"),
+    ) else {
+        eprintln!("smysl text add: --reader, --alias and --licence are required");
+        eprintln!("  none of the three has a defensible default: the reader id and the part");
+        eprintln!("  policy are recorded in the manifest and checked on re-read, and a missing");
+        eprintln!("  licence is not `unknown` — it is a decision nobody made");
+        return ExitCode::Usage;
+    };
+
+    let bytes = match std::fs::read(file) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("smysl text add: {file}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let mut spec = AddSpec::new(reader.clone(), alias.clone(), licence.clone());
+    if let Some(lang) = m.get_one::<String>("lang") {
+        match smysl::LangTag::new(lang) {
+            Ok(t) => spec.lang = Some(t),
+            Err(e) => {
+                eprintln!("smysl text add: --lang {lang}: {e}");
+                return ExitCode::Usage;
+            }
+        }
+    }
+    if let Some(carry) = m.get_one::<String>("carry") {
+        match smysl::Carry::parse(carry) {
+            Some(c) => spec.carry = c,
+            None => {
+                eprintln!("smysl text add: --carry {carry}: it is none, ref or text");
+                return ExitCode::Usage;
+            }
+        }
+    }
+    if let Some(policy) = m.get_one::<String>("part-policy") {
+        match Policy::parse(policy) {
+            Some(p) => spec.policy = Some(p),
+            None => {
+                eprintln!("smysl text add: --part-policy {policy}: not a policy this build writes");
+                return ExitCode::Usage;
+            }
+        }
+    }
+    let mut params = Params::default();
+    for pair in m
+        .get_many::<String>("param")
+        .map(|v| v.cloned().collect::<Vec<_>>())
+        .unwrap_or_default()
+    {
+        let Some((k, v)) = pair.split_once('=') else {
+            eprintln!("smysl text add: --param {pair}: a parameter is `key=value`");
+            return ExitCode::Usage;
+        };
+        if let Err(e) = params.set(reader, k, v) {
+            eprintln!("smysl text add: --param {pair}: {e}");
+            return ExitCode::Usage;
+        }
+    }
+    spec.params = params;
+
+    let mut library = match Library::create(root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl text add: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    // The library lock, then the shards in name order (§3.9.3). Held for the whole add, which
+    // is why `Library::add` does not take it: a method that acquired its own would deadlock
+    // with a caller that already holds one.
+    let shards = library.shards();
+    let _locks = match smysl::text::lock::acquire_all(root, &shards, "text add") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl text add: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    match library.add(&Input::new(&bytes), &spec, &Caps::DEFAULT) {
+        Ok(added) => {
+            println!("manifest  {}", added.mid.canonical());
+            println!("alias     {alias}");
+            println!("reader    {reader}");
+            println!("bytes     {}", added.bytes);
+            println!("parts     {}", added.parts.len());
+            for (i, tid) in added.parts.iter().enumerate() {
+                println!("  part {i}  {}", tid.canonical());
+            }
+            println!("objects   {} written", added.objects_written);
+            if added.lossy {
+                println!("lossy     the reader dropped something the source carried");
+            }
+            ExitCode::Success
+        }
+        Err(e) => {
+            eprintln!("smysl text add: {e}");
+            ExitCode::Failure
+        }
+    }
+}
+
+#[cfg(feature = "text")]
+fn text_ls(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
+    use smysl::text::library::Library;
+
+    let library = match Library::open(root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl text ls: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    let forks_only = m.get_flag("forks");
+    let catalog = library.catalog();
+    let mut shown = 0usize;
+    for (alias, heads) in &catalog {
+        if forks_only && heads.len() < 2 {
+            continue;
+        }
+        shown += 1;
+        // A fork is printed as a fork rather than resolved: `SMY-W418`, and the operator is
+        // the one who decides which of two catalogue entries is the one they meant.
+        let note = if heads.len() > 1 {
+            "  (SMY-W418: fork)"
+        } else {
+            ""
+        };
+        println!("{alias}{note}");
+        for mid in heads {
+            let parts = library
+                .store()
+                .manifest(mid)
+                .map(|man| man.parts.len())
+                .unwrap_or(0);
+            println!("  {}  {parts} part(s)", mid.canonical());
+        }
+    }
+    if shown == 0 {
+        eprintln!(
+            "smysl text ls: {}",
+            if forks_only {
+                "no alias has more than one head"
+            } else {
+                "the catalog is empty"
+            }
+        );
+    }
+    ExitCode::Success
+}
+
+#[cfg(feature = "text")]
+fn text_show(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
+    use smysl::text::library::Library;
+    use smysl::text::limits::Caps;
+    use smysl::text::locator;
+
+    let Some(reference) = m.get_one::<String>("target") else {
+        eprintln!("smysl text show: no reference given; it is `<alias|mid>#<locator>`");
+        return ExitCode::Usage;
+    };
+    let Some((who, loc_text)) = reference.split_once('#') else {
+        eprintln!("smysl text show: `{reference}` has no `#`; it is `<alias|mid>#<locator>`");
+        return ExitCode::Usage;
+    };
+    let loc = match locator::parse(loc_text) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl text show: `{loc_text}`: {e}");
+            return ExitCode::Usage;
+        }
+    };
+
+    let library = match Library::open(root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl text show: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    let passage = match library.passage(who, &loc, &Caps::DEFAULT) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("smysl text show: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    if m.get_flag("raw") {
+        print!("{}", passage.text);
+        return ExitCode::Success;
+    }
+    println!("manifest  {}", passage.mid.canonical());
+    println!("part      {}", passage.tid.canonical());
+    println!("range     {}..{}", passage.range.start, passage.range.end);
+    println!();
+    println!("{}", passage.text);
+
+    if m.get_flag("segments") {
+        match library.structure(&passage.mid, &passage.tid, &Caps::DEFAULT) {
+            Ok(structure) => {
+                println!();
+                println!("segments");
+                for node in structure.nodes() {
+                    if node.range.start >= passage.range.start
+                        && node.range.end <= passage.range.end
+                    {
+                        println!(
+                            "  {:<9} {} {}..{}",
+                            node.level, node.locator, node.range.start, node.range.end
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("smysl text show: --segments: {e}");
+                return ExitCode::Failure;
+            }
+        }
+    }
+    ExitCode::Success
+}
+
+#[cfg(not(feature = "text"))]
+fn cmd_text(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl text: this build has no library layer (build with --features text)");
+    ExitCode::Usage
 }
 
 #[cfg(test)]
@@ -5950,7 +6414,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 26);
+        assert_eq!(COMMANDS.len(), 27);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -5980,7 +6444,8 @@ mod tests {
                 "providers",
                 "usage",
                 "reindex",
-                "ui"
+                "ui",
+                "text"
             ]
         );
     }
@@ -6071,7 +6536,10 @@ mod tests {
     #[test]
     fn every_command_names_the_phase_that_wires_it() {
         for c in COMMANDS {
-            let phase = c.phase.starts_with("SM-P");
+            // Two phase vocabularies, because there are two RFCs: `SM-P*` is SMYSL-1's
+            // delivery plan and `TX-P*` is SMYSL-2.4's. A release number is the third form,
+            // for a command that arrived outside either plan.
+            let phase = c.phase.starts_with("SM-P") || c.phase.starts_with("TX-P");
             let cycle = c
                 .phase
                 .split('.')

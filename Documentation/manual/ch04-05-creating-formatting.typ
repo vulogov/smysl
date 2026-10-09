@@ -37,7 +37,7 @@ like to get one of these wrong, and exactly what the tool says back.
 
 #section("What you hand-author")
 
-Four kinds of record are ever typed by a person. Two more — `attestation`
+Five kinds of record are ever typed by a person. Two more — `attestation`
 and `contention` — exist in the format, but tooling stamps them on for you
 (`attest`, `merge`); nothing in this chapter asks you to write either by
 hand.
@@ -53,8 +53,63 @@ hand.
       `rebuts`, `warrant`, and eleven more.]),
     ([`@thread`], [A named, ordered, role-annotated walk over units already
       in the document.]),
+    ([`@manifest`], [A catalogue entry for a text: the alias, the reader
+      that read it, its licence, and the parts it was cut into (1.10.0).]),
   ),
 )
+
+#subsection("`@manifest` — a text in the catalogue")
+
+A `@manifest` is the one construct here that describes something *outside*
+the document. A claim is in the file you are editing; a manifest says that a
+text exists, who may carry it, which reader produced the parts, and what the
+identity of each part is — while the text itself lives in a library's object
+store, never in the log.
+
+#screen(caption: "A manifest with one part")[
+```
+@manifest kjv/1769 { lang: en, reader: osis/1, licence: public-domain,
+                     carry: text,
+                     part-policy: "smysl/parts/1 level=chapter min=65536 max=4194304",
+                     parts: [ { tid: "t3:…", length: 4096,
+                                structure: "b3:…", rdid: "r3:…" } ] }
+```
+]
+
+Six things are required and none of them has a default: the alias, `lang`,
+`reader`, `licence`, `carry`, and `part-policy`. The reasons are worth
+knowing, because each one is a decision that cannot be inferred later:
+
+- A missing `lang` is not `und`. `und` is a claim that nobody knows, which
+  is a different statement from nobody having said.
+- A missing `carry` is not `none`, because `none` is a decision about
+  whether this text may travel inside a bundle.
+- A missing `licence` is not `unknown`, for the same reason.
+- `part-policy` is the one that matters most. It records the boundary rule
+  and the size targets the parts were cut by, and the default changes as the
+  cut gets measured — so a manifest that recorded no policy would silently
+  mean a different cut of the same text in a later release.
+
+`parts` is the exception: it is allowed to be empty, and an omitted `parts`
+*is* an empty one, because writing `parts: []` by hand to say “this is a
+catalogue entry with nothing behind it yet” is noise. The writer omits an
+empty `parts` for the same reason, which is what keeps the round trip a
+fixed point.
+
+In practice you will rarely type one. `smysl text add` writes the manifest,
+computes every identity in it, and puts the bytes in the object store — and
+until 1.10.0 there was no command that could, which is why this section
+arrived one release after the syntax did. A documented form with nothing
+behind it is a form nobody can check their work against. Appendix A has the
+flags.
+
+#callout(label: "Note")[
+  Two records in the library family have **no** surface form at all: the part
+  text (15) and the reading (18). A megabyte of someone else's prose inside a
+  quoted string is neither readable nor diffable, and the object store already
+  addresses it by content. A log that was offered one refuses it outright
+  (`SMY-E452`).
+]
 
 #callout(label: "Note")[
   For the full field list of each construct — every status, every source

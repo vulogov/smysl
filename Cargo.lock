@@ -1462,6 +1462,7 @@ dependencies = [
  "smysl-provider",
  "smysl-render",
  "smysl-retrieve",
+ "smysl-text",
  "smysl-thread",
  "smysl-tui",
 ]

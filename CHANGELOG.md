@@ -52,6 +52,55 @@ Apache 2.0 and settled, the hosted one is not. It blocks nothing that has starte
 the first of them to be hashed over something other than a CBOR map. Step 2 adds the crate that
 interprets them, and the locator grammar the plan pointed at a document nobody has.
 
+### A text cut into two parts was losing a byte at the cut
+
+`smysl text add`, `text ls` and `text show`: a library is a directory now, with a catalogue, an
+object store and a `LIBRARY` marker, and `-s/--store` accepts one wherever it accepted a log.
+`check --library` resolves its parts, so the library pass can verify the objects behind a
+manifest. TX-P1 step 6.
+
+**The defect the first multi-part test found.** Cutting a text into parts took each part's range
+from the boundary nodes it held, on the premise that those nodes cover the text. They do not: a
+structure row starts at its first text byte and ends at its last, so every separator between two
+rows — a newline, a blank line, the whitespace between two chapters — belongs to no row. Parts
+bounded by rows therefore dropped one byte at every cut, and dropped whatever sat before the
+first row and after the last: the `notes.txt` fixture is 471 bytes and its single part was
+`0..470`.
+
+That is not a cosmetic loss. A part is addressed by the hash of its bytes, so unless a text's
+parts concatenate back to the text, no span, alignment or locator range that crosses a cut means
+what it says, and showing such a range would quietly be missing a byte. Parts now partition the
+text, and the cut lands in the gap between two rows, where there is nothing to cut through.
+
+**Nothing in the tree could have caught it.** All eight reader fixtures produce exactly one
+part, and for one part the shift is zero — so the arithmetic was exercised only in the case
+where it is the identity function. The same blind spot hid a second bug beside it: a reading's
+segment offsets are offsets into *its part*, and the only code that built one from a reader kept
+them absolute. One fixture's identities move as a result, by one byte of text.
+
+**Six required flags with no defaults**, which `text add` refuses rather than guesses. A missing
+`--lang` is not `und`, because `und` claims nobody knows and the absence means nobody said. A
+missing `--licence` is not `unknown`, and a missing `--carry` is not `none` — `none` is a
+decision about whether a text may travel. `--part-policy` is the one that matters most: it
+records the cut, and the default changes as the cut gets measured, so a manifest without one
+would silently mean a different cut of the same text in a later release. `carry: text` under a
+licence that does not permit redistribution is refused before a byte is written.
+
+A fork is printed as a fork. `text ls` shows both heads of an alias with the warning; `text show`
+refuses to pick one, because printing the lower-sorting identity would make the answer depend on
+a hash.
+
+**And four gates were wrong, two of them in the direction that passes.** The CLI surface record
+matches a positional argument by its value name, and a name with a `|` in it was recorded as
+nothing — a missing line, which the gate reads as correct. The manual's feature table is
+compared against the manifest by splitting `[features]` into physical lines, so a feature whose
+list spans several lines read as empty on the manifest side; it failed loudly here only because
+the manual's row was not also empty. The check this release added for a C toolchain in the CLI's
+dependency tree was written on `cargo tree`'s exit status, which is **0** with "nothing to
+print" when the package is absent — so it reported a compiler that was not there, and the
+fixed version was verified against a package that is. And the test that every command names its
+delivery phase knew about one of the two RFCs that now name phases.
+
 ### Two of the six codes a check pass was asked for could not be raised
 
 `check` has a twelfth pass, `library`, and a sixth conformance class, `C-Library`. TX-P1 step 5.

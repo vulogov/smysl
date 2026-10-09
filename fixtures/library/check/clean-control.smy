@@ -1,6 +1,6 @@
 @doc smysl/0.1 { id: v/library-clean }
 
-@manifest notes-txt { lang: en, reader: txt/1, licence: CC0-1.0, carry: text, part-policy: "smysl/parts/1 level=line min=65536 max=4194304", parts: [ { tid: "t3:mcvaewldprhtrdsvaovdy6xdpkcz7vtwxzznihpsks5zxmxge4kq", length: 470, structure: "b3:pbqmytlnhryguxglphxpkahzsa6niudof3u7ywfpi7np3i53g5wq", rdid: "r3:2o37zvysobip5yinj2jcbes4v6uvzkol3e4x5vav7q64livydr4a" } ] }
+@manifest notes-txt { lang: en, reader: txt/1, licence: CC0-1.0, carry: text, part-policy: "smysl/parts/1 level=line min=65536 max=4194304", parts: [ { tid: "t3:epf7m2nqtymxk5yn7c7glsaps57b36qetkyk74ngaxe3me4ggv2a", length: 471, structure: "b3:pbqmytlnhryguxglphxpkahzsa6niudof3u7ywfpi7np3i53g5wq", rdid: "r3:apfxei2trsqmihbwxzhjf6issljoke7ntpnpsukayeglkdck6e7a" } ] }
 
-@evidence e/note { status: cited, source: { kind: doc, ref: "t3:mcvaewldprhtrdsvaovdy6xdpkcz7vtwxzznihpsks5zxmxge4kq#L4" } }
+@evidence e/note { status: cited, source: { kind: doc, ref: "t3:epf7m2nqtymxk5yn7c7glsaps57b36qetkyk74ngaxe3me4ggv2a#L4" } }
 ~ The notes record the engine being restarted twice that afternoon.

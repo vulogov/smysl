@@ -69,7 +69,8 @@ and all:
   (
     ([Feature], [Turns on]),
     ([`default`], [`cli`, `local`, `render-typst` — what plain `cargo build` gives you: the binary, local (Ollama) model access, and Typst rendering. *Not* `tui`: `ratatui` and `crossterm` in every default build is a cost an embedder who only calls the library never opted into, so the browser is `--features tui`.]),
-    ([`cli`], [`dep:clap`. Without it there is no `[[bin]]` at all — the binary's own manifest entry requires this feature to exist.]),
+    ([`cli`], [`dep:clap`, `text`, and `smysl-text/reader-txt`, `smysl-text/reader-md`, `smysl-text/reader-usfm`, `smysl-text/reader-osis`, `smysl-text/reader-zefania`, `smysl-text/reader-json`. Without it there is no `[[bin]]` at all — the binary's own manifest entry requires this feature to exist. The six readers are here rather than in `default` because a `text add` with no reader built is a command that can only refuse, and they are *not* in the library's own default tree: they bring `quick-xml`, `pulldown-cmark` and `serde_json`, and the claim that `--no-default-features` carries no serde stack is one the purity gate checks.]),
+    ([`text`], [`dep:smysl-text` — the library layer of RFC SMYSL-2.4: a catalogue, an object store, locators, structures, and the reader registry, reached as `smysl::text`. The records themselves (`Manifest`, `PartText`, `PartReading`) need no feature: they are the format, and the envelope decodes them in any build.]),
     ([`tui`], [`dep:smysl-tui`, and `cli` (the TUI is reached through the same binary, so it pulls the parser in too).]),
     ([`providers`], [`dep:smysl-provider` — the provider abstraction: registry, capabilities, ledger. No vendor is wired in by this alone.]),
     ([`stage`], [`dep:smysl-ingest`, without the ingest crate's model feature — staging, the rung ceiling, recipes and CSV import, for a program that builds its own units. No `smysl-provider` in the tree. Since 1.3.]),

@@ -69,6 +69,7 @@ These apply to every subcommand, in any position on the command line.
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
+    ([`--library`], [—], [Treat the store as a library root and resolve its parts, so the library pass verifies objects (`SMY-E446`, `SMY-E401`). Without it those two are not checked and the report says so: a log holds no text, so there is nothing to check the manifests against.]),
     ([`--conformance`], [`CLASS`], [Assert the store is consumable at a conformance class.]),
     ([`--as`], [`SCHEMA` (repeatable)], [Report fidelity for a consumer implementing these schemas.]),
     ([`--granularity`], [—], [Report the granularity distribution of the store.]),
@@ -511,6 +512,38 @@ command says so rather than pretending.
     ([`PATH`], [positional], [Store to reindex.]),
   ),
 )
+
+#section("text")
+
+*Library: add, list and show texts.* Pure · TX-P1.
+
+The store argument is a **library root** rather than a log — a directory with a `LIBRARY`
+marker file in it, which `text add` creates. There is no separate flag for it: every command
+that takes `-s/--store` accepts a library root and reads its catalogue, and a plain file path
+keeps the meaning it has always had.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`ACTION`], [positional, required], [`add`, `ls` or `show`.]),
+    ([`TARGET`], [positional], [The file, for `add`; `<alias|mid>#<locator>` for `show`.]),
+    ([`--reader`], [`R`], [Reader id, such as `txt/1` or `osis/1`. Required by `add`, and recorded in the manifest: it is what `SMY-E401` compares against when a corpus is re-read.]),
+    ([`--alias`], [`A`], [The alias the expression is catalogued under. Required by `add`.]),
+    ([`--licence`], [`SPDX`], [The licence the text is under. Required by `add`; a missing one is not `unknown`, it is a decision nobody made.]),
+    ([`--lang`], [`L`], [BCP-47 tag, for a source that does not say. A text whose language neither the source nor the caller names is refused rather than tagged `und`.]),
+    ([`--carry`], [`none|ref|text`], [Whether the text itself may travel inside a bundle. `text` under a licence that does not permit redistribution is `SMY-E402`, refused before a byte is written.]),
+    ([`--part-policy`], [`P`], [The boundary rule and size targets parts are cut by. Recorded in the manifest, because the default changes as the cut gets measured.]),
+    ([`--param`], [`K=V` (repeatable)], [A reader parameter. Recorded beside the reader id, because a parameter changes a reader's output: a corpus that recorded only the id would mean something else on re-read. No TX-P1 reader takes one.]),
+    ([`--forks`], [—], [`ls`: show only the aliases with more than one head (`SMY-W418`).]),
+    ([`--raw`], [—], [`show`: print the passage's bytes with no heading.]),
+    ([`--segments`], [—], [`show`: list the segments the passage covers, with their levels and locators.]),
+  ),
+)
+
+`ls` prints a fork as a fork rather than resolving it, and `show` refuses an alias with two
+heads instead of picking one — printing the lower-sorting identity would make the answer depend
+on a hash. Naming one of the two heads works, which is what the refusal tells you to do.
 
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix B — Full Diagnostic Code Reference
