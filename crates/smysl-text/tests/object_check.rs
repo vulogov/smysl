@@ -64,7 +64,8 @@ fn the_object_half_reports_corruption_and_not_absence() {
     let store = Store::from_records(vec![Record::Manifest(manifest)]);
 
     let objects = ObjectStore::open(&dir).expect("an object store");
-    let resolver: Arc<dyn PartResolver + Send + Sync> = Arc::new(objects.clone());
+    let resolver: Arc<dyn PartResolver + Send + Sync + core::panic::RefUnwindSafe> =
+        Arc::new(objects.clone());
 
     // 1. Nothing stored. Not a defect.
     let report = check(
@@ -127,7 +128,8 @@ fn a_part_entry_that_lies_about_its_length_is_reported() {
 
     let objects = ObjectStore::open(&dir).expect("an object store");
     objects.put_part(&part).expect("stored");
-    let resolver: Arc<dyn PartResolver + Send + Sync> = Arc::new(objects);
+    let resolver: Arc<dyn PartResolver + Send + Sync + core::panic::RefUnwindSafe> =
+        Arc::new(objects);
 
     let report = check(&store, CheckOptions::default().with_parts(resolver));
     assert_eq!(report.count(Code::E401), 1, "{report}");

@@ -35,6 +35,9 @@
 //! | [`lock`] | one writer per shard, named (`SMY-E445`) |
 //! | [`library`] | the catalog and the objects, opened together: `add`, `resolve`, `passage` |
 //! | [`readers`] | the six TX-P1 readers, one behind each `reader-*` feature |
+//! | [`segment`] | sentences, where no file format marks one (TX-P2) |
+//! | [`analyze`] | terms, folded and stemmed per language (TX-P2) |
+//! | `lang` | which language a text is in, behind feature `detect` (TX-P2) |
 //!
 //! Each reader is a function from bytes to a text and a table over it — no clock, no
 //! environment, no filesystem, and no name for the input — so two libraries given the same
@@ -50,7 +53,10 @@
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
+pub mod analyze;
 pub mod ids;
+#[cfg(feature = "detect")]
+pub mod lang;
 pub mod library;
 pub mod limits;
 pub mod locator;
@@ -61,9 +67,11 @@ pub mod objects;
 pub mod part;
 pub mod readers;
 pub mod reading;
+pub mod segment;
 pub mod structure;
 
-pub use ids::{Did, Mid, Rdid};
+pub use analyze::Chain;
+pub use ids::{Did, LangTag, Mid, Rdid};
 pub use library::{AddSpec, Added, Library, Passage};
 pub use limits::{Budget, Caps, Fuel};
 pub use locator::{Locator, LocatorError};
@@ -74,6 +82,7 @@ pub use objects::{ObjectKind, ObjectStore};
 pub use part::{group, PartPlan, Policy};
 pub use readers::{reader, Input, NoReader, Params, ReadOutput, Reader};
 pub use reading::{Level, Reading, Segment};
+pub use segment::Segmenter;
 pub use smysl_core::error::LibError;
 pub use smysl_core::ids::Tid;
 pub use structure::{Defect, Node, Structure, StructureError};

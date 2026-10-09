@@ -48,9 +48,93 @@ their own evidence in the form they were written.
 **One decision still open.** OQ-34 for the hosted model's outputs as fixtures — the local model is
 Apache 2.0 and settled, the hosted one is not. It blocks nothing that has started.
 
-**TX-P1 has started.** The library wire is in: three new record types, four new identities, and
-the first of them to be hashed over something other than a CBOR map. Step 2 adds the crate that
-interprets them, and the locator grammar the plan pointed at a document nobody has.
+**TX-P1 is complete and TX-P2 has started.** The library wire is in — three new record types,
+four new identities, and the first of them to be hashed over something other than a CBOR map —
+and so is everything that interprets it: the crate, the six readers, the locator grammar the
+plan pointed at a document nobody has, the check pass, the CLI, and the three ports. One thing
+TX-P1 owes is a corpus rather than code, and TX-P2's first step has now added a second of
+exactly the same kind. The sections below are newest first.
+
+### The abbreviation lists were one rule of four, and a stemmer brought serde with it
+
+**TX-P2 has started.** Sentences, terms and languages — the three things ingest counts in and
+no file format marks. `smysl-text` gains `segment`, `analyze` and `lang`, and three of the four
+things worth reporting are what measuring them found rather than what the plan said.
+
+**The segmenter is `smysl/seg-uax29+abbr/1`: UAX #29 and four rules, not one.** The plan named
+the abbreviation lists. Run against prose in the five tier-1 languages, UAX #29 also breaks at
+every `\n` (so hard-wrapped prose came out one sentence per *line*), starts a sentence at a
+lowercase word when a closing quote sits before it (`He said "Stop!" | and left.`), and hands
+over a French `»` as the first character of the *next* sentence (`« … jamais eu. | » Sa sœur
+posa…`). Three more rules, each a few lines, and the last of them is a reattachment rather than
+a suppression: moving the mark joins nothing, whereas suppressing that boundary would have
+merged two sentences. All four are version 1 of the id, because nothing has been written with
+it yet. The five lists' hash is pinned to the id, so editing a list is a test failure and the
+moment to decide whether the id becomes 2.
+
+**What a list cannot settle is recorded instead of resolved.** German `f.` was removed —
+`Vgl. S. 14 f. Dort steht es.` is two sentences and a list that holds on `f.` finds one.
+Russian `г.` was kept although it loses the same boundary in `умерла в 1911 г. Ты сама…`,
+because `в г. Тверь` needs the hold and which is more frequent is a question about a corpus
+this repository does not have. It is the whole of the gap between ru's 0.963 and the other
+four languages' 1.000.
+
+**The exit test is built; the corpus it asks for is not.** The step's bar is F1 ≥ 0.97 (en, es,
+fr, de) and ≥ 0.95 (ru) over **500 sentences per language**. `tests/segment_f1.rs` is that test
+and `SMYSL_SEG_GOLD=<dir>` points it at any corpus — no code change. What it is pointed at here
+is ~30 sentences per language written for the purpose, and that is a *development* set, named as
+one: two list rows and one rule were added because it failed on them, and 30 sentences cannot
+tell 0.97 from 1.00. The 500-sentence gold set now sits on GE-T1's row beside the five Bibles —
+two debts of the same shape, an instrument built and its material missing.
+
+**`rust-stemmers` 1.2.0 depends on `serde` and `serde_derive` unconditionally.** There is no
+feature to turn them off, and OQ-37's answer — argued at length, enforced by a gate — is that
+the pure core carries no serde stack. The RFC had listed the crate as a plain dependency of
+`smysl-text`; `cargo tree` is what found that the two claims cannot both hold. Stemming is now
+behind `smysl-text/stem`, which `cli` turns on because `reader-json` has already paid for
+`serde` there, and a build without it has **one** chain for every language and says so in
+`Chain::id` (`smysl/an/1` rather than `smysl/an-ru/1`) — so two indexes that were analyzed
+differently cannot claim the same analyzer.
+
+**`lingua`'s cost, which §4.5 had left unverified: 57 crates and 14.4 MB of models.** Five
+language features, `rayon`, `getrandom` and `wasm-bindgen` among the crates, no C toolchain, and
+no MSRV move — the highest declared floor in that tree is 1.85, which is the pure tier's own.
+It is behind `smysl-text/detect`, in neither `text` nor `cli`, and the four crates are named in
+the purity gate's `NOT_IN_THE_CORE` list with the feature that may reach them. A pure crate that
+linked threads and a randomness source in every build would have stopped making the claim its
+name carries.
+
+**Detection cannot be automatic, and that is an identity rule rather than a preference.** A
+manifest's `lang` is part of its mid, so a build with `detect` falling back to a guess and a
+build without it would give the same file two different manifest ids. `lang::Detector` is
+something a caller *runs*; its answer becomes an ordinary `AddSpec::with_lang`, which is a guess
+turned into data before it turns into an identity. The detector id carries the pinned `lingua`
+version, because §7's risk is that a version decides an rdid.
+
+**One number in this release is a precaution and is labelled as one.** `MIN_CHARS = 30`, below
+which a row inherits its neighbours' language instead of guessing. The development set cannot
+locate it: all 146 of its sentences are identified correctly, 32 of them under the threshold.
+What is measured is the failure mode — on twenty one-word utterances the detector disagrees with
+the language the word came from eight times — and a test says in its name that the set cannot
+price the threshold, so the constant does not read as derived.
+
+### A major semver break that two gates ago nobody was running
+
+`make semver` had been red since `CheckOptions` gained its `parts` field three commits
+earlier, and nothing noticed, because the verification sweep this work is done under runs
+eleven gates and that was not one of them. The break is auto-trait leakage:
+`Option<Arc<dyn PartResolver + Send + Sync>>` is not `RefUnwindSafe`, so `CheckOptions` stopped
+being `UnwindSafe` and `RefUnwindSafe` — which `cargo-semver-checks` classes as major, and
+correctly: a consumer calling `catch_unwind` around a check would no longer compile.
+
+Fixed by putting `RefUnwindSafe` in the bound, which costs nothing — a resolver reads bytes and
+hands them back, and none of the three implementations has interior mutability — and the field
+is new in this unreleased version, so tightening it breaks no published API. `semver` and
+`cli-surface` are now in the sweep beside the others.
+
+The lesson is the one this repository keeps relearning in a new place: a gate that exists and
+is not run is a gate that reports nothing, and "nothing was wrong" and "nothing was checked"
+look identical from outside.
 
 ### A clean fuzz run over code the target could not reach
 

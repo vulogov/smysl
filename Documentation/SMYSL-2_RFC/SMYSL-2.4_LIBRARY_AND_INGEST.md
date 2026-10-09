@@ -440,6 +440,24 @@ per-language abbreviation lists in `smysl-text/data/abbr/<lang>.txt`, compiled i
 `include_str!`. The segmenter id `smysl/seg-uax29+abbr/1` covers the lists; editing a list bumps
 the id (a test hashes the lists and pins the hash to the id).
 
+**Built in TX-P2 step 1, and the lists turned out to be one rule of four.** Measuring UAX #29
+against prose in the five languages found three further things it does, each of which loses or
+invents a sentence, and version 1 of the id is all four because nothing has been written with it
+yet:
+
+| # | rule | what it is for |
+|---|---|---|
+| 1 | *soft wrap*: a single `\n` that no terminator precedes is not a boundary | UAX #29 breaks at every `\n` (SB4), so hard-wrapped prose came out one sentence per line. A blank line still ends a sentence. |
+| 2 | *abbreviation*: the lists, plus a rule for single uppercase initials | `Mr. Smith`, `M. Dupont`, `Abb. 3.`, `ул. Ленина`. |
+| 3 | *continuation*: a boundary before a lowercase word is suppressed | `He said "Stop!" and left.` — SB8 covers this after `.` but not after `!`, and a closing quote puts it out of reach either way. |
+| 4 | *closing marks* (a reattachment, not a suppression): a leading run of marks that cannot open a sentence joins the sentence before it | French spaces its quotes: `« … jamais eu. »` ends at the `»`, and UAX #29 ends it at the period, handing over `» Sa sœur posa…` as one piece. Suppressing that boundary would have joined two sentences; moving the mark joins nothing. |
+
+Two things a list cannot settle, recorded rather than resolved: German `f.` was **removed**
+because `Vgl. S. 14 f. Dort steht es.` is two sentences and holding on `f.` loses the second,
+and Russian `г.` was **kept** although `умерла в 1911 г. Ты сама…` loses a boundary the same
+way — `в г. Тверь` needs the hold, and which is more frequent is a question about a corpus.
+The 500-sentence gold set the step's exit asks for is what prices it.
+
 **Chats.** One segment per message, one part per UTC day by default (`--part-policy` overrides).
 Reply and thread ids go into the segment table as substrate edges. Pseudonymisation:
 `spk:` + 26 base32 chars of keyed BLAKE3 (`blake3::keyed_hash`) of the platform user id. The key is
@@ -623,6 +641,36 @@ inferred" cannot be built. Reported as `SMY-W441`. Prose ingest keeps `E307` non
 - `analyze::Chain` per language: UAX #29 words → fold (`caseless`; ru ё→е; de ß→ss) → Snowball
   stem emitted **beside** the surface term (`rust-stemmers`) → extras (es `¿ ¡` dropped; fr elision
   kept). Chain ids such as `smysl/an-ru/1` are recorded wherever terms are used.
+- **Built in TX-P2 step 1. Three corrections, all from running the thing:**
+  - **Step 2 does more than the plan credited it with and step 4 less.** `caseless` is full case
+    folding, so `ß`→`ss` is *its* doing and not an extra of ours; `¿ ¡` never reach the chain
+    because `unicode_words` drops punctuation at step 1. What is ours is `ё`→`е`, which case
+    folding leaves alone. Measured: `книгами → книг`, `continuellement → continuel`,
+    `Häuser → haus`, `aujourd’hui` one token.
+  - **`rust-stemmers` 1.2.0 depends on `serde` and `serde_derive` unconditionally**, with no
+    feature to turn them off, and OQ-37's answer is that the pure core carries no serde stack.
+    §4.1 listed the crate as a plain dependency; `cargo tree` is what found that the two cannot
+    both hold. Step 4 is therefore behind `smysl-text/stem`, which `cli` turns on because
+    `reader-json` has already paid for `serde` there. A build without it has one chain for every
+    language and **says so in `Chain::id`** (`smysl/an/1`), so two incomparable indexes cannot
+    claim the same analyzer.
+  - **`lingua` is behind `smysl-text/detect`, and §4.5's "unverified figure" is now measured**:
+    five language features bring **57 crates and 14.4 MB** of compiled-in models, among them
+    `rayon`, `getrandom` and `wasm-bindgen`. No C toolchain and no MSRV move (the maximum
+    declared floor in that tree is 1.85, the pure tier's own). The four are added to the purity
+    gate's `NOT_IN_THE_CORE` list, permitted through `detect` and nothing else.
+- **Detection is never automatic**, which the plan did not say and the identity rules require: a
+  manifest's `lang` is part of its mid, so a fallback that only builds with `detect` had would
+  give the same file two different manifest ids. `lang::Detector` is something a caller runs, and
+  its answer becomes an ordinary `AddSpec::with_lang` — a guess turned into data before it turns
+  into an identity. The detector id carries the `lingua` version (`smysl/lingua-1.8.0/1`) because
+  §7's risk is that a version decides an rdid.
+- **The short-text threshold is a precaution, not a measurement.** `MIN_CHARS = 30`: below it a
+  row inherits its neighbours' language. The development set cannot locate it — all 146 sentences
+  of `fixtures/segment/gold/` are identified correctly, 32 of them under the threshold. What *is*
+  measured is the failure mode: on twenty one-word utterances the detector disagrees with the
+  language the word was taken from eight times. GE-T1's chat corpora are what can price the
+  number, because a chat message is the short row it exists for.
 - `smysl-retrieve` gains an `Analyze` seam that `Tokenizer` implements; text stores default to the
   unit's language chain (unit `lang`, falling back to the view's). `fold_suffix` is gated to `en`
   by SMYSL-2.1.
@@ -778,8 +826,12 @@ crates/smysl-text/
     limits.rs       Budget, Caps, defaults, fuel accounting (E440)
 ```
 
-Dependencies as of TX-P1 step 3: `smysl-core`, `unicode-normalization`, and behind the reader
-features `quick-xml` (`=0.41.0`), `pulldown-cmark` (`=0.13.4`), `serde` and `serde_json`.
+Dependencies as of TX-P2 step 1: `smysl-core`, `smysl-graph`, `unicode-normalization`,
+`unicode-segmentation` (`=1.13.3`) and `caseless` (`=0.2.2`) in the default tree; behind the
+reader features `quick-xml` (`=0.41.0`), `pulldown-cmark` (`=0.13.4`), `serde` and `serde_json`;
+behind `stem` `rust-stemmers` (`=1.2.0`) and behind `detect` `lingua` (`=1.8.0`). The two gates
+are findings of step 1, not plan: see §3.7. Every version is pinned exactly, because a segment
+offset reaches a reading and a reading's rdid is an identity.
 The rest arrive with the modules that need them, which is the only way a purity gate over this
 crate means anything — a dependency list written ahead of its callers is a list nobody can
 check. The full set when the crate is finished: `smysl-core`, `smysl-graph`, `smysl-retrieve`,
@@ -1179,8 +1231,11 @@ Root `Cargo.toml`: `text = ["dep:smysl-text", "smysl-check/text", "smysl-retriev
   is one nobody has a reason for, which rots into the first. The CI job runs it and then compiles
   the base tier at 1.85, because the script cannot see our own source using a newer language
   feature than any dependency needs.
-- **Crate size.** `lingua` language models are large (unverified figure); five features only, and
-  the per-language model crates are downloaded only with `text`.
+- **Crate size.** ~~`lingua` language models are large (unverified figure); five features only, and
+  the per-language model crates are downloaded only with `text`.~~ **Measured in TX-P2 step 1:**
+  14.4 MB across the five model crates (English 2.59 MB, French 2.56 MB, German 3.46 MB, Russian
+  3.26 MB, Spanish 2.51 MB), compiled in via `include_dir`, and 57 crates in the tree. Not with
+  `text` — with `smysl-text/detect`, which neither `text` nor `cli` turns on (§3.7).
 
 ---
 
@@ -1297,7 +1352,7 @@ The `.expected` format is the existing one (`fixtures/README.md`): exact code se
 
 | experiment | phase | how |
 |---|---|---|
-| **GE-T1** (determinism) | TX-P1 (5 Bibles, JSON series), TX-P2 (2 chat exports) | build each library on Linux x86-64 and one other platform (CI matrix, unverified availability); compare mids, structure hashes, rdids; Python, JavaScript and Go recompute tid/rdid/mid from the emitted records and agree. They do not re-implement readers. Any mismatch blocks the next phase. **Partly met at TX-P1 step 7:** the three ports derive every identity in `fixtures/library/wire/ids.json` and agree, and that half is done. Two halves are owed and neither is a port's. The **five Bibles and the JSON series** are a corpus this repository does not hold, so what is checked is a two-part fixture (one Latin, one Cyrillic) — enough to exercise NFC, not enough to be the criterion. The **second platform now exists** (1.10.0): the three port jobs run on `ubuntu-latest` and `macos-latest`, where before every job in CI was Linux. Worth naming what that tests, because it is not the identities — BLAKE3 over bytes and canonical CBOR are platform-independent by construction — it is *reading files*: line endings, NFC through a different Unicode table version, path behaviour, which is exactly the code a part's identity depends on. The python job also regenerates the uid fixtures and requires no diff, so that check is now made on both. **What remains owed is the corpus**, and it is a reader risk, so it arrives with the readers' own fixtures in TX-P2. |
+| **GE-T1** (determinism) | TX-P1 (5 Bibles, JSON series), TX-P2 (2 chat exports) | build each library on Linux x86-64 and one other platform (CI matrix, unverified availability); compare mids, structure hashes, rdids; Python, JavaScript and Go recompute tid/rdid/mid from the emitted records and agree. They do not re-implement readers. Any mismatch blocks the next phase. **Partly met at TX-P1 step 7:** the three ports derive every identity in `fixtures/library/wire/ids.json` and agree, and that half is done. Two halves are owed and neither is a port's. The **five Bibles and the JSON series** are a corpus this repository does not hold, so what is checked is a two-part fixture (one Latin, one Cyrillic) — enough to exercise NFC, not enough to be the criterion. The **second platform now exists** (1.10.0): the three port jobs run on `ubuntu-latest` and `macos-latest`, where before every job in CI was Linux. Worth naming what that tests, because it is not the identities — BLAKE3 over bytes and canonical CBOR are platform-independent by construction — it is *reading files*: line endings, NFC through a different Unicode table version, path behaviour, which is exactly the code a part's identity depends on. The python job also regenerates the uid fixtures and requires no diff, so that check is now made on both. **What remains owed is the corpus**, and it is a reader risk, so it arrives with the readers' own fixtures in TX-P2. TX-P2 step 1 adds a **second** corpus to the same debt: the 500-sentence sentence-boundary gold set per tier-1 language that step's exit asks for. Its harness exists and takes a directory (`SMYSL_SEG_GOLD`); what is missing is prose nobody here wrote, annotated by someone who did not write the segmenter. Both are the same shape of gap — a measurement whose instrument is built and whose material is not — and neither is met by anything this repository can author. |
 | **GE-T4** (attribution fairness) | before TX-P5 | 200 hand-checked units per tier-1 language under normaliser v1 and v2 (SMYSL-2.1); v2 false-`Absent` > 1% in any language blocks TX-P5 |
 | **GE-T13** (effective time) | TX-P3 | synthetic chats with planted skews plus a public chronology with known relative orders; P-E4/P-E5 on real data; any planted skew undetected, or any false contested interval on consistent data, blocks TX-P4 |
 | **GE-T14** (part size) | end of TX-P2 | real chats, revised articles, Bibles at 64 KiB–4 MiB; object count, reuse on revision, redaction granularity; the curve is recorded and the default fixed before TX-P3 |
@@ -1687,9 +1742,24 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
 
 ### TX-P2 — segments, languages, chats, redaction
 
-1. `segment`, `lang`, `analyze`; abbreviation lists. *Exit:* sentence-boundary F1 on a 500-sentence
-   gold set per tier-1 language, proposed bars ≥ 0.97 (en, es, fr, de) and ≥ 0.95 (ru), not set by
-   draft 3.
+1. ~~`segment`, `lang`, `analyze`; abbreviation lists. *Exit:* sentence-boundary F1 on a
+   500-sentence gold set per tier-1 language, proposed bars ≥ 0.97 (en, es, fr, de) and ≥ 0.95
+   (ru), not set by draft 3.~~ **Built 2026-10-09**, exit **partly met**: the harness is the exit
+   test and the corpus is not.
+   - `segment.rs` (`smysl/seg-uax29+abbr/1`), five abbreviation lists with their hash pinned to
+     the id, `analyze.rs` (six chain ids), `lang.rs` behind `detect`. 71 new tests.
+   - `tests/segment_f1.rs` **is** the exit test, and `SMYSL_SEG_GOLD=<dir>` points it at any
+     corpus in `fixtures/segment/README.md`'s format — no code change. Against the ~30
+     sentences per language in `fixtures/segment/gold/`, F1 is **1.000** for de, en, es and fr
+     and **0.963** for ru. That set is a *development* set: it was written here beside the
+     segmenter, two list rows and one algorithm rule were added because it failed on them, and
+     30 sentences cannot distinguish 0.97 from 1.00. **The 500-sentence gold set per tier-1
+     language is outstanding**, recorded on GE-T1's row in §6 beside the Bibles — it needs prose
+     nobody here wrote and boundaries annotated by someone who is not the segmenter's author.
+   - Four findings, all in §3.2 and §3.7: the abbreviation lists are one rule of four, not the
+     whole algorithm; `rust-stemmers` hard-depends on `serde` and had to be gated; `lingua`'s
+     cost is 57 crates and 14.4 MB; and detection cannot be automatic, because a manifest's
+     language is part of its mid.
 2. Readers `telegram`, `slack`, `whatsapp` with `--pseudonymise`; opt-in `mbox`, `epub`, `html`,
    `pdf`. *Exit:* chat round trip with `raw` intact; `E450` test; fuzz targets.
 3. `text append`. *Exit:* growth test (§5.2).

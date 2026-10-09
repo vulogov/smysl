@@ -317,6 +317,14 @@ crate-features: ## Each crate with features, alone, at its defaults and with non
 		echo "==> cargo test -p smysl-text --no-default-features --features reader-$$r"; \
 		RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-text --no-default-features --features reader-$$r; \
 	done
+	@# And the two features of `smysl-text` that are not readers, for the same reason: both
+	@# arrived in TX-P2 step 1 because of what they drag in (`lingua`'s 57 crates behind
+	@# `detect`, `serde` behind `stem`), so both are combinations a developer will rarely build
+	@# by hand and a `cfg` list will happily get wrong.
+	@set -e; for f in detect stem; do \
+		echo "==> cargo test -p smysl-text --no-default-features --features $$f"; \
+		RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-text --no-default-features --features $$f; \
+	done
 	@# One mapper at a time: `--features gemini` alone warned on an unused `bearer`, and
 	@# `ingest` alone on an unused `Emitter`, while every multi-mapper row was clean.
 	@set -e; for m in ollama anthropic openai gemini deepseek; do \

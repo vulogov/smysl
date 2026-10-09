@@ -33,6 +33,24 @@ reader-json = ["dep:serde", "dep:serde_json"]
 reader-osis = ["dep:quick-xml"]
 reader-zefania = ["dep:quick-xml"]
 
+# Language identification (SMYSL-2.4 §3.7). Its own feature, and off by default, because
+# measuring `lingua` is what TX-P2 step 1 did: five language features bring **57 crates** and
+# 14.4 MB of compiled-in models, among them `rayon`, `getrandom` and `wasm-bindgen`. None of
+# them is on the purity gate's `NEVER` list and none moves the MSRV — the pure tier stays at
+# 1.85 — but a pure crate that linked threads and a randomness source in every build would be
+# claiming something it had stopped being. `segment` and `analyze` are *given* a language;
+# only this module guesses one, so only this module costs that tree.
+detect = ["dep:lingua"]
+
+# Snowball stemming (step 4 of the analyzer chain). A feature for a reason nobody planned
+# for: `rust-stemmers` 1.2.0 depends on `serde` and `serde_derive` **unconditionally** — there
+# is no feature to turn them off — and SMYSL-2.4 OQ-37's answer is that the pure core carries
+# no serde stack. §4.1 listed the crate as a plain dependency; running `cargo tree` is what
+# found that the two cannot both be true. The purity gate is the stronger claim, so the
+# stemmer is opt-in, and a build without it has one chain and says so in `Chain::id`
+# (`smysl/an/1` rather than `smysl/an-ru/1`).
+stem = ["dep:rust-stemmers"]
+
 [dependencies]
 smysl-core            = { workspace = true }
 # `library.rs` opens a catalog log into a `Store`: a library is a store and an object store
@@ -41,6 +59,16 @@ smysl-core            = { workspace = true }
 # cycle.
 smysl-graph           = { workspace = true }
 unicode-normalization = { workspace = true }
+# `segment.rs`. Not behind a feature and not optional: a sentence is what ingest windows,
+# spans and propositions are counted in, so a build of this crate that could not find one
+# would be a library layer with no unit of text. Pinned exactly for the reason the readers
+# are — segment offsets go into a reading, and a reading's rdid is an identity.
+unicode-segmentation  = { workspace = true }
+# `analyze.rs`. Not optional for the same reason: a term is what `find` matches and what a
+# proposition class is computed over, so a build with no analyzer could index nothing.
+caseless              = { workspace = true }
+rust-stemmers         = { workspace = true, optional = true }
+lingua                = { workspace = true, optional = true }
 pulldown-cmark        = { workspace = true, optional = true }
 serde                 = { workspace = true, optional = true }
 serde_json            = { workspace = true, optional = true }

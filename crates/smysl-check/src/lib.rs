@@ -162,7 +162,14 @@ pub struct CheckOptions {
     /// a log holds no text (OQ-39), so without this there is nothing to check against, and
     /// reporting every manifest as unverified would be a complaint about the caller's
     /// arguments rather than about the store.
-    pub parts: Option<Arc<dyn PartResolver + Send + Sync>>,
+    ///
+    /// `RefUnwindSafe` is in the bound because leaving it out **took `CheckOptions`'s own
+    /// `UnwindSafe` away**, and that is a major semver break by auto-trait leakage —
+    /// `make semver` says so, and it had been saying so since the field landed, because the
+    /// sweep that runs the other eleven gates did not run that one. A resolver reads bytes
+    /// and hands them back; none of the three implementations has interior mutability, so
+    /// the bound costs nothing and buys back a trait a consumer may have been relying on.
+    pub parts: Option<Arc<dyn PartResolver + Send + Sync + core::panic::RefUnwindSafe>>,
 }
 
 impl CheckOptions {
@@ -192,7 +199,10 @@ impl CheckOptions {
     }
 
     /// Hand the `Library` pass an object store, so `SMY-E446` and `SMY-E401` are checked.
-    pub fn with_parts(mut self, parts: Arc<dyn PartResolver + Send + Sync>) -> CheckOptions {
+    pub fn with_parts(
+        mut self,
+        parts: Arc<dyn PartResolver + Send + Sync + core::panic::RefUnwindSafe>,
+    ) -> CheckOptions {
         self.parts = Some(parts);
         self
     }

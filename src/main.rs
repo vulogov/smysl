@@ -5972,7 +5972,12 @@ fn main() -> ProcExitCode {
 fn library_resolver(
     m: &ArgMatches,
     path: &str,
-) -> Option<Result<std::sync::Arc<dyn smysl::PartResolver + Send + Sync>, ExitCode>> {
+) -> Option<
+    Result<
+        std::sync::Arc<dyn smysl::PartResolver + Send + Sync + core::panic::RefUnwindSafe>,
+        ExitCode,
+    >,
+> {
     use smysl::text::library::Library;
     if !m.get_flag("library") {
         return None;
@@ -5991,7 +5996,12 @@ fn library_resolver(
 fn library_resolver(
     m: &ArgMatches,
     _path: &str,
-) -> Option<Result<std::sync::Arc<dyn smysl::PartResolver + Send + Sync>, ExitCode>> {
+) -> Option<
+    Result<
+        std::sync::Arc<dyn smysl::PartResolver + Send + Sync + core::panic::RefUnwindSafe>,
+        ExitCode,
+    >,
+> {
     if m.get_flag("library") {
         eprintln!("smysl check: --library needs the library layer (build with --features text)");
         return Some(Err(ExitCode::Usage));

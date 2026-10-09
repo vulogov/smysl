@@ -49,7 +49,11 @@ pub const SKIPPED: &[(&str, &str)] = &[
 ];
 
 /// Run the pass. `parts` is the object store, when the caller has one.
-pub fn run(store: &Store, parts: Option<&(dyn PartResolver + Send + Sync)>, report: &mut Report) {
+pub fn run(
+    store: &Store,
+    parts: Option<&(dyn PartResolver + Send + Sync + core::panic::RefUnwindSafe)>,
+    report: &mut Report,
+) {
     malformed_identities(store, report);
     forks(store, report);
     text_in_the_log(store, report);
@@ -211,7 +215,11 @@ fn text_in_the_log(store: &Store, report: &mut Report) {
 /// and the rdid, which need a reading to compare — but "does not match the part entry on
 /// re-read" is exactly what this is, and C-Library forbids it, so leaving it unraisable would
 /// have made that row of the conformance table decorative.
-fn objects(store: &Store, parts: &(dyn PartResolver + Send + Sync), report: &mut Report) {
+fn objects(
+    store: &Store,
+    parts: &(dyn PartResolver + Send + Sync + core::panic::RefUnwindSafe),
+    report: &mut Report,
+) {
     for (mid, manifest) in store.manifests() {
         for entry in &manifest.parts {
             let where_ = || {

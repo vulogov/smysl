@@ -52,6 +52,22 @@ serde_json            = "1"
 # written down rather than inferred from a lock file — raising the pure tier for an XML parser
 # is a decision about every pure crate, and it has not been made.
 quick-xml             = { version = "=0.41.0", default-features = false }
+# The segmenter's boundaries reach a reading's segment table, and that table's hash is a
+# manifest's `structure` — so a UAX #29 table that changed between patch releases would
+# change identities nobody re-derived. Pinned for the same reason the parsers are. 1.13.3
+# declares 1.85, which is this workspace's base: the pure tier does not move for it.
+unicode-segmentation  = { version = "=1.13.3" }
+# The analyzer chains (SMYSL-2.4 §3.7). Pinned for a different reason than the parsers: terms
+# are not an identity, but an index built with one stemmer and queried with another silently
+# answers the wrong question, and `Chain::id` is what a store records to make that detectable.
+# A pin is what makes the id mean one algorithm. Both are MIT-or-better and declare no floor.
+caseless              = { version = "=0.2.2" }
+rust-stemmers         = { version = "=1.2.0" }
+# Language identification, behind `smysl-text/detect` and nothing's default. Pinned exactly
+# because SMYSL-2.4 §7 names the risk: a `mul` manifest's segment languages go into a reading,
+# and a reading's rdid is an identity — so a detector that changed its mind between releases
+# would change identities nobody re-derived. Five language features, not the 75 defaults.
+lingua = { version = "=1.8.0", default-features = false, features = ["english", "russian", "spanish", "french", "german"] }
 pulldown-cmark        = { version = "=0.13.4", default-features = false }
 
 # ---------------------------------------------------------------------------
@@ -121,8 +137,17 @@ cli       = [
     "smysl-text/reader-osis",
     "smysl-text/reader-zefania",
     "smysl-text/reader-json",
+    # Stemming. Free here and nowhere else: `reader-json` has already put `serde` in this
+    # tree, so the one thing `smysl-text/stem` costs a CLI build is the stemmer itself.
+    "smysl-text/stem",
 ]
 text      = ["dep:smysl-text"]
+# Language identification. Not in `cli` and not in `text`: it is 57 crates and 14.4 MB of
+# `lingua` models (SMYSL-2.4 §3.7, measured in TX-P2 step 1), and nothing in the CLI asks for
+# a guess yet — a manifest's language comes from the reader or from `--lang`, and a fallback
+# that only some builds had would have made a mid depend on a feature flag. Here so that a
+# library consumer who wants `smysl::text::lang` can have it by name.
+lang-detect = ["text", "smysl-text/detect"]
 tui       = ["dep:smysl-tui", "cli"]
 # Semantic retrieval. Off by default: it needs a model file the operator supplies, and a
 # build that cannot use one should not pay for `tokenizers` in its dependency tree.

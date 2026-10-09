@@ -1,0 +1,63 @@
+# de — tokens after which a sentence boundary is suppressed. Format: see `en.txt`.
+#
+# German is the language where this list earns its place: `Abb. 3.`, `Vgl. S. 14 f.` and
+# `Nr. 5` are all ordinary prose, and UAX #29 breaks inside the first two because an
+# uppercase word follows a period. The lowercase forms are listed beside the capitalised ones
+# rather than folded, for the reason `en.txt` gives.
+#
+# `usw.` and `etc.` are absent: both end German sentences routinely. So are `f.` and `ff.`,
+# which measuring cost a boundary — "Vgl. S. 14 f. Dort steht es." is two sentences, and a
+# list that holds on `f.` cannot find the second one. Before a lowercase word UAX #29 holds
+# them anyway, which is the case they would have been listed for.
+
+# Titles
+Hr.
+Fr.
+Dr.
+Prof.
+Dipl.
+Ing.
+Dir.
+St.
+
+# Reference
+Nr.
+Abb.
+Tab.
+Bd.
+Kap.
+Abs.
+Art.
+S.
+Anm.
+Hrsg.
+Aufl.
+vgl.
+Vgl.
+bzw.
+bspw.
+z.B.
+d.h.
+u.a.
+u.ä.
+z.T.
+ggf.
+evtl.
+inkl.
+exkl.
+zzgl.
+einschl.
+lt.
+
+# Measure and dates
+ca.
+max.
+min.
+mind.
+Jh.
+Jhd.
+v.Chr.
+n.Chr.
+geb.
+gest.
+Str.

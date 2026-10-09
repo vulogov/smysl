@@ -9,7 +9,7 @@
 use smysl_core::error::LibError;
 use smysl_core::ids::Tid;
 
-pub use smysl_core::ids::{Did, Mid, Rdid};
+pub use smysl_core::ids::{Did, LangTag, Mid, Rdid};
 
 use crate::locator::{self, Locator};
 use crate::norm::Normalised;

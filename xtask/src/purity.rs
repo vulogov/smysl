@@ -78,6 +78,27 @@ const NOT_IN_THE_CORE: &[(&str, &str)] = &[
         "only through `reader-osis` and `reader-zefania` of `smysl-text`",
     ),
     ("pulldown-cmark", "only through `reader-md` of `smysl-text`"),
+    // The four that `lingua` brings, each naming a different thing a pure crate's default
+    // tree should not contain. None of them is on `NEVER`: threads and randomness are not a
+    // runtime or a socket, and rule B is about the network. What they are is a claim — "the
+    // library layer is a function of its arguments" — and a crate that linked them in every
+    // build would have stopped making it. Permitted through `detect`, which exists for this.
+    (
+        "rayon",
+        "only through `detect` of `smysl-text`: `lingua`'s parallel path",
+    ),
+    (
+        "getrandom",
+        "only through `detect` of `smysl-text`, transitively under `lingua`",
+    ),
+    (
+        "wasm-bindgen",
+        "only through `detect` of `smysl-text`: `lingua`'s browser target",
+    ),
+    (
+        "futures-util",
+        "only through `detect` of `smysl-text`, transitively under `lingua`",
+    ),
 ];
 
 /// The pure crates. Every operation they expose is a bit-reproducible function of its
