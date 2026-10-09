@@ -234,6 +234,7 @@ pub use smysl::pack
 pub use smysl::parse_surface
 pub use smysl::payload_strings
 pub use smysl::plan_retraction
+pub use smysl::proposition
 pub use smysl::quantise
 pub use smysl::quote_support
 pub use smysl::quote_support_in

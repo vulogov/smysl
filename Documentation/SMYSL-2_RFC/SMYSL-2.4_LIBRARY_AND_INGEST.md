@@ -744,6 +744,15 @@ inferred" cannot be built. Reported as `SMY-W441`. Prose ingest keeps `E307` non
   ≥ n distinct attesting agents) are tool-level. Withdrawn edges are excluded through
   `Store::is_withdrawn`. **The class core moves to TX-P2** (§0.1): it is pure, needs only records,
   and TX-P5's consensus output cannot be read until it exists.
+  - **Built in TX-P2 step 5**, as `smysl_graph::proposition` — see that step for why the crate is
+    `smysl-graph` and not this one. `component` is a breadth-first search rather than a union-find:
+    the diameter is the thing being reported, a union-find gives components without one, and the
+    search that gives the diameter gives the components on the way. Four further rules the
+    paragraph above leaves implicit and the implementation has to decide: an edge whose endpoints
+    are not both **present** is not live (as a withdrawn one is not); a **self-edge** is true and
+    is not a class, since A-12.4's vertex set is "units with at least one edge"; only
+    `x.text/same-as` builds a class, so `x.text/translates` and the kernel kinds do not; and
+    `attested:n` counts **distinct agents**, so one agent attesting twice is one agent.
 - **Class measures ship as exploration only** (§1.1 item 3). Not a quality judgement on the
   implementation — a statement about what has been measured. S0's cosine proposer reached
   precision 0.789 same-language and 0.427 cross-lingual at recall 0.7 against a 0.9 bar, 0.835 and
@@ -2003,11 +2012,43 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
      existed since TX-P1 step 3, `fuzz-build` compiled it and `seed-fuzz` seeded it, and the
      `FUZZ_TARGETS` list did not name it. Found by reading the list while adding
      `redaction_merge` to it.
-5. `proposition::classes` — strict per SMYSL-2.3, `component` with diameter, `attested:n` —
+5. ~~`proposition::classes` — strict per SMYSL-2.3, `component` with diameter, `attested:n` —
    **moved here from TX-P7 step 1** by §0.1. It is pure, needs only `Store` and records, and
    TX-P5's consensus output cannot be read before it exists. *Exit:* strict class counts match a
    fixture computed by the Python reference (SMYSL-2.3 conformance) and are invariant under record
-   order.
+   order.~~ **Built, in `smysl-graph` rather than in `smysl-text`.**
+   - **The crate moved, and A-13 is why.** §4.1's tree puts `proposition/` in `smysl-text`,
+     beside the engines that propose the edges — and those belong there, since `lexical` needs
+     retrieval and `anchored` needs a `Library`. Counting the classes needs neither, and it has
+     to be reachable from **`smysl-check`**: A-13 obliges `C-Library` to "derive `strict` classes
+     per A-12.4", and §4.3.3 allows `smysl-check` exactly one edge to `smysl-text` (the `Time`
+     pass's). A module a conformance class needs and a checker cannot reach would be an
+     obligation nothing can discharge. `smysl::proposition` re-exports it.
+   - **The exit is two implementations, and the fixture is split so that it is.**
+     `crates/smysl-graph/tests/proposition_classes.rs` writes `fixtures/proposition/store.cbor`
+     and never the expectation; `scripts/gen-proposition-classes.py` — an independent reading of
+     A-12.4 over the Python port's decoder — writes `classes.json` and never the store; each
+     compares against the other's file, `python/tests/test_proposition.py` keeps the Python
+     reading live, and `make proposition-classes` is a CI job. One generator producing both
+     halves would be one implementation agreeing with itself, which is the failure
+     `verify-spec-tables.py`'s own header records.
+   - **`scope` is an `Option`**, not §4.2's bare `&BTreeSet<Uid>`. With a bare set the empty one
+     has to mean something and both readings are wrong: "every unit" makes a caller whose
+     computed scope came out empty count the whole store, and "no unit" makes the obvious way to
+     ask for all of them return nothing.
+   - Three things the fixture pins that a smaller one would not. A path is **two** strict classes
+     and one component of diameter 2 — the case a union-find implementation gets silently wrong,
+     since it agrees about the triangle and merges the path. A singleton class is a normal
+     outcome: the loose end of a path has an edge, so it is in A-12.4's vertex set, and it cannot
+     join the class its neighbour opened. And uid order is over the **32 bytes**, not over the
+     base32 text: §2.1's alphabet puts the digits after the letters, so the two orders differ —
+     the fixture holds a uid beginning with `4` so that they differ *here*, and a Python
+     assertion that sorted the text failed on it before the reference did anything wrong.
+   - **A-12.4 is not folded into the spec**, and that is deliberate. D-7 (OQ-7) was **not**
+     carried by the G0 acceptance — SMYSL-2.3 §0 says so explicitly — so the class definition is
+     an accepted *implementation* of an amendment that is still for discussion. The code and the
+     fixtures point at A-12.4; `SMYSL_FORMAT_SPEC.md` says nothing about classes until D-7 is
+     accepted, which is what A-14's fold rule requires rather than a gap.
 6. *Exit for the phase:* **GE-T1** on two chat exports; **GE-T14** curve recorded and default part
    policy fixed.
 

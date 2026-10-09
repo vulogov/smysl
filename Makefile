@@ -52,7 +52,8 @@ MATRIX := \
 .DEFAULT_GOAL := help
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix crate-features gates purity update seed-fuzz fuzz-build \
         determinism conformance eval live-ollama live-hosted doc fuzz clean sweep \
-        commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables dep-versions msrv seed-fuzz fuzz-long
+        commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables dep-versions msrv seed-fuzz fuzz-long \
+        proposition-classes
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -393,6 +394,13 @@ msrv: ## Fail if a crate's declared rust-version is not the one its dependencies
 	@# it. An untested MSRV is a decoration, not a promise.
 	python3 scripts/verify-msrv.py
 
+proposition-classes: ## Check fixtures/proposition/classes.json against the Python reference
+	@# TX-P2 step 5's exit, and the half a Rust test cannot have: A-12.4 is normative, so what
+	@# has to be true is that **two** implementations count the same classes. The Rust side
+	@# writes the store and reads this file; the Python reference writes this file and reads the
+	@# store. Either alone would be one implementation agreeing with itself.
+	python3 scripts/gen-proposition-classes.py
+
 spec-tables: ## Fail if the format's constants and the document that defines them disagree
 	@# The gate 1.2.0 needed and did not have. Four facts a C-Produce implementer cannot
 	@# proceed without — the status integers, the source sub-map's layout, the kind enum and
@@ -546,7 +554,7 @@ commit: ## Commit with aic and push
 # Everything
 # ---------------------------------------------------------------------------
 
-ci: lint doc-gate api-check test-matrix crate-features gates conformance fuzz-build doc-cargo spec-tables dep-versions msrv ## Everything CI runs, bar the jobs needing a server
+ci: lint doc-gate api-check test-matrix crate-features gates conformance fuzz-build doc-cargo spec-tables dep-versions msrv proposition-classes ## Everything CI runs, bar the jobs needing a server
 	@echo
 	@echo "ci: green."
 	@echo "Not covered here: the ollama job (needs a running server - see make live-ollama)"

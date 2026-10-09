@@ -48,13 +48,58 @@ their own evidence in the form they were written.
 **One decision still open.** OQ-34 for the hosted model's outputs as fixtures — the local model is
 Apache 2.0 and settled, the hosted one is not. It blocks nothing that has started.
 
-**TX-P1 is complete and TX-P2 is four steps in.** The library wire is in — three new record
+**TX-P1 is complete and TX-P2 is five steps in.** The library wire is in — three new record
 types, four new identities, and the first of them to be hashed over something other than a CBOR
 map — and so is everything that interprets it: the crate, now **nine** readers, the locator
 grammar the plan pointed at a document nobody has, the check pass, the CLI, and the three
 ports. One thing TX-P1 owes is a corpus rather than code, and TX-P2's first step added a second
 of exactly the same kind; its second step closed the chat half of the first. The sections below
 are newest first.
+
+### How many propositions a store holds, counted the same way twice
+
+**TX-P2 step 5.** `proposition::classes`: `strict` per SMYSL-2.3 A-12.4, `component` with a
+diameter, and `attested:n`. A `x.text/same-as` edge claims two units are the same proposition; a
+class is what a set of those edges adds up to. `strict` is the one policy whose answer is
+normative, and the reason is arithmetic rather than taste — the number of classes **is** the
+number of propositions, and every corpus measure in SMYSL-2.6 is divided by it.
+
+**So the exit is two implementations agreeing, and the fixture is split so that it is one.** The
+Rust test writes `fixtures/proposition/store.cbor` and never the expectation; a Python reference
+under `scripts/` — an independent reading of A-12.4 over the Python port's decoder — writes
+`classes.json` and never the store; each compares against the other's file. One generator
+producing both halves would be one implementation agreeing with itself, which is exactly the
+failure `verify-spec-tables.py`'s own header records: three readers "agreed" because all three had
+read the same fixture. `make proposition-classes` is a CI job of its own, and it needs no Rust
+toolchain.
+
+**The crate moved, and the conformance class is why.** SMYSL-2.4's tree puts `proposition/` in
+`smysl-text`, beside the engines that propose the edges — and those belong there, since one needs
+retrieval and another needs a `Library`. Counting the classes needs neither, and A-13 obliges
+`C-Library` to derive `strict` classes, while `smysl-check` may not depend on `smysl-text`. A
+module a conformance class needs and a checker cannot reach would be an obligation nothing can
+discharge, so it is `smysl-graph`'s.
+
+**Three things the fixture pins that a smaller one would not.** A path is **two** strict classes
+and one component of diameter 2 — the case a union-find implementation gets silently wrong, since
+it agrees about the triangle and merges the path. A **singleton** class is a normal outcome: the
+loose end of a path has an edge, so it is in A-12.4's vertex set, and it cannot join the class its
+neighbour opened. And uid order is over the **32 bytes**, not over the base32 text: §2.1's
+alphabet puts the digits after the letters, so the two orders differ — the fixture holds a uid
+beginning with `4` so that they differ *here* rather than in principle, and a Python assertion
+that sorted the text failed on it, correctly, before the reference had done anything wrong.
+
+A fourth thing it caught was a comment: the test that summarises the fixture's shape said four
+strict classes where both implementations said five. The implementations were right — two of the
+three groups are paths, and each contributes two. Two sides agreeing is no use if nobody can say
+what they agreed on, which is what that test is for.
+
+**`scope` is an `Option`**, not the RFC's bare `&BTreeSet<Uid>`: with a bare set the empty one has
+to mean something and both readings are wrong — "every unit" makes a caller whose computed scope
+came out empty count the whole store, and "no unit" makes the obvious way to ask for all of them
+return nothing. And **A-12.4 is not folded into the format spec**, deliberately: D-7 was not
+carried by the G0 acceptance, so the definition is an implementation of an amendment still under
+discussion. The fixture is what that discussion can now be had over.
 
 ### A redaction is a record, and the rule it carries lives where the bytes do
 

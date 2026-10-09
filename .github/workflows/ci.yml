@@ -268,6 +268,18 @@ jobs:
       - uses: actions/checkout@v4
       - run: python3 scripts/verify-spec-tables.py
 
+  # Proposition classes (SMYSL-2.3 A-12.4), which is normative for the same reason the tables
+  # above are checked: the number of classes is the number of propositions, and every corpus
+  # measure is divided by it. Two implementations have to count the same ones, so the Rust side
+  # writes the store and reads the expectation while the Python reference writes the expectation
+  # and reads the store. A job of its own, because it needs no Rust toolchain — the Rust half
+  # runs inside `cargo test`.
+  proposition-classes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/gen-proposition-classes.py
+
   # `rust-version = "1.79"` stood for eleven releases, was false in every selection, and
   # nothing tested it — the pure core could not be built at 1.79 at all, because `blake3`
   # pulls `constant_time_eq` 0.4.2, whose manifest is edition 2024 and which a 1.79 Cargo

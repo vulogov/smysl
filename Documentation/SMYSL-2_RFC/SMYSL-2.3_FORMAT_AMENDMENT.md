@@ -726,6 +726,18 @@ This greedy clique partition (seed, then grow in uid order) is deterministic, an
 the order records arrived in. It is not a minimum clique cover, and does not claim to be.
 SMYSL-2.4 §3.6 implements exactly this procedure.
 
+**Implemented in TX-P2 step 5** (`smysl_graph::proposition`), with two readings of it — Rust and
+the Python reference under `scripts/` — checked against one shared fixture, because what this
+section is normative *for* is two implementations counting the same classes. Two readings of the
+procedure that the fixture settled: uid order is over the 32 bytes and not over the base32 text
+(§2.1's alphabet puts the digits after the letters, so they differ), and a unit that has an edge
+but joins nobody forms a **singleton** class rather than none — "units with no edge in `E` form no
+class" is about the vertex set, and the loose end of a path is in it.
+
+The amendment itself stays **unaccepted**: D-7 is not in the G0 set (§0), so none of this is
+folded into `SMYSL_FORMAT_SPEC.md` yet. Implementing it before acceptance is deliberate — the
+fixture is what the discussion can be had over.
+
 ---
 
 ## A-13. Conformance (spec §7)

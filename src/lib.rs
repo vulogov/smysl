@@ -136,6 +136,19 @@ pub use smysl_graph::{
     StoreDiff, StoreOptions, SupersessionPolicy, TopoOrder, TraceKind, UnknownRecords, Via,
 };
 
+/// Proposition classes (SMYSL-2.3 A-12.4, SMYSL-2.4 §3.6).
+///
+/// `strict` is the one policy whose answer is normative, because the number of classes is the
+/// number of propositions, and every corpus measure is divided by it. Re-exported as a module
+/// rather than flattened: `Policy` and `Class` are common words, and `proposition::Policy` beside
+/// `part::Policy` is the pair that would otherwise need renaming.
+///
+/// It lives in `smysl-graph` and not in `smysl-text`, where SMYSL-2.4's tree puts the engines
+/// that propose the edges — counting the classes needs only a `Store`, and `smysl-check` has to
+/// reach it: `C-Library` is obliged to derive `strict` classes and may not depend on
+/// `smysl-text`.
+pub use smysl_graph::proposition;
+
 // ---- retrieve -------------------------------------------------------------
 // Pure, and deliberately so: the default engine is BM25 with one transitive dependency, no
 // model and no runtime, so retrieval is a bit-reproducible function of the store and the

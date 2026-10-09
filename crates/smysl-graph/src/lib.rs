@@ -16,6 +16,11 @@ pub mod compact;
 pub mod labels;
 pub mod lineage;
 pub mod merge;
+/// Proposition classes (SMYSL-2.3 A-12.4). Here rather than in `smysl-text`, where SMYSL-2.4's
+/// tree puts the engines that propose the edges: counting the classes needs only a `Store`, and
+/// `smysl-check` has to be able to reach it — `C-Library` is obliged to derive `strict` classes
+/// and may not depend on `smysl-text`.
+pub mod proposition;
 pub mod relink;
 pub mod salience;
 pub mod store;
