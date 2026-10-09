@@ -452,6 +452,53 @@ impl PartReading {
     }
 }
 
+/// What a resolver found under an identity.
+///
+/// Three states and not two, because the middle one is where `SMY-E446` lives. A resolver
+/// that answered `Option<PartText>` would have to fold "nothing is stored here" together
+/// with "something is stored here and it is not a part", and those are opposite answers: the
+/// first is ordinary — a manifest may name parts whose text this library does not hold — and
+/// the second is the corruption the code exists to report. Folded together, the only way to
+/// report it would be to report absence too, and then every `carry: ref` manifest would be an
+/// error.
+/// Closed, where most public enumerations in this crate are `#[non_exhaustive]`. The three
+/// states partition one question — what is at this address — into nothing, a part, and
+/// something that is not a part, and there is no fourth answer to add later. A `_` arm here
+/// would have to decide what to do about a state nobody has thought of, and the only
+/// available decisions are to report a defect that may not be one or to stay quiet about one
+/// that is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Resolved {
+    /// Nothing is stored under this identity. Not a defect: a manifest is a catalog entry,
+    /// and a catalog may name what it does not hold.
+    Absent,
+    /// The record stored there, **exactly as stored and not verified**.
+    Part(PartText),
+    /// Something is stored there and it is not a decodable part record.
+    Unreadable,
+}
+
+/// Somewhere a part's bytes can be fetched from, so a pass over manifests can check them.
+///
+/// The one method hands back what is stored **without verifying it**, and that is the
+/// contract rather than an oversight. An object store verifies on read — it has to, or a
+/// caller asking for text would get whatever was on the disk — so a resolver built out of
+/// `get_part` could never hand a checker a bad object, and `SMY-E446` would be unreportable
+/// by the one pass whose job is to report it. Resolving and verifying are separate jobs here:
+/// this fetches, `smysl-check`'s `Library` pass decides.
+///
+/// Implemented by `smysl-text`'s `ObjectStore`. It lives in the pure core because it names no
+/// I/O — a `Tid` in, a record out — and because `smysl-check` may not depend on `smysl-text`
+/// (SMYSL-2.4 §4.3.3 reserves that for the `Time` pass) while the facade cannot implement a
+/// foreign trait for a foreign type.
+/// `Debug` is a supertrait so that a caller can keep one in a `Debug` options struct —
+/// `CheckOptions` is `Debug` and is printed in test failures, and a field that silently
+/// dropped out of that would be the one field nobody could see while debugging a pass.
+pub trait PartResolver: core::fmt::Debug {
+    /// What is stored under `tid`.
+    fn part(&self, tid: &Tid) -> Resolved;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

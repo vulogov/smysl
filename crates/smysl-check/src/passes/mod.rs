@@ -9,5 +9,6 @@ pub mod epistemics;
 pub mod extension;
 pub mod granularity;
 pub mod integrity;
+pub mod library;
 pub mod shape;
 pub mod trust;

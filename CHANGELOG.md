@@ -52,6 +52,42 @@ Apache 2.0 and settled, the hosted one is not. It blocks nothing that has starte
 the first of them to be hashed over something other than a CBOR map. Step 2 adds the crate that
 interprets them, and the locator grammar the plan pointed at a document nobody has.
 
+### Two of the six codes a check pass was asked for could not be raised
+
+`check` has a twelfth pass, `library`, and a sixth conformance class, `C-Library`. TX-P1 step 5.
+It reports a reference that claims one of the four text prefixes and is not a well-formed
+identity (`SMY-E403`), an alias with two manifest heads (`SMY-W418`), text in a log
+(`SMY-E452`), and — when `check` is handed an object store to resolve parts against — an object
+that does not hash to the identity it is stored under (`SMY-E446`) or a part entry that
+disagrees with the object about its length (`SMY-E401`).
+
+**The plan named six codes and two are not implemented, so they are not registered.**
+`SMY-E404` is a span past a part's length and `SMY-W405` is a locator disagreeing with a span.
+Both read a field this release does not have — a unit's `source.span` — so neither can be
+raised, and a code in the registry that nothing can raise is a promise a reader greps for and
+finds nothing behind. The pass names them instead, with what they wait for, so "this build does
+not check that" is something a caller can read rather than infer from silence. `SMY-E401` went
+the other way: nothing in `check` could raise it, and once an object has been verified against
+its tid, checking the length the manifest recorded for it costs six lines — and `C-Library`
+forbids `SMY-E401`, so without it that row of the conformance table would have been decorative.
+
+**`C-Library` forbids `SMY-E452`**, which is the one addition to the class table that the RFC
+did not ask for. A log holding a part text is the single thing the format decided a log never
+does; a consumer promising C-Library while reading text out of a log would be reading it from
+the place the format says text never lives. A licence that refuses to let text travel
+(`SMY-E402`) is deliberately *not* in the family: that describes a correct store.
+
+The classes remain a branching table rather than a ladder, and `C-Library` is the second place
+that shows: a shape error does not stop a store being read as a library, and a malformed part
+identity does not stop units being authored into it.
+
+**And the manual's pass chapter had been wrong since 1.7.** It said ten passes, seven of them
+running inside `check`, while there were eleven and eight: the commitment pass never reached the
+chapter that documents passes. Twelve and nine now. No gate catches this — `doc-output` replays
+transcripts and `spec-tables` compares tables, and a sentence that counts the rows of a
+hand-written table is neither — so it surfaced only because this step added a pass and went
+looking for where passes are described.
+
 ### A manifest stops paying for the whole store
 
 A store holds manifests now: by mid, by alias, with the superseded set that makes a *head* a

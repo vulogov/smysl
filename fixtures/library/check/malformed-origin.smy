@@ -1,0 +1,6 @@
+@doc smysl/0.1 { id: v/library-origin }
+
+# A manifest's `origin` is a source too, and a manifest is the one record with no
+# unit to hang a diagnostic on — so this is the case that would be silent if the
+# pass only walked units.
+@manifest kjv/1769 { lang: en, reader: osis/1, licence: public-domain, carry: ref, part-policy: "smysl/parts/1 level=chapter min=65536 max=4194304", origin: { kind: doc, ref: "m3:tay2jdf" } }

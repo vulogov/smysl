@@ -6,8 +6,8 @@
 
 Chapter 8 used `check` the way you actually use it while drafting — a quick,
 cheap loop, run after every change, read for whatever it turns up. This
-chapter takes the same command apart. Ten passes are named in
-the format's own specification (§17), each with its own diagnostic codes, its
+chapter takes the same command apart. Twelve passes are named in
+the format's own specification (§17) and its amendments, each with its own diagnostic codes, its
 own reasoning, and its own idea of what "wrong" means. Knowing which pass
 caught something — and, just as often, which pass *cannot* catch
 something — is what turns a diagnostic from a red line you clear into
@@ -28,9 +28,9 @@ evidence you can reason about.
   the world the document describes.
 ]
 
-#section("Ten passes, and where each one actually runs")
+#section("Twelve passes, and where each one actually runs")
 
-`Pass` is a ten-member enum in `smysl-check`, numbered in the order the
+`Pass` is a twelve-member enum in `smysl-check`, numbered in the order the
 pipeline runs them, and every diagnostic code in this manual traces back to
 exactly one of them:
 
@@ -48,12 +48,19 @@ exactly one of them:
     ([8], [`retraction`], [Retraction authority and orphaning.], [No — enforced by `merge`, not by `check`.]),
     ([9], [`extension`], [An extension never redefines a kernel rule; unknown schemas degrade, never silently.], [Yes.]),
     ([10], [`hashes`], [Recomputed uids match a stored index, entry for entry.], [No — belongs to `Store::verify_against`, surfaced by `reindex --verify` (Chapter 23).]),
+    ([11], [`commitment`], [A unit is no more *settled* than the weakest thing it rests on — rule M's shape on a second axis (1.7).], [Yes.]),
+    ([12], [`library`], [A reference that claims a library identity is one; an alias has one head; a log holds no text; an object hashes to the identity it is stored under (1.10.0).], [Yes, and its object half only when `check` is given a library to resolve parts against.]),
   ),
 )
 
+Passes 11 and 12 are appended rather than inserted, which is why `commitment`
+follows `hashes` instead of sitting beside the other rule-M pass. `Pass` is
+matched in declaration order by everything that lists it, so a variant added
+in the middle would renumber nothing and reorder every report.
+
 That "runs inside `check`?" column is not a simplification — it is
 `smysl-check`'s own test suite, asserted directly:
-`Pass::IMPLEMENTED` names exactly seven of the ten, and a build that is asked
+`Pass::IMPLEMENTED` names exactly nine of the twelve, and a build that is asked
 for one of the other three (`check --pass codec`, `--pass retraction`, or
 `--pass hashes`) runs nothing and reports nothing, rather than pretending to
 have checked it. The reasons the other three sit outside the pipeline are
@@ -508,7 +515,7 @@ question worth asking, and it belongs to that chapter, not this one.
 
 #subsection("`--pass` — run only the passes you name")
 
-Ten passes over a large store is real work, and while debugging you often
+Twelve passes over a large store is real work, and while debugging you often
 know which one you care about. `--pass` restricts the run to exactly the
 names you give it — pass in a store with two independent defects and narrow
 to just one:
@@ -624,14 +631,15 @@ call for.
 #recap((
   [`check` verifies consistency, never truth — a mechanical pass reasons
    about relationships already in the document, not about the world.],
-  [Ten passes are named in the registry; seven run inside `check` itself.
+  [Twelve passes are named in the registry; nine run inside `check` itself.
    `codec` runs at read time and aborts before the pipeline starts;
    `retraction` is enforced by `merge`; `hashes` belongs to
    `Store::verify_against`, reachable today through `reindex --verify`.],
   [Every implemented pass has a real, isolable failure mode: `SMY-E060`
    (integrity), `SMY-E022` (shape), `SMY-E020` (closure), `SMY-E040`
    (granularity), `SMY-E030` (epistemics, rule M), `SMY-E033` (trust, rule
-   T), `SMY-W013`/`SMY-E012` (extension).],
+   T), `SMY-W013`/`SMY-E012` (extension), `SMY-W057` (commitment),
+   `SMY-E403`/`SMY-W418` (library).],
   [Rule T's violations have no surface syntax to author by hand —
    attestations are stamped on by tooling, never typed — so seeing one for
    real means building the store through the library, exactly as `ingest`
@@ -680,7 +688,7 @@ both are ways of reading it — neither adds a new pass of its own.
   specifically, implement.
 ]
 
-#section("The five conformance classes, demonstrated")
+#section("The six conformance classes, demonstrated")
 
 #dtable(
   (auto, 1fr),
@@ -690,11 +698,17 @@ both are ways of reading it — neither adds a new pass of its own.
     ([`C-Consume`], [Reading it and acting on it as a decision input — adds rules M and R.]),
     ([`C-Produce`], [Authoring new units into it — adds the shape rules.]),
     ([`C-Merge`], [Merging it with another store — adds the lifecycle rules (retraction, orphaning).]),
+    ([`C-Library`], [Reading its texts: resolving a reference to a part, checking a span against one, verifying an object against the identity it is stored under. Adds the library rules (1.10.0).]),
     ([`C-Full`], [All of the above at once.]),
   ),
 )
 
-`--conformance` takes exactly these five spellings, case-insensitive — the
+The classes are not a ladder, and `C-Library` is the second place that shows:
+a store with a shape error is perfectly readable as a library, and a store
+with a malformed part identity is perfectly producible from. Only `C-Full`
+is above all of them.
+
+`--conformance` takes exactly these six spellings, case-insensitive — the
 bare words `read` or `full` are not accepted, only the hyphenated `C-`
 form:
 
@@ -1065,7 +1079,7 @@ cannot promise anything about.
 xtask check-purity (rules A, B)
   dependency tree (--no-default-features): 31 crates, none forbidden
   pure crates: 8 checked, at default features and at --all-features
-  source scan: 101 files, 7 symbols
+  source scan: 102 files, 7 symbols
   rule A: 2 CLI files reach only the facade
 ok
 ```

@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 use smysl_core::error::LibError;
 use smysl_core::ids::{Rdid, Tid};
-use smysl_core::types::library::{PartReading, PartText};
+use smysl_core::types::library::{PartReading, PartResolver, PartText, Resolved};
 use smysl_core::types::Record;
 
 /// The two kinds of object, and the directory each lives in.
@@ -182,7 +182,34 @@ impl ObjectStore {
             _ => Err(corrupt()),
         }
     }
+}
 
+/// The store as `check`'s `Library` pass sees it: what is there, unverified.
+///
+/// `get_part` verifies and is right to — a caller asking for text must not be handed bytes
+/// that are not what was stored. That makes it useless to a checker, which needs the bad
+/// object in order to report it, so this reads the same file and stops before the hash. The
+/// two are deliberately not one method with a flag: the flag would be a way to ask for
+/// unverified text by accident, and there is exactly one caller that wants it.
+impl PartResolver for ObjectStore {
+    fn part(&self, tid: &Tid) -> Resolved {
+        let path = self.part_path(tid);
+        let Ok(bytes) = std::fs::read(&path) else {
+            // Any read failure is absence. A file that cannot be opened is not a part this
+            // store can be said to hold, and reporting `SMY-E446` for a permission error
+            // would name the wrong defect.
+            return Resolved::Absent;
+        };
+        match smysl_core::from_cbor(&bytes) {
+            // The consumed length is part of being readable, as it is in `get_part`: an
+            // object file holds one record and nothing after it.
+            Ok((Record::PartText(p), n)) if n == bytes.len() => Resolved::Part(p),
+            _ => Resolved::Unreadable,
+        }
+    }
+}
+
+impl ObjectStore {
     /// Delete a part's bytes: rule Z, after record 19 is in the log.
     ///
     /// `Ok(false)` when there was nothing there, so a repair pass over a crash between the

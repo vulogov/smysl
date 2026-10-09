@@ -1567,7 +1567,9 @@ dependencies = [
  "quick-xml",
  "serde",
  "serde_json",
+ "smysl-check",
  "smysl-core",
+ "smysl-graph",
  "unicode-normalization",
 ]
 

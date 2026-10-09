@@ -1019,15 +1019,27 @@ New passes appended after `CommitmentSupport`, as the enum's comment requires:
 
 | pass | number | codes | needs |
 |---|---|---|---|
-| `Library` | 12 | `E403` malformed tid/mid/did/rdid in a record or `source.manifest`; `E404` span past the part's length (length from the named manifest's part entry, so no object access); `W405` locator disagrees with span (needs a `PartResolver`); `W406` holder/speaker uid not in `deps`; `W418` two heads; `E452` a record 15 or 18 in a log (OQ-39); `E446` an object whose bytes do not hash to its tid | store; resolver optional |
+| `Library` | 12 | **built in step 5:** `E403` a reference claiming one of the four text prefixes and not parsing as that identity; `W418` two heads; `E452` a record 15 or 18 in a log (OQ-39); and with a resolver, `E446` an object whose bytes do not hash to its tid and `E401` a part entry whose `length` disagrees with the object. **Deferred:** `E404` span past the part's length and `W405` locator disagrees with span, both reading `SourceRef.span` (TX-P5, §4.3.1); `W406` holder/speaker uid not in `deps`, whose `text:holder`/`text:speaker` fields arrive with FC-9 field types in TX-P12 | store; resolver optional |
 | `Time` | 13 | `E410` malformed EDTF (in `published`, manifest key 8, dating values, `text:when`); `W411` `observed` outside the `published` interval; `W412`/`W413` from the engine, reported as derived contentions; `W449` | `smysl-text` (feature `text`) |
 
-- `CheckOptions` gains `parts: Option<Arc<dyn PartResolver + Send + Sync>>`; `smysl-text`
-  implements `PartResolver` for `Library`. Without a resolver, `W405` is skipped and the report says
-  so (as `Pass::IMPLEMENTED` does for passes this build does not run).
+- `CheckOptions` gains `parts: Option<Arc<dyn PartResolver + Send + Sync>>`. The trait is
+  **`smysl-core`'s**, not this crate's: `smysl-check` may not depend on `smysl-text` (the `Time`
+  pass's `text` feature is the only such edge) and the facade cannot implement a foreign trait
+  for a foreign type, so the orphan rule decides it. It names no I/O, and `smysl-text`
+  implements it for `ObjectStore` in step 5 and for `Library` when that handle lands in step 6.
+  Its answer is a three-state enum (`Absent` / `Part` / `Unreadable`), because absence is
+  ordinary and an unreadable object is `E446`. Without a resolver the object codes are skipped
+  and the report says so (as `Pass::IMPLEMENTED` does for passes this build does not run).
 - `ConformanceClass::Library` (`"C-Library"`, D-8): branches like `Merge`; forbids `E401`, `E403`,
-  `E404`, `E446` and a redaction violation; does not subsume `Produce`. `ALL` gains it at the end.
-- Fixture tree `fixtures/library/check/` in the existing `.smy` + `.expected` format.
+  `E404`, `E446`, **`E452`** and a redaction violation; does not subsume `Produce`. `ALL` gains it
+  at the end, and `Full` gains the family. `E452` was added to this list in step 5: a log holding
+  text is precisely what OQ-39 refused, so a C-Library consumer must not accept it. `E402` stays
+  outside the family — a licence refusing to let text travel describes a correct store.
+- Fixture tree `fixtures/library/check/` in the existing `.smy` + `.expected` format. `E452`,
+  `E446` and `E401` are **not** reachable from a `.smy` file — records 15 and 18 have no surface
+  form and the object codes need bytes — so those are tested programmatically, as rule T's
+  `E033` already is: `E452` in `tests/library_check.rs`, and the two object codes in
+  `crates/smysl-text/tests/object_check.rs`, beside the only `PartResolver` implementation.
 
 #### 4.3.4 `smysl-ingest`
 
@@ -1270,7 +1282,10 @@ fixtures/library/
                    crates/smysl-core/tests/gen_library_fixtures.rs (as gen_uid_fixtures.rs is)
   edtf/            valid.txt, invalid.txt (with expected byte offsets), intervals.tsv (OQ-9)
   readers/<id>/    input file, params, expected manifest (.cbor), mids
-  check/           .smy + .expected (E403, E404, W405, W406, E410, W411, W418, E446)
+  check/           .smy + .expected (E403, W418 in step 5; E410, W411 with the Time pass;
+                   E404, W405, W406 with the fields they read — and E446, E401, E452 are
+                   not .smy-expressible, so they live in tests/library_check.rs and
+                   crates/smysl-text/tests/object_check.rs)
   time/            stores + expected effective intervals and contentions (C-Library)
   redaction/       peer stores and the expected merged record set (C-Library)
   redteam/         untrusted texts and scripted answers
@@ -1478,10 +1493,59 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
      test gained the control that distinguishes them — a view, which moves no edge today and must
      rebuild anyway. Found by reading the implementation back against §7 rather than by a failure,
      which is the only way this one shows up: an allow-list is correct until the day it is not.
-5. `smysl-check` `Library` pass (E403, E404, W405, W418, E446, E452); `ConformanceClass::Library`.
-   *Exit:* `fixtures/library/check` green.
+5. ~~`smysl-check` `Library` pass (E403, E404, W405, W418, E446, E452); `ConformanceClass::Library`.
+   *Exit:* `fixtures/library/check` green.~~ **Done 2026-10-08.** Pass 12, appended after
+   `CommitmentSupport` as the enum's comment requires; `ConformanceClass::Library` appended
+   after `Full` for the same reason; `fixtures/library/check/` with five documents and two
+   controls. Six findings:
+   - **Two of the six codes cannot be raised by this build, so they are not registered.**
+     `E404` is a span past a part's length and `W405` is a locator disagreeing with a span, and
+     both read `SourceRef.span` — a field §4.3.1 gives to TX-P5. The registry's own rule is
+     that a code nothing can trigger is worse than a missing one, because a reader greps for it
+     and finds a promise with nothing behind it, and that rule does not stop applying because a
+     plan listed the code under this step. The pass names them in a `SKIPPED` constant with the
+     reason, as **text rather than `Code` values** — they are not in the registry, so there is
+     nothing to name them with, which is the property the constant is there to keep. The
+     registry is 72, not 74.
+   - **`E403`'s only carrier is `source.reference`.** §4.3.3 says "in a record or
+     `source.manifest`", and `source.manifest` is the TX-P5 field again; every other identity
+     in a record is typed (`PartEntry.tid`, `Manifest.parent`, `supersedes`) and cannot be
+     malformed. So the check is: a reference whose head claims one of the four text prefixes
+     and does not parse as that identity. A manifest's `origin` is a `SourceRef` too and is
+     checked with the units — the one case with no unit to hang a diagnostic on, and therefore
+     the one a pass over `store.units()` alone would have missed.
+   - **`E446` needs bytes, and `E401` comes free with them.** A log holds no text (OQ-39), so
+     the object half of the pass runs only when `check` is handed a resolver, and `CheckOptions`
+     gains `parts` for it. Once the bytes are verified, comparing `PartEntry.length` to the
+     object's length is six lines; §4.3.3's list does not mention `E401` — it was allocated for
+     the structure hash and the rdid, which need a reading — but "does not match the part entry
+     on re-read" is exactly what a part entry lying about its length is, and C-Library forbids
+     `E401`, so leaving it unraisable would have made that row of the table decorative.
+   - **`PartResolver` lives in `smysl-core`, which no section says.** `smysl-check` may not
+     depend on `smysl-text` (§4.3.3 reserves that for the `Time` pass behind feature `text`)
+     and the facade cannot implement a foreign trait for a foreign type, so the orphan rule
+     picks the home. The trait names no I/O. Its answer is a **three-state** enum rather than
+     an `Option`: "nothing is stored here" and "something is stored here and it is not a part"
+     are opposite answers, and folding them together would have made every `carry: ref`
+     manifest an error or every corrupt object silent.
+   - **C-Library forbids `E452`, which §4.3.3's list omits.** A store whose log holds a part
+     text is the one thing OQ-39 decided a log never does; a consumer promising C-Library would
+     be reading text from the place the format says text never lives. `E402` is deliberately
+     *outside* the family: a licence that refuses to let text travel describes a correct store.
+     C-Full gains the family too, being the union.
+   - **The manual's pass chapter had been stale since 1.7.** It said "ten passes … seven run
+     inside `check`" while `Pass` had eleven and ran eight: the commitment pass never reached
+     the chapter that documents passes. Twelve and nine now, with both new rows. Found by
+     adding a pass, not by a gate — `doc-output` replays transcripts and `spec-tables` compares
+     tables, and a sentence counting the rows of a hand-written table is neither.
 6. CLI `text add/ls/show`, `check --library`; purity gate with `smysl-text`; `cc` check in
-   `make crate-features`; **the manual's surface chapter gains `@manifest`** — deferred from
+   `make crate-features`; **the facade re-exports the library types** — found in step 5: the
+   facade exports `Record` but none of `Manifest`, `PartText`, `PartEntry`, `PartReading`,
+   `Tid`, `Mid`, `Did`, `Rdid`, `PartResolver`, so `Record::Manifest`'s payload is unnameable
+   through `smysl` and `tests/library_check.rs` reaches past the facade to the crates that
+   define them. Step 1 added the types and nothing re-exported them; this is the step that owns
+   the facade surface, so it is listed here rather than retrofitted;
+   **the manual's surface chapter gains `@manifest`** — deferred from
    step 1 deliberately, because until this step nothing can produce a manifest except by hand,
    and a documented form with no command behind it is a form nobody can check their work
    against. *Exit:* gates green.
@@ -1627,10 +1691,12 @@ meanings and are not repeated here.
 
 `453`–`459` are unallocated. SMYSL-2.3 may adopt `E446` as a C-Library obligation.
 
-**Registered as of TX-P1 step 2:** `E401`, `E402`, `E440`, `E445` and `E446`, in a ninth
-diagnostic group (`Group::Library`) and in the manual's Appendix B. Five of the twelve above,
-because those are the five this build can raise; the rest enter the registry with the pass,
-reader or ingest path that raises them. That is the repository's own rule — a code nothing can
+**Registered as of TX-P1 step 5:** `E401`, `E402`, `E403`, `W418`, `E440`, `E445`, `E446` and
+`E452`, in a ninth diagnostic group (`Group::Library`) and in the manual's Appendix B. Step 2
+registered the first five, step 4 added `E452` and step 5 `E403` and `W418`. Eight, and not the
+twelve above plus the draft-3 codes this RFC emits, because those are the ones this build can
+raise; the rest enter the registry with the pass, reader or ingest path that raises them —
+including `E404` and `W405`, which step 5's own plan listed and which read a field TX-P5 adds. That is the repository's own rule — a code nothing can
 trigger is worse than a missing one, because a reader greps for it and finds a promise with
 nothing behind it.
 

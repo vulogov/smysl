@@ -241,8 +241,12 @@ mod tests {
         // Five of that RFC's twelve allocations, because these are the five this build can
         // trigger — the rest arrive with the readers, the ingest path and the check pass that
         // raise them. 70 with `SMY-E452`, which TX-P1 step 4 made raisable: a log offered a
-        // record 15 or 18 refuses it, because text lives in the object store (OQ-39).
-        assert_eq!(Code::ALL.len(), 70);
+        // record 15 or 18 refuses it, because text lives in the object store (OQ-39). 72 with
+        // `SMY-E403` and `SMY-W418`, raised by step 5's `Library` pass. Step 5's plan named
+        // four more and two of those read `SourceRef.span`, which arrives in TX-P5, so
+        // `SMY-E404` and `SMY-W405` are not registered here: a code nothing can raise is the
+        // one thing this count is kept for.
+        assert_eq!(Code::ALL.len(), 72);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

@@ -307,6 +307,8 @@ registry! {
     Library => {
         E401 = "SMY-E401", Error, "Structure hash or rdid does not match the part entry on re-read";
         E402 = "SMY-E402", Error, "Carrying text is refused by the licence recorded in the manifest";
+        E403 = "SMY-E403", Error, "Malformed tid, mid, did or rdid in a record";
+        W418 = "SMY-W418", Warn,  "Expression fork: one alias has two manifest heads";
         E440 = "SMY-E440", Error, "Reader resource cap exceeded; nothing was written";
         E445 = "SMY-E445", Error, "The library or a shard is locked by another writer";
         E446 = "SMY-E446", Error, "An object does not hash to the identity it is stored under";
@@ -608,10 +610,17 @@ mod tests {
     /// RFC allocates: these are the ones `smysl-text` can raise as it stands, and the rest
     /// arrive with the code that raises them. 70, still 1.10.0, with `SMY-E452` — the sixth,
     /// registered in TX-P1 step 4 because that is the step where `Store::append` can raise it:
-    /// a log is offered a record 15 or 18 and refuses it (OQ-39).
+    /// a log is offered a record 15 or 18 and refuses it (OQ-39). 72 with `SMY-E403` and
+    /// `SMY-W418`, which TX-P1 step 5's `Library` check pass raises.
+    ///
+    /// Step 5's plan named six codes and two of them are **not** here. `SMY-E404` is a span
+    /// past a part's length and `SMY-W405` is a locator disagreeing with a span; both read
+    /// `SourceRef.span`, which SMYSL-2.4 §4.3.1 gives to TX-P5. Registering them with the pass
+    /// that will one day raise them would put two codes in the registry that nothing in this
+    /// build can produce, which is the thing this comment exists to prevent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 70);
+        assert_eq!(Code::ALL.len(), 72);
     }
 
     #[test]

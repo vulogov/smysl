@@ -40,3 +40,12 @@ pulldown-cmark        = { workspace = true, optional = true }
 serde                 = { workspace = true, optional = true }
 serde_json            = { workspace = true, optional = true }
 quick-xml             = { workspace = true, optional = true }
+
+# `tests/object_check.rs` runs `check`'s library pass against a real object store: this crate
+# owns the only `PartResolver` implementation, and `smysl-check` may not depend on it (the
+# `Time` pass's `text` feature is the one such edge SMYSL-2.4 §4.3.3 allows). A dev-dependency
+# is the other direction and costs nothing: every crate here shares the workspace
+# `rust-version`, so no floor moves, and nothing in the published tree gains an edge.
+[dev-dependencies]
+smysl-check = { workspace = true }
+smysl-graph = { workspace = true }

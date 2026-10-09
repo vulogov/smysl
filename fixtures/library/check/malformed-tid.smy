@@ -1,0 +1,4 @@
+@doc smysl/0.1 { id: v/library-malformed }
+
+@evidence e/note { status: cited, source: { kind: doc, ref: "t3:mcvaewld#L4" } }
+~ The notes record the engine being restarted twice that afternoon.

@@ -710,10 +710,15 @@ measured the default. And where either side has no majority script it reports no
 
 #subsection("Library — texts, parts and the object store")
 
-The first six of the library's codes, new in 1.10.0. Five are raised by `smysl-text`, the crate
-RFC SMYSL-2.4 adds for reading texts into a library, and the sixth by the store; the rest of that
-RFC's range arrives with the code that raises it, because a code nothing can trigger is worse
-than a missing one.
+The first eight of the library's codes, new in 1.10.0. Five are raised by `smysl-text`, the crate
+RFC SMYSL-2.4 adds for reading texts into a library, one by the store, and two by the `library`
+check pass; the rest of that RFC's range arrives with the code that raises it, because a code
+nothing can trigger is worse than a missing one.
+
+Two the pass is allocated are deliberately absent. `SMY-E404` (a span past a part's length) and
+`SMY-W405` (a locator disagreeing with a span) both read a unit's `source.span`, a field this
+release does not have, so neither is registered and the pass names them as what it does not
+check — which a caller can read, where silence would have to be guessed at.
 
 #dtable(
   (auto, auto, 1fr),
@@ -721,6 +726,8 @@ than a missing one.
     ([Code], [Sev.], [Meaning]),
     ([`SMY-E401`], [error], [A part was re-read and its structure hash or its `rdid` no longer matches the entry the manifest holds. The text is intact — that would be `SMY-E446` — so what changed is the *reading*, which is what happens when a reader is upgraded under a corpus. The message says which of the two identities moved.]),
     ([`SMY-E402`], [error], [A manifest asked to carry the text itself under a licence that does not permit redistributing it. The permissive list is compiled in and sorted; changing it is a code change with a test, and there is no override flag, because the one thing a flag would buy is the ability to ship someone else's text by accident.]),
+    ([`SMY-E403`], [error], [A reference claims to be one of the four library identities and is not one. The four have text prefixes — `t3:`, `m3:`, `d3:`, `r3:` — so a reference either claims an identity or does not, and one that claims and fails is worse than a reference to nothing: a dangling reference says what it is, while an abbreviated identity is refused for the reason an abbreviated `uid` is, and the store's by-part index simply would not find the part.]),
+    ([`SMY-W418`], [warn], [One alias has two manifest heads: two manifests for the same expression, neither superseding the other. Usually two people catalogued the same book without having met. Both heads are returned rather than one being chosen, and the fork is reported rather than recorded — the next manifest to arrive may be the one that joins them, and a record would then be a stale finding with a hash chain behind it.]),
     ([`SMY-E440`], [error], [A reader resource cap was exceeded. The message names the cap, its limit, what the input asked for and the flag that raises it; nothing was written. Inside a reader the budget is *fuel* rather than wall time, so a refusal happens at the same byte on every machine.]),
     ([`SMY-E445`], [error], [The library or one of its shards is locked by another writer, named: pid, host and command. Nothing removes a lock by timeout — a stale lock is the notice that a writer died mid-append, and `--break-lock` is where an operator says they have read it.]),
     ([`SMY-E446`], [error], [An object in the store does not hash to the identity it is stored under. Objects are content-addressed, so this is a corrupted or substituted file rather than a stale one.]),

@@ -17,7 +17,9 @@
 pub mod passes;
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
+use smysl_core::types::PartResolver;
 use smysl_core::{Error, GranularityProfile, Label, ProfileEstimator, Severity, Uid};
 use smysl_graph::Store;
 
@@ -53,6 +55,8 @@ pub enum Pass {
     /// every caller that lists it, and a variant inserted mid-enum would renumber nothing here
     /// but would reorder every report that iterates `ALL`.
     CommitmentSupport,
+    /// 12 - the library (1.10, RFC SMYSL-2.4 §4.3.3). Appended for the reason above.
+    Library,
 }
 
 impl Pass {
@@ -68,6 +72,7 @@ impl Pass {
         Pass::Extension,
         Pass::Hashes,
         Pass::CommitmentSupport,
+        Pass::Library,
     ];
 
     /// The passes this build actually runs.
@@ -80,6 +85,7 @@ impl Pass {
         Pass::Trust,
         Pass::Extension,
         Pass::CommitmentSupport,
+        Pass::Library,
     ];
 
     pub const fn number(self) -> u8 {
@@ -95,6 +101,7 @@ impl Pass {
             Pass::Extension => 9,
             Pass::Hashes => 10,
             Pass::CommitmentSupport => 11,
+            Pass::Library => 12,
         }
     }
 
@@ -111,6 +118,7 @@ impl Pass {
             Pass::Extension => "extension",
             Pass::Hashes => "hashes",
             Pass::CommitmentSupport => "commitment",
+            Pass::Library => "library",
         }
     }
 
@@ -149,6 +157,12 @@ pub struct CheckOptions {
     /// `check --estimator`). It overrides whichever profile is in force, because the question
     /// a caller is asking is "would these units fit under *that* count".
     pub estimator: Option<ProfileEstimator>,
+    /// Where a part's bytes can be fetched from, so the `Library` pass can verify them
+    /// (1.10). Absent means the object half of that pass is skipped and the report says so:
+    /// a log holds no text (OQ-39), so without this there is nothing to check against, and
+    /// reporting every manifest as unverified would be a complaint about the caller's
+    /// arguments rather than about the store.
+    pub parts: Option<Arc<dyn PartResolver + Send + Sync>>,
 }
 
 impl CheckOptions {
@@ -174,6 +188,12 @@ impl CheckOptions {
 
     pub fn as_consumer(mut self, p: ConsumerProfile) -> CheckOptions {
         self.consumer = Some(p);
+        self
+    }
+
+    /// Hand the `Library` pass an object store, so `SMY-E446` and `SMY-E401` are checked.
+    pub fn with_parts(mut self, parts: Arc<dyn PartResolver + Send + Sync>) -> CheckOptions {
+        self.parts = Some(parts);
         self
     }
 
@@ -271,6 +291,9 @@ pub fn check(store: &Store, opts: CheckOptions) -> Report {
     if opts.runs(Pass::CommitmentSupport) {
         passes::commitment::run(store, &mut report);
     }
+    if opts.runs(Pass::Library) {
+        passes::library::run(store, opts.parts.as_deref(), &mut report);
+    }
     report.sort();
     report
 }
@@ -351,6 +374,9 @@ pub enum ConformanceClass {
     Produce,
     Merge,
     Full,
+    /// C-Library (1.10, D-8). Appended at the end, like `Pass::Library`, and for the same
+    /// reason: `ALL` is iterated in declaration order.
+    Library,
 }
 
 impl ConformanceClass {
@@ -360,6 +386,7 @@ impl ConformanceClass {
         ConformanceClass::Produce,
         ConformanceClass::Merge,
         ConformanceClass::Full,
+        ConformanceClass::Library,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -369,6 +396,7 @@ impl ConformanceClass {
             ConformanceClass::Produce => "C-Produce",
             ConformanceClass::Merge => "C-Merge",
             ConformanceClass::Full => "C-Full",
+            ConformanceClass::Library => "C-Library",
         }
     }
 
@@ -418,13 +446,22 @@ impl ConformanceClass {
         );
         let lifecycle = matches!(code, Code::E050 | Code::E051);
         let render = matches!(code, Code::E210);
+        // The library family (1.10, D-8). `E452` is in it and §4.3.3's list does not name it:
+        // a log that holds a part text is the one thing OQ-39 decided a log never does, and a
+        // consumer promising C-Library would be reading text from the one place the format
+        // says text never lives. `E402` is *not* in it — a licence that refuses to let text
+        // travel is a correct store, not a defective one.
+        let library = matches!(code, Code::E401 | Code::E403 | Code::E446 | Code::E452);
 
         match self {
             ConformanceClass::Read => structural,
             ConformanceClass::Consume => structural || epistemic,
             ConformanceClass::Produce => structural || epistemic || shape,
             ConformanceClass::Merge => structural || epistemic || lifecycle,
-            ConformanceClass::Full => structural || epistemic || shape || lifecycle || render,
+            ConformanceClass::Full => {
+                structural || epistemic || shape || lifecycle || render || library
+            }
+            ConformanceClass::Library => structural || epistemic || library,
         }
     }
 }
@@ -456,6 +493,7 @@ mod conformance_table {
     const SHAPE: Code = Code::E020;
     const LIFECYCLE: Code = Code::E050;
     const RENDER: Code = Code::E210;
+    const LIBRARY: Code = Code::E403;
 
     /// The whole table, written out. Each row is `(class, what it forbids)`; anything absent
     /// from a row must be permitted at that class.
@@ -466,11 +504,12 @@ mod conformance_table {
         (ConformanceClass::Merge, &[STRUCTURAL, EPISTEMIC, LIFECYCLE]),
         (
             ConformanceClass::Full,
-            &[STRUCTURAL, EPISTEMIC, SHAPE, LIFECYCLE, RENDER],
+            &[STRUCTURAL, EPISTEMIC, SHAPE, LIFECYCLE, RENDER, LIBRARY],
         ),
+        (ConformanceClass::Library, &[STRUCTURAL, EPISTEMIC, LIBRARY]),
     ];
 
-    const ALL_FAMILIES: &[Code] = &[STRUCTURAL, EPISTEMIC, SHAPE, LIFECYCLE, RENDER];
+    const ALL_FAMILIES: &[Code] = &[STRUCTURAL, EPISTEMIC, SHAPE, LIFECYCLE, RENDER, LIBRARY];
 
     #[test]
     fn each_class_forbids_exactly_its_row() {
@@ -488,6 +527,42 @@ mod conformance_table {
 
     /// The property the table exists to express, stated separately so it cannot be lost in a
     /// refactor of the rows above.
+    /// C-Library branches the same way C-Merge does, and the branch is the claim: a store
+    /// with a shape error is perfectly readable as a library, and a store with a malformed tid
+    /// is perfectly producible from. Collapsing either into the other would turn the table
+    /// into a ladder, which it has never been.
+    #[test]
+    fn library_is_a_branch_and_not_a_rung() {
+        assert!(!ConformanceClass::Library.forbids(SHAPE));
+        assert!(!ConformanceClass::Library.forbids(LIFECYCLE));
+        assert!(!ConformanceClass::Library.forbids(RENDER));
+        assert!(!ConformanceClass::Produce.forbids(LIBRARY));
+        assert!(!ConformanceClass::Merge.forbids(LIBRARY));
+        assert!(ConformanceClass::Full.forbids(LIBRARY));
+    }
+
+    /// The family, written out. Four codes and one of them is `SMY-E452`, which §4.3.3's list
+    /// omits; the omission is the thing worth pinning, because a store whose log holds text is
+    /// exactly what C-Library must not accept. `SMY-E402` is outside the family on purpose: a
+    /// licence refusing to let text travel describes a correct store.
+    #[test]
+    fn the_library_family_is_four_codes() {
+        for code in [Code::E401, Code::E403, Code::E446, Code::E452] {
+            assert!(
+                ConformanceClass::Library.forbids(code),
+                "{code} must block C-Library"
+            );
+        }
+        assert!(
+            !ConformanceClass::Library.forbids(Code::E402),
+            "a licence that refuses carry is a correct store"
+        );
+        assert!(
+            !ConformanceClass::Library.forbids(Code::W418),
+            "a fork is a warning about a corpus, not a store that cannot be read"
+        );
+    }
+
     #[test]
     fn merge_is_not_produce_and_neither_subsumes_the_other() {
         assert!(
@@ -530,8 +605,8 @@ mod tests {
     }
 
     #[test]
-    fn five_conformance_classes_with_stable_names() {
-        assert_eq!(ConformanceClass::ALL.len(), 5);
+    fn six_conformance_classes_with_stable_names() {
+        assert_eq!(ConformanceClass::ALL.len(), 6);
         assert_eq!(ConformanceClass::Read.to_string(), "C-Read");
         assert_eq!(ConformanceClass::Full.to_string(), "C-Full");
         for c in ConformanceClass::ALL {
@@ -547,8 +622,8 @@ mod tests {
     }
 
     #[test]
-    fn ten_passes_numbered_as_in_section_17() {
-        assert_eq!(Pass::ALL.len(), 11);
+    fn twelve_passes_numbered_as_in_section_17() {
+        assert_eq!(Pass::ALL.len(), 12);
         for (i, p) in Pass::ALL.iter().enumerate() {
             assert_eq!(p.number() as usize, i + 1);
             assert_eq!(Pass::parse(p.as_str()), Some(*p));
@@ -574,7 +649,8 @@ mod tests {
                 "epistemics",
                 "trust",
                 "extension",
-                "commitment"
+                "commitment",
+                "library"
             ]
         );
         assert!(
