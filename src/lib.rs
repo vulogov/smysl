@@ -275,8 +275,11 @@ mod tests {
         // `SMY-E403` and `SMY-W418`, raised by step 5's `Library` pass. Step 5's plan named
         // four more and two of those read `SourceRef.span`, which arrives in TX-P5, so
         // `SMY-E404` and `SMY-W405` are not registered here: a code nothing can raise is the
-        // one thing this count is kept for.
-        assert_eq!(Code::ALL.len(), 72);
+        // one thing this count is kept for. 73 with `SMY-E450`, which TX-P2 step 3 made
+        // raisable — `text append` to a pseudonymised expression with no key — and which step 2
+        // deliberately left out for exactly this reason: `--pseudonymise` existed, and nothing
+        // could refuse an append until there was an append.
+        assert_eq!(Code::ALL.len(), 73);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

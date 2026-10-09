@@ -1043,20 +1043,22 @@ asserts byte-identical output across all sixteen runs per operation:
 ```
 xtask determinism (rule D)
   matrix: 8 permutations
-  7 operations registered: rule D's five, and 2 since
+  8 operations registered: rule D's five, and 3 since
   pack: identical across 16 runs
   salience: identical across 16 runs
   merge: identical across 16 runs
   derive_thread: identical across 16 runs
   text_add: identical across 16 runs
   text_show: identical across 16 runs
+  text_append: identical across 16 runs
   render: identical across 16 runs
 ok
 ```
 ]
 
 All five of rule D's named operations are registered and passing in this
-build, and `text add` and `text show` have joined them (1.10.0). Those two
+build, and `text add`, `text show` and `text append` have joined them
+(1.10.0). The first two of those three
 are the first registered operations that *write*, which the harness could not
 compare at all until it gained a scratch directory: running one fixed command
 twice over the same library makes the second run see what the first did, and
@@ -1066,7 +1068,11 @@ of the sixteen captures now gets a directory made fresh and removed
 afterwards, so the question is the one it should always have been: the same
 input *and the same starting state* give the same bytes. `text show` needs a
 library to exist at all, so it declares `text add` as its setup, whose output
-is discarded and whose failure is not — a setup that silently did nothing
+is discarded and whose failure is not — and `text append` needs one for the
+same reason, with a fixture pair of a growing chat export: it compares the new
+manifest, the one it supersedes and the objects it wrote, so an unreproducible
+reader or part cut would show up as a different expression history rather than
+as a different byte — a setup that silently did nothing
 would leave the real command printing the same refusal sixteen times and
 passing. The permutation matrix targets the four things that quietly break
 determinism in practice and nowhere else: locale-dependent collation and

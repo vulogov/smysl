@@ -734,6 +734,21 @@ pub enum LibError {
         /// The identity asked for, in text form.
         id: String,
     },
+    /// `SMY-E450` - an append to a pseudonymised expression with no pseudonym key.
+    ///
+    /// The one failure a pseudonym exists to prevent: the same person's new messages would get a
+    /// different speaker from their old ones, the link between them would be gone, and nothing
+    /// downstream could tell — a pseudonym is opaque, so two pseudonyms for one person look
+    /// exactly like two people. Refused at the door rather than repaired afterwards, because
+    /// there is no repair: re-deriving the old speakers needs the key that is missing.
+    ///
+    /// Whether an expression is pseudonymised is read out of its own readings and not out of a
+    /// manifest key (SMYSL-2.4 §3.2): a speaker that is `spk:` plus 26 base32 characters says so
+    /// by its shape, so there is no flag for a corpus to disagree with.
+    PseudonymKeyMissing {
+        /// The expression's alias, which is what a caller named it by.
+        alias: String,
+    },
     /// `SMY-E452` - a record 15 or 18 was offered to a log (OQ-39).
     ///
     /// Text lives in the object store. A log that held it would one day have to be rewritten
@@ -806,6 +821,7 @@ impl LibError {
             LibError::Limit { .. } => Some(Code::E440),
             LibError::Locked { .. } => Some(Code::E445),
             LibError::ObjectCorrupt { .. } => Some(Code::E446),
+            LibError::PseudonymKeyMissing { .. } => Some(Code::E450),
             LibError::TextInLog { .. } => Some(Code::E452),
             LibError::NotText { .. }
             | LibError::BadAlias { .. }
@@ -866,6 +882,13 @@ impl fmt::Display for LibError {
                 write!(f, "{}: {id} does not hash to its name", Code::E446)
             }
             LibError::NotText { at } => write!(f, "input is not valid UTF-8 at byte {at}"),
+            LibError::PseudonymKeyMissing { alias } => write!(
+                f,
+                "{}: `{alias}` names its speakers by pseudonym, and this library has no \
+                 pseudonym key; appending without it would give the same person a second \
+                 speaker",
+                Code::E450
+            ),
             LibError::TextInLog { record } => write!(
                 f,
                 "{}: record {record} does not belong in a log; text lives in the object store",

@@ -225,10 +225,14 @@ fn the_argument_surface_is_recorded() {
         .lines()
         .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
         .map(|l| {
-            let mut it = l.split_whitespace();
-            let c = it.next().expect("a command").to_string();
-            let a = it.next().expect("an argument").to_string();
-            (c, a)
+            // The command, then **the rest of the line**: a recorded entry may itself hold
+            // spaces now that `[possible values: add, append, ls, show]` is one of them. It
+            // used to be the second whitespace-separated token, which would have reduced every
+            // such entry to `[possible`.
+            let (c, a) = l
+                .split_once(char::is_whitespace)
+                .unwrap_or_else(|| panic!("`{l}` is not a `command  argument` pair"));
+            (c.to_string(), a.trim().to_string())
         })
         .collect();
 
@@ -269,6 +273,15 @@ fn the_argument_surface_is_recorded() {
             };
             if let Some(a) = arg.filter(|s| s.len() > 2) {
                 actual.push((command.to_string(), a));
+            }
+            // And the argument's choices, where it has any. Recorded beside the argument
+            // rather than inside it, so that adding a value shows up as one added line: a
+            // choice is a capability, and `text append` arrived as a new value of `<ACTION>`
+            // without moving this file by a line until TX-P2 step 3.
+            if let Some(at) = t.find("[possible values: ") {
+                if let Some(end) = t[at..].find(']') {
+                    actual.push((command.to_string(), t[at..=at + end].to_string()));
+                }
             }
         }
     }

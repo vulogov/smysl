@@ -163,15 +163,19 @@ docs: ## Rebuild the PDFs in Documentation/ from their typst sources
 # `#[non_exhaustive]` to a struct shows up only in the second.
 cli-surface: ## Regenerate tests/cli-surface.txt, the recorded CLI argument surface
 	@$(CARGO) build --quiet
+	@# `[possible values: …]` is recorded too, since TX-P2 step 3. Without it the surface was
+	@# blind to an argument's *choices*, and a choice is a capability: `text append` arrived as
+	@# a new value of `<ACTION>` and this file did not move by one line. A removed action would
+	@# have been just as invisible, which is the direction that matters.
 	@{ sed -n '1,/^# Regenerate with/p' tests/cli-surface.txt; \
 	   for c in $(COMMAND_NAMES); do \
 	     ./target/debug/smysl $$c --help 2>&1 \
-	       | grep -oE "^ +(-[a-zA-Z], )?--[a-z0-9-]+|^ +[<[][A-Z.]+[]>]" \
+	       | grep -oE "^ +(-[a-zA-Z], )?--[a-z0-9-]+|^ +[<[][A-Z.]+[]>]|\[possible values: [^]]+\]" \
 	       | sed -E 's/^ +//; s/^-[a-zA-Z], //' \
 	       | while read -r a; do printf '%-10s %s\n' "$$c" "$$a"; done; \
 	   done; } > tests/cli-surface.txt.new
 	@mv tests/cli-surface.txt.new tests/cli-surface.txt
-	@echo "cli-surface: recorded $$(grep -vc '^#' tests/cli-surface.txt) argument(s) across $(words $(COMMAND_NAMES)) commands"
+	@echo "cli-surface: recorded $$(grep -vc '^#' tests/cli-surface.txt) line(s) across $(words $(COMMAND_NAMES)) commands"
 
 api: ## Regenerate the recorded public surfaces, both ends
 	@command -v cargo-public-api >/dev/null || { echo "cargo install cargo-public-api"; exit 1; }

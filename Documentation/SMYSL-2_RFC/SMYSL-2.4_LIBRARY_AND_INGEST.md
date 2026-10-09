@@ -335,6 +335,46 @@ level are provisional until GE-T14 (end of TX-P2). The policy string is written 
 unchanged parts (object already present: no write), and appends a manifest with `supersedes`. Two
 heads under one alias are `SMY-W418`, reported by the library pass of `check` and by `text ls`.
 
+**Built in TX-P2 step 3, and "unchanged" needed one word.** A part that **was the last one** is
+rewritten exactly once. Parts partition the text — a cut may lose no byte, which is what TX-P1
+step 6 fixed — and the separator between two parts belongs to the earlier of them, so the day
+that was last gains the space that now joins it to its successor and its tid moves. Measured on
+a three-day export cut per day: day one is `0..306` in the one-day export and `0..307` in every
+export after it, and `0..307` is the same bytes in the two-day and the three-day one. So the
+cost of an append is **one rewritten part, whatever the size of the corpus** — four objects, not
+2·n — and every part before it is untouched. `objects N written` reports it.
+
+The alternative was considered and not taken: give the separator to the *later* part, and every
+earlier part is reused with nothing rewritten. It would also make every part but the first begin
+with whitespace — visible in `text show --raw` and in every span offset inside a part — and move
+every tid ever computed. The cost that was measured is `O(1)` per append; the one that was not
+is in every reading.
+
+Four further things the step settled:
+
+1. **Tid reuse is a property of the part policy.** Under the default 64 KiB `target_min` a chat
+   export of a few kilobytes is *one* part, and one part that grew is a part with a new tid — so
+   an append of such an expression rewrites its only object and reuses nothing. Correct, and not
+   nothing: an operator who wants per-day parts says so in `--part-policy` at `add`, where it is
+   recorded in the manifest and reused by every append afterwards. The library's doc comment and
+   the manual both say so rather than leaving it to be discovered.
+2. **An append that changes nothing writes nothing.** Re-running a sync before the export has
+   grown is routine; without this it would write a manifest whose only difference from the head
+   is that it supersedes it, which makes `supersedes` mean nothing. The head's own part *entries*
+   are compared against the ones just built — entries, so "the same text read the same way"
+   rather than "the same bytes" — and a match returns the head's mid with no record written.
+3. **The spelling is `text append <file> --alias A`**, not `text append <alias> <file>`.
+   `TARGET` is one positional that already means three things depending on the action; making it
+   mean two things *at once* for one of them is the shape nobody can read back out of `--help`.
+   `add` and `append` now put the same two pieces of information in the same places. The flags an
+   append takes from the head manifest — `--reader`, `--licence`, `--lang`, `--carry`,
+   `--part-policy` — are **refused** rather than ignored, because an ignored `--part-policy` is a
+   second version somebody believes was cut one way and a corpus cut another.
+4. **Appending to one side of a fork does not merge it.** `text append --alias A` on a forked
+   alias is refused by name; naming one head by mid appends to that side, and the other head is
+   still a head, so `SMY-W418` goes on being reported. Merging two heads is a different
+   operation from growing one.
+
 **Carry.** `bundle`/`text` commands refuse to emit 15/18 unless manifest key 5 is `text` and key 4
 is `public-domain` or on the permissive list compiled into `smysl-text` (`licence::PERMISSIVE`, a
 sorted SPDX list; changing it is a code change with a test). `SMY-E402`, no override flag.
@@ -1000,6 +1040,12 @@ impl Library {
     pub fn store(&self) -> &Store;
     pub fn add(&mut self, input: &Input<'_>, spec: &AddSpec, caps: &Caps) -> Result<Added, LibError>;
     pub fn append(&mut self, alias: &str, input: &Input<'_>, caps: &Caps) -> Result<Added, LibError>;
+    // As built (TX-P2 step 3): `append(&mut self, input, who, key: Option<&speaker::Key>, caps)`.
+    // Input first, as `add` has it. `who` is an alias *or* the mid of one head of a forked
+    // alias. The key is an argument for the reason `AddSpec`'s is (§3.2, correction 5), and it
+    // is the only thing an append is given: everything else comes from the head manifest.
+    // The record-level `append(&[Record])` is now `append_records`, since *append* in this
+    // crate's vocabulary is what the command means.
     pub fn part(&self, tid: &Tid) -> Result<PartText, LibError>;                  // verified (E446)
     pub fn reading(&self, rdid: &Rdid) -> Result<Reading, LibError>;
     pub fn structure(&self, mid: &Mid, tid: &Tid) -> Result<Structure, LibError>; // checks structure hash (E401)
@@ -1212,7 +1258,7 @@ Cmd { name: "same-as",   about: "Propose same-as edges; derive classes",        
 | command | flags | purity | phase |
 |---|---|---|---|
 | `text add <file>` | `--reader R --alias A [--lang L] --licence SPDX [--carry none\|ref\|text] [--pseudonymise] [--part-policy P] [--param k=v]… [--max-* N] [--timeout S]` | pure | P1 (`--pseudonymise` P2) |
-| `text append <alias> <file>` | as `add`, reader and parameters taken from the head manifest | pure | P2 |
+| `text append <file>` | `--alias A [--pseudonymise]`; reader, parameters, policy, lang, licence and carry taken from the head manifest, and refused on the command line | pure | P2 (built, step 3) |
 | `text ls` | `[--alias A] [--forks]` | pure | P1 |
 | `text show <alias\|mid>#<locator>[-<locator>]` | `[--raw] [--segments]` | pure | P1 |
 | `text align <a> <b>` | `--scheme S` | pure | P4 |
@@ -1870,7 +1916,22 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
      `structure` hash (**OQ-70**); the key is an argument because a pure crate cannot mint a
      secret; and `whatsapp/1`'s date order is the parameter that widened manifest key 3's
      grammar in the format spec.
-3. `text append`. *Exit:* growth test (§5.2).
+3. ~~`text append`. *Exit:* growth test (§5.2).~~ **Built.** `tests/cmd_text_append.rs` is the
+   growth test §5.2 asks for — three days of a Telegram export appended one day at a time,
+   through the binary — beside seven cases at the library layer. `SMY-E450` is registered and
+   raisable, which is the item step 2 moved here. Five findings, all in §3.1: a part that was
+   last is rewritten once (and only one is, whatever the corpus size); tid reuse is a property
+   of the part policy; an unchanged append writes nothing; the command's spelling is
+   `--alias` rather than a second positional, and the flags it inherits are refused rather than
+   ignored; and appending to one side of a fork does not merge it.
+   - Two things found by writing it, neither in the plan. `Library::add` wrote the bare reader
+     **id** into record 18 key 1 while the manifest's key 3 held the id *and its parameters*,
+     so the two spellings of one thing gave the two paths two different rdids — invisible until
+     step 2 added the only sample with a parameter. And `tests/readers.rs` *printed* `lossy` and
+     never recorded manifest key 15, so the mid it pinned for a lossy sample was not the mid
+     `Library::add` produces; it pinned nothing wrong until step 2, because until the chat
+     samples arrived no sample was lossy. Both are fixed, and the library-level cross-check now
+     uses a parameterised reader instead of `notes.txt`, which has neither property.
 4. Record 19, rule Z in `Store::append`, `text redact`, `@redact`; `E452` refuses a 15 or 18
    offered to a log (OQ-39, so there is no `rewrite_redacted` to write). *Exit:* redaction test;
    P-Z1–P-Z4 harness green; ports decode 19.
@@ -1992,7 +2053,7 @@ meanings and are not repeated here.
 | `SMY-W447` | a structure node larger than the window was split at sentence boundaries | `ingest --text` |
 | `SMY-W448` | a reply or quotation constraint names a message or unit not found; constraint skipped | time engine |
 | `SMY-W449` | EDTF value outside the index's representable range; indexed as an open bound | time engine, `check` |
-| `SMY-E450` | appending to a pseudonymised expression without its pseudonym key | `text append` (step 3: `--pseudonymise` landed in step 2, and nothing can trigger this code until there is an append to refuse) |
+| `SMY-E450` | appending to a pseudonymised expression without its pseudonym key | `text append` (**raisable since TX-P2 step 3**; `--pseudonymise` landed in step 2 and the code was deliberately left unregistered until there was an append to refuse) |
 | `SMY-W451` | an alignment scheme does not cover a locator; the pair is left unaligned and counted | `text align`, `anchored` engine |
 | `SMY-E452` | a record 15 or 18 was offered to a log; text lives in the object store (OQ-39) | `append`, `check` |
 

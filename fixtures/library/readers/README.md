@@ -63,7 +63,14 @@ general/2024-01-16.json    2 messages
 reading/2024-01-16.json    1 message
 ```
 
-It is also the only fixture in this tree that is not text, and it is read by two suites: the
+`telegram-first-day.json` is **not a sample** and has no `.expected`: it is `telegram.json`
+with its second day removed, so that the pair is one export of a growing conversation and the
+export after it. `text append` is measured against it — in `xtask determinism`, where appending
+the longer file to the shorter one's expression has to produce the same `supersedes` chain
+sixteen times over, and in `tests/cmd_text_append.rs`, where the growth test builds its own
+exports because what it measures is what happens *between* two of them.
+
+`slack.zip` is also the only fixture in this tree that is not text, and it is read by two suites: the
 reader expectations here, and `tests/limits.rs`, whose archive cap cases need an archive that a
 real zipper wrote rather than one assembled by the code under test.
 

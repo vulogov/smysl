@@ -150,7 +150,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "usage",     about: "Token and cost ledger",                               purity: Purity::Pure,  phase: "SM-P13" , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "reindex",   about: "Rebuild the derived index from the log alone",        purity: Purity::Pure,  phase: "SM-P3"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "ui",        about: "Terminal UI",                                         purity: Purity::Pure,  phase: "SM-P15" , impure_when: None , forms: NO_DOCUMENT },
-    Cmd { name: "text",      about: "Library: add, list and show texts",                   purity: Purity::Pure,  phase: "TX-P1"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "text",      about: "Library: add, append, list and show texts",           purity: Purity::Pure,  phase: "TX-P1"  , impure_when: None , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -386,8 +386,11 @@ fn cli() -> Command {
                     Arg::new("action")
                         .required(true)
                         .value_name("ACTION")
-                        .value_parser(["add", "ls", "show"])
-                        .help("add a file, list the catalog, or show a passage"),
+                        .value_parser(["add", "append", "ls", "show"])
+                        .help(
+                            "add a file, append a new version of one, list the catalog, \
+                             or show a passage",
+                        ),
                 )
                 .arg(
                     // `TARGET` rather than `FILE|REF`, which is what it is: `make
@@ -398,7 +401,7 @@ fn cli() -> Command {
                     // records as correct.
                     Arg::new("target")
                         .value_name("TARGET")
-                        .help("the file for `add`, or `<alias|mid>#<locator>` for `show`"),
+                        .help("the file for `add` and `append`, or `<alias|mid>#<locator>` for `show`"),
                 )
                 .arg(
                     Arg::new("reader")
@@ -410,7 +413,7 @@ fn cli() -> Command {
                     Arg::new("alias")
                         .long("alias")
                         .value_name("A")
-                        .help("The alias this expression is catalogued under"),
+                        .help("The alias this expression is catalogued under (`add`, `append`)"),
                 )
                 .arg(
                     Arg::new("lang")
@@ -447,7 +450,7 @@ fn cli() -> Command {
                 .arg(
                     Arg::new("pseudonymise")
                         .long("pseudonymise")
-                        .help("Replace each speaker with a keyed pseudonym (`add`)")
+                        .help("Replace each speaker with a keyed pseudonym (`add`, `append`)")
                         .action(ArgAction::SetTrue),
                 )
                 .arg(
@@ -6046,10 +6049,11 @@ fn cmd_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     };
     match action {
         "add" => text_add(m, &root),
+        "append" => text_append(m, &root),
         "ls" => text_ls(m, &root),
         "show" => text_show(m, &root),
         other => {
-            eprintln!("smysl text: `{other}` is not an action; it is add, ls or show");
+            eprintln!("smysl text: `{other}` is not an action; it is add, append, ls or show");
             ExitCode::Usage
         }
     }
@@ -6198,6 +6202,137 @@ fn text_add(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
         Err(e) => {
             eprintln!("smysl text add: {e}");
             ExitCode::Failure
+        }
+    }
+}
+
+/// `smysl text append <file> --alias A` — a new version of an expression (SMYSL-2.4 §3.1).
+///
+/// **`--alias` rather than a second positional**, which is how the RFC spells it
+/// (`text append <alias> <file>`). `TARGET` is one positional and already means three things
+/// depending on the action; making it mean two things *at once* for one of them would be the
+/// shape nobody can read back out of `--help`. `text add <file> --alias A` and
+/// `text append <file> --alias A` put the same two pieces of information in the same places,
+/// which is the stronger argument.
+///
+/// Everything else — the reader, its parameters, the part policy, the language, the licence and
+/// the carry mode — comes from the head manifest, so there is nothing else to pass.
+#[cfg(feature = "text")]
+fn text_append(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
+    use smysl::text::library::Library;
+    use smysl::text::limits::Caps;
+    use smysl::text::readers::Input;
+
+    let Some(file) = m.get_one::<String>("target") else {
+        eprintln!("smysl text append: no file given");
+        return ExitCode::Usage;
+    };
+    let Some(alias) = m.get_one::<String>("alias") else {
+        eprintln!("smysl text append: --alias names the expression to append to");
+        eprintln!("  the reader, its parameters and the part policy come from its head");
+        eprintln!("  manifest: an append that restated them could state them differently, and");
+        eprintln!("  a second version cut by another policy cannot be compared with the first");
+        return ExitCode::Usage;
+    };
+    for flag in ["reader", "licence", "lang", "carry", "part-policy"] {
+        if m.contains_id(flag)
+            && m.value_source(flag) == Some(clap::parser::ValueSource::CommandLine)
+        {
+            eprintln!("smysl text append: --{flag} is not an append's to set; it comes from the");
+            eprintln!("  head manifest, which is what makes the two versions comparable");
+            return ExitCode::Usage;
+        }
+    }
+
+    let bytes = match std::fs::read(file) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("smysl text append: {file}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    // Loaded, never created. A `--pseudonymise` that minted a key here would mint a *different*
+    // key from the one the expression's existing speakers were derived under, and every
+    // appended message would get a second pseudonym for a person already in the corpus — which
+    // is the exact failure `SMY-E450` exists to prevent, arrived at by way of the flag that was
+    // supposed to prevent it.
+    let key = if m.get_flag("pseudonymise") {
+        match smysl::text::secrets::load(root) {
+            Ok(Some(key)) => Some(key),
+            Ok(None) => {
+                eprintln!(
+                    "smysl text append: --pseudonymise: this library has no {}",
+                    smysl::text::secrets::PSEUDONYM
+                );
+                eprintln!("  a key is created by `text add --pseudonymise`, and an append cannot");
+                eprintln!("  create one: a new key would give the same people new pseudonyms");
+                return ExitCode::Failure;
+            }
+            Err(e) => {
+                eprintln!("smysl text append: --pseudonymise: {e}");
+                return ExitCode::Failure;
+            }
+        }
+    } else {
+        None
+    };
+
+    let mut library = match Library::open(root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl text append: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    let shards = library.shards();
+    let _locks = match smysl::text::lock::acquire_all(root, &shards, "text append") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl text append: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    match library.append(&Input::new(&bytes), alias, key.as_ref(), &Caps::DEFAULT) {
+        Ok(added) => match added.supersedes {
+            Some(previous) => {
+                println!("manifest  {}", added.mid.canonical());
+                println!("supersedes {}", previous.canonical());
+                println!("alias     {alias}");
+                println!("bytes     {}", added.bytes);
+                println!("parts     {}", added.parts.len());
+                for (i, tid) in added.parts.iter().enumerate() {
+                    println!("  part {i}  {}", tid.canonical());
+                }
+                // Two objects per part that moved. Printed because it is the one number that
+                // says how much of the corpus this append touched, and the answer for a growing
+                // text is "one part" however long the text is.
+                println!("objects   {} written", added.objects_written);
+                if added.lossy {
+                    println!("lossy     the reader dropped something the source carried");
+                }
+                if key.is_some() {
+                    println!(
+                        "speakers  pseudonymised under {}",
+                        smysl::text::secrets::PSEUDONYM
+                    );
+                }
+                ExitCode::Success
+            }
+            // The same corpus. No version was created, which is a result and not a failure:
+            // re-running a sync before the export has grown is the ordinary way to find out
+            // that it has not.
+            None => {
+                println!("manifest  {}", added.mid.canonical());
+                println!("alias     {alias}");
+                println!("unchanged no version was written: this file is the corpus already");
+                ExitCode::Success
+            }
+        },
+        Err(e) => {
+            eprintln!("smysl text append: {e}");
+            e.code_exit()
         }
     }
 }

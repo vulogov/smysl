@@ -300,7 +300,7 @@ registry! {
     // --- The library (RFC SMYSL-2.4), in the order `smysl-text` raises them -------------------
     //
     // Registered with the code that raises them, not with the RFC that allocated them: the
-    // range `E440`-`W459` holds twelve allocations and this build can trigger five. A code
+    // range `E440`-`W459` holds twelve allocations and this build can trigger six. A code
     // nothing can trigger is worse than a missing one, because a reader who greps for it finds
     // a promise with nothing behind it. The other seven arrive with their readers, their
     // ingest path and their check pass.
@@ -312,6 +312,7 @@ registry! {
         E440 = "SMY-E440", Error, "Reader resource cap exceeded; nothing was written";
         E445 = "SMY-E445", Error, "The library or a shard is locked by another writer";
         E446 = "SMY-E446", Error, "An object does not hash to the identity it is stored under";
+        E450 = "SMY-E450", Error, "Appending to a pseudonymised expression without its pseudonym key";
         E452 = "SMY-E452", Error, "A record 15 or 18 was offered to a log; text lives in the object store";
     }
 }
@@ -611,7 +612,10 @@ mod tests {
     /// arrive with the code that raises them. 70, still 1.10.0, with `SMY-E452` — the sixth,
     /// registered in TX-P1 step 4 because that is the step where `Store::append` can raise it:
     /// a log is offered a record 15 or 18 and refuses it (OQ-39). 72 with `SMY-E403` and
-    /// `SMY-W418`, which TX-P1 step 5's `Library` check pass raises.
+    /// `SMY-W418`, which TX-P1 step 5's `Library` check pass raises. 73 with `SMY-E450` in
+    /// TX-P2 step 3, where `text append` exists to refuse: an append to a pseudonymised
+    /// expression with no pseudonym key. Step 2 built `--pseudonymise` and left the code
+    /// unregistered, which is this rule applied rather than an omission.
     ///
     /// Step 5's plan named six codes and two of them are **not** here. `SMY-E404` is a span
     /// past a part's length and `SMY-W405` is a locator disagreeing with a span; both read
@@ -620,7 +624,7 @@ mod tests {
     /// build can produce, which is the thing this comment exists to prevent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 72);
+        assert_eq!(Code::ALL.len(), 73);
     }
 
     #[test]

@@ -515,7 +515,7 @@ command says so rather than pretending.
 
 #section("text")
 
-*Library: add, list and show texts.* Pure · TX-P1.
+*Library: add, append, list and show texts.* Pure · TX-P1.
 
 The store argument is a **library root** rather than a log — a directory with a `LIBRARY`
 marker file in it, which `text add` creates. There is no separate flag for it: every command
@@ -526,8 +526,8 @@ keeps the meaning it has always had.
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
-    ([`ACTION`], [positional, required], [`add`, `ls` or `show`.]),
-    ([`TARGET`], [positional], [The file, for `add`; `<alias|mid>#<locator>` for `show`.]),
+    ([`ACTION`], [positional, required], [`add`, `append`, `ls` or `show`.]),
+    ([`TARGET`], [positional], [The file, for `add` and `append`; `<alias|mid>#<locator>` for `show`.]),
     ([`--reader`], [`R`], [Reader id, such as `txt/1` or `osis/1`. Required by `add`, and recorded in the manifest: it is what `SMY-E401` compares against when a corpus is re-read. Nine in a default build: `txt/1`, `md/1`, `usfm/1`, `osis/1`, `zefania/1`, `json/1`, `telegram/1`, `slack/1`, `whatsapp/1`.]),
     ([`--alias`], [`A`], [The alias the expression is catalogued under. Required by `add`.]),
     ([`--licence`], [`SPDX`], [The licence the text is under. Required by `add`; a missing one is not `unknown`, it is a decision nobody made.]),
@@ -541,6 +541,38 @@ keeps the meaning it has always had.
     ([`--segments`], [—], [`show`: list the segments the passage covers, with their levels and locators — and, where the reader filled them, the speaker and the timestamp. A chat reading is the first one where those are not empty.]),
   ),
 )
+
+*`text append`.* `text append <file> --alias A` is a **new version** of an expression: the input is the whole
+updated document — a chat export is always the whole conversation — and the new manifest carries
+`supersedes`, so the alias keeps one head. Nothing else is passed, and passing it is refused
+rather than ignored: the reader, its parameters, the part policy, the language, the licence and
+the carry mode come from the head manifest, because an append that restated them could state
+them differently, and a second version cut by another policy cannot be compared with the first.
+
+What makes it cheaper than a second `add` is that parts whose bytes did not change hash to the
+tids they already have, so their objects are already in the store and nothing is written for
+them. With one qualification, which is worth knowing before you measure it: **a part that was
+the last one is rewritten exactly once.** Parts partition the text — a cut may lose no byte —
+and the separator between two parts belongs to the earlier of them, so the day that was last
+gains the space that now joins it to its successor. Every part before it is untouched. The cost
+of an append is therefore one rewritten part whatever the size of the corpus, and `objects N
+written` is where you see it.
+
+Tid reuse at all depends on the **part policy**: under the default 64 KiB minimum a chat export
+of a few kilobytes is one part, and one part that grew is a part with a new tid. An operator who
+wants per-day parts says so in `--part-policy` at `add`, where it is recorded in the manifest
+and reused by every append afterwards.
+
+An append of a file the corpus already holds writes no version and says `unchanged`. Appending
+to an alias with two heads is refused by name (`SMY-W418`); naming one of them by mid appends to
+that side, and does not merge the fork — merging two heads is a different operation.
+
+`--pseudonymise` on an append **reads** the key and never creates one. A created key would be a
+different key from the one the expression's existing speakers were derived under, so every
+appended message would get a second pseudonym for somebody already in the corpus — which is the
+failure `SMY-E450` exists to prevent, reached by way of the flag meant to prevent it. An append
+to a pseudonymised expression without the flag is `SMY-E450`; with it, and with no key file, it
+is a refusal that says `text add --pseudonymise` is what creates one.
 
 `ls` prints a fork as a fork rather than resolving it, and `show` refuses an alias with two
 heads instead of picking one — printing the lower-sorting identity would make the answer depend

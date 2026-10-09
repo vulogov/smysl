@@ -254,6 +254,14 @@ fn describe(sample: &Sample, out: &ReadOutput) -> String {
     if let Some(raw) = &out.raw {
         manifest = manifest.raw(raw.clone());
     }
+    // Manifest key 15, which this file did not set until TX-P2 step 3 — it *printed* `lossy`
+    // and did not record it, so an expectation for a lossy sample pinned a mid that
+    // `Library::add` does not produce. It pinned nothing wrong until step 2, because until the
+    // chat samples arrived **no sample was lossy**: the three of them are the only ones, and
+    // the only cross-check between this file and the library used `notes.txt`, which is not.
+    if out.lossy {
+        manifest = manifest.lossy();
+    }
 
     let mut rendered = String::new();
     writeln!(rendered, "file      {}", sample.file).expect("write");
@@ -294,7 +302,11 @@ fn describe(sample: &Sample, out: &ReadOutput) -> String {
             .collect();
         let reading = Reading {
             tid: text.tid,
-            reader: sample.reader.to_string(),
+            // The reader **field**, as `Library::add` writes it: record 18 key 1 carries what
+            // manifest key 3 carries, parameters included. This read `sample.reader` until
+            // TX-P2 step 3, which is a difference no fixture could show — `whatsapp/1` is the
+            // only sample with a parameter, and it arrived in the step before.
+            reader: reader_field.clone(),
             rows,
             raw: None,
         };

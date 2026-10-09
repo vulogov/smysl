@@ -152,6 +152,12 @@ pub struct Added {
     pub bytes: u64,
     /// The reader dropped something the source carried.
     pub lossy: bool,
+    /// The manifest this one supersedes, for an [`Library::append`]; `None` for an `add`.
+    ///
+    /// Here rather than inferred from the manifest by the caller, because the caller is usually
+    /// printing it, and the one place that knows whether this was a growth or a first add is the
+    /// call that did it.
+    pub supersedes: Option<Mid>,
 }
 
 /// One resolved passage: the part it came from, the byte range in it, and the text.
@@ -266,6 +272,132 @@ impl Library {
         spec: &AddSpec,
         caps: &Caps,
     ) -> Result<Added, LibError> {
+        self.add_with(input, spec, None, caps)
+    }
+
+    /// Read a file into the library as a **new version** of an expression.
+    ///
+    /// SMYSL-2.4 §3.1's growth operation: `text append <file> --alias A`. The input is the
+    /// whole updated document — a chat export is always the whole conversation — and what makes
+    /// this cheaper than a second `add` is that parts whose text did not change hash to the tids
+    /// they already have, so their objects are already in the store and nothing is written for
+    /// them. The new manifest carries `supersedes`, so the alias keeps one head.
+    ///
+    /// **Everything but the key comes from the head manifest**, and that is the point rather
+    /// than a convenience. The reader and its parameters, the part policy, the language, the
+    /// licence and the carry mode are what the expression *was built with*; re-stating them on
+    /// the command line is an invitation to state them differently, and an expression whose
+    /// second version was cut by another policy is one whose parts cannot be compared with its
+    /// first. The key is the exception because a key is the one thing a corpus cannot hand back.
+    ///
+    /// **Tid reuse is a property of the part policy, not of this method.** With the default
+    /// `target_min` of 64 KiB, a chat export of a few kilobytes is one part, and one part that
+    /// grew is a part with a new tid — so an append of such an expression rewrites its only
+    /// object and reuses nothing. That is correct and it is not nothing: `objects_written`
+    /// reports it, and an operator who wants per-day parts says so in `--part-policy` at `add`.
+    ///
+    /// `SMY-E450` when the expression's speakers are pseudonyms and no key was given: the new
+    /// messages would otherwise get a different speaker from the same person's old ones, which
+    /// is the one failure a pseudonym exists to prevent and which nothing downstream could
+    /// detect afterwards.
+    /// `who` is the alias, or the mid of one head of a forked alias.
+    ///
+    /// The input comes first, as in [`Library::add`]: both operations are "read these bytes into
+    /// the library", and a pair of methods that disagreed about the order of their arguments
+    /// would be a pair somebody passes the wrong way round.
+    pub fn append(
+        &mut self,
+        input: &Input<'_>,
+        who: &str,
+        key: Option<&speaker::Key>,
+        caps: &Caps,
+    ) -> Result<Added, LibError> {
+        // `head` refuses an alias with two heads by name, which is the right refusal here too:
+        // appending to a fork would have to pick one of them, and picking the lower-sorting mid
+        // would make the answer depend on a hash. A caller that means a particular head names
+        // it by mid, which `head` also accepts.
+        let mid = self.head(who)?;
+        let head = self
+            .store
+            .manifest(&mid)
+            .cloned()
+            .ok_or_else(|| LibError::Io {
+                at: CATALOG.to_string(),
+                message: format!("no manifest `{}`", mid.canonical()),
+            })?;
+
+        let (reader_id, params) =
+            crate::readers::parse_reader_field(&head.reader).ok_or_else(|| LibError::BadParam {
+                reader: head.reader.clone(),
+                key: "reader".to_string(),
+                reason: "a reader field this build could have written; this manifest was                          written by another release"
+                    .to_string(),
+            })?;
+        let policy = Policy::parse(&head.part_policy).ok_or_else(|| LibError::BadParam {
+            reader: reader_id.clone(),
+            key: "part-policy".to_string(),
+            reason: format!(
+                "a policy this build can read, not `{}`; this manifest was written by                  another release",
+                head.part_policy
+            ),
+        })?;
+
+        // Whether this expression's speakers are pseudonyms is read out of the **corpus**, not
+        // out of a flag: a reading whose speakers are `spk:…` says so in its own rows, so there
+        // is no manifest key for it to disagree with. Reading the head's readings also verifies
+        // them against their part entries (`SMY-E401`), which is a good thing to find out
+        // before appending to a corpus rather than after.
+        let mut pseudonymous = false;
+        let mut plain_speaker = None;
+        for entry in &head.parts {
+            let reading = self.part_reading(&mid, &entry.tid)?;
+            for row in &reading.rows {
+                match &row.speaker {
+                    Some(who) if speaker::is_pseudonym(who) => pseudonymous = true,
+                    Some(who) => plain_speaker = Some(who.clone()),
+                    None => {}
+                }
+            }
+        }
+        match (pseudonymous, key) {
+            (true, None) => {
+                return Err(LibError::PseudonymKeyMissing {
+                    alias: head.alias.clone(),
+                })
+            }
+            // A key offered to an expression whose speakers are plain names. Refused rather
+            // than applied: half a corpus pseudonymised and half not would give one person two
+            // speakers, which is the same defect `SMY-E450` prevents from the other side.
+            (false, Some(_)) if plain_speaker.is_some() => {
+                return Err(LibError::BadParam {
+                    reader: reader_id.clone(),
+                    key: "pseudonymise".to_string(),
+                    reason: format!(
+                        "`{}` names its speakers plainly (`{}`); pseudonymising only what is                          appended would give one person two speakers",
+                        head.alias,
+                        plain_speaker.unwrap_or_default()
+                    ),
+                })
+            }
+            _ => {}
+        }
+
+        let mut spec = AddSpec::new(reader_id, head.alias.clone(), head.licence.clone());
+        spec.params = params;
+        spec.lang = Some(head.lang.clone());
+        spec.carry = head.carry;
+        spec.policy = Some(policy);
+        spec.pseudonym_key = key.cloned();
+        self.add_with(input, &spec, Some(mid), caps)
+    }
+
+    fn add_with(
+        &mut self,
+        input: &Input<'_>,
+        spec: &AddSpec,
+        supersedes: Option<Mid>,
+        caps: &Caps,
+    ) -> Result<Added, LibError> {
         // The licence gate first, before a byte is read. `carry: text` under a licence that
         // does not permit redistribution is `SMY-E402`, and finding that out after writing the
         // objects would mean a library holding text it may not pass on.
@@ -335,6 +467,9 @@ impl Library {
         let mut builder =
             ManifestBuilder::new(&spec.alias, lang, &reader_field, &spec.licence, &policy)?
                 .carry(spec.carry);
+        if let Some(previous) = supersedes {
+            builder = builder.supersedes(previous);
+        }
         if let Some(title) = spec.title.clone().or_else(|| out.title.clone()) {
             builder = builder.title(title);
         }
@@ -366,7 +501,12 @@ impl Library {
                 }
             })?;
             let rows = part::local_rows(&out.rows, &plan.range);
-            let reading = Reading::new(text.tid, &spec.reader, rows);
+            // The **reader field**, not the bare id: record 18 key 1 holds what produced the
+            // reading, and a parameter changed it. The format spec says key 1 carries what
+            // manifest key 3 carries, and the two being one string is what lets a check compare
+            // them. Written with the id alone until TX-P2 step 3, when `whatsapp/1`'s date
+            // order made the difference visible.
+            let reading = Reading::new(text.tid, &reader_field, rows);
             entries.push(reading.entry(plan.len()));
             tids.push(text.tid);
 
@@ -379,9 +519,35 @@ impl Library {
             }
         }
 
+        // An append that changes nothing changes nothing.
+        //
+        // Re-running a sync before the export has grown is routine, and without this it would
+        // write a new manifest whose only difference from the head is that it supersedes it —
+        // a version chain of identical versions, which makes `supersedes` mean nothing. So the
+        // head's own part entries are compared against the ones just built, and an append that
+        // matches returns the head: same mid, no record written, `supersedes: None` to say that
+        // no version was created. The objects were already there, so `written` is zero too.
+        //
+        // Entries and not tids: an entry carries the length, the structure hash and the rdid as
+        // well, so this is "the same text read the same way" rather than "the same bytes".
+        if let Some(previous) = supersedes {
+            if let Some(head) = self.store.manifest(&previous) {
+                if head.parts == entries {
+                    return Ok(Added {
+                        mid: previous,
+                        parts: tids,
+                        objects_written: written,
+                        bytes: out.text.len() as u64,
+                        lossy: out.lossy,
+                        supersedes: None,
+                    });
+                }
+            }
+        }
+
         let manifest = builder.parts(entries).build()?;
         let mid = manifest.mid();
-        self.append(&[Record::Manifest(manifest)])?;
+        self.append_records(&[Record::Manifest(manifest)])?;
 
         Ok(Added {
             mid,
@@ -389,6 +555,7 @@ impl Library {
             objects_written: written,
             bytes: out.text.len() as u64,
             lossy: out.lossy,
+            supersedes,
         })
     }
 
@@ -397,7 +564,13 @@ impl Library {
     /// `SMY-E452` travels out of here untouched: a part text or a reading offered to a log is
     /// refused by `Store::append`, whole batch, and this is the path a caller would otherwise
     /// use to get one in.
-    pub fn append(&mut self, records: &[Record]) -> Result<(), LibError> {
+    ///
+    /// Named `append_records` and not `append` since TX-P2 step 3, where [`Library::append`]
+    /// became the growth operation SMYSL-2.4 §3.1 names — `text append <file>`, a new version
+    /// of an expression. Both are new in 1.10.0, so nothing released moves; the rename is here
+    /// because *append* in this crate's vocabulary now means what the command means, and a
+    /// method called `append` that took records would be the other thing.
+    pub fn append_records(&mut self, records: &[Record]) -> Result<(), LibError> {
         self.store.append(records).map_err(|e| LibError::Io {
             at: CATALOG.to_string(),
             message: e.to_string(),

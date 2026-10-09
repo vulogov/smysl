@@ -261,6 +261,61 @@ const OPS: &[Op] = &[
             "en",
         ]),
     },
+    Op {
+        name: "text_append",
+        // A second version of an expression (TX-P2 step 3): the head manifest read back, the
+        // reader and the policy taken from it, the new text cut, and the `supersedes` chain.
+        //
+        // What is compared is stdout, which carries the new mid, the mid it supersedes, every
+        // part's tid and the number of objects written — so a reader or a part cut that was not
+        // reproducible would move the chain, and a `supersedes` that came out differently would
+        // show up as a different expression history rather than as a different byte.
+        //
+        // The fixture pair is one day of a chat export and two days of it. Under the default
+        // part policy both are **one** part, so what this pins is the chain and the identities
+        // rather than tid reuse; reuse needs a policy that cuts per day, and the growth test in
+        // `tests/cmd_text_append.rs` is where that is measured.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "text",
+            "append",
+            "fixtures/library/readers/telegram.json",
+            "-s",
+            SCRATCH,
+            "--alias",
+            "rg",
+        ],
+        setup: Some(&[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "text",
+            "add",
+            "fixtures/library/readers/telegram-first-day.json",
+            "-s",
+            SCRATCH,
+            "--reader",
+            "telegram/1",
+            "--alias",
+            "rg",
+            "--licence",
+            "CC0-1.0",
+            "--carry",
+            "text",
+            "--lang",
+            "mul",
+        ]),
+    },
 ];
 
 /// Two-stage operations, run as a shell pipeline. `render` needs a thread, and the only

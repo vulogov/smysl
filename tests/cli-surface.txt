@@ -1,4 +1,7 @@
-# Every argument each subcommand accepts, one `command  argument` pair per line.
+# Every argument each subcommand accepts, one `command  argument` pair per line — and, since
+# TX-P2 step 3, every argument's `[possible values: …]` beside it. A choice is a capability:
+# `text append` arrived as a new value of `<ACTION>` and this file did not move by one line,
+# which means a *removed* action would have been just as invisible.
 #
 # The third CLI gate, and it exists because the other two are blind to this one thing.
 # `cli()` registers all twenty-two subcommands from the COMMANDS table unconditionally; its
@@ -27,6 +30,7 @@ fmt        --store
 fmt        --write
 fmt        --output
 fmt        --format
+fmt        [possible values: surface, cbor]
 fmt        --strict
 fmt        --offline
 fmt        --no-color
@@ -44,6 +48,7 @@ check      --store
 check      --as
 check      --output
 check      --format
+check      [possible values: surface, cbor]
 check      --granularity
 check      --estimator
 check      --strict
@@ -64,6 +69,7 @@ pack       --output
 pack       --support
 pack       --focus
 pack       --format
+pack       [possible values: surface, cbor]
 pack       --query
 pack       --strict
 pack       --offline
@@ -71,27 +77,33 @@ pack       --payload
 pack       --no-color
 pack       --source
 pack       --engine
+pack       [possible values: lexical, semantic, hybrid]
 pack       --noprogress
 pack       --json
 pack       --model
 pack       --quiet
 pack       --query-limit
 pack       --lod
+pack       [possible values: auto, L0, L1, L2]
 pack       --verbose
 pack       --explain
 pack       --seed-check
 pack       --tokenizer
 pack       --mode
+pack       [possible values: greedy, exact]
 pack       --help
 merge      <STORE>
 merge      --config
 merge      --policy
+merge      [possible values: latest, all, contend]
 merge      --retraction
+merge      [possible values: strict, advisory, ignore]
 merge      --store
 merge      --output
 merge      --staged
 merge      --fail-on-contention
 merge      --format
+merge      [possible values: surface, cbor]
 merge      --max-contentions-per-agent
 merge      --strict
 merge      --offline
@@ -110,6 +122,7 @@ diff       --store
 diff       --output
 diff       --recipe
 diff       --format
+diff       [possible values: surface, cbor]
 diff       --strict
 diff       --offline
 diff       --no-color
@@ -127,6 +140,7 @@ trace      --depth
 trace      --output
 trace      --parents
 trace      --format
+trace      [possible values: surface, cbor]
 trace      --grounds
 trace      --both
 trace      --strict
@@ -146,6 +160,7 @@ view       --id
 view       --output
 view       --threads
 view       --format
+view       [possible values: surface, cbor]
 view       --requires
 view       --strict
 view       --offline
@@ -162,7 +177,9 @@ bundle     --view
 bundle     --include-retracted
 bundle     --output
 bundle     --unknown
+bundle     [possible values: keep, drop]
 bundle     --format
+bundle     [possible values: surface, cbor]
 bundle     --strict
 bundle     --offline
 bundle     --no-color
@@ -175,10 +192,13 @@ bundle     --help
 thread     [PATH]
 thread     --config
 thread     --derive
+thread     [possible values: analysis, narrative, brief, qa, plan]
 thread     --schema
+thread     [possible values: analysis, narrative, brief, qa, plan]
 thread     --output
 thread     --only
 thread     --format
+thread     [possible values: surface, cbor]
 thread     --list
 thread     --show
 thread     --strict
@@ -202,6 +222,7 @@ salience   --top
 salience   --explain
 salience   --output
 salience   --format
+salience   [possible values: surface, cbor]
 salience   --weights
 salience   --seed
 salience   --strict
@@ -221,7 +242,9 @@ find       --kind
 find       --min-status
 find       --output
 find       --engine
+find       [possible values: lexical, semantic, hybrid]
 find       --format
+find       [possible values: surface, cbor]
 find       --model
 find       --strict
 find       --offline
@@ -245,6 +268,7 @@ retract    --output
 retract    --reason
 retract    --authority
 retract    --format
+retract    [possible values: surface, cbor]
 retract    --strict
 retract    --offline
 retract    --no-color
@@ -263,6 +287,7 @@ withdraw   --output
 withdraw   --reason
 withdraw   --at
 withdraw   --format
+withdraw   [possible values: surface, cbor]
 withdraw   --dry-run
 withdraw   --strict
 withdraw   --offline
@@ -282,6 +307,7 @@ resolve    --at
 resolve    --output
 resolve    --dry-run
 resolve    --format
+resolve    [possible values: surface, cbor]
 resolve    --strict
 resolve    --offline
 resolve    --no-color
@@ -295,9 +321,11 @@ review     [PATH]
 review     --config
 review     --confirm
 review     --confirmed-by
+review     [possible values: human, model, tool]
 review     --all
 review     --output
 review     --format
+review     [possible values: surface, cbor]
 review     --strict
 review     --offline
 review     --no-color
@@ -311,11 +339,13 @@ commit     <UID>
 commit     [PATH]
 commit     --config
 commit     --level
+commit     [possible values: floated, drafted, committed, canonical, retconned]
 commit     --as
 commit     --note
 commit     --output
 commit     --at
 commit     --format
+commit     [possible values: surface, cbor]
 commit     --dry-run
 commit     --strict
 commit     --offline
@@ -332,9 +362,13 @@ render     --thread
 render     --profile
 render     --output
 render     --target
+render     [possible values: markdown, md, typst, html, slides, json, text]
 render     --format
+render     [possible values: surface, cbor]
 render     --lod
+render     [possible values: L0, L1, L2]
 render     --contentions
+render     [possible values: show, suppress]
 render     --strict
 render     --as
 render     --offline
@@ -350,9 +384,11 @@ import     <PATH>
 import     --config
 import     --key
 import     --kind
+import     [possible values: file, metric, tool, url, doc]
 import     --store
 import     --output
 import     --format
+import     [possible values: surface, cbor]
 import     --strict
 import     --offline
 import     --no-color
@@ -368,6 +404,7 @@ relink     --dry-run
 relink     --store
 relink     --output
 relink     --format
+relink     [possible values: surface, cbor]
 relink     --strict
 relink     --offline
 relink     --no-color
@@ -383,6 +420,7 @@ compact    --dry-run
 compact    --store
 compact    --output
 compact    --format
+compact    [possible values: surface, cbor]
 compact    --strict
 compact    --offline
 compact    --no-color
@@ -396,21 +434,27 @@ ingest     [FILE]
 ingest     --config
 ingest     --hop
 ingest     --rung
+ingest     [possible values: computed, document, web, model]
 ingest     --store
 ingest     --granularity
+ingest     [possible values: coarse, default, standard, fine]
 ingest     --output
 ingest     --estimator
 ingest     --format
+ingest     [possible values: surface, cbor]
 ingest     --max-output
 ingest     --strict
 ingest     --lang-policy
+ingest     [possible values: source]
 ingest     --offline
 ingest     --no-color
 ingest     --normaliser
+ingest     [possible values: v1, v2]
 ingest     --noprogress
 ingest     --temperature
 ingest     --json
 ingest     --path
+ingest     [possible values: auto, surface, json-ast]
 ingest     --quiet
 ingest     --repair
 ingest     --prompt
@@ -422,9 +466,11 @@ ingest     --help
 attest     [PATH]
 attest     --config
 attest     --what
+attest     [possible values: gist-coverage, warrant-plausibility, granularity]
 attest     --sample
 attest     --output
 attest     --format
+attest     [possible values: surface, cbor]
 attest     --strict
 attest     --offline
 attest     --no-color
@@ -441,6 +487,7 @@ providers  --store
 providers  --output
 providers  --tasks
 providers  --format
+providers  [possible values: surface, cbor]
 providers  --strict
 providers  --offline
 providers  --no-color
@@ -451,12 +498,14 @@ providers  --verbose
 providers  --seed-check
 providers  --help
 usage      --by
+usage      [possible values: provider, task, run, model]
 usage      --config
 usage      --store
 usage      --since
 usage      --output
 usage      --reset
 usage      --format
+usage      [possible values: surface, cbor]
 usage      --strict
 usage      --offline
 usage      --no-color
@@ -471,6 +520,7 @@ reindex    --config
 reindex    --verify
 reindex    --output
 reindex    --format
+reindex    [possible values: surface, cbor]
 reindex    --strict
 reindex    --offline
 reindex    --no-color
@@ -485,6 +535,7 @@ ui         --config
 ui         --store
 ui         --output
 ui         --format
+ui         [possible values: surface, cbor]
 ui         --strict
 ui         --offline
 ui         --no-color
@@ -495,6 +546,7 @@ ui         --verbose
 ui         --seed-check
 ui         --help
 text       <ACTION>
+text       [possible values: add, append, ls, show]
 text       [TARGET]
 text       --config
 text       --reader
@@ -503,8 +555,10 @@ text       --store
 text       --lang
 text       --output
 text       --format
+text       [possible values: surface, cbor]
 text       --licence
 text       --carry
+text       [possible values: none, ref, text]
 text       --strict
 text       --offline
 text       --part-policy

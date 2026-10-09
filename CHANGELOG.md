@@ -48,13 +48,87 @@ their own evidence in the form they were written.
 **One decision still open.** OQ-34 for the hosted model's outputs as fixtures — the local model is
 Apache 2.0 and settled, the hosted one is not. It blocks nothing that has started.
 
-**TX-P1 is complete and TX-P2 is two steps in.** The library wire is in — three new record
+**TX-P1 is complete and TX-P2 is three steps in.** The library wire is in — three new record
 types, four new identities, and the first of them to be hashed over something other than a CBOR
 map — and so is everything that interprets it: the crate, now **nine** readers, the locator
 grammar the plan pointed at a document nobody has, the check pass, the CLI, and the three
 ports. One thing TX-P1 owes is a corpus rather than code, and TX-P2's first step added a second
 of exactly the same kind; its second step closed the chat half of the first. The sections below
 are newest first.
+
+### Growth costs one part, not the corpus
+
+**TX-P2 step 3.** `text append <file> --alias A`: a new version of an expression. The input is
+the whole updated document — a chat export is always the whole conversation — and what makes it
+cheaper than a second `add` is that parts whose bytes did not change hash to the tids they
+already have, so their objects are in the store and nothing is written for them. The manifest
+carries `supersedes`, so the alias keeps one head however many versions it has.
+
+**"Reuses tids for unchanged parts" needed one word.** A part that **was the last one** is
+rewritten exactly once. Parts partition the text — a cut may lose no byte, which is what 1.10
+already fixed once — and the separator between two parts belongs to the earlier of them, so the
+day that was last gains the space that now joins it to its successor. Measured on a three-day
+export cut per day: day one is `0..306` in a one-day export and `0..307` in every export after
+it, and `0..307` is the same bytes in the two-day and the three-day one. So an append writes
+**four objects whatever the size of the corpus** — the new part and the one that was last, each
+as a part and a reading — and every part before them is untouched. A year of daily appends
+rewrites one part a day, not a year of them.
+
+The alternative is real and was not taken: give the separator to the *later* part and nothing is
+ever rewritten. It would also make every part but the first begin with whitespace, visible in
+`text show --raw` and in every span offset inside a part, and it would move every tid ever
+computed. The measured cost is `O(1)` per append; the unmeasured one is in every reading.
+
+**Tid reuse is a property of the part policy, which is worth saying out loud.** Under the
+default 64 KiB minimum, a chat export of a few kilobytes is *one* part — and one part that grew
+is a part with a new tid, so an append of such an expression rewrites its only object and reuses
+nothing. Correct, and not nothing: per-day parts are a `--part-policy` at `add`, recorded in the
+manifest and reused by every append afterwards. The doc comment, the manual and the RFC all say
+so rather than leaving an operator to measure it.
+
+**Three decisions about the command.** An append that changes nothing writes nothing — it
+compares the head's own part *entries* against the ones just built and prints `unchanged`,
+because re-running a sync before the export has grown is routine and the alternative is a
+version chain of identical versions that makes `supersedes` mean nothing. The spelling is
+`text append <file> --alias A` and not the RFC's `text append <alias> <file>`: `TARGET` is one
+positional that already means three things depending on the action, and making it mean two at
+once is the shape nobody can read back out of `--help`. And the flags an append *inherits* —
+`--reader`, `--licence`, `--lang`, `--carry`, `--part-policy` — are **refused** rather than
+ignored, because an ignored `--part-policy` is a second version somebody believes was cut one
+way and a corpus cut another.
+
+**`SMY-E450` is now raisable**, which is the item step 2 moved here on the rule that a code
+nothing can trigger is worse than a missing one: an append to a pseudonymised expression with no
+key. The registry is 73. `--pseudonymise` on an append **reads** the key and never creates one —
+a created key is a *different* key from the one the existing speakers were derived under, so
+every appended message would get a second pseudonym for somebody already in the corpus, which is
+the failure the code exists to prevent arrived at through the flag meant to prevent it. The
+mirror case is refused too: a key offered to an expression whose speakers are plain names.
+
+**Two defects found by writing the test, both of them ours and both invisible until last week.**
+`Library::add` wrote the bare reader **id** into record 18 key 1 while the manifest's key 3 held
+the id *and its parameters* — two spellings of one thing, giving the library path and the fixture
+path two different rdids. Nothing could see it until step 2 added `whatsapp/1`, the only sample
+with a parameter. And `tests/readers.rs` *printed* `lossy` and never set manifest key 15, so the
+mid it pinned for a lossy sample was not the mid `Library::add` produces; it pinned nothing wrong
+until step 2 either, because before the chat samples arrived no sample was lossy. The
+library-level cross-check between the two paths used `notes.txt`, which has neither property, and
+now uses one that has both.
+
+**And a third gate had a blind spot of its own.** `text append` arrived as a new value of
+`<ACTION>` and `tests/cli-surface.txt` did not move by one line: the surface recorded every
+*argument* and none of their **choices**. A choice is a capability — a removed action would have
+been just as invisible as an added one — so the recorded surface now carries every
+`[possible values: …]` beside its argument, which is fifty-one lines it was not watching.
+
+`text_append` is registered in `xtask determinism`, the third writing operation and the eighth
+overall. Its fixture pair is one day of a chat export and two days of it, so what sixteen runs
+under eight environment permutations compare is the new mid, the mid it supersedes and the
+objects written — an unreproducible reader or part cut would show up as a different expression
+history rather than as a different byte.
+
+Also: `Library::append(&[Record])` is `append_records`, because *append* in this crate's
+vocabulary is now what the command means. Both are new in 1.10.0, so nothing released moves.
 
 ### Three chat readers, and a pseudonym that changes no byte of the text
 

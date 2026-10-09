@@ -701,6 +701,420 @@ fn the_same_person_in_two_adds_is_one_pseudonym() {
     assert_eq!(first_speakers[0], key.pseudonym("user111"));
 }
 
+/// A parameterised reader's identities are the same through the library as through the reader.
+///
+/// `adding_a_fixture_reproduces_the_identities_recorded_beside_it` does this for `notes.txt`,
+/// which takes no parameter — so it could not have caught what TX-P2 step 3 found: `add` wrote
+/// the bare reader **id** into record 18 key 1 while the manifest's key 3 held the id *and its
+/// settings*, and the only sample with a setting is this one. The two spellings gave the two
+/// paths two different rdids, and nothing compared them.
+#[test]
+#[cfg(feature = "reader-whatsapp")]
+fn a_parameterised_reader_agrees_with_its_fixture_through_the_library() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("fixtures/library/readers");
+    let bytes = std::fs::read(root.join("whatsapp.txt")).expect("the fixture");
+    let expected =
+        std::fs::read_to_string(root.join("whatsapp.txt.expected")).expect("expectations");
+    let field = |name: &str| -> String {
+        expected
+            .lines()
+            .find_map(|l| l.trim().strip_prefix(name))
+            .unwrap_or_else(|| panic!("no `{name}` line in the expectation"))
+            .trim()
+            .to_string()
+    };
+
+    let dir = Scratch::new("param-fixture");
+    let mut lib = Library::create(dir.path()).expect("created");
+    let added = lib
+        .add(
+            &Input::new(&bytes),
+            &chat_spec(
+                "whatsapp/1",
+                "reading-group-whatsapp",
+                &[("date-format", "dmy")],
+            ),
+            &Caps::DEFAULT,
+        )
+        .expect("added");
+
+    assert_eq!(added.parts[0].canonical(), field("tid"));
+    assert_eq!(added.mid.canonical(), field("mid"));
+    let manifest = lib.store().manifest(&added.mid).expect("the manifest");
+    assert_eq!(manifest.parts[0].rdid.canonical(), field("rdid"));
+    // The two fields are one string, which is what makes them comparable at all.
+    assert_eq!(manifest.reader, "whatsapp/1 date-format=dmy");
+    let reading = lib
+        .part_reading(&added.mid, &added.parts[0])
+        .expect("a reading");
+    assert_eq!(reading.reader, manifest.reader);
+}
+
+// ---------------------------------------------------------------------------
+// TX-P2 step 3: growth.
+// ---------------------------------------------------------------------------
+
+/// A Telegram export of `days` days, each day one message, as the exporter would write it.
+///
+/// Built rather than fixtured because what is being tested is what happens **between** two
+/// exports of one conversation, so the test needs the pair — and a pair of fixtures would be
+/// two files whose relationship a reader has to take on trust.
+#[cfg(feature = "reader-telegram")]
+fn export_of(days: usize) -> String {
+    let mut s =
+        String::from(r#"{"name":"Reading group","type":"private_group","id":77,"messages":["#);
+    for day in 0..days {
+        if day > 0 {
+            s.push(',');
+        }
+        // 1705314225 is 2024-01-15T10:23:45Z; one message per day thereafter. Each message is
+        // padded so that a part policy with a small minimum cuts one part per day.
+        let at = 1_705_314_225 + day as u64 * 86_400;
+        let filler = "and then we talked about the chapter for a while. ".repeat(6);
+        s.push_str(&format!(
+            r#"{{"id":{},"type":"message","date_unixtime":"{at}","from":"Ada","from_id":"user111","text":"Day {}: {filler}"}}"#,
+            day + 1,
+            day + 1
+        ));
+    }
+    s.push_str("]}");
+    s
+}
+
+/// The policy that makes a day a part: a minimum small enough not to group them.
+///
+/// Spelled out because it is the thing tid reuse depends on. Under the default 64 KiB minimum
+/// every day of a small export lands in one part, that part grows, and an append reuses
+/// nothing — which is correct, and is why `Library::append`'s doc says so rather than leaving
+/// an operator to discover it.
+#[cfg(feature = "reader-telegram")]
+fn per_day() -> Policy {
+    Policy::new(Level::new("day").expect("a level"), 64, 4096)
+}
+
+/// Three days, appended one at a time: every earlier part is reused but the one that was last.
+///
+/// TX-P2 step 3's exit (§5.2's growth test), at the library layer — and the place where §3.1's
+/// "reuses tids for unchanged parts" turned out to need one word of qualification, which this
+/// test is written around rather than against.
+///
+/// **A part that was the last one is rewritten exactly once.** Parts partition the text (TX-P1
+/// step 6: a cut loses no byte), and the separator between two parts goes to the earlier of
+/// them — so the day that was last gains the space that now joins it to its successor, and its
+/// tid moves. Measured: day one is `0..306` in a one-day export and `0..307` in every export
+/// after it, and `0..307` is the same bytes in the two-day and the three-day export. So the
+/// cost of an append is **one** rewritten part, whatever the size of the corpus, and every part
+/// before it is untouched.
+///
+/// The alternative — give the separator to the *later* part — would reuse everything and make
+/// every part but the first begin with whitespace, which is visible in `text show --raw` and in
+/// every span offset inside a part. It would also move every tid ever computed. Not taken; the
+/// cost that was measured is `O(1)` per append and the one that was not is in every reading.
+#[test]
+#[cfg(feature = "reader-telegram")]
+fn three_days_appended_one_at_a_time_reuse_every_earlier_part() {
+    let dir = Scratch::new("growth");
+    let mut lib = Library::create(dir.path()).expect("created");
+
+    let mut spec = chat_spec("telegram/1", "rg", &[]);
+    spec.policy = Some(per_day());
+    let day1 = export_of(1);
+    let first = lib
+        .add(&Input::new(day1.as_bytes()), &spec, &Caps::DEFAULT)
+        .expect("added");
+    assert_eq!(first.parts.len(), 1, "one day, one part");
+    assert_eq!(first.objects_written, 2, "a part and a reading");
+    assert_eq!(first.supersedes, None, "an add supersedes nothing");
+
+    let day2 = export_of(2);
+    let second = lib
+        .append(&Input::new(day2.as_bytes()), "rg", None, &Caps::DEFAULT)
+        .expect("appended");
+    assert_eq!(second.parts.len(), 2);
+    assert_ne!(
+        second.parts[0], first.parts[0],
+        "the day that was last gained the separator joining it to the new one"
+    );
+    assert_eq!(
+        second.objects_written, 4,
+        "the new day, and the one that was last, each as a part and a reading"
+    );
+    assert_eq!(second.supersedes, Some(first.mid));
+
+    let day3 = export_of(3);
+    let third = lib
+        .append(&Input::new(day3.as_bytes()), "rg", None, &Caps::DEFAULT)
+        .expect("appended");
+    assert_eq!(third.parts.len(), 3);
+    // **The claim of `append`.** Day one is not touched by the third version: it stopped being
+    // the last part at the second, and nothing after that changes a byte of it.
+    assert_eq!(
+        third.parts[0], second.parts[0],
+        "a part that is not the last one is reused"
+    );
+    assert_ne!(
+        third.parts[1], second.parts[1],
+        "and the one that was last is not"
+    );
+    assert_eq!(third.objects_written, 4);
+    assert_eq!(third.supersedes, Some(second.mid));
+
+    // The cost does not grow with the corpus: a fourth day writes four objects too, not eight.
+    let fourth = lib
+        .append(
+            &Input::new(export_of(4).as_bytes()),
+            "rg",
+            None,
+            &Caps::DEFAULT,
+        )
+        .expect("appended");
+    assert_eq!(fourth.parts.len(), 4);
+    assert_eq!(&fourth.parts[..2], &third.parts[..2], "two days untouched");
+    assert_eq!(fourth.objects_written, 4);
+
+    // One head, after four versions. The chain is what keeps it that way.
+    let heads = lib.store().heads("rg");
+    assert_eq!(heads, vec![fourth.mid], "four versions, one head");
+
+    // And every version is still in the log, which is what makes the chain auditable: a
+    // superseded manifest is not deleted, it is superseded.
+    for mid in [first.mid, second.mid, third.mid, fourth.mid] {
+        assert!(lib.store().manifest(&mid).is_some(), "{}", mid.canonical());
+    }
+
+    // The passage reached through the alias is the newest version's.
+    let fourth_day = lib
+        .passage(
+            "rg",
+            &locator::parse("chat.20240118.1").expect("a locator"),
+            &Caps::DEFAULT,
+        )
+        .expect("the fourth day resolves");
+    assert!(fourth_day.text.starts_with("Day 4:"), "{}", fourth_day.text);
+}
+
+/// Appending a file that changes nothing changes nothing.
+#[test]
+#[cfg(feature = "reader-telegram")]
+fn appending_an_unchanged_export_writes_no_version() {
+    let dir = Scratch::new("growth-noop");
+    let mut lib = Library::create(dir.path()).expect("created");
+    let mut spec = chat_spec("telegram/1", "rg", &[]);
+    spec.policy = Some(per_day());
+    let export = export_of(2);
+    let first = lib
+        .add(&Input::new(export.as_bytes()), &spec, &Caps::DEFAULT)
+        .expect("added");
+
+    let again = lib
+        .append(&Input::new(export.as_bytes()), "rg", None, &Caps::DEFAULT)
+        .expect("appended");
+    assert_eq!(again.mid, first.mid, "the same corpus is the same manifest");
+    assert_eq!(again.supersedes, None, "no version was created");
+    assert_eq!(again.objects_written, 0);
+    assert_eq!(lib.store().heads("rg"), vec![first.mid], "still one head");
+}
+
+/// The reader and its parameters come from the head manifest, not from the caller.
+///
+/// `whatsapp/1` requires a date order, and an append does not restate it: restating it is an
+/// invitation to state it differently, and an expression whose second version read `03/04` the
+/// other way round is one whose parts cannot be compared with its first.
+#[test]
+#[cfg(feature = "reader-whatsapp")]
+fn an_append_reads_with_the_settings_the_expression_was_built_with() {
+    let dir = Scratch::new("growth-params");
+    let mut lib = Library::create(dir.path()).expect("created");
+    // Each day over the policy's 64-byte minimum, or the two of them group into one part and
+    // the test would be measuring the grouping rather than the append.
+    let day1 = "[15/01/2024, 10:23:45] Ada: the first day of it, and what we said about \
+                 the first chapter of the book that nobody had finished.\n";
+    let day2 = "[16/01/2024, 09:00:00] Ada: and the second day, in which we got as far \
+                 as the letters and stopped there for the evening.\n";
+    let first_day = day1.to_string();
+    let both_days = format!("{day1}{day2}");
+
+    let mut spec = chat_spec("whatsapp/1", "chat", &[("date-format", "dmy")]);
+    spec.policy = Some(per_day());
+    let first = lib
+        .add(&Input::new(first_day.as_bytes()), &spec, &Caps::DEFAULT)
+        .expect("added");
+    let second = lib
+        .append(
+            &Input::new(both_days.as_bytes()),
+            "chat",
+            None,
+            &Caps::DEFAULT,
+        )
+        .expect("appended");
+
+    assert_eq!(second.parts.len(), 2, "two days, two parts");
+    let manifest = lib.store().manifest(&second.mid).expect("the manifest");
+    assert_eq!(
+        manifest.reader, "whatsapp/1 date-format=dmy",
+        "the settings came along"
+    );
+    assert_eq!(
+        manifest.part_policy,
+        lib.store()
+            .manifest(&first.mid)
+            .expect("the first manifest")
+            .part_policy,
+        "and so did the policy"
+    );
+}
+
+/// `SMY-E450`: appending to a pseudonymised expression without its key.
+#[test]
+#[cfg(feature = "reader-telegram")]
+fn appending_to_a_pseudonymised_expression_without_the_key_is_refused() {
+    use smysl_core::error::LibError;
+    use smysl_core::Code;
+    use smysl_text::speaker;
+
+    let dir = Scratch::new("growth-e450");
+    let mut lib = Library::create(dir.path()).expect("created");
+    let key = speaker::Key::from_bytes([0x33; 32]);
+    let mut spec = chat_spec("telegram/1", "rg", &[]).pseudonymised(key.clone());
+    spec.policy = Some(per_day());
+    lib.add(&Input::new(export_of(1).as_bytes()), &spec, &Caps::DEFAULT)
+        .expect("added");
+
+    let two = export_of(2);
+    let err = lib
+        .append(&Input::new(two.as_bytes()), "rg", None, &Caps::DEFAULT)
+        .expect_err("refused");
+    assert_eq!(err.code(), Some(Code::E450), "{err:?}");
+    match &err {
+        LibError::PseudonymKeyMissing { alias } => assert_eq!(alias, "rg"),
+        other => panic!("{other:?}"),
+    }
+    // The message says what is missing and does not print a key.
+    let shown = err.to_string();
+    assert!(shown.contains("SMY-E450"), "{shown}");
+    assert!(shown.contains("second speaker"), "{shown}");
+    assert_eq!(lib.store().heads("rg").len(), 1, "nothing was written");
+
+    // With the key, the same append succeeds and one person keeps one pseudonym.
+    let appended = lib
+        .append(
+            &Input::new(two.as_bytes()),
+            "rg",
+            Some(&key),
+            &Caps::DEFAULT,
+        )
+        .expect("appended");
+    let reading = lib
+        .part_reading(&appended.mid, &appended.parts[1])
+        .expect("a reading");
+    let who: Vec<&str> = reading
+        .rows
+        .iter()
+        .filter_map(|r| r.speaker.as_deref())
+        .collect();
+    assert_eq!(who, vec![key.pseudonym("user111").as_str()]);
+}
+
+/// A key offered to an expression whose speakers are plain names is refused.
+///
+/// The same defect as `SMY-E450` from the other side: half a corpus pseudonymised and half not
+/// gives one person two speakers.
+#[test]
+#[cfg(feature = "reader-telegram")]
+fn appending_pseudonymised_rows_to_a_plain_expression_is_refused() {
+    use smysl_core::error::LibError;
+    use smysl_text::speaker;
+
+    let dir = Scratch::new("growth-mixed");
+    let mut lib = Library::create(dir.path()).expect("created");
+    let mut spec = chat_spec("telegram/1", "rg", &[]);
+    spec.policy = Some(per_day());
+    lib.add(&Input::new(export_of(1).as_bytes()), &spec, &Caps::DEFAULT)
+        .expect("added");
+
+    let key = speaker::Key::from_bytes([1u8; 32]);
+    let two = export_of(2);
+    let err = lib
+        .append(
+            &Input::new(two.as_bytes()),
+            "rg",
+            Some(&key),
+            &Caps::DEFAULT,
+        )
+        .expect_err("refused");
+    match &err {
+        LibError::BadParam { key, reason, .. } => {
+            assert_eq!(key, "pseudonymise");
+            assert!(reason.contains("user111"), "{reason}");
+            assert!(reason.contains("two speakers"), "{reason}");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+/// An alias nobody catalogued, and an alias with two heads, are two different refusals.
+#[test]
+#[cfg(feature = "reader-telegram")]
+fn appending_needs_exactly_one_head_to_append_to() {
+    let dir = Scratch::new("growth-heads");
+    let mut lib = Library::create(dir.path()).expect("created");
+    let one = export_of(1);
+
+    let err = lib
+        .append(&Input::new(one.as_bytes()), "nobody", None, &Caps::DEFAULT)
+        .expect_err("refused");
+    assert!(err.to_string().contains("nobody"), "{err}");
+
+    // Two heads under one alias: two adds of two different texts, neither superseding the
+    // other, which is what two machines appending to one expression produces.
+    let mut spec = chat_spec("telegram/1", "rg", &[]);
+    spec.policy = Some(per_day());
+    lib.add(&Input::new(one.as_bytes()), &spec, &Caps::DEFAULT)
+        .expect("added");
+    let two = export_of(2);
+    lib.add(&Input::new(two.as_bytes()), &spec, &Caps::DEFAULT)
+        .expect("added");
+    assert_eq!(lib.store().heads("rg").len(), 2, "a fork, SMY-W418");
+
+    let err = lib
+        .append(
+            &Input::new(export_of(3).as_bytes()),
+            "rg",
+            None,
+            &Caps::DEFAULT,
+        )
+        .expect_err("refused");
+    let shown = err.to_string();
+    assert!(shown.contains("2 heads"), "{shown}");
+    assert!(shown.contains("SMY-W418"), "{shown}");
+
+    // Naming one of the two heads by mid appends to that side, which is how whoever knows which
+    // side is theirs grows it. It does **not** resolve the fork: the other head is still a
+    // head, because nothing superseded it. Merging two heads is a different operation from
+    // appending to one, and `SMY-W418` goes on being reported until something does it.
+    let heads = lib.store().heads("rg");
+    let (mine, theirs) = (heads[0], heads[1]);
+    let appended = lib
+        .append(
+            &Input::new(export_of(3).as_bytes()),
+            &mine.canonical(),
+            None,
+            &Caps::DEFAULT,
+        )
+        .expect("appended to a named head");
+    assert_eq!(appended.supersedes, Some(mine));
+    let after = lib.store().heads("rg");
+    assert_eq!(
+        after.len(),
+        2,
+        "appending to one side does not merge a fork"
+    );
+    assert!(after.contains(&theirs), "the other side is untouched");
+    assert!(after.contains(&appended.mid));
+}
+
 /// Every regular file under a directory, relative to it.
 fn walk(root: &Path) -> Vec<String> {
     let mut out = Vec::new();
