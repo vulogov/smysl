@@ -546,7 +546,7 @@ ui         --verbose
 ui         --seed-check
 ui         --help
 text       <ACTION>
-text       [possible values: add, append, ls, show, redact]
+text       [possible values: add, append, ls, show, redact, index]
 text       [TARGET]
 text       --config
 text       --reader
@@ -574,6 +574,7 @@ text       --reason
 text       --verbose
 text       --forks
 text       --seed-check
+text       --rebuild
 text       --raw
 text       --segments
 text       --help

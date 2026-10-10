@@ -120,7 +120,12 @@ impl Library {
 /// in its canonical form and nothing shorter: `Tid::parse` refuses an abbreviation for the
 /// reason `Uid::parse` does — an abbreviated identity in a record weakens identity silently,
 /// and a 26-character prefix that happened to collide would put two texts' units in one bucket.
-fn part_of(reference: &str) -> Option<Tid> {
+///
+/// `pub(super)` since TX-P4 step 1, where the substrate index's `journal` table had to ask the
+/// same question on its incremental path. A second copy of this would be a second place where
+/// the canonical-only rule could be relaxed by accident, and the rule is the whole content of
+/// the function. [`Store::part_of_reference`] is how `smysl-text` reaches it.
+pub(super) fn part_of(reference: &str) -> Option<Tid> {
     let rest = reference.strip_prefix(Tid::PREFIX)?;
     let body = match rest.find('#') {
         Some(i) => &rest[..i],
@@ -235,6 +240,16 @@ impl Store {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// The part a unit's `source.reference` names, if it names one.
+    ///
+    /// An associated function rather than a method: it reads nothing from the store, and a
+    /// caller indexing a batch of records it has not appended yet has no store to ask. What it
+    /// buys is one implementation of the canonical-only parse, the one this module's `part_of`
+    /// holds.
+    pub fn part_of_reference(reference: &str) -> Option<Tid> {
+        part_of(reference)
     }
 
     /// The units whose source names this part, exactly.

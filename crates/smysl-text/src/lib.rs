@@ -17,7 +17,7 @@
 //! crate. A reader's only side channel is its [`limits::Budget`], and fuel is deterministic,
 //! so a refusal happens at the same byte on every machine.
 //!
-//! # What is here as of TX-P2 step 2
+//! # What is here as of TX-P4 step 1
 //!
 //! The substrate, and the nine readers that stand on it:
 //!
@@ -40,6 +40,8 @@
 //! | `lang` | which language a text is in, behind feature `detect` (TX-P2) |
 //! | [`speaker`] | pseudonyms: `spk:` + keyed BLAKE3 of a platform user id (TX-P2) |
 //! | [`secrets`] | `secrets/pseudonym.key`, the one file in a library that is not a corpus |
+//! | [`time`] | EDTF, calendars, the stratified network, rule E's engine (TX-P3) |
+//! | [`index`] | the derived tables of §3.8, with both builders and a sidecar (TX-P4) |
 //!
 //! Each reader is a function from bytes to a text and a table over it — no clock, no
 //! environment, no filesystem, and no name for the input — so two libraries given the same
@@ -48,6 +50,12 @@
 //! three fixtures. Three more read conversations, where the same property has to hold over an
 //! **archive**: a Slack export zipped in another order is the same reading, because the entries
 //! are sorted before a row is built rather than read in the order they happen to be in.
+//!
+//! [`index`] is the only thing here that is **not** a fact about a corpus. Everything else in
+//! this crate derives something a second implementation has to derive the same way — a tid, a
+//! structure hash, an rdid, an effective interval. An index is a cache of answers, addressed by
+//! nothing and travelling in no bundle, which is why a stale one is a rebuild rather than a
+//! refusal and why D-8 asks nothing of the ports about it.
 //!
 //! [`library`] is the one module that touches a directory, added in step 6 once step 4 had
 //! given a `Store` manifests to hold — a handle written earlier would have been a handle to
@@ -59,6 +67,7 @@
 
 pub mod analyze;
 pub mod ids;
+pub mod index;
 #[cfg(feature = "detect")]
 pub mod lang;
 pub mod library;

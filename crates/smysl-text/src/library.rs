@@ -41,6 +41,7 @@ use smysl_core::types::provenance::Hlc;
 use smysl_core::types::{Carry, PartEntry, PartText, Record};
 use smysl_graph::Store;
 
+use crate::index::{self, Index};
 use crate::limits::{Budget, Caps};
 use crate::locator::Locator;
 use crate::manifest::ManifestBuilder;
@@ -205,6 +206,13 @@ pub struct Library {
     root: PathBuf,
     store: Store,
     objects: ObjectStore,
+    /// The derived substrate index (§3.8), loaded from its sidecar or rebuilt on open.
+    ///
+    /// Held rather than handed out, because the only thing that may consult it is a query that
+    /// would otherwise do the work it caches — see [`Library::resolve`], which is the one such
+    /// query in this step. A field a caller could reach would be a field a caller could trust
+    /// past its completeness rule.
+    index: Index,
 }
 
 fn io(at: impl AsRef<str>, e: &std::io::Error) -> LibError {
@@ -266,9 +274,102 @@ impl Library {
             root: root.to_path_buf(),
             store,
             objects,
+            index: Index::default(),
         };
         library.enforce_z()?;
+        library.load_index();
         Ok(library)
+    }
+
+    /// Load the index sidecar, or build the part of the index an open can afford.
+    ///
+    /// Three outcomes and no fourth: the sidecar is current and is used whole; or it is stale,
+    /// unreadable or absent, and the five tables derived from the catalog are built while the
+    /// two derived from the **objects** are left for `text index --rebuild`. That split is
+    /// [`Index::objects_read`]'s subject, and the reason is cost: the five are arithmetic over
+    /// a log this method has already parsed, and the two are an object read and a structure
+    /// tree per part, which `text ls` should not be paying for.
+    ///
+    /// A rebuild is never persisted from here — opening a library is a write in exactly one
+    /// case (see [`Library::enforce_z`]) and a cache is not it, so a read-only command on a
+    /// read-only corpus still works.
+    ///
+    /// Nothing here can fail. A sidecar that does not parse is a stale sidecar, which is a
+    /// rebuild; `SMY-W110` is the graph store's precedent for saying so rather than refusing.
+    fn load_index(&mut self) {
+        let fresh = std::fs::read(Index::path(&self.root))
+            .ok()
+            .and_then(|b| Index::from_bytes(&b).ok())
+            .filter(|ix| ix.matches(self.store.log_len(), self.store.log_hash()));
+        self.index = match fresh {
+            Some(ix) => ix,
+            None => Index::rebuild_catalog(self),
+        };
+    }
+
+    /// Build the two object-derived tables if an open left them out.
+    ///
+    /// What a command that is about to **write** calls, because it is already holding the locks
+    /// and already paying for I/O, so the one-time cost of indexing a library that has never
+    /// been indexed lands on the operation that grows it rather than on every operation that
+    /// reads it. It is also what keeps a persisted sidecar whole: [`Library::write_index`]
+    /// refuses to write a partial one, and without this a library first opened by this release
+    /// would never get a complete sidecar at all.
+    pub fn complete_index(&mut self) {
+        if !self.index.is_complete() {
+            self.reindex();
+        }
+    }
+
+    /// The derived index, as it stands.
+    pub fn index(&self) -> &Index {
+        &self.index
+    }
+
+    /// Rebuild the index from the catalog and the objects, and return it.
+    ///
+    /// §3.8's gate compares this against the index this library has been maintaining as it
+    /// grew — `crates/smysl-text/tests/index.rs` is where that comparison lives, and it
+    /// compares [`Index::to_bytes`] rather than the values.
+    pub fn reindex(&mut self) -> &Index {
+        self.index = Index::rebuild(self);
+        &self.index
+    }
+
+    /// Write the index sidecar, creating `index/` if it is not there.
+    ///
+    /// The only thing that persists an index. `text index --rebuild` is the command, and the
+    /// writing commands call it after they have appended, so a library that is being added to
+    /// never needs the rebuild path twice.
+    ///
+    /// A partial index is not written: see [`Library::complete_index`]. Silently, and
+    /// returning `Ok`, because every caller is reporting a *successful* operation and "the
+    /// cache was not written because it was not complete" is not news to anybody — the next
+    /// open rebuilds exactly as much as this one did, which is the state the library was
+    /// already in.
+    pub fn write_index(&self) -> Result<(), LibError> {
+        if !self.index.is_complete() {
+            return Ok(());
+        }
+        let target = Index::path(&self.root);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| io(index::DIR, &e))?;
+        }
+        std::fs::write(&target, self.index.to_bytes()).map_err(|e| io(index::SIDECAR, &e))?;
+        Ok(())
+    }
+
+    /// Bring the index forward over records this library has just appended.
+    ///
+    /// Called after the append, never before: a table built by reading the library has to see
+    /// the library the rebuild would see, or the two builders are comparing different corpora.
+    fn index_appended(&mut self, records: &[Record]) {
+        // The borrow has to be split: `on_append` reads the library while it writes the index,
+        // and the index is a field of the library. Taking it out and putting it back is the
+        // honest version of that, and it costs one move of a struct of maps.
+        let mut index = std::mem::take(&mut self.index);
+        index.on_append(self, records);
+        self.index = index;
     }
 
     /// Rule Z, on the way in: no object for a part this library's catalog has redacted.
@@ -718,6 +819,11 @@ impl Library {
             at: CATALOG.to_string(),
             message: e.to_string(),
         })?;
+        // Every path that grows a library comes through here - `add`, `append` and `redact`
+        // all call it rather than reaching the store - so the index is maintained in one
+        // place. `SMY-E452` is refused above and the whole batch with it, so there is no
+        // half-appended batch for a table to have half-absorbed.
+        self.index_appended(records);
         Ok(())
     }
 
@@ -810,6 +916,19 @@ impl Library {
         loc: &Locator,
         caps: &Caps,
     ) -> Result<Option<(Tid, Range<u64>)>, LibError> {
+        // The `locators` table, when it can answer for this manifest (§3.8). "Can answer" is a
+        // question about the manifest and not about the locator: a mid is in the table only
+        // when every one of its parts resolved into it, so a *miss* here is an answer and not
+        // an absence. A mid that is not there falls through to the search below, which is the
+        // answer this method gave before the table existed - and the one it still has to give,
+        // because a redacted part makes the search refuse rather than return nothing, and an
+        // index that turned a refusal into `Ok(None)` would have changed a result.
+        if self.index.has_locators(mid) {
+            return Ok(self
+                .index
+                .resolve(mid, &loc.to_string())
+                .map(|at| (at.tid, at.start..at.end)));
+        }
         let manifest = self.store.manifest(mid).ok_or_else(|| LibError::Io {
             at: CATALOG.to_string(),
             message: format!("no manifest `{}`", mid.canonical()),

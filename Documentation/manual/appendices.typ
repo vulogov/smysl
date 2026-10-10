@@ -515,7 +515,7 @@ command says so rather than pretending.
 
 #section("text")
 
-*Library: add, append, list, show and redact texts.* Pure · TX-P1.
+*Library: add, append, list, show, redact and index texts.* Pure · TX-P1, TX-P4.
 
 The store argument is a **library root** rather than a log — a directory with a `LIBRARY`
 marker file in it, which `text add` creates. There is no separate flag for it: every command
@@ -526,8 +526,8 @@ keeps the meaning it has always had.
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
-    ([`ACTION`], [positional, required], [`add`, `append`, `ls`, `show` or `redact`.]),
-    ([`TARGET`], [positional], [The file, for `add` and `append`; `<alias|mid>#<locator>` for `show`; a tid for `redact`.]),
+    ([`ACTION`], [positional, required], [`add`, `append`, `ls`, `show`, `redact` or `index`.]),
+    ([`TARGET`], [positional], [The file, for `add` and `append`; `<alias|mid>#<locator>` for `show`; a tid for `redact`. `ls` and `index` take none.]),
     ([`--reader`], [`R`], [Reader id, such as `txt/1` or `osis/1`. Required by `add`, and recorded in the manifest: it is what `SMY-E401` compares against when a corpus is re-read. Nine in a default build: `txt/1`, `md/1`, `usfm/1`, `osis/1`, `zefania/1`, `json/1`, `telegram/1`, `slack/1`, `whatsapp/1`.]),
     ([`--alias`], [`A`], [The alias the expression is catalogued under. Required by `add`.]),
     ([`--licence`], [`SPDX`], [The licence the text is under. Required by `add`; a missing one is not `unknown`, it is a decision nobody made.]),
@@ -537,6 +537,7 @@ keeps the meaning it has always had.
     ([`--param`], [`K=V` (repeatable)], [A reader parameter. Recorded beside the reader id, because a parameter changes a reader's output: a corpus that recorded only the id would mean something else on re-read. Two readers take one: `whatsapp/1` *requires* `date-format=dmy|mdy|ymd`, because `03/04/2024` is two different days and the transcript does not say which, and both it and `telegram/1` accept `tz=±HHMM` for a timestamp written as a local wall clock.]),
     ([`--pseudonymise`], [—], [`add`: replace every speaker in the reading with `spk:` plus 26 base32 characters of keyed BLAKE3 of the platform's user id. The key is `secrets/pseudonym.key` under the library, created with thirty-two random bytes on first use, mode 0600, and never printed. It changes **no byte of the text** — the speaker is a field of a segment row — so the parts, their tids and their objects are the same as they would have been without it; only the reading differs. Names *inside* the prose are a different instrument.]),
     ([`--forks`], [—], [`ls`: show only the aliases with more than one head (`SMY-W418`).]),
+    ([`--rebuild`], [—], [`index`: rebuild every table from the catalogue and the objects, and write the sidecar. A library-wide operation, so it takes the library lock and then the shard locks in name order.]),
     ([`--raw`], [—], [`show`: print the passage's bytes with no heading.]),
     ([`--segments`], [—], [`show`: list the segments the passage covers, with their levels and locators — and, where the reader filled them, the speaker and the timestamp. A chat reading is the first one where those are not empty.]),
     ([`--as`], [`AGENT`], [`redact`: the agent issuing the redaction. Required — a redaction is an act by somebody, and a default would invent one.]),
@@ -606,6 +607,29 @@ no part or the wrong one.
 `ls` prints a fork as a fork rather than resolving it, and `show` refuses an alias with two
 heads instead of picking one — printing the lower-sorting identity would make the answer depend
 on a hash. Naming one of the two heads works, which is what the refusal tells you to do.
+
+*`text index`.* What the library's derived index holds, one line per table, and `--rebuild` to
+rebuild it and write the sidecar. The index is **never authoritative**: the catalogue and the
+objects are the truth, and this is a cache of what would otherwise be recomputed. Deleting
+`index/substrate.idx` loses nothing but the time it takes to build again.
+
+What it buys is the question `text show` asks. Resolving a locator means finding which of a
+manifest's parts answers to it, and without the index that is one object read and one structure
+tree per part until one does. The `locators` table is that answer written down. A library that is
+being added to never pays for it twice: `text add`, `text append` and `text redact` each bring
+the index forward over what they appended and write it out, and only a library written by a
+release without an index rebuilds from scratch.
+
+Five of the twelve tables print `not built` and the phase step that will fill them, rather than
+printing zero rows. That distinction is the point of the line: `postings 0` would read as a
+corpus nothing can be found in, where what it means is that persistent postings are the next step
+and `find` is using the in-memory path meanwhile.
+
+A table is only ever as complete as the objects it was built from, and a locator table is **all
+or nothing per manifest** for a reason worth knowing: a redacted part has no bytes to read, so a
+manifest that contains one keeps no table and `text show` goes back to searching — which refuses,
+naming the redaction. A table with the redacted addresses quietly dropped would have answered
+"nothing is there" instead, and an index that changes an answer is worse than no index.
 
 #section("date")
 

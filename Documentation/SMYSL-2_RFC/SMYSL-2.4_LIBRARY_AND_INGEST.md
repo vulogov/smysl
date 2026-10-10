@@ -884,13 +884,26 @@ inferred" cannot be built. Reported as `SMY-W441`. Prose ingest keeps `E307` non
 
 ### 3.8 Substrate index (draft 3 §14.1–14.3)
 
-`index.redb` behind feature `substrate-redb`. Tables built in this RFC: `manifests`, `parts`,
-`by-part`, `redactions`, `segments`, `locators`, `align`, `said`, `composed`, `observed`,
-`postings`, `journal`. (`vectors` and `queries` are SMYSL-2.5; `imported`, `waiting` SMYSL-2.7;
-`schemas` SMYSL-2.5.) Each derived table has a builder `fn rebuild(&Library) -> Table` and an
-incremental `fn on_append(&[Record])`; a test asserts rebuild and incremental produce the same
-bytes. Without the feature, the same queries run against in-memory maps rebuilt on open — slower,
-same answers.
+Tables built in this RFC: `manifests`, `parts`, `by-part`, `redactions`, `segments`, `locators`,
+`align`, `said`, `composed`, `observed`, `postings`, `journal`. (`vectors` and `queries` are
+SMYSL-2.5; `imported`, `waiting` SMYSL-2.7; `schemas` SMYSL-2.5.) Each derived table has a
+builder `fn rebuild(&Library) -> Table` and an incremental `fn on_append(&Library, &[Record])`; a
+test asserts rebuild and incremental produce the same bytes.
+
+**Amended in TX-P4 step 1** (§6), on three points found by building it:
+
+- The incremental builder takes the **library** as well as the records. Three of the tables are
+  built from records 15 and 18, which a log never holds (OQ-39): the records say what changed and
+  the library is where the changed thing is read from.
+- The backing is **in-memory maps plus a deterministic sidecar**, `index/substrate.idx`, checked
+  against the catalog's length and hash on open. `index.redb` behind feature `substrate-redb` is
+  **owed**: `redb` 4.3 requires Rust 1.90, Cargo gives `rust-version` per package rather than per
+  feature, and `smysl-text` is a base-tier crate at 1.85 — so the feature would move the floor
+  for every build of the substrate. The sidecar costs one rebuild rather than one per open, which
+  is better than the featureless path this section described.
+- A rebuild is **lenient** and completeness is tracked per manifest. An object can be missing
+  (rule Z) or corrupt (`SMY-E446`), and a derived cache may not fail an open; a table that is
+  partial must still never be half-trusted, which the per-manifest rule is what buys.
 
 ### 3.9 Security (D-10)
 
@@ -2323,9 +2336,122 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
 
 ### TX-P4 — substrate index and retrieval
 
-1. `index` tables of §3.8 with rebuild and incremental builders. *Exit:* rebuild ≡ incremental
+1. ~~`index` tables of §3.8 with rebuild and incremental builders. *Exit:* rebuild ≡ incremental
    (byte comparison of a table dump); deleting `index.redb` and rebuilding restores every derived
-   table; the operational `journal` is rebuilt by re-checking staged/stored units.
+   table; the operational `journal` is rebuilt by re-checking staged/stored units.~~ **Done
+   2026-10-10.** `crates/smysl-text/src/index/` — `mod.rs` (the `Table` enumeration, the `Index`
+   handle, the deterministic dump, the sidecar), `tables.rs` (six `rebuild`/`on_append` pairs)
+   and `journal.rs` (the seventh). Seven of §3.8's twelve tables are built and the other five
+   name the step that will build them, on the pattern `smysl_check::Pass` set. `text index`
+   reports them and `--rebuild` writes the sidecar; `text add`, `text append` and `text redact`
+   maintain it incrementally and persist it. `crates/smysl-text/tests/index.rs`, 13 tests.
+
+   **The exit's first clause caught two of the five shapes it had to.** `rebuild ≡ incremental`
+   over a grown library is necessary and **not sufficient**, which was measured rather than
+   reasoned about: each of the five table shapes was broken in turn and the suite rerun. A
+   rebuild walks the corpus in identity order and an append walks it in arrival order, so five
+   tables needed a shape that does not depend on which record was seen last — and the
+   whole-corpus comparison failed for only two of them.
+
+   | shape | caught by the whole-corpus comparison? |
+   |---|---|
+   | `by_part` mids inserted in order, not appended | yes |
+   | `manifests.head` unseated by a successor's arrival | yes |
+   | `segments` rows dropped when rule Z unlinks a reading | no — needs a redaction in the corpus |
+   | `locators` tables dropped for every manifest of a redacted part | no — same |
+   | `parts` holding a **set** of what each manifest records | no — needs two manifests that disagree about one part |
+
+   The three the comparison missed are each a corpus the fixture did not contain. The last is
+   the sharpest: every manifest a grown library here produces comes from `txt/1`, so every
+   shared part is recorded identically and a last-wins table agrees with a rebuild **by
+   accident**. Two readers over one part — same bytes, one tid, two readings — is the real case,
+   and it is reached by appending a manifest directly. So the clause names a gate that needs a
+   corpus chosen to defeat it, and the four cases are named in the test file rather than left to
+   the next person to rediscover.
+
+   **`on_append(&[Record])` cannot build three of the six tables.** `parts`, `segments` and
+   `locators` are built from records **15** and **18**, and OQ-39's answer is that a log never
+   holds one — they are in the object store, addressed by the identities a manifest records. A
+   builder handed only the appended records can keep `manifests`, `by_part` and `redactions`
+   current and has no way to reach the other three. The signature is `on_append(&Library,
+   &[Record])`: the records say what changed, the library is where the changed thing is read
+   from. §3.8's text is amended.
+
+   **`index.redb` is not here, and the reason is `rust-version`.** Cargo gives `rust-version`
+   per **package**, not per feature — the workspace manifest's own comment says so, which is why
+   `smysl-tui` and the facade declare 1.88 for every build and not only for the feature that
+   needs it. `redb` 4.3 requires 1.90, and `smysl-text` is a base-tier crate at 1.85 that
+   `smysl-check` and the facade depend on. Adding the dependency here would move the floor for
+   every build of the substrate to buy a backing nobody had turned on, which is a cost §3.8 did
+   not weigh because it was written before the MSRV tiers were measured (OQ-40, closed 1.10.0).
+   What this step owes is the tables, the builders and the gate; where the bytes rest is a
+   backing decision, and the right place for it is a crate of its own. **Recorded as owed**, and
+   §3.8's own sentence — "the same queries run against in-memory maps rebuilt on open, slower,
+   same answers" — is the licence to take it separately.
+
+   The sidecar is a third option §3.8 did not have: `index/substrate.idx`, in the directory §4.1
+   reserves, written deterministically and checked against the catalog's length and hash on open,
+   exactly as `smysl_graph::store::index` has done since SM-P3. It makes the featureless path
+   cost **one** rebuild rather than one per open, which is strictly better than the path §3.8
+   described. A sidecar that is stale, truncated, from another version or not an index at all is
+   a rebuild and never a refusal: a derived cache that can stop a library opening is worse than
+   no cache.
+
+   **The journal's clause splits, and only half of it is recoverable.** "Rebuilt by re-checking
+   staged/stored units" is two claims. *Coverage* — which units came out of which part, at what
+   status — is recomputable from the units alone and is recomputed; this is what makes a lost
+   journal survivable, since the corpus can still say what was ingested, which is the question a
+   resume asks. *Cost* — the per-language retry rate and the token figures TX-P5 step 5 wants a
+   report of — is written by the ingest that spends it and no amount of re-checking recovers a
+   number nobody recorded. There is no writer in this build, so there is nothing to recover and
+   nothing to pretend about. The **staged** half is the same story from the other end: today's
+   staging is `.smysl/staged.smy` under a *project* root, and the per-shard
+   `<library>/stage/<shard>/staged.smy` of §3.9 arrives with TX-P5. A scanner written here would
+   be a reader for a file no writer in this build produces — the shape of mistake TX-P2 step 4
+   removed when it deleted `by_mid` for having no source of values.
+
+   **Rule Z's ordering makes the incremental builder deaf**, and that is the one place the two
+   builders learn of a change differently. `redact` appends record 19 **before** it unlinks the
+   objects, deliberately, so that a process killed between the two is repairable on the next open
+   — which means the incremental builder runs while the objects are still readable and cannot
+   learn of the loss by failing to read one. It has to be told by the record, in two arms.
+
+   **An index may be partial and is never half-trusted.** A rebuild reads objects, and an object
+   is missing for a redacted part and unreadable for a corrupt one; neither may fail an open. So
+   the rebuild is lenient and completeness is tracked **per manifest**: a mid has a locator table
+   only when every one of its parts resolved into it, and `resolve` falls back to the search for
+   a mid that is not there. The rule that forces this is that the index must not change an
+   answer — a redacted part makes the search *refuse*, and a locator table with the redacted
+   addresses quietly removed would answer `Ok(None)` where the library refuses. Half-built and
+   complete cannot be told apart at lookup time, so the distinction has to be made per manifest
+   or not at all.
+
+   **`store::library::part_of` is `pub(super)` and `Store::part_of_reference` is public.** The
+   journal's two builders both have to answer "does this source name a part", and the answer's
+   whole content is that it parses the canonical 52-character form and nothing shorter. A second
+   copy would be a second place that rule could be relaxed by accident.
+
+   **The three ports gain nothing, and that is the correct answer rather than a gap.** Every
+   TX-P1 and TX-P2 step ended with a port change, because each added something to the *wire*:
+   a record type, an identity, a surface form. An index is derived, never travels in a bundle,
+   and is addressed by nothing — so D-8's C-Read obligation does not reach it. A second
+   implementation that wanted one would build its own; a second implementation that wanted to
+   read a corpus needs none, which is the same reason a stale sidecar is a rebuild and not a
+   refusal. The one thing the index touches that a port could see is `Store::part_of_reference`,
+   and that is a parse the ports already perform.
+
+   **Opening a library stays cheap, which §3.8 did not ask for and would have cost.** "The same
+   queries run against in-memory maps rebuilt on open" is affordable for the five tables derived
+   from the catalog — arithmetic over a log the open has already parsed — and not for the two
+   derived from the object store, which cost one object read and one structure tree **per part**.
+   At the measured 1 KiB part minimum (GE-T14) a single Bible is thousands of parts, so an
+   unconditional rebuild would put tens of thousands of reads in front of `text ls`, which wants
+   none of them. So an open builds the five and leaves the two; `text index --rebuild` and the
+   three writing commands — which hold the locks and are already paying for I/O — build all
+   seven. The split is a field in the dump rather than an assumption: a partial index reports its
+   two object tables as *not built for this library* instead of as empty, answers no locator
+   question, and refuses to be persisted, because a half-built sidecar would load as current on
+   the next open and the catalog's hash would agree.
 2. `Analyze`/`Postings` seams; persistent postings per partition; `find --lang --analyzer`.
    *Exit:* `find` p95 < 200 ms at 155k units (13 s today, F-10) on the Appendix E corpus;
    results identical to the in-memory path.

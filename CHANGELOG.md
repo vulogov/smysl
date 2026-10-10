@@ -58,6 +58,85 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### An exit clause that caught two of the five things it had to
+
+**TX-P4 step 1, the substrate index.** §3.8's tables, with a `rebuild(&Library)` and an
+`on_append` for each of the seven this build fills, a deterministic dump so the two can be
+compared byte for byte, and a sidecar so opening a library costs a rebuild once rather than
+every time. `text index` reports every table; `--rebuild` writes the file; `text add`,
+`text append` and `text redact` maintain it as they go. `Library::resolve` now consults the
+`locators` table, which is what its own comment had been asking for — "searching rather than
+indexing is what keeps this correct while `text ls` is the only index there is".
+
+**The exit's gate is necessary and not sufficient, and that was measured rather than argued.**
+"Rebuild ≡ incremental (byte comparison of a table dump)" is the clause. A rebuild walks the
+corpus in identity order and an append walks it in arrival order, so five tables needed a shape
+that does not depend on which record arrived last. Each of the five was then broken on purpose
+and the suite rerun. The whole-corpus comparison caught **two**: mids appended to `by_part`
+instead of inserted in order, and a `head` flag not unseated when a successor arrives. The other
+three each need a corpus chosen to produce the disagreement — two of them a redaction, and the
+third two manifests that record one part *differently*. That last one is the sharpest: every
+manifest a test library grows here comes from one reader, so every shared part is recorded
+identically and a last-wins table agrees with a rebuild **by accident**. Two readers over one
+part — the same bytes, one tid, two readings — is the real case, and until it was in the suite
+the gate was passing on a corpus that could not fail it.
+
+**One table shape in §3.8 cannot be built as specified.** `fn on_append(&[Record])` is the
+plan's signature, and `parts`, `segments` and `locators` are built from records **15** and
+**18** — which a log never holds, because OQ-39's answer is that a catalog refuses one
+(`SMY-E452`). A builder handed only the appended records can keep three tables current and
+cannot reach the other three. It takes the library too: the records say what changed, the
+library is where the changed thing is read from.
+
+**`index.redb` is owed, and the reason is MSRV rather than effort.** The plan puts the tables
+behind feature `substrate-redb`. `redb` 4.3 requires Rust 1.90; Cargo gives `rust-version` per
+**package** and not per feature — the workspace manifest says so in a comment, which is why
+`smysl-tui` declares 1.88 for every build; and `smysl-text` is a base-tier crate at 1.85 that
+`smysl-check` and the facade depend on. The feature as written would move the floor for every
+build of the substrate to buy a backing nobody had turned on. What the step owed is the tables,
+the builders and the gate, and those are here; where the bytes rest is a separate decision, now
+recorded as owed instead of smuggled in behind a flag.
+
+**The journal's clause splits, and only half of it is recoverable.** "The operational `journal`
+is rebuilt by re-checking staged/stored units" turns out to be two claims. *Coverage* — which
+units came out of which part, at what status — is recomputable from the units alone and is
+recomputed, which is what makes a lost journal survivable: the corpus can still answer the
+question a resume asks. *Cost* — the per-language retry rate and the token figures TX-P5's exit
+wants a report of — is written by the ingest that spends it, and no amount of re-checking
+recovers a number nobody recorded. There is no writer for it in this build, so there is nothing
+to recover and nothing to pretend about.
+
+**An index may be partial and is never half-trusted.** A rebuild reads objects; an object is
+missing for a redacted part and unreadable for a corrupt one; and a derived cache that can stop
+a library opening is worse than no cache. So the rebuild is lenient and completeness is tracked
+*per manifest* — a manifest has a locator table only when every one of its parts resolved, and
+`resolve` falls back to the search for one that does not. The rule behind it is that the index
+must not change an answer: a redacted part makes the search **refuse**, and a locator table with
+the redacted addresses quietly dropped would have answered "nothing is there" where the library
+refuses outright.
+
+**Rule Z's deliberate ordering makes the incremental builder deaf.** `redact` appends record 19
+*before* it unlinks the objects, so that a process killed between the two is repairable on the
+next open. Which means the incremental builder runs while the objects are still readable and
+cannot learn of the loss by failing to read one. It has to be told by the record — and both
+tables that read objects now are.
+
+**Opening a library did not get slower, which took a second design.** "Rebuilt on open" is
+affordable for the five tables derived from the catalogue and not for the two derived from the
+object store: those cost an object read and a structure tree *per part*, and at the 1 KiB part
+minimum GE-T14 settled on, one Bible is thousands of parts. An unconditional rebuild would have
+put tens of thousands of reads in front of `text ls`. So an open builds the five, and
+`text index --rebuild` and the three writing commands — which hold the locks and are already
+paying for I/O — build all seven. A partial index says which two it skipped, answers no locator
+question, and refuses to be saved: a half-built sidecar would load as current next time, because
+the catalogue's hash would agree with it.
+
+**The three ports gain nothing from this step, which is the right answer rather than a gap.**
+Every TX-P1 and TX-P2 step ended in a port change, because each added something to the *wire* —
+a record type, an identity, a surface form. An index is derived, never travels in a bundle, and
+is addressed by nothing, so D-8's obligation on a second implementation does not reach it. That
+is the same fact as a stale sidecar being a rebuild rather than a refusal.
+
 ### A gate that finds nothing, after four steps that each found something
 
 **TX-P3 step 5, and the phase exit.** **GE-T13** ran. Three of its four clauses are met and the

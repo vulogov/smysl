@@ -151,7 +151,7 @@ discussion; OQ-7, OQ-23, OQ-35 and OQ-49 stay open with them.
 | TX-P1 **complete** | 2.4 | parts, readings, manifests, object store, first readers, structure, locators; `admission` opened (2.3 A-8.1) | met but for the corpus: the three ports derive every identity in the wire fixture and agree. GE-T1's five Bibles and JSON series are material this repository does not hold, and the debt is recorded at §5.5 rather than counted as passed | TX-P0, G0 **passed**; F-2 **done** (§1.1) |
 | TX-P2 **complete** | 2.4 | segmenter, analyzers, `lingua`, chat readers, `text append`, redaction (rule Z), **and the class core** (`strict`, `component`, `attested:n`) moved here from TX-P7 so TX-P5's consensus output can be read | met: GE-T1's chat half is pinned in `fixtures/library/readers/` and recomputed by all three ports, rule Z's algebra survives a stale peer by property, the strict class counts agree with an independent Python reading of A-12.4, and **GE-T14 ran** — the part minimum moved from 64 KiB to 1 KiB on the measured curve. Owed: the per-language boundary gold set | TX-P1 |
 | TX-P3 **complete** | 2.4 | EDTF, `published`, datings, rule E engine, locks, `date` commands | GE-T13 ran; 3 clauses of 4 met, a chronology owed | TX-P2 |
-| TX-P4 | 2.4 | substrate index, persistent postings, `text` commands | `find` p95 < 200 ms at 155k units | TX-P3 |
+| TX-P4 **under way** | 2.4 | substrate index, persistent postings, `text` commands | `find` p95 < 200 ms at 155k units. Step 1 done: seven of §3.8's twelve tables, both builders, `text index`, and the byte-comparison gate — which caught two of the five shapes it had to, measured by breaking each in turn. The redb backing is **owed** and the reason is MSRV, not effort (2.4 §6) | TX-P3 |
 | TX-P5 | 2.4 | ingest over texts, owned-range spans, ledger digest, journal, FC-1/FC-3, entities without span, **consensus extraction** and **structural holder/mode** | G1, plus the probe-set gate and GE-T2 rerun the pivot adds (2.4 §6) | TX-P4, TX-P2's class core |
 | TX-P6 | 2.5 | `sq` core (pure) | `--seed-check` on every pure query | TX-P5 |
 | TX-P7 | 2.4 | same-as engines, linker, summary tree (`strict` classes moved to TX-P2) | GE-T5 **under the α-relative threshold** (2.4 §5.5), GE-T11 | TX-P5 |
@@ -473,12 +473,12 @@ Coding speed cannot compress those.
    `scripts/verify-spec-tables.py` for each (A-14). A fold is not complete until that gate covers
    its tables.
 
-**Where the work is:** **TX-P1 and TX-P2 are complete** (2.4 §6 records each step and its
-departures) and **TX-P3 is under way** — step 1 (`smysl-core`'s EDTF, `source.published`,
-record 17), step 2 (the time engine, rule E, the copy and omission rules), step 3 (the
-`Time` check pass), step 4 (`date set/order/show --why`, and §19.2's scenario) and step 5
-(**GE-T13**) are all done, with `P-E1`–`P-E8` green and the diagnostic registry at 78 — so
-**TX-P1, TX-P2 and TX-P3 are complete** and TX-P4 is unblocked. Step 4 found four defects in
+**Where the work is:** **TX-P1, TX-P2 and TX-P3 are complete** (2.4 §6 records each step and
+its departures) and **TX-P4 is under way**. TX-P3's step 1 (`smysl-core`'s EDTF,
+`source.published`, record 17), step 2 (the time engine, rule E, the copy and omission rules),
+step 3 (the `Time` check pass), step 4 (`date set/order/show --why`, and §19.2's scenario) and
+step 5 (**GE-T13**) are all done, with `P-E1`–`P-E8` green and the diagnostic registry at 78.
+Step 4 found four defects in
 what was already shipped and none in the command it added, which is recorded in 2.4 §6 and
 worth the summary here: a dating could not be written to a surface document at all, an
 unevidenced offset was moving a `measured` instant, a held dating named no contention to
@@ -486,6 +486,21 @@ resolve and `resolve` refused every derived id, and a `canonical` commitment cou
 dating by did. Step 5 found nothing, which is itself informative: the four steps before it
 were each the first caller of what the step before had built, and every defect was at that
 seam. GE-T13 drives the same `effective` two callers already drive, over different data.
+
+**TX-P4 step 1** is the substrate index: §3.8's tables, a `rebuild` and an `on_append` for each
+of the seven this build fills, and a deterministic dump so the two can be compared byte for
+byte. Three findings are worth the summary. The exit's own gate — rebuild ≡ incremental over a
+grown corpus — is *necessary and not sufficient*, which was measured by breaking each of the
+five order-dependent table shapes in turn: it caught two, and the other three each need a
+corpus chosen to produce the disagreement. `on_append(&[Record])` as §3.8 writes it cannot
+build three of the tables at all, because they are built from records 15 and 18 and OQ-39's
+answer is that a log never holds one. And `index.redb` is **owed rather than built**: `redb`
+4.3 needs Rust 1.90, Cargo gives `rust-version` per package and not per feature, and
+`smysl-text` is a base-tier crate at 1.85 that `smysl-check` and the facade depend on — so the
+feature as specified would move the floor for every build of the substrate to buy a backing
+nobody had turned on. The tables, the builders and the gate are what the step owed; a sidecar
+checked against the catalog's length and hash carries them, and costs one rebuild rather than
+one per open.
 
 TX-P3 adds one corpus item to the standing debt and no more: **a public chronology with known
 relative orders**, GE-T13's fourth clause. The harness takes one through

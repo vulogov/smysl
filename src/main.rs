@@ -387,10 +387,10 @@ fn cli() -> Command {
                     Arg::new("action")
                         .required(true)
                         .value_name("ACTION")
-                        .value_parser(["add", "append", "ls", "show", "redact"])
+                        .value_parser(["add", "append", "ls", "show", "redact", "index"])
                         .help(
                             "add a file, append a new version of one, list the catalog, \
-                             show a passage, or redact a part",
+                             show a passage, redact a part, or report and rebuild the index",
                         ),
                 )
                 .arg(
@@ -480,6 +480,12 @@ fn cli() -> Command {
                     Arg::new("forks")
                         .long("forks")
                         .help("List only the aliases with more than one head (`ls`)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("rebuild")
+                        .long("rebuild")
+                        .help("Rebuild the index from the catalog and write it (`index`)")
                         .action(ArgAction::SetTrue),
                 )
                 .arg(
@@ -6247,9 +6253,10 @@ fn cmd_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "ls" => text_ls(m, &root),
         "show" => text_show(m, &root),
         "redact" => text_redact(m, &root),
+        "index" => text_index(m, &root),
         other => {
             eprintln!(
-                "smysl text: `{other}` is not an action; it is add, append, ls, show or redact"
+                "smysl text: `{other}` is not an action; it is add, append, ls, show, redact or index"
             );
             ExitCode::Usage
         }
@@ -6372,6 +6379,11 @@ fn text_add(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
         }
     };
 
+    // Under the lock, and before the append: a library this release has not indexed yet gets
+    // its two object-derived tables built once, here, by the command that is already paying
+    // for I/O - rather than by every later `text ls`. See `Library::complete_index`.
+    library.complete_index();
+
     match library.add(&Input::new(&bytes), &spec, &Caps::DEFAULT) {
         Ok(added) => {
             println!("manifest  {}", added.mid.canonical());
@@ -6383,6 +6395,7 @@ fn text_add(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
                 println!("  part {i}  {}", tid.canonical());
             }
             println!("objects   {} written", added.objects_written);
+            persist_index(&library, "text add");
             // Rule Z. Said out loud because `objects 0 written` otherwise reads as "already
             // there", and the two are opposite facts: one means the library holds the text, the
             // other that it is forbidden to.
@@ -6500,6 +6513,11 @@ fn text_append(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
         }
     };
 
+    // Under the lock, and before the append: a library this release has not indexed yet gets
+    // its two object-derived tables built once, here, by the command that is already paying
+    // for I/O - rather than by every later `text ls`. See `Library::complete_index`.
+    library.complete_index();
+
     match library.append(&Input::new(&bytes), alias, key.as_ref(), &Caps::DEFAULT) {
         Ok(added) => match added.supersedes {
             Some(previous) => {
@@ -6515,6 +6533,7 @@ fn text_append(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
                 // says how much of the corpus this append touched, and the answer for a growing
                 // text is "one part" however long the text is.
                 println!("objects   {} written", added.objects_written);
+                persist_index(&library, "text append");
                 if added.objects_redacted > 0 {
                     println!(
                         "redacted  {} object(s) withheld: this text holds a part somebody \
@@ -6618,6 +6637,11 @@ fn text_redact(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
         }
     };
 
+    // Under the lock, and before the append: a library this release has not indexed yet gets
+    // its two object-derived tables built once, here, by the command that is already paying
+    // for I/O - rather than by every later `text ls`. See `Library::complete_index`.
+    library.complete_index();
+
     let at = record_time(m);
     let ts = smysl::Hlc::new(at, 0, agent.clone());
     match library.redact(&tid, &agent, ts, reason) {
@@ -6626,6 +6650,7 @@ fn text_redact(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
             println!("agent     {agent}");
             println!("objects   {} unlinked", done.objects_removed);
             println!("manifests {} still name this part", done.manifests);
+            persist_index(&library, "text redact");
             if done.already {
                 println!("already   this part was redacted before this call");
             }
@@ -6636,6 +6661,83 @@ fn text_redact(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
             e.code_exit()
         }
     }
+}
+
+/// Persist the substrate index after a command that grew the library.
+///
+/// A warning and never a failure. The operation the operator asked for has already succeeded —
+/// the manifest is in the catalog and the objects are on disk — and the index is derived, so a
+/// library whose sidecar could not be written is a library that rebuilds on its next open. The
+/// warning is still worth printing: a corpus that pays a rebuild every time is usually a
+/// directory somebody has made read-only, and that is a fact about the deployment rather than
+/// about the corpus.
+#[cfg(feature = "text")]
+fn persist_index(library: &smysl::text::library::Library, cmd: &str) {
+    if let Err(e) = library.write_index() {
+        eprintln!("smysl {cmd}: the index was not written ({e}); it will be rebuilt on open");
+    }
+}
+
+/// `text index` - what the substrate index holds, and `--rebuild` to write it (TX-P4 step 1).
+///
+/// Reporting and rebuilding in one action rather than two, because the report is what tells an
+/// operator whether a rebuild is worth asking for. A table this build does not fill prints
+/// `not built` and the step that will fill it, which is the distinction `Index::rows` returns
+/// `None` for: an empty table and a table nobody wrote are different sentences, and the
+/// difference matters most to someone reading `postings 0` and concluding their corpus is
+/// unsearchable.
+#[cfg(feature = "text")]
+fn text_index(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
+    use smysl::text::index::Table;
+    use smysl::text::library::Library;
+
+    let mut library = match Library::open(root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl text index: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+
+    if m.get_flag("rebuild") {
+        // A library-wide operation, so it takes the library lock and then the shard locks in
+        // name order, as §3.9 requires of every one of them. Writing the sidecar without the
+        // lock would race a concurrent `text add` that is maintaining the same file.
+        let shards = library.shards();
+        let _locks = match smysl::text::lock::acquire_all(root, &shards, "text index") {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("smysl text index: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        library.reindex();
+        if let Err(e) = library.write_index() {
+            eprintln!("smysl text index: {e}");
+            return ExitCode::Failure;
+        }
+        println!("rebuilt   {}", smysl::text::index::SIDECAR);
+    }
+
+    for table in Table::ALL {
+        match library.index().rows(*table) {
+            Some(n) => println!("{:<11} {n} row(s)", table.as_str()),
+            // Two different reasons for the same `None`, and they are not the same news. A
+            // table this build has no builder for is a phase step away; a table this *library*
+            // has not had built is one `--rebuild` away, and saying "TX-P4 step 1" about it
+            // would read as a release that has not shipped.
+            None if table.is_built() => println!(
+                "{:<11} not built for this library; `text index --rebuild` builds it",
+                table.as_str()
+            ),
+            None => println!(
+                "{:<11} not built; TX-P4 step {}",
+                table.as_str(),
+                table.step()
+            ),
+        }
+    }
+    ExitCode::Success
 }
 
 #[cfg(feature = "text")]
