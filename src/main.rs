@@ -151,6 +151,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "reindex",   about: "Rebuild the derived index from the log alone",        purity: Purity::Pure,  phase: "SM-P3"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "ui",        about: "Terminal UI",                                         purity: Purity::Pure,  phase: "SM-P15" , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "text",      about: "Library: add, append, list and show texts",           purity: Purity::Pure,  phase: "TX-P1"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "date",      about: "Write datings; show effective time and why",          purity: Purity::Pure,  phase: "TX-P3"  , impure_when: None , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -493,6 +494,100 @@ fn cli() -> Command {
                         .help("Print the segments the passage covers (`show`)")
                         .action(ArgAction::SetTrue),
                 ),
+            "date" => sub
+                .arg(
+                    Arg::new("action")
+                        .required(true)
+                        .value_name("ACTION")
+                        .value_parser(["set", "order", "show"])
+                        .help(
+                            "write a dating, order two subjects (sugar for a relative \
+                             `set`), or print effective time",
+                        ),
+                )
+                .arg(
+                    // `TARGET` and not `UID|TID|MID`: `make cli-surface` records a positional
+                    // by matching `[A-Z.]+` inside brackets, so a value name with a `|` in it
+                    // is recorded as nothing and the gate goes blind to the argument. The same
+                    // trap `text`'s positional carries a comment about.
+                    Arg::new("target")
+                        .required(true)
+                        .value_name("TARGET")
+                        .help("A unit (uid or label), a part (`t3:`) or a manifest (`m3:`)"),
+                )
+                .arg(
+                    // `date order <a> before <b>` is three positionals, and the middle one is
+                    // the relation rather than a fixed word. Allen's seven spellings all read
+                    // as English here, and restricting the sugar to `before` would mean
+                    // `--value during:<b>` were the only way to say the commonest of the other
+                    // six.
+                    Arg::new("relation")
+                        .value_name("RELATION")
+                        .value_parser(smysl::Allen::ALL.iter().map(|a| a.as_str()).collect::<Vec<_>>())
+                        .help("Allen relation, for `order`"),
+                )
+                .arg(
+                    Arg::new("other")
+                        .value_name("OTHER")
+                        .help("The second subject, for `order`"),
+                )
+                .arg(
+                    Arg::new("axis")
+                        .long("axis")
+                        .value_name("A")
+                        .value_parser(["said", "composed", "about"])
+                        .default_value("said")
+                        .help("Which of a unit's times this is about"),
+                )
+                .arg(
+                    Arg::new("value")
+                        .long("value")
+                        .value_name("V")
+                        .help(
+                            "An EDTF date, `offset:MS`, or `<allen>:<target>` (`set`)",
+                        ),
+                )
+                .arg(
+                    // The surface form spells a window as `window: [from, to]` beside the
+                    // tid, so the flag does too rather than inventing a `<tid>@a..b`
+                    // compound. One spelling per thing, in the document and on the
+                    // command line.
+                    Arg::new("window")
+                        .long("window")
+                        .value_name("FROM..TO")
+                        .help("Narrow a part target to the units in a millisecond range"),
+                )
+                .arg(
+                    Arg::new("basis")
+                        .long("basis")
+                        .value_name("UID")
+                        .help("The unit giving the evidence; its status is the dating's"),
+                )
+                .arg(
+                    Arg::new("as")
+                        .long("as")
+                        .value_name("AGENT")
+                        .help("The agent issuing the dating (`set`, `order`)"),
+                )
+                .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .value_name("MS")
+                        .help("Wall clock for the record, in milliseconds")
+                        .value_parser(clap::value_parser!(u64)),
+                )
+                .arg(
+                    Arg::new("why")
+                        .long("why")
+                        .help("Print the chain that set each bound (`show`)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .help("Report what would be written, and write nothing")
+                        .action(ArgAction::SetTrue),
+                ),
             "view" => sub
                 .arg(
                     Arg::new("roots")
@@ -624,7 +719,7 @@ fn cli() -> Command {
                     Arg::new("unit")
                         .required(true)
                         .value_name("UID")
-                        .help("The unit being committed to, by uid or label"),
+                        .help("The unit being committed to, by uid or label, or a dating by did"),
                 )
                 .arg(
                     Arg::new("level")
@@ -2872,6 +2967,14 @@ fn persist(
                 // A manifest usually has one (1.10); the predicate names the cases it does
                 // not, among them an alias the parser would not read back.
                 Record::Manifest(m) => smysl::surface::manifest_has_surface_form(m),
+                // A dating usually has one. `@date` has been in the grammar since TX-P3 step 1
+                // and this arm was missing, so `date set` on a surface document was refused by
+                // the one writer every record-writing command goes through — the predicate
+                // existed and nothing consulted it. The cases it still rules out are a
+                // dating whose `ts` names a different agent than its author, one carrying
+                // unknown keys, and one whose relative target is a window: the parser cannot
+                // read any of the three back.
+                Record::Dating(d) => smysl::surface::dating_has_surface_form(d),
                 _ => false,
             };
             if !expressible {
@@ -3087,11 +3190,27 @@ fn cmd_commit(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             return ExitCode::Failure;
         }
     };
-    let unit = match resolve(&store, m.get_one::<String>("unit").expect("required")) {
-        Ok(u) => u,
-        Err(e) => {
-            eprintln!("smysl commit: {e}");
-            return e.code;
+    let raw = m.get_one::<String>("unit").expect("required");
+    // A commitment may name a **dating** as well as a unit: A-6 gives key 0 either, and a
+    // `canonical` commitment on a dating is how rule E's liveness lock is written (A-12.2).
+    // The did's bytes are the key, which is what `held_by_lock` reads, so the spelling is all
+    // that was missing — and without it the lock had no way to be written at all, since
+    // `@commit` in a document takes a uid or a label (OQ-73).
+    let unit = if raw.starts_with(smysl::Did::PREFIX) {
+        match smysl::Did::parse(raw) {
+            Ok(d) => Uid::from_bytes(*d.as_bytes()),
+            Err(e) => {
+                eprintln!("smysl commit: `{raw}` is not a did: {e}");
+                return ExitCode::Usage;
+            }
+        }
+    } else {
+        match resolve(&store, raw) {
+            Ok(u) => u,
+            Err(e) => {
+                eprintln!("smysl commit: {e}");
+                return e.code;
+            }
         }
     };
     let level = smysl::Commitment::parse(m.get_one::<String>("level").expect("required"))
@@ -3338,6 +3457,48 @@ fn cmd_withdraw(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     ExitCode::Success
 }
 
+/// The contentions **rule E derives** over this store, searched by id.
+///
+/// Three sources, all of them kind 4 or kind 5 and none of them in the log: a dating a lock is
+/// holding, a live dating that moved no bound, and a set of records whose times cannot all be
+/// right. Searched over all three axes, because a dating bears on one axis and the caller named
+/// an id rather than an axis.
+///
+/// Returns the id itself and how it reads in a report, so the caller records the same bytes it
+/// matched rather than re-deriving them.
+#[cfg(feature = "text")]
+fn derived_time_contention(store: &Store, raw: &str) -> Option<(smysl::ContentionId, String)> {
+    use smysl::text::time::engine;
+    for axis in [smysl::Axis::Said, smysl::Axis::Composed, smysl::Axis::About] {
+        let e = engine::effective(store, axis);
+        for did in &e.held {
+            let Some(id) = store
+                .dating(did)
+                .and_then(|d| engine::hold_contention(did, d))
+            else {
+                continue;
+            };
+            if id.as_str() == raw {
+                let what = format!("{id}  dating not applied over {did} (held, {axis})");
+                return Some((id, what));
+            }
+        }
+        for c in e.not_applied.iter().chain(&e.inconsistent) {
+            if c.id.as_str() == raw {
+                let what = format!("{}  {} over {} ({axis})", c.id, c.kind, c.over);
+                return Some((c.id.clone(), what));
+            }
+        }
+    }
+    None
+}
+
+/// Without the time engine there are no derived contentions to find.
+#[cfg(not(feature = "text"))]
+fn derived_time_contention(_store: &Store, _raw: &str) -> Option<(smysl::ContentionId, String)> {
+    None
+}
+
 /// `smysl resolve` - record that a disagreement was reviewed (1.4).
 ///
 /// Decides nothing: the reviewer's conclusion is a retraction or a withdrawal, recorded by
@@ -3390,13 +3551,23 @@ fn cmd_resolve(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 ),
                 _ => unreachable!("matched a contention"),
             },
-            None => {
-                eprintln!(
-                    "smysl resolve: no contention `{raw}` is open or resolved in this store; \
-                     `smysl review --all` lists them"
-                );
-                return ExitCode::Failure;
-            }
+            None => match derived_time_contention(&store, raw) {
+                // Rule E's contentions are **derived and never written** (A-8.2), so no amount
+                // of `review` will list one and the recorded lookup above cannot find it. A
+                // resolution naming one is nevertheless the documented way to release a held
+                // dating (A-12.2), which made that release unreachable through this command
+                // until the fallback existed. It is a second lookup and not a loosened guard:
+                // the id has to be one rule E derives over *this* store right now.
+                Some((id, what)) => (smysl::ResolutionTarget::Contention(id), what),
+                None => {
+                    eprintln!(
+                        "smysl resolve: no contention `{raw}` is open or resolved in this store, \
+                         and rule E derives none with that id; `smysl review --all` lists the \
+                         recorded ones and `smysl check --pass time` reports the derived ones"
+                    );
+                    return ExitCode::Failure;
+                }
+            },
         }
     } else {
         let edge = match resolve_edge(&store, raw) {
@@ -5976,6 +6147,7 @@ fn main() -> ProcExitCode {
         "compact" => cmd_compact(sub, &matches),
         "ui" => cmd_ui(sub, &matches),
         "text" => cmd_text(sub, &matches),
+        "date" => cmd_date(sub, &matches),
         _ => {
             // Unreachable while every command in `COMMANDS` has an arm above, which
             // `command_table_matches_section_23` enforces. Kept as the honest answer if one
@@ -6604,6 +6776,443 @@ fn cmd_text(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
     ExitCode::Usage
 }
 
+// ---------------------------------------------------------------------------
+// `date` (RFC SMYSL-2.4 §4.4, TX-P3 step 4)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "text")]
+fn cmd_date(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    match m.get_one::<String>("action").expect("required").as_str() {
+        "set" => date_set(m, global),
+        "order" => date_order(m, global),
+        "show" => date_show(m, global),
+        other => {
+            eprintln!("smysl date: unknown action `{other}`");
+            ExitCode::Usage
+        }
+    }
+}
+
+/// A millisecond range, spelled as the surface form spells it.
+#[cfg(feature = "text")]
+fn parse_window(raw: &str) -> Result<(u64, u64), String> {
+    let Some((a, b)) = raw.split_once("..") else {
+        return Err(format!("`{raw}` is not a range; write `FROM..TO`"));
+    };
+    // `u64`, because a window is matched against a unit's `observed` and that is a `u64`
+    // millisecond clock. An offset is signed and a window is not: one is a correction, the
+    // other a span of the record's own time.
+    let from: u64 = a
+        .trim()
+        .parse()
+        .map_err(|_| format!("`{a}` is not a millisecond instant"))?;
+    let to: u64 = b
+        .trim()
+        .parse()
+        .map_err(|_| format!("`{b}` is not a millisecond instant"))?;
+    // Refused here rather than written and warned about later. `DatingTarget::selects_anything`
+    // exists because the *format* cannot refuse an empty window — a record has to leave again
+    // as it arrived — but a person typing one has made a mistake, and `SMY-W412` three commands
+    // later is a worse answer than a message now.
+    if from >= to {
+        return Err(format!(
+            "`{raw}` selects nothing: {from} is not before {to}"
+        ));
+    }
+    Ok((from, to))
+}
+
+/// A target, in the three spellings a dating's target has.
+#[cfg(feature = "text")]
+fn date_target(
+    store: &Store,
+    raw: &str,
+    window: Option<&String>,
+) -> Result<smysl::DatingTarget, Unresolved> {
+    use smysl::{DatingTarget, Mid, Tid};
+    let usage = |message: String| Unresolved {
+        code: ExitCode::Usage,
+        message,
+    };
+    let range = match window {
+        Some(w) => Some(parse_window(w).map_err(usage)?),
+        None => None,
+    };
+    if raw.starts_with(Tid::PREFIX) {
+        let tid = Tid::parse(raw).map_err(|e| usage(format!("`{raw}` is not a tid: {e}")))?;
+        return Ok(match range {
+            Some((from_ms, to_ms)) => DatingTarget::Window {
+                tid,
+                from_ms,
+                to_ms,
+            },
+            None => DatingTarget::Part(tid),
+        });
+    }
+    if raw.starts_with(Mid::PREFIX) {
+        if range.is_some() {
+            return Err(usage(
+                "--window narrows a part; a manifest is already the units of its parts".into(),
+            ));
+        }
+        let mid = Mid::parse(raw).map_err(|e| usage(format!("`{raw}` is not a mid: {e}")))?;
+        return Ok(DatingTarget::Manifest(mid));
+    }
+    if range.is_some() {
+        return Err(usage(
+            "--window narrows a part target; a unit is one subject".into(),
+        ));
+    }
+    Ok(DatingTarget::Unit(resolve(store, raw)?))
+}
+
+/// `--value`: an EDTF date, an offset, or a relation to another target.
+///
+/// The three are told apart by an exact prefix and never by "contains a colon": an EDTF
+/// date-time carries two of them (`1984-01-01T12:30:00Z`), so a looser test would read a
+/// perfectly good absolute value as a malformed offset.
+#[cfg(feature = "text")]
+fn date_value(store: &Store, raw: &str) -> Result<smysl::DatingValue, Unresolved> {
+    use smysl::{Allen, DatingValue};
+    let usage = |message: String| Unresolved {
+        code: ExitCode::Usage,
+        message,
+    };
+    if let Some(ms) = raw.strip_prefix("offset:") {
+        let ms: i64 = ms
+            .trim()
+            .parse()
+            .map_err(|_| usage(format!("`{ms}` is not a millisecond offset")))?;
+        return Ok(DatingValue::Offset(ms));
+    }
+    for allen in Allen::ALL.iter().copied() {
+        let prefix = format!("{}:", allen.as_str());
+        if let Some(rest) = raw.strip_prefix(&prefix) {
+            let target = date_target(store, rest.trim(), None)?;
+            return Ok(DatingValue::Relative { allen, target });
+        }
+    }
+    // `SMY-E410` at the writing end, which is what makes the check pass's own fixture for it a
+    // Rust test: no document and no command can put a malformed value into a store.
+    if !smysl::edtf::is_valid(raw) {
+        return Err(Unresolved {
+            code: ExitCode::Failure,
+            message: format!(
+                "`{raw}` is not an EDTF level-0 or level-1 value ({})",
+                Code::E410
+            ),
+        });
+    }
+    Ok(DatingValue::Absolute(raw.to_string()))
+}
+
+#[cfg(feature = "text")]
+fn axis_of(m: &ArgMatches) -> smysl::Axis {
+    match m.get_one::<String>("axis").expect("has a default").as_str() {
+        "composed" => smysl::Axis::Composed,
+        "about" => smysl::Axis::About,
+        _ => smysl::Axis::Said,
+    }
+}
+
+#[cfg(feature = "text")]
+fn date_set(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let Some(value) = m.get_one::<String>("value") else {
+        eprintln!("smysl date set: --value is required");
+        return ExitCode::Usage;
+    };
+    write_dating(m, global, "set", |store| date_value(store, value))
+}
+
+#[cfg(feature = "text")]
+fn date_order(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    if m.get_one::<String>("value").is_some() {
+        eprintln!("smysl date order: --value is what `order` writes for you");
+        return ExitCode::Usage;
+    }
+    let (Some(relation), Some(other)) = (
+        m.get_one::<String>("relation"),
+        m.get_one::<String>("other"),
+    ) else {
+        eprintln!("smysl date order: write `date order <a> before <b>`");
+        return ExitCode::Usage;
+    };
+    let allen = smysl::Allen::ALL
+        .iter()
+        .copied()
+        .find(|a| a.as_str() == relation)
+        .expect("clap restricts the values");
+    write_dating(m, global, "order", |store| {
+        // The second subject takes no `--window`: one flag cannot narrow two targets, and
+        // `date set <a> --value during:<tid>` is there for the case that wants it.
+        let target = date_target(store, other, None)?;
+        Ok(smysl::DatingValue::Relative { allen, target })
+    })
+}
+
+/// What `set` and `order` share: resolve, build record 17, append, report.
+#[cfg(feature = "text")]
+fn write_dating(
+    m: &ArgMatches,
+    global: &ArgMatches,
+    action: &str,
+    value: impl FnOnce(&Store) -> Result<smysl::DatingValue, Unresolved>,
+) -> ExitCode {
+    let path = match store_path(m, global, "date") {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+    warn_output_is_a_report(global, "date");
+    let (store, labels) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl date {action}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let raw = m.get_one::<String>("target").expect("required");
+    let target = match date_target(&store, raw, m.get_one::<String>("window")) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("smysl date {action}: {e}");
+            return e.code;
+        }
+    };
+    let value = match value(&store) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl date {action}: {e}");
+            return e.code;
+        }
+    };
+    let Some(agent) = m.get_one::<String>("as") else {
+        eprintln!("smysl date {action}: --as is required; a dating records who dated it");
+        return ExitCode::Usage;
+    };
+    let agent = match AgentId::new(agent) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl date {action}: --as: {e}");
+            return ExitCode::Usage;
+        }
+    };
+    let basis = match m.get_one::<String>("basis").map(|r| resolve(&store, r)) {
+        None => None,
+        Some(Ok(u)) => Some(u),
+        Some(Err(e)) => {
+            eprintln!("smysl date {action}: --basis: {e}");
+            return e.code;
+        }
+    };
+
+    let at = record_time(m);
+    let axis = axis_of(m);
+    let mut dating = smysl::Dating::new(
+        target.clone(),
+        axis,
+        value,
+        agent.clone(),
+        Hlc::new(at, 0, agent),
+    );
+    if let Some(u) = basis {
+        dating = dating.with_basis(u);
+    }
+    let did = dating.did();
+    let known = store.dating(&did).is_some();
+    let dry = m.get_flag("dry-run");
+    // A did is the hash of the dating, so re-running the same command names the record already
+    // there. Saying so beats appending a byte-identical second one, which the log would carry
+    // and which would answer the same.
+    let apply = !dry && !known;
+    if apply {
+        let records = vec![Record::Dating(dating)];
+        if let Err(e) = persist(&path, &records, &store, &labels) {
+            eprintln!("smysl date {action}: {e}");
+            return ExitCode::Failure;
+        }
+    }
+
+    // What the dating selects *now*, which is the number a person wants back: a window over a
+    // part with no units in range is accepted by the format and dates nothing, and that is
+    // worth hearing at the moment of writing rather than from `check` afterwards.
+    let selects = smysl::text::time::engine::subjects(&store, &target).len();
+    if global.get_flag("json") {
+        println!(
+            "{{\"did\":{},\"axis\":{},\"selects\":{},\"applied\":{},\"known\":{}}}",
+            smysl::json_escape(&did.canonical()),
+            smysl::json_escape(axis.as_str()),
+            selects,
+            apply,
+            known
+        );
+    } else {
+        println!("{path}: {} {axis}  {did}", target_label(&target, &labels));
+        println!("{path}:   selects {selects} subject(s)");
+        if known {
+            println!("{path}:   this dating is already recorded; nothing to do");
+        } else if dry {
+            println!("{path}:   --dry-run, so nothing was written");
+        }
+    }
+    ExitCode::Success
+}
+
+/// How a target reads in a report, with a label where the store has one.
+#[cfg(feature = "text")]
+fn target_label(
+    t: &smysl::DatingTarget,
+    labels: &std::collections::BTreeMap<smysl::Label, Uid>,
+) -> String {
+    use smysl::DatingTarget;
+    match t {
+        DatingTarget::Unit(u) => labels
+            .iter()
+            .find(|(_, x)| *x == u)
+            .map(|(l, _)| l.as_str().to_string())
+            .unwrap_or_else(|| u.short()),
+        DatingTarget::Part(tid) => tid.short(),
+        DatingTarget::Manifest(mid) => mid.short(),
+        DatingTarget::Window {
+            tid,
+            from_ms,
+            to_ms,
+        } => format!("{} [{from_ms}..{to_ms}]", tid.short()),
+        _ => "an unknown target kind".into(),
+    }
+}
+
+#[cfg(feature = "text")]
+fn date_show(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use smysl::text::time::engine;
+    let path = match store_path(m, global, "date") {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+    let (store, labels) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl date show: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let raw = m.get_one::<String>("target").expect("required");
+    let target = match date_target(&store, raw, m.get_one::<String>("window")) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("smysl date show: {e}");
+            return e.code;
+        }
+    };
+    let axis = axis_of(m);
+    let eff = engine::effective(&store, axis);
+    let subjects = engine::subjects(&store, &target);
+    let why = m.get_flag("why");
+
+    let name = |s: &smysl::text::time::Subject| match s {
+        smysl::text::time::Subject::Unit(u) => labels
+            .iter()
+            .find(|(_, x)| *x == u)
+            .map(|(l, _)| l.as_str().to_string())
+            .unwrap_or_else(|| u.short()),
+        smysl::text::time::Subject::Manifest(mid) => mid.short(),
+    };
+
+    if global.get_flag("json") {
+        let rows: Vec<String> = subjects
+            .iter()
+            .map(|s| {
+                let d = eff.of(s);
+                format!(
+                    "{{\"subject\":{},\"interval\":{},\"lo\":{},\"hi\":{},\"contested\":{},\"why\":[{}]}}",
+                    smysl::json_escape(&s.to_string()),
+                    smysl::json_escape(&eff.interval(s).to_string()),
+                    d.map(|d| smysl::json_escape(d.lo_status.as_str()))
+                        .unwrap_or_else(|| "null".into()),
+                    d.map(|d| smysl::json_escape(d.hi_status.as_str()))
+                        .unwrap_or_else(|| "null".into()),
+                    d.is_some_and(|d| d.contested),
+                    d.map(why_json).unwrap_or_default()
+                )
+            })
+            .collect();
+        println!(
+            "{{\"axis\":{},\"subjects\":[{}]}}",
+            smysl::json_escape(axis.as_str()),
+            rows.join(",")
+        );
+        return ExitCode::Success;
+    }
+
+    if subjects.is_empty() {
+        println!(
+            "{path}: {} names no subject in this store",
+            target_label(&target, &labels)
+        );
+        return ExitCode::Success;
+    }
+    println!("{path}: {axis}");
+    for s in &subjects {
+        let Some(d) = eff.of(s) else {
+            println!("  {}  undated", name(s));
+            continue;
+        };
+        let mark = if d.contested { "  contested" } else { "" };
+        println!(
+            "  {}  {}  lo {} / hi {}{mark}",
+            name(s),
+            d.interval,
+            d.lo_status,
+            d.hi_status
+        );
+        if why {
+            // Both ends, always, and labelled. The two differ often enough that printing one
+            // chain would be printing the wrong one half the time: a `measured` instant under
+            // a `cited` ceiling is an ordinary thing for a corpus to hold.
+            for (end, w) in [("lo", d.why_lo), ("hi", d.why_hi)] {
+                match w {
+                    Some(w) => {
+                        let via = match w.through {
+                            Some(t) => format!(" through {}", name(&t)),
+                            None => String::new(),
+                        };
+                        println!("    {end}: {} at {}{via}", w.cause, w.at);
+                    }
+                    None => println!("    {end}: nothing set this bound"),
+                }
+            }
+        }
+    }
+    ExitCode::Success
+}
+
+#[cfg(feature = "text")]
+fn why_json(d: &smysl::text::time::engine::Dated) -> String {
+    let one = |end: &str, w: Option<smysl::text::time::engine::Why>| {
+        w.map(|w| {
+            format!(
+                "{{\"end\":{},\"cause\":{},\"at\":{},\"through\":{}}}",
+                smysl::json_escape(end),
+                smysl::json_escape(&w.cause.to_string()),
+                smysl::json_escape(w.at.as_str()),
+                w.through
+                    .map(|t| smysl::json_escape(&t.to_string()))
+                    .unwrap_or_else(|| "null".into())
+            )
+        })
+    };
+    [one("lo", d.why_lo), one("hi", d.why_hi)]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+#[cfg(not(feature = "text"))]
+fn cmd_date(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl date: this build has no time engine (build with --features text)");
+    ExitCode::Usage
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6734,7 +7343,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 27);
+        assert_eq!(COMMANDS.len(), 28);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -6765,7 +7374,8 @@ mod tests {
                 "usage",
                 "reindex",
                 "ui",
-                "text"
+                "text",
+                "date"
             ]
         );
     }

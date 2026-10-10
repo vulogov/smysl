@@ -2254,7 +2254,50 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
    its 32 bytes as `b3:…`, which claims to be a uid. The round trip is byte-exact, so this is
    a legibility defect rather than a data one, and it is why the held-dating test builds its
    store rather than parsing a document. Recorded as **OQ-73**.
-4. `date set/order/show`, `--why`. *Exit:* §19.2 scenario (§5.2).
+4. ~~`date set/order/show`, `--why`. *Exit:* §19.2 scenario (§5.2).~~ **Done**, as the
+   twenty-eighth command, with `tests/cmd_date.rs` as the scenario and `date show` registered
+   with `xtask determinism`. The exit is met in full: a window-target dating with
+   `offset:-93000` and a `cited` basis re-times exactly the messages in the window, the
+   quotation-order `W413` disappears, **no uid moves** (asserted with `diff`, which answers
+   that question exactly), the same dating with no basis gives `W412` and is not applied, and
+   a `canonical` commitment on a dating holds a later one until a resolution names the derived
+   contention.
+
+   **Four defects found by running the scenario, none of them in the command the step added.**
+
+   - **`persist` had no arm for a dating**, so `date set` on a surface document was refused by
+     the one writer every record-writing command goes through. `@date` had been in the grammar
+     since step 1 and `dating_has_surface_form` existed to answer this exact question; nothing
+     called it. A predicate with no caller is not covered by the tests that cover the predicate.
+   - **An offset sat outside A-12.2's no-silent-override.** Step 2 applied one unconditionally
+     and took `min(dating status, seed status)`, so an unevidenced `offset:` shifted a
+     `measured` instant and relabelled it `speculative`. A-12.2 and §5.2 agree the move is not
+     made and is reported. Found because the test that appeared to cover it covered the
+     *absolute* path: its comment described an offset and its body built an absolute dating.
+   - **A held dating named no contention**, and `resolve` refused every derived id, so the
+     documented release path was unreachable for every rule-E contention. `engine::hold_contention`
+     is now public and the diagnostic prints the id; `resolve` consults the derived set when the
+     recorded lookup fails.
+   - **`commit` could not name a dating by did**, which is how A-12.2's lock is written (A-6
+     key 0). The did's bytes are the key `held_by_lock` already reads.
+
+   **One asymmetry decided.** A hold's contention is over the dating's **target**; an outranked
+   move's is over the **subject**. A hold is one fact about one dating however many subjects it
+   would have moved; an outranked move is one fact per subject, because a dating may outrank the
+   value over one unit and not another. Keying a hold by subject would make releasing a
+   part-target hold take one resolution per unit in the part.
+
+   **Two spellings the plan does not give.** A window is `--window FROM..TO` beside a tid
+   target, mirroring the surface form's `window: [from, to]` rather than inventing a
+   `<tid>@a..b` compound — one spelling per thing, in the document and on the command line. And
+   `date order` accepts all seven Allen words rather than only `before`, because `during` is the
+   commonest of the other six and restricting the sugar would have left `--value during:<b>` as
+   the only way to say it.
+
+   **`engine::subjects` is public** so the CLI expands a target exactly as the engine does. A
+   second implementation of "a part is the units drawn from it, a manifest is the units of its
+   parts, a window is the subset whose as-recorded instant falls inside it" would drift from
+   this one the first time a target kind gained a rule.
 5. *Exit for the phase:* **GE-T13**.
 
 ### TX-P4 — substrate index and retrieval

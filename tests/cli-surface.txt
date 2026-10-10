@@ -577,3 +577,32 @@ text       --seed-check
 text       --raw
 text       --segments
 text       --help
+date       <ACTION>
+date       [possible values: set, order, show]
+date       <TARGET>
+date       [RELATION]
+date       [possible values: before, after, meets, overlaps, during, contains, equals]
+date       [OTHER]
+date       --axis
+date       [possible values: said, composed, about]
+date       --config
+date       --store
+date       --value
+date       --output
+date       --window
+date       --basis
+date       --format
+date       [possible values: surface, cbor]
+date       --as
+date       --strict
+date       --at
+date       --offline
+date       --no-color
+date       --why
+date       --dry-run
+date       --noprogress
+date       --json
+date       --quiet
+date       --verbose
+date       --seed-check
+date       --help

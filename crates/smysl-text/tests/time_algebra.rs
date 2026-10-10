@@ -308,12 +308,15 @@ fn p_e5_detection() {
     }
 }
 
-/// P-E5's other half: a planted clock skew is reported when it cannot be applied.
+/// P-E5's other half: a weaker dating is reported when it cannot be applied.
 #[test]
-fn p_e5_a_skew_that_cannot_apply_is_reported() {
+fn p_e5_a_weaker_date_that_cannot_apply_is_reported() {
     // A unit whose instant is `measured` — an instrument put it there — and a `speculative`
-    // offset that would move it. The offset is live, it changes nothing, and that is exactly
-    // what `SMY-W412` exists to say.
+    // absolute dating that would narrow it. The dating is live, it changes nothing, and that is
+    // exactly what `SMY-W412` exists to say. The **offset** form of the same fault is
+    // `an_unevidenced_offset_cannot_move_a_measured_instant` below; this test's first version
+    // described the offset in its comment and tested the absolute, which is how the offset
+    // path came to sit outside A-12.2 unnoticed.
     let core = UnitCoreBuilder::new(
         KernelType::Evidence,
         "a measurement from an instrument, long enough to pass",
@@ -367,6 +370,64 @@ fn p_e5_a_skew_that_cannot_apply_is_reported() {
         d.interval,
         Interval::at(Instant(1_726_500_000_000)),
         "and the measured instant must be untouched"
+    );
+}
+
+/// The offset path, under the same rule as every other value.
+///
+/// Step 2 applied an offset unconditionally and took the weaker of the two statuses, so an
+/// unevidenced `--value offset:` shifted a `measured` instant and relabelled it `speculative`:
+/// one command erasing a measurement's standing. A-12.2's no-silent-override and §5.2's own
+/// scenario both say the move is not made and is reported, so it is.
+#[test]
+fn an_unevidenced_offset_cannot_move_a_measured_instant() {
+    let at: u64 = 1_726_500_000_000;
+    let core = UnitCoreBuilder::new(
+        KernelType::Evidence,
+        "a measurement from an instrument, long enough to pass admission",
+        Status::Measured,
+    )
+    .source(SourceRef::new(SourceKind::Metric, "pool.wait_ms").observed_at(at))
+    .build()
+    .expect("a unit");
+    let uid = smysl_core::canonical_uid(&core);
+    let att = smysl_core::types::Attestation::new(
+        uid,
+        agent(),
+        smysl_core::Op::Imported,
+        smysl_core::Rung::Computed,
+        Hlc::new(at + 1_000, 0, agent()),
+    );
+    // No basis, so `speculative` however confident its author (D-4).
+    let skew = Dating::new(
+        DatingTarget::Unit(uid),
+        Axis::Said,
+        DatingValue::Offset(-93_000),
+        agent(),
+        Hlc::new(2, 0, agent()),
+    );
+    let did = skew.did();
+    let store = store_of(&[
+        Record::Unit(core),
+        Record::Attestation(att),
+        Record::Dating(skew),
+    ]);
+    let e = effective(&store, Axis::Said);
+    let d = e.of(&Subject::Unit(uid)).expect("the unit is dated");
+    assert_eq!(
+        d.interval,
+        Interval::at(Instant(at as i64)),
+        "the measured instant must not have moved"
+    );
+    assert_eq!(
+        d.lo_status,
+        TimeStatus::Measured,
+        "nor may its standing have been lowered to the offset's"
+    );
+    assert!(
+        e.not_applied.iter().any(|c| c.datings.contains(&did)),
+        "and the offset must be reported: not_applied={:?}",
+        e.not_applied
     );
 }
 

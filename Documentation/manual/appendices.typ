@@ -607,6 +607,57 @@ no part or the wrong one.
 heads instead of picking one — printing the lower-sorting identity would make the answer depend
 on a hash. Naming one of the two heads works, which is what the refusal tells you to do.
 
+#section("date")
+
+*Write datings; show effective time and why.* Pure · TX-P3.
+
+A **dating** is a record that stands beside a unit rather than inside it. That placement is the
+whole design: a unit's `published` and `observed` are fields of its core and therefore inside its
+uid, so correcting one by editing the unit would change what the unit *is*. Record 17 says
+"somebody dated this, on this evidence" without touching the thing dated, which means a clock
+fault in an export can be corrected without rewriting a corpus's identities.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`ACTION`], [positional, required], [`set`, `order` or `show`.]),
+    ([`TARGET`], [positional, required], [A unit, by uid or label; a part, by `t3:` tid; or a manifest, by `m3:` mid. A part or a manifest dates the *units drawn from it* — a part has no time of its own, because the bytes were not said at a moment, the messages in them were.]),
+    ([`RELATION`], [positional], [`order`: one of Allen's seven spellings — `before`, `after`, `meets`, `overlaps`, `during`, `contains`, `equals`.]),
+    ([`OTHER`], [positional], [`order`: the second subject.]),
+    ([`--axis`], [`said|composed|about`], [Which of a unit's times this is about. Defaults to `said`. Only `said` has an as-recorded value to start from: `composed` is reached through datings on a work's catalogue entity and `about` through datings alone, so both begin undated — which is not a gap. A unit nobody has dated on those axes has no composed or about time, and inventing one from `observed` would assert that a message is about the moment it was sent.]),
+    ([`--value`], [`V`], [`set`: an EDTF date (`1611`, `1920~`, `1984-01-01T12:30:00Z`), `offset:MS` for a clock correction, or `<allen>:<target>` for an ordering. The three are told apart by an exact prefix and never by "contains a colon", because an EDTF date-time carries two of them.]),
+    ([`--window`], [`FROM..TO`], [Narrow a part target to the units whose recorded instant falls in a millisecond range. The range is matched against the **as-recorded** instant and never the effective one: a window that moved as the datings it selects took effect would select a different set on every pass, and the solve would not converge. An empty range is refused here rather than written and warned about later.]),
+    ([`--basis`], [`UID`], [The unit giving the evidence. This is what decides **status**: a dating takes the status of its basis unit, and one with no basis is `speculative` however confident its author. It is the whole mechanism by which "the export header says so" outranks "it must have been about then" without anybody ranking them by hand.]),
+    ([`--as`], [`AGENT`], [`set`, `order`: the agent issuing the dating. Required — a dating is an act by somebody, and a default would invent one.]),
+    ([`--at`], [`MS`], [The wall clock for the record, in milliseconds. Defaults to now.]),
+    ([`--why`], [—], [`show`: print, for each bound, what set it and at what status. Both ends, always: a `measured` instant under a `cited` ceiling is an ordinary thing for a corpus to hold, so printing one chain would be printing the wrong one half the time.]),
+    ([`--dry-run`], [—], [Report what would be written, and write nothing.]),
+  ),
+)
+
+*What a dating cannot do.* It cannot silently override a better-evidenced value. A correction
+that is less well evidenced than the bound it would move is **not applied and not discarded**:
+it is reported as `SMY-W412`, and the value it would have changed stays as it was. This holds
+for `offset:` exactly as it does for an absolute date — an unevidenced offset shifting a
+`measured` instant, and relabelling it `speculative` on the way, would be one command erasing a
+measurement's standing.
+
+*`date order a before b`* is sugar for `date set a --value before:b`, and writes the same record.
+The seven relations are accepted rather than only `before`, because `during` is the commonest of
+the other six and restricting the sugar would have made `--value` the only way to say it.
+
+*A dating names no uid of its own in a document.* `@date` is in the surface grammar, so a dating
+round-trips through a `.smy` file byte for byte. A `canonical` commitment *on* a dating — rule E's
+liveness lock — does not: `@commit` takes a uid or a label, and a dating is named by a `d3:` did.
+`smysl commit <did>` accepts one, so the lock can be written, but it needs a CBOR store; the
+surface refusal is correct rather than a defect, and it is recorded as an open question.
+
+*Releasing a hold.* Rule E's contentions are **derived and never written**, so `review` cannot
+list them and the log does not hold them. The `SMY-W412` that reports a held dating therefore
+names the contention id outright, and `smysl resolve` accepts an id rule E derives over the
+store as well as one the log records.
+
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix B — Full Diagnostic Code Reference
 // ═══════════════════════════════════════════════════════════════════════

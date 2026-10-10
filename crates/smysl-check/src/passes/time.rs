@@ -34,7 +34,7 @@ use smysl_core::diag::{Code, Diagnostic, Report, Subject};
 use smysl_core::edtf;
 use smysl_core::types::{Axis, DatingTarget, DatingValue};
 use smysl_graph::Store;
-use smysl_text::time::engine::{effective, Unresolved};
+use smysl_text::time::engine::{effective, hold_contention, Unresolved};
 use smysl_text::time::{edtf as extent, Instant, Subject as TimeSubject};
 
 /// Run the pass.
@@ -204,12 +204,21 @@ fn consequences(store: &Store, report: &mut Report) {
             );
         }
         for did in &e.held {
+            // The id is named, not merely referred to. Rule E's contentions are derived and
+            // never written (A-8.2), so `review` cannot list this one — a message that said
+            // "a resolution releases it" and stopped there sent a reader looking for something
+            // no command can show them.
+            let id = store
+                .dating(did)
+                .and_then(|d| hold_contention(did, d))
+                .map(|id| format!(" ({id})"))
+                .unwrap_or_default();
             report.push(
                 Diagnostic::new(Code::W412)
                     .with_subject(Subject::Store)
                     .with_message(format!(
                         "{axis}: dating {did} is held by a canonical commitment and was not \
-                         applied; a resolution naming the derived contention releases it"
+                         applied; a resolution naming the derived contention{id} releases it"
                     )),
             );
         }

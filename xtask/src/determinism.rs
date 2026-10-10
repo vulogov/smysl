@@ -374,6 +374,35 @@ const OPS: &[Op] = &[
             "mul",
         ]),
     },
+    Op {
+        name: "date_show",
+        // Rule E end to end (TX-P3 step 4): the seed from `observed`, a dating that cannot be
+        // applied, the stratified solve, and the why-chain printed for both bounds.
+        //
+        // What is compared is stdout — the interval, the two statuses, the contested mark and
+        // the chain — so a solve whose answer depended on record order, or a bound attributed to
+        // a different cause on a second run, shows up here. That is not hypothetical: the
+        // shortest-path attribution was where step 2's SPFA tie-break went wrong.
+        //
+        // No setup, and a conformance fixture rather than the scratch library: a document that
+        // already carries a `@date` is the cheapest honest store, and `date show` writes nothing.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "date",
+            "show",
+            "c/sent",
+            "-s",
+            "fixtures/conformance/check/time/impossible-dating.smy",
+            "--why",
+        ],
+        setup: None,
+    },
 ];
 
 /// Two-stage operations, run as a shell pipeline. `render` needs a thread, and the only

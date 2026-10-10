@@ -440,20 +440,44 @@ fn held_by_lock(store: &Store, did: &Did, dating: &Dating) -> bool {
     false
 }
 
-/// Whether a resolution names the kind-4 contention a hold on this dating derives.
-fn resolved(store: &Store, did: &Did, dating: &Dating) -> bool {
+/// The kind-4 contention a hold on this dating derives: the id a resolution must name to
+/// release it.
+///
+/// Over the **target**, where an outranked move's contention is over the *subject*. The two are
+/// deliberately different ids for deliberately different things. A hold is one fact about one
+/// dating — a lock was placed and nobody has looked yet — so it has one id however many
+/// subjects the dating would have moved; an outranked move is one fact per subject, because the
+/// dating may outrank the value over one unit and not over another. The alternative, keying a
+/// hold by subject, would make releasing a part-target hold take one resolution per unit in the
+/// part.
+///
+/// Public because `check` has to print this id. A held dating's diagnostic that says "a
+/// resolution releases it" without naming what to resolve sends a reader to look for a
+/// contention `review` cannot list, since rule E's contentions are derived and never written
+/// (A-8.2).
+///
+/// `None` for a target kind this build does not know, which is the same answer
+/// `DatingTarget::kind` gives it: an id cannot be derived over a thing with no identity here.
+pub fn hold_contention(did: &Did, dating: &Dating) -> Option<ContentionId> {
     let over = match &dating.target {
         DatingTarget::Unit(u) => *u,
         DatingTarget::Part(t) => Uid::from_bytes(*t.as_bytes()),
         DatingTarget::Manifest(m) => Uid::from_bytes(*m.as_bytes()),
         DatingTarget::Window { tid, .. } => Uid::from_bytes(*tid.as_bytes()),
-        _ => return false,
+        _ => return None,
     };
-    let id = ContentionId::derive(
+    Some(ContentionId::derive(
         DetectionKind::DatingNotApplied,
         &over,
         &[Uid::from_bytes(*did.as_bytes())],
-    );
+    ))
+}
+
+/// Whether a resolution names the kind-4 contention a hold on this dating derives.
+fn resolved(store: &Store, did: &Did, dating: &Dating) -> bool {
+    let Some(id) = hold_contention(did, dating) else {
+        return false;
+    };
     store.resolutions().any(|r| match &r.target {
         smysl_core::ResolutionTarget::Contention(c) => *c == id,
         _ => false,
@@ -478,6 +502,19 @@ fn why_unresolved(store: &Store, target: &DatingTarget) -> Unresolved {
     } else {
         Unresolved::TargetMissing
     }
+}
+
+/// The subjects a dating's target names, which is how `date show` expands one.
+///
+/// Public because the CLI has to expand a target **exactly** as the engine does — a part is
+/// the units drawn from it, a manifest is the units of its parts, a window is the subset whose
+/// as-recorded instant falls inside it — and a second implementation of that would drift from
+/// this one the first time a target kind gained a rule. The `inexact_scopes` count a manifest
+/// target can raise is dropped here: it is a property of a derivation, and nothing is being
+/// derived.
+pub fn subjects(store: &Store, target: &DatingTarget) -> Vec<Subject> {
+    let mut sink = Effective::default();
+    resolve(store, target, &mut sink)
 }
 
 /// The subjects a target names.
@@ -709,6 +746,23 @@ fn apply_offsets(
         if base.interval.is_undated() {
             // An offset has nothing to correct. Not an error and not silent: the dating is live
             // and did not move a bound, which is exactly what `SMY-W412` is for.
+            out.not_applied.push(one_dating_contention(
+                subject,
+                l.did,
+                DetectionKind::DatingNotApplied,
+            ));
+            continue;
+        }
+        // A-12.2's no-silent-override applies to an offset as it does to every other value.
+        // Step 2 left this path outside the rule and took `l.status.min(base.lo_status)`
+        // instead, which let an unevidenced `--value offset:` shift a `measured` instant and
+        // relabel it `speculative` — one command erasing a measurement's standing, which is
+        // the opposite of what rule E is for. §5.2's scenario and A-12.2 agree on the answer:
+        // the move is not made, and it is reported.
+        //
+        // Both bounds, because an offset shifts both. A correction that cannot outrank the
+        // ceiling over an instant cannot be said to have corrected it.
+        if l.status < base.lo_status || l.status < base.hi_status {
             out.not_applied.push(one_dating_contention(
                 subject,
                 l.did,

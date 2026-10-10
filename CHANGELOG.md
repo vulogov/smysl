@@ -58,6 +58,59 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### Four gaps the scenario found, and none of them was in the command it was written to test
+
+**TX-P3 step 4.** `date set`, `date order` and `date show --why`, as the twenty-eighth command,
+and §19.2's clock fault end to end: two messages, one sent by a device whose clock ran
+ninety-three seconds ahead, and a reply that quotes the first — so the corpus says the reply came
+second and the clocks say it came first. One dating with a window target and an `offset` corrects
+exactly the messages in the window, the contradiction goes, **and no uid moves**, which is the
+point of a dating standing beside the unit rather than inside it.
+
+The command took an afternoon. Running the scenario found four things that were wrong elsewhere,
+and each of them had been shipped looking right.
+
+**`date set` could not write to a `.smy` file at all.** Every record-writing command goes through
+one `persist`, which refuses a record surface text cannot hold rather than dropping it — and its
+match had no arm for a dating, so a dating fell to the default and was refused. `@date` had been
+in the grammar since step 1 and `dating_has_surface_form` had been written to answer exactly this
+question; nothing consulted it. A predicate with no caller is not covered by the tests that cover
+the predicate.
+
+**An unevidenced `offset:` was moving a `measured` instant.** Step 2 applied an offset
+unconditionally and took the weaker of the two statuses, so `date set --value offset:-93000`
+with no `--basis` shifted an instrument's reading and relabelled it `speculative` — one command
+erasing a measurement's standing, which is the opposite of what rule E is for. A-12.2's
+no-silent-override and §5.2's own scenario agree that the move is not made and is reported, so
+it now is. The test that looked like it covered this covered the *absolute* path: its comment
+described an offset and its body built an absolute dating, which is how the offset path came to
+sit outside the rule unnoticed. Both cases now have a test, and the comment says which is which.
+
+**A held dating named no contention to resolve.** Rule E's contentions are derived and never
+written (A-8.2), so `review` cannot list them and the log does not hold them. The `SMY-W412` for
+a held dating said "a resolution naming the derived contention releases it" and stopped there,
+sending a reader to look for something no command could show them — and `smysl resolve` refused
+every such id, because its guard required the contention to be recorded. So the documented way to
+release a lock was unreachable for every rule-E contention there is. The diagnostic now names the
+id, and `resolve` accepts an id rule E derives over the store: a second lookup, not a loosened
+guard, since the id still has to be one the engine derives right now.
+
+**A `canonical` commitment could not name a dating.** A-6 gives key 0 either a unit or a dating
+and the lock is written as a commitment on a did; `commit` took a uid or a label. The did's bytes
+are the key the engine already reads, so the spelling was all that was missing.
+
+**One asymmetry decided rather than defaulted.** A hold's contention is derived over the
+dating's **target**; an outranked move's is derived over the **subject**. They are different ids
+for different things: a hold is one fact about one dating, however many subjects it would have
+moved, while an outranked move is one fact per subject, because a dating may outrank the value
+over one unit and not over another. Keying a hold by subject would make releasing a part-target
+hold take one resolution per unit in the part.
+
+`date show` is registered with `xtask determinism`, and it is the first registered operation
+whose point is **attribution** rather than output: a bound credited to a different cause on a
+second run is a determinism failure no interval comparison would catch, and the shortest-path
+attribution is where this engine's first version went wrong.
+
 ### A malformed date cannot be written here, so the pass that finds one has no document to test with
 
 **TX-P3 step 3.** The `Time` check pass, as pass 13, and the last four codes of RFC SMYSL-2.4's

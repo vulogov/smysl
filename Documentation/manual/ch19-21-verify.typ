@@ -1046,7 +1046,7 @@ asserts byte-identical output across all sixteen runs per operation:
 ```
 xtask determinism (rule D)
   matrix: 8 permutations
-  9 operations registered: rule D's five, and 4 since
+  10 operations registered: rule D's five, and 5 since
   pack: identical across 16 runs
   salience: identical across 16 runs
   merge: identical across 16 runs
@@ -1055,14 +1055,15 @@ xtask determinism (rule D)
   text_show: identical across 16 runs
   text_redact: identical across 16 runs
   text_append: identical across 16 runs
+  date_show: identical across 16 runs
   render: identical across 16 runs
 ok
 ```
 ]
 
 All five of rule D's named operations are registered and passing in this
-build, and `text add`, `text show`, `text append` and `text redact` have
-joined them (1.10.0). Three of those four
+build, and `text add`, `text show`, `text append`, `text redact` and
+`date show` have joined them (1.10.0). Three of those five
 are the first registered operations that *write*, which the harness could not
 compare at all until it gained a scratch directory: running one fixed command
 twice over the same library makes the second run see what the first did, and
@@ -1080,7 +1081,15 @@ as a different byte; `text append` and `text redact` both pin their one
 input that is a wall clock with `--at`, because rule D is about everything
 else in the operation — a setup that silently did nothing
 would leave the real command printing the same refusal sixteen times and
-passing. The permutation matrix targets the four things that quietly break
+passing. `date show` is the one of the five that writes nothing, and it earns
+its place for a different reason: it is rule E end to end — the seed from a
+record's own instant, the stratified solve, and the chain printed for each
+bound — and what the comparison pins is the *attribution*. A bound credited to
+a different cause on a second run is a determinism failure that no interval
+comparison would catch, and the shortest-path attribution is exactly where this
+engine's first version went wrong.
+
+The permutation matrix targets the four things that quietly break
 determinism in practice and nowhere else: locale-dependent collation and
 case folding, timezone-dependent date formatting, and hash-seed-dependent
 iteration order over an unordered collection — the class of bug that passes

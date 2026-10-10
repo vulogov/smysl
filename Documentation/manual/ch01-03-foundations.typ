@@ -150,6 +150,10 @@ classification, and each subcommand's own `--help` repeats it under
     ([`salience`], [pure]),
     ([`find`], [mixed — pure unless `--engine semantic` or `hybrid`]),
     ([`retract`], [pure]),
+    ([`withdraw`], [pure]),
+    ([`resolve`], [pure]),
+    ([`review`], [pure]),
+    ([`commit`], [pure]),
     ([`render`], [pure]),
     ([`import`], [pure]),
     ([`relink`], [pure]),
@@ -160,6 +164,8 @@ classification, and each subcommand's own `--help` repeats it under
     ([`usage`], [pure]),
     ([`reindex`], [pure]),
     ([`ui`], [pure — needs a terminal, and `--features tui`, which is not on by default]),
+    ([`text`], [pure]),
+    ([`date`], [pure]),
   ),
 )
 
@@ -168,7 +174,7 @@ This is not a marketing claim; it is a tested one. The project's CI runs
 (reordered records, rebuilt indices, repeated runs) specifically to catch any
 pure command that has quietly stopped being a function of its bytes.
 
-Operationally, the split means: run the fifteen commands that cannot reach a
+Operationally, the split means: run the twenty-three commands that cannot reach a
 model as often as you like, in a pre-commit hook, in a CI matrix, on a laptop
 with no network — the answer is always the same answer, and there is no bill
 for asking twice. The two model commands are different in kind, not degree:
