@@ -315,9 +315,11 @@ mod tests {
         // dating that did not move a bound and a set of records that cannot all be true are
         // both things something can now say. They are also A-8.2's two `DetectionKind` values,
         // and `DetectionKind::code()` is total, so kind and code had to land together.
-        // `SMY-W411` and `SMY-W449` are findings about a *store* rather than results of the
-        // engine, and arrive with the `Time` check pass in step 3.
-        assert_eq!(Code::ALL.len(), 76);
+        // 78 as of step 3, with `SMY-W411` and `SMY-W449`, which the `Time` check pass raises:
+        // an `observed` outside the `published` interval beside it, and an EDTF value outside
+        // the millisecond range, indexed as an open bound rather than clamped. That is all of
+        // RFC SMYSL-2.4's range but `SMY-E404` and `SMY-W405`, which read `source.span`.
+        assert_eq!(Code::ALL.len(), 78);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

@@ -1741,6 +1741,7 @@ version = "1.10.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
+ "smysl-text",
 ]
 
 [[package]]

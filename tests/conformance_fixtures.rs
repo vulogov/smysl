@@ -634,6 +634,21 @@ fn check_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/conformance/check")
 }
 
+/// The `Time` pass is behind a feature (RFC SMYSL-2.4 §4.3), so its fixtures live in their
+/// own subdirectory and join the suite only when the build runs that pass. Keying on the
+/// directory rather than on a list of codes is what keeps this from drifting: a sixth time
+/// fixture dropped in there is covered without touching this file, and `dating-names-nothing`
+/// expects `E060` - a code the integrity pass also raises - so no code set could have told
+/// the two apart.
+fn check_fixtures() -> Vec<PathBuf> {
+    let mut out = fixtures(&check_dir(), "smy");
+    if smysl::Pass::Time.is_implemented() {
+        out.extend(fixtures(&check_dir().join("time"), "smy"));
+    }
+    out.sort();
+    out
+}
+
 /// Every code a fixture produces, from parsing and checking together.
 ///
 /// Which layer catches a defect is an implementation detail - a unit that violates a
@@ -655,7 +670,7 @@ fn all_codes(src: &str) -> BTreeSet<Code> {
 
 #[test]
 fn every_check_fixture_has_an_expected_set() {
-    let files = fixtures(&check_dir(), "smy");
+    let files = check_fixtures();
     assert!(!files.is_empty(), "the check conformance tree is empty");
     for f in &files {
         assert!(
@@ -669,7 +684,7 @@ fn every_check_fixture_has_an_expected_set() {
 /// The SM-P4 gate: exactly the expected codes, no more and no fewer.
 #[test]
 fn every_check_fixture_produces_exactly_its_expected_codes() {
-    for f in fixtures(&check_dir(), "smy") {
+    for f in check_fixtures() {
         let src = std::fs::read_to_string(&f).unwrap();
         let observed = all_codes(&src);
         let expected = expected_codes(&f);
@@ -694,7 +709,7 @@ fn the_check_tree_contains_a_clean_control() {
 fn the_check_tree_covers_every_pass_the_build_implements() {
     use smysl::Pass;
     let mut seen: BTreeSet<Code> = BTreeSet::new();
-    for f in fixtures(&check_dir(), "smy") {
+    for f in check_fixtures() {
         seen.extend(expected_codes(&f));
     }
     for (required, pass) in [
@@ -712,6 +727,20 @@ fn the_check_tree_covers_every_pass_the_build_implements() {
             "no fixture exercises {required} ({pass})"
         );
     }
+    // The feature-gated pass, asserted the other way round: when the build runs rule E, the
+    // suite must exercise it. `E410` is absent on purpose - no document can carry a malformed
+    // EDTF value, because the parser refuses it on the way in, so that code's fixture is a
+    // Rust test in `smysl-check` instead.
+    if Pass::Time.is_implemented() {
+        for required in [Code::W411, Code::W412, Code::W413, Code::W449] {
+            assert!(
+                seen.contains(&required),
+                "no fixture exercises {required} ({})",
+                Pass::Time
+            );
+        }
+    }
+
     // Rule T has no surface syntax to exercise it: attestations are not in Appendix A's
     // grammar, so provenance can only be authored programmatically until `ingest` lands.
     assert!(Pass::Trust.is_implemented());

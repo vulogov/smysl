@@ -113,6 +113,21 @@ pub struct TimeContention {
     pub free: Vec<FreeKind>,
 }
 
+/// Why a dating's target named no subject.
+///
+/// Two cases that look the same in a count and are not the same finding. A target the store
+/// does not hold is a **dangling reference**, as a relation endpoint pointing at nothing is. A
+/// target the store holds whose selection is empty — a window over instants no unit has — is an
+/// ordinary thing: the records it would select may arrive later, and a dating written ahead of
+/// an ingest is how a known clock error gets recorded before the messages do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Unresolved {
+    /// The uid, tid or mid names nothing in this store.
+    TargetMissing,
+    /// The target is here and selects no unit.
+    SelectedNothing,
+}
+
 /// Effective time over a store, for one axis.
 #[derive(Debug, Clone, Default)]
 pub struct Effective {
@@ -128,8 +143,8 @@ pub struct Effective {
     pub not_live: Vec<Did>,
     /// Manifest-scoped datings resolved through a part two manifests share.
     pub inexact_scopes: usize,
-    /// Datings whose target this store cannot resolve to any subject.
-    pub unresolved: Vec<Did>,
+    /// Datings that named no subject, and which of the two reasons it was.
+    pub unresolved: Vec<(Did, Unresolved)>,
 }
 
 impl Effective {
@@ -368,7 +383,8 @@ fn live_datings(store: &Store, axis: Axis, out: &mut Effective) -> Vec<Live> {
         }
         let scope = resolve(store, &dating.target, out);
         if scope.is_empty() {
-            out.unresolved.push(*did);
+            out.unresolved
+                .push((*did, why_unresolved(store, &dating.target)));
             continue;
         }
         live.push(Live {
@@ -442,6 +458,26 @@ fn resolved(store: &Store, did: &Did, dating: &Dating) -> bool {
         smysl_core::ResolutionTarget::Contention(c) => *c == id,
         _ => false,
     })
+}
+
+/// Why a target named nothing: the thing is absent, or it is here and selects nothing.
+fn why_unresolved(store: &Store, target: &DatingTarget) -> Unresolved {
+    let present = match target {
+        DatingTarget::Unit(u) => store.units().any(|(x, _)| x == u),
+        DatingTarget::Manifest(m) => store.manifest(m).is_some(),
+        // A store holds no parts; a part exists if some manifest lists it. Asking the catalog
+        // is the only question available, and it is the right one: a tid no manifest names is
+        // a tid this store has never heard of.
+        DatingTarget::Part(t) | DatingTarget::Window { tid: t, .. } => store
+            .manifests()
+            .any(|(_, m)| m.parts.iter().any(|p| p.tid == *t)),
+        _ => false,
+    };
+    if present {
+        Unresolved::SelectedNothing
+    } else {
+        Unresolved::TargetMissing
+    }
 }
 
 /// The subjects a target names.

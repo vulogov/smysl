@@ -173,7 +173,7 @@ cli       = [
 # is the claim TX-P2 step 1 put in the purity gate when `lingua` brought `getrandom` with it. So
 # the library layer knows where the key lives and what shape it has, and the facade mints one.
 # Free in this tree: `ureq`'s TLS stack already links it, so the feature adds no crate at all.
-text      = ["dep:smysl-text", "dep:getrandom"]
+text      = ["dep:smysl-text", "dep:getrandom", "smysl-check/text"]
 # Language identification. Not in `cli` and not in `text`: it is 57 crates and 14.4 MB of
 # `lingua` models (SMYSL-2.4 §3.7, measured in TX-P2 step 1), and nothing in the CLI asks for
 # a guess yet — a manifest's language comes from the reader or from `--lang`, and a fallback

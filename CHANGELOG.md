@@ -58,6 +58,67 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### A malformed date cannot be written here, so the pass that finds one has no document to test with
+
+**TX-P3 step 3.** The `Time` check pass, as pass 13, and the last four codes of RFC SMYSL-2.4's
+range that this release can raise.
+
+Five findings, and the division between them is the design. Three are about **values** and read
+one record at a time: an EDTF string that does not parse (`SMY-E410`), one that parses and names
+an instant no millisecond counter can hold (`SMY-W449`), and an `observed` instant standing
+outside the `published` interval beside it (`SMY-W411`). Two are about **consequences** and need
+rule E: a live dating that moved no bound (`SMY-W412`) and a set of records whose times cannot
+all be right (`SMY-W413`).
+
+**`SMY-E410` has no `.smy` fixture, and the absence is the point.** The surface parser refuses a
+malformed EDTF value as it reads it, so no document can produce a store that holds one — which
+is exactly what refusing at the writing end is for. The only way a store gets one is CBOR from
+an implementation that wrote it, and the only way to test for that is to build the store. So
+the other codes get documents and that one is a Rust test, with the reason written where the
+test is rather than left for somebody to wonder about.
+
+**The pass is behind a feature, so its fixtures are too.** They live in
+`fixtures/conformance/check/time/` and join the suite when `Pass::Time.is_implemented()`, which
+is what lets the conformance suite run at `--no-default-features` as CI runs it without either
+failing on documents whose pass did not run or quietly dropping the gate when it did. Keying
+that on a directory rather than on a set of codes is deliberate: one of the five expects
+`SMY-E060`, a code the integrity pass raises too, so no code set could have told them apart.
+
+**A manifest's date is checked as well as a unit's.** Units copy a manifest's `published` byte
+for byte under A-2.4 rule 2, so a malformed value at the catalog entry becomes a malformed value
+on every unit drawn from it. Finding it once at the manifest is the difference between one
+diagnostic and ten thousand.
+
+**A dating's target is the first reference the integrity pass cannot see.** A dating moves no
+edge, so it is deliberately absent from the adjacency — and `report_dangling` works off the
+adjacency. A target naming nothing is `SMY-E060`, raised by this pass instead; a target that is
+present and selects nothing, such as a window over instants no unit has, is `SMY-W412` and not
+an error, because the records it would select may arrive later. A dating written ahead of an
+ingest is how a known clock error gets recorded before the messages do.
+
+**Two placements decided rather than defaulted.** `SMY-E410` joins the **shape** family in
+`ConformanceClass::forbids` and not the library one: A-13 gives C-Produce "write only
+well-formed EDTF", so a store carrying a malformed value was not produced conformantly, while
+C-Library's obligation is to derive effective time and report contested subjects — which it can
+do perfectly well with one unreadable date in the store. And rule E's four warnings block
+nothing at any class, because a contested subject is a fact about a corpus and not a defect in
+it. Both are pinned in the conformance table's own test, which exists because mutation testing
+once flipped every `||` in that function to `&&` and nothing noticed.
+
+**The pass is behind a `text` feature.** Rule E's engine is in `smysl-text` — the calendar
+arithmetic and the EDTF extent are there — so the pass needs a dependency edge `smysl-check` did
+not have. With the feature off, `Pass::Time` is in `ALL` and not in `IMPLEMENTED`, so a report
+says the pass did not run: the machinery `codec`, `retraction` and `hashes` have always used. A
+`Pass` enumeration that changed shape with a feature would make `--pass time` an unknown name in
+one build and a known one in another, which is worse than a pass that says it was skipped.
+
+**Found on the way: the surface form cannot spell a did.** A-6 lets a withdrawal and a
+commitment name a dating in key 0, and `@withdraw`/`@commit` accept a uid or a label — so a held
+dating cannot be written in a document at all, and a store that holds one writes it back as
+`b3:…`, which claims to be a uid. The round trip is byte-exact, so it is a legibility defect
+rather than a data one: a reader goes looking for a unit that is not there. **OQ-73**, and the
+reason the held-dating test builds its store instead of parsing a document.
+
 ### The clock was wrong, and correcting the record was the one repair that could not be made
 
 **TX-P3 step 2.** Rule E: effective time, and the engine that derives it.

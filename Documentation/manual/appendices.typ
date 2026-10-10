@@ -805,10 +805,12 @@ measured the default. And where either side has no majority script it reports no
 
 #subsection("Library — texts, parts and the object store")
 
-The first twelve of the library's codes, new in 1.10.0. Six are raised by `smysl-text`, the
-crate RFC SMYSL-2.4 adds for reading texts into a library, one by the store, two by the
-`library` check pass, one by the surface parser and two by the time engine; the rest of that
-RFC's range arrives with the code that raises it, because a code nothing can trigger is worse
+Fourteen codes, new in 1.10.0, and all but two of the range RFC SMYSL-2.4 allocates. Six are
+raised by `smysl-text`, the crate that RFC adds for reading texts into a library, one by the
+store, two by the `library` check pass, four by the `time` pass, and `SMY-E410` by the surface
+parser as well as by `time` — refused where a value is written and reported where a store holds
+one. The two still absent are `SMY-E404` and `SMY-W405`, which read a unit's `source.span`: a
+field this release does not have, so neither is registered. A code nothing can trigger is worse
 than a missing one.
 
 Two the pass is allocated are deliberately absent. `SMY-E404` (a span past a part's length) and
@@ -827,9 +829,11 @@ check — which a caller can read, where silence would have to be guessed at.
     ([`SMY-W418`], [warn], [One alias has two manifest heads: two manifests for the same expression, neither superseding the other. Usually two people catalogued the same book without having met. Both heads are returned rather than one being chosen, and the fork is reported rather than recorded — the next manifest to arrive may be the one that joins them, and a record would then be a stale finding with a hash chain behind it.]),
     ([`SMY-W412`], [warn], [A live dating that rule E could not apply, reported rather than dropped. Two causes, and the message says which: the dating is **held** by a `canonical` commitment pending review, or it is less well evidenced than the value it would have overridden — somebody typed a date that disagrees with an instrument. The second is the whole point of the rule: a weakly evidenced value never quietly replaces a better one, and the disagreement is a thing to look at rather than a thing to lose. Derived and never written to a store, so a resolution names its derived id.]),
     ([`SMY-W413`], [warn], [A temporal inconsistency: a set of records whose times cannot all be right. A negative cycle in the ordering — A before B and B before A — or an interval that has closed to nothing, such as a 1066 date on a unit an instrument timestamped in 2024. Every subject on it is reported *contested* and **nothing is chosen** for it, because picking one of two contradictory dates is an adjudication and this format does not adjudicate. The message names the datings and the free constraints involved.]),
+    ([`SMY-W411`], [warn], [A unit carries both an `observed` instant and a `published` interval, and the instant is not inside the interval. Both fields are permitted together — they answer different questions, when the manifestation was published and when this reading was taken — but a reading taken before its own source was published is a pair of records that cannot both be right. Reported rather than refused, because which of the two is wrong is not something a checker can know.]),
     ([`SMY-E440`], [error], [A reader resource cap was exceeded. The message names the cap, its limit, what the input asked for and the flag that raises it; nothing was written. Inside a reader the budget is *fuel* rather than wall time, so a refusal happens at the same byte on every machine.]),
     ([`SMY-E445`], [error], [The library or one of its shards is locked by another writer, named: pid, host and command. Nothing removes a lock by timeout — a stale lock is the notice that a writer died mid-append, and `--break-lock` is where an operator says they have read it.]),
     ([`SMY-E446`], [error], [An object in the store does not hash to the identity it is stored under. Objects are content-addressed, so this is a corrupted or substituted file rather than a stale one.]),
+    ([`SMY-W449`], [warn], [An EDTF value that parses and names an instant no millisecond counter can hold — a `Y`-prefixed year of three hundred million, say. It is ordered as an *open bound* rather than clamped to the nearest representable instant, because a clamped bound is a claim nobody made and it would propagate through every ordering that touches it. The value itself is kept exactly as written.]),
     ([`SMY-E450`], [error], [An append to a pseudonymised expression with no pseudonym key. The key lives at `secrets/pseudonym.key` under the library root and is what makes a pseudonym stable across appends; without it the same speaker would be given a second name and the conversation would read as two people. The refusal happens before anything is written.]),
     ([`SMY-E452`], [error], [A part text or a part reading was offered to a log, and a log does not hold text. Text lives in the object store, and the whole batch is refused before a byte is written. The reason is the log's own integrity: a log holding text would one day have to be rewritten to honour a redaction, and rewriting an append-only log resets exactly the hash chain that would have shown the rewrite. Erasure is therefore always an unlink.]),
   ),

@@ -57,6 +57,14 @@ pub enum Pass {
     CommitmentSupport,
     /// 12 - the library (1.10, RFC SMYSL-2.4 §4.3.3). Appended for the reason above.
     Library,
+    /// 13 - time, rule E (1.10, RFC SMYSL-2.4 §4.3, TX-P3 step 3).
+    ///
+    /// In `ALL` unconditionally and in [`Pass::IMPLEMENTED`] only under the `text` feature,
+    /// because rule E's engine lives in `smysl-text`. A build without it reports the pass as
+    /// not run, which is a sentence a caller can read — the alternative, a `Pass` enumeration
+    /// that changes shape with a feature, would make `--pass time` an unknown name in one
+    /// build and a known one in another.
+    Time,
 }
 
 impl Pass {
@@ -73,9 +81,27 @@ impl Pass {
         Pass::Hashes,
         Pass::CommitmentSupport,
         Pass::Library,
+        Pass::Time,
     ];
 
     /// The passes this build actually runs.
+    #[cfg(feature = "text")]
+    pub const IMPLEMENTED: &'static [Pass] = &[
+        Pass::Integrity,
+        Pass::Shape,
+        Pass::Closure,
+        Pass::Granularity,
+        Pass::Epistemics,
+        Pass::Trust,
+        Pass::Extension,
+        Pass::CommitmentSupport,
+        Pass::Library,
+        Pass::Time,
+    ];
+
+    /// The passes this build actually runs. Without the `text` feature, `Time` is not one:
+    /// rule E's engine is in `smysl-text`.
+    #[cfg(not(feature = "text"))]
     pub const IMPLEMENTED: &'static [Pass] = &[
         Pass::Integrity,
         Pass::Shape,
@@ -102,6 +128,7 @@ impl Pass {
             Pass::Hashes => 10,
             Pass::CommitmentSupport => 11,
             Pass::Library => 12,
+            Pass::Time => 13,
         }
     }
 
@@ -119,6 +146,7 @@ impl Pass {
             Pass::Hashes => "hashes",
             Pass::CommitmentSupport => "commitment",
             Pass::Library => "library",
+            Pass::Time => "time",
         }
     }
 
@@ -304,6 +332,10 @@ pub fn check(store: &Store, opts: CheckOptions) -> Report {
     if opts.runs(Pass::Library) {
         passes::library::run(store, opts.parts.as_deref(), &mut report);
     }
+    #[cfg(feature = "text")]
+    if opts.runs(Pass::Time) {
+        passes::time::run(store, &mut report);
+    }
     report.sort();
     report
 }
@@ -453,6 +485,14 @@ impl ConformanceClass {
                 | Code::E031
                 | Code::E032
                 | Code::E040
+                // `E410` since TX-P3 step 3, and in *shape* rather than in the library family
+                // below. A-13 gives C-Produce the obligation "write only well-formed EDTF", so
+                // a store carrying a malformed value was not produced conformantly — while
+                // C-Library's obligation is to derive effective time and report contested
+                // subjects, which it can do perfectly well with one unreadable date in the
+                // store. The code is reported either way; what this decides is which promise
+                // the store makes impossible to keep.
+                | Code::E410
         );
         let lifecycle = matches!(code, Code::E050 | Code::E051);
         let render = matches!(code, Code::E210);
@@ -551,6 +591,32 @@ mod conformance_table {
         assert!(ConformanceClass::Full.forbids(LIBRARY));
     }
 
+    /// `SMY-E410` is a **shape** code, not a library one, and the placement is the claim.
+    ///
+    /// A-13 gives C-Produce "write only well-formed EDTF", so a store carrying a malformed
+    /// date was not produced conformantly. C-Library's obligation is to derive effective time
+    /// and report contested subjects, and it can do that with one unreadable date in the
+    /// store — the date is reported and skipped. So the code blocks producing and does not
+    /// block reading as a library, which is the same shape as every other row in this table.
+    #[test]
+    fn a_malformed_date_blocks_producing_and_not_reading_as_a_library() {
+        assert!(ConformanceClass::Produce.forbids(Code::E410));
+        assert!(ConformanceClass::Full.forbids(Code::E410));
+        assert!(!ConformanceClass::Library.forbids(Code::E410));
+        assert!(!ConformanceClass::Read.forbids(Code::E410));
+        assert!(!ConformanceClass::Merge.forbids(Code::E410));
+        // And the warnings rule E reports block nothing at all: a contested subject is a fact
+        // about a corpus, not a defect in it.
+        for code in [Code::W411, Code::W412, Code::W413, Code::W449] {
+            for class in ConformanceClass::ALL {
+                assert!(
+                    !class.forbids(code),
+                    "{class} must not be blocked by {code}"
+                );
+            }
+        }
+    }
+
     /// The family, written out. Four codes and one of them is `SMY-E452`, which §4.3.3's list
     /// omits; the omission is the thing worth pinning, because a store whose log holds text is
     /// exactly what C-Library must not accept. `SMY-E402` is outside the family on purpose: a
@@ -632,8 +698,11 @@ mod tests {
     }
 
     #[test]
-    fn twelve_passes_numbered_as_in_section_17() {
-        assert_eq!(Pass::ALL.len(), 12);
+    fn thirteen_passes_numbered_as_in_section_17() {
+        // Thirteen as of TX-P3 step 3, with `time`. The number is the position, so a variant
+        // inserted mid-enum would renumber every pass after it and change what `--pass 7`
+        // means in a report somebody has already read; appending is why `Time` is last.
+        assert_eq!(Pass::ALL.len(), 13);
         for (i, p) in Pass::ALL.iter().enumerate() {
             assert_eq!(p.number() as usize, i + 1);
             assert_eq!(Pass::parse(p.as_str()), Some(*p));
@@ -649,20 +718,25 @@ mod tests {
             .filter(|p| p.is_implemented())
             .map(|p| p.as_str())
             .collect();
-        assert_eq!(
-            implemented,
-            [
-                "integrity",
-                "shape",
-                "closure",
-                "granularity",
-                "epistemics",
-                "trust",
-                "extension",
-                "commitment",
-                "library"
-            ]
-        );
+        // `time` is here only under the `text` feature, because rule E's engine lives in
+        // `smysl-text`. Asserted both ways rather than only the one this build has: a feature
+        // that silently dropped a pass from `IMPLEMENTED` would make `check` report "clean"
+        // for a store it had not looked at.
+        let mut want = vec![
+            "integrity",
+            "shape",
+            "closure",
+            "granularity",
+            "epistemics",
+            "trust",
+            "extension",
+            "commitment",
+            "library",
+        ];
+        if cfg!(feature = "text") {
+            want.push("time");
+        }
+        assert_eq!(implemented, want);
         assert!(
             !Pass::Retraction.is_implemented(),
             "lands with merge in SM-P6"

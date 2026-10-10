@@ -308,12 +308,14 @@ registry! {
         E402 = "SMY-E402", Error, "Carrying text is refused by the licence recorded in the manifest";
         E403 = "SMY-E403", Error, "Malformed tid, mid, did or rdid in a record";
         E410 = "SMY-E410", Error, "Malformed EDTF value in published or a dating";
-        W412 = "SMY-W412", Warn,  "A live dating rule E could not apply: held, or outranked by what it would override";
+        W411 = "SMY-W411", Warn,  "The observed instant lies outside the published interval";
+        W412 = "SMY-W412", Warn,  "A live dating rule E could not apply: held, outranked, or applying to nothing";
         W413 = "SMY-W413", Warn,  "Temporal inconsistency: a negative cycle or an empty interval under rule E";
         W418 = "SMY-W418", Warn,  "Expression fork: one alias has two manifest heads";
         E440 = "SMY-E440", Error, "Reader resource cap exceeded; nothing was written";
         E445 = "SMY-E445", Error, "The library or a shard is locked by another writer";
         E446 = "SMY-E446", Error, "An object does not hash to the identity it is stored under";
+        W449 = "SMY-W449", Warn,  "An EDTF value outside the instant range; indexed as an open bound";
         E450 = "SMY-E450", Error, "Appending to a pseudonymised expression without its pseudonym key";
         E452 = "SMY-E452", Error, "A record 15 or 18 was offered to a log; text lives in the object store";
     }
@@ -627,10 +629,14 @@ mod tests {
     /// `DetectionKind::code()` is total — every kind names the diagnostic it is reported as — so
     /// the kinds and the codes had to arrive together, which is why step 1 shipped neither.
     ///
-    /// **`W411` and `W449` are still not here.** An `observed` outside a `published` interval
-    /// and an EDTF value outside the instant range are both findings about a *store*, which the
-    /// `Time` check pass reports; the engine computes intervals and raises nothing. They arrive
-    /// in step 3 with the pass.
+    /// 78 with `SMY-W411` and `SMY-W449` in TX-P3 step 3, where the `Time` check pass exists
+    /// to raise them: an `observed` outside the `published` interval it stands beside, and an
+    /// EDTF value outside the millisecond instant range, which is indexed as an open bound
+    /// rather than clamped. Both are findings about a *store*, which is why they waited for a
+    /// pass — the engine computes intervals and pushes no diagnostics at all.
+    ///
+    /// That completes RFC SMYSL-2.4's `E401`–`W459` range except `SMY-E404` and `SMY-W405`,
+    /// which read `SourceRef.span` and arrive with FC-3 in TX-P5.
     ///
     /// Step 5's plan named six codes and two of them are **not** here. `SMY-E404` is a span
     /// past a part's length and `SMY-W405` is a locator disagreeing with a span; both read
@@ -639,7 +645,7 @@ mod tests {
     /// build can produce, which is the thing this comment exists to prevent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 76);
+        assert_eq!(Code::ALL.len(), 78);
     }
 
     #[test]

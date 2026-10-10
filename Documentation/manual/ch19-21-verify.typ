@@ -631,15 +631,18 @@ call for.
 #recap((
   [`check` verifies consistency, never truth — a mechanical pass reasons
    about relationships already in the document, not about the world.],
-  [Twelve passes are named in the registry; nine run inside `check` itself.
+  [Thirteen passes are named in the registry; ten run inside `check` itself.
    `codec` runs at read time and aborts before the pipeline starts;
    `retraction` is enforced by `merge`; `hashes` belongs to
-   `Store::verify_against`, reachable today through `reindex --verify`.],
+   `Store::verify_against`, reachable today through `reindex --verify`. The
+   tenth is `time`, and it is there only in a build with the library layer
+   compiled in — rule E's engine lives in `smysl-text` — which a report says
+   rather than leaves to be inferred.],
   [Every implemented pass has a real, isolable failure mode: `SMY-E060`
    (integrity), `SMY-E022` (shape), `SMY-E020` (closure), `SMY-E040`
    (granularity), `SMY-E030` (epistemics, rule M), `SMY-E033` (trust, rule
    T), `SMY-W013`/`SMY-E012` (extension), `SMY-W057` (commitment),
-   `SMY-E403`/`SMY-W418` (library).],
+   `SMY-E403`/`SMY-W418` (library), `SMY-W411`/`SMY-W413` (time).],
   [Rule T's violations have no surface syntax to author by hand —
    attestations are stamped on by tooling, never typed — so seeing one for
    real means building the store through the library, exactly as `ingest`
@@ -1102,7 +1105,7 @@ cannot promise anything about.
 xtask check-purity (rules A, B)
   dependency tree (--no-default-features): 31 crates, none forbidden
   pure crates: 8 checked, at default features and at --all-features
-  source scan: 121 files, 7 symbols
+  source scan: 122 files, 7 symbols
   rule A: 2 CLI files reach only the facade
 ok
 ```
