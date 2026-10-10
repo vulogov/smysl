@@ -58,6 +58,50 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### A gate that finds nothing, after four steps that each found something
+
+**TX-P3 step 5, and the phase exit.** **GE-T13** ran. Three of its four clauses are met and the
+fourth is a corpus debt, so **TX-P1, TX-P2 and TX-P3 are complete** and TX-P4 is unblocked.
+
+*Synthetic chats with planted skews.* 64 generated chats, each a chain of messages quoting the
+one before it, with one instant moved. Every skew that contradicts an ordering is detected; every
+skew that leaves every ordering true is **not** reported. The second half matters as much as the
+first — a detector that flagged everything would pass clause one and fail the gate, which blocks
+TX-P4 on either an undetected skew *or* a false contested interval on consistent data.
+
+*The three chat fixtures, unmodified, report nothing.* And with their real timestamps and real
+reply graph, every interval contains the instant the export recorded, every planted skew is
+found, and one window dating with a `cited` basis puts the message back where it belongs.
+
+**The units are synthesised, and the harness says so in its own header.** A chat reaches a unit
+only through ingest, which is TX-P5 — so there is no store of units from a chat for a gate that
+blocks TX-P4 to read, and there will not be one for two more phases. One unit per message at its
+recorded instant, with an `x.text/quotes` edge per reply, is what ingest will build minus the
+model. That makes the *data* real and the units this harness's, and which half is which decides
+what the result means: a skew detected here is a claim about the engine over real chat timing, not
+a claim about ingest.
+
+**The fourth clause is owed, not met.** "A public chronology with known relative orders" is
+material this repository does not hold, and authoring one here would make it a development set —
+the same shape as GE-T1's five Bibles and the 500-sentence boundary gold. `SMYSL_CHRONOLOGY=<file>`
+measures it with no code change. Without it the harness prints that the clause is owed, which is
+the difference between a gate and a green light.
+
+**What `whatsapp.txt` cannot contribute, and why that is right.** A WhatsApp export records no
+reply, so there is no ordering in it for a skew to contradict — and a harness that detected one
+would be inventing a fault. The two readers that do record an ordering spell it differently
+(`telegram/1` the message replied to, `slack/1` the thread root), and a thread root names
+*itself*: reading that as an ordering would put a unit before itself and plant a fault the export
+does not contain.
+
+**The gate found no defect, which is the first time in this phase.** Steps 1–4 were each the
+first caller of what the step before had built, and every defect they found was at that seam — a
+`DetectionKind` with no diagnostic, a surface form with no writer, a predicate with no caller, a
+diagnostic with no id. GE-T13 is not a new caller: it drives the same `effective` that the `Time`
+pass and `date show` already drive, over different data. Four steps that found something followed
+by one that found nothing is evidence about where this codebase's faults live, and it is at the
+joins rather than in the arithmetic.
+
 ### Four gaps the scenario found, and none of them was in the command it was written to test
 
 **TX-P3 step 4.** `date set`, `date order` and `date show --why`, as the twenty-eighth command,

@@ -150,7 +150,7 @@ discussion; OQ-7, OQ-23, OQ-35 and OQ-49 stay open with them.
 | TX-P0 **complete** | 2.1 | Every item, including **F-2** — which G0's pivot pulled out of 1.10.0 and which landed 2026-10-07 with OQ-31 answered (§1.1 item 1) — and F-16's `bundle --unknown keep\|drop` flag, which had been separated because only the closure was a defect | met: F-16/F-17 reproductions fixed, every probe reversed, and suite, `make semver`, `api-check`, `doc-output` and `spec-tables` clean on every commit. Departures from plan: 2.1 §10 | G−1 accepted in full |
 | TX-P1 **complete** | 2.4 | parts, readings, manifests, object store, first readers, structure, locators; `admission` opened (2.3 A-8.1) | met but for the corpus: the three ports derive every identity in the wire fixture and agree. GE-T1's five Bibles and JSON series are material this repository does not hold, and the debt is recorded at §5.5 rather than counted as passed | TX-P0, G0 **passed**; F-2 **done** (§1.1) |
 | TX-P2 **complete** | 2.4 | segmenter, analyzers, `lingua`, chat readers, `text append`, redaction (rule Z), **and the class core** (`strict`, `component`, `attested:n`) moved here from TX-P7 so TX-P5's consensus output can be read | met: GE-T1's chat half is pinned in `fixtures/library/readers/` and recomputed by all three ports, rule Z's algebra survives a stale peer by property, the strict class counts agree with an independent Python reading of A-12.4, and **GE-T14 ran** — the part minimum moved from 64 KiB to 1 KiB on the measured curve. Owed: the per-language boundary gold set | TX-P1 |
-| TX-P3 **steps 1–4 done** | 2.4 | EDTF, `published`, datings, rule E engine, locks, `date` commands | GE-T13 | TX-P2 |
+| TX-P3 **complete** | 2.4 | EDTF, `published`, datings, rule E engine, locks, `date` commands | GE-T13 ran; 3 clauses of 4 met, a chronology owed | TX-P2 |
 | TX-P4 | 2.4 | substrate index, persistent postings, `text` commands | `find` p95 < 200 ms at 155k units | TX-P3 |
 | TX-P5 | 2.4 | ingest over texts, owned-range spans, ledger digest, journal, FC-1/FC-3, entities without span, **consensus extraction** and **structural holder/mode** | G1, plus the probe-set gate and GE-T2 rerun the pivot adds (2.4 §6) | TX-P4, TX-P2's class core |
 | TX-P6 | 2.5 | `sq` core (pure) | `--seed-check` on every pure query | TX-P5 |
@@ -476,13 +476,22 @@ Coding speed cannot compress those.
 **Where the work is:** **TX-P1 and TX-P2 are complete** (2.4 §6 records each step and its
 departures) and **TX-P3 is under way** — step 1 (`smysl-core`'s EDTF, `source.published`,
 record 17), step 2 (the time engine, rule E, the copy and omission rules), step 3 (the
-`Time` check pass) and step 4 (`date set/order/show --why`, and §19.2's scenario) are done,
-with `P-E1`–`P-E8` green and the diagnostic registry at 78. Only the phase exit, **GE-T13**,
-is left. Step 4 found four defects in what was already shipped and none in the command it
-added, which is recorded in 2.4 §6 and worth the summary here: a dating could not be written
-to a surface document at all, an unevidenced offset was moving a `measured` instant, a held
-dating named no contention to resolve and `resolve` refused every derived id, and a
-`canonical` commitment could not name a dating by did. What TX-P1 and TX-P2 still owe is corpora rather than code, recorded against
+`Time` check pass), step 4 (`date set/order/show --why`, and §19.2's scenario) and step 5
+(**GE-T13**) are all done, with `P-E1`–`P-E8` green and the diagnostic registry at 78 — so
+**TX-P1, TX-P2 and TX-P3 are complete** and TX-P4 is unblocked. Step 4 found four defects in
+what was already shipped and none in the command it added, which is recorded in 2.4 §6 and
+worth the summary here: a dating could not be written to a surface document at all, an
+unevidenced offset was moving a `measured` instant, a held dating named no contention to
+resolve and `resolve` refused every derived id, and a `canonical` commitment could not name a
+dating by did. Step 5 found nothing, which is itself informative: the four steps before it
+were each the first caller of what the step before had built, and every defect was at that
+seam. GE-T13 drives the same `effective` two callers already drive, over different data.
+
+TX-P3 adds one corpus item to the standing debt and no more: **a public chronology with known
+relative orders**, GE-T13's fourth clause. The harness takes one through
+`SMYSL_CHRONOLOGY=<file>` and measures the clause with no code change; the material is not
+something this repository can author, because a chronology written here would be a
+development set. What TX-P1 and TX-P2 still owe is corpora rather than code, recorded against
 the gate that wants them: GE-T1's five Bibles and JSON series, and TX-P2 step 1's 500-sentence
 boundary gold set per tier-1 language. Neither blocks TX-P3.
 
