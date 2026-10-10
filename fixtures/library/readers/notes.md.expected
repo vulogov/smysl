@@ -3,7 +3,7 @@ reader    md/1
 alias     notes-md
 licence   CC0-1.0
 reader-field md/1
-policy    smysl/parts/1 level=section min=65536 max=4194304
+policy    smysl/parts/1 level=section min=1024 max=4194304
 top-level section
 lossy     false
 title     Reading a text into a library
@@ -19,7 +19,7 @@ part 0
   rdid      r3:37bzba73dhlog5ostrapxdqfjhi4yvmtpoq4u5fd3wfbeb3tecua
   segments  7
 
-mid       m3:vhfjf4om4tqehz4kq3jn4gt4lvccbxlfjjwhw3irnaz5denrsd3a
+mid       m3:7u3yjuzpid2ilao26whvkjnlqwhodnlyixgm6zxmc7d3c2qjpzha
 
 locators
   section   L1 0..188

@@ -3,7 +3,7 @@ reader    json/1
 alias     exchange
 licence   CC0-1.0
 reader-field json/1
-policy    smysl/parts/1 level=entry min=65536 max=4194304
+policy    smysl/parts/1 level=entry min=1024 max=4194304
 top-level entry
 lossy     false
 title     -
@@ -19,7 +19,7 @@ part 0
   rdid      r3:xivaa5nedhycfirtqjgc3eetr5lybbo2j6dnz3ja4z5e4t3sru5a
   segments  11
 
-mid       m3:q4455torkchgczoet47iizqscuwghaqqc6w5y76gg2ht3g2mtbxq
+mid       m3:4pkv7cobdos5eqjbdtgjmrukax67sni7cxqjlfeehkg4fh6ccviq
 
 locators
   entry     /name 0..16

@@ -3,7 +3,7 @@ reader    usfm/1
 alias     kjv1769
 licence   public-domain
 reader-field usfm/1
-policy    smysl/parts/1 level=chapter min=65536 max=4194304
+policy    smysl/parts/1 level=chapter min=1024 max=4194304
 top-level chapter
 lossy     false
 title     Genesis
@@ -19,7 +19,7 @@ part 0
   rdid      r3:47lbesv4atlhent3lnu6lmq2wf2yamceuf3njfz4krrob6mqruuq
   segments  7
 
-mid       m3:byvvyuvdpvscr75tofjdbhdyf5darrqtekj5vud6eu4klqftlqva
+mid       m3:vaiwdk7fk2fumht7vej7ohmozvb7kn5264n2m34huekto43a262q
 
 locators
   book      Gen 0..454

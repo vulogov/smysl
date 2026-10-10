@@ -3,7 +3,7 @@ reader    telegram/1
 alias     reading-group-telegram
 licence   CC0-1.0
 reader-field telegram/1
-policy    smysl/parts/1 level=day min=65536 max=4194304
+policy    smysl/parts/1 level=day min=1024 max=4194304
 top-level day
 lossy     true
 title     Reading group
@@ -20,7 +20,7 @@ part 0
   rdid      r3:etqmcseyn73vx2leksl2gshik4mfs2iib6hqyswuaqwzb2ufv2wq
   segments  7
 
-mid       m3:fb7o6dv5oeyyavkkuidkcflz54yquz2roilmg3m4bhh3mqyddb7a
+mid       m3:nw3sqq7png6btr55tk7rlzo3i3ucfhst7rmxyj73dacpncrnwgxq
 
 locators
   day       chat.20240115 0..235

@@ -331,6 +331,54 @@ boundary_level }` groups whole nodes into parts. Defaults 64 KiB / 4 MiB at the 
 level are provisional until GE-T14 (end of TX-P2). The policy string is written to manifest key
 17, so corpora built before the default changes stay valid under the policy they recorded.
 
+**GE-T14 ran in TX-P2 step 6, and the default is now 1 KiB / 4 MiB.** The curve, over a year of
+chat (365 days of 40 messages), a revised article (40 paragraphs) and a 1,189-chapter Bible:
+
+| `target_min` | chat parts | mean part | redaction removes | rewritten on growth | on a re-length | manifest | catalog / chat-year |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 KiB | 365 | 4,041 | 1 day | 2 | 185 | 40 KB | 7.0 MB |
+| 4 KiB | 197 | 7,487 | 2 days | 1 | 100 | 22 KB | 3.8 MB |
+| 16 KiB | 73 | 20,205 | 5 days | 2 | 37 | 8 KB | 1.4 MB |
+| 64 KiB | 22 | 67,045 | **16 days** | 1 | 12 | 2.5 KB | 0.4 MB |
+| 256 KiB | 6 | 245,831 | 61 days | 1 | 4 | 0.7 KB | 0.1 MB |
+
+Three of the four axes turn out not to depend on the size at all:
+
+1. **Growth costs at most two parts, at every size** — the part that *was* last, which gains the
+   separator joining it to its successor (step 3), and a new one where the last group did not
+   absorb the new nodes. So the minimum buys nothing for the case a chat corpus is in every day.
+2. **An in-place correction costs one part if its length is unchanged, and every part after it if
+   it is not** — also at every size, because what decides it is whether the bytes after the edit
+   kept their offsets. Smaller parts make the second case *worse* in object count: 185 parts
+   rewritten at 1 KiB against 12 at 64 KiB, for the same correction.
+3. So the only genuine trade is **object count and catalog size against redaction granularity**.
+
+The decision follows from what the two remaining numbers are *about*. The boundary level is the
+structural judgement the reader's author already made — a day, a chapter, a paragraph — and a
+minimum above the typical node size silently overrides it: at 64 KiB a part is sixteen days
+whatever the reader said. So the minimum's job is only to stop pathologically small parts, and
+its value belongs **below** the node sizes that matter (a chat day and a Bible chapter both
+measure about 4 KB). 1 KiB is below them, so the level governs and a redaction removes about what
+it names. 4 KiB sits *at* them, where the grouping flips on fifty-seven bytes — the one value to
+avoid. The cost is 7 MB of catalog per chat-year and 2,378 objects for a Bible, against a
+redaction that takes one day instead of a fortnight, and that exchange is settled in favour of
+the obligation that comes from outside the system.
+
+`target_max` is unchanged and, at this minimum, inert: coalescing stops at 1 KiB, so the ceiling
+binds only on a single node larger than it, with `Caps::part_bytes` behind that.
+
+**The measurement is synthetic, and that is the honest instrument here.** GE-T14's row asks for
+"real chats, revised articles, Bibles"; this repository holds three chat exports of two days and
+five verses of Genesis. But all four axes are functions of the **structure alone** — the number
+of parts, which of them a revision moves, how many bytes one part holds, and how long a manifest
+is depend on the node sizes and their order and on nothing about the words. So a generated corpus
+whose node-size distribution matches the real shapes measures the policy exactly, and what stays
+owed is only whether those distributions are right — which anybody with a real corpus can check
+in an afternoon, and which the fixtures anchor at one real point each (a telegram day is 113 and
+235 bytes; a Genesis verse is 55–97). The harness is
+`crates/smysl-text/tests/part_size.rs`, and it **asserts** the curve rather than printing one, so
+the table above cannot rot.
+
 **Growth and revision.** `text append <alias> <file>` re-reads only the new input, reuses tids for
 unchanged parts (object already present: no write), and appends a manifest with `supersedes`. Two
 heads under one alias are `SMY-W418`, reported by the library pass of `check` and by `text ls`.
@@ -352,12 +400,16 @@ is in every reading.
 
 Four further things the step settled:
 
-1. **Tid reuse is a property of the part policy.** Under the default 64 KiB `target_min` a chat
-   export of a few kilobytes is *one* part, and one part that grew is a part with a new tid — so
-   an append of such an expression rewrites its only object and reuses nothing. Correct, and not
-   nothing: an operator who wants per-day parts says so in `--part-policy` at `add`, where it is
-   recorded in the manifest and reused by every append afterwards. The library's doc comment and
-   the manual both say so rather than leaving it to be discovered.
+1. **Tid reuse is a property of the part policy.** Under the 64 KiB `target_min` that was the
+   default when this step landed, a chat export of a few kilobytes is *one* part, and one part
+   that grew is a part with a new tid — so an append of such an expression rewrites its only
+   object and reuses nothing. Correct, and not nothing: an operator who wants per-day parts says
+   so in `--part-policy` at `add`, where it is recorded in the manifest and reused by every
+   append afterwards. The library's doc comment and the manual both say so rather than leaving it
+   to be discovered. **Step 6's GE-T14 moved the default to 1 KiB**, where a day *is* a part and
+   this paragraph's advice is the default — and it moved it partly on the strength of this
+   finding, since a minimum that buys nothing for growth is a minimum spending redaction
+   granularity for nothing.
 2. **An append that changes nothing writes nothing.** Re-running a sync before the export has
    grown is routine; without this it would write a manifest whose only difference from the head
    is that it supersedes it, which makes `supersedes` mean nothing. The head's own part *entries*
@@ -544,8 +596,9 @@ types in a citation cannot be `1705314225.000200`. The platform's own id is kept
 `ids` instead.
 
 1. **"One part per UTC day" is a boundary level, not a part count.** The part policy's
-   `target_min` is 64 KiB, so whole days are *grouped* into parts and a quiet month is one
-   part. A day is never split; that is what cutting on the day level buys. The sentence above
+   `target_min` was 64 KiB when step 2 landed, so whole days were *grouped* into parts and a
+   quiet month was one part. A day is never split; that is what cutting on the day level buys —
+   and step 6's GE-T14 moved the minimum to 1 KiB, where a day is a part. The sentence above
    reads as a promise about parts and is a statement about boundaries.
 2. **The day cannot come from the file.** Slack's export is one JSON file per channel per
    **local** day, so a `2024-01-15.json` holds messages belonging to two UTC days — the
@@ -1542,7 +1595,7 @@ The `.expected` format is the existing one (`fixtures/README.md`): exact code se
 | **GE-T1** (determinism) | TX-P1 (5 Bibles, JSON series), TX-P2 (2 chat exports) | build each library on Linux x86-64 and one other platform (CI matrix, unverified availability); compare mids, structure hashes, rdids; Python, JavaScript and Go recompute tid/rdid/mid from the emitted records and agree. They do not re-implement readers. Any mismatch blocks the next phase. **Partly met at TX-P1 step 7:** the three ports derive every identity in `fixtures/library/wire/ids.json` and agree, and that half is done. Two halves are owed and neither is a port's. The **five Bibles and the JSON series** are a corpus this repository does not hold, so what is checked is a two-part fixture (one Latin, one Cyrillic) — enough to exercise NFC, not enough to be the criterion. The **second platform now exists** (1.10.0): the three port jobs run on `ubuntu-latest` and `macos-latest`, where before every job in CI was Linux. Worth naming what that tests, because it is not the identities — BLAKE3 over bytes and canonical CBOR are platform-independent by construction — it is *reading files*: line endings, NFC through a different Unicode table version, path behaviour, which is exactly the code a part's identity depends on. The python job also regenerates the uid fixtures and requires no diff, so that check is now made on both. **What remains owed is the corpus**, and it is a reader risk, so it arrives with the readers' own fixtures in TX-P2. TX-P2 step 1 adds a **second** corpus to the same debt: the 500-sentence sentence-boundary gold set per tier-1 language that step's exit asks for. Its harness exists and takes a directory (`SMYSL_SEG_GOLD`); what is missing is prose nobody here wrote, annotated by someone who did not write the segmenter. Both are the same shape of gap — a measurement whose instrument is built and whose material is not — and neither is met by anything this repository can author. **TX-P2 step 2 closes the chat half of the first gap, in the one way it can be closed honestly:** `fixtures/library/readers/{telegram.json,whatsapp.txt,slack.zip}` are two chat exports in three formats, written for the purpose, with every identity pinned in a `.expected` file beside them. They are small and they are ours, so they are an instrument and not a measurement of real traffic — what they do establish is the half GE-T1 asks of a *reader*: that the same bytes produce the same tids, structure hashes, rdids and mid on re-read, and that the readings do not depend on the order a zip happens to be written in. |
 | **GE-T4** (attribution fairness) | before TX-P5 | 200 hand-checked units per tier-1 language under normaliser v1 and v2 (SMYSL-2.1); v2 false-`Absent` > 1% in any language blocks TX-P5 |
 | **GE-T13** (effective time) | TX-P3 | synthetic chats with planted skews plus a public chronology with known relative orders; P-E4/P-E5 on real data; any planted skew undetected, or any false contested interval on consistent data, blocks TX-P4 |
-| **GE-T14** (part size) | end of TX-P2 | real chats, revised articles, Bibles at 64 KiB–4 MiB; object count, reuse on revision, redaction granularity; the curve is recorded and the default fixed before TX-P3 |
+| ~~**GE-T14** (part size)~~ | ~~end of TX-P2~~ | **Ran in TX-P2 step 6; the curve is in §3.1 and the default is fixed at 1 KiB / 4 MiB.** Three of the four axes are independent of the size — growth costs at most two parts, a same-length correction one, a re-length every part after it — so the only trade is object count and catalog size against redaction granularity, and 64 KiB made one redaction remove sixteen days of a conversation. The measurement is synthetic and says so: every axis is a function of the structure alone, so the material still owed is only whether the node-size distributions match real corpora. `crates/smysl-text/tests/part_size.rs` asserts the curve rather than printing it. |
 | **GE-T2** (extraction stability) | rerun at TX-P5 | under the consensus policy (§3.4), not the single-pass policy draft 3 assumed. Stability is measured as `identical-span` agreement between the two passes — computed, not judged — and reported per language. The judged `J_class` form of GE-T2 waits for GE-T9 with GE-T5, for the reason in the row below. S0's pilot: `J_class` 1.000 local, 0.327 hosted, against a 0.6 threshold. |
 | GE-T5 within-language arm, GE-T11 | TX-P7 | as draft 3 §23, **except the threshold** (§1.1 item 5, argued in §0.1). Draft 3's "precision ≥ 0.9 at recall 0.7" is measured against a gold, and S0's gold is three model coders whose binary α is 0.600 [0.550, 0.646] — so 0.9 is above what that gold can support, and the pilot's 0.835 and 0.712 measure the gold rather than the engines. Restated: an engine passes when its agreement with the pooled gold, scored on the coders' own scale, is **not distinguishable from the coders' agreement with each other** — it joins the pool rather than beating it. The absolute bar returns when **GE-T9** supplies a human α, which is still owed; until then every class figure is reported against the model-model ceiling, and `attested:2` is the default (§3.6). The cross-lingual arm of GE-T5 is SMYSL-2.5 and waits for TX-P10's S1 embeddings. |
 
@@ -1553,6 +1606,14 @@ The `.expected` format is the existing one (`fixtures/README.md`): exact code se
 | `python/smysl` (`records.py`, `uid.py`) | decode/re-encode records 14, 15, 17, 18, 19 and unit key 9, source keys 4–6, byte-identically; `tid`, `mid`, `did`, `rdid`; record-set digest (from SMYSL-2.1) | `tests/test_library.py` over `fixtures/library/wire` |
 | `nodejs/src` (`records.js`, `uid.js`) | same | `test/library.test.js` |
 | `go/` (`records.go`, `uid.go`) | same | `library_test.go` |
+
+**Added in TX-P2 step 6: `fixtures/library/chat-wire/`**, and the three suites above gained a
+second file each (`test_chat_wire.py`, `chat_wire.test.js`, `chat_wire_test.go`). The fixture
+above is hand-built in `smysl-core` — correctly, in a crate with no reader — so what it cannot
+offer is the records a *reader* emits. The chat fixture is the output of three real `text add`
+runs, and it is where the identities are derived over what scripture has none of: segment tables
+with speakers, timestamps and platform ids in them, `mul` manifests, and `raw` metadata inside
+the mid. The ports still implement no reader; they decode and hash.
 
 The record bodies are maps of integers, text, byte strings and arrays, already within each
 port's decoder; the work is per-record field tables and four hash functions. Planned at about
@@ -2049,8 +2110,30 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
      an accepted *implementation* of an amendment that is still for discussion. The code and the
      fixtures point at A-12.4; `SMYSL_FORMAT_SPEC.md` says nothing about classes until D-7 is
      accepted, which is what A-14's fold rule requires rather than a gap.
-6. *Exit for the phase:* **GE-T1** on two chat exports; **GE-T14** curve recorded and default part
-   policy fixed.
+6. ~~*Exit for the phase:* **GE-T1** on two chat exports; **GE-T14** curve recorded and default
+   part policy fixed.~~ **Both done, and the phase is closed.**
+   - **GE-T14**: the curve is recorded in §3.1 and the default moved from 64 KiB to **1 KiB**.
+     Three of its four axes turned out not to depend on the size at all, which is what made the
+     decision a short argument rather than a balance: the boundary level is the structural
+     judgement, and a minimum above the typical node size silently overrides it. Changing the
+     default moved every fixture's mid and no fixture's *cut* — they are all under 1 KiB — which
+     is exactly the event manifest key 17 exists for.
+   - **GE-T1, the chat half**: `fixtures/library/chat-wire/` holds the records a chat `text add`
+     emits — three exports, three readers, one catalog — and the three ports recompute every tid,
+     structure hash, rdid and mid from them. That is the half `fixtures/library/wire/` could not
+     give them: its records are hand-built in `smysl-core`, correctly, in a crate with no reader,
+     so no port had ever hashed a segment table with a **speaker** in it, a `mul` manifest, or a
+     manifest carrying opaque `raw` metadata inside its mid. A port that dropped an opaque key
+     would decode the record and disagree about the identity, with nothing else to notice.
+   - **GE-T1, the second platform**: the three port jobs have run on Linux and macOS since
+     1.10.0, and the Rust library — the implementation that *writes* the identities — did not.
+     It does now (`library-platforms`), over the suites that pin identities. What that tests is
+     not the hashing, which is platform-independent by construction, but **reading files**: line
+     endings, NFC through another Unicode table version, path behaviour — and the Slack reader's
+     zip path, which is the one place a path separator could reach a locator.
+   - What stays owed is corpora and not code, as it was before: the five Bibles and the JSON
+     series for GE-T1, the 500-sentence boundary gold set from step 1, and the question of
+     whether GE-T14's synthetic node-size distributions match real traffic.
 
 ### TX-P3 — time
 

@@ -3,7 +3,7 @@ reader    txt/1
 alias     notes-txt
 licence   CC0-1.0
 reader-field txt/1
-policy    smysl/parts/1 level=line min=65536 max=4194304
+policy    smysl/parts/1 level=line min=1024 max=4194304
 top-level line
 lossy     false
 title     -
@@ -19,7 +19,7 @@ part 0
   rdid      r3:apfxei2trsqmihbwxzhjf6issljoke7ntpnpsukayeglkdck6e7a
   segments  10
 
-mid       m3:hvrstoo5jrvkcmb63aqykc5axfnpwx6wmtgo6xicsqkgii7juluq
+mid       m3:lq2h6mnnel45wrts5ld4k4tpkhapawetz42ohdk5gqkzvlx72maa
 
 locators
   line      L1 0..29

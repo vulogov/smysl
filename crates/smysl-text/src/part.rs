@@ -15,10 +15,11 @@
 //!
 //! # The policy is recorded, not assumed
 //!
-//! Manifest key 17 holds [`Policy::id`], and it is a required key. The defaults here are
-//! provisional until GE-T14 measures them at the end of TX-P2 — so a corpus built today must
-//! stay valid under the policy it was built with rather than under whatever the default
-//! becomes. That is the whole reason the string is on the wire.
+//! Manifest key 17 holds [`Policy::id`], and it is a required key. The defaults were
+//! provisional until GE-T14 measured them at the end of TX-P2 — and the measurement moved
+//! `target_min` from 64 KiB to 1 KiB, which is exactly the event the key exists for: every
+//! corpus cut under the old default stays valid under the policy it recorded, and `text append`
+//! goes on cutting it that way. See [`Policy::DEFAULT_MIN`] for the curve and the argument.
 
 use smysl_core::error::LibError;
 
@@ -48,14 +49,49 @@ impl Policy {
     /// check later.
     pub const ID: &'static str = "smysl/parts/1";
 
-    /// 64 KiB to 4 MiB at the reader's top level — §3.1's provisional defaults.
+    /// 1 KiB to 4 MiB at the reader's top level — **fixed by GE-T14** (TX-P2 step 6).
     ///
     /// `Level::new` cannot be `const`, so the default level is a `&str` here and a `Level`
     /// in the [`Default`] impl. The level is `chapter` rather than `book`: a
     /// 4 MiB ceiling over book-sized nodes would put most Bibles in one part and make every
     /// re-read of a corrected verse rewrite the whole thing.
+    ///
+    /// # Why 1 KiB, and why it was 64
+    ///
+    /// `target_min` was 64 KiB and provisional, which is why manifest key 17 records the policy:
+    /// a corpus cut under the old default stays valid under the policy it recorded.
+    /// `crates/smysl-text/tests/part_size.rs` is the measurement that settled it, over a year of
+    /// chat, a revised article and a 1,189-chapter Bible. What it found:
+    ///
+    /// - **Growth costs at most two parts at every size** — the one that was last, and a new one
+    ///   where the last group did not absorb the new nodes. So the minimum buys nothing for the
+    ///   case a chat is in every day.
+    /// - **An in-place correction costs one part if its length is unchanged, and every part after
+    ///   it if it is not** — also at every size. Smaller parts make the second case *worse* in
+    ///   object count, not better.
+    /// - So the only axis the size genuinely trades is **object count and catalog size against
+    ///   redaction granularity**: 1 KiB gives a year of chat 365 parts, a 40 KB manifest and 7 MB
+    ///   of catalog over 365 daily appends; 64 KiB gives 22 parts, 2.5 KB and 0.4 MB — and makes
+    ///   one redaction remove **sixteen days** of conversation instead of one.
+    ///
+    /// The decision follows from what the two numbers are *about*. The boundary level is the
+    /// structural judgement the reader's author already made — a day, a chapter, a paragraph —
+    /// and a minimum above the typical node size silently overrides it: at 64 KiB a part is
+    /// sixteen days whatever the reader said. So the minimum's job is only to stop
+    /// pathologically small parts, and its value belongs **below** the node sizes that matter
+    /// (a chat day and a Bible chapter both measure about 4 KB). 1 KiB is below them, so the
+    /// level governs and a redaction removes about what it names; 4 KiB sits *at* them, where
+    /// the grouping flips on fifty-seven bytes, which is the one value to avoid.
+    ///
+    /// The cost is 7 MB of catalog per chat-year and 2,378 objects for a Bible, against a
+    /// redaction that takes one day rather than a fortnight. That exchange is settled in favour
+    /// of the obligation that comes from outside the system.
+    ///
+    /// `target_max` is unchanged and, at this minimum, inert: coalescing stops at 1 KiB, so the
+    /// ceiling binds only on a single node larger than it — and `Caps::part_bytes` is the hard
+    /// limit behind that.
     pub const DEFAULT_LEVEL: &'static str = "chapter";
-    pub const DEFAULT_MIN: u64 = 64 << 10;
+    pub const DEFAULT_MIN: u64 = 1 << 10;
     pub const DEFAULT_MAX: u64 = 4 << 20;
 
     pub fn new(boundary_level: Level, target_min: u64, target_max: u64) -> Policy {
@@ -287,7 +323,7 @@ mod tests {
     #[test]
     fn the_policy_string_round_trips() {
         let p = Policy::default();
-        assert_eq!(p.id(), "smysl/parts/1 level=chapter min=65536 max=4194304");
+        assert_eq!(p.id(), "smysl/parts/1 level=chapter min=1024 max=4194304");
         assert_eq!(Policy::parse(&p.id()), Some(p.clone()));
 
         let other = Policy::new(Level::new("day").unwrap(), 1, 2);

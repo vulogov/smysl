@@ -561,7 +561,9 @@ gains the space that now joins it to its successor. Every part before it is unto
 of an append is therefore one rewritten part whatever the size of the corpus, and `objects N
 written` is where you see it.
 
-Tid reuse at all depends on the **part policy**: under the default 64 KiB minimum a chat export
+Tid reuse at all depends on the **part policy**, though less than it used to: GE-T14 moved the
+default minimum from 64 KiB to 1 KiB at the end of TX-P2, so a chat day is now a part by default.
+Under the old 64 KiB minimum a chat export
 of a few kilobytes is one part, and one part that grew is a part with a new tid. An operator who
 wants per-day parts says so in `--part-policy` at `add`, where it is recorded in the manifest
 and reused by every append afterwards.

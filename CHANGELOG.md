@@ -48,13 +48,78 @@ their own evidence in the form they were written.
 **One decision still open.** OQ-34 for the hosted model's outputs as fixtures — the local model is
 Apache 2.0 and settled, the hosted one is not. It blocks nothing that has started.
 
-**TX-P1 is complete and TX-P2 is five steps in.** The library wire is in — three new record
-types, four new identities, and the first of them to be hashed over something other than a CBOR
-map — and so is everything that interprets it: the crate, now **nine** readers, the locator
-grammar the plan pointed at a document nobody has, the check pass, the CLI, and the three
-ports. One thing TX-P1 owes is a corpus rather than code, and TX-P2's first step added a second
-of exactly the same kind; its second step closed the chat half of the first. The sections below
-are newest first.
+**TX-P1 and TX-P2 are complete.** The library wire is in — four new record types, four new
+identities, and the first of them to be hashed over something other than a CBOR map — and so is
+everything that interprets it: the crate, **nine** readers, the locator grammar the plan pointed
+at a document nobody has, sentences and terms and languages, growth, redaction, proposition
+classes, the check pass, the CLI, and the three ports. Two gated experiments ran and one default
+moved because of them. What the two phases still owe is **corpora rather than code** — the five
+Bibles and the JSON series, a 500-sentence boundary gold set per language, and whether a
+synthetic node-size distribution matches real traffic — and each is recorded where it is owed
+rather than counted as done. The sections below are newest first.
+
+### The part size was provisional for eleven releases, and three of its four axes do not depend on it
+
+**TX-P2 step 6 — the phase exit.** Two gated experiments, and the phase is closed.
+
+**GE-T14 moved the default `target_min` from 64 KiB to 1 KiB.** It has been provisional since it
+was written, which is why manifest key 17 records the policy a corpus was cut by: the default can
+change without invalidating anything, and this release is where it changed. The curve, over a year
+of chat, a revised article and a 1,189-chapter Bible:
+
+| `target_min` | chat parts | redaction removes | rewritten on growth | on a re-length | catalog / chat-year |
+|---:|---:|---:|---:|---:|---:|
+| 1 KiB | 365 | 1 day | 2 | 185 | 7.0 MB |
+| 16 KiB | 73 | 5 days | 2 | 37 | 1.4 MB |
+| 64 KiB | 22 | **16 days** | 1 | 12 | 0.4 MB |
+| 256 KiB | 6 | 61 days | 1 | 4 | 0.1 MB |
+
+**Three of the four axes turn out not to depend on the size at all.** Growth costs at most two
+parts at every size — the part that was last, and a new one where the last group did not absorb
+the new nodes. A same-length correction costs one part at every size. A length-changing correction
+costs every part after it at every size, and *smaller* parts make that worse in object count, not
+better: 185 rewritten at 1 KiB against 12 at 64 KiB. So the only genuine trade is object count and
+catalog size against redaction granularity, and that made the decision a short argument rather
+than a balance.
+
+The argument: **the boundary level is the structural judgement the reader's author already made**
+— a day, a chapter, a paragraph — and a minimum above the typical node size silently overrides
+it. At 64 KiB a part is sixteen days whatever the reader said. So the minimum's job is only to
+stop pathologically small parts, and its value belongs below the node sizes that matter (a chat
+day and a Bible chapter both measure about 4 KB). 1 KiB is below them. 4 KiB sits *at* them, where
+the grouping flips on fifty-seven bytes — the one value to avoid. The cost is 7 MB of catalog per
+chat-year and 2,378 objects for a Bible, against a redaction that takes one day instead of a
+fortnight, and that exchange goes to the obligation that comes from outside the system.
+
+Changing it moved every fixture's mid and **no fixture's cut** — they are all under 1 KiB — which
+is exactly the event key 17 exists for.
+
+The measurement is **synthetic and says so**. GE-T14 asks for real chats, revised articles and
+Bibles; this repository holds three chat exports of two days and five verses of Genesis. But all
+four axes are functions of the *structure alone* — how many parts, which a revision moves, how
+many bytes one holds, how long a manifest is — so a generated corpus whose node-size distribution
+matches the real shapes measures the policy exactly, and what stays owed is only whether those
+distributions are right. The harness **asserts** the curve rather than printing it, so the table
+above cannot rot.
+
+**GE-T1's chat half is closed, and it needed a second wire fixture.** The three ports recompute
+every identity in `fixtures/library/wire/` and agree — but those records are hand-built in
+`smysl-core`, correctly, in a crate with no reader. So no port had ever hashed a segment table
+with a **speaker** in it, a `mul` manifest, or a manifest carrying opaque `raw` metadata inside
+its mid — and a port that dropped an opaque key would decode the record and disagree about the
+identity, with nothing else to notice. `fixtures/library/chat-wire/` is the output of three real
+`text add` runs over three formats into one catalog, and the three ports now recompute its tids,
+structure hashes, rdids and mids. They still implement no reader.
+
+**And GE-T1's second platform now covers the implementation that writes the identities.** The
+three port jobs have run on Linux and macOS since earlier in 1.10.0; the Rust library ran on
+Linux alone. What a second runner tests is not the hashing, which is platform-independent by
+construction — it is **reading files**: line endings, NFC through another Unicode table version,
+path behaviour, and now the Slack reader's zip path, which is the one place a path separator could
+reach a locator.
+
+What stays owed is corpora and not code, as before: the five Bibles and the JSON series, step 1's
+500-sentence boundary gold set, and whether GE-T14's node-size distributions match real traffic.
 
 ### How many propositions a store holds, counted the same way twice
 
@@ -178,9 +243,10 @@ ever rewritten. It would also make every part but the first begin with whitespac
 computed. The measured cost is `O(1)` per append; the unmeasured one is in every reading.
 
 **Tid reuse is a property of the part policy, which is worth saying out loud.** Under the
-default 64 KiB minimum, a chat export of a few kilobytes is *one* part — and one part that grew
-is a part with a new tid, so an append of such an expression rewrites its only object and reuses
-nothing. Correct, and not nothing: per-day parts are a `--part-policy` at `add`, recorded in the
+64 KiB minimum that was the default when this landed, a chat export of a few kilobytes is *one*
+part — and one part that grew is a part with a new tid, so an append of such an expression
+rewrites its only object and reuses nothing. (Step 6 moved the default to 1 KiB, partly on the
+strength of this finding; see below.) Correct, and not nothing: per-day parts are a `--part-policy` at `add`, recorded in the
 manifest and reused by every append afterwards. The doc comment, the manual and the RFC all say
 so rather than leaving an operator to measure it.
 
@@ -301,8 +367,9 @@ defines it over the whole segment table, which holds the speaker, so `SMY-E401`'
 `which: "structure"` means "the table changed" rather than "the segmentation changed". Recorded
 as OQ-70 against SMYSL-2.3 rather than fixed here, because narrowing A-5 would move every
 structure hash ever computed. And "one part per UTC day" is a *boundary level*, not a part
-count: the policy's 64 KiB minimum groups whole days, so a quiet month is one part — a day is
-never split, which is what cutting on the day level actually buys.
+count: the 64 KiB minimum that was then the default groups whole days, so a quiet month was one
+part — a day is never split, which is what cutting on the day level actually buys. Step 6's
+GE-T14 moved the minimum to 1 KiB, where a day is a part.
 
 **`SMY-E450` is not in this release**, deliberately. It refuses an append to a pseudonymised
 expression without its key, `text append` is step 3, and the rule in force is that a code

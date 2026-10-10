@@ -3,7 +3,7 @@ reader    osis/1
 alias     kjv1769-osis
 licence   public-domain
 reader-field osis/1
-policy    smysl/parts/1 level=chapter min=65536 max=4194304
+policy    smysl/parts/1 level=chapter min=1024 max=4194304
 top-level chapter
 lossy     false
 title     The King James Version, 1769
@@ -19,7 +19,7 @@ part 0
   rdid      r3:q4fusdnj5nn2fyz7t7jr76q232djvmkyoe5kv37k6vkk24q67pia
   segments  7
 
-mid       m3:ossnufhomwd5b5egkokotghk2wbybg5sj2xktqogzlefxzuxhosq
+mid       m3:vspvlmcbzndjkyfyoyfzuk6q2g5iynwttbe7z7moaykpswpqeuea
 
 locators
   book      Gen 0..454

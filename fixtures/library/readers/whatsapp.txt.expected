@@ -3,7 +3,7 @@ reader    whatsapp/1
 alias     reading-group-whatsapp
 licence   CC0-1.0
 reader-field whatsapp/1 date-format=dmy
-policy    smysl/parts/1 level=day min=65536 max=4194304
+policy    smysl/parts/1 level=day min=1024 max=4194304
 top-level day
 lossy     true
 title     -
@@ -19,7 +19,7 @@ part 0
   rdid      r3:726kk4vitarxmabmrmlpqofzu7jizky7ajdkyosrkzlqzmvdaoja
   segments  8
 
-mid       m3:fvv6bbcnszg7j3b2wjiffkjef5xztinq7cwcah5nvk3b4wpdmacq
+mid       m3:nf4qzw2mx2rkjwxqrujej4zbristuhisopgdr6kr6usym6dmv2fq
 
 locators
   day       chat.20240115 0..156

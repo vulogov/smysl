@@ -70,7 +70,7 @@ store, never in the log.
 ```
 @manifest kjv/1769 { lang: en, reader: osis/1, licence: public-domain,
                      carry: text,
-                     part-policy: "smysl/parts/1 level=chapter min=65536 max=4194304",
+                     part-policy: "smysl/parts/1 level=chapter min=1024 max=4194304",
                      parts: [ { tid: "t3:…", length: 4096,
                                 structure: "b3:…", rdid: "r3:…" } ] }
 ```

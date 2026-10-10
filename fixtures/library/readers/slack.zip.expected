@@ -3,7 +3,7 @@ reader    slack/1
 alias     reading-group-slack
 licence   CC0-1.0
 reader-field slack/1
-policy    smysl/parts/1 level=day min=65536 max=4194304
+policy    smysl/parts/1 level=day min=1024 max=4194304
 top-level day
 lossy     true
 title     -
@@ -20,7 +20,7 @@ part 0
   rdid      r3:tgtygqt5ynylwtiv77pmzf2akaohqdoaafbtlug7hhifqzxpsn2q
   segments  12
 
-mid       m3:rpa6kdl7ztm63at7opdwvo7rvbhnbyqrmc6gxf7qe4fs2cre5u3a
+mid       m3:d7shwfaig7edk7qmpavantumchjteoqtohuh5wwmuwb66offv2sq
 
 locators
   channel   general 0..317

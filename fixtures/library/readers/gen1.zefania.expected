@@ -3,7 +3,7 @@ reader    zefania/1
 alias     luther1912
 licence   public-domain
 reader-field zefania/1
-policy    smysl/parts/1 level=chapter min=65536 max=4194304
+policy    smysl/parts/1 level=chapter min=1024 max=4194304
 top-level chapter
 lossy     false
 title     Lutherbibel 1912
@@ -19,7 +19,7 @@ part 0
   rdid      r3:l5jytqqcje7xcysf3ujuxv3c7calvvys2ravljbkefn6aawxvkpq
   segments  5
 
-mid       m3:7hlmvuvnq5dvpogmif6q2fkyfejnp2pbrwqguac3miquv7teunlq
+mid       m3:2cjxdecf66za6du2mrodni2a42mdxvbfa3pcwg6ft34e247oczka
 
 locators
   book      Gen 0..202
