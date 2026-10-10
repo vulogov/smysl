@@ -11,7 +11,7 @@ pub use lex::{lex, Line, LineClass};
 pub use parse::{parse_surface, parse_surface_with, ParseOptions, ParseOutcome};
 pub use payload::{object_to_payload, payload_to_object};
 pub use write::{
-    commit_has_surface_form, manifest_has_surface_form, resolution_has_surface_form,
-    schema_decl_has_surface_form, thread_has_surface_form, unit_has_surface_form,
-    withdrawal_has_surface_form, write_surface, WriteContext,
+    commit_has_surface_form, dating_has_surface_form, manifest_has_surface_form,
+    resolution_has_surface_form, schema_decl_has_surface_form, thread_has_surface_form,
+    unit_has_surface_form, withdrawal_has_surface_form, write_surface, WriteContext,
 };

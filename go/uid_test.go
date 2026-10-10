@@ -36,6 +36,8 @@ type uidCase struct {
 			Kind      uint64  `json:"kind"`
 			Reference string  `json:"reference"`
 			Captured  *string `json:"captured"`
+			Observed  *uint64 `json:"observed"`
+			Published *string `json:"published"`
 		} `json:"source"`
 		PayloadHex *string `json:"payload_hex"`
 	} `json:"core"`
@@ -91,6 +93,12 @@ func build(t *testing.T, c uidCase) *UnitCore {
 		s := &Source{Kind: c.Core.Source.Kind, Reference: c.Core.Source.Reference}
 		if c.Core.Source.Captured != nil {
 			s.Captured = *c.Core.Source.Captured
+		}
+		if c.Core.Source.Observed != nil {
+			s.Observed = *c.Core.Source.Observed
+		}
+		if c.Core.Source.Published != nil {
+			s.Published = *c.Core.Source.Published
 		}
 		u.Source = s
 	}

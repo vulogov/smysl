@@ -38,6 +38,8 @@ def build(spec: dict) -> UnitCore:
             kind=k["source"]["kind"],
             reference=k["source"]["reference"],
             captured=k["source"]["captured"],
+            observed=k["source"]["observed"],
+            published=k["source"]["published"],
         )
     return UnitCore(
         schema=k["schema"],

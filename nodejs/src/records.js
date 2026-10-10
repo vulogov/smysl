@@ -50,7 +50,7 @@ export const RECORD_NAMES = new Map([
  * separation above is what makes that sentence sayable.
  */
 export const UNDERSTOOD_RECORDS = new Set([
-  1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 18, 19,
+  1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 17, 18, 19,
 ]);
 
 /** §2.2. Anything at 9 or above is an unknown key that rule X says must survive verbatim. */

@@ -57,6 +57,9 @@ pub enum LineClass {
     /// `@redact <tid> { agent: …, ts: […] }` — a `Redaction` (1.10, rule Z). At the end for the
     /// same reason as every variant above it.
     RedactStart,
+    /// `@date <target> { axis: …, when: …, agent: …, ts: […] }` — a `Dating` (1.10, record 17).
+    /// At the end for the same reason as every variant above it.
+    DateStart,
 }
 
 impl LineClass {
@@ -73,6 +76,7 @@ impl LineClass {
                 | LineClass::CommitStart
                 | LineClass::ManifestStart
                 | LineClass::RedactStart
+                | LineClass::DateStart
         )
     }
 }
@@ -157,15 +161,16 @@ fn classify(line: &str) -> LineClass {
             "resolve" => LineClass::ResolveStart,
             // Reserved in 1.7, in the same way.
             "commit" => LineClass::CommitStart,
-            // Reserved in 1.10 (SMYSL-2.3 A-10), in the same way. `@date` is reserved by the
-            // same amendment and lands in TX-P3; until then it lexes as `Text`, which is what
-            // every one of these words did before its release and is why reserving a word is
-            // not the same as implementing it.
+            // Reserved in 1.10 (SMYSL-2.3 A-10), in the same way.
             "manifest" => LineClass::ManifestStart,
             // Rule Z (TX-P2 step 4). A redaction has a surface form although a part text does
             // not: the record says *that* a part was redacted, and that is exactly the half a
             // person reads and writes.
             "redact" => LineClass::RedactStart,
+            // Record 17 (TX-P3 step 1). Reserved by the same amendment as `@manifest` and
+            // `@redact`, and lexing as `Text` until now — which is what every one of these
+            // words did before its release, and why reserving a word is not implementing it.
+            "date" => LineClass::DateStart,
             w if is_record_type(w) => LineClass::RecordStart,
             // A type this build does not know, which a later version may have added. The
             // writer emits exactly the type string it decoded - it has to, since the type

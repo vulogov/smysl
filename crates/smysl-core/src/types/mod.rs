@@ -19,7 +19,8 @@ pub use annex::{
 pub use epistemics::{Date, Lod, SourceKind, SourcePolicy, SourceRef, Status};
 pub use estimate::{ProfileEstimator, TokenEstimator};
 pub use library::{
-    Calendar, Carry, Manifest, ParentKind, PartEntry, PartReading, PartResolver, PartText, Resolved,
+    Allen, Axis, Calendar, Carry, Dating, DatingTarget, DatingValue, Manifest, ParentKind,
+    PartEntry, PartReading, PartResolver, PartText, Redaction, Resolved,
 };
 pub use lifecycle::{Commit, Commitment, Resolution, ResolutionTarget, Withdrawal};
 pub use provenance::{Attestation, Hlc, Op, Rung};

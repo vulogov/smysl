@@ -4,7 +4,7 @@
 //! registration, more compact, and determinism is easier to guarantee.
 
 use crate::types::annex::{Contention, LabelBinding, PackInfo, SchemaDecl};
-use crate::types::library::{Manifest, PartReading, PartText, Redaction};
+use crate::types::library::{Dating, Manifest, PartReading, PartText, Redaction};
 use crate::types::lifecycle::{Commit, Resolution, Withdrawal};
 use crate::types::provenance::Attestation;
 use crate::types::relation::Relation;
@@ -49,7 +49,9 @@ pub mod code {
     /// Reserved: hold (telemetry). MUST NOT be emitted until a later amendment defines it,
     /// so it decodes to [`super::Record::Unknown`] exactly as code 9 does.
     pub const HOLD: u64 = 16;
-    /// A statement about when something happened (TX-P3). Not yet decoded by this build.
+    /// A statement about when something happened (1.10, TX-P3). A record about units, parts
+    /// and manifests — never an edit to them, because correcting a unit's `observed` in place
+    /// would change its uid.
     pub const DATING: u64 = 17;
     /// What one reader derived from one part (1.10).
     pub const PART_READING: u64 = 18;
@@ -71,6 +73,7 @@ pub mod code {
         COMMIT,
         MANIFEST,
         PART_TEXT,
+        DATING,
         PART_READING,
         REDACTION,
     ];
@@ -101,6 +104,8 @@ pub enum Record {
     /// A part's normalised text (1.10). Carries no surface form: text is not written in
     /// surface syntax.
     PartText(PartText),
+    /// A statement about when something happened (1.10). Its identity is a did (A-3).
+    Dating(Dating),
     /// What one reader derived from one part (1.10). No surface form either.
     PartReading(PartReading),
     /// A part's text is to be held no longer (1.10, rule Z).
@@ -133,6 +138,7 @@ impl Record {
             Record::Commit(_) => code::COMMIT,
             Record::Manifest(_) => code::MANIFEST,
             Record::PartText(_) => code::PART_TEXT,
+            Record::Dating(_) => code::DATING,
             Record::PartReading(_) => code::PART_READING,
             Record::Redaction(_) => code::REDACTION,
             Record::Unknown { code, .. } => *code,
@@ -155,6 +161,7 @@ impl Record {
             Record::Commit(_) => "commitment",
             Record::Manifest(_) => "manifest",
             Record::PartText(_) => "parttext",
+            Record::Dating(_) => "dating",
             Record::PartReading(_) => "partreading",
             Record::Redaction(_) => "redaction",
             Record::Unknown { .. } => "unknown",
@@ -224,26 +231,25 @@ mod tests {
     /// here so that adding the variant without adding the code to `KNOWN`, or the reverse,
     /// fails a test instead of shipping.
     #[test]
-    fn dating_is_allocated_and_not_yet_decoded_and_redaction_now_is() {
+    fn the_library_records_are_decoded_and_sixteen_stays_reserved() {
         assert_eq!(code::DATING, 17);
         assert_eq!(code::REDACTION, 19);
-        assert!(!code::KNOWN.contains(&code::DATING));
+        assert!(code::KNOWN.contains(&code::DATING));
         assert!(code::KNOWN.contains(&code::REDACTION));
     }
 
-    /// Ascending, and with a hole. Codes 1-8 are 0.1's records; 9 stays reserved for
+    /// Ascending, and with two holes. Codes 1-8 are 0.1's records; 9 stays reserved for
     /// checkpointing, whose format interacts with content addressing and must not be
     /// retrofitted; 10 is 0.2's label binding; 11 and 12 are 1.4's withdrawal and resolution;
-    /// 13 is 1.7's commitment; 14, 15, 18 and 19 are 1.10's library records, and the two holes
-    /// at 16 and 17 are a reserved slot and a code whose phase has not landed. The list was
-    /// contiguous until the hole
-    /// became real, and contiguity was never the property that mattered - being ascending
-    /// and free of duplicates is, since a code is a permanent wire commitment.
+    /// 13 is 1.7's commitment; 14, 15, 17, 18 and 19 are 1.10's library records, and 16 is a
+    /// reserved slot (hold, telemetry) that no amendment has defined. The list was contiguous
+    /// until the first hole became real, and contiguity was never the property that mattered -
+    /// being ascending and free of duplicates is, since a code is a permanent wire commitment.
     #[test]
     fn known_codes_ascend_and_skip_the_reserved_slot() {
         assert_eq!(
             code::KNOWN,
-            &[1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 18, 19]
+            &[1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 17, 18, 19]
         );
         assert!(code::KNOWN.windows(2).all(|w| w[0] < w[1]));
     }

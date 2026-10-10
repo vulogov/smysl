@@ -5,9 +5,8 @@ package smysl
 // RecordNames is the table in §3.1: every code the format has allocated.
 //
 // A code is a permanent wire commitment the moment it is allocated, so the reserved and
-// not-yet-defined ones are named too — 9 is checkpoint, 16 is reserved, and 17 and 19 are
-// specified but land in later releases. Naming them is how a reader says *what* it met rather
-// than only that it met something.
+// not-yet-defined ones are named too — 9 is checkpoint and 16 is reserved. Naming them is how a
+// reader says *what* it met rather than only that it met something.
 var RecordNames = map[uint64]string{
 	1: "unit", 2: "attestation", 3: "relation", 4: "thread", 5: "view",
 	6: "contention", 7: "pack_info", 8: "schema_decl", 9: "checkpoint", 10: "label_binding",
@@ -26,15 +25,15 @@ var RecordNames = map[uint64]string{
 //
 // An unknown record is still preserved verbatim and re-encoded byte for byte; that is C-Read
 // and it is unaffected.
-// 14, 15, 18 and 19 joined in 1.10: library.go decodes their bodies and derives the four
-// identities over the first three — a redaction has none, being a statement about a part rather
-// than a thing the format refers to. 9, 16 and 17 are still named and not understood: nothing
-// emits a checkpoint, 16 is reserved, and 17 lands with the release that writes it. The
-// separation above is what makes that sentence sayable.
+// 14, 15, 18 and 19 joined in 1.10 and 17 with TX-P3: library.go decodes their bodies and
+// derives an identity for each but the redaction, which has none — a redaction is a statement
+// about a part rather than a thing the format refers to. 9 and 16 are still named and not
+// understood: nothing emits a checkpoint and 16 is reserved. The separation above is what makes
+// that sentence sayable.
 var understoodRecords = map[uint64]bool{
 	1: true, 2: true, 3: true, 4: true, 5: true, 6: true,
 	7: true, 8: true, 10: true, 11: true, 12: true, 13: true,
-	14: true, 15: true, 18: true, 19: true,
+	14: true, 15: true, 17: true, 18: true, 19: true,
 }
 
 // UnitKeys is the table in §2.2. Anything at 9 or above is an unknown key that rule X says

@@ -107,7 +107,7 @@
         "deps": [],
         "grounds": [],
         "status": 5,
-        "source": { "kind": 2, "reference": "pool.wait_ms{shard=eu-west}", "captured": null },
+        "source": { "kind": 2, "reference": "pool.wait_ms{shard=eu-west}", "captured": null, "observed": null, "published": null },
         "payload_hex": null
       },
       "core_bytes_hex": "a4006865766964656e6365016d61206d6561737572656d656e74060507a2000201781b706f6f6c2e776169745f6d737b73686172643d65752d776573747d",
@@ -123,11 +123,43 @@
         "deps": [],
         "grounds": [],
         "status": 5,
-        "source": { "kind": 1, "reference": "analysis/tables/latency.csv", "captured": "2026-06-30" },
+        "source": { "kind": 1, "reference": "analysis/tables/latency.csv", "captured": "2026-06-30", "observed": null, "published": null },
         "payload_hex": null
       },
       "core_bytes_hex": "a4006865766964656e6365017361206461746564206d6561737572656d656e74060507a3000101781b616e616c797369732f7461626c65732f6c6174656e63792e637376026a323032362d30362d3330",
       "uid_hex": "3e3447044c85811591a47fdd2079f7b10d451555327391b1d1cc43db70ed274a"
+    },
+    {
+      "name": "with-observed",
+      "core": {
+        "schema": "evidence",
+        "gist": "a measurement with an instant",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 5,
+        "source": { "kind": 2, "reference": "pool.wait_ms", "captured": null, "observed": 1726500000123, "published": null },
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a4006865766964656e636501781d61206d6561737572656d656e74207769746820616e20696e7374616e74060507a30002016c706f6f6c2e776169745f6d73031b00000191fb6b517b",
+      "uid_hex": "d05c4b370375e893528413885a46d27883b548668011fc8bd468e649fa02d76b"
+    },
+    {
+      "name": "with-published",
+      "core": {
+        "schema": "evidence",
+        "gist": "a passage from a dated manifestation",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 4,
+        "source": { "kind": 4, "reference": "a-book", "captured": null, "observed": null, "published": "1920~" },
+        "payload_hex": null
+      },
+      "core_bytes_hex": "a4006865766964656e63650178246120706173736167652066726f6d2061206461746564206d616e69666573746174696f6e060407a300040166612d626f6f6b0465313932307e",
+      "uid_hex": "6a6a38b54f5920172ee8c12b1240774350dde0f36db3c05736f64ee1d9423b90"
     },
     {
       "name": "unicode-composed",
@@ -235,7 +267,7 @@
         "deps": [],
         "grounds": [],
         "status": 4,
-        "source": { "kind": 4, "reference": "a-document", "captured": null },
+        "source": { "kind": 4, "reference": "a-document", "captured": null, "observed": null, "published": null },
         "payload_hex": null
       },
       "core_bytes_hex": "a40065636c61696d01766f6e6520676973742c20736978207374617475736573060407a20004016a612d646f63756d656e74",
@@ -251,7 +283,7 @@
         "deps": [],
         "grounds": [],
         "status": 5,
-        "source": { "kind": 4, "reference": "a-document", "captured": null },
+        "source": { "kind": 4, "reference": "a-document", "captured": null, "observed": null, "published": null },
         "payload_hex": null
       },
       "core_bytes_hex": "a40065636c61696d01766f6e6520676973742c20736978207374617475736573060507a20004016a612d646f63756d656e74",

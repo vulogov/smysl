@@ -44,6 +44,11 @@ type libVectors struct {
 		TsMs    uint64 `json:"ts_ms"`
 		BodyHex string `json:"body_hex"`
 	} `json:"redaction"`
+	Datings []struct {
+		DidHex  string `json:"did_hex"`
+		Axis    string `json:"axis"`
+		BodyHex string `json:"body_hex"`
+	} `json:"datings"`
 	DomainBytes map[string]uint64 `json:"domain_bytes"`
 }
 
@@ -206,7 +211,7 @@ func TestTheRecordFixtureRoundTripsAndNamesEveryLibraryCode(t *testing.T) {
 	if !bytes.Equal(out, data) {
 		t.Error("the fixture did not round-trip")
 	}
-	for _, code := range []uint64{14, 15, 18, 19} {
+	for _, code := range []uint64{14, 15, 17, 18, 19} {
 		if len(of(records, code)) == 0 {
 			t.Errorf("record %d is not in the fixture", code)
 		}
@@ -214,7 +219,7 @@ func TestTheRecordFixtureRoundTripsAndNamesEveryLibraryCode(t *testing.T) {
 	// The fixture also carries codes this implementation still does not understand, which keeps
 	// the distinction in understoodRecords an observed fact rather than a claim.
 	var unknown int
-	for _, code := range []uint64{16, 17} {
+	for _, code := range []uint64{16} {
 		unknown += len(of(records, code))
 	}
 	if unknown == 0 {
@@ -250,6 +255,59 @@ func TestARedactionDecodesIntoItsNamedFields(t *testing.T) {
 	for _, p := range v.Parts {
 		if p.TidHex == v.Redaction.TidHex {
 			t.Error("the part it names must not be in the fixture")
+		}
+	}
+}
+
+// Record 17 (TX-P3): a dating, with its did taken from the body's own bytes.
+//
+// The three in the fixture are one per target kind that has an identity and one per value kind,
+// and the offset is **negative** — the first signed integer any record in this format carries,
+// so until it existed this decoder had never read CBOR major type 1 out of a smysl store.
+func TestADatingDecodesIntoItsNamedFields(t *testing.T) {
+	v, records := libFixtures(t)
+	got := of(records, 17)
+	if len(got) != len(v.Datings) {
+		t.Fatalf("%d datings, want %d", len(got), len(v.Datings))
+	}
+	kinds := map[string]bool{}
+	values := map[string]bool{}
+	for i, r := range got {
+		d, err := DecodeDating(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		did, err := d.Did()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hex.EncodeToString(did) != v.Datings[i].DidHex {
+			t.Errorf("dating %d did %s, want %s", i, hex.EncodeToString(did), v.Datings[i].DidHex)
+		}
+		if d.AxisName() != v.Datings[i].Axis {
+			t.Errorf("dating %d axis %q, want %q", i, d.AxisName(), v.Datings[i].Axis)
+		}
+		body, err := BodyBytes(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hex.EncodeToString(body) != v.Datings[i].BodyHex {
+			t.Errorf("dating %d body bytes", i)
+		}
+		kinds[d.Target.KindName()] = true
+		values[d.ValueKind] = true
+		if d.ValueKind == "offset" && d.Offset >= 0 {
+			t.Errorf("dating %d: the fixture's offset is negative, decoded %d", i, d.Offset)
+		}
+	}
+	for _, want := range []string{"manifest", "part", "window"} {
+		if !kinds[want] {
+			t.Errorf("no dating in the fixture targets a %s", want)
+		}
+	}
+	for _, want := range []string{"absolute", "offset", "relative"} {
+		if !values[want] {
+			t.Errorf("no dating in the fixture carries an %s value", want)
 		}
 	}
 }

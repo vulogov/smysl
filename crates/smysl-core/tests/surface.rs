@@ -1840,9 +1840,14 @@ fn a_source_key_this_build_does_not_define_refuses_the_unit() {
         )
     };
 
-    // The control: every defined key, in one source.
+    // The control: every defined key, in one source. `published` joined them in 1.10 — it was
+    // the *refused* case here until TX-P3 step 1, chosen because A-2 had reserved the name for
+    // a later phase, and a key moving from one list to the other is exactly what this test is
+    // for. `span` and `manifest` are the two still reserved, and one of them takes its place
+    // below.
     let ok = parse_surface(&doc(
-        "{ kind: doc, ref: \"x://y\", captured: 2026-07-05, observed: 1726500000000 }",
+        "{ kind: doc, ref: \"x://y\", captured: 2026-07-05, observed: 1726500000000, \
+         published: \"1920~\" }",
     ))
     .expect("the parser recovers rather than failing");
     assert!(
@@ -1852,7 +1857,7 @@ fn a_source_key_this_build_does_not_define_refuses_the_unit() {
 
     for bad in [
         "{ kind: doc, ref: \"x://y\", bogus: 1 }",
-        "{ kind: doc, ref: \"x://y\", published: 2026 }",
+        "{ kind: doc, ref: \"x://y\", span: [0, 1] }",
     ] {
         let out = parse_surface(&doc(bad)).expect("the parser recovers rather than failing");
         assert!(

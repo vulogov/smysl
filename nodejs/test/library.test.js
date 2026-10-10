@@ -105,12 +105,12 @@ test("the record fixture round trips and names every library code", () => {
   const rs = records();
   assert.deepEqual([...smysl.encodeStore(rs)], [...RECORDS]);
   const codes = new Set(rs.map((r) => r.code));
-  for (const code of [14, 15, 18, 19]) {
+  for (const code of [14, 15, 17, 18, 19]) {
     assert.ok(codes.has(code), `record ${code} is not in it`);
   }
   // The fixture also carries codes this implementation still does not understand, which keeps
   // the distinction in UNDERSTOOD_RECORDS an observed fact rather than a claim.
-  assert.ok([16, 17].some((c) => codes.has(c)));
+  assert.ok([16].some((c) => codes.has(c)));
   for (const r of rs) assert.equal(r.isKnown, smysl.UNDERSTOOD_RECORDS.has(r.code));
 });
 
@@ -123,6 +123,54 @@ test("a redaction decodes into its named fields", () => {
   assert.equal(r.reason, null);
   const parts = new Set(IDS.parts.map((p) => p.tid_hex));
   assert.ok(!parts.has(IDS.redaction.tid_hex), "the part it names is not in the fixture");
+});
+
+test("a dating decodes into its named fields", () => {
+  // Record 17 (TX-P3 step 1). The three in the fixture are one per target kind that has an
+  // identity — a manifest, a part, a window over a part — and one per value kind: an absolute
+  // EDTF year, a **negative** offset and an Allen relation.
+  //
+  // The negative one is not decoration, and it matters most here of the three ports:
+  // JavaScript has one number type, so a decoder that read CBOR major type 1 as a large
+  // positive number would agree with the fixture about every byte and disagree about what they
+  // mean. This is the first signed integer any record in this format carries.
+  const ds = only(17).map((r) => smysl.Dating.decode(r));
+  assert.equal(ds.length, IDS.datings.length);
+  const kinds = new Set();
+  const values = new Set();
+  ds.forEach((d, i) => {
+    const expected = IDS.datings[i];
+    assert.equal(toHex(smysl.encodeOne(d.body)), expected.body_hex);
+    // The did over the body this implementation re-encodes, not over bytes the fixture
+    // supplied: the same claim the mid and rdid tests make, for the fourth identity.
+    assert.equal(toHex(d.datingId()), expected.did_hex);
+    assert.equal(d.axisName, expected.axis);
+    kinds.add(d.target.kindName);
+    values.add(d.value[0]);
+  });
+  assert.deepEqual([...kinds].sort(), ["manifest", "part", "window"]);
+  assert.deepEqual([...values].sort(), ["absolute", "offset", "relative"]);
+  const offset = ds.find((d) => d.value[0] === "offset");
+  assert.equal(Number(offset.value[1]), -10800000);
+  assert.ok(offset.target.window[0] < offset.target.window[1]);
+  assert.equal(ds.find((d) => d.value[0] === "relative").value[1][0], "after");
+});
+
+test("a dating refuses a value that says two things", () => {
+  // A dating's value is a one-entry map, and the count is what makes it one claim. Hand-built,
+  // because a conforming producer cannot write this: it is the record a *non*-conforming one
+  // would write, and the point is that a reader meeting it says so instead of silently taking
+  // whichever entry came first.
+  const good = only(17)[0].body;
+  const two = new Map(good);
+  two.set(2, new Map([[0, "1611"], [1, 0]]));
+  assert.throws(() => smysl.Dating.decode(two), smysl.LibraryError);
+  const noAxis = new Map(good);
+  noAxis.delete(1);
+  assert.throws(() => smysl.Dating.decode(noAxis), smysl.LibraryError);
+  const badAxis = new Map(good);
+  badAxis.set(1, 3);
+  assert.throws(() => smysl.Dating.decode(badAxis), smysl.LibraryError);
 });
 
 test("a manifest decodes into its named fields", () => {

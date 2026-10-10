@@ -60,6 +60,7 @@ const (
 	keySourceReference = 1
 	keySourceCaptured  = 2
 	keySourceObserved  = 3
+	keySourcePublished = 4
 )
 
 // UidLen is the digest width of §2.1: the full 32 bytes, never an abbreviation.
@@ -114,6 +115,7 @@ type Source struct {
 	Reference string
 	Captured  string // "YYYY-MM-DD", empty when absent
 	Observed  uint64 // epoch milliseconds the observation was taken (1.8), 0 when absent
+	Published string // EDTF, as the source states it (1.10, §2.2), empty when absent
 }
 
 // UnitCore is the hashed content of a unit — not the envelope. The record type code is
@@ -228,6 +230,9 @@ func (s *Source) encode() ([]byte, error) {
 	}
 	if s.Captured != "" {
 		entries = append(entries, entry{keySourceCaptured, encodeText(s.Captured)})
+	}
+	if s.Published != "" {
+		entries = append(entries, entry{keySourcePublished, encodeText(s.Published)})
 	}
 	return encodeMap(entries)
 }

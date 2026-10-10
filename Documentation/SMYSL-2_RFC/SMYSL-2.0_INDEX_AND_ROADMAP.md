@@ -148,9 +148,9 @@ discussion; OQ-7, OQ-23, OQ-35 and OQ-49 stay open with them.
 |---|---|---|---|---|
 | S0 | 2.2 | extraction stability and proposition-trust spike with today's CLI | 2.2 decision table | — |
 | TX-P0 **complete** | 2.1 | Every item, including **F-2** — which G0's pivot pulled out of 1.10.0 and which landed 2026-10-07 with OQ-31 answered (§1.1 item 1) — and F-16's `bundle --unknown keep\|drop` flag, which had been separated because only the closure was a defect | met: F-16/F-17 reproductions fixed, every probe reversed, and suite, `make semver`, `api-check`, `doc-output` and `spec-tables` clean on every commit. Departures from plan: 2.1 §10 | G−1 accepted in full |
-| TX-P1 | 2.4 | parts, readings, manifests, object store, first readers, structure, locators; `admission` opened (2.3 A-8.1) | GE-T1 (Bibles and JSON) | TX-P0, G0 **passed**; F-2 **done** (§1.1) |
-| TX-P2 | 2.4 | segmenter, analyzers, `lingua`, chat readers, `text append`, redaction (rule Z), **and the class core** (`strict`, `component`, `attested:n`) moved here from TX-P7 so TX-P5's consensus output can be read | GE-T1 (chats), redaction survives a stale peer, strict class counts match the Python reference | TX-P1 |
-| TX-P3 | 2.4 | EDTF, `published`, datings, rule E engine, locks, `date` commands | GE-T13 | TX-P2 |
+| TX-P1 **complete** | 2.4 | parts, readings, manifests, object store, first readers, structure, locators; `admission` opened (2.3 A-8.1) | met but for the corpus: the three ports derive every identity in the wire fixture and agree. GE-T1's five Bibles and JSON series are material this repository does not hold, and the debt is recorded at §5.5 rather than counted as passed | TX-P0, G0 **passed**; F-2 **done** (§1.1) |
+| TX-P2 **complete** | 2.4 | segmenter, analyzers, `lingua`, chat readers, `text append`, redaction (rule Z), **and the class core** (`strict`, `component`, `attested:n`) moved here from TX-P7 so TX-P5's consensus output can be read | met: GE-T1's chat half is pinned in `fixtures/library/readers/` and recomputed by all three ports, rule Z's algebra survives a stale peer by property, the strict class counts agree with an independent Python reading of A-12.4, and **GE-T14 ran** — the part minimum moved from 64 KiB to 1 KiB on the measured curve. Owed: the per-language boundary gold set | TX-P1 |
+| TX-P3 **steps 1–2 done** | 2.4 | EDTF, `published`, datings, rule E engine, locks, `date` commands | GE-T13 | TX-P2 |
 | TX-P4 | 2.4 | substrate index, persistent postings, `text` commands | `find` p95 < 200 ms at 155k units | TX-P3 |
 | TX-P5 | 2.4 | ingest over texts, owned-range spans, ledger digest, journal, FC-1/FC-3, entities without span, **consensus extraction** and **structural holder/mode** | G1, plus the probe-set gate and GE-T2 rerun the pivot adds (2.4 §6) | TX-P4, TX-P2's class core |
 | TX-P6 | 2.5 | `sq` core (pure) | `--seed-check` on every pure query | TX-P5 |
@@ -330,6 +330,8 @@ lands.
 | OQ-60–OQ-64 | 2.7 |
 | OQ-65–OQ-69 | 2.8 |
 | OQ-70 | 2.4 (found in TX-P2 step 2; the decision is an SMYSL-2.3 A-5 amendment) |
+| OQ-71 | 2.4 (found in TX-P3 step 2): **what does a dating's arithmetic mean?** Three sub-questions SMYSL-2.3 names words for and gives no arithmetic. (a) *A qualifier is not a width*: A-2.3 says widening for `?` and `~` "is SMYSL-2.3's rule" and A-12 states no such rule, so the engine gives `1920~` the extent of `1920` — any width would be invented, and an invented width propagates. What a qualifier plausibly *should* affect is time status. (b) *A season is its year*: EDTF numbers the seasons 21–24 and fixes no hemisphere, so narrowing one to three months assumes one, and northern winter reaches into the next year. (c) *Four Allen relations collapse*: with a subject that is an instant with uncertainty rather than a duration, `during`, `overlaps`, `contains` and `equals` all read as "at the same time as". Each implemented reading is **weaker** than the relation it stands for, so none can exclude a truth the strict reading admits — the collapse costs precision, never soundness. |
+| OQ-72 | 2.4 (found in TX-P3 step 2): **nothing dates a manifest.** A-5 gives dating target kind 2 the meaning "every unit drawn under one manifest", so a mid in a target scopes to units and the catalog entry's own `published` can be corrected only by a new manifest version. The engine follows the wording. If the intent was to date the manifest, A-5's kind 2 needs a sentence — and the two readings are not interchangeable: constraining both would let a dating meant for the units contradict the catalog entry's seed and report an inconsistency nobody meant. |
 
 ### 6.3 Format registry
 
@@ -470,10 +472,14 @@ Coding speed cannot compress those.
    `scripts/verify-spec-tables.py` for each (A-14). A fold is not complete until that gate covers
    its tables.
 
-**What is startable now:** **TX-P1 — nothing is left before it.** The gate passed, F-2 landed,
-step 7 answered the last of its open questions and step 6's re-plan is done, so 2.4 draft 2 is the
-plan to build from. What step 6 leaves downstream rather than blocking: TX-P5 is sized from a
-measurement taken after F-2 rather than from a planning figure, and GE-T5's absolute bar waits on
-step 8's human α — neither of which TX-P1 touches.
+**Where the work is:** **TX-P1 and TX-P2 are complete** (2.4 §6 records each step and its
+departures) and **TX-P3 is under way** — step 1 (`smysl-core`'s EDTF, `source.published`,
+record 17) and step 2 (the time engine, rule E, the copy and omission rules) are done, with
+`P-E1`–`P-E8` green. What TX-P1 and TX-P2 still owe is corpora rather than code, recorded against
+the gate that wants them: GE-T1's five Bibles and JSON series, and TX-P2 step 1's 500-sentence
+boundary gold set per tier-1 language. Neither blocks TX-P3.
+
+What the re-plan leaves downstream rather than blocking: TX-P5 is sized from a measurement taken
+after F-2 rather than from a planning figure, and GE-T5's absolute bar waits on step 8's human α.
 TX-P13a remains independent of all of it — the `StoreRead` trait and its consumers
 ported in memory (2.8 §§3–4), which §2's note marks as needing only TX-P0.

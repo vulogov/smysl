@@ -1,3 +1,9 @@
 @manifest kjv/1769 { lang: en, reader: osis/1, licence: public-domain, carry: text, part-policy: "top/64Ki-4Mi", title: "The Holy Bible: King James Version", creators: ["The Translators"], published: 1769, identifiers: { url: "https://example.invalid/kjv" }, origin: { kind: url, ref: "https://example.invalid/kjv.osis.xml", captured: "2026-10-08" }, versification: kjv, calendar: julian, parts: [{ tid: t3:w75spjohk7y23jgohkujj56vefvcxaxsox5c6lh6odeomuecjhta, length: 97, structure: b3:ykckqkokjagsnl3gtadwjztt2yjvf62ltfr7eywo7ukpj343dmgq, rdid: r3:ybhjojx4h7s4kkhcyipwpwrtabssofgjyfbck24ooobwqa3b5fya }, { tid: t3:3tk5qh74jstxgdiytcinglr5fl62p3u52p6o35c4bdazcw3ovkva, length: 64, structure: b3:lvy3ajryupmyphcqp327uqnlv44dy7fnsp7lzhd474aed3cyxxfa, rdid: r3:vbo2s25y4obhbypdydb6wfrqxbqqgj7yn5iqcbexjwabzro226ua, lang: ru }] }
 
 @redact t3:e32hc3icjfxbm7rtv2dzfypgzuhoyxencopk2cl7mnvgez2g4asq { agent: human:vu, ts: [1726500000000, 0] }
+
+@date m3:2v53cmcjs5kldvkadfsojminnjjeyqxeatpallrlh2s5dwg3htfq { axis: composed, when: 1611, agent: human:vu, ts: [1726500000000, 1] }
+
+@date t3:w75spjohk7y23jgohkujj56vefvcxaxsox5c6lh6odeomuecjhta { axis: said, window: [1726500000000, 1726586400000], offset: -10800000, agent: human:vu, ts: [1726500000000, 2] }
+
+@date t3:3tk5qh74jstxgdiytcinglr5fl62p3u52p6o35c4bdazcw3ovkva { axis: said, after: t3:w75spjohk7y23jgohkujj56vefvcxaxsox5c6lh6odeomuecjhta, agent: human:vu, ts: [1726500000000, 3] }

@@ -208,15 +208,16 @@ def main() -> int:
     # quietly relying on a parser accident.
     check("§2.2 unit core keys are 0..8", sorted(unit_keys), list(range(9)))
     check("§2.2 has six statuses", sorted(status), list(range(6)))
-    check("§2.2 source sub-map is 0..3", sorted(source_keys), [0, 1, 2, 3])
+    # 0..4 since 1.10: `published` (A-2.3), EDTF text, written only when present.
+    check("§2.2 source sub-map is 0..4", sorted(source_keys), [0, 1, 2, 3, 4])
     # Six since 1.7's `node`, which the spec's table did not gain until 1.8 — found by this gate
     # once `observed` forced a look at the same section.
     check("§2.2 has six source kinds", sorted(source_kind), list(range(6)))
     # 11 and 12 since 1.4: withdrawal and resolution. 14-19 since 1.10, the library records
-    # of RFC SMYSL-2.3 A-5 — of which 14, 15 and 18 are defined and written, while 16 is
-    # reserved and 17 and 19 are allocated for later phases. All six are in the table because a
-    # code is a permanent wire commitment the moment it is allocated, and a table that names
-    # only what is implemented would let a later release spend one twice.
+    # of RFC SMYSL-2.3 A-5 — of which 14, 15, 17, 18 and 19 are defined and written, while 16
+    # is reserved. It is in the table anyway, because a code is a permanent wire commitment the
+    # moment it is allocated, and a table that names only what is implemented would let a later
+    # release spend one twice.
     check("§3.1 record codes are 1..19", sorted(record_codes), list(range(1, 20)))
 
     # -- The library tables of §2.6 and §3.1, added in 1.10 ------------------
@@ -235,9 +236,23 @@ def main() -> int:
             text[text.find("**Part reading (18)**"):], "| key | field | type | presence |", 0, 1
         )
     )
+    dating_keys = canon_map(
+        table_after(text[text.find("**Dating (17)**"):], "| key | field | type | presence |", 0, 1)
+    )
+    # A dating's two sub-tables: the target kinds and the one-entry value map. Both are wire
+    # commitments inside the did's preimage, and both are transcribed in four places.
+    dating_targets = canon_map(
+        table_after(text[text.find("**Dating (17)**"):], "| kind | name | id |", 0, 1)
+    )
+    dating_values = canon_map(
+        table_after(text[text.find("**Dating (17)**"):], "| key | value | means |", 0, 2)
+    )
     check("§3.1 manifest keys are 0..18", sorted(manifest_keys), list(range(19)))
     check("§3.1 part reading keys are 0..3", sorted(reading_keys), [0, 1, 2, 3])
     check("§3.1 redaction keys are 0..3", sorted(redaction_keys), [0, 1, 2, 3])
+    check("§3.1 dating keys are 0..5", sorted(dating_keys), [0, 1, 2, 3, 4, 5])
+    check("§3.1 dating target kinds are 0..3", sorted(dating_targets), [0, 1, 2, 3])
+    check("§3.1 dating value keys are 0..2", sorted(dating_values), [0, 1, 2])
 
     # §2.6's domain bytes, from the identity table rather than from prose. The spec writes them
     # as `0x0f`; the ports write them as integers, so the comparison is on the number.
@@ -289,12 +304,18 @@ def main() -> int:
         canon_map(pairs(block(py_records, "RECORD_NAMES = {", "\n}"), PY_ROW)),
         record_codes,
     )
+    # The whole sub-map, not a subset. It was three names until TX-P3 step 1, and the subset
+    # was hiding two keys the Python and Node producers could not write at all — `observed`,
+    # which landed in 1.8, and `published`. A gate that names what to compare will go on
+    # agreeing about exactly those names forever.
     check(
         "python: §2.2 source sub-map keys",
-        named_ints(py_uid, ["SOURCE_KIND", "SOURCE_REFERENCE", "SOURCE_CAPTURED"],
+        named_ints(py_uid,
+                   ["SOURCE_KIND", "SOURCE_REFERENCE", "SOURCE_CAPTURED", "SOURCE_OBSERVED",
+                    "SOURCE_PUBLISHED"],
                    r"^%s = (\d+)$"),
-        {0: "source_kind", 1: "source_reference", 2: "source_captured"},
-        "python names the source sub-map's keys SOURCE_*; the spec calls them kind/reference/captured",
+        {k: "source_" + v for k, v in source_keys.items()},
+        "python names the source sub-map's keys SOURCE_*; the spec calls them kind/reference/…",
     )
     check("python: §3 constraint 9 nesting bound",
           int(re.search(r"^MAX_NESTING = (\d+)", py_cbor, re.M).group(1)), 128)
@@ -317,6 +338,17 @@ def main() -> int:
         "python: §3.1 redaction keys",
         canon_map(pairs(block(py_library, "REDACTION_KEYS = {", "\n}"), PY_ROW)),
         redaction_keys,
+    )
+    # Record 17 since TX-P3 step 1, in all three ports for the same reason.
+    check(
+        "python: §3.1 dating keys",
+        canon_map(pairs(block(py_library, "DATING_KEYS = {", "\n}"), PY_ROW)),
+        dating_keys,
+    )
+    check(
+        "python: §3.1 dating target kinds",
+        canon_map(pairs(block(py_library, "TARGET_KINDS = {", "}"), PY_ROW)),
+        dating_targets,
     )
     check(
         "python: §2.6 domain bytes",
@@ -356,7 +388,7 @@ def main() -> int:
     check("go: §2.2 source sub-map keys",
           named_ints(go_uid,
                      ["keySourceKind", "keySourceReference", "keySourceCaptured",
-                      "keySourceObserved"],
+                      "keySourceObserved", "keySourcePublished"],
                      r"^\t%s\s+= (\d+)$"),
           {k: "keysource" + v for k, v in source_keys.items()})
     check("go: §3 constraint 9 nesting bound",
@@ -373,6 +405,12 @@ def main() -> int:
           canon_map(pairs(block(go_library, "RedactionKeys = map[uint64]string{", "\n}"),
                           GO_ROW)),
           redaction_keys)
+    check("go: §3.1 dating keys",
+          canon_map(pairs(block(go_library, "DatingKeys = map[uint64]string{", "\n}"), GO_ROW)),
+          dating_keys)
+    check("go: §3.1 dating target kinds",
+          canon_map(pairs(block(go_library, "TargetKinds = map[uint64]string{", "\n}"), GO_ROW)),
+          dating_targets)
     check("go: §2.6 domain bytes",
           {name: int(re.search(rf"^\t{name.title()}Domain\s+byte = (0x[0-9a-fA-F]+)$",
                                go_library, re.M).group(1), 16)
@@ -418,6 +456,12 @@ def main() -> int:
     check("nodejs: §3.1 redaction keys",
           canon_map(pairs(block(js_library, "REDACTION_KEYS = new Map([", "\n]);"), JS_ROW)),
           redaction_keys)
+    check("nodejs: §3.1 dating keys",
+          canon_map(pairs(block(js_library, "DATING_KEYS = new Map([", "\n]);"), JS_ROW)),
+          dating_keys)
+    check("nodejs: §3.1 dating target kinds",
+          canon_map(pairs(block(js_library, "TARGET_KINDS = new Map([", "\n]);"), JS_ROW)),
+          dating_targets)
     check("nodejs: §2.6 domain bytes",
           {name: int(re.search(rf"^export const {name.upper()}_DOMAIN = (0x[0-9a-fA-F]+);$",
                                js_library, re.M).group(1), 16)
@@ -531,6 +575,30 @@ def main() -> int:
             got = [int(m) for m in re.findall(r"^    Unknown = (\d+),$", read(rel), re.M)]
             check(f"rust: §3.1 reserved code in {rel}", sorted(set(got)), [want],
                   "an `Unknown` at any other code would make a future addition a break")
+
+    # A-12.2, rule E (TX-P3 step 2). Three things: the rule has a row in §6's table, the time
+    # statuses are the four the engine stratifies by, and the free constraints are the five D-3
+    # names. A status the document listed and the engine did not have would be a stratum
+    # nothing runs, which is a silent loss of the one property the rule exists for.
+    check("§6's rule table has a row for E", bool(re.search(r"^\| \*\*E\*\* \|", text, re.M)), True)
+    check("the spec has §6.4, rule E", "6.4" in exists, True)
+    spec_statuses = [
+        m.lower()
+        for m in re.findall(r"^\|[^|]+\| (measured|cited|derived|speculative) \|$", text, re.M)
+    ]
+    time_rs = read("crates/smysl-text/src/time/mod.rs")
+    rust_statuses = re.findall(r'TimeStatus::\w+ => "(\w+)",', time_rs)
+    check("§6.4 time statuses are the four the engine stratifies by",
+          sorted(set(spec_statuses)), sorted(set(rust_statuses)),
+          "a status in one and not the other is a stratum that runs over nothing")
+    constraints_rs = read("crates/smysl-text/src/time/constraints.rs")
+    spec_free = sorted(set(re.findall(r"^\| (quotation|derivation|supersession|reply|first seen) \|",
+                                      text, re.M)))
+    rust_free = sorted(
+        m.replace("-", " ")
+        for m in re.findall(r'FreeKind::\w+ => "([a-z-]+)",', constraints_rs)
+    )
+    check("§6.4 free constraints are the five D-3 names", spec_free, rust_free)
 
     # -- The gate cannot have quietly stopped checking -----------------------
     #

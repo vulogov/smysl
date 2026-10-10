@@ -24,6 +24,13 @@ from .records import (
     encode_store,
 )
 from .library import (
+    ALLEN,
+    AXES,
+    DATING_KEYS,
+    DATING_VALUE_KEYS,
+    Dating,
+    DatingTarget,
+    TARGET_KINDS,
     CARRY,
     DID_DOMAIN,
     DID_PREFIX,
@@ -57,6 +64,13 @@ from .library import (
 from .uid import Source, UnitCore
 
 __all__ = [
+    "ALLEN",
+    "AXES",
+    "DATING_KEYS",
+    "DATING_VALUE_KEYS",
+    "Dating",
+    "DatingTarget",
+    "TARGET_KINDS",
     "CARRY",
     "CborError",
     "DID_DOMAIN",

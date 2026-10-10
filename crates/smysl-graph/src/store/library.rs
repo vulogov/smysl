@@ -12,8 +12,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use smysl_core::ids::{Mid, Tid};
-use smysl_core::types::library::Redaction;
+use smysl_core::ids::{Did, Mid, Tid};
+use smysl_core::types::library::{Dating, DatingTarget, Redaction};
 use smysl_core::types::Manifest;
 use smysl_core::Uid;
 
@@ -42,6 +42,21 @@ pub(super) struct Library {
     /// and both records are facts. Keeping both is also what makes the merge idempotent
     /// without a tie-break — a set union needs no rule about which of two agents to believe.
     pub(super) redactions: BTreeMap<Tid, BTreeSet<Redaction>>,
+    /// Every dating, by its did (record 17).
+    ///
+    /// Keyed by did and not by target, because a did is what names a dating from outside: a
+    /// withdrawal makes one not live and a `canonical` commitment holds it (A-6), and both do
+    /// so by writing 32 bytes into the slot a rid or a uid would occupy.
+    pub(super) datings: BTreeMap<Did, Dating>,
+    /// The datings of each target, so rule E can seed a subject without scanning every one.
+    ///
+    /// The key is the target's **wire form** rather than the target itself, which is the one
+    /// thing worth explaining: a window is `[tid, from, to]`, two windows over one part are two
+    /// keys, and a lookup for "the datings of this part" therefore has to ask for the part's
+    /// own key and then for the windows that contain the instant. Keying by `DatingTarget`
+    /// keeps that honest — the alternative, collapsing windows onto their part, would silently
+    /// apply a three-day correction to a three-year chat.
+    pub(super) datings_by_target: BTreeMap<DatingTarget, BTreeSet<Did>>,
     //
     // **No `by_mid`**, though §4.3.2 lists one. It would be fed from `source.manifest`, and
     // that field arrives in TX-P5 (§4.3.1) — so a map built now could only ever be empty,
@@ -71,6 +86,17 @@ impl Library {
     /// back into holding it by a peer that still has it.
     pub(super) fn absorb_redaction(&mut self, r: &Redaction) {
         self.redactions.entry(r.tid).or_default().insert(r.clone());
+    }
+
+    /// Record a dating. Idempotent: a did is a function of the body, so the same dating twice
+    /// is one entry in both maps.
+    pub(super) fn absorb_dating(&mut self, d: &Dating) {
+        let did = d.did();
+        self.datings_by_target
+            .entry(d.target.clone())
+            .or_default()
+            .insert(did);
+        self.datings.entry(did).or_insert_with(|| d.clone());
     }
 
     /// Index a unit by the part and the manifest its source names.
@@ -139,6 +165,34 @@ impl Store {
     /// How many parts this store holds a redaction for.
     pub fn redacted_count(&self) -> usize {
         self.library.redactions.len()
+    }
+
+    /// The dating with this did.
+    pub fn dating(&self, did: &Did) -> Option<&Dating> {
+        self.library.datings.get(did)
+    }
+
+    /// Every dating the store holds, in did order.
+    pub fn datings(&self) -> impl Iterator<Item = (&Did, &Dating)> + '_ {
+        self.library.datings.iter()
+    }
+
+    /// How many datings the store holds.
+    pub fn dating_count(&self) -> usize {
+        self.library.datings.len()
+    }
+
+    /// The datings written against exactly this target, in did order.
+    ///
+    /// *Exactly*: a dating on a part is not returned for a window over that part, nor the
+    /// reverse. Rule E asks both questions and they are different questions; answering the
+    /// narrow one here keeps the engine's seeding step explicit about which it meant.
+    pub fn datings_of(&self, target: &DatingTarget) -> Vec<Did> {
+        self.library
+            .datings_by_target
+            .get(target)
+            .map(|set| set.iter().copied().collect())
+            .unwrap_or_default()
     }
 
     /// Every expression alias the store has a manifest for, in order.

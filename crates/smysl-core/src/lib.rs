@@ -13,6 +13,7 @@
 
 pub mod cbor;
 pub mod diag;
+pub mod edtf;
 pub mod error;
 pub mod hash;
 pub mod ids;
@@ -34,13 +35,13 @@ pub use ids::{
     SchemaId, ThreadId, Tid, Uid, UidPrefix, ViewId,
 };
 pub use types::{
-    json_escape, quantise, tokens, Admission, Attestation, Calendar, Carry, Commit, Commitment,
-    Contention, ContentionStatus, Date, Detected, DetectionKind, DropReason, Extra, Fidelity,
-    GranularityProfile, Hlc, LabelBinding, Lod, Manifest, Op, Optimality, PackInfo, PackMode,
-    ParentKind, PartEntry, PartReading, PartText, ProfileEstimator, Record, RelKind, Relation,
-    Resolution, ResolutionTarget, Role, Rung, SchemaDecl, SourceKind, SourcePolicy, SourceRef,
-    Status, Step, Thread, ThreadSchema, TokenEstimator, Unit, UnitCore, UnitCoreBuilder, View,
-    Withdrawal,
+    json_escape, quantise, tokens, Admission, Allen, Attestation, Axis, Calendar, Carry, Commit,
+    Commitment, Contention, ContentionStatus, Date, Dating, DatingTarget, DatingValue, Detected,
+    DetectionKind, DropReason, Extra, Fidelity, GranularityProfile, Hlc, LabelBinding, Lod,
+    Manifest, Op, Optimality, PackInfo, PackMode, ParentKind, PartEntry, PartReading, PartText,
+    ProfileEstimator, Record, Redaction, RelKind, Relation, Resolution, ResolutionTarget, Role,
+    Rung, SchemaDecl, SourceKind, SourcePolicy, SourceRef, Status, Step, Thread, ThreadSchema,
+    TokenEstimator, Unit, UnitCore, UnitCoreBuilder, View, Withdrawal,
 };
 
 /// Format versions this implementation accepts in a `@doc` header (§11).

@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use crate::ids::{Label, Uid};
 use crate::surface::hjson::{HObject, HValue};
 use crate::surface::payload::payload_to_object;
+use crate::types::library::{Dating, DatingTarget, DatingValue};
 use crate::types::lifecycle::{Resolution, ResolutionTarget, Withdrawal};
 use crate::types::relation::Relation;
 use crate::types::thread::Thread;
@@ -148,6 +149,9 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
             // the reader has met, and the writer's order has to be the parser's or the round
             // trip is not a fixed point.
             Record::Redaction(r) => write_redaction(&mut out, r, ctx),
+            // And a dating after a redaction, which is where the parser resolves it: its
+            // target and its basis may both be units the document declares.
+            Record::Dating(d) if dating_has_surface_form(d) => write_dating(&mut out, d, ctx),
             // Records with no surface form travel as CBOR only.
             _ => {}
         }
@@ -450,6 +454,61 @@ fn write_redaction(out: &mut String, r: &crate::types::library::Redaction, ctx: 
     out.push_str(" }\n\n");
 }
 
+/// Whether a dating can be spelled `@date` without losing anything.
+///
+/// Two things cost it its surface form. Keys a later version added, as everywhere else — and a
+/// **relative value whose own target is a window**, which the grammar cannot spell: a window is
+/// written as a `window:` key beside the positional target, and there is one positional slot.
+/// Representable in CBOR, not in text, and counted among the records a surface rendering cannot
+/// hold rather than written back as something else.
+pub fn dating_has_surface_form(d: &Dating) -> bool {
+    let inner_window = matches!(
+        &d.value,
+        DatingValue::Relative {
+            target: DatingTarget::Window { .. },
+            ..
+        }
+    );
+    d.extra.is_empty() && d.ts.agent == d.agent && !inner_window
+}
+
+fn write_dating(out: &mut String, d: &Dating, ctx: &WriteContext) {
+    out.push_str("@date ");
+    out.push_str(&target_text(&d.target, ctx));
+    out.push_str(&format!(" {{ axis: {}", d.axis));
+    if let DatingTarget::Window { from_ms, to_ms, .. } = &d.target {
+        out.push_str(&format!(", window: [{from_ms}, {to_ms}]"));
+    }
+    match &d.value {
+        DatingValue::Absolute(t) => {
+            out.push_str(&format!(", when: {}", quoteless_or_quoted(t)));
+        }
+        DatingValue::Offset(ms) => out.push_str(&format!(", offset: {ms}")),
+        DatingValue::Relative { allen, target } => {
+            out.push_str(&format!(", {allen}: {}", target_text(target, ctx)));
+        }
+    }
+    out.push_str(&format!(
+        ", agent: {}, ts: [{}, {}]",
+        quoteless_or_quoted(d.agent.as_str()),
+        d.ts.wall_ms,
+        d.ts.counter
+    ));
+    if let Some(u) = &d.basis {
+        out.push_str(&format!(", basis: {}", ctx.reference(u)));
+    }
+    out.push_str(" }\n\n");
+}
+
+/// A target's positional spelling. A window is its part's tid: the range travels in `window:`.
+fn target_text(t: &DatingTarget, ctx: &WriteContext) -> String {
+    match t {
+        DatingTarget::Unit(u) => ctx.reference(u),
+        DatingTarget::Part(tid) | DatingTarget::Window { tid, .. } => tid.canonical(),
+        DatingTarget::Manifest(mid) => mid.canonical(),
+    }
+}
+
 fn write_schema_decl(out: &mut String, d: &crate::types::annex::SchemaDecl) {
     out.push_str(&format!(
         "@schema {} {{ version: {}",
@@ -538,6 +597,9 @@ fn write_unit(out: &mut String, u: &UnitCore, ctx: &WriteContext) {
         }
         if let Some(d) = s.captured {
             src.push_str(&format!(", captured: {d}"));
+        }
+        if let Some(p) = &s.published {
+            src.push_str(&format!(", published: {}", quoteless_or_quoted(p)));
         }
         src.push_str(" }");
         fields.push(src);

@@ -31,21 +31,42 @@ in the phase its §1.2 row names, and folding one into the spec is not complete 
 `spec-tables` gate reading its constants out of the document (A-14); anything less leaves the
 document and the wire free to drift, which is the condition §2.2 of the spec records four times.
 
-| amendment | spec section | gate covers |
-|---|---|---|
-| A-4 record-set digest | new §2.7 | the prefix `smysl/rsd/1` and the domain byte, against the one function that computes it |
-| A-8.1 opening | §3.1, §8.3 | the reserved code, against the `Unknown` discriminant of each enumeration that has one |
-| A-9 estimator | §3.1, §8.1 | the registry's ids against `TokenEstimator::id`, and granularity key 5 against `keys::granularity` |
-| A-10 item 3 strict `source` | §4, §8.3 | — (a parser rule, with no constant to compare) |
+| amendment | spec section | folded at | gate covers |
+|---|---|---|---|
+| A-4 record-set digest | new §2.7 | TX-P0 | the prefix `smysl/rsd/1` and the domain byte, against the one function that computes it |
+| A-8.1 opening | §3.1, §8.3 | TX-P0, TX-P1 (`admission`) | the reserved code, against the `Unknown` discriminant of each enumeration that has one |
+| A-9 estimator | §3.1, §8.1 | TX-P0 | the registry's ids against `TokenEstimator::id`, and granularity key 5 against `keys::granularity` |
+| A-10 item 3 strict `source` | §4, §8.3 | TX-P0 | — (a parser rule, with no constant to compare) |
+| A-3 library identities | new §2.6 | TX-P1 | the four domain bytes, against the identity table, in all three ports |
+| A-5 records 14, 15, 18 | §3.1 | TX-P1 | the record-code table and the manifest, part-entry and reading key tables, in all three ports |
+| A-5 record 19, A-12.3 rule **Z** | §3.1, §6 | TX-P2 step 4 | the redaction key table in all three ports, and rule Z's row in §6's table |
+| A-5 record 17, A-6 did in keys 0 | §3.1 | TX-P3 step 1 | the dating key table, its target kinds and its value keys, in all three ports |
+| A-2 `source` key 4, A-2.3 `published`, A-2.4 rules 2–4 | §2.2, §4 | TX-P3 step 1 | the whole `source` sub-map, which the gate had been comparing as a named subset of three. The copy and omission rules are normative text with no constant: they are enforced in `provenance::stamp` and gated by `P-E` from step 2 |
+| A-12.2 rule **E** | §6, new §6.4 | TX-P3 step 2 | rule E's row in §6's table, its four time statuses and its five free constraints, against the engine's own enumerations |
+| A-10 item 1 reserved words | §4 | TX-P1 (`@manifest`), TX-P2 step 4 (`@redact`), TX-P3 step 1 (`@date`) | — (reserved words, with no constants to compare) |
 
-Those are the amendments whose phase has landed: TX-P0 shipped in 1.9.0, so its four fold now.
-The rest wait for theirs, and the spec says nothing about them in the meantime — which is correct
-rather than a gap, since spec §8.1 makes every one of them an addition an older reader already
-round-trips.
+Those are the amendments whose phase has landed. The rest wait for theirs, and the spec says
+nothing about them in the meantime — which is correct rather than a gap, since spec §8.1 makes
+every one of them an addition an older reader already round-trips.
 
-**§2.6 is held, not skipped.** A-3's library identities were given it, and A-4 was given §2.7;
-folding A-4 first would have renumbered A-3's section if §2.6 were filled in, so the spec carries
-§2.6 as a held heading naming what arrives there.
+**A-13 is accepted and deliberately unfolded.** Its C-Read, C-Consume and C-Produce additions
+are clauses about records whose own folds arrive phase by phase, so folding the table early would
+oblige a reader to compute a did before record 17 existed. The new **C-Library** class is the part
+with a date attached: it names four obligations — verify parts against their ids, apply rule Z,
+derive effective time per rule E, derive `strict` classes per A-12.4 — and three of the four are
+built (TX-P1 step 5's library pass, TX-P2 step 4's rule Z, TX-P2 step 5's classes). The fourth is
+rule E, which is this phase. **A-13 folds at the end of TX-P3**, when the class it defines is a
+class something can claim, and spec §7 gains it then.
+
+**This table was two phases out of date when TX-P3 began**, listing TX-P0's four alone although
+A-3, A-5 and rule Z had folded in TX-P1 and TX-P2. A-14 asks for the folds to be recorded, and a
+record nobody updates is the condition it exists to prevent — so the `folded at` column is new,
+and it says which step did each one rather than leaving "so far" to be inferred from the date at
+the top of the file.
+
+**§2.6 is no longer held.** It was a held heading through TX-P0 — A-3's library identities were
+given it and A-4 was given §2.7, so folding A-4 first would have renumbered A-3's section — and
+TX-P1 filled it.
 
 **Author:** Vladimir Ulogov
 **Date:** 2026-10-02
@@ -73,17 +94,17 @@ specific older reader, the amendment says so and states the cost.
 | # | amends | what | draft-3 id | activated in |
 |---|---|---|---|---|
 | A-1 | spec §2.2 | unit core key 9 `lang` | FC-1 | TX-P5 |
-| A-2 | spec §2.2 | `source` keys 4 `published`, 5 `span`, 6 `manifest`, and the copy and omission rules | FC-2, FC-3 | TX-P3 (4), TX-P5 (5, 6) |
+| A-2 | spec §2.2 | `source` keys 4 `published`, 5 `span`, 6 `manifest`, and the copy and omission rules | FC-2, FC-3 | TX-P3 (4, **folded in at step 1** with A-2.3 and A-2.4 rules 2–4), TX-P5 (5, 6) |
 | A-3 | new spec §2.6 | library identities: tid, mid, rdid, did | — | TX-P1 (tid, mid, rdid), TX-P3 (did) |
 | A-4 | new spec §2.7 | record-set digest | — | TX-P0 |
-| A-5 | spec §3.1 | records 14 manifest, 15 part text, 17 dating, 18 part reading, 19 redaction; 16 reserved | FC-4 | TX-P1 (14, 15, 18), TX-P2 (19), TX-P3 (17) |
-| A-6 | spec §3.1 | withdrawal and commitment may name a did | — | TX-P3 |
+| A-5 | spec §3.1 | records 14 manifest, 15 part text, 17 dating, 18 part reading, 19 redaction; 16 reserved | FC-4 | TX-P1 (14, 15, 18), TX-P2 (19), TX-P3 (17, **folded in at step 1**) |
+| A-6 | spec §3.1 | withdrawal and commitment may name a did | — | TX-P3 (**folded in at step 1**; no type change was needed — key 0 is 32 bytes either way and the domain bytes keep the kinds apart) |
 | A-7 | spec §3.1 | schema declaration: key 4 `payload_shape` structure, key 5 `lenses` | FC-9 | TX-P12. Until then, ingest resolves uid-typed payload keys itself (SMYSL-2.4 §3.4). |
 | A-8 | spec §3.1 | open enumerations: code 255 reserved; new codes for thread schemas, roles, detection kinds | FC-8 | TX-P0 (opening four; reserving 255 in five), TX-P1 (opening `admission`), TX-P8 (codes) |
 | A-9 | spec §3.1 | granularity key 5 `estimator`; estimator registry | FC-6 | TX-P0 |
 | A-10 | spec §4 | surface: reserved words, `lang`, `source` keys, `@schema` fields and lenses, strict `source` | — | per construct |
 | A-11 | spec §5 | standard extension schemas `x.text/v1`, `x.query/v1`; uid-typed payload keys | FC-5 | TX-P5, TX-P8 |
-| A-12 | spec §6 | rules **N** (naming), **E** (effective time), **Z** (redaction); proposition classes; time contentions | — | TX-P2 (Z, **folded in at step 4**: §6's rule table and §3.1's record 19 both carry it), TX-P3 (E), TX-P7 (classes), TX-P12 (N) |
+| A-12 | spec §6 | rules **N** (naming), **E** (effective time), **Z** (redaction); proposition classes; time contentions | — | TX-P2 (Z, **folded in at step 4**: §6's rule table and §3.1's record 19 both carry it), TX-P3 (E, **folded in at step 2** as §6.4, with the time contentions' derived-only rule), TX-P7 (classes), TX-P12 (N) |
 | A-13 | spec §7 | conformance: C-Read additions, new class **C-Library**, C-Produce and C-Merge additions | — | per phase |
 | A-14 | spec §8 | registry and activation | — | at acceptance |
 

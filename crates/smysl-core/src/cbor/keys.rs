@@ -203,6 +203,32 @@ pub mod part_reading {
     pub const HIGHEST: u16 = RAW;
 }
 
+/// Dating (type code 17, SMYSL-2.3 A-5).
+///
+/// The did's preimage is this body, so the key numbers are permanent in a stronger sense than
+/// usual: renumbering one would change the identity of every dating ever written.
+pub mod dating {
+    /// `[kind, id]`, where `kind` is `0` unit, `1` part, `2` manifest, `3` window and a
+    /// window's `id` is itself `[tid, from_ms, to_ms]`.
+    pub const TARGET: u16 = 0;
+    /// `0` said, `1` composed, `2` about.
+    pub const AXIS: u16 = 1;
+    /// A one-entry map: `{0: EDTF text}`, `{1: offset in ms}` or `{2: [allen, target]}`.
+    pub const VALUE: u16 = 2;
+    pub const BASIS: u16 = 3;
+    pub const AGENT: u16 = 4;
+    pub const TS: u16 = 5;
+    pub const HIGHEST: u16 = TS;
+}
+
+/// The three entries of a dating's value map (`dating::VALUE`), which holds exactly one.
+pub mod dating_value {
+    pub const ABSOLUTE: u16 = 0;
+    pub const OFFSET: u16 = 1;
+    pub const RELATIVE: u16 = 2;
+    pub const HIGHEST: u16 = RELATIVE;
+}
+
 /// Redaction (type code 19, rule Z, SMYSL-2.4 §4.3.2).
 ///
 /// The same four keys a withdrawal has, in the same order, and deliberately so: both say "this
@@ -224,7 +250,10 @@ pub mod source {
     /// The observation instant in epoch milliseconds (1.8). Written only when present, so a
     /// source without one encodes to the bytes it always did.
     pub const OBSERVED: u16 = 3;
-    pub const HIGHEST: u16 = OBSERVED;
+    /// The publication date of the manifestation, EDTF text (SMYSL-2.3 A-2.3, FC-2). Written
+    /// only when present, so a source without one encodes to the bytes it always did.
+    pub const PUBLISHED: u16 = 4;
+    pub const HIGHEST: u16 = PUBLISHED;
 }
 
 /// GranularityProfile, nested inside a view under [`view::GRANULARITY`].
@@ -436,6 +465,27 @@ mod tests {
                 ],
             ),
             (
+                "dating",
+                dating::HIGHEST,
+                &[
+                    dating::TARGET,
+                    dating::AXIS,
+                    dating::VALUE,
+                    dating::BASIS,
+                    dating::AGENT,
+                    dating::TS,
+                ],
+            ),
+            (
+                "dating value",
+                dating_value::HIGHEST,
+                &[
+                    dating_value::ABSOLUTE,
+                    dating_value::OFFSET,
+                    dating_value::RELATIVE,
+                ],
+            ),
+            (
                 "source",
                 source::HIGHEST,
                 &[
@@ -443,6 +493,7 @@ mod tests {
                     source::REFERENCE,
                     source::CAPTURED,
                     source::OBSERVED,
+                    source::PUBLISHED,
                 ],
             ),
             (

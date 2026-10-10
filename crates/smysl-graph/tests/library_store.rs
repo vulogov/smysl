@@ -230,6 +230,63 @@ fn a_log_refuses_text_with_e452() {
     }
 }
 
+/// A time contention offered to a log is refused: rule E derives those, nobody writes them.
+///
+/// A-8.2 says an implementation MUST NOT write a record 6 with detection kind 4 or 5, and the
+/// cheapest place to keep a MUST NOT is the door — the same decision as `SMY-E452` above, and
+/// for a related reason. A store that accepted one would hold a contention an implementation
+/// predating the kinds can preserve and cannot act on, and the whole point of opening the
+/// enumeration in 1.9 was that an unknown code should cost a reader nothing.
+///
+/// No diagnostic code, deliberately: refusing it makes the violation unrepresentable rather
+/// than reportable. A **resolution** naming the derived id is a different record and is
+/// accepted as it always was — that is the one a reviewer writes.
+#[test]
+fn a_log_refuses_a_contention_rule_e_derives() {
+    use smysl_core::types::{Contention, Detected, DetectionKind};
+    use smysl_core::{AgentId, ContentionId, Hlc, Uid};
+    let agent = AgentId::new("human:vu").expect("an agent");
+    let uid = |n: u8| Uid::from_bytes([n; 32]);
+    for kind in DetectionKind::DERIVED_ONLY.iter().copied() {
+        let c = Contention::new(
+            ContentionId::derive(kind, &uid(1), &[uid(2)]),
+            uid(1),
+            vec![uid(2)],
+            Detected::new(kind, Hlc::new(1, 0, agent.clone())),
+        );
+        let mut store = Store::new();
+        let err = store.append(&[Record::Contention(c)]).expect_err("refused");
+        match err {
+            Error::Lib(lib @ LibError::DerivedContention { .. }) => {
+                assert_eq!(lib.code(), None, "the refusal is not a diagnostic");
+                assert!(lib.to_string().contains("rule E"), "{lib}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(store.len(), 0, "nothing was written");
+    }
+    // And the four kinds merge does write are accepted, which is what makes the refusal narrow
+    // rather than a ban on record 6.
+    for kind in [
+        DetectionKind::SupersessionFork,
+        DetectionKind::LiveRebuttal,
+        DetectionKind::LabelCollision,
+        DetectionKind::CommitmentFork,
+    ] {
+        let c = Contention::new(
+            ContentionId::derive(kind, &uid(1), &[uid(2)]),
+            uid(1),
+            vec![uid(2)],
+            Detected::new(kind, Hlc::new(1, 0, agent.clone())),
+        );
+        let mut store = Store::new();
+        store
+            .append(&[Record::Contention(c)])
+            .expect("a kind merge writes");
+        assert_eq!(store.len(), 1);
+    }
+}
+
 /// The whole batch is refused, not the records before the offending one.
 ///
 /// A half-appended delivery would leave a store the sender cannot reason about: the manifest

@@ -1,4 +1,5 @@
-//! Library records: manifest (14), part text (15), part reading (18) and redaction (19).
+//! Library records: manifest (14), part text (15), dating (17), part reading (18) and
+//! redaction (19).
 //!
 //! SMYSL-2.3 A-5 defines them; this module is only the types and their identities. What
 //! *interprets* them — normalising text, reading files, deriving structure, resolving a
@@ -16,7 +17,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::ids::{is_alias, AgentId, LangTag, Mid, Rdid, Tid, Uid};
+use crate::ids::{is_alias, AgentId, Did, LangTag, Mid, Rdid, Tid, Uid};
 use crate::types::epistemics::SourceRef;
 use crate::types::provenance::Hlc;
 use crate::types::unit::Extra;
@@ -498,6 +499,281 @@ pub enum Resolved {
 pub trait PartResolver: core::fmt::Debug {
     /// What is stored under `tid`.
     fn part(&self, tid: &Tid) -> Resolved;
+}
+
+/// Which of a unit's times a dating speaks about (record 17, key 1; rule E).
+///
+/// Rule E names four axes and this enumeration has three. The fourth, *known*, is the earliest
+/// HLC `ts` of a unit's attestations: it is read from the store and never corrected, so there
+/// is nothing for a dating to say about it. A record that could claim a different *known* time
+/// would be a record that could rewrite when the store learned something.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+#[non_exhaustive]
+pub enum Axis {
+    /// When it was said or published.
+    Said = 0,
+    /// When the work was written. Reached only through datings on the work's catalog entity.
+    Composed = 1,
+    /// The time the claim refers to, which may be nothing like either of the others.
+    About = 2,
+}
+
+impl Axis {
+    pub const ALL: &'static [Axis] = &[Axis::Said, Axis::Composed, Axis::About];
+
+    pub const fn as_u8(self) -> u8 {
+        self as u8
+    }
+
+    pub const fn from_u8(v: u8) -> Option<Axis> {
+        match v {
+            0 => Some(Axis::Said),
+            1 => Some(Axis::Composed),
+            2 => Some(Axis::About),
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Axis::Said => "said",
+            Axis::Composed => "composed",
+            Axis::About => "about",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Axis> {
+        Axis::ALL.iter().copied().find(|a| a.as_str() == s)
+    }
+}
+
+impl std::fmt::Display for Axis {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.pad(self.as_str())
+    }
+}
+
+/// What a dating is about (record 17, key 0).
+///
+/// Four kinds, and the fourth is the one that earns its place: a **window** dates every unit
+/// drawn from a range of one part's `observed` instants. A chat export whose clock was wrong
+/// for three days is one record, not one per message — and the alternative, a dating per unit,
+/// would make a correction cost as much as the ingest did.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum DatingTarget {
+    /// One unit, by uid.
+    Unit(Uid),
+    /// Every unit drawn from one part.
+    Part(Tid),
+    /// Every unit drawn under one manifest.
+    Manifest(Mid),
+    /// Every unit of one part whose as-recorded `observed` falls in `[from_ms, to_ms)`.
+    ///
+    /// Half-open, and against the **as-recorded** instant rather than the effective one: a
+    /// window that moved as the datings it selects took effect would select a different set on
+    /// every pass, and rule E would not converge.
+    Window { tid: Tid, from_ms: u64, to_ms: u64 },
+}
+
+impl DatingTarget {
+    /// The wire code of this kind (key 0, first element).
+    pub const fn kind(&self) -> u8 {
+        match self {
+            DatingTarget::Unit(_) => 0,
+            DatingTarget::Part(_) => 1,
+            DatingTarget::Manifest(_) => 2,
+            DatingTarget::Window { .. } => 3,
+        }
+    }
+
+    /// Whether the window is non-empty, or `true` for every other kind.
+    ///
+    /// A window with `from_ms >= to_ms` selects nothing, which is not an error the format can
+    /// refuse — it decodes, and the record has to leave again as it arrived — so it is a
+    /// question a producer and a check pass ask, and this is the one place that answers it.
+    pub fn selects_anything(&self) -> bool {
+        match self {
+            DatingTarget::Window { from_ms, to_ms, .. } => from_ms < to_ms,
+            _ => true,
+        }
+    }
+}
+
+/// One of Allen's thirteen interval relations, in the seven spellings a dating may use.
+///
+/// Text on the wire, not a code (A-5), and deliberately: the relations are a closed set whose
+/// names are standard, and a reader meeting `starts` — one of the six this format does not
+/// use — can say which word it did not understand. A code could only say `7`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum Allen {
+    Before,
+    After,
+    Meets,
+    Overlaps,
+    During,
+    Contains,
+    Equals,
+}
+
+impl Allen {
+    pub const ALL: &'static [Allen] = &[
+        Allen::Before,
+        Allen::After,
+        Allen::Meets,
+        Allen::Overlaps,
+        Allen::During,
+        Allen::Contains,
+        Allen::Equals,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Allen::Before => "before",
+            Allen::After => "after",
+            Allen::Meets => "meets",
+            Allen::Overlaps => "overlaps",
+            Allen::During => "during",
+            Allen::Contains => "contains",
+            Allen::Equals => "equals",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Allen> {
+        Allen::ALL.iter().copied().find(|a| a.as_str() == s)
+    }
+
+    /// The relation with its ends swapped: `a before b` is `b after a`.
+    ///
+    /// Rule E builds a constraint graph, and an edge has to be readable from either end.
+    pub const fn inverse(self) -> Allen {
+        match self {
+            Allen::Before => Allen::After,
+            Allen::After => Allen::Before,
+            Allen::Meets => Allen::Meets,
+            Allen::Overlaps => Allen::Overlaps,
+            Allen::During => Allen::Contains,
+            Allen::Contains => Allen::During,
+            Allen::Equals => Allen::Equals,
+        }
+    }
+}
+
+impl std::fmt::Display for Allen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.pad(self.as_str())
+    }
+}
+
+/// What a dating says (record 17, key 2): a one-entry map, so exactly one of three things.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum DatingValue {
+    /// EDTF level 1 text (`{0: …}`). "This was published in 1920?".
+    ///
+    /// A `String` for the reason `SourceRef::published` is one: the value is what a source
+    /// said, a record that arrived has to leave again byte for byte, and a malformed value is
+    /// reported (`SMY-E410`) rather than refused. [`Dating::absolute`] takes a parsed
+    /// [`crate::edtf::Edtf`], so nothing this build writes is malformed.
+    Absolute(String),
+    /// A correction in milliseconds (`{1: …}`). "Every clock in this window was 3 h slow."
+    ///
+    /// Signed, and on the *said* axis over instants only: an offset applied to an EDTF
+    /// interval of unknown width means nothing, and an offset is the one value whose whole
+    /// purpose is to repair a recorded instant.
+    Offset(i64),
+    /// An Allen relation to another target (`{2: [allen, target]}`). "This is during that."
+    Relative { allen: Allen, target: DatingTarget },
+}
+
+/// A dating (record 17): a statement about when something happened.
+///
+/// **A record about units, never an edit to them.** The alternative — correcting `observed` in
+/// place — would change the units' uids, and a store that re-identified its contents whenever
+/// a clock turned out to be wrong could not be cited. So a dating stands beside what it dates,
+/// carries who said it and on what evidence, can be withdrawn (A-6), and rule E recomputes the
+/// effective time from the record set every time the record set changes.
+///
+/// It has its own identity, a **did** (A-3), because the things that name a dating need one:
+/// a withdrawal makes a dating not live, and a `canonical` commitment holds it for review.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub struct Dating {
+    pub target: DatingTarget,
+    pub axis: Axis,
+    pub value: DatingValue,
+    /// The unit giving the evidence.
+    ///
+    /// Optional, and what it decides is **status**: a dating takes the status of its basis
+    /// unit (D-4), and one with no basis is `speculative` however confident its author. That
+    /// is the whole mechanism by which "the export header says so" outranks "it must have been
+    /// about then" without anybody ranking them by hand.
+    pub basis: Option<Uid>,
+    pub agent: AgentId,
+    pub ts: Hlc,
+    pub extra: Extra,
+}
+
+impl Dating {
+    pub fn new(
+        target: DatingTarget,
+        axis: Axis,
+        value: DatingValue,
+        agent: AgentId,
+        ts: Hlc,
+    ) -> Dating {
+        Dating {
+            target,
+            axis,
+            value,
+            basis: None,
+            agent,
+            ts,
+            extra: Extra::new(),
+        }
+    }
+
+    /// An absolute dating from a parsed EDTF value.
+    ///
+    /// Takes an [`crate::edtf::Edtf`] rather than a string for the reason
+    /// [`crate::types::SourceRef::published_at`] does: EDTF has one spelling of each value,
+    /// the value is inside the did, and a producer handed a `&str` is one typo from two
+    /// identities for one claim.
+    pub fn absolute(
+        target: DatingTarget,
+        axis: Axis,
+        when: &crate::edtf::Edtf,
+        agent: AgentId,
+        ts: Hlc,
+    ) -> Dating {
+        Dating::new(
+            target,
+            axis,
+            DatingValue::Absolute(when.to_string()),
+            agent,
+            ts,
+        )
+    }
+
+    /// A clock correction, in milliseconds.
+    ///
+    /// Hard-codes [`Axis::Said`], which is the only axis an offset has a meaning on (A-5), so
+    /// the one combination a producer could get wrong is not reachable from here.
+    pub fn offset(target: DatingTarget, ms: i64, agent: AgentId, ts: Hlc) -> Dating {
+        Dating::new(target, Axis::Said, DatingValue::Offset(ms), agent, ts)
+    }
+
+    pub fn with_basis(mut self, basis: Uid) -> Dating {
+        self.basis = Some(basis);
+        self
+    }
+
+    /// This dating's did: BLAKE3 over the domain byte `0x11` and the canonical body (A-3).
+    pub fn did(&self) -> Did {
+        Did::of(&crate::cbor::envelope::dating_bytes(self))
+    }
 }
 
 /// A redaction: this part's text is to be held no longer (record 19, rule Z).

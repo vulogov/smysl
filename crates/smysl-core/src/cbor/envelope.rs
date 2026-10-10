@@ -25,7 +25,8 @@ use crate::types::annex::{
 use crate::types::epistemics::{Date, Lod, SourceKind, SourceRef, Status};
 use crate::types::estimate::ProfileEstimator;
 use crate::types::library::{
-    Calendar, Carry, Manifest, ParentKind, PartEntry, PartReading, PartText, Redaction,
+    Allen, Axis, Calendar, Carry, Dating, DatingTarget, DatingValue, Manifest, ParentKind,
+    PartEntry, PartReading, PartText, Redaction,
 };
 use crate::types::lifecycle::{Commit, Commitment, Resolution, ResolutionTarget, Withdrawal};
 use crate::types::provenance::{Attestation, Hlc, Op, Rung};
@@ -71,6 +72,9 @@ fn enc_source(e: &mut Enc, s: &SourceRef) {
     });
     m.put_opt(keys::source::OBSERVED, s.observed.as_ref(), |e, ms| {
         e.uint(*ms)
+    });
+    m.put_opt(keys::source::PUBLISHED, s.published.as_ref(), |e, p| {
+        e.text(p)
     });
     // Rule X inside the sub-map, as every record body has done since 0.2. Without it a reader
     // that met a key it did not know re-encoded the unit without it and changed its uid.
@@ -509,6 +513,62 @@ pub fn part_reading_bytes(r: &PartReading) -> Vec<u8> {
     m.into_bytes()
 }
 
+/// The canonical bytes of a dating body — the did's preimage after its domain byte (A-3).
+pub fn dating_bytes(d: &Dating) -> Vec<u8> {
+    let mut m = MapBuilder::new();
+    m.put(keys::dating::TARGET, |e| enc_dating_target(e, &d.target));
+    m.put(keys::dating::AXIS, |e| e.uint(d.axis.as_u8() as u64));
+    m.put(keys::dating::VALUE, |e| {
+        let mut v = MapBuilder::new();
+        match &d.value {
+            DatingValue::Absolute(t) => {
+                v.put(keys::dating_value::ABSOLUTE, |e| e.text(t));
+            }
+            DatingValue::Offset(ms) => {
+                v.put(keys::dating_value::OFFSET, |e| e.int(*ms));
+            }
+            DatingValue::Relative { allen, target } => {
+                v.put(keys::dating_value::RELATIVE, |e| {
+                    e.array_head(2);
+                    e.text(allen.as_str());
+                    enc_dating_target(e, target);
+                });
+            }
+        }
+        v.finish(e);
+    });
+    m.put_opt(keys::dating::BASIS, d.basis.as_ref(), |e, u| {
+        e.bytes(u.as_bytes())
+    });
+    m.put(keys::dating::AGENT, |e| e.text(d.agent.as_str()));
+    m.put(keys::dating::TS, |e| enc_hlc(e, &d.ts));
+    m.put_extra(&d.extra);
+    m.into_bytes()
+}
+
+/// `[kind, id]` — and a window's id is itself an array, which is why this is a function
+/// rather than two lines inlined twice: a relative value holds a second target, and the two
+/// spellings drifting apart would give one dating two dids.
+fn enc_dating_target(e: &mut Enc, t: &DatingTarget) {
+    e.array_head(2);
+    e.uint(t.kind() as u64);
+    match t {
+        DatingTarget::Unit(u) => e.bytes(u.as_bytes()),
+        DatingTarget::Part(tid) => e.bytes(tid.as_bytes()),
+        DatingTarget::Manifest(mid) => e.bytes(mid.as_bytes()),
+        DatingTarget::Window {
+            tid,
+            from_ms,
+            to_ms,
+        } => {
+            e.array_head(3);
+            e.bytes(tid.as_bytes());
+            e.uint(*from_ms);
+            e.uint(*to_ms);
+        }
+    }
+}
+
 /// The canonical bytes of a redaction body (record 19, rule Z).
 ///
 /// No identity of its own, and that is a decision rather than an omission: a redaction is not
@@ -544,6 +604,7 @@ pub fn to_cbor(r: &Record) -> Vec<u8> {
         Record::Manifest(m) => manifest_bytes(m),
         Record::PartText(p) => part_text_bytes(p),
         Record::PartReading(r) => part_reading_bytes(r),
+        Record::Dating(d) => dating_bytes(d),
         Record::Redaction(r) => redaction_bytes(r),
         Record::Unknown { payload, .. } => payload.clone(),
     };
@@ -595,6 +656,7 @@ fn dec_source(d: &mut Dec<'_>) -> Res<SourceRef> {
     let mut reference = None;
     let mut captured = None;
     let mut observed = None;
+    let mut published = None;
     let mut raw_kind = None;
     let mut extra = Extra::new();
     read_map(d, &mut extra, |d, k| match k {
@@ -618,12 +680,20 @@ fn dec_source(d: &mut Dec<'_>) -> Res<SourceRef> {
             observed = Some(d.uint()?);
             Ok(true)
         }
+        keys::source::PUBLISHED => {
+            // Not validated here. `source` is inside the uid, so a value that arrived has to
+            // leave again byte for byte; a malformed one is reported (`SMY-E410`) rather than
+            // refused, exactly as an unrecognised `source.kind` is kept rather than refused.
+            published = Some(d.text()?.to_string());
+            Ok(true)
+        }
         _ => Ok(false),
     })?;
     let kind = kind.ok_or_else(|| bad(at))?;
     let mut s = SourceRef::new(kind, reference.ok_or_else(|| bad(at))?);
     s.captured = captured;
     s.observed = observed;
+    s.published = published;
     s.extra = extra;
     if kind == SourceKind::Unknown {
         // `source.kind` is inside the uid, so the code has to leave again exactly as it
@@ -1682,6 +1752,111 @@ fn dec_part_reading(d: &mut Dec<'_>) -> Res<PartReading> {
     Ok(r)
 }
 
+fn dec_dating(d: &mut Dec<'_>) -> Res<Dating> {
+    let at = d.position();
+    let mut target = None;
+    let mut axis = None;
+    let mut value = None;
+    let mut basis = None;
+    let mut agent = None;
+    let mut ts = None;
+    let mut extra = Extra::new();
+    read_map(d, &mut extra, |d, k| match k {
+        keys::dating::TARGET => {
+            target = Some(dec_dating_target(d)?);
+            Ok(true)
+        }
+        keys::dating::AXIS => {
+            // Closed, unlike `source.kind` and the thread schemas: rule E is defined over
+            // three axes and an axis this build cannot name is an axis it cannot propagate,
+            // so there is nothing to preserve a code *for*. The amendment opens the
+            // enumerations whose unknown values a reader can still carry; this is not one.
+            let c = u8::try_from(d.uint()?).map_err(|_| bad(at))?;
+            axis = Some(Axis::from_u8(c).ok_or_else(|| bad(at))?);
+            Ok(true)
+        }
+        keys::dating::VALUE => {
+            value = Some(dec_dating_value(d)?);
+            Ok(true)
+        }
+        keys::dating::BASIS => {
+            basis = Some(d.uid()?);
+            Ok(true)
+        }
+        keys::dating::AGENT => {
+            agent = Some(AgentId::new(d.text()?).map_err(|_| bad(at))?);
+            Ok(true)
+        }
+        keys::dating::TS => {
+            ts = Some(dec_hlc(d)?);
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+    let mut dating = Dating::new(
+        target.ok_or_else(|| bad(at))?,
+        axis.ok_or_else(|| bad(at))?,
+        value.ok_or_else(|| bad(at))?,
+        agent.ok_or_else(|| bad(at))?,
+        ts.ok_or_else(|| bad(at))?,
+    );
+    dating.basis = basis;
+    dating.extra = extra;
+    Ok(dating)
+}
+
+fn dec_dating_target(d: &mut Dec<'_>) -> Res<DatingTarget> {
+    let at = d.position();
+    if d.array_head()? != 2 {
+        return Err(bad(at));
+    }
+    let kind = d.uint()?;
+    Ok(match kind {
+        0 => DatingTarget::Unit(d.uid()?),
+        1 => DatingTarget::Part(Tid::from_bytes(dec_32(d)?)),
+        2 => DatingTarget::Manifest(Mid::from_bytes(dec_32(d)?)),
+        3 => {
+            if d.array_head()? != 3 {
+                return Err(bad(at));
+            }
+            DatingTarget::Window {
+                tid: Tid::from_bytes(dec_32(d)?),
+                from_ms: d.uint()?,
+                to_ms: d.uint()?,
+            }
+        }
+        // A fourth kind would name a thing to date that this build cannot find, and the
+        // record's own `target` is inside its did — so there is no way to keep an unknown
+        // kind and still agree with the writer about which dating this is.
+        _ => return Err(bad(at)),
+    })
+}
+
+fn dec_dating_value(d: &mut Dec<'_>) -> Res<DatingValue> {
+    let at = d.position();
+    // Exactly one entry: A-5 says a one-entry map, and a two-entry one would be a dating
+    // that says two things with no rule for which wins.
+    if d.map_head()? != 1 {
+        return Err(bad(at));
+    }
+    let key = u16::try_from(d.uint()?).map_err(|_| bad(at))?;
+    Ok(match key {
+        keys::dating_value::ABSOLUTE => DatingValue::Absolute(d.text()?.to_string()),
+        keys::dating_value::OFFSET => DatingValue::Offset(d.int()?),
+        keys::dating_value::RELATIVE => {
+            if d.array_head()? != 2 {
+                return Err(bad(at));
+            }
+            let allen = Allen::parse(d.text()?).ok_or_else(|| bad(at))?;
+            DatingValue::Relative {
+                allen,
+                target: dec_dating_target(d)?,
+            }
+        }
+        _ => return Err(bad(at)),
+    })
+}
+
 fn dec_redaction(d: &mut Dec<'_>) -> Res<Redaction> {
     let at = d.position();
     let mut tid = None;
@@ -1742,6 +1917,7 @@ pub fn from_cbor(bytes: &[u8]) -> Res<(Record, usize)> {
         code::MANIFEST => Record::Manifest(dec_manifest(&mut d)?),
         code::PART_TEXT => Record::PartText(dec_part_text(&mut d)?),
         code::PART_READING => Record::PartReading(dec_part_reading(&mut d)?),
+        code::DATING => Record::Dating(dec_dating(&mut d)?),
         code::REDACTION => Record::Redaction(dec_redaction(&mut d)?),
         other => {
             // `SMY-W014`: preserved verbatim, skipped semantically. The payload is parsed

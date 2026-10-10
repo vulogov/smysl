@@ -52,6 +52,8 @@ PAYLOAD = 8
 SOURCE_KIND = 0
 SOURCE_REFERENCE = 1
 SOURCE_CAPTURED = 2
+SOURCE_OBSERVED = 3
+SOURCE_PUBLISHED = 4
 
 UID_LEN = 32
 
@@ -107,6 +109,10 @@ class Source:
     kind: int
     reference: str
     captured: Optional[str] = None  # "YYYY-MM-DD"
+    #: Epoch milliseconds the observation was taken (1.8), supplied and never read from a clock.
+    observed: Optional[int] = None
+    #: EDTF, as the source states it (1.10, key 4).
+    published: Optional[str] = None
 
     def encode(self) -> bytes:
         entries = [
@@ -115,6 +121,10 @@ class Source:
         ]
         if self.captured is not None:
             entries.append((SOURCE_CAPTURED, _text(self.captured)))
+        if self.observed is not None:
+            entries.append((SOURCE_OBSERVED, _uint(self.observed)))
+        if self.published is not None:
+            entries.append((SOURCE_PUBLISHED, _text(self.published)))
         return _map(entries)
 
 

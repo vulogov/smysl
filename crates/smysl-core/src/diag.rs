@@ -299,15 +299,17 @@ registry! {
     }
     // --- The library (RFC SMYSL-2.4), in the order `smysl-text` raises them -------------------
     //
-    // Registered with the code that raises them, not with the RFC that allocated them: the
-    // range `E440`-`W459` holds twelve allocations and this build can trigger six. A code
+    // Registered with the code that raises them, not with the RFC that allocated them. A code
     // nothing can trigger is worse than a missing one, because a reader who greps for it finds
-    // a promise with nothing behind it. The other seven arrive with their readers, their
-    // ingest path and their check pass.
+    // a promise with nothing behind it. The rest arrive with their readers, their ingest path
+    // and their check pass.
     Library => {
         E401 = "SMY-E401", Error, "Structure hash or rdid does not match the part entry on re-read";
         E402 = "SMY-E402", Error, "Carrying text is refused by the licence recorded in the manifest";
         E403 = "SMY-E403", Error, "Malformed tid, mid, did or rdid in a record";
+        E410 = "SMY-E410", Error, "Malformed EDTF value in published or a dating";
+        W412 = "SMY-W412", Warn,  "A live dating rule E could not apply: held, or outranked by what it would override";
+        W413 = "SMY-W413", Warn,  "Temporal inconsistency: a negative cycle or an empty interval under rule E";
         W418 = "SMY-W418", Warn,  "Expression fork: one alias has two manifest heads";
         E440 = "SMY-E440", Error, "Reader resource cap exceeded; nothing was written";
         E445 = "SMY-E445", Error, "The library or a shard is locked by another writer";
@@ -615,7 +617,20 @@ mod tests {
     /// `SMY-W418`, which TX-P1 step 5's `Library` check pass raises. 73 with `SMY-E450` in
     /// TX-P2 step 3, where `text append` exists to refuse: an append to a pseudonymised
     /// expression with no pseudonym key. Step 2 built `--pseudonymise` and left the code
-    /// unregistered, which is this rule applied rather than an omission.
+    /// unregistered, which is this rule applied rather than an omission. 74 with `SMY-E410` in
+    /// TX-P3 step 1, where `@date` and `source { published: … }` give the surface parser two
+    /// places to meet a malformed EDTF value and refuse it.
+    ///
+    /// 76 with `SMY-W412` and `SMY-W413` in TX-P3 step 2, where the time engine computes an
+    /// interval and can therefore say that a live dating did not move a bound, or that a set of
+    /// records cannot all be true. They are also the two `DetectionKind` values A-8.2 adds, and
+    /// `DetectionKind::code()` is total — every kind names the diagnostic it is reported as — so
+    /// the kinds and the codes had to arrive together, which is why step 1 shipped neither.
+    ///
+    /// **`W411` and `W449` are still not here.** An `observed` outside a `published` interval
+    /// and an EDTF value outside the instant range are both findings about a *store*, which the
+    /// `Time` check pass reports; the engine computes intervals and raises nothing. They arrive
+    /// in step 3 with the pass.
     ///
     /// Step 5's plan named six codes and two of them are **not** here. `SMY-E404` is a span
     /// past a part's length and `SMY-W405` is a locator disagreeing with a span; both read
@@ -624,7 +639,7 @@ mod tests {
     /// build can produce, which is the thing this comment exists to prevent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 73);
+        assert_eq!(Code::ALL.len(), 76);
     }
 
     #[test]

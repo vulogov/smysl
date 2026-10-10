@@ -111,6 +111,43 @@ REDACTION_KEYS = {
     3: "reason",
 }
 
+#: §3.1, dating (17). A statement about when something happened.
+#:
+#: The key numbers are the did's preimage, so they are permanent in a stronger sense than the
+#: other tables here: renumbering one would change the identity of every dating ever written.
+DATING_KEYS = {
+    0: "target",
+    1: "axis",
+    2: "value",
+    3: "basis",
+    4: "agent",
+    5: "ts",
+}
+
+#: §3.1, the three entries of a dating's value map, which holds exactly one.
+DATING_VALUE_KEYS = {
+    0: "absolute",
+    1: "offset",
+    2: "relative",
+}
+
+#: §3.1, a dating's axis (key 1). Rule E names a fourth — *known* — which no dating can speak
+#: about: it is the earliest attestation clock of a unit and is never corrected.
+AXES = {0: "said", 1: "composed", 2: "about"}
+
+#: §3.1, a dating's target kind (key 0, first element).
+TARGET_KINDS = {
+    0: "unit",
+    1: "part",
+    2: "manifest",
+    3: "window",
+}
+
+#: §3.1, the Allen relations a relative dating may use.
+ALLEN = frozenset(
+    {"before", "after", "meets", "overlaps", "during", "contains", "equals"}
+)
+
 #: §3.1, a segment row inside a reading's key 2.
 SEGMENT_KEYS = {
     0: "start",
@@ -420,14 +457,141 @@ class PartReading:
 
 
 def decode_library_record(code: int, body: Any):
-    """Decode a record 14, 15 or 18 body. Anything else is not this module's business."""
+    """Decode a record 14, 15, 17 or 18 body. Anything else is not this module's business."""
     if code == 14:
         return Manifest.decode(body)
     if code == 15:
         return PartText.decode(body)
+    if code == 17:
+        return Dating.decode(body)
     if code == 18:
         return PartReading.decode(body)
     raise CborError(f"record {code} is not a library record this module decodes")
+
+
+@dataclass(frozen=True)
+class DatingTarget:
+    """What a dating is about: a unit, a part, a manifest, or a window over a part.
+
+    ``ident`` is 32 bytes for the first three kinds. For a window it is the part's tid and the
+    range is in ``window``, half-open and against the **as-recorded** ``observed`` instant — not
+    the effective one, which would make the set of selected units move as the datings applied.
+    """
+
+    kind: int
+    ident: bytes
+    window: Optional[tuple[int, int]] = None
+
+    @classmethod
+    def decode(cls, value: Any) -> "DatingTarget":
+        if not isinstance(value, list) or len(value) != 2:
+            raise LibraryError("a dating target is [kind, id]")
+        kind = value[0]
+        if kind not in TARGET_KINDS:
+            raise LibraryError(f"a dating target kind is 0 to 3, not {kind}")
+        if kind == 3:
+            inner = value[1]
+            if not isinstance(inner, list) or len(inner) != 3:
+                raise LibraryError("a window is [tid, from_ms, to_ms]")
+            if not isinstance(inner[0], bytes) or len(inner[0]) != 32:
+                raise LibraryError("a window's tid is 32 bytes")
+            if not all(isinstance(i, int) for i in inner[1:]):
+                raise LibraryError("a window's bounds are integers")
+            return cls(kind=3, ident=inner[0], window=(inner[1], inner[2]))
+        if not isinstance(value[1], bytes) or len(value[1]) != 32:
+            raise LibraryError("a dating target's id is 32 bytes")
+        return cls(kind=kind, ident=value[1])
+
+    @property
+    def kind_name(self) -> str:
+        return TARGET_KINDS[self.kind]
+
+
+@dataclass(frozen=True)
+class Dating:
+    """Record 17: a statement about when something happened.
+
+    A record *about* units, parts and manifests, never an edit to them — correcting a unit's
+    ``observed`` in place would change its uid, and a store that re-identified its contents
+    whenever a clock turned out to be wrong could not be cited.
+
+    Its identity is a did (§2.6), derived from the body bytes, because the records that name a
+    dating need one: a withdrawal makes it not live and a ``canonical`` commitment holds it.
+    """
+
+    target: DatingTarget
+    axis: int
+    #: ``("absolute", str)``, ``("offset", int)`` or ``("relative", (allen, DatingTarget))``.
+    value: tuple[str, Any]
+    agent: str
+    ts: Any
+    basis: Optional[bytes] = None
+    extra: dict[int, Any] = field(default_factory=dict)
+    body: Any = None
+
+    @classmethod
+    def decode(cls, body: Any) -> "Dating":
+        if not isinstance(body, dict):
+            raise LibraryError("a dating body is a map")
+        for required in (0, 1, 2, 4, 5):
+            if required not in body:
+                raise LibraryError(f"a dating needs key {required} ({DATING_KEYS[required]})")
+        target = DatingTarget.decode(body[0])
+        axis = body[1]
+        if axis not in AXES:
+            raise LibraryError(f"a dating's axis is 0, 1 or 2, not {axis}")
+        if not isinstance(body[4], str):
+            raise LibraryError("a dating's agent is text")
+        basis = body.get(3)
+        if basis is not None and (not isinstance(basis, bytes) or len(basis) != 32):
+            raise LibraryError("a dating's basis is a uid")
+        return cls(
+            target=target,
+            axis=axis,
+            value=_dating_value(body[2]),
+            agent=body[4],
+            ts=body[5],
+            basis=basis,
+            extra={k: v for k, v in body.items() if k > 5},
+            body=body,
+        )
+
+    @property
+    def axis_name(self) -> str:
+        return AXES[self.axis]
+
+    def dating_id(self) -> bytes:
+        """This dating's did, over the re-encoded body (§2.6)."""
+        return did(encode_one(self.body))
+
+
+def _dating_value(value: Any) -> tuple[str, Any]:
+    """A dating's value: a one-entry map, so exactly one of three things.
+
+    Exactly one, and the count is checked: a two-entry map would be a dating that says two
+    things with no rule for which wins.
+    """
+    if not isinstance(value, dict) or len(value) != 1:
+        raise LibraryError("a dating's value is a one-entry map")
+    (key, inner), = value.items()
+    if key == 0:
+        if not isinstance(inner, str):
+            raise LibraryError("an absolute dating's value is EDTF text")
+        return ("absolute", inner)
+    if key == 1:
+        # Signed. The first field in this format to carry a negative integer, so a decoder
+        # that read CBOR major type 1 as a large positive number would fail here and nowhere
+        # else: a clock can be fast as well as slow.
+        if not isinstance(inner, int) or isinstance(inner, bool):
+            raise LibraryError("an offset is an integer of milliseconds")
+        return ("offset", inner)
+    if key == 2:
+        if not isinstance(inner, list) or len(inner) != 2:
+            raise LibraryError("a relative dating's value is [allen, target]")
+        if inner[0] not in ALLEN:
+            raise LibraryError(f"`{inner[0]}` is not an Allen relation this format uses")
+        return ("relative", (inner[0], DatingTarget.decode(inner[1])))
+    raise LibraryError(f"a dating's value has no key {key}")
 
 
 @dataclass(frozen=True)

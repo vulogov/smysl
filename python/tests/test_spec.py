@@ -188,16 +188,16 @@ def test_record_type_codes_match_the_table_in_3_1():
 def test_a_named_record_is_not_the_same_as_an_understood_one():
     """§3.1: a code the spec names is not a code this implementation decodes.
 
-    1.10 added five library codes to the name table and this implementation now decodes four
-    of them — a manifest, a part text, a part reading and a redaction, with the four identities
-    over the first three (`test_library.py`). Three are still named and not understood, and that
-    is what the two tables exist to be able to say: 9 is a checkpoint nothing has ever emitted,
-    16 is reserved, and 17 lands with the release that writes it. A reader that called those
-    known while decoding none of them would be exactly the silence ``SMY-W014`` exists to break.
+    1.10 added five library codes to the name table and this implementation decodes all five —
+    a manifest, a part text, a dating, a part reading and a redaction, with an identity for each
+    but the redaction (`test_library.py`). Two are still named and not understood, and that is
+    what the two tables exist to be able to say: 9 is a checkpoint nothing has ever emitted and
+    16 is reserved. A reader that called those known while decoding neither would be exactly the
+    silence ``SMY-W014`` exists to break.
     """
     named_not_understood = set(smysl.RECORD_NAMES) - smysl.UNDERSTOOD_RECORDS
-    assert named_not_understood == {9, 16, 17}
-    assert {14, 15, 18, 19} <= smysl.UNDERSTOOD_RECORDS
+    assert named_not_understood == {9, 16}
+    assert {14, 15, 17, 18, 19} <= smysl.UNDERSTOOD_RECORDS
     assert smysl.UNDERSTOOD_RECORDS <= set(smysl.RECORD_NAMES)
 
 

@@ -759,6 +759,16 @@ pub enum LibError {
         /// The record code offered, 15 or 18, so a message names what was refused.
         record: u8,
     },
+    /// A record 6 carrying a detection kind rule E derives (SMYSL-2.3 A-8.2).
+    ///
+    /// No diagnostic code, and that is the point: a time contention is derived and reported,
+    /// never written, so a store that refuses the record makes the violation unrepresentable
+    /// rather than reportable. The same shape as the redaction decision in TX-P2 step 4 — the
+    /// cheapest place to enforce a MUST NOT is the door.
+    DerivedContention {
+        /// The detection kind offered, 4 or 5, so a message names what was refused.
+        kind: u8,
+    },
     /// Input that is not text at all: invalid UTF-8 at a byte offset. No code, because
     /// nothing was ingested and there is nothing to diagnose later.
     NotText { at: usize },
@@ -837,7 +847,8 @@ impl LibError {
             LibError::ObjectCorrupt { .. } => Some(Code::E446),
             LibError::PseudonymKeyMissing { .. } => Some(Code::E450),
             LibError::TextInLog { .. } => Some(Code::E452),
-            LibError::NotText { .. }
+            LibError::DerivedContention { .. }
+            | LibError::NotText { .. }
             | LibError::BadAlias { .. }
             | LibError::Unreadable { .. }
             | LibError::NoParts { .. }
@@ -908,6 +919,11 @@ impl fmt::Display for LibError {
                 f,
                 "{}: record {record} does not belong in a log; text lives in the object store",
                 Code::E452
+            ),
+            LibError::DerivedContention { kind } => write!(
+                f,
+                "a contention of detection kind {kind} is derived by rule E, never written; \
+                 a resolution names its derived id and needs no record 6"
             ),
             LibError::Redacted { tid } => write!(
                 f,

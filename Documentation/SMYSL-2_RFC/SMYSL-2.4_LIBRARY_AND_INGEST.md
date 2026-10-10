@@ -2137,10 +2137,80 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
 
 ### TX-P3 — time
 
-1. `smysl-core`: `edtf.rs`, `source.published` (FC-2), record 17, `@date`, `Did`; time
-   `DetectionKind` values for derivation only. *Exit:* EDTF fixtures; round trips; ports decode 17.
-2. `time::{calendar, constraints, stn, engine}`; copy and omission rules in `provenance::stamp`.
-   *Exit:* P-E1–P-E8 green; omission rule tested at second vs millisecond precision.
+1. ~~`smysl-core`: `edtf.rs`, `source.published` (FC-2), record 17, `@date`, `Did`; time
+   `DetectionKind` values for derivation only. *Exit:* EDTF fixtures; round trips; ports decode
+   17.~~ **Done.** `Did` already existed (TX-P1 step 1 built all four identities). The exit is
+   met: `fixtures/library/edtf/cases.json` is the EDTF fixture, `tests/dating.rs` round-trips
+   every target kind against every value kind through CBOR and every spellable one through text,
+   and all three ports decode record 17 out of `fixtures/library/wire/`, with its did, against
+   three datings chosen one per target kind and one per value kind.
+
+   **Four departures, each recorded where it lands.**
+
+   - **The two `DetectionKind` values move to step 2.** `DetectionKind::code()` is total — every
+     kind names the diagnostic it is reported as — so kinds 4 and 5 cannot land before `W412` and
+     `W413` can be raised, and nothing raises them until the engine computes an interval. The
+     registry's rule is that a code nothing can trigger is worse than a missing one; honouring it
+     and keeping the mapping total means the variants arrive with `time::stn`. Nothing in step 1
+     needed them: `ContentionId::derive` takes a kind and does not enumerate them.
+   - **`Store` gained `datings` and `datings_by_target`** (§4.3.2), which the plan does not
+     assign to a step. Left out, `absorb` would have decoded record 17 and dropped it on the
+     floor — the silent-drop class this plan keeps closing — and the adjacency deny-list's own
+     comment asks for the variant to join it in the commit that adds it.
+   - **The interval conversion stays for step 2.** §3.3 puts `Instant`, `Bound` and `Interval` in
+     `smysl-text::time`, and nothing in `smysl-core` needs them: EDTF *syntax* is what the
+     surface parser and the CBOR producers have to refuse, and that is all step 1 ships.
+   - **A-2.4's copy and omission rules are folded into the spec but not yet enforced.** They are
+     a producer's rules and `provenance::stamp` is step 2's. Writing them down with the key they
+     govern is the point of a fold; the gate that tests them is `P-E` and arrives with the code.
+
+   Two things found on the way, neither in the plan. The `spec-tables` gate was comparing the
+   `source` sub-map as a **named subset of three keys**, so `observed` — a key since 1.8 — was
+   missing from the Python and Node producers and from `fixtures/wire/uid/cases.json`, and no
+   gate asked. The subset is now the whole table, both producers write both keys, and the uid
+   fixture carries a case for each. And a dating's offset is the **first signed integer any
+   record in this format has ever carried**, so `Enc::int`/`Dec::int` are new and the three ports
+   had never decoded CBOR major type 1 out of a smysl store; the fixture's offset is negative for
+   that reason.
+2. ~~`time::{calendar, constraints, stn, engine}`; copy and omission rules in
+   `provenance::stamp`; `DetectionKind` 4 and 5 with `W412`/`W413` (moved from step 1, above).
+   *Exit:* P-E1–P-E8 green; omission rule tested at second vs millisecond precision.~~
+   **Done.** `crates/smysl-text/tests/time_algebra.rs` holds `P-E1`–`P-E8` and three worked
+   cases; `fuzz/fuzz_targets/{time_engine,edtf}.rs` drive the same properties from the shared
+   generator. A-12.2 is folded into the spec as §6.4 and `make spec-tables` reads rule E's row,
+   its four time statuses and its five free constraints out of the document (85 comparisons).
+
+   **The omission rule fires almost never, and that is the rule working.** A-2.4 rule 3 omits
+   `published` when its interval *equals* the one millisecond an `observed` denotes. EDTF level
+   1 cannot write a millisecond, so the narrowest value it can express is a second — and
+   `2026-09-30T14:05:00Z` is a one-second interval that is not equal to any instant inside it.
+   What the rule prevents is a producer reasoning "these say the same thing, drop one" and
+   dropping the field that carried a second of uncertainty, which would move the unit's uid. The
+   exit asks for the test at both precisions and `provenance.rs` has it.
+
+   **Decisions this step had to make because the amendment names words and no arithmetic**, all
+   three recorded as **OQ-71** with the implemented reading as the proposal: a qualifier is not
+   a width; a season is its year; and four of the seven Allen relations collapse to "at the same
+   time as" for a subject that is an instant with uncertainty rather than a duration. Every
+   reading chosen is **weaker** than the relation it stands for, so the collapse costs precision
+   and never soundness — which is what `P-E4` checks over generated corpora.
+
+   **Two things the step found.** `SPFA` did not terminate on a network with a negative
+   self-loop beside a zero-weight edge: the zero edge tied at the runaway distance, the
+   tie-break re-enqueued the node, and the relaxation counter never fired because a tie moves
+   nothing. Found by `P-E6`'s generator on a five-variable network, at case 108 of 400. The fix
+   is that a tie updates attribution and does not propagate — which is also correct, since what
+   a node records is the edge it was *reached by*, so a tie at one node tells nothing downstream.
+   And the **first-seen** constraint is sharper than it looks: a unit whose `observed` is after
+   the earliest attestation of it is a contradiction with no dating in it at all, which is now
+   its own test.
+
+   **What this release cannot compute, stated rather than absent.** A manifest-scoped dating
+   resolves through the manifest's part list, because a unit does not name its manifest until
+   FC-3 (TX-P5); that over-selects on a supersession chain, where two manifests share a part,
+   and `Effective::inexact_scopes` counts it. The **reply** free constraint has no data: the
+   ids it would be built from live in a segment row and reach a unit only through ingest. And
+   nothing dates a manifest, which is **OQ-72**.
 3. `smysl-check` `Time` pass. *Exit:* `E410`, `W411`, `W412`, `W413`, `W449` fixtures.
 4. `date set/order/show`, `--why`. *Exit:* §19.2 scenario (§5.2).
 5. *Exit for the phase:* **GE-T13**.

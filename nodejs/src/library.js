@@ -97,6 +97,55 @@ export const REDACTION_KEYS = new Map([
   [3, "reason"],
 ]);
 
+/** §3.1, dating (17). A statement about when something happened.
+ *
+ * The key numbers are the did's preimage, so they are permanent in a stronger sense than the
+ * other tables here: renumbering one would change the identity of every dating ever written.
+ */
+export const DATING_KEYS = new Map([
+  [0, "target"],
+  [1, "axis"],
+  [2, "value"],
+  [3, "basis"],
+  [4, "agent"],
+  [5, "ts"],
+]);
+
+/** §3.1, the three entries of a dating's value map, which holds exactly one. */
+export const DATING_VALUE_KEYS = new Map([
+  [0, "absolute"],
+  [1, "offset"],
+  [2, "relative"],
+]);
+
+/** §3.1, a dating's axis (key 1). Rule E names a fourth — *known* — which no dating can speak
+ * about: it is the earliest attestation clock of a unit and is never corrected.
+ */
+export const AXES = new Map([
+  [0, "said"],
+  [1, "composed"],
+  [2, "about"],
+]);
+
+/** §3.1, a dating's target kind (key 0, first element). */
+export const TARGET_KINDS = new Map([
+  [0, "unit"],
+  [1, "part"],
+  [2, "manifest"],
+  [3, "window"],
+]);
+
+/** §3.1, the Allen relations a relative dating may use. */
+export const ALLEN = new Set([
+  "before",
+  "after",
+  "meets",
+  "overlaps",
+  "during",
+  "contains",
+  "equals",
+]);
+
 export const SEGMENT_KEYS = new Map([
   [0, "start"],
   [1, "end"],
@@ -484,9 +533,144 @@ export class Redaction {
   }
 }
 
-/** Decode a record 14, 15, 18 or 19. Anything else is not this module's business. */
+/** What a dating is about: a unit, a part, a manifest, or a window over a part.
+ *
+ * `ident` is 32 bytes for the first three kinds. For a window it is the part's tid and the
+ * range is in `window`, half-open and against the **as-recorded** `observed` instant — not the
+ * effective one, which would make the set of selected units move as the datings applied.
+ */
+export class DatingTarget {
+  constructor(fields) {
+    Object.assign(this, fields);
+  }
+
+  static decode(value) {
+    if (!Array.isArray(value) || value.length !== 2) {
+      throw new LibraryError("a dating target is [kind, id]");
+    }
+    const [kind, id] = value;
+    if (!TARGET_KINDS.has(kind)) {
+      throw new LibraryError(`a dating target kind is 0 to 3, not ${kind}`);
+    }
+    const bytes32 = (b, what) => {
+      if (!(b instanceof Uint8Array) || b.length !== 32) throw new LibraryError(what);
+      return b;
+    };
+    if (kind === 3) {
+      if (!Array.isArray(id) || id.length !== 3) {
+        throw new LibraryError("a window is [tid, from_ms, to_ms]");
+      }
+      if (!id.slice(1).every((n) => typeof n === "number" || typeof n === "bigint")) {
+        throw new LibraryError("a window's bounds are integers");
+      }
+      return new DatingTarget({
+        kind: 3,
+        ident: bytes32(id[0], "a window's tid is 32 bytes"),
+        window: [id[1], id[2]],
+        kindName: "window",
+      });
+    }
+    return new DatingTarget({
+      kind,
+      ident: bytes32(id, "a dating target's id is 32 bytes"),
+      window: null,
+      kindName: TARGET_KINDS.get(kind),
+    });
+  }
+}
+
+/** A dating's value: a one-entry map, so exactly one of three things.
+ *
+ * Exactly one, and the count is checked: a two-entry map would be a dating that says two
+ * things with no rule for which wins.
+ */
+function datingValue(value) {
+  if (!(value instanceof Map) || value.size !== 1) {
+    throw new LibraryError("a dating's value is a one-entry map");
+  }
+  const [[key, inner]] = [...value];
+  if (key === 0) {
+    if (typeof inner !== "string") {
+      throw new LibraryError("an absolute dating's value is EDTF text");
+    }
+    return ["absolute", inner];
+  }
+  if (key === 1) {
+    // Signed. The first field in this format to carry a negative integer, so a decoder that
+    // read CBOR major type 1 as a large positive number would fail here and nowhere else: a
+    // clock can be fast as well as slow.
+    if (typeof inner !== "number" && typeof inner !== "bigint") {
+      throw new LibraryError("an offset is an integer of milliseconds");
+    }
+    return ["offset", inner];
+  }
+  if (key === 2) {
+    if (!Array.isArray(inner) || inner.length !== 2) {
+      throw new LibraryError("a relative dating's value is [allen, target]");
+    }
+    if (!ALLEN.has(inner[0])) {
+      throw new LibraryError(`\`${inner[0]}\` is not an Allen relation this format uses`);
+    }
+    return ["relative", [inner[0], DatingTarget.decode(inner[1])]];
+  }
+  throw new LibraryError(`a dating's value has no key ${key}`);
+}
+
+/** Record 17: a statement about when something happened.
+ *
+ * A record *about* units, parts and manifests, never an edit to them — correcting a unit's
+ * `observed` in place would change its uid, and a store that re-identified its contents
+ * whenever a clock turned out to be wrong could not be cited.
+ *
+ * Its identity is a did (§2.6), because the records that name a dating need one: a withdrawal
+ * makes it not live and a `canonical` commitment holds it.
+ */
+export class Dating {
+  constructor(fields) {
+    Object.assign(this, fields);
+  }
+
+  static decode(record) {
+    const body = record instanceof Map ? record : record.body;
+    if (!(body instanceof Map)) throw new LibraryError("a dating body is a map");
+    for (const key of [0, 1, 2, 4, 5]) {
+      if (!body.has(key)) {
+        throw new LibraryError(`a dating needs key ${key} (${DATING_KEYS.get(key)})`);
+      }
+    }
+    const axis = body.get(1);
+    if (!AXES.has(axis)) {
+      throw new LibraryError(`a dating's axis is 0, 1 or 2, not ${axis}`);
+    }
+    if (typeof body.get(4) !== "string") {
+      throw new LibraryError("a dating's agent is text");
+    }
+    const extra = new Map();
+    for (const [k, v] of body) if (k > 5) extra.set(k, v);
+    return new Dating({
+      target: DatingTarget.decode(body.get(0)),
+      axis,
+      axisName: AXES.get(axis),
+      value: datingValue(body.get(2)),
+      agent: body.get(4),
+      ts: body.get(5),
+      basis: body.has(3) ? needBytes(body, 3, 32, "a dating's basis") : null,
+      extra,
+      body,
+    });
+  }
+
+  /** This dating's did, over the re-encoded body (§2.6). */
+  datingId() {
+    return did(encodeOne(this.body));
+  }
+}
+
+/** Decode a record 14, 15, 17, 18 or 19. Anything else is not this module's business. */
 export function decodeLibraryRecord(record) {
   switch (record.code) {
+    case 17:
+      return Dating.decode(record);
     case 14:
       return Manifest.decode(record);
     case 15:

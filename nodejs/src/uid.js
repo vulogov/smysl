@@ -165,7 +165,11 @@ function putSet(map, key, uids) {
  * integers, so the only statement of this anywhere is the hex in `core_bytes_hex` — which is
  * to say a C-Produce implementer must decode a fixture to learn a part of the format.
  *
- * `captured` follows the same omit-when-absent rule as every other optional (constraint 5).
+ * `captured`, `observed` (1.8) and `published` (1.10, EDTF as the source states it) follow the
+ * same omit-when-absent rule as every other optional (constraint 5). All three were missing from
+ * this producer until TX-P3 step 1 added the last of them and found the other two absent: the
+ * spec-table gate compared a named subset of the sub-map's keys, so a key no port could write
+ * was a key no gate asked about.
  */
 function putSource(map, source) {
   if (!source) return;
@@ -177,6 +181,8 @@ function putSource(map, source) {
   inner.set(0, kind);
   inner.set(1, source.reference);
   if (source.captured != null) inner.set(2, source.captured);
+  if (source.observed != null) inner.set(3, source.observed);
+  if (source.published != null) inner.set(4, source.published);
   map.set(7, inner);
 }
 

@@ -2,6 +2,7 @@
 
 use core::fmt;
 
+use crate::edtf::Edtf;
 use crate::error::IdError;
 use crate::types::unit::Extra;
 
@@ -345,6 +346,29 @@ pub struct SourceRef {
     /// metric at different instants are two units. That is correct for a time series, and the
     /// alternative — collapsing them — would silently lose the series.
     pub observed: Option<u64>,
+    /// When the manifestation this unit was drawn from was published, **as the source states
+    /// it**: EDTF level 1 text (SMYSL-2.3 A-2.3, source key 4).
+    ///
+    /// A title page, a byline, a dateline, an export header. `1920?` is a legitimate value and
+    /// `1920-01-01T00:00:00Z` is not the same claim — the uncertainty is in the evidence, and
+    /// a field that could not hold it would make every producer invent precision it does not
+    /// have. [`SourceRef::published_at`] takes a parsed [`Edtf`], so a value this build wrote
+    /// is always well formed and always in EDTF's one spelling of itself.
+    ///
+    /// **A `String`, and not an `Edtf`.** Decoding does not reject a malformed value: `source`
+    /// is inside `UnitCore` and therefore inside the uid, so a value that arrived has to leave
+    /// again byte for byte or the unit silently changes identity. A reader that refused it
+    /// would also make a whole store unopenable over one field — the lesson F-12 and the open
+    /// `source.kind` already record. The malformed value is reported instead (`SMY-E410`), by
+    /// the surface parser when a document writes one and by the `Time` check pass when a store
+    /// holds one.
+    ///
+    /// It is **inside identity**, as the rest of `source` is, and SMYSL-2.3 A-2.4 therefore
+    /// makes copying and omitting it normative: a unit drawn from a manifest that records a
+    /// publication date carries that date byte for byte (rule 2), and omits it when it would
+    /// merely restate `observed` (rule 3). Those rules are a producer's, and they are applied
+    /// in `smysl-text::provenance::stamp`.
+    pub published: Option<String>,
     /// Unknown keys from a future minor version, preserved verbatim (1.7).
     ///
     /// Every other record body has had one since 0.2 and this sub-map did not, which made it the
@@ -442,6 +466,7 @@ impl SourceRef {
             captured: None,
             kind_code: None,
             observed: None,
+            published: None,
             extra: Extra::new(),
         }
     }
@@ -454,6 +479,16 @@ impl SourceRef {
 
     pub fn captured_on(mut self, d: Date) -> SourceRef {
         self.captured = Some(d);
+        self
+    }
+
+    /// The publication date of the manifestation, as the source states it (A-2.3).
+    ///
+    /// Takes a parsed value rather than a string, which is the whole of this method's
+    /// contribution: the field is inside the uid, EDTF has exactly one spelling of each value,
+    /// and a producer handed a `&str` would be one typo away from two uids for one claim.
+    pub fn published_at(mut self, when: &Edtf) -> SourceRef {
+        self.published = Some(when.to_string());
         self
     }
 }

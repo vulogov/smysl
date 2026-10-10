@@ -384,6 +384,18 @@ impl Store {
                     record: code,
                 }));
             }
+            // And a time contention is derived, never written (SMYSL-2.3 A-8.2). Refused at
+            // the same door and for a related reason: the records a store accepts decide what
+            // it can be asked to hold, and a MUST NOT enforced anywhere else is a MUST NOT
+            // some other caller will reach around. A resolution naming the derived id is
+            // accepted as it always was — that is the record a reviewer writes.
+            if let Record::Contention(c) = r {
+                if c.detected.kind.is_derived_only() {
+                    return Err(Error::Lib(smysl_core::error::LibError::DerivedContention {
+                        kind: c.detected.kind.as_u8(),
+                    }));
+                }
+            }
         }
         let mut report = AppendReport::default();
         let mut fresh = Vec::new();
@@ -1138,6 +1150,7 @@ impl Store {
                     self.commits.entry(c.unit).or_default().insert(c.clone());
                 }
                 Record::Manifest(m) => self.library.absorb_manifest(m),
+                Record::Dating(d) => self.library.absorb_dating(d),
                 Record::Redaction(r) => self.library.absorb_redaction(r),
                 _ => {}
             }
@@ -1167,11 +1180,11 @@ impl Store {
         //
         // What is on the list is text — a manifest, a part text, a part reading, a redaction.
         // None of them names a unit as an endpoint, so none can appear in `adjacency` or in
-        // `unfounded` however many of them arrive. A dating (record 17, TX-P3) belongs here too
-        // and is absent because the enum does not hold it yet; it joins the list in the release
-        // that adds the variant, and until then it cannot arrive. A redaction joined it in
-        // TX-P2 step 4, in the commit that added the variant, which is the rule this comment
-        // asks for applied rather than restated.
+        // `unfounded` however many of them arrive. A redaction joined the list in TX-P2 step 4
+        // and a dating in TX-P3 step 1, each in the commit that added its variant, which is
+        // the rule this comment asks for applied rather than restated. A dating *names* a unit
+        // in `target` and `basis` and still belongs here: those are not edges, and rule E
+        // recomputes effective time from the record set rather than from the adjacency.
         //
         // Pending attestations are retried inside `rebuild_adjacency`, and skipping the
         // rebuild cannot delay one indefinitely: an attestation lands when its subject
@@ -1183,6 +1196,7 @@ impl Store {
                     | Record::PartText(_)
                     | Record::PartReading(_)
                     | Record::Redaction(_)
+                    | Record::Dating(_)
             )
         });
         self.records.extend(records);

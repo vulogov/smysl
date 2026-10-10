@@ -78,6 +78,30 @@ var RedactionKeys = map[uint64]string{
 	0: "tid", 1: "agent", 2: "ts", 3: "reason",
 }
 
+// DatingKeys is record 17's key table (§3.1). A statement about when something happened.
+//
+// The key numbers are the did's preimage, so they are permanent in a stronger sense than the
+// other tables here: renumbering one would change the identity of every dating ever written.
+var DatingKeys = map[uint64]string{
+	0: "target", 1: "axis", 2: "value", 3: "basis", 4: "agent", 5: "ts",
+}
+
+// DatingValueKeys names the three entries of a dating's value map, which holds exactly one.
+var DatingValueKeys = map[uint64]string{0: "absolute", 1: "offset", 2: "relative"}
+
+// Axes is a dating's key 1 (§3.1). Rule E names a fourth — known — which no dating can speak
+// about: it is the earliest attestation clock of a unit and is never corrected.
+var Axes = map[uint64]string{0: "said", 1: "composed", 2: "about"}
+
+// TargetKinds is a dating target's kind (key 0, first element).
+var TargetKinds = map[uint64]string{0: "unit", 1: "part", 2: "manifest", 3: "window"}
+
+// Allen holds the interval relations a relative dating may use.
+var Allen = map[string]bool{
+	"before": true, "after": true, "meets": true, "overlaps": true,
+	"during": true, "contains": true, "equals": true,
+}
+
 // SegmentKeys is a segment row's key table, inside a reading's key 2 (§3.1).
 var SegmentKeys = map[uint64]string{
 	0: "start", 1: "end", 2: "level", 3: "locator", 4: "lang",
@@ -106,8 +130,7 @@ func Mid(body []byte) []byte { return domainDigest(MidDomain, body) }
 
 // Did derives a dating's identity: BLAKE3-256 over 0x11 and the canonical CBOR of its body.
 //
-// Record 17 lands in a later release and nothing here decodes a dating body. The derivation is
-// present because the domain-separation claim is about all four together: a did that collided
+// The derivation is domain-separated from the other three: a did that collided
 // with a mid would be a defect in the table, and a table with a hole in it cannot be checked.
 func Did(body []byte) []byte { return domainDigest(DidDomain, body) }
 
@@ -596,4 +619,217 @@ func (g *PartReading) VerifyEntry(e *PartEntry) error {
 		return libErr("SMY-E401: the rdid does not match the part entry")
 	}
 	return nil
+}
+
+// DatingTarget is what a dating is about: a unit, a part, a manifest, or a window over a part.
+//
+// Ident is 32 bytes for the first three kinds. For a window it is the part's tid and the range
+// is in From and To, half-open and against the as-recorded observed instant — not the effective
+// one, which would make the set of selected units move as the datings applied.
+type DatingTarget struct {
+	Kind  uint64
+	Ident []byte
+	From  uint64
+	To    uint64
+}
+
+// KindName is the word §3.1 gives this target kind.
+func (t *DatingTarget) KindName() string { return TargetKinds[t.Kind] }
+
+func decodeDatingTarget(v any) (*DatingTarget, error) {
+	outer, ok := v.([]any)
+	if !ok || len(outer) != 2 {
+		return nil, libErr("a dating target is [kind, id]")
+	}
+	kind, ok := outer[0].(uint64)
+	if !ok {
+		return nil, libErr("a dating target kind is an integer")
+	}
+	if _, named := TargetKinds[kind]; !named {
+		return nil, libErr("a dating target kind is 0 to 3, not %d", kind)
+	}
+	bytes32 := func(v any, what string) ([]byte, error) {
+		b, ok := v.([]byte)
+		if !ok || len(b) != 32 {
+			return nil, libErr("%s is 32 bytes", what)
+		}
+		return b, nil
+	}
+	if kind == 3 {
+		inner, ok := outer[1].([]any)
+		if !ok || len(inner) != 3 {
+			return nil, libErr("a window is [tid, from_ms, to_ms]")
+		}
+		tid, err := bytes32(inner[0], "a window's tid")
+		if err != nil {
+			return nil, err
+		}
+		from, okFrom := inner[1].(uint64)
+		to, okTo := inner[2].(uint64)
+		if !okFrom || !okTo {
+			return nil, libErr("a window's bounds are non-negative integers")
+		}
+		return &DatingTarget{Kind: 3, Ident: tid, From: from, To: to}, nil
+	}
+	ident, err := bytes32(outer[1], "a dating target's id")
+	if err != nil {
+		return nil, err
+	}
+	return &DatingTarget{Kind: kind, Ident: ident}, nil
+}
+
+// Dating is record 17: a statement about when something happened.
+//
+// A record about units, parts and manifests, never an edit to them — correcting a unit's
+// observed in place would change its uid, and a store that re-identified its contents whenever
+// a clock turned out to be wrong could not be cited.
+//
+// Its identity is a did (§2.6), because the records that name a dating need one: a withdrawal
+// makes it not live and a canonical commitment holds it.
+type Dating struct {
+	Target *DatingTarget
+	Axis   uint64
+	// ValueKind is "absolute", "offset" or "relative", and exactly one of the three fields
+	// below carries the value.
+	ValueKind string
+	Absolute  string
+	Offset    int64
+	Relation  string
+	RelTarget *DatingTarget
+	Agent     string
+	Ts        any
+	Basis     []byte
+	Extra     map[uint64]any
+	Body      *Map
+	BodyRaw   []byte
+}
+
+// AxisName is the word §3.1 gives this dating's axis.
+func (d *Dating) AxisName() string { return Axes[d.Axis] }
+
+// DecodeDating decodes a record 17 body.
+func DecodeDating(r *Record) (*Dating, error) {
+	body, ok := r.Body.(*Map)
+	if !ok {
+		return nil, libErr("a dating body is a map")
+	}
+	for _, key := range []uint64{0, 1, 2, 4, 5} {
+		if _, ok := body.Get(key); !ok {
+			return nil, libErr("a dating needs key %d (%s)", key, DatingKeys[key])
+		}
+	}
+	targetAny, _ := body.Get(uint64(0))
+	target, err := decodeDatingTarget(targetAny)
+	if err != nil {
+		return nil, err
+	}
+	axisAny, _ := body.Get(uint64(1))
+	axis, ok := axisAny.(uint64)
+	if !ok {
+		return nil, libErr("a dating's axis is an integer")
+	}
+	if _, named := Axes[axis]; !named {
+		return nil, libErr("a dating's axis is 0, 1 or 2, not %d", axis)
+	}
+	agentAny, _ := body.Get(uint64(4))
+	agent, ok := agentAny.(string)
+	if !ok {
+		return nil, libErr("a dating's agent is text")
+	}
+	ts, _ := body.Get(uint64(5))
+	d := &Dating{
+		Target: target,
+		Axis:   axis,
+		Agent:  agent,
+		Ts:     ts,
+		Body:   body,
+		Extra:  map[uint64]any{},
+	}
+	if r.Raw != nil {
+		b, err := BodyBytes(r)
+		if err != nil {
+			return nil, err
+		}
+		d.BodyRaw = b
+	}
+	valueAny, _ := body.Get(uint64(2))
+	if err := d.decodeValue(valueAny); err != nil {
+		return nil, err
+	}
+	if _, ok := body.Get(uint64(3)); ok {
+		basis, err := mapBytes(body, 3, 32, "a dating's basis")
+		if err != nil {
+			return nil, err
+		}
+		d.Basis = basis
+	}
+	for _, e := range body.Entries {
+		if k, ok := e.Key.(uint64); ok && k > 5 {
+			d.Extra[k] = e.Value
+		}
+	}
+	return d, nil
+}
+
+// decodeValue reads the one-entry map of §3.1's key 2.
+//
+// Exactly one entry, and the count is checked: a two-entry map would be a dating that says two
+// things with no rule for which wins.
+func (d *Dating) decodeValue(v any) error {
+	m, ok := v.(*Map)
+	if !ok || len(m.Entries) != 1 {
+		return libErr("a dating's value is a one-entry map")
+	}
+	key, ok := m.Entries[0].Key.(uint64)
+	if !ok {
+		return libErr("a dating's value key is an integer")
+	}
+	inner := m.Entries[0].Value
+	switch key {
+	case 0:
+		text, ok := inner.(string)
+		if !ok {
+			return libErr("an absolute dating's value is EDTF text")
+		}
+		d.ValueKind, d.Absolute = "absolute", text
+		return nil
+	case 1:
+		// Signed. The first field in this format to carry a negative integer, so a decoder
+		// that read CBOR major type 1 as a large positive number would fail here and nowhere
+		// else: a clock can be fast as well as slow.
+		switch n := inner.(type) {
+		case uint64:
+			d.ValueKind, d.Offset = "offset", int64(n)
+		case int64:
+			d.ValueKind, d.Offset = "offset", n
+		default:
+			return libErr("an offset is an integer of milliseconds")
+		}
+		return nil
+	case 2:
+		pair, ok := inner.([]any)
+		if !ok || len(pair) != 2 {
+			return libErr("a relative dating's value is [allen, target]")
+		}
+		relation, ok := pair[0].(string)
+		if !ok || !Allen[relation] {
+			return libErr("that is not an Allen relation this format uses")
+		}
+		target, err := decodeDatingTarget(pair[1])
+		if err != nil {
+			return err
+		}
+		d.ValueKind, d.Relation, d.RelTarget = "relative", relation, target
+		return nil
+	default:
+		return libErr("a dating's value has no key %d", key)
+	}
+}
+
+// Did derives this dating's identity from the body's own bytes.
+func (d *Dating) Did() ([]byte, error) {
+	if d.BodyRaw == nil {
+		return nil, libErr("this dating has no body bytes")
+	}
+	return Did(d.BodyRaw), nil
 }

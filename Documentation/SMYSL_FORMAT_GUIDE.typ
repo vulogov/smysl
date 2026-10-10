@@ -484,6 +484,14 @@ source: { kind: metric, ref: "pool.wait_ms{shard=eu-west}", captured: 2026-07-09
 `kind` is one of five, `ref` (or the longer spelling `reference`) is a free-text pointer
 whose shape depends on the kind, and `captured` is an optional `YYYY-MM-DD` date.
 
+Two more are optional. `observed` is the instant an observation was taken, in epoch
+milliseconds — a date is too coarse to order two readings a minute apart, which is the whole
+point of a time series. `published` is when the thing the unit came from was published, *as the
+source states it*, in EDTF: `1920`, `1920?` if the source hedges, `1920/1930` for a range,
+`201X` for a decade. The uncertainty belongs in the record, because the alternative is inventing
+`1920-01-01T00:00:00Z` and calling it provenance. The three answer different questions and a
+producer must not derive one from another.
+
 #dtable(
   (auto, auto, auto),
   (

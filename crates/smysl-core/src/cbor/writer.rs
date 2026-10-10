@@ -71,6 +71,22 @@ impl Enc {
         self.head(major::UINT, v);
     }
 
+    /// Encode a signed integer: major type 0 at zero and above, major type 1 below.
+    ///
+    /// The first field in the format to need one is a dating's offset (SMYSL-2.3 A-5): a clock
+    /// can be fast as well as slow, and a correction that could only be written one way would
+    /// leave half of them unwritable. Shortest-form through [`Enc::head`] like every other
+    /// head, so a negative integer is as canonical as a positive one.
+    pub fn int(&mut self, v: i64) {
+        if v >= 0 {
+            self.head(major::UINT, v as u64);
+        } else {
+            // `-1 - v` in 128-bit arithmetic, because `-i64::MIN` does not fit in an `i64`
+            // and the argument it encodes to — 2^63 - 1 — fits in a `u64` perfectly well.
+            self.head(major::NEGINT, (-(v as i128) - 1) as u64);
+        }
+    }
+
     pub fn bytes(&mut self, b: &[u8]) {
         self.head(major::BYTES, b.len() as u64);
         self.buf.extend_from_slice(b);

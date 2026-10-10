@@ -22,10 +22,12 @@ pub use smysl::Admission
 pub use smysl::AgentActivity
 pub use smysl::AgentId
 pub use smysl::AgentKind
+pub use smysl::Allen
 pub use smysl::AnyError
 pub use smysl::AppendReport
 pub use smysl::Artifact
 pub use smysl::Attestation
+pub use smysl::Axis
 pub use smysl::Backend
 pub use smysl::Block
 pub use smysl::Bm25
@@ -50,6 +52,9 @@ pub use smysl::ContentionId
 pub use smysl::ContentionStatus
 pub use smysl::Contentions
 pub use smysl::Date
+pub use smysl::Dating
+pub use smysl::DatingTarget
+pub use smysl::DatingValue
 pub use smysl::DeriveOptions
 pub use smysl::DeriveReport
 pub use smysl::Detected
@@ -132,6 +137,7 @@ pub use smysl::Reason
 pub use smysl::RecipeChange
 pub use smysl::RecipeChangeKind
 pub use smysl::Record
+pub use smysl::Redaction
 pub use smysl::Register
 pub use smysl::RelKind
 pub use smysl::Relation
@@ -211,6 +217,7 @@ pub use smysl::dependents
 pub use smysl::dependents_via
 pub use smysl::derive_thread
 pub use smysl::diff
+pub use smysl::edtf
 pub use smysl::effective_status
 pub use smysl::emit_artifact
 pub use smysl::fidelity

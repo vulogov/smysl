@@ -147,6 +147,7 @@ uids *and* enforce a different monotonicity rule while believing itself conforma
 | 1 | reference | text | required |
 | 2 | captured | text | optional |
 | 3 | observed | uint, epoch milliseconds | optional |
+| 4 | published | text, EDTF (below) | optional |
 
 `observed` was added in 1.8 and is written only when present, so a source without one encodes to
 the bytes it always did. It is the instant the observation was taken, **supplied by the
@@ -157,6 +158,53 @@ NOT derive one from the other.
 
 Both are inside `source` and therefore inside the uid, so two readings of one metric at different
 instants are **two units**. That is deliberate: collapsing them would lose the series.
+
+`published` (key 4, added in 1.10) is the publication time of the manifestation the unit was
+drawn from, **as the source states it**: a title page, a byline, a dateline, an export header. It
+is written only when present, so a source without one encodes to the bytes it always did. The
+three fields answer three different questions and an implementation MUST NOT derive one from
+another when writing.
+
+`published` is **EDTF** — ISO 8601-2, levels 0 and 1 — and the format stores the string. This is
+what lets a source that says "about 1920" be recorded as `1920~` instead of a producer inventing
+`1920-01-01T00:00:00Z`: the uncertainty is in the evidence. The format defines no calendar
+arithmetic over it beyond what rule E (§6) needs to order intervals. A malformed value is
+`SMY-E410`.
+
+What levels 0 and 1 cover: dates at year, month or day precision; date-times with `Z` or a
+numeric offset; the qualifiers `?` (uncertain), `~` (approximate) and `%` (both); unspecified
+rightmost digits written `X` (`201X`, `1984-XX`); intervals with an **open** end (`..`, there is
+no bound) or an **unknown** end (empty, there is one and nobody recorded it); negative years;
+`Y`-prefixed years for the ones four digits cannot hold; and the seasons 21–24. Level 2 — sets,
+interior `X`, per-component qualifiers — is not part of this format.
+
+**One value has one spelling.** `published` is inside the uid, so a producer MUST write the
+canonical form: four-digit zero-padded years with no leading `+`, `Y` only where four digits do
+not suffice, uppercase `T` and `Z`, and `+00:00` rather than `-00:00`. Two byte strings for one
+date would be two uids for one claim. `fixtures/library/edtf/cases.json` lists every accepted
+form and, as importantly, the values that MUST be refused.
+
+EDTF is proleptic Gregorian: year zero exists and is a leap year. A manifest that records a date
+in another calendar says so (§3.1, manifest key 18); the value is stored **as written** and
+converted only when intervals are derived.
+
+Two rules bind a producer that draws a unit from a part, and both decide uids:
+
+- **Copy.** A unit that names a manifest whose `published` (key 8) is present, and that carries
+  no `observed`, MUST carry `published` equal to that value, byte for byte.
+- **Omission.** `published` MUST be omitted when its normalised interval equals the degenerate
+  interval `[observed, observed]` at millisecond precision. The comparison is between intervals,
+  so it is exact: `2026-09-30T14:05:00Z` is a one-second interval and is not equal to any
+  millisecond instant inside it.
+
+Both present is permitted; `SMY-W411` is reported when the `observed` instant lies outside the
+`published` interval. Neither present means the unit is undated on the *said* axis — not early,
+not late.
+
+A **decoder** does not refuse a malformed `published`. The field is inside the uid, so a value
+that arrived has to leave again byte for byte or the unit silently changes identity, and a reader
+that refused it would make a whole store unopenable over one field. The malformed value is
+reported instead.
 
 and its `kind`:
 
@@ -566,6 +614,73 @@ A segment row is `{0: start, 1: end, 2: level (text), 3: locator (text), 4: lang
 6: observed?, 7: ids? (map text → text), 8: tz offset in minutes?}`. An empty table is an empty
 **array**, not an absent value. Record 18 has no surface form either.
 
+**Dating (17)** — a statement about when something happened.
+
+| key | field | type | presence |
+|---:|---|---|---|
+| 0 | target | array `[kind, id]` (below) | required |
+| 1 | axis | uint: `0` said, `1` composed, `2` about | required |
+| 2 | value | a one-entry map (below) | required |
+| 3 | basis | 32 bytes, the uid of the unit giving the evidence | optional |
+| 4 | agent | text, an agent id | required |
+| 5 | ts | `[wall_ms, counter]`, as every record with an `agent` carries | required |
+
+A **target** is `[kind, id]`:
+
+| kind | name | id | what it dates |
+|---:|---|---|---|
+| 0 | unit | a uid | one unit |
+| 1 | part | a tid | every unit drawn from one part |
+| 2 | manifest | a mid | every unit drawn under one manifest |
+| 3 | window | `[tid, from_ms, to_ms]` | every unit of that part whose as-recorded `observed` falls in `[from_ms, to_ms)` |
+
+A window is half-open and is matched against the **as-recorded** instant, never the effective
+one: a window that moved as the datings it selects took effect would select a different set on
+every pass, and rule E would not converge. A window with `from_ms >= to_ms` selects nothing;
+that is a fact to report, not a record to refuse.
+
+A **value** is a map with exactly one entry:
+
+| key | value | means |
+|---:|---|---|
+| 0 | EDTF text (§2.2) | an absolute dating: "published in 1920?" |
+| 1 | integer, milliseconds | an offset: "every clock in this window was 3 h slow" |
+| 2 | `[allen, target]` | a relative dating: "this is during that" |
+
+`allen` is **text**, one of `before`, `after`, `meets`, `overlaps`, `during`, `contains`,
+`equals`. Text rather than a code because the relations are a closed set with standard names, so
+a reader meeting one of the six this format does not use can say which word it did not
+understand; a code could only say `7`. The offset is **signed** — a clock can be fast as well as
+slow — and is the only field in this format that carries a negative integer; it is defined on the
+*said* axis over instants only, because an offset applied to an interval of unknown width means
+nothing. A value map with two entries is malformed: it would be a dating that says two things
+with no rule for which wins.
+
+Rule E (§6) names a fourth axis, *known*, and no dating can speak about it: it is the earliest
+attestation clock of a unit and is never corrected.
+
+A dating is a record **about** units, parts and manifests, and never an edit to them. Correcting
+a unit's `observed` in place would change its uid, and a store that re-identified its contents
+whenever a clock turned out to be wrong could not be cited. So a dating stands beside what it
+dates, carries who said it and on what evidence, and can be withdrawn.
+
+It has its own identity, a **did** (§2.6), because the records that name a dating need one. Its
+surface form is
+`@date <target> { axis: …, <value>, agent: …, ts: […][, window: [from, to]][, basis: <unit>] }`,
+where the value is `when:` for an absolute EDTF value, `offset:` for a correction in
+milliseconds, or the Allen relation itself as the key (`during: <target>`). A positional target
+is a uid, a tid or a mid spelled in full; a window is its part's tid with a `window:` key, which
+is how the one target kind that is not a single identity is written without a second grammar. A
+relative value whose own target is a window has no surface form and travels as CBOR only.
+
+**Withdrawals and commitments may name a did.** Key 0 of a withdrawal (11) MAY be a did as well
+as a rid, and key 0 of a commitment (13) MAY be a did as well as a uid; the domain bytes of §2.6
+keep the kinds of identity from colliding. A withdrawal naming a did makes that dating not live
+(rule E). A commitment naming a did records how settled it is, and a `canonical` one holds
+conflicting datings for review. A reader that predates this sees a withdrawal of an edge it never
+receives, which is inert, and a commitment on a unit it never receives, which may appear in its
+commitment listings. That is a stated cost, not a corruption.
+
 **Redaction (19)** — this part's text is to be held no longer.
 
 | key | field | type | presence |
@@ -722,16 +837,19 @@ Consequences that are easy to get wrong, each of which has been a real defect:
   part-policy: "top/64Ki-4Mi", parts: [{ tid: t3:…, length: 97, structure: b3:…, rdid: r3:… }] }`.
   `manifest` is a reserved word in the same way, as are `date` and `redact` for records 17 and
   19. Records 15 and 18 have **no** surface form, so the set of records surface text cannot hold
-  grew with this release. The five required keys are named rather than defaulted: `part-policy`
+  grew with this release. `@date` takes exactly one value key — `when`, `offset`, or one of the
+  seven Allen words — and a header with two of them is `SMY-E001`: a dating says one thing, and
+  the wire form is a one-entry map for the same reason. The five required keys are named rather than defaulted: `part-policy`
   in particular, because the policy a corpus was cut by is not recoverable from the parts and a
   default that changes later would silently redefine every manifest that omitted it. `parts` is
   the exception — omitting it means an empty one, which is an import manifest. A manifest
   carrying key 16, `raw`, has no surface form: it is opaque reader metadata, and a writer
   spelling it would be deciding what the bytes mean.
-- **`source { }` accepts a closed set of keys** (1.9): `kind`, `ref` or `reference`, `captured`
-  and `observed`. Any other key is `SMY-E001`, a `captured` that is not a date is `SMY-E001`, an
-  `observed` outside `u64` is `SMY-E001`, and a `source` that fails to parse refuses the unit —
-  none of the four is a silent drop. `source` is inside the uid (§2.2), so a key the parser
+- **`source { }` accepts a closed set of keys** (1.9): `kind`, `ref` or `reference`, `captured`,
+  `observed` and, from 1.10, `published`. Any other key is `SMY-E001`, a `captured` that is not a
+  date is `SMY-E001`, an `observed` outside `u64` is `SMY-E001`, a `published` that is not EDTF
+  is `SMY-E410`, and a `source` that fails to parse refuses the unit — none of the five is a
+  silent drop. `source` is inside the uid (§2.2), so a key the parser
   ignored was a key that never reached the encoder: the unit written back was a *different unit*
   from the one the document described, carrying an identity nothing else refers to. Forward
   compatibility inside `source` is the wire's business, where an unknown key is preserved
@@ -771,6 +889,7 @@ are the format-level obligations.
 | **V1/V2** | Rendering — provenance and contentions are shown or suppressed per profile, never silently. |
 | **X** | Extensions survive (§5). |
 | **Z** | Redaction — a store holding a redaction for a tid holds no part text or reading for it, on any merge (§3.1, record 19). |
+| **E** | Effective time — a unit's time on an axis is derived from the record set, never stored, and a weakly evidenced value never overrides a better one (§6.4). |
 | **D** | Determinism — pure operations are bit-reproducible functions of their inputs. |
 | **P** | On a pipe, stdout defaults to CBOR. |
 
@@ -839,6 +958,84 @@ looked, and who.
   an item awaiting review.
 
 Resolutions accumulate like withdrawals. There is no reopening a resolved item in this version.
+
+### 6.4 Rule E — effective time
+
+> Each unit has up to four times: **said** (when it was said or published), **composed** (when
+> the work was written), **about** (the time the claim refers to) and **known** (the earliest
+> attestation clock of the unit, never corrected). Rule E derives the first three. Each is an
+> interval of instants, or *undated*, or *contested*.
+>
+> **Effective time is never stored.** An implementation MAY index it and MUST recompute it when
+> the record set changes.
+
+That sentence is the rule. A clock in a corpus turns out to be wrong — an export ran three
+hours slow, a title page says 1769 and the translation is from 1611 — and the repair cannot be
+to correct the record, because `observed` and `published` are inside a unit's uid (§2.2) and a
+store that re-identified its contents whenever a clock turned out to be wrong could not be
+cited. So a correction is a **dating** (§3.1, record 17) standing beside the unit, and the time
+a unit effectively has is recomputed.
+
+**Time status.** Every time value is as well evidenced as whatever put it there:
+
+| as-recorded value | time status |
+|---|---|
+| `observed` on a unit attested `Imported` at rung `computed` | measured |
+| `observed` supplied by a reader from a platform export | cited |
+| `published` on a unit or manifest | cited |
+| a value supplied with no source | speculative |
+
+A **dating** takes the status of its basis unit, and `speculative` with no basis. That is the
+whole mechanism by which "the export header says so" outranks "it must have been about then"
+without anybody ranking the two by hand.
+
+**Free constraints** are orderings a store implies without anybody writing a dating:
+
+| constraint | rule | status |
+|---|---|---|
+| quotation | if B quotes A then said(A) ≤ said(B) | the quoting unit's |
+| derivation | a manifest is no earlier than its parent (key 11) | cited |
+| supersession | a manifest is no earlier than the one it supersedes (key 13) | cited |
+| reply | a reply is no earlier than the message it answers, by first-version `observed` | cited |
+| first seen | nothing is said after the earliest attestation of it | derived |
+
+**Liveness.** A dating is live unless a withdrawal names its did (§3.1), its basis is unfounded
+(rule R), or it is **held**: a `canonical` commitment names it, or names the target's existing
+dating and this one would change the effective value, until a resolution names the resulting
+contention.
+
+**Procedure** (normative). For one axis, over the constraint graph of a scope:
+
+1. **Seed.** Each subject starts from `published` if present, else `[observed, observed]`, else
+   *undated* with no bound. Each bound carries the time status of the value that set it.
+2. **Strata.** For each status level `s`, from measured down to speculative: build a simple
+   temporal network from the live absolute and relative datings and the free constraints whose
+   status is at least `s`.
+3. **Tighten.** Solve each stratum by shortest paths. A bound moves only if `s` is at least the
+   time status of the value currently setting it. A move that `s` would make and may not is
+   **not applied and not discarded**: it is recorded as a position of a detection-kind-4
+   contention (`SMY-W412`). A path's status is the minimum of its edges', and a stratum holds
+   only edges of status `s` or better, so every move it makes is justified at `s` — which is
+   to say a chain tightens at its weakest link.
+4. **Offsets** are applied to instants before propagation, and target the as-recorded instant.
+5. **Inconsistency.** A negative cycle, or an empty interval, in any stratum marks every
+   subject on it **contested**: a detection-kind-5 contention (`SMY-W413`) names the datings
+   and constraints involved, and nothing is chosen.
+6. **Order independence.** Every stratum is a simple temporal network, whose tightest solution
+   is unique, so effective time is a function of the record set and not of arrival order
+   (rule U).
+
+A **window** target (§3.1) is matched against the **as-recorded** `observed`, never the
+effective one: a window that moved as the datings it selects took effect would select a
+different set on every pass and the solve would not converge.
+
+**Calendars.** A value a manifest says is Julian (key 18) is converted to a Gregorian interval
+in step 1, and never written back.
+
+**Time contentions are derived, not recorded.** Their identity is §6.2's contention identity
+with detection kind 4 or 5. A resolution (record 12) names that identity, and an implementation
+MUST NOT write a record 6 with either kind — which keeps a store readable by an implementation
+that predates them.
 
 ## 7. Conformance classes
 
@@ -914,6 +1111,11 @@ than read as a policy nobody exercised:
 | 1.8 | `source` key 3, `observed` | new key above a sub-map's highest |
 | 1.9 | granularity key 5, `estimator` | new key above a body's highest |
 | 1.9 | four enumerations opened (§3.1) | not an addition itself but a §8.3 tightening — it is what makes a later code in one of them an addition at all |
+| 1.10 | record types 14, 15, 18 and 19; `@manifest`, `@redact` | new record types, new reserved words |
+| 1.10 | `admission`, the fifth enumeration opened (§3.1) | a §8.3 tightening, as 1.9's four were |
+| 1.10 | record type 17, dating; `@date` | new record type, new reserved word |
+| 1.10 | `source` key 4, `published` | new key above a sub-map's highest |
+| 1.10 | a did in withdrawal key 0 and commitment key 0 | a new value in an existing key, domain-separated from the kinds already there (§2.6) |
 
 Keeping this list is what RFC SMYSL-2.3 A-14 asks for, and it is cheap insurance: an addition
 nobody wrote down is an addition the next implementer rediscovers by decoding a fixture, which

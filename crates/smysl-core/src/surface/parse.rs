@@ -27,7 +27,10 @@ use crate::surface::lex::{arrow_len, find_arrow, lex, Line, LineClass};
 use crate::surface::payload::object_to_payload;
 use crate::types::annex::SchemaDecl;
 use crate::types::epistemics::{Date, SourceKind, SourcePolicy, SourceRef, Status};
-use crate::types::library::{Calendar, Carry, Manifest, ParentKind, PartEntry, Redaction};
+use crate::types::library::{
+    Allen, Axis, Calendar, Carry, Dating, DatingTarget, DatingValue, Manifest, ParentKind,
+    PartEntry, Redaction,
+};
 use crate::types::lifecycle::{Commit, Commitment, Resolution, ResolutionTarget, Withdrawal};
 use crate::types::provenance::Hlc;
 use crate::types::relation::{RelKind, Relation};
@@ -214,6 +217,40 @@ struct RawRedaction {
     span: Span,
 }
 
+/// A dating before its references are resolved (record 17).
+///
+/// Raw for the same reason a redaction is: `target` may be a unit the document declares and
+/// `basis` always is, and neither is known by uid until the labels resolve. A tid, a mid and a
+/// window need no resolution — each is spelled in full.
+struct RawDating {
+    target: DateTarget,
+    axis: Axis,
+    value: RawValue,
+    basis: Option<Spanned<Ref>>,
+    agent: AgentId,
+    ts: Hlc,
+    span: Span,
+}
+
+/// A dating's target, with a unit still spelled as the document spelled it.
+///
+/// Not `RawTarget`, which is what `@withdraw` and `@resolve` name — an edge, a rid or a
+/// contention id. The two have no case in common, and one enum covering both would offer every
+/// reader of either eight variants of which four are impossible.
+enum DateTarget {
+    Part(Tid),
+    Manifest(Mid),
+    Window { tid: Tid, from_ms: u64, to_ms: u64 },
+    Unit(Spanned<Ref>),
+}
+
+/// A dating's value, with a relative target still unresolved.
+enum RawValue {
+    Absolute(String),
+    Offset(i64),
+    Relative { allen: Allen, target: DateTarget },
+}
+
 struct RawThread {
     id: ThreadId,
     schema: ThreadSchema,
@@ -270,6 +307,7 @@ pub fn parse_surface_with(src: &str, opts: &ParseOptions) -> Result<ParseOutcome
         lifecycle: Vec::new(),
         commits: Vec::new(),
         redactions: Vec::new(),
+        datings: Vec::new(),
         manifests: Vec::new(),
         view: None,
     };
@@ -290,6 +328,7 @@ struct Parser<'a> {
     lifecycle: Vec<RawLifecycle>,
     commits: Vec<RawCommit>,
     redactions: Vec<RawRedaction>,
+    datings: Vec<RawDating>,
     manifests: Vec<Manifest>,
     view: Option<RawView>,
 }
@@ -370,6 +409,11 @@ impl<'a> Parser<'a> {
                 LineClass::RedactStart => {
                     if let Some(r) = self.redact_record() {
                         self.redactions.push(r);
+                    }
+                }
+                LineClass::DateStart => {
+                    if let Some(d) = self.date_record() {
+                        self.datings.push(d);
                     }
                 }
                 _ => {
@@ -1384,8 +1428,14 @@ impl<'a> Parser<'a> {
     /// the unit written back differed from the one the author described — silently, and with a
     /// different identity. Forward compatibility inside `source` is the wire's business, where
     /// `SourceRef::extra` preserves what it does not know; surface text has an author to tell.
-    const SOURCE_KEYS: &'static [&'static str] =
-        &["kind", "ref", "reference", "captured", "observed"];
+    const SOURCE_KEYS: &'static [&'static str] = &[
+        "kind",
+        "ref",
+        "reference",
+        "captured",
+        "observed",
+        "published",
+    ];
 
     fn source(&mut self, v: &Spanned<HValue>) -> Option<SourceRef> {
         let o = match v.value.as_object() {
@@ -1452,12 +1502,35 @@ impl<'a> Parser<'a> {
                 }
             },
         };
+        // EDTF text, and refused rather than dropped for the same reason `captured` is: the
+        // value is inside the uid, so a unit written with a value the parser silently dropped
+        // would be a different unit from the one the author wrote. A decoder keeps a malformed
+        // value — it has to, byte for byte — but a document can still be told.
+        let published = match o.get("published") {
+            None => None,
+            Some(c) => {
+                let txt = match (c.value.as_str(), c.value.as_int()) {
+                    (Some(t), _) => t.to_string(),
+                    (None, Some(i)) => i.to_string(),
+                    _ => {
+                        self.err(Code::E001, c.span, "`published` is an EDTF value");
+                        return None;
+                    }
+                };
+                if let Err(e) = crate::edtf::parse(&txt) {
+                    self.err(Code::E410, c.span, e.to_string());
+                    return None;
+                }
+                Some(txt)
+            }
+        };
         // Surface text cannot spell an unknown source kind: `kind:` parses against the named
         // set, so an open enumeration is the wire's business, not this parser's. A source that
         // arrived as CBOR with an unknown code keeps it; one written by hand cannot have one.
         let mut s = SourceRef::new(kind, reference.to_string());
         s.captured = captured;
         s.observed = observed;
+        s.published = published;
         Some(s)
     }
 
@@ -1522,6 +1595,232 @@ impl<'a> Parser<'a> {
     /// reason `Uid::parse` does — an abbreviated identity weakens identity silently — and here
     /// the cost of an abbreviation would be a redaction that names a part nobody can find, or
     /// worse, the wrong one.
+    /// `@date <target> { axis: said, when: <edtf>, agent: …, ts: […] }` — a `Dating` (17).
+    ///
+    /// The target is positional, as a redaction's tid and a commitment's unit are: a tid, a
+    /// mid, a uid or a label. A **window** is that part's tid with a `window: [from, to]` key,
+    /// which is how the one target kind that is not a single identity gets written down
+    /// without a second grammar.
+    ///
+    /// Exactly one value key: `when` for an absolute EDTF value, `offset` for a correction in
+    /// milliseconds, or one of the seven Allen words for a relative dating. Using the relation
+    /// itself as the key is what makes the common case read as what it says — `during:
+    /// m3:…` — and the set is closed, so a misspelling is a key error rather than a silent
+    /// relation nobody meant.
+    fn date_record(&mut self) -> Option<RawDating> {
+        let l = self.lines[self.i];
+        let rest = l.text.strip_prefix("@date").unwrap_or("").trim_start();
+        let target_txt = match rest.find('{') {
+            Some(p) => rest[..p].trim(),
+            None => {
+                self.err(
+                    Code::E001,
+                    l.span,
+                    "`@date` needs a target and a header with `axis`, a value, `agent` and `ts`",
+                );
+                self.recover();
+                return None;
+            }
+        };
+        let target = self.target_of(target_txt, l.span)?;
+
+        let Ok((mut header, header_span)) = self.header_object(l) else {
+            self.recover();
+            return None;
+        };
+        self.advance_past(header_span.end.max(l.span.end));
+
+        let Some(axis) = header
+            .take("axis")
+            .and_then(|v| v.value.as_str().and_then(Axis::parse))
+        else {
+            self.err(
+                Code::E001,
+                l.span,
+                "`@date` needs `axis: said`, `composed` or `about`",
+            );
+            return None;
+        };
+        // A window narrows a part, so it is read before the value: a `window` on anything but
+        // a part is a target the writer could not have meant.
+        let target = match header.take("window") {
+            None => target,
+            Some(v) => {
+                let (DateTarget::Part(tid), Some([from, to])) = (
+                    &target,
+                    v.value.as_array().and_then(|a| <&[_; 2]>::try_from(a).ok()),
+                ) else {
+                    self.err(
+                        Code::E001,
+                        v.span,
+                        "`window: [from_ms, to_ms]` narrows a part, so the target must be a tid",
+                    );
+                    return None;
+                };
+                let (Some(from_ms), Some(to_ms)) = (
+                    from.value.as_int().and_then(|i| u64::try_from(i).ok()),
+                    to.value.as_int().and_then(|i| u64::try_from(i).ok()),
+                ) else {
+                    self.err(
+                        Code::E001,
+                        v.span,
+                        "a window is two epoch-millisecond instants",
+                    );
+                    return None;
+                };
+                DateTarget::Window {
+                    tid: *tid,
+                    from_ms,
+                    to_ms,
+                }
+            }
+        };
+        let value = self.date_value(&mut header, l.span)?;
+        let Some(agent) = header
+            .take("agent")
+            .and_then(|v| v.value.as_str().and_then(|s| AgentId::new(s).ok()))
+        else {
+            self.err(Code::E001, l.span, "`@date` needs a valid `agent`");
+            return None;
+        };
+        let Some(ts) = header.take("ts").and_then(|v| self.hlc(&v, &agent)) else {
+            self.err(Code::E001, l.span, "`@date` needs `ts: [wall_ms, counter]`");
+            return None;
+        };
+        let basis = match header.take("basis") {
+            None => None,
+            Some(v) => match v.value.as_str().and_then(parse_ref) {
+                Some(r) => Some(Spanned::new(r, v.span)),
+                None => {
+                    self.err(Code::E001, v.span, "`basis` names a unit");
+                    return None;
+                }
+            },
+        };
+        if let Some((k, _)) = header.iter().next() {
+            self.err(
+                Code::E001,
+                k.span,
+                format!(
+                    "`@date` has no key `{}`; it takes `axis`, `window`, `when`, `offset`, \
+                     an Allen relation, `agent`, `ts` and `basis`",
+                    k.value
+                ),
+            );
+            return None;
+        }
+        Some(RawDating {
+            target,
+            axis,
+            value,
+            basis,
+            agent,
+            ts,
+            span: l.span,
+        })
+    }
+
+    /// A dating's one value key.
+    fn date_value(&mut self, header: &mut HObject, span: Span) -> Option<RawValue> {
+        let mut found: Option<RawValue> = None;
+        if let Some(v) = header.take("when") {
+            // An unquoted `1920` lexes as an integer and is a perfectly good EDTF year, so
+            // both spellings are read — and rendered with no padding, so `920` stays the
+            // three-digit value the document wrote and is refused as one. Repairing it to
+            // `0920` would be this parser deciding what a source said.
+            let txt = match (v.value.as_str(), v.value.as_int()) {
+                (Some(s), _) => s.to_string(),
+                (None, Some(i)) => i.to_string(),
+                _ => {
+                    self.err(Code::E001, v.span, "`when` is an EDTF value");
+                    return None;
+                }
+            };
+            if let Err(e) = crate::edtf::parse(&txt) {
+                self.err(Code::E410, v.span, e.to_string());
+                return None;
+            }
+            found = Some(RawValue::Absolute(txt));
+        }
+        if let Some(v) = header.take("offset") {
+            if found.is_some() {
+                self.err(Code::E001, v.span, "a dating says one thing, not two");
+                return None;
+            }
+            let Some(ms) = v.value.as_int() else {
+                self.err(Code::E001, v.span, "`offset` is a number of milliseconds");
+                return None;
+            };
+            found = Some(RawValue::Offset(ms));
+        }
+        for allen in Allen::ALL {
+            let Some(v) = header.take(allen.as_str()) else {
+                continue;
+            };
+            if found.is_some() {
+                self.err(Code::E001, v.span, "a dating says one thing, not two");
+                return None;
+            }
+            let Some(txt) = v.value.as_str() else {
+                self.err(
+                    Code::E001,
+                    v.span,
+                    format!("`{allen}` names a unit, a part or a manifest"),
+                );
+                return None;
+            };
+            let target = self.target_of(txt, v.span)?;
+            found = Some(RawValue::Relative {
+                allen: *allen,
+                target,
+            });
+        }
+        if found.is_none() {
+            self.err(
+                Code::E001,
+                span,
+                "`@date` needs a value: `when`, `offset` or an Allen relation",
+            );
+        }
+        found
+    }
+
+    /// A target as a document spells it: a tid, a mid, or a reference to a unit.
+    fn target_of(&mut self, txt: &str, span: Span) -> Option<DateTarget> {
+        if txt.starts_with(Tid::PREFIX) {
+            return match Tid::parse(txt) {
+                Ok(t) => Some(DateTarget::Part(t)),
+                Err(_) => {
+                    self.err(Code::E403, span, format!("`{txt}` is not a tid"));
+                    self.recover();
+                    None
+                }
+            };
+        }
+        if txt.starts_with(Mid::PREFIX) {
+            return match Mid::parse(txt) {
+                Ok(m) => Some(DateTarget::Manifest(m)),
+                Err(_) => {
+                    self.err(Code::E403, span, format!("`{txt}` is not a mid"));
+                    self.recover();
+                    None
+                }
+            };
+        }
+        match parse_ref(txt) {
+            Some(r) => Some(DateTarget::Unit(Spanned::new(r, span))),
+            None => {
+                self.err(
+                    Code::E001,
+                    span,
+                    format!("`{txt}` is not a unit, a part or a manifest"),
+                );
+                self.recover();
+                None
+            }
+        }
+    }
+
     fn redact_record(&mut self) -> Option<RawRedaction> {
         let l = self.lines[self.i];
         let rest = l.text.strip_prefix("@redact").unwrap_or("").trim_start();
@@ -2276,6 +2575,53 @@ impl<'a> Parser<'a> {
             redaction.reason = reason;
             let _ = r.span;
             self.out.records.push(Record::Redaction(redaction));
+        }
+
+        // Datings after the redactions, last of all: a dating's `target` and its `basis` may
+        // both be units the document declares, so nothing can resolve until every label is
+        // known. The writer emits them here too, which is what keeps the round trip a fixed
+        // point.
+        for d in std::mem::take(&mut self.datings) {
+            let resolve = |t: DateTarget, out: &mut ParseOutcome| -> Option<DatingTarget> {
+                Some(match t {
+                    DateTarget::Part(tid) => DatingTarget::Part(tid),
+                    DateTarget::Manifest(mid) => DatingTarget::Manifest(mid),
+                    DateTarget::Window {
+                        tid,
+                        from_ms,
+                        to_ms,
+                    } => DatingTarget::Window {
+                        tid,
+                        from_ms,
+                        to_ms,
+                    },
+                    DateTarget::Unit(r) => DatingTarget::Unit(lookup(&r.value, out, r.span)?),
+                })
+            };
+            let Some(target) = resolve(d.target, &mut self.out) else {
+                continue;
+            };
+            let value = match d.value {
+                RawValue::Absolute(t) => DatingValue::Absolute(t),
+                RawValue::Offset(ms) => DatingValue::Offset(ms),
+                RawValue::Relative { allen, target: t } => {
+                    let Some(target) = resolve(t, &mut self.out) else {
+                        continue;
+                    };
+                    DatingValue::Relative { allen, target }
+                }
+            };
+            let basis = match &d.basis {
+                None => None,
+                Some(u) => match lookup(&u.value, &mut self.out, u.span) {
+                    Some(uid) => Some(uid),
+                    None => continue,
+                },
+            };
+            let mut dating = Dating::new(target, d.axis, value, d.agent.clone(), d.ts);
+            dating.basis = basis;
+            let _ = d.span;
+            self.out.records.push(Record::Dating(dating));
         }
 
         if let Some(v) = &self.view {

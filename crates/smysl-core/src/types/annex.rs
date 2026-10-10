@@ -30,6 +30,12 @@ pub enum DetectionKind {
     LabelCollision = 2,
     /// Two agents' latest commitments to one unit disagree about how settled it is (1.7).
     CommitmentFork = 3,
+    /// A live dating that rule E could not apply: held by a lock, or of lower time status than
+    /// the value it would have overridden (1.10, SMYSL-2.3 A-8.2). Reported as `SMY-W412`.
+    DatingNotApplied = 4,
+    /// A negative cycle or an empty interval in rule E's constraint graph (1.10). Reported as
+    /// `SMY-W413`.
+    TemporalInconsistency = 5,
     /// A detection kind this build does not know (1.9). See `ThreadSchema::Unknown`.
     Unknown = 255,
 }
@@ -40,7 +46,27 @@ impl DetectionKind {
         DetectionKind::LiveRebuttal,
         DetectionKind::LabelCollision,
         DetectionKind::CommitmentFork,
+        DetectionKind::DatingNotApplied,
+        DetectionKind::TemporalInconsistency,
     ];
+
+    /// The kinds a store MUST NOT hold a record 6 for (SMYSL-2.3 A-8.2).
+    ///
+    /// Time contentions are **derived and reported, never written** — the same choice merge
+    /// already makes for detection. Writing one would put a record 6 with an unknown code into
+    /// a store an older reader has to decode, and the whole point of opening the enumeration in
+    /// 1.9 was to stop a code it cannot name from making a store unopenable; a code it *can*
+    /// preserve but not interpret is still a contention it cannot act on. A resolution (record
+    /// 12) names the derived id, which needs no contention record at all.
+    pub const DERIVED_ONLY: &'static [DetectionKind] = &[
+        DetectionKind::DatingNotApplied,
+        DetectionKind::TemporalInconsistency,
+    ];
+
+    /// Whether this kind is derived rather than recorded, so a record 6 carrying it is refused.
+    pub fn is_derived_only(self) -> bool {
+        DetectionKind::DERIVED_ONLY.contains(&self)
+    }
 
     pub const fn as_u8(self) -> u8 {
         self as u8
@@ -52,6 +78,8 @@ impl DetectionKind {
             1 => Some(DetectionKind::LiveRebuttal),
             2 => Some(DetectionKind::LabelCollision),
             3 => Some(DetectionKind::CommitmentFork),
+            4 => Some(DetectionKind::DatingNotApplied),
+            5 => Some(DetectionKind::TemporalInconsistency),
             255 => Some(DetectionKind::Unknown),
             _ => None,
         }
@@ -63,6 +91,8 @@ impl DetectionKind {
             DetectionKind::LiveRebuttal => "live-rebuttal",
             DetectionKind::LabelCollision => "label-collision",
             DetectionKind::CommitmentFork => "commitment-fork",
+            DetectionKind::DatingNotApplied => "dating-not-applied",
+            DetectionKind::TemporalInconsistency => "temporal-inconsistency",
             DetectionKind::Unknown => "unknown",
         }
     }
@@ -76,6 +106,11 @@ impl DetectionKind {
             // Its own code: a reader told "concurrent supersession" about a commitment would
             // go looking for a supersedes edge that is not there.
             DetectionKind::CommitmentFork => crate::diag::Code::W058,
+            // Rule E's two. Their own codes, because what a reader has to do about them
+            // differs: `W412` names a dating that is sitting there unapplied and may become
+            // applicable, and `W413` names a set of records that cannot all be true.
+            DetectionKind::DatingNotApplied => crate::diag::Code::W412,
+            DetectionKind::TemporalInconsistency => crate::diag::Code::W413,
             // A kind this build cannot name has no diagnostic of its own. W053 is the generic
             // "these disagree" code, which is the most that can honestly be said about it.
             DetectionKind::Unknown => crate::diag::Code::W053,
@@ -475,7 +510,9 @@ mod tests {
 
     #[test]
     fn detection_kinds_round_trip_and_map_to_codes() {
-        assert_eq!(DetectionKind::ALL.len(), 4);
+        // Six as of TX-P3 step 2, with rule E's two. Four of them merge detects and writes;
+        // two it derives and never writes, which is what `DERIVED_ONLY` is for.
+        assert_eq!(DetectionKind::ALL.len(), 6);
         for &k in DetectionKind::ALL {
             assert_eq!(DetectionKind::from_u8(k.as_u8()), Some(k));
         }
@@ -493,6 +530,43 @@ mod tests {
             DetectionKind::CommitmentFork.code(),
             crate::diag::Code::W058
         );
+        assert_eq!(
+            DetectionKind::DatingNotApplied.code(),
+            crate::diag::Code::W412
+        );
+        assert_eq!(
+            DetectionKind::TemporalInconsistency.code(),
+            crate::diag::Code::W413
+        );
+    }
+
+    /// Rule E's two kinds are derived and never written, and the enumeration says which.
+    ///
+    /// Asserted here rather than only at the store's door, because `DERIVED_ONLY` is what the
+    /// refusal reads: a kind added later and left off this list would be a record 6 a store
+    /// accepts and an older reader cannot interpret.
+    #[test]
+    fn the_two_time_kinds_are_derived_and_the_other_four_are_not() {
+        assert_eq!(
+            DetectionKind::DERIVED_ONLY,
+            &[
+                DetectionKind::DatingNotApplied,
+                DetectionKind::TemporalInconsistency
+            ]
+        );
+        assert!(DetectionKind::DatingNotApplied.is_derived_only());
+        assert!(DetectionKind::TemporalInconsistency.is_derived_only());
+        for k in [
+            DetectionKind::SupersessionFork,
+            DetectionKind::LiveRebuttal,
+            DetectionKind::LabelCollision,
+            DetectionKind::CommitmentFork,
+            DetectionKind::Unknown,
+        ] {
+            assert!(!k.is_derived_only(), "{k} is a kind merge writes");
+        }
+        assert_eq!(DetectionKind::DatingNotApplied.as_u8(), 4);
+        assert_eq!(DetectionKind::TemporalInconsistency.as_u8(), 5);
     }
 
     #[test]

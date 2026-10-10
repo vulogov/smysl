@@ -19,11 +19,11 @@
 
 use std::path::{Path, PathBuf};
 
-use smysl_core::cbor::envelope::{manifest_bytes, part_reading_bytes};
+use smysl_core::cbor::envelope::{dating_bytes, manifest_bytes, part_reading_bytes};
 use smysl_core::cbor::writer::MapBuilder;
 use smysl_core::cbor::Enc;
 use smysl_core::surface::{parse_surface, write_surface, WriteContext};
-use smysl_core::types::library::Redaction;
+use smysl_core::types::library::{Dating, Redaction};
 use smysl_core::{from_cbor_seq, to_cbor_seq, Manifest, PartReading, PartText, Record, Tid, Uid};
 
 fn hex(b: &[u8]) -> String {
@@ -80,6 +80,14 @@ struct Built {
     /// `Store::append` filters — a conformance fixture whose records a conforming store drops is
     /// a fixture nobody can check against.
     redaction: Redaction,
+    /// Three datings (record 17), chosen to cover what a decoder can get wrong.
+    ///
+    /// One per target kind that has an identity — a manifest, a part, a window over a part —
+    /// and one per value kind: an absolute EDTF year, a **negative** offset and an Allen
+    /// relation. The negative one is not decoration: a dating's offset is the first signed
+    /// integer any record in this format carries, so until now no other implementation had
+    /// ever decoded CBOR major type 1 from a smysl store.
+    datings: Vec<Dating>,
     /// The surface document the manifest was parsed from, with the real identities in it.
     surface: String,
 }
@@ -129,6 +137,43 @@ fn build() -> Built {
         gone.canonical()
     );
 
+    // Parsed once to learn the manifest's own mid, because one of the datings names it and a
+    // mid is a hash of the manifest body. The datings are appended and the document is parsed
+    // again, so the committed `.smy` is the one these records actually came from.
+    let first = parse_surface(&surface).unwrap();
+    assert!(first.diagnostics.is_empty(), "{:?}", first.diagnostics);
+    let mid = first
+        .records
+        .iter()
+        .find_map(|r| match r {
+            Record::Manifest(m) => Some(m.mid()),
+            _ => None,
+        })
+        .expect("the document declares a manifest");
+
+    // 1769-09-30T00:00:00Z and the day after it, as a window over the first part. Any pair of
+    // instants would do; these are inside the expression's own publication year, which makes
+    // the fixture read as something a corpus could contain.
+    const WINDOW_FROM: u64 = 1726500000000;
+    const WINDOW_TO: u64 = 1726586400000;
+    let surface = format!(
+        "{surface}\n{a}\n\n{b}\n\n{c}\n",
+        a = format_args!(
+            "@date {mid} {{ axis: composed, when: 1611, agent: human:vu, ts: [1726500000000, 1] }}",
+            mid = mid.canonical(),
+        ),
+        b = format_args!(
+            "@date {p1} {{ axis: said, window: [{WINDOW_FROM}, {WINDOW_TO}], \
+             offset: -10800000, agent: human:vu, ts: [1726500000000, 2] }}",
+            p1 = texts[0].tid.canonical(),
+        ),
+        c = format_args!(
+            "@date {p2} {{ axis: said, after: {p1}, agent: human:vu, ts: [1726500000000, 3] }}",
+            p1 = texts[0].tid.canonical(),
+            p2 = texts[1].tid.canonical(),
+        ),
+    );
+
     let out = parse_surface(&surface).unwrap();
     assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
     let manifest = out
@@ -139,6 +184,7 @@ fn build() -> Built {
             _ => None,
         })
         .expect("the document declares a manifest");
+    assert_eq!(manifest.mid(), mid, "appending datings moved the manifest");
     let redaction = out
         .records
         .iter()
@@ -147,12 +193,22 @@ fn build() -> Built {
             _ => None,
         })
         .expect("the document declares a redaction");
+    let datings: Vec<Dating> = out
+        .records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Dating(d) => Some(d.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(datings.len(), 3, "the document declares three datings");
 
     Built {
         manifest,
         texts,
         readings,
         redaction,
+        datings,
         surface,
     }
 }
@@ -175,17 +231,19 @@ fn part_row(t: &PartText, r: &PartReading, lang: Option<&str>) -> String {
 
 /// Records this build does not decode, to prove they survive it.
 ///
-/// 16 is A-5's reserved telemetry slot, which no amendment has defined; 17 is allocated and
-/// lands in TX-P3. Both must decode to `Record::Unknown`, re-encode byte for byte and be
-/// reported as `SMY-W014`. That is the whole argument for why adding records 14, 15, 18 and 19
-/// is an addition rather than a version break, and it is worth asserting from the side that
-/// will actually meet them: a 1.10 build reading a 1.11 store.
+/// 16 is A-5's reserved telemetry slot, which no amendment has defined. It must decode to
+/// `Record::Unknown`, re-encode byte for byte and be reported as `SMY-W014`. That is the whole
+/// argument for why adding records 14, 15, 17, 18 and 19 is an addition rather than a version
+/// break, and it is worth asserting from the side that will actually meet them: a 1.10 build
+/// reading a 1.11 store.
 ///
-/// **19 left this list in TX-P2 step 4.** It is a redaction now, and the fixture carries a real
-/// one — which is the better test of the same property anyway: three other implementations have
-/// to decode it, and until step 4 they were being checked against a map with one key in it.
+/// **19 left this list in TX-P2 step 4 and 17 in TX-P3 step 1.** Each is a real record now and
+/// the fixture carries real ones — the better test of the same property anyway: three other
+/// implementations have to decode them, and while they were forward records those
+/// implementations were being checked against a map with one key in it. One code is left, which
+/// is enough: the property is about an unknown code, not about how many there are.
 fn forward_records() -> Vec<Record> {
-    [16u64, 17]
+    [16u64]
         .into_iter()
         .map(|code| {
             let mut m = MapBuilder::new();
@@ -207,6 +265,9 @@ fn records(b: &Built) -> Vec<Record> {
         v.push(Record::PartReading(r.clone()));
     }
     v.push(Record::Redaction(b.redaction.clone()));
+    for d in &b.datings {
+        v.push(Record::Dating(d.clone()));
+    }
     v.extend(forward_records());
     v
 }
@@ -258,6 +319,20 @@ fn ids_json(b: &Built) -> String {
         b.redaction.ts.wall_ms,
         hex(&smysl_core::cbor::envelope::redaction_bytes(&b.redaction)),
     ));
+    // The datings (record 17). Each has a did, so the ports have three things to agree on:
+    // the body bytes, the did derived from them, and — for the offset — that a negative CBOR
+    // integer decoded to a negative number rather than to a very large positive one.
+    s.push_str("  \"datings\": [\n");
+    for (i, d) in b.datings.iter().enumerate() {
+        s.push_str(&format!(
+            "    {{ \"did_hex\": \"{}\", \"axis\": \"{}\", \"body_hex\": \"{}\" }}{}\n",
+            hex(d.did().as_bytes()),
+            d.axis,
+            hex(&dating_bytes(d)),
+            if i + 1 == b.datings.len() { "" } else { "," },
+        ));
+    }
+    s.push_str("  ],\n");
     s.push_str(&format!(
         "  \"domain_bytes\": {{ \"tid\": {}, \"mid\": {}, \"did\": {}, \"rdid\": {} }}\n",
         Tid::DOMAIN,

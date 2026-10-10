@@ -129,6 +129,38 @@ fn cases() -> Vec<(&'static str, UnitCore)> {
     .build()
     .unwrap();
 
+    // `observed` (1.8, source key 3) and `published` (1.10, source key 4). Two cases rather
+    // than one, so a port that confused the two keys fails rather than hashing the same bytes
+    // by accident — they are adjacent integers carrying different types, which is exactly the
+    // confusion a single case cannot catch.
+    //
+    // Neither key was in this fixture until TX-P3 step 1, and `observed` had been in the format
+    // since 1.8: the Python and Node producers could not write it at all, and nothing said so,
+    // because the fixture's `source` shape named three fields and the spec-table gate compared
+    // the same three.
+    let with_observed = UnitCoreBuilder::new(
+        KernelType::Evidence,
+        "a measurement with an instant",
+        Status::Measured,
+    )
+    .source(SourceRef::new(SourceKind::Metric, "pool.wait_ms").observed_at(1726500000123))
+    .build()
+    .unwrap();
+
+    // `1920~` rather than `1920`: a qualifier is the half of EDTF a producer is likeliest to
+    // drop, and dropping it here changes the uid.
+    let with_published =
+        UnitCoreBuilder::new(
+            KernelType::Evidence,
+            "a passage from a dated manifestation",
+            Status::Cited,
+        )
+        .source(SourceRef::new(SourceKind::Doc, "a-book").published_at(
+            &smysl_core::edtf::parse("1920~").expect("the fixture's own value is EDTF"),
+        ))
+        .build()
+        .unwrap();
+
     // Text that is not ASCII, and text that is not NFC on the way in. The second must produce
     // the same uid as its composed twin — normalisation is part of identity, not presentation.
     let unicode = UnitCoreBuilder::new(
@@ -209,6 +241,8 @@ fn cases() -> Vec<(&'static str, UnitCore)> {
         ("with-refs", with_refs),
         ("with-source", with_source),
         ("with-captured", with_captured),
+        ("with-observed", with_observed),
+        ("with-published", with_published),
         ("unicode-composed", unicode),
         ("unicode-decomposed", decomposed),
         ("with-payload", with_payload),
@@ -290,10 +324,18 @@ fn emit() {
                 out.push_str(&format!("\"kind\": {}, ", s.kind.as_u8()));
                 out.push_str(&format!("\"reference\": {}, ", json_string(&s.reference)));
                 match &s.captured {
-                    None => out.push_str("\"captured\": null "),
+                    None => out.push_str("\"captured\": null, "),
                     Some(d) => {
-                        out.push_str(&format!("\"captured\": {} ", json_string(&d.to_string())))
+                        out.push_str(&format!("\"captured\": {}, ", json_string(&d.to_string())))
                     }
+                }
+                match &s.observed {
+                    None => out.push_str("\"observed\": null, "),
+                    Some(ms) => out.push_str(&format!("\"observed\": {ms}, ")),
+                }
+                match &s.published {
+                    None => out.push_str("\"published\": null "),
+                    Some(p) => out.push_str(&format!("\"published\": {} ", json_string(p))),
                 }
                 out.push_str("},\n");
             }

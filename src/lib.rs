@@ -89,10 +89,25 @@ pub use smysl_core::{
 /// down what it had. Found in step 5, when a test in this repository had to reach past the
 /// facade to the crate that defines them — the clearest possible statement that rule A was
 /// not being met.
+///
+/// `Redaction` (TX-P2 step 4) and the dating types (TX-P3 step 1) are here for the same
+/// reason, and the second omission was found by looking rather than by tripping over it: every
+/// variant of `Record` has a payload, and a variant whose payload cannot be named is a variant
+/// a consumer can only count.
 pub use smysl_core::ids::{Did, Mid, Rdid, Tid};
 pub use smysl_core::types::{
-    Calendar, Carry, Manifest, ParentKind, PartEntry, PartReading, PartResolver, PartText, Resolved,
+    Allen, Axis, Calendar, Carry, Dating, DatingTarget, DatingValue, Manifest, ParentKind,
+    PartEntry, PartReading, PartResolver, PartText, Redaction, Resolved,
 };
+
+/// EDTF — the date syntax `source.published` and a dating's absolute value carry (A-2.3).
+///
+/// A module rather than a handful of names, because it is a parser with an AST: `Edtf`, the
+/// `Date` and `DateTime` it holds, `Year`, `Part`, `Qualifier`, `Zone` and `End`. `Date` would
+/// collide with the kernel's own `Date` — the `YYYY-MM-DD` of `source.captured` — if it were
+/// re-exported flat, and the two are genuinely different things: one is a calendar day, the
+/// other is what a source said about when something happened.
+pub use smysl_core::edtf;
 
 // ---- check ----------------------------------------------------------------
 pub use smysl_check::{
@@ -291,8 +306,18 @@ mod tests {
         // one thing this count is kept for. 73 with `SMY-E450`, which TX-P2 step 3 made
         // raisable — `text append` to a pseudonymised expression with no key — and which step 2
         // deliberately left out for exactly this reason: `--pseudonymise` existed, and nothing
-        // could refuse an append until there was an append.
-        assert_eq!(Code::ALL.len(), 73);
+        // could refuse an append until there was an append. 74 with `SMY-E410`, which TX-P3
+        // step 1 made raisable: `@date` and `source { published: … }` both carry EDTF text, so
+        // the surface parser now has two places to meet a malformed value. The three other
+        // codes that step allocates — `SMY-W411`, `SMY-W412`, `SMY-W413` — and `SMY-W449` all
+        // need an interval computed from that text, and nothing computes one before step 2.
+        // 76 as of step 2, with `SMY-W412` and `SMY-W413`: the time engine exists, so a live
+        // dating that did not move a bound and a set of records that cannot all be true are
+        // both things something can now say. They are also A-8.2's two `DetectionKind` values,
+        // and `DetectionKind::code()` is total, so kind and code had to land together.
+        // `SMY-W411` and `SMY-W449` are findings about a *store* rather than results of the
+        // engine, and arrive with the `Time` check pass in step 3.
+        assert_eq!(Code::ALL.len(), 76);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

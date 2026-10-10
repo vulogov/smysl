@@ -69,12 +69,14 @@ pub mod manifest;
 pub mod norm;
 pub mod objects;
 pub mod part;
+pub mod provenance;
 pub mod readers;
 pub mod reading;
 pub mod secrets;
 pub mod segment;
 pub mod speaker;
 pub mod structure;
+pub mod time;
 
 pub use analyze::Chain;
 pub use ids::{Did, LangTag, Mid, Rdid};
@@ -92,6 +94,7 @@ pub use segment::Segmenter;
 pub use smysl_core::error::LibError;
 pub use smysl_core::ids::Tid;
 pub use structure::{Defect, Node, Structure, StructureError};
+pub use time::{Bound, Instant, Interval, Subject, TimeStatus};
 
 /// The reader ids this crate answers to, in the phase they arrive.
 ///

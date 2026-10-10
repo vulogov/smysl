@@ -58,6 +58,160 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### The clock was wrong, and correcting the record was the one repair that could not be made
+
+**TX-P3 step 2.** Rule E: effective time, and the engine that derives it.
+
+**Why a dating is a record and not an edit.** A corpus has clocks in it that are wrong — an
+export ran three hours slow for a week, a title page says 1769 and the translation is from 1611,
+a reader supplied an instant and somebody later found the header that contradicts it. The
+obvious repair is to correct `observed`. That field is inside a unit's uid, so correcting it in
+place gives every affected unit a new identity, and a store that re-identified its contents
+whenever a clock turned out to be wrong could not be cited: a report naming those uids stops
+resolving. So a correction stands *beside* the unit, and the time a unit effectively has is
+**recomputed from the record set** every time the record set changes. Nothing is stored.
+
+**No silent override, and it is a construction rather than a check.** The network is solved once
+per status level, from `measured` down to `speculative`, and a bound moves only if the stratum
+doing the moving is at least as well evidenced as the value already there. A stratum holds only
+edges of its own status or better, so the weakest link on any path bounds what that path can
+justify — which is OQ-42's answer falling out of the shape of the algorithm instead of being
+tested for. A move a stratum would make and may not is **not discarded**: it is reported
+(`SMY-W412`), because "somebody typed a date that disagrees with the instrument" is a thing to
+look at and not a thing to lose. The registry is 76, with `SMY-W413` for records whose times
+cannot all be right — where every subject involved is *contested* and **nothing is chosen**,
+since picking one of two contradictory dates is an adjudication and this format does not
+adjudicate.
+
+**Soundness before precision, three times over.** The amendment names words and gives no
+arithmetic, so three readings had to be chosen, and each was chosen to be *weaker* than the
+reading it stands for — a bound that excluded the truth would exclude it everywhere downstream.
+A **qualifier is not a width**: `1920~` has the extent of `1920`, because "about 1920" does not
+say "within five years" and any number picked here would be invented. A **season is its year**,
+because EDTF numbers the seasons and fixes no hemisphere — `2001-21` is spring in Oslo and
+autumn in Wellington, and northern winter reaches into 2002. And **four of the seven Allen
+relations collapse** to "at the same time as", because a subject here is an instant with
+uncertainty rather than a duration. All three are recorded as **OQ-71** with the implemented
+reading as the proposal, and `P-E4` checks the consequence over generated corpora: the truth is
+inside every interval the engine reports.
+
+**Eight properties, and the generator earned its place twice.** `P-E1`–`P-E8` are
+order independence, idempotence, no silent override, soundness, detection, agreement with a
+brute-force Floyd–Warshall reference, withdrawal, and monotone evidence. Two findings came out
+of them rather than out of reading the code:
+
+- **The shortest-path search did not terminate** on a network with a negative self-loop beside a
+  zero-weight edge. The zero edge tied at the runaway distance, the tie-break re-enqueued the
+  node, and the relaxation counter never fired because a tie moves nothing. `P-E6`'s generator
+  found it at case 108 of 400, on five variables. The fix is that a tie updates attribution and
+  does not propagate — which is also the correct rule, since what a node records is the edge it
+  was *reached by*, so a tie at one node has nothing to tell anything downstream.
+- **Negative cycles need their own pass.** A search from the reference never visits a cycle
+  nobody dated, so "A strictly before B, B strictly before A" was reported consistent when
+  neither unit had a date. Detection now runs from a virtual source over every node, and the
+  Floyd–Warshall reference is what caught the difference.
+
+**The omission rule almost never fires, and that is it working.** A-2.4 rule 3 omits `published`
+when its interval *equals* the one millisecond an `observed` denotes. EDTF level 1 cannot write
+a millisecond, so the narrowest value it can express is a second — and `2026-09-30T14:05:00Z` is
+a one-second interval that is not equal to any instant inside it. What the rule prevents is a
+producer reasoning "these say the same thing, drop one" and dropping the field that carried the
+second of uncertainty, which would move the unit's uid. The whole of D-1's copy set now lives in
+one function, which is a prohibition as much as a function: a producer assembling a `SourceRef`
+by hand is one `title` away from putting a book's name inside ten thousand uids.
+
+**One calendar, not two.** The chat readers had the civil-date arithmetic first, behind their own
+feature gates, and the engine needs it unconditionally. Two copies of a calendar is two
+calendars: a difference between them would put a message on a different day in one path and not
+the other, and the identity of a part depends on which day a reader puts a message in. The
+arithmetic is now in `time::calendar`, with the Julian conversion beside it and the three dates
+every library disagrees about pinned — 1582-10-04/15, 1700-02-29, and 0001-01-01.
+
+**What this release cannot compute, said rather than left absent.** A manifest-scoped dating
+resolves through the manifest's part list, because a unit does not name its manifest until FC-3
+(TX-P5); that over-selects on a supersession chain, where two manifests share a part, and the
+result counts it. The **reply** free constraint has no data at all — the ids it would be built
+from live in a segment row and reach a unit only through ingest. And **nothing dates a
+manifest**: A-5 gives target kind 2 to "every unit drawn under one manifest", so a catalog
+entry's own publication date can be corrected only by a new version, which is **OQ-72**.
+
+**Gates.** 85 spec-table comparisons (up from 81, with rule E's row, its time statuses and its
+free constraints), the diagnostic registry at 76, and two new fuzz targets — `time_engine` and
+`edtf` — which `make fuzz` runs rather than merely compiling.
+
+### A date the source wrote down, and the first negative integer in the format
+
+**TX-P3 step 1.** Record 17 — a dating — and the EDTF text two fields now carry.
+
+**A dating is a record about units, never an edit to them.** The obvious way to fix a chat export
+whose clock was three hours out is to correct `observed`. That field is inside the uid, so
+correcting it in place gives every affected unit a new identity, and a store that re-identifies
+its contents whenever a clock turns out to be wrong cannot be cited: a report naming those uids
+stops resolving. So a dating stands beside what it dates. It carries who said it, on what
+evidence (`basis`, which decides its status by rule E), and it can be withdrawn — and rule E
+recomputes effective time from the record set whenever the record set changes, rather than
+anything being rewritten.
+
+Its target is one of four things, and the fourth is what makes a correction affordable: a
+**window** over a part's as-recorded instants dates every unit in a range with one record. The
+three-hour chat export is one dating, not one per message. Against the **as-recorded** instant and
+not the effective one, because a window that moved as the datings it selects took effect would
+select a different set on each pass and rule E would not converge.
+
+**`source.published` stores what the source wrote, not what a producer can defend.** A title page
+that says "about 1920" becomes `1920~`. The alternative is a producer inventing
+`1920-01-01T00:00:00Z`, which is a claim nobody made, with a precision nobody has, inside an
+identity. EDTF levels 0 and 1 are what the field holds: qualifiers `?`, `~`, `%`; unspecified
+digits (`201X`, `1984-XX`); intervals with an **open** end (`..`, there is no bound) and an
+**unknown** end (empty, there is one and nobody recorded it) — two different claims, and a parser
+that collapsed them would round-trip every string and lose the distinction rule E acts on.
+
+**Acceptance is canonical, and the refusals are the half that matters.** `+1984`, `Y1984`,
+`1984-6-2` and `-00:00` all parse under any EDTF library, and each is a second spelling of a value
+already accepted. Both fields that carry EDTF are inside an identity, so two byte strings for one
+date are two uids for one claim, and the parser refuses the second spelling for that reason and no
+other. `fixtures/library/edtf/cases.json` lists 36 accepted forms and **39 refused**, each with
+the reason, because a fixture of accepted forms alone would let a second implementation pass while
+accepting all of them. A reversed interval (`2005/1984`) is accepted: it is well-formed text whose
+*meaning* is empty, which rule E reports and a parser cannot see the store to judge.
+
+**A decoder does not refuse a malformed value.** `published` is inside the uid, so a value that
+arrived has to leave again byte for byte or the unit silently changes identity — and a reader that
+refused it would make a whole store unopenable over one field, which is F-12's lesson and the
+reason `source.kind` is open. `SMY-E410` is raised where a value is *written*: by the surface
+parser in `@date` and in `source { published: … }`. The registry is 74.
+
+**The offset is signed, and nothing in this format had ever been.** A clock can be fast as well as
+slow, so `Enc::int` and `Dec::int` are new — CBOR major type 1, shortest-form like every other
+head — and the wire fixture's offset is negative on purpose: until this release the Python,
+JavaScript and Go ports had never decoded a negative integer out of a smysl store, and one that
+read it as a very large positive number would have agreed about every byte and disagreed about
+what they mean.
+
+**Two things the step found that were not in the plan.**
+
+The `spec-tables` gate was comparing the `source` sub-map as a **named subset of three keys**. So
+`observed`, a key since 1.8, was absent from the Python and Node producers and from the uid
+fixture, and no gate asked — a gate that names what to compare goes on agreeing about exactly
+those names. The subset is now the whole table, both producers write both keys, and
+`fixtures/wire/uid/cases.json` carries a case for each, kept apart so a port that confused two
+adjacent integer keys fails rather than hashing the same bytes by luck.
+
+And the spec's own fold record was **two phases out of date**: RFC SMYSL-2.3's table listed
+TX-P0's four amendments although A-3, A-5 and rule Z had folded in TX-P1 and TX-P2. A-14 asks for
+the folds to be recorded and a record nobody updates is the condition it exists to prevent, so the
+table now says which step did each one.
+
+**Moved out of this step.** The two time `DetectionKind` values stay for step 2, where the engine
+that derives them exists. `DetectionKind::code()` is total — every kind names the diagnostic it is
+reported as — so kinds 4 and 5 cannot land before `SMY-W412` and `SMY-W413` can be raised, and
+the registry's rule is that a code nothing can trigger is worse than a missing one. Keeping the
+mapping total and the registry honest means the variants arrive with `time::stn`.
+
+**Gates.** 81 spec-table comparisons (up from 72, with the dating's key table, target kinds and
+value keys in all three ports), 207 Python tests, 178 Node, Go green, and the diagnostic registry
+at 74.
+
 ### The part size was provisional for eleven releases, and three of its four axes do not depend on it
 
 **TX-P2 step 6 — the phase exit.** Two gated experiments, and the phase is closed.

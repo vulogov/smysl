@@ -85,3 +85,15 @@ name = "redaction_merge"
 path = "fuzz_targets/redaction_merge.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "edtf"
+path = "fuzz_targets/edtf.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "time_engine"
+path = "fuzz_targets/time_engine.rs"
+test = false
+doc = false

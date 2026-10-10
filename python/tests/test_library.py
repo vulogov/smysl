@@ -173,6 +173,59 @@ def test_a_redaction_decodes_into_its_named_fields():
     assert expected["tid_hex"] not in tids
 
 
+def test_a_dating_decodes_into_its_named_fields():
+    """Record 17 (TX-P3 step 1): a statement about when something happened.
+
+    The three in the fixture are one per target kind that has an identity — a manifest, a part,
+    a window over a part — and one per value kind: an absolute EDTF year, a **negative** offset
+    and an Allen relation. The negative one is not decoration. A dating's offset is the first
+    signed integer any record in this format carries, so until it existed this decoder had never
+    read CBOR major type 1 out of a smysl store, and a decoder that read it as a very large
+    positive number would have agreed with the fixture about every byte and disagreed about what
+    they mean.
+    """
+    datings = [smysl.Dating.decode(r.body) for r in _records() if r.code == 17]
+    assert len(datings) == len(IDS["datings"])
+    kinds, values = set(), set()
+    for dating, expected in zip(datings, IDS["datings"]):
+        body = smysl.encode_one(dating.body)
+        assert body.hex() == expected["body_hex"]
+        # The did over the body this implementation re-encodes, not over bytes the fixture
+        # supplied: the same claim the mid and the rdid tests make, for the fourth identity.
+        assert dating.dating_id().hex() == expected["did_hex"]
+        assert dating.axis_name == expected["axis"]
+        kinds.add(dating.target.kind_name)
+        values.add(dating.value[0])
+    assert kinds == {"manifest", "part", "window"}
+    assert values == {"absolute", "offset", "relative"}
+    offset = next(d for d in datings if d.value[0] == "offset")
+    assert offset.value[1] == -10800000
+    assert offset.target.window is not None and offset.target.window[0] < offset.target.window[1]
+    relative = next(d for d in datings if d.value[0] == "relative")
+    assert relative.value[1][0] == "after"
+
+
+def test_a_dating_refuses_a_value_that_says_two_things():
+    """A dating's value is a one-entry map, and the count is what makes it one claim.
+
+    Hand-built rather than taken from the fixture, because a conforming producer cannot write
+    this: it is the record a *non*-conforming one would write, and the point of checking is that
+    a reader meeting it says so instead of silently taking whichever entry came first.
+    """
+    good = next(r.body for r in _records() if r.code == 17)
+    two = dict(good)
+    two[2] = {0: "1611", 1: 0}
+    with pytest.raises(smysl.LibraryError):
+        smysl.Dating.decode(two)
+    no_axis = {k: v for k, v in good.items() if k != 1}
+    with pytest.raises(smysl.LibraryError):
+        smysl.Dating.decode(no_axis)
+    bad_axis = dict(good)
+    bad_axis[1] = 3
+    with pytest.raises(smysl.LibraryError):
+        smysl.Dating.decode(bad_axis)
+
+
 def test_the_mid_is_derived_from_the_body_this_implementation_re_encodes():
     """**The test the exit criterion is about.**
 
