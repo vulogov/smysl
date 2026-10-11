@@ -145,10 +145,13 @@ impl Chain {
     /// [`crate::segment::Segmenter::new`] does, deliberately — a unit's `lang` chooses both,
     /// and two different answers from one tag would be a bug nobody could see.
     pub fn new(lang: &LangTag) -> Chain {
+        // Both arms are written as the trailing expression, which is the one spelling that is
+        // clean under either flag: a `return` in the first is needless once `cfg` has removed
+        // the second, and clippy says so in a build without `stem`.
         #[cfg(not(feature = "stem"))]
         {
             let _ = lang;
-            return Chain::plain();
+            Chain::plain()
         }
         #[cfg(feature = "stem")]
         {

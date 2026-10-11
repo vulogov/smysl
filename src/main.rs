@@ -2461,14 +2461,32 @@ fn find_with_chosen(
         None => library_chain(&library),
     };
 
-    let Some(view) = library.index().postings() else {
-        // An open builds five of the eight tables and `postings` is not one of them, for the
+    // Whichever file holds them. The sidecar's table is scored where it lies; a library whose
+    // postings are in the backing store is scored a term at a time out of that store, and the
+    // ranking is the same one — `crates/smysl-text/tests/substrate_db.rs` compares the two bit
+    // for bit. The flag does not say which, because a caller asking for the index it has
+    // already paid for does not care which file it is in.
+    let Some(view) = library.postings() else {
+        // An open builds eight of the twelve tables and `postings` is not one of them, for the
         // reason `Table::ON_OPEN` records. Falling back is right — it is the same ranking — and
         // saying so is right too, because the point of the flag was not to pay for it.
-        eprintln!(
-            "smysl {cmd}: {path}: the index holds no postings yet; analysing the corpus instead"
-        );
-        eprintln!("  `smysl text index --rebuild {path}` builds them once and writes them down");
+        if library.has_postings_store() && !cfg!(feature = "substrate-redb") {
+            // The one case with a different remedy: the rows are written down, in a file this
+            // binary has no reader for. A `--rebuild` would not help, so it is not offered.
+            eprintln!(
+                "smysl {cmd}: {path}: the postings are in {}, which this build cannot read; \
+                 analysing the corpus instead",
+                smysl::text::index::STORE
+            );
+            eprintln!("  a build with `--features substrate-redb` reads it");
+        } else {
+            eprintln!(
+                "smysl {cmd}: {path}: the index holds no postings yet; analysing the corpus instead"
+            );
+            eprintln!(
+                "  `smysl text index --rebuild {path}` builds them once and writes them down"
+            );
+        }
         return Ok(in_memory_hits(library.store(), q, Some(chosen)));
     };
 
@@ -2477,8 +2495,15 @@ fn find_with_chosen(
     // rather than refused: per-document routing is what the partitions are *for*, so a
     // multi-language library legitimately holds several chains and no one of them is the right
     // way to split a query the caller did not qualify.
-    let ids = smysl::text::index::postings::analyzers(&library.index().postings);
-    if !ids.is_empty() && !ids.iter().any(|id| *id == chosen.id()) {
+    //
+    // The ids come from the summary rather than from the resident table, because the table may
+    // not be resident: a stored partition carries its analyzer in the row beside its document
+    // count, which is what makes this question answerable without reading the postings.
+    let ids: Vec<String> = library
+        .postings_held()
+        .map(|held| held.analyzers)
+        .unwrap_or_default();
+    if !ids.is_empty() && !ids.iter().any(|id| id == chosen.id()) {
         eprintln!(
             "smysl {cmd}: {path}: the query is split by `{}` and this library is analysed by \
              {} — only the terms they agree about can match",
@@ -7115,26 +7140,57 @@ fn text_index(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
             return ExitCode::Failure;
         }
         println!("rebuilt   {}", smysl::text::index::SIDECAR);
+        // Two files when the build has the backing store, and the second one is where the
+        // `postings` table went — so a reader of this output can see which file the next open
+        // will read the rows out of.
+        if library.has_postings_store() {
+            println!("rebuilt   {}", smysl::text::index::STORE);
+        }
     }
 
     for table in Table::ALL {
-        match library.index().rows(*table) {
-            // `postings` is the one table whose row count is not the whole story: the rows are
-            // terms, and what a reader needs beside them is how the corpus was divided and
-            // which chains analysed it — a query has to name one of those ids.
-            Some(n) if *table == Table::Postings => {
-                let ix = library.index();
-                println!(
-                    "{:<11} {n} term(s) across {} partition(s), analysed by {}",
+        // `postings` is the one table whose row count is not the whole story, and since the
+        // backing store it is also the one table that need not be in the sidecar at all. So it
+        // is asked of the **library** rather than of the resident index: the rows are terms,
+        // what a reader needs beside them is how the corpus was divided and which chains
+        // analysed it, and which file holds them decides what `--rebuild` would rewrite.
+        if *table == Table::Postings {
+            match library.postings_held() {
+                Some(held) => println!(
+                    "{:<11} {} term(s) across {} partition(s), analysed by {}{}",
                     table.as_str(),
-                    ix.postings.len(),
-                    if ix.postings.is_empty() {
+                    held.terms,
+                    held.partitions,
+                    if held.analyzers.is_empty() {
                         "nothing".to_string()
                     } else {
-                        smysl::text::index::postings::analyzers(&ix.postings).join(", ")
+                        held.analyzers.join(", ")
+                    },
+                    if held.stored {
+                        format!(", in {}", smysl::text::index::STORE)
+                    } else {
+                        String::new()
                     }
-                );
+                ),
+                // Two reasons for a `None` and two remedies, which is why the sentence is not
+                // one sentence: a table nobody built is a `--rebuild` away, and a table in a
+                // file this binary has no reader for is a build away. Saying `--rebuild` to
+                // the second would be advice that overwrites what it could not read.
+                None if library.has_postings_store() && !cfg!(feature = "substrate-redb") => {
+                    println!(
+                        "{:<11} in {}, which this build cannot read; `--features substrate-redb`",
+                        table.as_str(),
+                        smysl::text::index::STORE
+                    )
+                }
+                None => println!(
+                    "{:<11} not built for this library; `text index --rebuild` builds it",
+                    table.as_str()
+                ),
             }
+            continue;
+        }
+        match library.index().rows(*table) {
             Some(n) => println!("{:<11} {n} row(s)", table.as_str()),
             // One reason for a `None` now, where step 1 had two. A table this *library* has not
             // had built is one `--rebuild` away; a table this *build* has no builder for was a

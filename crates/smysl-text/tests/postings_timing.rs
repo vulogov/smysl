@@ -181,8 +181,32 @@ fn find_over_persistent_postings_against_analysing_the_corpus() {
     let bytes = std::fs::metadata(smysl_text::index::Index::path(&dir))
         .map(|m| m.len())
         .unwrap_or_default();
+    // The backing store, when this build has one: with `substrate-redb` the write above put the
+    // `postings` table there and the sidecar below is the other eleven tables, so the two
+    // figures are what the feature moved rather than two ways of counting one file.
+    let stored = std::fs::metadata(dir.join(smysl_text::index::STORE))
+        .map(|m| m.len())
+        .unwrap_or_default();
+    // Both numbers, because for this file they differ and only one of them is a cost. redb grows
+    // its file in regions and fills pages inside them as it needs them, so the logical length is
+    // the region it allocated and the block count is what is on the disk.
+    #[cfg(unix)]
+    let allocated = {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(dir.join(smysl_text::index::STORE))
+            .map(|m| m.blocks() * 512)
+            .unwrap_or_default()
+    };
+    #[cfg(not(unix))]
+    let allocated = 0u64;
     println!("rebuild     every table, {rebuild:?}");
     println!("sidecar     {bytes} bytes written in {write:?}");
+    if stored > 0 {
+        println!(
+            "store       {stored} bytes long, {allocated} allocated, in {}",
+            smysl_text::index::STORE
+        );
+    }
 
     // What `find --library` pays before it can score anything, split into the two halves it is
     // made of. The catalog parse is a floor this phase cannot move — SMYSL-2.8's M-7 is that the
@@ -204,14 +228,27 @@ fn find_over_persistent_postings_against_analysing_the_corpus() {
     let reopened = Library::open(&dir).expect("reopened");
     let open = start.elapsed();
     println!("open        {catalog_only:?} with no sidecar, so building ON_OPEN's tables");
+    // Asked of the **library**, not of the index: with `substrate-redb` the rows are in the
+    // store and the sidecar does not carry them, and what is being timed is a query against the
+    // index a library has — whichever file that is. The line says which, because the two
+    // numbers below mean different things: a decode of the sidecar, or a page cache filling.
+    // Timed on its own, because with the backing store it is no longer free: a view hydrates the
+    // document lengths of the partitions it spans (`Db::lens_of`), which is a scan of that table
+    // once per command. The resident path builds a view out of references and this is ~0.
+    let start = Instant::now();
     let view = reopened
-        .index()
         .postings()
-        .expect("the sidecar carried the postings table");
+        .expect("the library has a postings table to score");
+    let view_open = start.elapsed();
     println!(
-        "open        {open:?}, {} documents in {} partition(s)",
+        "open        {open:?}, {} documents in {} partition(s), from {}",
         view.docs(),
-        view.partitions()
+        view.partitions(),
+        if view.is_stored() {
+            smysl_text::index::STORE
+        } else {
+            smysl_text::index::SIDECAR
+        }
     );
     assert_eq!(view.docs() as usize, UNITS, "the table lost documents");
 
@@ -252,10 +289,20 @@ fn find_over_persistent_postings_against_analysing_the_corpus() {
         "open, sidecar current  {:.3} ms  (catalog parse plus {bytes} bytes decoded)",
         open.as_secs_f64() * 1000.0
     );
+    if stored > 0 {
+        println!(
+            "postings read from     {} ({stored} long, {allocated} allocated)",
+            smysl_text::index::STORE
+        );
+    }
+    println!(
+        "view opened in         {:.3} ms  (hydrating what a view hydrates)",
+        view_open.as_secs_f64() * 1000.0
+    );
     println!("p95 over postings      {persistent:.3} ms  (exit clause: < 200 ms)");
     println!(
         "command, end to end    {:.3} ms",
-        open.as_secs_f64() * 1000.0 + persistent
+        open.as_secs_f64() * 1000.0 + view_open.as_secs_f64() * 1000.0 + persistent
     );
     println!("one query, analysed    {in_memory:.3} ms");
     println!(

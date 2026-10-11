@@ -221,6 +221,24 @@ pub struct Library {
     /// query in this step. A field a caller could reach would be a field a caller could trust
     /// past its completeness rule.
     index: Index,
+    /// The backing store for the `postings` table, when this library has one (§3.8).
+    ///
+    /// `Some` only when the file was already there: an open does not create one, for the reason
+    /// [`index::db::Db::exists`] gives. `None` therefore means one of three things that all have
+    /// the same answer — no store, a store this build cannot open, or a build without the
+    /// feature — and the answer is that the postings are wherever the sidecar says they are.
+    ///
+    /// `AssertUnwindSafe`, and the assertion is the cache argument in one word. A `Library` is
+    /// handed out as an `Arc<dyn PartResolver + Send + Sync + RefUnwindSafe>` — `text show` and
+    /// the renderers resolve parts inside a `catch_unwind` — and redb's `Database` is not
+    /// `RefUnwindSafe`, because a panic mid-write could leave its page state observable and
+    /// torn. For a store of **derived** rows that is already a handled state: every read path
+    /// compares the catalog stamp and rebuilds when it disagrees, a torn file fails to open and
+    /// is a rebuild too, and the authoritative bytes are in the log and the object store. What
+    /// unwind safety protects — a half-updated invariant that is then trusted — is the one thing
+    /// a cache with a stamp cannot have.
+    #[cfg(feature = "substrate-redb")]
+    db: Option<std::panic::AssertUnwindSafe<index::db::Db>>,
 }
 
 fn io(at: impl AsRef<str>, e: &std::io::Error) -> LibError {
@@ -283,6 +301,13 @@ impl Library {
             store,
             objects,
             index: Index::default(),
+            // A store that will not open is no store, and the library reports its postings the
+            // way a library with none does: this is a cache, and a cache may not fail an open.
+            #[cfg(feature = "substrate-redb")]
+            db: index::db::Db::exists(root)
+                .then(|| index::db::Db::open(root).ok())
+                .flatten()
+                .map(std::panic::AssertUnwindSafe),
         };
         library.enforce_z()?;
         library.load_index();
@@ -323,10 +348,54 @@ impl Library {
     /// reads it. It is also what keeps a persisted sidecar whole: [`Library::write_index`]
     /// refuses to write a partial one, and without this a library first opened by this release
     /// would never get a complete sidecar at all.
+    ///
+    /// **The backing store is read first, and that is the point of the order.** A library whose
+    /// postings live in `index/substrate.redb` loads a sidecar that does not hold them, so it is
+    /// incomplete by exactly one table — and rebuilding that table means analysing every unit in
+    /// the corpus (1,898 ms at 155k, [`index::Table::ON_OPEN`]) to arrive at rows that are already
+    /// written down. Hydrating instead is a read of the file. When the store is stale or absent
+    /// the rebuild happens as it always did.
     pub fn complete_index(&mut self) {
+        if self.index.is_complete() {
+            return;
+        }
+        self.hydrate_postings();
         if !self.index.is_complete() {
             self.reindex();
         }
+    }
+
+    /// Bring the stored `postings` table into memory, if that is where it is and it is current.
+    ///
+    /// `true` when the table is now resident. Nothing else moves: the other eleven tables are
+    /// the sidecar's, and a store whose stamp does not match the catalog is a stale cache that
+    /// [`Library::reindex`] is about to replace.
+    #[cfg(feature = "substrate-redb")]
+    fn hydrate_postings(&mut self) -> bool {
+        if self.index.built.has(index::Table::Postings) {
+            return true;
+        }
+        let Some(db) = self.db.as_ref() else {
+            return false;
+        };
+        if !db.matches(self.store.log_len(), self.store.log_hash()) {
+            return false;
+        }
+        match db.load() {
+            Ok(table) => {
+                self.index.postings = table;
+                self.index.built = self.index.built.with(index::Table::Postings);
+                true
+            }
+            // A malformed store is a rebuild, like a malformed sidecar. The next write replaces
+            // it, which is the repair.
+            Err(_) => false,
+        }
+    }
+
+    #[cfg(not(feature = "substrate-redb"))]
+    fn hydrate_postings(&mut self) -> bool {
+        self.index.built.has(index::Table::Postings)
     }
 
     /// The derived index, as it stands.
@@ -355,6 +424,11 @@ impl Library {
     /// cache was not written because it was not complete" is not news to anybody — the next
     /// open rebuilds exactly as much as this one did, which is the state the library was
     /// already in.
+    /// **Two files, when this build has the backing store.** The `postings` table goes into
+    /// `index/substrate.redb` and the sidecar is written without it — the whole of what the
+    /// feature buys, since that table is 1.1 KB a unit and the other eleven together are not.
+    /// The store is written **first**: if it cannot be, the sidecar is written whole, so a
+    /// library never ends up with the postings in neither file.
     pub fn write_index(&self) -> Result<(), LibError> {
         if !self.index.is_complete() {
             return Ok(());
@@ -363,8 +437,137 @@ impl Library {
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|e| io(index::DIR, &e))?;
         }
-        std::fs::write(&target, self.index.to_bytes()).map_err(|e| io(index::SIDECAR, &e))?;
+        let bytes = if self.store_postings() {
+            self.index.to_bytes_without_postings()
+        } else {
+            self.index.to_bytes()
+        };
+        std::fs::write(&target, bytes).map_err(|e| io(index::SIDECAR, &e))?;
         Ok(())
+    }
+
+    /// Replace the backing store's `postings` table with the one in memory, and stamp it.
+    ///
+    /// `false` when there is no store to write, or when writing it failed — and a failure is not
+    /// returned, because the caller's answer to it is already written down: the sidecar carries
+    /// the table instead. An error here would fail a successful `text add` over a cache.
+    #[cfg(feature = "substrate-redb")]
+    fn store_postings(&self) -> bool {
+        let owned;
+        let db = match self.db.as_ref() {
+            Some(db) => db,
+            // The file is created by the first command that writes an index, never by an open.
+            None => match index::db::Db::open(&self.root) {
+                Ok(db) => {
+                    owned = db;
+                    &owned
+                }
+                Err(_) => return false,
+            },
+        };
+        db.write(
+            &self.index.postings,
+            self.store.log_len(),
+            self.store.log_hash(),
+        )
+        .is_ok()
+    }
+
+    #[cfg(not(feature = "substrate-redb"))]
+    fn store_postings(&self) -> bool {
+        false
+    }
+
+    /// A scoring view over this library's postings, from whichever file holds them.
+    ///
+    /// `None` means the library has none to score — an open that did not afford them and no
+    /// store to read, which is [`index::Table::ON_OPEN`]'s subject — and the caller's answer is to
+    /// analyse the corpus as `find` always has, or to run `text index --rebuild` once. Not an
+    /// empty view: an empty view retrieves nothing and looks exactly like an empty corpus.
+    ///
+    /// The resident table wins when both could answer. They cannot disagree — a write puts the
+    /// same rows in both places and stamps them with the same catalog — and reading the one
+    /// already in memory costs nothing.
+    pub fn postings(&self) -> Option<index::Source<'_>> {
+        if let Some(view) = self.index.postings() {
+            return Some(index::Source::Memory(view));
+        }
+        self.stored_postings()
+    }
+
+    /// The store's own answer, when there is a store and its stamp is the catalog's.
+    #[cfg(feature = "substrate-redb")]
+    fn stored_postings(&self) -> Option<index::Source<'_>> {
+        let db = self.db.as_ref()?;
+        if !db.matches(self.store.log_len(), self.store.log_hash()) {
+            return None;
+        }
+        db.all()
+            .ok()
+            .map(|view| index::Source::Stored(Box::new(view)))
+    }
+
+    #[cfg(not(feature = "substrate-redb"))]
+    fn stored_postings(&self) -> Option<index::Source<'_>> {
+        None
+    }
+
+    /// Where this library's postings are and what they hold, or `None` when it holds none.
+    ///
+    /// What `text index` prints for the table. Counting terms in the store means walking its
+    /// `postings` table, which is a scan of the rows and not of the corpus — the one place a
+    /// report pays for the table being on disk.
+    pub fn postings_held(&self) -> Option<index::Held> {
+        if self.index.built.has(index::Table::Postings) {
+            return Some(index::Held {
+                stored: false,
+                terms: self.index.postings.values().map(|p| p.iter().count()).sum(),
+                partitions: self.index.postings.len(),
+                analyzers: index::postings::analyzers(&self.index.postings)
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            });
+        }
+        self.stored_held()
+    }
+
+    /// The same question of the store.
+    #[cfg(feature = "substrate-redb")]
+    fn stored_held(&self) -> Option<index::Held> {
+        let db = self.db.as_ref()?;
+        if !db.matches(self.store.log_len(), self.store.log_hash()) {
+            return None;
+        }
+        let partitions = db.partitions().ok()?;
+        let mut analyzers: Vec<String> = partitions
+            .iter()
+            .filter(|(_, a, _)| !a.is_empty())
+            .map(|(_, a, _)| a.clone())
+            .collect();
+        analyzers.sort_unstable();
+        analyzers.dedup();
+        Some(index::Held {
+            stored: true,
+            terms: db.terms().ok()?,
+            partitions: partitions.len(),
+            analyzers,
+        })
+    }
+
+    #[cfg(not(feature = "substrate-redb"))]
+    fn stored_held(&self) -> Option<index::Held> {
+        None
+    }
+
+    /// Whether a backing store sits beside this library, whatever this build can do with it.
+    ///
+    /// Asked by a build **without** the feature, which is the only reason it does not consult
+    /// the opened store: a library whose postings are in a file this binary cannot read must be
+    /// told apart from one whose postings were never built, because the two have different
+    /// remedies — a build with the feature, and a `--rebuild`.
+    pub fn has_postings_store(&self) -> bool {
+        self.root.join(index::STORE).is_file()
     }
 
     /// Bring the index forward over records this library has just appended.

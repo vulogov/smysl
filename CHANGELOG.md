@@ -58,6 +58,117 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### The substrate index gets a backing store, and the MSRV argument that deferred it was wrong
+
+`substrate-redb` (off by default) puts the `postings` table in `index/substrate.redb` instead of
+holding all of it in memory. RFC SMYSL-2.4 §3.8 had recorded this as owed because "redb 4.3
+requires Rust 1.90" and `smysl-text` is a base-tier crate at 1.85. That is true of 4.3 and of
+nothing else: **redb 2.6.4 declares 1.85**, exactly this workspace's base. 3.0 and 4.0 declare
+1.89. So the pin is `=2.6.4`, `smysl-text` keeps its 1.85, and `make msrv` confirms nothing moved
+— base 1.85 is still the floor of eleven crates. The workspace already makes this exact trade
+twice, for `quick-xml` and for `zip`.
+
+**What the store is for, and what it is not.** The `postings` table is a 32-byte
+content-addressed uid and a `u32` per posting: 169 MB at 155k units, 7 GB at 10⁶, **resident
+while the library is open**. Neither usual remedy works alone. A uid is a hash, so a postings
+list of uids cannot be delta-encoded. And a dense internal document id — the fix that would take
+a posting from 36 bytes to about 5 — cannot be maintained incrementally without giving up §3.8's
+byte-for-byte rebuild gate: a content-derived id is a rank within its partition, so appending one
+window to a partition of size *p* re-ranks *p* postings, and ingest commits window by window.
+Paging the table makes the resident cost a page cache the caller sizes and leaves the gate alone.
+The dense id is still worth having as an *on-disk* encoding, where it changes one value format
+and nothing else.
+
+**The gate it cannot pass, and the one that replaces it.** A redb file is not byte-reproducible:
+page allocation depends on the history of writes, so two libraries with identical contents have
+different files. `Db::agrees` compares the *logical* table instead — partitions, analyzer,
+document count, total length, term set, postings lists, document lengths — and returns the first
+difference as a sentence rather than a bool. `the_store_disagrees_when_the_table_moves` is what
+keeps it from being a function that returns `Ok`.
+
+**The claim worth testing is that a score does not move.** `a_score_from_the_store_is_the_score_from_memory`
+scores a corpus through both backings over eight query shapes and compares `f32` **bit patterns**,
+not approximate equality — a term in one partition, a term in both, a term in neither, a repeated
+term, and the empty query. `tf` is compared too, because a search does not exercise it and a
+decomposed score does: the stored list is binary-searched in its value bytes at a fixed 36-byte
+stride rather than decoded.
+
+`redb` is registered in the purity gate's second list — permitted through this feature and
+nowhere by default — so making it a default feature is a change somebody has to argue for. Its
+only normal dependency on Linux and macOS is `libc`.
+
+**`Library` uses it, and the two paths arrived together.** A write puts the `postings` table in
+the store and writes the sidecar **without** it, bit cleared — so the rows are in one file, not in
+two with one hash between them. The sidecar format did not change: a table an index does not hold
+has always been written as a table of no rows. An open scores out of whichever file holds them,
+and `find --library` does not say which, because a caller asking for the index it has already paid
+for does not care.
+
+Four things this needed, each decided rather than inherited:
+
+- **An open never creates the store.** Opening a library is a write in exactly one case — rule Z,
+  which unlinks the objects of a redacted part — and a cache is not it. A library is handed its
+  store only when it already has one, and the first command that writes an index creates it. A
+  read-only command on a read-only corpus keeps working, which is the rule the sidecar has.
+- **A writing command hydrates before it appends.** `on_append` extends a table it can see, and
+  §3.8's gate is over a table rather than a file, so a library whose postings are stored reads
+  them back and writes the whole table again. That is the `O(corpus)` a sidecar paid on *every*
+  write, now paid only by commands that write; reading commands never pay it, which is the whole
+  saving. `complete_index` hydrates first and rebuilds only if that fails — otherwise a library
+  would reanalyse 155k units (1,898 ms) to arrive at rows already written down.
+- **§3.8's gate holds one level up.** `an_append_over_the_store_lands_where_a_rebuild_does`:
+  a library whose postings live in the store, appended to and written again, has an index whose
+  `to_bytes` is byte-identical to a full rebuild's. The file is not reproducible; the table is.
+- **A build without the feature says so by name.** It finds the bit clear and the file present,
+  and reports that the postings are in `index/substrate.redb`, which it cannot read — not that
+  the library has none. The remedies differ (a build, not a `--rebuild`), so the sentences do.
+
+`redb`'s `Database` is not `RefUnwindSafe` and a `Library` is handed out as
+`Arc<dyn PartResolver + Send + Sync + RefUnwindSafe>`, since `text show` resolves parts inside a
+`catch_unwind`. The store is held as `AssertUnwindSafe`, and the assertion is the cache argument:
+what unwind safety protects is a half-updated invariant that is then trusted, and every read here
+compares the catalog stamp first.
+
+`text index` reports the table where it actually is, counting the same terms and partitions either
+way, and names the file when the rows are in it. The facade feature is `substrate-redb`; it is off
+by default, which is a decision — it puts `redb` in the tree of a binary that runs perfectly well
+without it, and what it buys shows up on a corpus large enough for 1.1 KB a unit to matter.
+
+**Measured, and the first version was 3.4× slower than the thing it replaced.** 155,510 units in
+five texts, `--release`, both paths on the same machine:
+
+| | resident sidecar | backing store |
+|---|---|---|
+| query p95 | 34.9 ms | 120 ms → **28.6 ms** |
+| view opened in | 0.001 ms | 18.4 ms |
+| command, end to end | 739 ms | **700 ms** |
+| index written in | 47 ms | 673 ms, plus the store |
+| sidecar | 176 MiB | **24.8 MiB** |
+| store file | — | 514 MiB long, 312 MiB allocated |
+
+The 120 ms was the honest first result, and the fix was not where I looked. I removed two
+whole-postings-list copies from `df` and `tf` — real waste, worth removing — and the p95 moved
+from 125 to 120 ms, which is to say nowhere. What the numbers were pointing at was `doc_len`: a
+scorer asks it once per **posting**, so a common term cost one b-tree descent per document, and
+the one query in the set whose term has a single posting came back in 0.88 ms against 120 ms for
+the rest. Cost tracked postings-list length, not lookup count.
+
+So `doclen` is read into memory when a view opens and `postings` stays on disk. That is affordable
+for the reason the lists are not: a length is 36 bytes a unit against their 1.1 KB — 5.6 MB at
+155k units and 36 MB at 10⁶, against the 7 GB that made this file worth having. The table asked
+per posting is resident; the table that is 97% of the bytes is not.
+
+The result is a path that is **faster** than the one it replaces, per query and end to end, with
+143 MB of postings no longer in memory. Two costs remain, both off the query path and both
+recorded rather than fixed: the file is 1.8× the sidecar's bytes for the same rows, and writing it
+is an order of magnitude dearer. One blob per partition instead of a row per document is the next
+experiment for both.
+
+One thing the comparison turned up that is not about disks at all: the stored view's `doc_len` is
+one merged map, while `postings::View::doc_len` searches five partition maps in turn — which is
+why the store now wins on a corpus where it should at best draw. The in-memory view can have the
+same merge, and that is a change to the resident path rather than to this one.
+
 ### One name for the text vocabulary, and an entity that does not multiply
 
 TX-P5 step 2 ships `x.text/v1` as a declaration (A-11, new spec §5.1) and activates A-2.4 rule 7.

@@ -91,6 +91,26 @@ zip                   = { version = "=4.3.0", default-features = false, features
 # C in the core path" asks for and what `make crate-features` checks.
 flate2                = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
 
+# The substrate index's backing store (SMYSL-2.4 §3.8, `substrate-redb`; SMYSL-2.8 §3.5 shares
+# this pin with `store-redb`). `=2.6.4` and **not** 4.3.0, which is the current release, for the
+# reason `quick-xml` is pinned below its latest and `zip` far below its: 4.3 declares rustc 1.90
+# and 3.0 and 4.0 declare 1.89, while `smysl-text` is in the pure tier at 1.85. 2.6.4 declares
+# **1.85** — exactly this workspace's base — so the feature moves no floor for any build of the
+# substrate. SMYSL-2.4 §3.8 recorded the redb backing as owed on the strength of 4.3's 1.90
+# alone; the version table is in that section now, because "redb needs 1.90" is true of one
+# release and of nothing else.
+#
+# Pinned exactly rather than with a caret, and for a different reason than the readers: a
+# reader's output is a corpus's identity, while an index is derived and disposable. What the pin
+# buys here is that the *file format* behind `index.redb` changes only when somebody decides it
+# should — redb's format moved across both of its majors, and a silent minor bump that could not
+# open an existing file would turn a cache into a refusal.
+#
+# `default-features = false` drops nothing this needs: the default set is empty, and `logging`,
+# `cache_metrics` and `python` are all opt-in. Its only normal dependency on Linux and macOS is
+# `libc` — no `cc`, no C toolchain, which is what §13 asks for and `make crate-features` checks.
+redb                  = { version = "=2.6.4", default-features = false }
+
 # ---------------------------------------------------------------------------
 # Facade crate: [lib] + [[bin]] (RFC SMYSL-1 §12.1)
 # ---------------------------------------------------------------------------
@@ -180,6 +200,13 @@ text      = ["dep:smysl-text", "dep:getrandom", "smysl-check/text"]
 # that only some builds had would have made a mid depend on a feature flag. Here so that a
 # library consumer who wants `smysl::text::lang` can have it by name.
 lang-detect = ["text", "smysl-text/detect"]
+# The substrate index's backing store (SMYSL-2.4 §3.8). Off by default, and the default is the
+# decision rather than an oversight: it puts `redb` in the tree of a binary that runs perfectly
+# well without it, and what it buys shows up on a corpus large enough for 1.1 KB a unit to
+# matter. A build with it writes the `postings` table to `index/substrate.redb` instead of into
+# the sidecar, and `find --library` scores it there; a build without it says so, by name, rather
+# than reporting a library whose postings are written down as having none.
+substrate-redb = ["text", "smysl-text/substrate-redb"]
 tui       = ["dep:smysl-tui", "cli"]
 # Semantic retrieval. Off by default: it needs a model file the operator supplies, and a
 # build that cannot use one should not pay for `tokenizers` in its dependency tree.

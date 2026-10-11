@@ -59,6 +59,22 @@ detect = ["dep:lingua"]
 # (`smysl/an/1` rather than `smysl/an-ru/1`).
 stem = ["dep:rust-stemmers"]
 
+# The substrate index on disk (SMYSL-2.4 §3.8). Off by default and recorded in the purity
+# gate's second list, so a default build of the pure tier still links no database.
+#
+# What it buys is the one cost the sidecar cannot be made to pay. A posting is a 32-byte
+# content-addressed uid and a `u32`, so the `postings` table is about 1.1 KB a unit: 169 MB at
+# 155k units and 7 GB at the 10**6 SMYSL-2.8 sizes for, **all of it resident while the library is
+# open**. A uid is a hash, so a postings list of uids cannot be delta-encoded, and a dense
+# internal document id — the other half of the fix — cannot be maintained incrementally without
+# giving up §3.8's byte-for-byte rebuild gate: a content-derived id is a rank within its
+# partition, and appending one window to a partition of size *p* re-ranks *p* postings. Paging
+# the table instead makes the resident cost a configurable page cache and leaves the gate alone.
+#
+# It does not move the floor: redb 2.6.4 declares 1.85, this workspace's base. See the
+# workspace manifest's pin for why that is 2.6 and not 4.3.
+substrate-redb = ["dep:redb"]
+
 [dependencies]
 smysl-core            = { workspace = true }
 # `speaker.rs` derives a pseudonym with `blake3::keyed_hash`. No new crate in any tree:
@@ -93,6 +109,7 @@ lingua                = { workspace = true, optional = true }
 pulldown-cmark        = { workspace = true, optional = true }
 serde                 = { workspace = true, optional = true }
 serde_json            = { workspace = true, optional = true }
+redb                  = { workspace = true, optional = true }
 quick-xml             = { workspace = true, optional = true }
 zip                   = { workspace = true, optional = true }
 flate2                = { workspace = true, optional = true }

@@ -243,7 +243,8 @@ Every statement below was read from the tree. `cargo test --offline -p smysl-cor
 
 - Root `Cargo.toml`: features `default = ["cli", "local", "render-typst"]`, `cli`, `tui`,
   `semantic`, `providers`, `stage`, `ingest`, `local`, `remote`, `render-*`, `exact-pack`,
-  `tls-pure`. Workspace `rust-version = "1.85"` since 1.10.0 — `1.79` when this was written,
+  `tls-pure`, and `substrate-redb` since 1.10 (§3.8: the facade's name for `smysl-text`'s, so
+  that a binary can be built with the index's backing store). Workspace `rust-version = "1.85"` since 1.10.0 — `1.79` when this was written,
   and false then (§4.5, OQ-40) — with `smysl-provider` and `smysl-ingest` declaring 1.86 and
   `smysl-tui` and the facade 1.88. `resolver = "2"`, `fuzz` excluded.
 - `src/main.rs`: `enum Purity { Pure, Mixed, Model }`; `struct Cmd { name, about, purity, phase }`;
@@ -896,11 +897,83 @@ test asserts rebuild and incremental produce the same bytes.
   built from records 15 and 18, which a log never holds (OQ-39): the records say what changed and
   the library is where the changed thing is read from.
 - The backing is **in-memory maps plus a deterministic sidecar**, `index/substrate.idx`, checked
-  against the catalog's length and hash on open. `index.redb` behind feature `substrate-redb` is
-  **owed**: `redb` 4.3 requires Rust 1.90, Cargo gives `rust-version` per package rather than per
-  feature, and `smysl-text` is a base-tier crate at 1.85 — so the feature would move the floor
-  for every build of the substrate. The sidecar costs one rebuild rather than one per open, which
-  is better than the featureless path this section described.
+  against the catalog's length and hash on open. The sidecar costs one rebuild rather than one
+  per open, which is better than the featureless path this section described.
+
+  ~~`index.redb` behind feature `substrate-redb` is **owed**: `redb` 4.3 requires Rust 1.90,
+  Cargo gives `rust-version` per package rather than per feature, and `smysl-text` is a base-tier
+  crate at 1.85 — so the feature would move the floor for every build of the substrate.~~
+  **The floor argument was wrong, and it was wrong about one release rather than about redb.**
+  Checked 2026-10-11:
+
+  | redb | declares |
+  |---|---|
+  | **2.6.4** | **1.85** — exactly this workspace's base |
+  | 3.0.0 | 1.89 |
+  | 4.0.0 | 1.89 |
+  | 4.3.0 | 1.90 |
+
+  So the version is a choice and not a wall, and the workspace already makes this choice twice
+  for the same reason: `quick-xml` is pinned at `=0.41.0` because 0.42 declares 1.86, and `zip`
+  at `=4.3.0` against a current 9.0.0 that declares 1.88. `substrate-redb` is pinned at
+  `=2.6.4`, `smysl-text` keeps its declared 1.85, and `make msrv` confirms it: base 1.85 is
+  still the floor of eleven crates and the workspace floor is still 1.88, set by the facade.
+  `redb` is registered in the purity gate's second list — permitted through this feature and
+  nowhere by default — so a later edit that made it a default feature has to be argued there.
+
+  **Wired, 2026-10-11.** With the feature compiled in, a write puts the `postings` table in
+  `index/substrate.redb` and the sidecar is written **without** it, its bit cleared — the format
+  does not change, because a table an index does not hold has always been written as a table of
+  no rows. So the two files cannot hold the same rows under one hash, and which of them to ask is
+  a bit rather than a guess. Four consequences, each of which had to be decided rather than
+  inherited:
+
+  - **A byte comparison is unavailable here, and `Db::agrees` replaces it.** A redb file's page
+    allocation depends on the history of writes, so two libraries with identical contents have
+    different files. The comparison is over the logical table and returns the first difference as
+    a sentence. §3.8's own gate survives one level up: a library whose postings live in the store,
+    appended to and written again, produces an index whose `to_bytes` is byte-identical to a full
+    rebuild's.
+  - **An open never creates the file.** Opening a library is a write in exactly one case (rule Z,
+    §4.2) and a cache is not it, so a library is handed its store only when it already has one;
+    the first command that writes an index creates it. That keeps a read-only command on a
+    read-only corpus working, which is the same rule the sidecar has.
+  - **A writing command hydrates before it appends.** `on_append` extends a table it can see and
+    the gate above is over a table, not a file, so a library whose postings are in the store reads
+    them back and writes the whole table again — the `O(corpus)` a sidecar paid on *every* write,
+    now paid only by the commands that write. Reading commands never pay it, which is the saving.
+    The incremental write is what replaces this, and the shape that permits one is already the
+    key: `(partition, term)`.
+  - **A build without the feature says so by name.** It finds the bit clear and the file present,
+    and reports that the postings are in `index/substrate.redb`, which it cannot read — not that
+    the library has none. The remedy differs (a build, not a `--rebuild`), so the sentence has to.
+
+  **Measured 2026-10-11**, 155,510 units in five texts, `--release`, both paths on one machine:
+
+  | | resident sidecar | backing store |
+  |---|---|---|
+  | query p95 | 34.9 ms | 120 ms → **28.6 ms** |
+  | view opened in | 0.001 ms | 18.4 ms |
+  | command, end to end | 739 ms | **700 ms** |
+  | index written in | 47 ms | 673 ms, plus the store |
+  | sidecar | 176 MiB | **24.8 MiB** |
+  | store file | — | 514 MiB long, 312 MiB allocated |
+
+  **One table is resident and it is not the big one**, which the measurement decided rather than
+  the design. With both tables on disk a query cost 120 ms against the sidecar's 34.9: a scorer
+  asks `doc_len` once per *posting*, so a common term paid one b-tree descent per document, and
+  the one query whose term has a single posting came back in 0.88 ms. So `doclen` is read into
+  memory when a view opens and `postings` is read a term at a time. A length is 36 bytes a unit
+  against a list's 1.1 KB — 5.6 MB at 155k and 36 MB at 10⁶, against the 7 GB this file exists
+  for — so the table asked per posting is in memory and the table that is 97% of the bytes is not.
+
+  What that buys is measured and modest: the same query, slightly faster, with 143 MB no longer
+  resident. Two costs are owed and both are off the query path — the file is 1.8× the sidecar's
+  bytes for the same rows, and writing it is an order of magnitude dearer. Neither is attributed
+  yet: redb's `stats()` would say how much is fragmentation and how much is a 155k-row `doclen`
+  b-tree, and one blob per partition instead of a row per document is the next experiment for
+  both. The *written* cost of a posting is still the dense document id's to fix, and that is a
+  third decision rather than either of these.
 - A rebuild is **lenient** and completeness is tracked per manifest. An object can be missing
   (rule Z) or corrupt (`SMY-E446`), and a derived cache may not fail an open; a table that is
   partial must still never be half-trusted, which the per-manifest rule is what buys.
@@ -923,7 +996,8 @@ test asserts rebuild and incremental produce the same bytes.
 - `align` is derived from the library and from nothing else: the two manifests' `versification`
   declarations (key 14), the maps installed at `versification/*.tsv`, and the `locators` table.
   A map given on a command line would make the table unreproducible, so `text align` installs it.
-- A **dense document id** is owed beside `index.redb`. A posting is a 32-byte content-addressed
+- A **dense document id** is owed beside the store, and it is a second decision rather than the
+  other half of this one — which is the correction the wiring above forced. A posting is a 32-byte content-addressed
   uid and a `u32`, so the table is about 1.1 KB per unit — 169 MB at 155k and 7 GB at 10⁶ — and a
   uid is a hash, so a postings list of them cannot be delta-encoded. The remedy is a `u32` per
   unit internal to the table, which is a format decision about the backing and is recorded with
@@ -2576,7 +2650,7 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
    being a boolean. `Built` is a `u16` over `Table::ALL` positions, `Table::ON_OPEN` names the
    five an open can afford, and steps 3 and 4 will need the same distinction.
 
-   **The 169 MB sidecar is what will force §3.8's redb decision.** A posting is a 32-byte
+    **The 169 MB sidecar is what will force §3.8's redb decision.** A posting is a 32-byte
    content-addressed uid and a `u32`, so 25 terms a unit is about 1.1 KB a unit — 169 MB at 155k,
    and 7 GB at the 10⁶ units SMYSL-2.8 sizes for, all of it in memory while the library is open.
    The usual remedy does not apply: a uid is a hash, so a postings list of uids **cannot** be
@@ -2585,6 +2659,28 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
    belongs with the backing, so it is **recorded as owed** beside `index.redb` rather than taken
    here. At 155k the sidecar costs about as much to decode as the five tables cost to rebuild,
    which is why it is adequate now and will not be.
+
+   **Decided 2026-10-11, and the two halves turned out not to be one decision.** The owner chose
+   the redb backing and chose it *before* TX-P5 step 3, on the reasoning that step 3 is the first
+   thing to write units at corpus scale and G1 calls this the last cheap point to change the
+   table. What the options review found is that the 169 MB is two costs — bytes written and bytes
+   resident — and only one of them is the dense id's to fix:
+
+   - A **dense document id** fixes the written half cheaply and the resident half only if the id
+     is resident, and a resident one cannot be maintained incrementally without giving up this
+     section's byte-for-byte rebuild gate. A content-derived id is a rank within its partition —
+     that is what makes it a function of the library rather than of arrival order, which the gate
+     requires — so appending one window to a partition of size *p* re-ranks *p* postings. Ingest
+     commits window by window, which makes it quadratic per manifest. Assigned at *encode* time
+     instead it keeps the gate and the appends and buys the disk win alone.
+   - **Paging the table** makes the resident cost a page cache the caller sizes, and leaves the
+     gate alone.
+
+   So redb is the decision and the dense id becomes an on-disk encoding to take afterwards,
+   where it is a change to one value format and nothing else. Scope: `postings` first, since that
+   is where both figures live; `segments` and `locators` follow, where what the store buys is
+   persistence without a rebuild rather than memory; the five tables an open can afford stay in
+   the sidecar, which is reproducible and which this file is not.
 
    **`--library` has no corpus the CLI can give it yet**, and that is TX-P5's to fix. No command
    in this build puts a unit in a library: `text` writes manifests, parts and readings, and

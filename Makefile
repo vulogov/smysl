@@ -328,11 +328,13 @@ crate-features: ## Each crate with features, alone, at its defaults and with non
 		echo "==> cargo test -p smysl-text --no-default-features --features reader-$$r"; \
 		RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-text --no-default-features --features reader-$$r; \
 	done
-	@# And the two features of `smysl-text` that are not readers, for the same reason: both
-	@# arrived in TX-P2 step 1 because of what they drag in (`lingua`'s 57 crates behind
-	@# `detect`, `serde` behind `stem`), so both are combinations a developer will rarely build
-	@# by hand and a `cfg` list will happily get wrong.
-	@set -e; for f in detect stem; do \
+	@# And the features of `smysl-text` that are not readers, for the same reason: each arrived
+	@# because of what it drags in (`lingua`'s 57 crates behind `detect`, `serde` behind `stem`,
+	@# `redb` behind `substrate-redb`), so each is a combination a developer will rarely build
+	@# by hand and a `cfg` list will happily get wrong. `substrate-redb` alone is the sharpest of
+	@# the three: its module is the only one here that is entirely behind a feature, so a `use`
+	@# it needs from a sibling module would compile at `--all-features` and nowhere else.
+	@set -e; for f in detect stem substrate-redb; do \
 		echo "==> cargo test -p smysl-text --no-default-features --features $$f"; \
 		RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-text --no-default-features --features $$f; \
 	done

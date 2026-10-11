@@ -665,6 +665,15 @@ rebuild it and write the sidecar. The index is **never authoritative**: the cata
 objects are the truth, and this is a cache of what would otherwise be recomputed. Deleting
 `index/substrate.idx` loses nothing but the time it takes to build again.
 
+A build with `--features substrate-redb` writes **two** files: the `postings` table goes into
+`index/substrate.redb` and the sidecar is written without it, so the rows a query scores are read
+out of that file a term at a time instead of being held in memory. On the 155k-unit corpus that
+makes the sidecar 24.8 MiB instead of 176 MiB and the query very slightly faster, at the price of
+a larger file and a dearer write. `text index` says which file
+holds them and `--rebuild` names both. Deleting either loses nothing, for the same reason. A build
+*without* the feature meeting such a library says so by name — it will not tell you to
+`--rebuild` a file it cannot read, because that advice would overwrite rows that are not lost.
+
 What it buys is the question `text show` asks. Resolving a locator means finding which of a
 manifest's parts answers to it, and without the index that is one object read and one structure
 tree per part until one does. The `locators` table is that answer written down. A library that is

@@ -41,6 +41,8 @@
 //! that is not there. An index can therefore be half-built without ever being half-trusted.
 
 pub mod align;
+#[cfg(feature = "substrate-redb")]
+pub mod db;
 pub mod journal;
 pub mod postings;
 pub mod ranges;
@@ -56,7 +58,7 @@ use smysl_core::types::Record;
 use crate::library::Library;
 // The trait, for `MemPostings::analyzer` in the encoder. A postings row is read through the seam
 // here as everywhere else: the table is the seam's own shape, written down.
-use smysl_retrieve::Postings as _;
+use smysl_retrieve::Postings;
 
 /// File magic. Eight bytes, so the header is aligned and greppable.
 pub const MAGIC: &[u8; 8] = b"SMYSLSIX";
@@ -77,11 +79,18 @@ pub const DIR: &str = "index";
 
 /// The sidecar, relative to the library root.
 ///
-/// `index/substrate.idx` and not `index/index.redb`: the file the redb backing will write is
-/// a different file in the same reserved directory, so a library can carry both without one
-/// name meaning two formats. See the module note in [`tables`] on why the backing is separate
-/// from the tables.
+/// `index/substrate.idx` and not `index/substrate.redb`: the backing store is a different file
+/// in the same reserved directory, so a library can carry both without one name meaning two
+/// formats. See the module note in [`tables`] on why the backing is separate from the tables.
 pub const SIDECAR: &str = "index/substrate.idx";
+
+/// The backing store, relative to the library root (`substrate-redb`).
+///
+/// Named here rather than in [`db`] so that a build without the feature can still **say** that a
+/// library's postings are in a file it cannot read. The alternative was a build that reported
+/// "the index holds no postings yet" about a library whose postings were written down, which is
+/// the sort of true-sounding falsehood a cache should not be able to produce.
+pub const STORE: &str = "index/substrate.redb";
 
 /// The tables of §3.8, and which TX-P4 step builds each.
 ///
@@ -300,6 +309,15 @@ impl Built {
             .into_iter()
     }
 
+    /// The same mask with one table taken out.
+    ///
+    /// What writing the sidecar does with [`Table::Postings`] when the backing store holds them:
+    /// the table is not in the file, so the file may not claim it. See
+    /// [`Index::to_bytes_without_postings`].
+    pub const fn without(self, table: Table) -> Built {
+        Built(self.0 & !table.bit())
+    }
+
     /// The mask as it is written to the sidecar.
     pub const fn bits(self) -> u16 {
         self.0
@@ -442,6 +460,127 @@ pub struct Index {
     /// Postings per partition (TX-P4 step 2). See [`postings`] for the partition.
     pub postings: postings::Table,
     pub journal: Vec<journal::Row>,
+}
+
+/// Where a library's postings are, and what they hold — what `text index` prints.
+///
+/// One struct for both backings, because the question a reader is asking is about the corpus and
+/// not about the file: how many terms, across how many partitions, split by which chains. The one
+/// field that is about the file is `stored`, and it is here because a reader who is about to run
+/// `text index --rebuild` should know which of the two it would rewrite.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Held {
+    /// `true` when the rows are in the backing store rather than resident in this process.
+    pub stored: bool,
+    /// Terms, which is the quantity both backings count for [`Table::Postings`].
+    pub terms: usize,
+    pub partitions: usize,
+    /// The analyzer ids, sorted and without repetition.
+    pub analyzers: Vec<String>,
+}
+
+/// A scoring view over a library's postings, from whichever backing holds them.
+///
+/// The seam is [`smysl_retrieve::Postings`] and both backings implement it, so this enum exists
+/// only to be *named* by a caller that does not care which: `find --library` scores one of these
+/// and the ranking is the same either way, which is the claim
+/// `crates/smysl-text/tests/substrate_db.rs` checks bit for bit.
+///
+/// Not a `Box<dyn Postings>`: the trait's `analyzer` returns a borrowed id, the in-memory view
+/// borrows the index, and an enum keeps both lifetimes visible to the compiler instead of
+/// hiding them behind an allocation.
+#[non_exhaustive]
+pub enum Source<'a> {
+    /// The table this process holds.
+    Memory(postings::View<'a>),
+    /// The table beside the library, read a term at a time.
+    ///
+    /// Boxed: a stored view holds two open redb tables and is some 350 bytes, against the
+    /// in-memory view's vector of references. A caller moves one of these per query, so the
+    /// enum is the size of a pointer instead of the size of its largest arm.
+    #[cfg(feature = "substrate-redb")]
+    Stored(Box<db::View>),
+}
+
+impl Source<'_> {
+    /// How many partitions this view spans.
+    pub fn partitions(&self) -> usize {
+        match self {
+            Source::Memory(v) => v.partitions(),
+            #[cfg(feature = "substrate-redb")]
+            Source::Stored(v) => v.partitions(),
+        }
+    }
+
+    /// Whether the rows came from the backing store.
+    pub fn is_stored(&self) -> bool {
+        match self {
+            Source::Memory(_) => false,
+            #[cfg(feature = "substrate-redb")]
+            Source::Stored(_) => true,
+        }
+    }
+}
+
+/// Delegation, and nothing else. A method here that did arithmetic would be a third answer to a
+/// question two backings already answer identically.
+impl Postings for Source<'_> {
+    fn df(&self, term: &str) -> u32 {
+        match self {
+            Source::Memory(v) => v.df(term),
+            #[cfg(feature = "substrate-redb")]
+            Source::Stored(v) => v.df(term),
+        }
+    }
+
+    fn postings(&self, term: &str) -> Vec<(smysl_core::Uid, u32)> {
+        match self {
+            Source::Memory(v) => v.postings(term),
+            #[cfg(feature = "substrate-redb")]
+            Source::Stored(v) => v.postings(term),
+        }
+    }
+
+    fn doc_len(&self, uid: &smysl_core::Uid) -> Option<u32> {
+        match self {
+            Source::Memory(v) => v.doc_len(uid),
+            #[cfg(feature = "substrate-redb")]
+            Source::Stored(v) => v.doc_len(uid),
+        }
+    }
+
+    fn tf(&self, term: &str, uid: &smysl_core::Uid) -> u32 {
+        match self {
+            Source::Memory(v) => v.tf(term, uid),
+            #[cfg(feature = "substrate-redb")]
+            Source::Stored(v) => v.tf(term, uid),
+        }
+    }
+
+    fn docs(&self) -> u32 {
+        match self {
+            Source::Memory(v) => v.docs(),
+            #[cfg(feature = "substrate-redb")]
+            Source::Stored(v) => v.docs(),
+        }
+    }
+
+    fn total_len(&self) -> u64 {
+        match self {
+            Source::Memory(v) => v.total_len(),
+            #[cfg(feature = "substrate-redb")]
+            Source::Stored(v) => v.total_len(),
+        }
+    }
+
+    fn analyzer(&self) -> Option<&str> {
+        match self {
+            Source::Memory(v) => v.analyzer(),
+            #[cfg(feature = "substrate-redb")]
+            Source::Stored(v) => v.analyzer(),
+        }
+    }
 }
 
 /// Why a sidecar could not be used.
@@ -661,12 +800,36 @@ impl Index {
     /// what they would persist if either held a map whose iteration order were not its key
     /// order — so the gate compares what reaches the disk.
     pub fn to_bytes(&self) -> Vec<u8> {
+        self.dump(true)
+    }
+
+    /// The same dump with the `postings` table left out, and the bit for it cleared.
+    ///
+    /// What [`crate::library::Library::write_index`] writes when the backing store ([`db`]) is
+    /// holding the postings: the sidecar is 1.1 KB a unit lighter, the store carries its own
+    /// catalog stamp, and the two cannot disagree because the bit says which file to ask. A
+    /// sidecar that kept the table **and** a store that held it would be the same rows in two
+    /// places with one hash between them.
+    ///
+    /// The format does not change. A not-built table is written as a table of no rows, which is
+    /// what every table a partial index does not hold has always been written as — so a build
+    /// without the feature reads this file, finds the bit clear, and says what is true: the
+    /// postings are not in the index it can read.
+    pub fn to_bytes_without_postings(&self) -> Vec<u8> {
+        self.dump(false)
+    }
+
+    fn dump(&self, postings: bool) -> Vec<u8> {
         let mut w = Writer::new();
         w.raw(MAGIC);
         w.u16(VERSION);
         w.u64(self.catalog_len);
         w.raw(&self.catalog_hash);
-        w.u16(self.built.bits());
+        w.u16(if postings {
+            self.built.bits()
+        } else {
+            self.built.without(Table::Postings).bits()
+        });
 
         w.u32(self.manifests.len() as u32);
         for (mid, row) in &self.manifests {
@@ -765,8 +928,12 @@ impl Index {
             }
         }
 
-        w.u32(self.postings.len() as u32);
-        for (partition, row) in &self.postings {
+        w.u32(if postings {
+            self.postings.len() as u32
+        } else {
+            0
+        });
+        for (partition, row) in self.postings.iter().filter(|_| postings) {
             match partition {
                 postings::Partition::Text { mid, lang } => {
                     w.u8(1);

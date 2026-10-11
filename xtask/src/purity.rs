@@ -114,6 +114,20 @@ const NOT_IN_THE_CORE: &[(&str, &str)] = &[
         "futures-util",
         "only through `detect` of `smysl-text`, transitively under `lingua`",
     ),
+    // The substrate index's backing store (SMYSL-2.4 §3.8). Here rather than on `NEVER`
+    // because an embedded key-value file is neither a runtime nor a network: redb is
+    // synchronous, offline, and its only normal dependency on Linux and macOS is `libc`. What
+    // it is, is a *database* in a tier whose claim is that every operation is a function of its
+    // arguments — so it is permitted where the index needs it and nowhere by default, and a
+    // later edit that made `substrate-redb` a default feature would have to be argued here.
+    //
+    // Measured before adoption, like the others: redb 2.6.4 (not 4.3.0, which declares rustc
+    // 1.90, nor 3.0/4.0 at 1.89) declares **1.85** — exactly this tier's base — and brings one
+    // crate. The workspace manifest's pin records why the version is the one it is.
+    (
+        "redb",
+        "only through `substrate-redb` of `smysl-text` (SMYSL-2.4 §3.8)",
+    ),
 ];
 
 /// The pure crates. Every operation they expose is a bit-reproducible function of its
