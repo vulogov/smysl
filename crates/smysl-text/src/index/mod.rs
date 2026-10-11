@@ -40,16 +40,23 @@
 //! every part of that mid resolved into it, and `resolve` falls back to the search for a mid
 //! that is not there. An index can therefore be half-built without ever being half-trusted.
 
+pub mod align;
 pub mod journal;
+pub mod postings;
+pub mod ranges;
 pub mod tables;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use smysl_core::ids::{Mid, Rdid, Tid};
+use smysl_core::types::library::Axis;
 use smysl_core::types::Record;
 
 use crate::library::Library;
+// The trait, for `MemPostings::analyzer` in the encoder. A postings row is read through the seam
+// here as everywhere else: the table is the seam's own shape, written down.
+use smysl_retrieve::Postings as _;
 
 /// File magic. Eight bytes, so the header is aligned and greppable.
 pub const MAGIC: &[u8; 8] = b"SMYSLSIX";
@@ -58,7 +65,12 @@ pub const MAGIC: &[u8; 8] = b"SMYSLSIX";
 ///
 /// Independent of the wire format, and of `smysl_graph::store::index::VERSION`: this index is
 /// derived, so bumping it costs a rebuild and nothing else.
-pub const VERSION: u16 = 1;
+///
+/// **2** since TX-P4 step 2. Step 1 wrote a single `objects_read` byte, which was the right
+/// shape for two expensive tables and the wrong one for a third: `postings` reads no object and
+/// is still too dear for an open, so "which tables does this index actually hold" stopped being
+/// a boolean. It is a [`Built`] bitmask now, which is also what steps 3 and 4 will need.
+pub const VERSION: u16 = 2;
 
 /// The directory §4.1's layout reserves for the index, relative to the library root.
 pub const DIR: &str = "index";
@@ -133,8 +145,60 @@ impl Table {
         Table::Redactions,
         Table::Segments,
         Table::Locators,
+        Table::Align,
+        Table::Said,
+        Table::Composed,
+        Table::Observed,
+        Table::Postings,
         Table::Journal,
     ];
+
+    /// The tables an **open** fills, when there is no current sidecar to load instead.
+    ///
+    /// The eight built tables fall into three cost classes, and only the cheapest can be
+    /// afforded by every command that opens a library:
+    ///
+    /// | class | tables | measured at 155k units |
+    /// |---|---|---|
+    /// | arithmetic over the catalog's manifests | `manifests`, `parts`, `by-part`, `redactions` | 0.05 ms together |
+    /// | a pass or a solve over every unit | `journal` 55, `said` 99, `composed` 41, `observed` 10 | 205 ms together |
+    /// | analysing every unit's text | `postings` | 1,898 ms |
+    /// | one object read and one structure tree per part | `segments`, `locators` | tens of thousands of reads on five Bibles |
+    ///
+    /// The first two classes are what an open builds; `text index --rebuild` and the writing
+    /// commands build all eleven, and [`Index::built`] records which happened. The figures are
+    /// from `tests/postings_timing.rs` (`--release`, Appendix E's gist length) and they are the
+    /// reason the line falls where it does: the four tables in the second class are within a
+    /// factor of ten of each other and an order of magnitude short of `postings`. Two of those
+    /// numbers were orders of magnitude worse before this phase measured them — 4.53 s and 64 s
+    /// — and both reasons are recorded where they were fixed, in `journal::rebuild` and in
+    /// `crate::time::engine`'s `seed`.
+    pub const ON_OPEN: &'static [Table] = &[
+        Table::Manifests,
+        Table::Parts,
+        Table::ByPart,
+        Table::Redactions,
+        Table::Said,
+        Table::Composed,
+        Table::Observed,
+        Table::Journal,
+    ];
+
+    /// This table's bit in a [`Built`] mask: its position in [`Table::ALL`].
+    ///
+    /// Position rather than discriminant, so that the mask a sidecar carries does not change
+    /// meaning if a variant is ever inserted — `ALL` is the order §3.8 lists them in, and that
+    /// order is part of the format.
+    pub const fn bit(self) -> u16 {
+        let mut i = 0;
+        while i < Table::ALL.len() {
+            if Table::ALL[i] as u8 == self as u8 {
+                return 1u16 << i;
+            }
+            i += 1;
+        }
+        0
+    }
 
     /// The name §3.8 gives the table, which is also what `text index` prints.
     pub const fn as_str(self) -> &'static str {
@@ -183,6 +247,72 @@ impl Table {
 impl core::fmt::Display for Table {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+/// Which tables an index actually holds (1.10, TX-P4 step 2).
+///
+/// The one field of [`Index`] that is about the index rather than about the corpus, and the
+/// field that keeps a partial index from being a silently wrong one: a table that was not built
+/// reports itself as not built, answers no question, and refuses to be persisted — because a
+/// half-built sidecar would load as current on the next open, the catalog's hash agreeing.
+///
+/// A bitmask over [`Table::ALL`] positions rather than a `BTreeSet<Table>`: it is two bytes in
+/// the sidecar, it is `Copy`, and the question asked of it — "is this one built" — is a bit
+/// test. Step 1 had a boolean here and [`Table::ON_OPEN`] has the argument for why that stopped
+/// being enough.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Built(u16);
+
+impl Built {
+    /// No table built. What an index of an empty library would have, and the default.
+    pub const fn empty() -> Built {
+        Built(0)
+    }
+
+    /// Every table of a given set.
+    pub fn of(tables: &[Table]) -> Built {
+        tables.iter().fold(Built::empty(), |b, t| b.with(*t))
+    }
+
+    /// The same mask with one more table built.
+    pub const fn with(self, table: Table) -> Built {
+        Built(self.0 | table.bit())
+    }
+
+    /// Whether a table is built.
+    pub const fn has(self, table: Table) -> bool {
+        self.0 & table.bit() != 0
+    }
+
+    /// Whether every table this build fills is built.
+    pub fn is_complete(self) -> bool {
+        Table::BUILT.iter().all(|t| self.has(*t))
+    }
+
+    /// The tables that are built, in §3.8 order.
+    pub fn tables(self) -> impl Iterator<Item = Table> {
+        Table::ALL
+            .iter()
+            .copied()
+            .filter(move |t| self.has(*t))
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    /// The mask as it is written to the sidecar.
+    pub const fn bits(self) -> u16 {
+        self.0
+    }
+
+    /// A mask read back from a sidecar.
+    ///
+    /// Bits outside [`Table::ALL`] are dropped rather than refused: a sidecar written by a later
+    /// build may know tables this one does not, and the answer to that is to rebuild the ones
+    /// this build has — not to fail an open over a cache.
+    pub fn from_bits(bits: u16) -> Built {
+        let known = Table::ALL.iter().fold(0u16, |mask, t| mask | t.bit());
+        Built(bits & known)
     }
 }
 
@@ -285,22 +415,13 @@ pub struct Index {
     pub catalog_len: u64,
     /// BLAKE3 of those bytes.
     pub catalog_hash: [u8; 32],
-    /// Whether the two tables built by **reading objects** — `segments` and `locators` — were
-    /// built at all.
+    /// Which tables this index holds.
     ///
-    /// The one field that is about the index rather than about the corpus, and it is here
-    /// because opening a library may not afford them. Five of the seven tables are derived from
-    /// the catalog, which is already parsed and in memory, so building them on open costs
-    /// arithmetic. The other two cost **one object read and one structure tree per part**, which
-    /// on a corpus of five Bibles cut at the measured 1 KiB minimum is tens of thousands of
-    /// reads — an unacceptable price for `text ls`, which wants none of it.
-    ///
-    /// So [`Index::rebuild_catalog`] is what an open does and [`Index::rebuild`] is what
-    /// `text index --rebuild` and the writing commands do, and this field is what keeps the
-    /// difference from being silent: a partial index reports its two object tables as not built
-    /// rather than as empty, refuses to be persisted, and answers no locator question — which
-    /// sends `resolve` to the search, the answer it gave before this module existed.
-    pub objects_read: bool,
+    /// [`Table::ON_OPEN`] has the three cost classes and why an open builds five of the eight.
+    /// A partial index reports the three it did not build as not built rather than as empty,
+    /// refuses to be persisted, and answers no locator question — which sends `resolve` to the
+    /// search, the answer it gave before this module existed.
+    pub built: Built,
     pub manifests: BTreeMap<Mid, ManifestRow>,
     pub parts: BTreeMap<Tid, PartRow>,
     pub by_part: BTreeMap<Tid, Vec<Mid>>,
@@ -310,6 +431,16 @@ pub struct Index {
     /// so a lookup that misses is a lookup to make the other way rather than a locator that
     /// names nothing.
     pub locators: BTreeMap<Mid, LocatorTable>,
+    /// Which locator of one expression is which of another (TX-P4 step 4). See [`align`].
+    pub align: align::Table,
+    /// Effective `said` time per subject, as a range table (TX-P4 step 3).
+    pub said: ranges::Ranges,
+    /// Effective `composed` time per subject (TX-P4 step 3).
+    pub composed: ranges::Ranges,
+    /// Each unit's recorded `observed` instant, one millisecond wide (TX-P4 step 3).
+    pub observed: ranges::Ranges,
+    /// Postings per partition (TX-P4 step 2). See [`postings`] for the partition.
+    pub postings: postings::Table,
     pub journal: Vec<journal::Row>,
 }
 
@@ -344,35 +475,44 @@ impl Index {
     /// an error, because every caller is on a path that must not fail for a cache.
     pub fn rebuild(lib: &Library) -> Index {
         let mut ix = Index::rebuild_catalog(lib);
-        ix.objects_read = true;
         ix.segments = tables::segments_rebuild(lib);
         ix.locators = tables::locators_rebuild(lib);
+        ix.postings = postings::rebuild(lib, &ix.manifests, &ix.by_part);
+        // After `locators`, which it reads: an alignment is between two locator tables, and a
+        // manifest whose parts did not all resolve has none.
+        ix.align = align::rebuild(lib, &ix.manifests, &ix.locators);
+        ix.built = Built::of(Table::BUILT);
         ix
     }
 
     /// Build only the tables derived from the catalog, reading no object.
     ///
-    /// What opening a library does. See [`Index::objects_read`] for why the split exists: these
-    /// five are arithmetic over a log that is already parsed, and the two left out cost I/O per
-    /// part.
+    /// What opening a library does. See [`Table::ON_OPEN`] for why the split exists: these five
+    /// are arithmetic over a log that is already parsed, and the three left out cost either an
+    /// analysis of every unit or I/O per part.
     pub fn rebuild_catalog(lib: &Library) -> Index {
         Index {
             catalog_len: lib.store().log_len(),
             catalog_hash: *lib.store().log_hash(),
-            objects_read: false,
+            built: Built::of(Table::ON_OPEN),
             manifests: tables::manifests_rebuild(lib),
             parts: tables::parts_rebuild(lib),
             by_part: tables::by_part_rebuild(lib),
             redactions: tables::redactions_rebuild(lib),
             segments: BTreeMap::new(),
             locators: BTreeMap::new(),
+            align: align::Table::new(),
+            said: ranges::axis_rebuild(lib, Axis::Said),
+            composed: ranges::axis_rebuild(lib, Axis::Composed),
+            observed: ranges::observed_rebuild(lib),
+            postings: postings::Table::new(),
             journal: journal::rebuild(lib),
         }
     }
 
-    /// Whether both object-derived tables were built.
+    /// Whether every table this build fills was built.
     pub fn is_complete(&self) -> bool {
-        self.objects_read
+        self.built.is_complete()
     }
 
     /// Bring every table forward over records that were just appended.
@@ -389,15 +529,63 @@ impl Index {
         tables::by_part_on_append(&mut self.by_part, lib, records);
         tables::redactions_on_append(&mut self.redactions, lib, records);
         journal::on_append(&mut self.journal, lib, records);
+        if self.built.has(Table::Said) {
+            ranges::axis_on_append(&mut self.said, lib, Axis::Said, records);
+        }
+        if self.built.has(Table::Composed) {
+            ranges::axis_on_append(&mut self.composed, lib, Axis::Composed, records);
+        }
+        if self.built.has(Table::Observed) {
+            ranges::observed_on_append(&mut self.observed, records);
+        }
         // The two object tables are brought forward only when they exist. Absorbing an append
         // into a table that was never built would make it hold the parts added since the open
         // and not the ones that were there first - which is the one state the completeness flag
         // is for, since a half-built locator table cannot be told from a complete one at
         // lookup time.
-        if self.objects_read {
+        if self.built.has(Table::Segments) {
             tables::segments_on_append(&mut self.segments, lib, records);
+        }
+        if self.built.has(Table::Locators) {
             tables::locators_on_append(&mut self.locators, lib, records);
         }
+        // After `manifests` and `by_part`, which decide a unit's partition and which the lines
+        // above have just brought forward. A postings builder reading the old `head` would put
+        // the appended units in the partition the rebuild has stopped using.
+        // `align` is rebuilt rather than extended, and the reason is not laziness: a row
+        // depends on two manifests' numbering declarations, on the maps installed in the
+        // library, and on both locator tables — so a manifest arriving can create pairs with
+        // every manifest already there, and a map installed since the last build changes pairs
+        // nothing in the batch mentions. The rebuild is `O(head pairs × locators)` over tables
+        // already in memory, and the pairs are the texts of the library rather than its parts.
+        if self.built.has(Table::Align)
+            && records
+                .iter()
+                .any(|r| matches!(r, Record::Manifest(_) | Record::Redaction(_)))
+        {
+            self.align = align::rebuild(lib, &self.manifests, &self.locators);
+        }
+        if self.built.has(Table::Postings) {
+            postings::on_append(
+                &mut self.postings,
+                lib,
+                &self.manifests,
+                &self.by_part,
+                records,
+            );
+        }
+    }
+
+    /// Score the postings table, when this index holds one.
+    ///
+    /// `None` when `postings` was not built — which is an open that did not afford it — and the
+    /// caller's answer to that is to analyse the corpus in memory as `find` always has, or to
+    /// run `text index --rebuild` once and never pay it again. Not an empty view: an empty view
+    /// would retrieve nothing and look exactly like a corpus with nothing in it.
+    pub fn postings(&self) -> Option<postings::View<'_>> {
+        self.built
+            .has(Table::Postings)
+            .then(|| postings::View::all(&self.postings))
     }
 
     /// Whether this index describes the catalog it was opened beside.
@@ -415,9 +603,9 @@ impl Index {
         if !table.is_built() {
             return None;
         }
-        // A partial index says so about the two tables it did not build, rather than reporting
-        // them empty. `segments 0` on a library full of readings is a false sentence.
-        if !self.objects_read && matches!(table, Table::Segments | Table::Locators) {
+        // A partial index says so about the tables it did not build, rather than reporting them
+        // empty. `segments 0` on a library full of readings is a false sentence.
+        if !self.built.has(table) {
             return None;
         }
         Some(match table {
@@ -427,8 +615,18 @@ impl Index {
             Table::Redactions => self.redactions.len(),
             Table::Segments => self.segments.len(),
             Table::Locators => self.locators.values().map(BTreeMap::len).sum(),
+            Table::Align => align::rows(&self.align),
+            Table::Said => self.said.len(),
+            Table::Composed => self.composed.len(),
+            Table::Observed => self.observed.len(),
+            // Terms rather than partitions or postings: a row of a postings table is a term's
+            // list, and the count a reader can check against a corpus is how many distinct
+            // terms it holds. `text index` prints the partition and analyzer counts beside it.
+            Table::Postings => self.postings.values().map(|p| p.iter().count()).sum(),
             Table::Journal => self.journal.len(),
-            _ => return None,
+            // No catch-all arm, and the compiler is what says so: TX-P4 step 4 built the last of
+            // §3.8's twelve, so `_ => return None` became unreachable. It was the arm that said
+            // "this build has no builder for that table", and there is no such table any more.
         })
     }
 
@@ -446,7 +644,7 @@ impl Index {
     /// it a mid with no table and a mid whose every part resolved to nothing would be the same
     /// answer, and one of those means *search*.
     pub fn has_locators(&self, mid: &Mid) -> bool {
-        self.objects_read && self.locators.contains_key(mid)
+        self.built.has(Table::Locators) && self.locators.contains_key(mid)
     }
 
     /// Where the sidecar for a library lives.
@@ -468,7 +666,7 @@ impl Index {
         w.u16(VERSION);
         w.u64(self.catalog_len);
         w.raw(&self.catalog_hash);
-        w.u8(u8::from(self.objects_read));
+        w.u16(self.built.bits());
 
         w.u32(self.manifests.len() as u32);
         for (mid, row) in &self.manifests {
@@ -532,6 +730,70 @@ impl Index {
             }
         }
 
+        w.u32(self.align.len() as u32);
+        for ((a, b), row) in &self.align {
+            w.raw(a.as_bytes());
+            w.raw(b.as_bytes());
+            w.text(&row.scheme);
+            w.u32(row.uncovered);
+            w.u32(row.rows.len() as u32);
+            for (from, to) in &row.rows {
+                w.text(from);
+                w.text(to);
+            }
+        }
+
+        // The three range tables, in §3.8's order. Rows only: the max-hi tree over them is a
+        // function of the rows and is rebuilt on decode, so it is not a second thing that could
+        // be written down wrong.
+        for table in [&self.said, &self.composed, &self.observed] {
+            w.u8(u8::from(table.danglers()));
+            w.u32(table.rows().len() as u32);
+            for row in table.rows() {
+                match row.subject {
+                    ranges::Subject::Unit(uid) => {
+                        w.u8(0);
+                        w.raw(uid.as_bytes());
+                    }
+                    ranges::Subject::Manifest(mid) => {
+                        w.u8(1);
+                        w.raw(mid.as_bytes());
+                    }
+                }
+                bound(&mut w, row.lo);
+                bound(&mut w, row.hi);
+            }
+        }
+
+        w.u32(self.postings.len() as u32);
+        for (partition, row) in &self.postings {
+            match partition {
+                postings::Partition::Text { mid, lang } => {
+                    w.u8(1);
+                    w.raw(mid.as_bytes());
+                    w.text(lang);
+                }
+                postings::Partition::Loose => w.u8(0),
+            }
+            w.text(row.analyzer().unwrap_or_default());
+            let terms: Vec<(&str, &[(smysl_core::Uid, u32)])> = row.iter().collect();
+            w.u32(terms.len() as u32);
+            for (term, list) in terms {
+                w.text(term);
+                w.u32(list.len() as u32);
+                for (uid, tf) in list {
+                    w.raw(uid.as_bytes());
+                    w.u32(*tf);
+                }
+            }
+            let lens: Vec<(&smysl_core::Uid, u32)> = row.lengths().collect();
+            w.u32(lens.len() as u32);
+            for (uid, len) in lens {
+                w.raw(uid.as_bytes());
+                w.u32(len);
+            }
+        }
+
         w.u32(self.journal.len() as u32);
         for row in &self.journal {
             w.raw(row.tid.as_bytes());
@@ -553,7 +815,7 @@ impl Index {
         }
         let catalog_len = r.u64()?;
         let catalog_hash: [u8; 32] = r.take(32)?.try_into().map_err(|_| IndexError::Truncated)?;
-        let objects_read = r.u8()? != 0;
+        let built = Built::from_bits(r.u16()?);
 
         let mut manifests = BTreeMap::new();
         for _ in 0..r.u32()? {
@@ -641,6 +903,79 @@ impl Index {
             locators.insert(mid, table);
         }
 
+        let mut align = align::Table::new();
+        for _ in 0..r.u32()? {
+            let a = Mid::from_bytes(r.id()?);
+            let b = Mid::from_bytes(r.id()?);
+            let scheme = r.text()?;
+            let uncovered = r.u32()?;
+            let mut rows = BTreeMap::new();
+            for _ in 0..r.u32()? {
+                let from = r.text()?;
+                rows.insert(from, r.text()?);
+            }
+            align.insert(
+                (a, b),
+                align::Rows {
+                    scheme,
+                    rows,
+                    uncovered,
+                },
+            );
+        }
+
+        let mut three = Vec::new();
+        for _ in 0..3 {
+            let danglers = r.u8()? != 0;
+            let mut rows = Vec::new();
+            for _ in 0..r.u32()? {
+                let subject = match r.u8()? {
+                    0 => ranges::Subject::Unit(smysl_core::Uid::from_bytes(r.id()?)),
+                    1 => ranges::Subject::Manifest(Mid::from_bytes(r.id()?)),
+                    _ => return Err(IndexError::Malformed("range subject kind")),
+                };
+                let lo = read_bound(&mut r)?;
+                let hi = read_bound(&mut r)?;
+                rows.push(ranges::Row { lo, hi, subject });
+            }
+            three.push(ranges::Ranges::of(rows, danglers));
+        }
+        let mut three = three.into_iter();
+        let said = three.next().expect("three tables");
+        let composed = three.next().expect("three tables");
+        let observed = three.next().expect("three tables");
+
+        let mut postings = postings::Table::new();
+        for _ in 0..r.u32()? {
+            let partition = match r.u8()? {
+                0 => postings::Partition::Loose,
+                1 => postings::Partition::Text {
+                    mid: Mid::from_bytes(r.id()?),
+                    lang: r.text()?,
+                },
+                _ => return Err(IndexError::Malformed("postings partition kind")),
+            };
+            let analyzer = r.text()?;
+            let mut terms: BTreeMap<String, Vec<(smysl_core::Uid, u32)>> = BTreeMap::new();
+            for _ in 0..r.u32()? {
+                let term = r.text()?;
+                let mut list = Vec::new();
+                for _ in 0..r.u32()? {
+                    list.push((smysl_core::Uid::from_bytes(r.id()?), r.u32()?));
+                }
+                terms.insert(term, list);
+            }
+            let mut lens: BTreeMap<smysl_core::Uid, u32> = BTreeMap::new();
+            for _ in 0..r.u32()? {
+                let uid = smysl_core::Uid::from_bytes(r.id()?);
+                lens.insert(uid, r.u32()?);
+            }
+            postings.insert(
+                partition,
+                smysl_retrieve::MemPostings::from_parts(&analyzer, terms, lens),
+            );
+        }
+
         let mut journal = Vec::new();
         for _ in 0..r.u32()? {
             let tid = Tid::from_bytes(r.id()?);
@@ -653,15 +988,43 @@ impl Index {
         Ok(Index {
             catalog_len,
             catalog_hash,
-            objects_read,
+            built,
             manifests,
             parts,
             by_part,
             redactions,
             segments,
             locators,
+            align,
+            said,
+            composed,
+            observed,
+            postings,
             journal,
         })
+    }
+}
+
+/// A bound as a presence byte and an `i64`.
+///
+/// An open bound writes a zero and no instant rather than a sentinel: `Instant` is an `i64` and
+/// a corpus may legitimately name a date near either extreme — EDTF's `Y`-prefixed years reach
+/// the whole range — so a sentinel would make one real instant mean *unbounded*.
+fn bound(w: &mut Writer, b: ranges::Bound) {
+    match b {
+        ranges::Bound::Open => w.u8(0),
+        ranges::Bound::At(at) => {
+            w.u8(1);
+            w.u64(at.0 as u64);
+        }
+    }
+}
+
+fn read_bound(r: &mut Reader<'_>) -> Result<ranges::Bound, IndexError> {
+    match r.u8()? {
+        0 => Ok(ranges::Bound::Open),
+        1 => Ok(ranges::Bound::At(ranges::Instant(r.u64()? as i64))),
+        _ => Err(IndexError::Malformed("range bound kind")),
     }
 }
 

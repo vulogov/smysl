@@ -168,6 +168,13 @@ pub use smysl_graph::proposition;
 // Pure, and deliberately so: the default engine is BM25 with one transitive dependency, no
 // model and no runtime, so retrieval is a bit-reproducible function of the store and the
 // query. `Retriever` is the seam an impure semantic backend would sit behind.
+/// The analyzer and postings seams (1.10, SMYSL-2.4 §4.3.5).
+///
+/// Re-exported because `find --analyzer` is the command that names an analyzer and `find
+/// --library` is the command that scores a table it did not build — rule A says both reach them
+/// through here. `analyze` comes as a module: its `ID_PLAIN` would be a second `ID_PLAIN` beside
+/// `smysl_text::analyze`'s, and the two name different analyses.
+pub use smysl_retrieve::{analyze as retrieve_analyze, Analyze, Bm25View, MemPostings, Postings};
 pub use smysl_retrieve::{
     fold_suffix, tokenize as retrieve_tokenize, Bm25, Hit, PayloadFilter, Query, Retriever,
     Tokenizer,
@@ -319,7 +326,11 @@ mod tests {
         // an `observed` outside the `published` interval beside it, and an EDTF value outside
         // the millisecond range, indexed as an open bound rather than clamped. That is all of
         // RFC SMYSL-2.4's range but `SMY-E404` and `SMY-W405`, which read `source.span`.
-        assert_eq!(Code::ALL.len(), 78);
+        // 79 as of TX-P4 step 4, with `SMY-W451`: `text align` exists, so a locator an
+        // alignment scheme does not cover is a finding something can make. Step 1 could not
+        // have made it — there was no command that aligned two expressions, and the code would
+        // have sat in the registry unraisable, which is what this count is kept for.
+        assert_eq!(Code::ALL.len(), 79);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

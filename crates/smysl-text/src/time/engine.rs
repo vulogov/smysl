@@ -579,6 +579,18 @@ fn shares_a_part(store: &Store, mid: &Mid, m: &Manifest) -> bool {
 }
 
 /// The as-recorded interval and status of a subject (step 1).
+/// One subject's as-recorded interval on an axis, before any dating or constraint.
+///
+/// Exposed for TX-P4 step 3's `said` and `composed` range tables, whose incremental builder has
+/// one sound local case: a subject arriving into a corpus with nothing dangling, which nothing
+/// has dated and nothing constrains, keeps the interval this returns. The engine's own comment
+/// says why that is true — "disconnected subjects simply keep their seeds" — and a second
+/// implementation of seeding in the index would be a second answer to what a unit's own fields
+/// say about its time.
+pub fn seed_of(store: &Store, s: &Subject, axis: Axis) -> Interval {
+    seed(store, s, axis).interval
+}
+
 fn seed(store: &Store, s: &Subject, axis: Axis) -> Dated {
     let undated = |lo_status: TimeStatus| Dated {
         interval: Interval::UNDATED,
@@ -598,7 +610,12 @@ fn seed(store: &Store, s: &Subject, axis: Axis) -> Dated {
     }
     match s {
         Subject::Unit(uid) => {
-            let Some(unit) = store.units().find(|(u, _)| *u == uid).map(|(_, u)| u) else {
+            // `get`, not a scan of `units()`. It was the scan until TX-P4 step 3, and the cost
+            // was invisible on a fixture: one seed per subject over a store of *n* units is
+            // `O(n²)`, which at 155k subjects is **64 s** for this axis against 38 ms for the
+            // two that seed nothing. The index's `said` table is what made that measurable, and
+            // the fix is the lookup that was always there.
+            let Some(unit) = store.get(uid) else {
                 return undated(TimeStatus::Speculative);
             };
             let Some(source) = unit.core.source.as_ref() else {

@@ -151,7 +151,7 @@ discussion; OQ-7, OQ-23, OQ-35 and OQ-49 stay open with them.
 | TX-P1 **complete** | 2.4 | parts, readings, manifests, object store, first readers, structure, locators; `admission` opened (2.3 A-8.1) | met but for the corpus: the three ports derive every identity in the wire fixture and agree. GE-T1's five Bibles and JSON series are material this repository does not hold, and the debt is recorded at §5.5 rather than counted as passed | TX-P0, G0 **passed**; F-2 **done** (§1.1) |
 | TX-P2 **complete** | 2.4 | segmenter, analyzers, `lingua`, chat readers, `text append`, redaction (rule Z), **and the class core** (`strict`, `component`, `attested:n`) moved here from TX-P7 so TX-P5's consensus output can be read | met: GE-T1's chat half is pinned in `fixtures/library/readers/` and recomputed by all three ports, rule Z's algebra survives a stale peer by property, the strict class counts agree with an independent Python reading of A-12.4, and **GE-T14 ran** — the part minimum moved from 64 KiB to 1 KiB on the measured curve. Owed: the per-language boundary gold set | TX-P1 |
 | TX-P3 **complete** | 2.4 | EDTF, `published`, datings, rule E engine, locks, `date` commands | GE-T13 ran; 3 clauses of 4 met, a chronology owed | TX-P2 |
-| TX-P4 **under way** | 2.4 | substrate index, persistent postings, `text` commands | `find` p95 < 200 ms at 155k units. Step 1 done: seven of §3.8's twelve tables, both builders, `text index`, and the byte-comparison gate — which caught two of the five shapes it had to, measured by breaking each in turn. The redb backing is **owed** and the reason is MSRV, not effort (2.4 §6) | TX-P3 |
+| TX-P4 **complete** | 2.4 | substrate index, persistent postings, `text` commands | met, with one clause attributed: **all twelve** of §3.8's tables, both builders each, the byte-comparison gate — which caught two of the five shapes it had to, measured by breaking each in turn — the `Analyze`/`Postings` seams, `find --lang --analyzer --library`, `text align` and `text index`. `find`'s p95 clause is met for the **query** (2,034 ms → 34 ms at 155k) and not for the command (2.6 s → 659 ms), because what is left is the catalog load: SMYSL-2.8's M-7, and TX-P13's. Step 3's range clause is met with 24 rows read for 24 answers out of 155,510. OQ-4 was not needed and stays open. The redb backing and a dense document id are **owed** (2.4 §6) | TX-P3 |
 | TX-P5 | 2.4 | ingest over texts, owned-range spans, ledger digest, journal, FC-1/FC-3, entities without span, **consensus extraction** and **structural holder/mode** | G1, plus the probe-set gate and GE-T2 rerun the pivot adds (2.4 §6) | TX-P4, TX-P2's class core |
 | TX-P6 | 2.5 | `sq` core (pure) | `--seed-check` on every pure query | TX-P5 |
 | TX-P7 | 2.4 | same-as engines, linker, summary tree (`strict` classes moved to TX-P2) | GE-T5 **under the α-relative threshold** (2.4 §5.5), GE-T11 | TX-P5 |
@@ -501,6 +501,43 @@ feature as specified would move the floor for every build of the substrate to bu
 nobody had turned on. The tables, the builders and the gate are what the step owed; a sidecar
 checked against the catalog's length and hash carries them, and costs one rebuild rather than
 one per open.
+
+**TX-P4 step 2** is the postings table and the two seams that make it scorable, and it ends with
+the exit clause half met and the other half attributed. The two scoring paths agree **bit for
+bit** — uid, `f32` score and per-term decomposition, over twelve query shapes — which is the
+strongest reading of "results identical to the in-memory path" and the only one worth asserting:
+a scorer that agreed about the ranking and disagreed in the fourth decimal would still have
+changed every `--why` line `doc-output` compares. On the timing, a query over the table is
+**sixty times** faster at 155k units and inside the 200 ms the clause names; the command is four
+times faster and outside it, because what remains is parsing the catalog — a floor SMYSL-2.8
+already named as M-7 and assigned to TX-P13. The clause also names a corpus that is a *store*,
+and a partition is a manifest and a language, so there was no honest way to time the thing it
+asked for; what was timed instead is a library of the same size and the two quantities the clause
+is really comparing.
+
+The step found one defect in the step before it, and the finding is methodological as much as
+technical: step 1's `journal` rebuild inserted each row in order into a `Vec`, which is quadratic
+in bytes moved — **4.53 s** of a 4.96 s open at 155k units, in the one table step 1 had filed
+under "arithmetic over a log the open has already parsed". It is 58 ms sorted once. A fixture of
+nine lines cannot tell a cost class from a cost claim, and step 1's was a claim.
+
+**TX-P4 steps 3 and 4** finish the phase, and between them they found the thing worth taking out
+of it. Step 3's three range tables answer a window by descending a max-`hi` tree over rows in
+`lo` order, and the clause — "answers without sorting the store" — is asserted as a **count of
+rows read** rather than as a time, because a timing says the machine was fast where a count says
+the answer did not touch the corpus: 24 rows read for 24 answers out of 155,510. Step 4's `align`
+table maps a locator of one expression to a locator of another through a map *installed in the
+library*, which is what keeps a derived table derivable; the KJV ↔ Synodal Ps 14 ↔ Ps 13 clause is
+met, the numbering being a published convention while the verse text is synthetic and said to be.
+OQ-4 — the licence of *shipped* maps — turned out not to block the step at all.
+
+What the phase will be remembered for is the measuring. Three defects were found by building a
+corpus of the size the phase is sized for, and not one of them was visible on any fixture in the
+repository: step 1's `journal` rebuild was quadratic (4.53 s of a 4.96 s open), the time engine's
+`seed` scanned the whole store per subject (64.4 s for one axis, against 51 ms after a one-line
+fix), and the first postings query loop allocated a map per candidate (270 ms p95 against a
+clause asking for 200). Two of the three were in code that had already shipped a step with its
+tests passing. A cost class asserted in a doc comment is a claim; the measurement is the thing.
 
 TX-P3 adds one corpus item to the standing debt and no more: **a public chronology with known
 relative orders**, GE-T13's fourth clause. The harness takes one through

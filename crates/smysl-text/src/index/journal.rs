@@ -48,13 +48,23 @@ pub struct Row {
 }
 
 /// Rebuild the coverage half by re-checking every stored unit.
+///
+/// Collected and then sorted, rather than inserted in place one row at a time. The difference is
+/// not stylistic: an ordered insert into a `Vec` moves the tail, so building a table of *n* rows
+/// that way is `O(n²)` in bytes moved, and TX-P4 step 2's timing harness measured what that cost
+/// at the size the phase is sized for — **4.53 s** of a 4.96 s open at 155k units, six times the
+/// whole postings table. Step 1 put this table in the class it called arithmetic over a parsed
+/// log, and the reasoning was right about the table and wrong about the loop. It is 47 ms now.
 pub fn rebuild(lib: &Library) -> Vec<Row> {
-    let mut out: Vec<Row> = Vec::new();
-    for (uid, unit) in lib.store().units() {
-        if let Some(row) = row_of(*uid, unit.core.source.as_ref(), unit.core.status) {
-            insert_sorted(&mut out, row);
-        }
-    }
+    let mut out: Vec<Row> = lib
+        .store()
+        .units()
+        .filter_map(|(uid, unit)| row_of(*uid, unit.core.source.as_ref(), unit.core.status))
+        .collect();
+    out.sort_unstable();
+    // A uid is content-addressed, so a duplicate row is the same unit twice and carries the same
+    // status; `dedup` after a sort is the same answer `insert_sorted`'s `Err` arm gave.
+    out.dedup();
     out
 }
 

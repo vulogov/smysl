@@ -387,10 +387,13 @@ fn cli() -> Command {
                     Arg::new("action")
                         .required(true)
                         .value_name("ACTION")
-                        .value_parser(["add", "append", "ls", "show", "redact", "index"])
+                        .value_parser([
+                            "add", "append", "ls", "show", "align", "redact", "index",
+                        ])
                         .help(
                             "add a file, append a new version of one, list the catalog, \
-                             show a passage, redact a part, or report and rebuild the index",
+                             show a passage, align two numberings, redact a part, or report \
+                             and rebuild the index",
                         ),
                 )
                 .arg(
@@ -404,14 +407,34 @@ fn cli() -> Command {
                         .value_name("TARGET")
                         .help(
                             "the file for `add` and `append`, `<alias|mid>#<locator>` for \
-                             `show`, or a tid for `redact`",
+                             `show`, the first expression for `align`, or a tid for `redact`",
                         ),
+                )
+                .arg(
+                    Arg::new("other")
+                        .value_name("OTHER")
+                        .help("The second expression, for `align`"),
                 )
                 .arg(
                     Arg::new("reader")
                         .long("reader")
                         .value_name("R")
                         .help("Reader id, such as `txt/1` or `osis/1` (`add`)"),
+                )
+                .arg(
+                    Arg::new("versification")
+                        .long("versification")
+                        .value_name("S")
+                        .help(
+                            "The numbering this expression uses, such as `kjv` or `synodal` \
+                             (`add`); carried forward by `append`",
+                        ),
+                )
+                .arg(
+                    Arg::new("scheme")
+                        .long("scheme")
+                        .value_name("FILE")
+                        .help("A versification map to install and align by (`align`)"),
                 )
                 .arg(
                     Arg::new("alias")
@@ -952,6 +975,33 @@ fn cli() -> Command {
                             "Restrict to units whose payload has KEY equal to one of VALUE; a \
                              unit without the key is excluded",
                         ),
+                )
+                .arg(
+                    Arg::new("lang")
+                        .long("lang")
+                        .value_name("TAG")
+                        .help(
+                            "Analyse the query and the corpus with this language's chain, as \
+                             `ru` stems Russian; overridden by --analyzer",
+                        ),
+                )
+                .arg(
+                    Arg::new("analyzer")
+                        .long("analyzer")
+                        .value_name("ID")
+                        .help(
+                            "Name the analyzer by id (smysl/plain/1, smysl/fold-en/1, \
+                             smysl/an-<lang>/1)",
+                        ),
+                )
+                .arg(
+                    Arg::new("library")
+                        .long("library")
+                        .help(
+                            "Treat the store as a library root and score its persistent \
+                             postings instead of analysing the corpus again",
+                        )
+                        .action(ArgAction::SetTrue),
                 )
                 .arg(
                     Arg::new("why")
@@ -2296,6 +2346,212 @@ fn ranked(
         return Err(ExitCode::Failure);
     }
     Ok(smysl::Bm25::index(store).search(query))
+}
+
+/// The analyzer `find` was told to use, owning it for the length of the query (1.10).
+///
+/// Two variants because the two analyzer families live in two crates for a reason: the
+/// tokeniser splits identifiers and belongs with retrieval, the chains fold and stem and belong
+/// with language. A build without `--features text` has only the first, and says so rather than
+/// quietly analysing Russian with an English fold.
+enum Chosen {
+    Tok(smysl::Tokenizer),
+    #[cfg(feature = "text")]
+    Chain(smysl::text::analyze::Chain),
+}
+
+impl Chosen {
+    fn as_analyze(&self) -> &dyn smysl::Analyze {
+        match self {
+            Chosen::Tok(t) => t,
+            #[cfg(feature = "text")]
+            Chosen::Chain(c) => c,
+        }
+    }
+
+    fn id(&self) -> &str {
+        self.as_analyze().id()
+    }
+}
+
+/// Every analyzer id this build can produce, for a message that has to list them.
+fn analyzer_ids() -> Vec<String> {
+    let mut out: Vec<String> = smysl::retrieve_analyze::ids().map(str::to_string).collect();
+    #[cfg(feature = "text")]
+    out.extend(smysl::text::analyze::ids().map(str::to_string));
+    out
+}
+
+/// The analyzer named by `--analyzer`, or chosen by `--lang`, or `None` when neither was given.
+///
+/// An id this build cannot produce is a usage error and not a fallback: a query analysed by a
+/// chain other than the one it named would retrieve almost nothing and report it as a ranking.
+fn chosen_analyzer(m: &ArgMatches, cmd: &str) -> Result<Option<Chosen>, ExitCode> {
+    if let Some(id) = m.get_one::<String>("analyzer") {
+        if let Some(tok) = smysl::retrieve_analyze::by_id(id) {
+            return Ok(Some(Chosen::Tok(tok)));
+        }
+        #[cfg(feature = "text")]
+        if let Some(chain) = smysl::text::analyze::by_id(id) {
+            return Ok(Some(Chosen::Chain(chain)));
+        }
+        eprintln!("smysl {cmd}: this build cannot produce the analyzer `{id}`");
+        eprintln!("  it has: {}", analyzer_ids().join(", "));
+        // The stemming chains are behind a feature for a dependency reason, so a missing id is
+        // as often a build as a typo.
+        eprintln!("  the stemming chains (smysl/an-<lang>/1) need --features stem on smysl-text");
+        return Err(ExitCode::Usage);
+    }
+    let Some(raw) = m.get_one::<String>("lang") else {
+        return Ok(None);
+    };
+    let Ok(tag) = smysl::LangTag::new(raw.as_str()) else {
+        eprintln!("smysl {cmd}: `{raw}` is not a language tag");
+        return Err(ExitCode::Usage);
+    };
+    #[cfg(feature = "text")]
+    {
+        Ok(Some(Chosen::Chain(smysl::text::analyze::Chain::new(&tag))))
+    }
+    // Without the library layer there are no chains, and `folding_for` is the one
+    // language-dependent decision this tier can make: fold for `en`, leave everything else as
+    // written (F-4).
+    #[cfg(not(feature = "text"))]
+    {
+        Ok(Some(Chosen::Tok(smysl::Tokenizer::folding_for(&tag))))
+    }
+}
+
+/// `find` over an analyzer the caller chose, and over persistent postings when asked.
+///
+/// The slow path is the one `find` has always taken, with the analyzer swapped: analyse the
+/// corpus, then score it. The fast path is `--library`, which scores the `postings` table the
+/// substrate index already holds — the work is the same work, done once by whoever last wrote
+/// to the library.
+#[cfg(feature = "text")]
+fn find_with_chosen(
+    store: &Store,
+    q: &smysl::Query,
+    m: &ArgMatches,
+    path: &str,
+    cmd: &str,
+) -> Result<Vec<smysl::Hit>, ExitCode> {
+    use smysl::Retriever as _;
+
+    let chosen = chosen_analyzer(m, cmd)?;
+    if !m.get_flag("library") {
+        return Ok(in_memory_hits(store, q, chosen));
+    }
+
+    let library = match smysl::text::library::Library::open(std::path::Path::new(path)) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl {cmd}: {path}: {e}");
+            return Err(ExitCode::Failure);
+        }
+    };
+
+    // The analyzer is settled before it is known whether the table exists, so that the fast path
+    // and the fallback split the query the same way. They did not, in the first version of this:
+    // with no postings table the fallback took `Bm25::index`'s plain tokeniser and returned a
+    // different score for the same query than the table would have, which is the silent
+    // difference this whole step is trying not to have.
+    let chosen = match chosen {
+        Some(c) => c,
+        None => library_chain(&library),
+    };
+
+    let Some(view) = library.index().postings() else {
+        // An open builds five of the eight tables and `postings` is not one of them, for the
+        // reason `Table::ON_OPEN` records. Falling back is right — it is the same ranking — and
+        // saying so is right too, because the point of the flag was not to pay for it.
+        eprintln!(
+            "smysl {cmd}: {path}: the index holds no postings yet; analysing the corpus instead"
+        );
+        eprintln!("  `smysl text index --rebuild {path}` builds them once and writes them down");
+        return Ok(in_memory_hits(library.store(), q, Some(chosen)));
+    };
+
+    // A table analysed by a chain the query was not split by retrieves only the terms the two
+    // chains happen to agree about, which is a thin result rather than an error. Said once,
+    // rather than refused: per-document routing is what the partitions are *for*, so a
+    // multi-language library legitimately holds several chains and no one of them is the right
+    // way to split a query the caller did not qualify.
+    let ids = smysl::text::index::postings::analyzers(&library.index().postings);
+    if !ids.is_empty() && !ids.iter().any(|id| *id == chosen.id()) {
+        eprintln!(
+            "smysl {cmd}: {path}: the query is split by `{}` and this library is analysed by \
+             {} — only the terms they agree about can match",
+            chosen.id(),
+            ids.join(", ")
+        );
+        eprintln!("  --analyzer names one; `smysl text index {path}` lists them");
+    }
+    Ok(smysl::Bm25::over(&view, chosen.as_analyze(), library.store()).search(q))
+}
+
+/// The chain a library's own texts imply, for a query that named none.
+///
+/// The language of its texts when they agree about it, and the plain chain otherwise. Not a
+/// refusal: a library of texts in three languages is a thing to have, and the terms of a query
+/// have to be produced by *something* before anything can match. What the caller gets instead of
+/// a refusal is a line saying which chains the index holds, and `--analyzer` to name one.
+///
+/// Head manifests only. A superseded text is not what the library is about any more, and its
+/// language is not either.
+#[cfg(feature = "text")]
+fn library_chain(library: &smysl::text::library::Library) -> Chosen {
+    use std::collections::BTreeSet;
+    let langs: BTreeSet<&str> = library
+        .index()
+        .manifests
+        .values()
+        .filter(|row| row.head)
+        .map(|row| row.lang.as_str())
+        .collect();
+    let mut it = langs.into_iter();
+    match (it.next(), it.next()) {
+        (Some(lang), None) => match smysl::LangTag::new(lang) {
+            Ok(tag) => Chosen::Chain(smysl::text::analyze::Chain::new(&tag)),
+            Err(_) => Chosen::Chain(smysl::text::analyze::Chain::plain()),
+        },
+        _ => Chosen::Chain(smysl::text::analyze::Chain::plain()),
+    }
+}
+
+/// The same, for a build with no library layer compiled in./// The same, for a build with no library layer compiled in.
+#[cfg(not(feature = "text"))]
+fn find_with_chosen(
+    store: &Store,
+    q: &smysl::Query,
+    m: &ArgMatches,
+    _path: &str,
+    cmd: &str,
+) -> Result<Vec<smysl::Hit>, ExitCode> {
+    let chosen = chosen_analyzer(m, cmd)?;
+    if m.get_flag("library") {
+        eprintln!("smysl {cmd}: this build has no library layer (build with --features text)");
+        return Err(ExitCode::Usage);
+    }
+    Ok(in_memory_hits(store, q, chosen))
+}
+
+/// Analyse the corpus and score it, which is what `find` does without `--library`.
+///
+/// Through the postings seam rather than `Bm25::index_with`, because the chains are not
+/// tokenisers and `index_with` takes a `Tokenizer`. The two produce bit-identical scores for the
+/// same analyzer (`smysl-retrieve/tests/postings.rs`), so this is the same ranking by another
+/// road; with no analyzer named it is literally the same call `find` has always made.
+fn in_memory_hits(store: &Store, q: &smysl::Query, chosen: Option<Chosen>) -> Vec<smysl::Hit> {
+    use smysl::Retriever as _;
+    match chosen {
+        None => smysl::Bm25::index(store).search(q),
+        Some(c) => {
+            let analyze = c.as_analyze();
+            let postings = smysl::MemPostings::index(store, analyze);
+            smysl::Bm25::over(&postings, analyze, store).search(q)
+        }
+    }
 }
 
 /// A payload restriction from `KEY=VALUE[,VALUE]` (1.6).
@@ -4444,9 +4700,29 @@ fn cmd_find(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         Ok(v) => v,
         Err(code) => return code,
     };
-    let hits = match ranked(&store, &q, engine, model.as_deref(), "find") {
-        Ok(h) => h,
-        Err(code) => return code,
+    // `--lang`, `--analyzer` and `--library` are about how the *lexical* index is analysed and
+    // where it comes from. A semantic run has neither an analyzer nor a postings table, so
+    // accepting them there would be accepting an argument that does nothing — the F-13 class of
+    // defect this repository has one of already.
+    let chose = m.get_one::<String>("lang").is_some()
+        || m.get_one::<String>("analyzer").is_some()
+        || m.get_flag("library");
+    let hits = if chose && engine != Engine::Lexical {
+        eprintln!(
+            "smysl find: --lang, --analyzer and --library choose how the lexical index is \
+             analysed, and --engine is not lexical"
+        );
+        return ExitCode::Usage;
+    } else if chose {
+        match find_with_chosen(&store, &q, m, &path, "find") {
+            Ok(h) => h,
+            Err(code) => return code,
+        }
+    } else {
+        match ranked(&store, &q, engine, model.as_deref(), "find") {
+            Ok(h) => h,
+            Err(code) => return code,
+        }
     };
 
     if global.get_flag("json") {
@@ -6252,11 +6528,13 @@ fn cmd_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "append" => text_append(m, &root),
         "ls" => text_ls(m, &root),
         "show" => text_show(m, &root),
+        "align" => text_align(m, &root),
         "redact" => text_redact(m, &root),
         "index" => text_index(m, &root),
         other => {
             eprintln!(
-                "smysl text: `{other}` is not an action; it is add, append, ls, show, redact or index"
+                "smysl text: `{other}` is not an action; it is add, append, ls, show, align, \
+                 redact or index"
             );
             ExitCode::Usage
         }
@@ -6321,6 +6599,11 @@ fn text_add(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
                 return ExitCode::Usage;
             }
         }
+    }
+    // A name, not a map: `kjv`, `synodal`, `lxx`. What it buys is `text align`, which cannot
+    // align two expressions that have not each said how they are numbered.
+    if let Some(scheme) = m.get_one::<String>("versification") {
+        spec.versification = Some(scheme.clone());
     }
     let mut params = Params::default();
     for pair in m
@@ -6686,6 +6969,121 @@ fn persist_index(library: &smysl::text::library::Library, cmd: &str) {
 /// `None` for: an empty table and a table nobody wrote are different sentences, and the
 /// difference matters most to someone reading `postings 0` and concluding their corpus is
 /// unsearchable.
+/// `smysl text align A B --scheme FILE` (TX-P4 step 4).
+///
+/// Installs the map into the library and rebuilds the `align` table. Installing is the whole
+/// reason this writes anything: the table is derived, and §3.8's gate is that a rebuild from the
+/// library alone reproduces it — so a map that stayed on the command line would make the table
+/// reproducible only by whoever still had the command line.
+#[cfg(feature = "text")]
+fn text_align(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
+    use smysl::text::index::align;
+    use smysl::text::library::Library;
+
+    let (Some(a), Some(b)) = (m.get_one::<String>("target"), m.get_one::<String>("other")) else {
+        eprintln!("smysl text align: two expressions are needed, as `text align kjv synodal`");
+        return ExitCode::Usage;
+    };
+
+    let mut library = match Library::open(root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl text align: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    let (Ok(mid_a), Ok(mid_b)) = (library.head(a), library.head(b)) else {
+        eprintln!("smysl text align: `{a}` and `{b}` must each name one head of this library");
+        return ExitCode::Usage;
+    };
+
+    // Both must say how they are numbered, and the message names the key: an expression that has
+    // not said is not a failure of this command, it is a manifest that was written without the
+    // field, and `text add --versification` is where that is fixed.
+    for (who, mid) in [(a, &mid_a), (b, &mid_b)] {
+        let declared = library
+            .store()
+            .manifest(mid)
+            .and_then(|manifest| manifest.versification.clone());
+        if declared.is_none() {
+            eprintln!(
+                "smysl text align: `{who}` declares no versification (manifest key 14), so there \
+                 is nothing to align it by"
+            );
+            eprintln!("  `text add --versification SCHEME` records it when the text is added");
+            return ExitCode::Usage;
+        }
+    }
+
+    if let Some(file) = m.get_one::<String>("scheme") {
+        let path = std::path::Path::new(file);
+        let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+            eprintln!("smysl text align: --scheme {file}: a map is named by its file");
+            return ExitCode::Usage;
+        };
+        let text = match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("smysl text align: --scheme {file}: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        // Under the locks, like every other write to a library: installing a map changes what
+        // the next rebuild produces, which is the same kind of change appending a record is.
+        let shards = library.shards();
+        let _locks = match smysl::text::lock::acquire_all(root, &shards, "text align") {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("smysl text align: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        match smysl::text::versification::install(root, name, &text) {
+            Ok(scheme) => println!(
+                "installed  {name} ({} → {}, {} row(s))",
+                scheme.from,
+                scheme.to,
+                scheme.len()
+            ),
+            Err(e) => {
+                eprintln!("smysl text align: --scheme {file}: {e}");
+                return ExitCode::Usage;
+            }
+        }
+    }
+
+    library.reindex();
+    if let Err(e) = library.write_index() {
+        eprintln!("smysl text align: {e}");
+        return ExitCode::Failure;
+    }
+
+    let table = &library.index().align;
+    let Some(rows) = table.get(&(mid_a, mid_b)) else {
+        eprintln!(
+            "smysl text align: no installed map connects the two numberings `{a}` and `{b}` \
+             declare"
+        );
+        eprintln!("  --scheme FILE installs one; `text index` says what the table holds");
+        return ExitCode::Failure;
+    };
+    println!("scheme     {}", rows.scheme);
+    println!("aligned    {} locator(s)", rows.rows.len());
+    // `SMY-W451` as a count rather than a line per locator: a psalter has thousands, and the
+    // number is what says whether the map covers the corpus. The pairs are in the table for a
+    // caller that wants them.
+    println!("unaligned  {} locator(s) (SMY-W451)", rows.uncovered);
+    if let Some(back) = table.get(&(mid_b, mid_a)) {
+        println!("reverse    {} locator(s)", back.rows.len());
+    }
+    println!(
+        "table      {} pair(s), {} row(s)",
+        table.len(),
+        align::rows(table)
+    );
+    ExitCode::Success
+}
+
 #[cfg(feature = "text")]
 fn text_index(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
     use smysl::text::index::Table;
@@ -6721,19 +7119,31 @@ fn text_index(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
 
     for table in Table::ALL {
         match library.index().rows(*table) {
+            // `postings` is the one table whose row count is not the whole story: the rows are
+            // terms, and what a reader needs beside them is how the corpus was divided and
+            // which chains analysed it — a query has to name one of those ids.
+            Some(n) if *table == Table::Postings => {
+                let ix = library.index();
+                println!(
+                    "{:<11} {n} term(s) across {} partition(s), analysed by {}",
+                    table.as_str(),
+                    ix.postings.len(),
+                    if ix.postings.is_empty() {
+                        "nothing".to_string()
+                    } else {
+                        smysl::text::index::postings::analyzers(&ix.postings).join(", ")
+                    }
+                );
+            }
             Some(n) => println!("{:<11} {n} row(s)", table.as_str()),
-            // Two different reasons for the same `None`, and they are not the same news. A
-            // table this build has no builder for is a phase step away; a table this *library*
-            // has not had built is one `--rebuild` away, and saying "TX-P4 step 1" about it
-            // would read as a release that has not shipped.
-            None if table.is_built() => println!(
+            // One reason for a `None` now, where step 1 had two. A table this *library* has not
+            // had built is one `--rebuild` away; a table this *build* has no builder for was a
+            // phase step away, and as of TX-P4 step 4 there is no such table — every one of
+            // §3.8's twelve is built, which `every_table_is_named_and_says_which_step_builds_it`
+            // asserts by comparing `Table::BUILT` against `Table::ALL`.
+            None => println!(
                 "{:<11} not built for this library; `text index --rebuild` builds it",
                 table.as_str()
-            ),
-            None => println!(
-                "{:<11} not built; TX-P4 step {}",
-                table.as_str(),
-                table.step()
             ),
         }
     }

@@ -51,7 +51,7 @@ pub struct Bm25 {
 /// gist counts four times, in the body twice, in the detail once. Repetition rather than a
 /// post-hoc score multiplier because it also feeds the length normalisation, which is the
 /// part of BM25 that decides a short precise gist beats a long rambling body.
-fn repeats(weight: f32) -> usize {
+pub(crate) fn repeats(weight: f32) -> usize {
     match weight {
         w if w >= 1.0 => 4,
         w if w >= 0.5 => 2,
@@ -135,6 +135,23 @@ impl Bm25 {
 }
 
 impl Bm25 {
+    /// Score an existing postings table instead of building one (1.10).
+    ///
+    /// The hook TX-P4 step 2 exists for: `find` spends its time building this index and nothing
+    /// about that work is query-dependent, so a corpus that has already been analysed should be
+    /// searchable without analysing it again. The `store` argument is not in SMYSL-2.4 §4.3.5's
+    /// signature and is not optional — [`Bm25View`](crate::Bm25View) has the argument.
+    ///
+    /// Scores are bit-identical to [`Bm25::index_with`] over the same corpus and analyzer. That
+    /// is a tested claim rather than an intention: see `tests/postings.rs`.
+    pub fn over<'p>(
+        postings: &'p dyn crate::Postings,
+        analyzer: &'p dyn crate::Analyze,
+        store: &'p Store,
+    ) -> crate::Bm25View<'p> {
+        crate::Bm25View::new(postings, analyzer, store)
+    }
+
     /// What each query term contributed to this unit's score (R22, 1.6).
     ///
     /// Exact rather than attributed: BM25 sums `idf(t) · value(t, d)` over the *distinct* terms of

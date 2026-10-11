@@ -318,6 +318,7 @@ registry! {
         W449 = "SMY-W449", Warn,  "An EDTF value outside the instant range; indexed as an open bound";
         E450 = "SMY-E450", Error, "Appending to a pseudonymised expression without its pseudonym key";
         E452 = "SMY-E452", Error, "A record 15 or 18 was offered to a log; text lives in the object store";
+        W451 = "SMY-W451", Warn,  "An alignment scheme does not cover a locator; the pair is left unaligned and counted";
     }
 }
 
@@ -635,6 +636,12 @@ mod tests {
     /// rather than clamped. Both are findings about a *store*, which is why they waited for a
     /// pass — the engine computes intervals and pushes no diagnostics at all.
     ///
+    /// 79 with `SMY-W451` in TX-P4 step 4, where `text align` exists: an alignment scheme that
+    /// does not cover a locator leaves the pair unaligned, and the count of those is what says
+    /// whether a map covers a corpus. Registered now rather than in step 1 for the usual reason
+    /// — until there was a command that aligned two expressions, nothing in this build could
+    /// find an uncovered locator.
+    ///
     /// That completes RFC SMYSL-2.4's `E401`–`W459` range except `SMY-E404` and `SMY-W405`,
     /// which read `SourceRef.span` and arrive with FC-3 in TX-P5.
     ///
@@ -645,7 +652,7 @@ mod tests {
     /// build can produce, which is the thing this comment exists to prevent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 78);
+        assert_eq!(Code::ALL.len(), 79);
     }
 
     #[test]

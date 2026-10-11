@@ -38,11 +38,14 @@
 //! ids are not comparable and the id is how that is noticed rather than inferred from a bad
 //! answer. The dependency pins in `Cargo.toml` are what make the id mean one algorithm.
 //!
-//! # Not here yet
+//! # The seam
 //!
-//! `impl smysl_retrieve::Analyze for Chain`. The seam is TX-P4 step 2, and the chain is
-//! TX-P2 step 1 — it is wanted by the segmenter's callers before retrieval has the trait to
-//! hang it on. [`Chain::terms`] is the method that trait will call, with that signature.
+//! `impl smysl_retrieve::Analyze for Chain`, since TX-P4 step 2. The chain is TX-P2 step 1 —
+//! wanted by the segmenter's callers before retrieval had a trait to hang it on — and the
+//! signature [`Chain::terms`] was given then is the one the trait turned out to call, unchanged.
+//! The trait lives in the crate that *consumes* terms and the chains live here, where language
+//! lives, which is why the dependency runs `smysl-text` → `smysl-retrieve`: the consumer needs
+//! neither a segmenter nor a stemmer.
 
 #[cfg(feature = "stem")]
 use rust_stemmers::{Algorithm, Stemmer};
@@ -83,6 +86,31 @@ pub fn ids() -> impl Iterator<Item = &'static str> {
     #[cfg(not(feature = "stem"))]
     let rest = std::iter::empty();
     std::iter::once(ID_PLAIN).chain(rest)
+}
+
+/// The chain an id names, when this build can produce it (1.10).
+///
+/// The inverse of [`Chain::id`], for `find --analyzer`: a caller naming an id is naming an
+/// analysis, and the honest answers are "here it is" and "this build cannot produce that" — never
+/// a default chain under someone else's id. A build without feature `stem` can produce exactly
+/// one of the six, and this returns `None` for the other five rather than handing back the plain
+/// chain for `smysl/an-ru/1`.
+pub fn by_id(id: &str) -> Option<Chain> {
+    if id == ID_PLAIN {
+        return Some(Chain::plain());
+    }
+    #[cfg(feature = "stem")]
+    {
+        let (lang, _, _) = CHAINS.iter().find(|(_, chain_id, _)| *chain_id == id)?;
+        let tag = LangTag::new(*lang).ok()?;
+        Some(Chain::new(&tag))
+    }
+    // A build without the stemmer can produce one chain, and the five ids above are ids it
+    // cannot honour. `None` rather than `Chain::plain()`: handing back the plain chain under
+    // `smysl/an-ru/1` would index a Russian corpus unstemmed and record that it had been
+    // stemmed.
+    #[cfg(not(feature = "stem"))]
+    None
 }
 
 /// One language's analyzer chain.
@@ -196,6 +224,23 @@ impl Chain {
             out.push(folded);
         }
         out
+    }
+}
+
+/// The chains, through the seam `smysl-retrieve` scores and stores terms over (1.10, TX-P4 step 2).
+///
+/// The trait is in the crate that consumes terms and the implementation is here, where language
+/// lives — that is the whole reason the dependency runs this way and not the other. A caller
+/// building a postings table over a Russian text passes `&Chain::new(&lang)` and the table
+/// records `smysl/an-ru/1`; a query over that table has to be split by the same chain, and the
+/// id is what makes the mismatch visible rather than merely wrong.
+impl smysl_retrieve::Analyze for Chain {
+    fn id(&self) -> &str {
+        self.id
+    }
+
+    fn terms(&self, text: &str) -> Vec<String> {
+        Chain::terms(self, text)
     }
 }
 

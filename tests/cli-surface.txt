@@ -254,10 +254,13 @@ find       --source
 find       --noprogress
 find       --payload
 find       --json
-find       --why
+find       --lang
+find       --analyzer
 find       --quiet
+find       --library
 find       --verbose
 find       --seed-check
+find       --why
 find       --help
 retract    <UID>
 retract    [PATH]
@@ -546,34 +549,37 @@ ui         --verbose
 ui         --seed-check
 ui         --help
 text       <ACTION>
-text       [possible values: add, append, ls, show, redact, index]
+text       [possible values: add, append, ls, show, align, redact, index]
 text       [TARGET]
+text       [OTHER]
 text       --config
 text       --reader
-text       --alias
 text       --store
-text       --lang
+text       --versification
 text       --output
+text       --scheme
+text       --alias
 text       --format
 text       [possible values: surface, cbor]
+text       --lang
+text       --strict
 text       --licence
+text       --offline
 text       --carry
 text       [possible values: none, ref, text]
-text       --strict
-text       --offline
-text       --part-policy
 text       --no-color
-text       --param
 text       --noprogress
-text       --pseudonymise
-text       --as
+text       --part-policy
 text       --json
-text       --at
+text       --param
+text       --pseudonymise
 text       --quiet
-text       --reason
+text       --as
 text       --verbose
-text       --forks
+text       --at
 text       --seed-check
+text       --reason
+text       --forks
 text       --rebuild
 text       --raw
 text       --segments

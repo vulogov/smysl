@@ -86,6 +86,7 @@ pub mod segment;
 pub mod speaker;
 pub mod structure;
 pub mod time;
+pub mod versification;
 
 pub use analyze::Chain;
 pub use ids::{Did, LangTag, Mid, Rdid};

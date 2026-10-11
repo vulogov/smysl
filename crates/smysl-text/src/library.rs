@@ -97,6 +97,13 @@ pub struct AddSpec {
     /// it lives and what shape it has, the facade's `text` feature supplies the randomness, and
     /// this crate stays a function of what it was given.
     pub pseudonym_key: Option<speaker::Key>,
+    /// The versification scheme this expression is numbered in (manifest key 14, TX-P4 step 4).
+    ///
+    /// A *name*, not a map: `kjv`, `synodal`, `lxx`. What it buys is the `align` table — two
+    /// manifests can only be aligned if each says which numbering it uses, and a scheme that
+    /// connects the two names is installed in the library. Absent means the expression makes no
+    /// claim, and an expression that makes no claim is not aligned rather than aligned by guess.
+    pub versification: Option<String>,
 }
 
 impl AddSpec {
@@ -115,6 +122,7 @@ impl AddSpec {
             policy: None,
             title: None,
             pseudonym_key: None,
+            versification: None,
         }
     }
 
@@ -615,6 +623,11 @@ impl Library {
         spec.carry = head.carry;
         spec.policy = Some(policy);
         spec.pseudonym_key = key.cloned();
+        // Carried from the head, like the licence and the policy: an append is a new version of
+        // the *same* expression, and an expression does not change its numbering between
+        // versions. A successor that dropped it would unseat an aligned head with an unaligned
+        // one and the `align` table would quietly empty.
+        spec.versification = head.versification.clone();
         self.add_with(input, &spec, Some(mid), caps)
     }
 
@@ -699,6 +712,13 @@ impl Library {
         }
         if let Some(title) = spec.title.clone().or_else(|| out.title.clone()) {
             builder = builder.title(title);
+        }
+        // Only from the caller: no reader infers one. A USFM file names its books in the
+        // vocabulary `osis/1` normalises into, and the *numbering* is not something the file
+        // states — two Bibles with identical markup can be numbered differently, which is the
+        // whole reason the `align` table exists.
+        if let Some(scheme) = spec.versification.clone() {
+            builder = builder.versification(scheme);
         }
         if !out.creators.is_empty() {
             builder = builder.creators(out.creators.clone());

@@ -46,10 +46,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use smysl_core::{KernelType, SchemaId, Status, Uid};
 use smysl_graph::Store;
 
+pub mod analyze;
+pub mod postings;
 pub mod tokenize;
 
 mod lexical;
+pub use analyze::Analyze;
 pub use lexical::Bm25;
+pub use postings::{Bm25View, MemPostings, Postings};
 pub use tokenize::{fold_suffix, tokenize, Tokenizer};
 
 /// One retrieved unit and why it scored.
@@ -268,6 +272,24 @@ impl Query {
             Some(f) => f.admits(strings),
             None => true,
         }
+    }
+
+    /// Whether this query restricts the candidate set at all (1.10).
+    ///
+    /// For an implementation deciding whether to look a unit up. Applying a filter costs a read
+    /// per candidate, and a candidate set is the whole corpus for a term the whole corpus holds
+    /// — so a query that filters on nothing should pay for nothing.
+    ///
+    /// A method rather than five field tests at the call site, because `Query` is
+    /// `#[non_exhaustive]` and gains filters: a sixth one is then forgotten in one place rather
+    /// than wherever somebody wrote out the condition. An implementation that skips its filter
+    /// when this is `false` is correct by the definition of these five.
+    pub fn filters_anything(&self) -> bool {
+        !self.kinds.is_empty()
+            || self.min_status.is_some()
+            || !self.within.is_empty()
+            || self.payload.is_some()
+            || !self.schemas.is_empty()
     }
 
     /// Whether a unit passes the kind and status filters. Provided so every implementation

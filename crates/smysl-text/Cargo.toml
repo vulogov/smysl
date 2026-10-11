@@ -72,6 +72,13 @@ blake3                = { workspace = true }
 # the pure tier and `smysl-graph` does not depend on this one, so the edge adds no floor and no
 # cycle.
 smysl-graph           = { workspace = true }
+# `index/postings.rs` implements `smysl_retrieve::Postings` and `analyze.rs` implements
+# `smysl_retrieve::Analyze` (SMYSL-2.4 §4.3.5, TX-P4 step 2). The seams are in the crate that
+# *consumes* terms and the chains are here, where language lives, so the edge runs this way and
+# `smysl-retrieve` keeps needing neither a segmenter nor a stemmer. Both crates are pure and
+# base-tier, so no floor moves and there is no cycle: `smysl-retrieve` depends on core and graph
+# only.
+smysl-retrieve        = { workspace = true }
 unicode-normalization = { workspace = true }
 # `segment.rs`. Not behind a feature and not optional: a sentence is what ingest windows,
 # spans and propositions are counted in, so a build of this crate that could not find one

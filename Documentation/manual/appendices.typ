@@ -226,7 +226,7 @@ SM-P11.
 
 #section("find")
 
-*Rank units against a query, lexically.* Pure · 0.5.0.
+*Rank units against a query, lexically.* Pure · 0.5.0, TX-P4.
 
 #dtable(
   (auto, auto, 1fr),
@@ -242,12 +242,33 @@ SM-P11.
     ([`--schema`], [`ID` (repeatable)], [Restrict to units of this schema, kernel or extension (`x.domain/type`). Extension-typed units are retrievable at all since 1.7.]),
     ([`--payload`], [`KEY=VALUE[,VALUE]`], [Restrict to units whose payload has `KEY` equal to one of `VALUE`, nested keys written `a.b`; a unit without the key is excluded. Applied before the limit, and it does not re-score.]),
     ([`--why`], [—], [Also print, on stderr, which query terms each hit matched and what each contributed.]),
-    ([`PATH`], [positional], [Store to search.]),
+    ([`--lang`], [`TAG`], [Analyse the query and the corpus with this language's chain, so `ru` stems Russian and `de` folds `ß` to `ss`. Overridden by `--analyzer`.]),
+    ([`--analyzer`], [`ID`], [Name the analyzer outright: `smysl/plain/1`, `smysl/fold-en/1`, or one of the chains `smysl/an/1` … `smysl/an-ru/1`. An id this build cannot produce is refused, never silently replaced.]),
+    ([`--library`], [—], [Treat `PATH` as a library root and score the `postings` table its index already holds, instead of analysing the corpus again.]),
+    ([`PATH`], [positional], [Store to search, or a library root with `--library`.]),
   ),
 )
 
 The first command whose phase is a release rather than an `SM-Pnn`. The delivery phases
 ended at SM-P15, and writing `SM-P16` here would invent one to satisfy a naming pattern.
+
+*Which analyzer, and why it is a decision rather than a default.* What counts as a term is a
+decision about a language: `книгами` and `книга` are one word in Russian and two strings
+everywhere else. `--analyzer` names that decision and the id travels with any index built under
+it, because two indexes built under different ids are not comparable and the id is how that is
+noticed rather than inferred from a thin result. With neither flag given, the query is split the
+way it always was — `smysl/plain/1`, which splits identifiers and lowercases — except under
+`--library`, where the library's own texts decide: the chain of the language its head manifests
+agree on, and the plain chain when they do not.
+
+*`--library` is a different cost, not a different answer.* The table holds the terms of every unit
+of the library, so a query over it does no analysis. At 155k units that is the difference between
+34 ms and two seconds, measured in `crates/smysl-text/tests/postings_timing.rs`; what it does not
+move is the 625 ms spent parsing the catalog, so the command is four times faster rather than
+sixty. A library whose index holds no postings yet — any library opened since its catalog last
+changed — says so and analyses the corpus instead, which is the same ranking at the old price;
+`text index --rebuild` builds the table once. Nothing in this build puts a *unit* in a library, so
+until ingest arrives the flag has a corpus only where one was put there deliberately.
 
 #section("retract")
 
@@ -515,7 +536,7 @@ command says so rather than pretending.
 
 #section("text")
 
-*Library: add, append, list, show, redact and index texts.* Pure · TX-P1, TX-P4.
+*Library: add, append, list, show, align, redact and index texts.* Pure · TX-P1, TX-P4.
 
 The store argument is a **library root** rather than a log — a directory with a `LIBRARY`
 marker file in it, which `text add` creates. There is no separate flag for it: every command
@@ -526,8 +547,9 @@ keeps the meaning it has always had.
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
-    ([`ACTION`], [positional, required], [`add`, `append`, `ls`, `show`, `redact` or `index`.]),
-    ([`TARGET`], [positional], [The file, for `add` and `append`; `<alias|mid>#<locator>` for `show`; a tid for `redact`. `ls` and `index` take none.]),
+    ([`ACTION`], [positional, required], [`add`, `append`, `ls`, `show`, `align`, `redact` or `index`.]),
+    ([`TARGET`], [positional], [The file, for `add` and `append`; `<alias|mid>#<locator>` for `show`; the first expression for `align`; a tid for `redact`. `ls` and `index` take none.]),
+    ([`OTHER`], [positional], [The second expression, for `align`.]),
     ([`--reader`], [`R`], [Reader id, such as `txt/1` or `osis/1`. Required by `add`, and recorded in the manifest: it is what `SMY-E401` compares against when a corpus is re-read. Nine in a default build: `txt/1`, `md/1`, `usfm/1`, `osis/1`, `zefania/1`, `json/1`, `telegram/1`, `slack/1`, `whatsapp/1`.]),
     ([`--alias`], [`A`], [The alias the expression is catalogued under. Required by `add`.]),
     ([`--licence`], [`SPDX`], [The licence the text is under. Required by `add`; a missing one is not `unknown`, it is a decision nobody made.]),
@@ -536,6 +558,8 @@ keeps the meaning it has always had.
     ([`--part-policy`], [`P`], [The boundary rule and size targets parts are cut by. Recorded in the manifest, because the default changes as the cut gets measured.]),
     ([`--param`], [`K=V` (repeatable)], [A reader parameter. Recorded beside the reader id, because a parameter changes a reader's output: a corpus that recorded only the id would mean something else on re-read. Two readers take one: `whatsapp/1` *requires* `date-format=dmy|mdy|ymd`, because `03/04/2024` is two different days and the transcript does not say which, and both it and `telegram/1` accept `tz=±HHMM` for a timestamp written as a local wall clock.]),
     ([`--pseudonymise`], [—], [`add`: replace every speaker in the reading with `spk:` plus 26 base32 characters of keyed BLAKE3 of the platform's user id. The key is `secrets/pseudonym.key` under the library, created with thirty-two random bytes on first use, mode 0600, and never printed. It changes **no byte of the text** — the speaker is a field of a segment row — so the parts, their tids and their objects are the same as they would have been without it; only the reading differs. Names *inside* the prose are a different instrument.]),
+    ([`--versification`], [`S`], [`add`: the numbering this expression uses, as a name — `kjv`, `synodal`, `lxx`. Manifest key 14. No reader infers one: two Bibles with identical markup can be numbered differently, and the file does not say. `append` carries it forward from the head, because an expression does not change its numbering between versions.]),
+    ([`--scheme`], [`FILE`], [`align`: a versification map to install into the library and align by. Installed rather than merely read — see the prose below.]),
     ([`--forks`], [—], [`ls`: show only the aliases with more than one head (`SMY-W418`).]),
     ([`--rebuild`], [—], [`index`: rebuild every table from the catalogue and the objects, and write the sidecar. A library-wide operation, so it takes the library lock and then the shard locks in name order.]),
     ([`--raw`], [—], [`show`: print the passage's bytes with no heading.]),
@@ -608,6 +632,34 @@ no part or the wrong one.
 heads instead of picking one — printing the lower-sorting identity would make the answer depend
 on a hash. Naming one of the two heads works, which is what the refusal tells you to do.
 
+*`text align`.* `text align <a> <b> --scheme FILE` records which locator of one expression is
+which of another. Psalm 14 in a Hebrew-numbered Bible is Psalm 13 in a Septuagint-numbered one,
+and the shift runs from Psalm 10 to Psalm 147; two manifests can hold the same text, cut by the
+same policy, and address it with locators that never agree. A reader cannot fix that, because the
+numbering is not in the file — so each expression *declares* its numbering with
+`--versification`, and a map between two declarations is what connects them.
+
+The map is **installed into the library**, at `versification/<name>.tsv`, and that is the one
+thing worth understanding about this command. The `align` table is derived, and the rule every
+table in the index is under is that a rebuild from the library alone reproduces it. A map passed
+on a command line and not kept would make the table reproducible only by whoever still had the
+command line; installed, the next `text index --rebuild` finds it and builds the same table. A
+shipped map, when one is licensed, is the same file copied into the same place.
+
+The format is tab-separated: a `smysl/versification/1` marker, `from` and `to` naming the two
+numberings as a manifest names them, then one row per locator pair. A **chapter row carries its
+verses** — `Ps.14 → Ps.13` maps `Ps.14.3` to `Ps.13.3` — because a whole-chapter offset is what
+most of a versification difference is, and an exact row always wins, which is what a psalm whose
+verse numbering also moves needs. One level of carry and no more: a book-level row does not
+silently renumber a Bible through two levels of guessing.
+
+Both directions go in the table, the reverse built from the same map so the two cannot disagree —
+and refused outright if the forward map is not injective, because a reverse that dropped one of
+two rows pointing at the same verse would answer with the wrong one. A locator the map does not
+cover is **not aligned and counted** (`SMY-W451`): the command prints the count, because that is
+what says whether a map covers a corpus. Nothing is guessed. An alignment is what a later engine
+grounds a `same-as` on, and a guessed one would put a claim about one verse onto another.
+
 *`text index`.* What the library's derived index holds, one line per table, and `--rebuild` to
 rebuild it and write the sidecar. The index is **never authoritative**: the catalogue and the
 objects are the truth, and this is a cache of what would otherwise be recomputed. Deleting
@@ -620,10 +672,20 @@ being added to never pays for it twice: `text add`, `text append` and `text reda
 the index forward over what they appended and write it out, and only a library written by a
 release without an index rebuilds from scratch.
 
-Five of the twelve tables print `not built` and the phase step that will fill them, rather than
-printing zero rows. That distinction is the point of the line: `postings 0` would read as a
-corpus nothing can be found in, where what it means is that persistent postings are the next step
-and `find` is using the in-memory path meanwhile.
+Every one of the twelve tables §3.8 names is built as of TX-P4 step 4, so none of them prints
+`not built; TX-P4 step n` any more — the line that said which phase step would fill a table has
+no table left to say it about.
+
+A table this *library* has not had built says so instead, and names `--rebuild`. Opening a
+library builds the five tables that are arithmetic over a catalog it has already parsed and
+leaves the three that are not: `segments` and `locators` cost an object read and a structure tree
+per part, and `postings` analyses every unit in the corpus. A partial index answers no locator
+question and refuses to be written to the sidecar, because a half-built sidecar would load as
+current next time with the catalog's hash agreeing.
+
+The `postings` line says more than a row count, because the row count is terms: how many
+partitions the corpus is divided into and which chains analysed them. A query has to be split by
+one of those chains to match anything, which is what `find --analyzer` is for.
 
 A table is only ever as complete as the objects it was built from, and a locator table is **all
 or nothing per manifest** for a reason worth knowing: a redacted part has no bytes to read, so a
@@ -911,6 +973,7 @@ check — which a caller can read, where silence would have to be guessed at.
     ([`SMY-W449`], [warn], [An EDTF value that parses and names an instant no millisecond counter can hold — a `Y`-prefixed year of three hundred million, say. It is ordered as an *open bound* rather than clamped to the nearest representable instant, because a clamped bound is a claim nobody made and it would propagate through every ordering that touches it. The value itself is kept exactly as written.]),
     ([`SMY-E450`], [error], [An append to a pseudonymised expression with no pseudonym key. The key lives at `secrets/pseudonym.key` under the library root and is what makes a pseudonym stable across appends; without it the same speaker would be given a second name and the conversation would read as two people. The refusal happens before anything is written.]),
     ([`SMY-E452`], [error], [A part text or a part reading was offered to a log, and a log does not hold text. Text lives in the object store, and the whole batch is refused before a byte is written. The reason is the log's own integrity: a log holding text would one day have to be rewritten to honour a redaction, and rewriting an append-only log resets exactly the hash chain that would have shown the rewrite. Erasure is therefore always an unlink.]),
+    ([`SMY-W451`], [warn], [An alignment scheme does not cover a locator, so the pair is left unaligned and counted. Two misses give the same answer: a scheme that says nothing about this locator, and one that maps it somewhere the other expression does not hold. The count is what says whether a map covers a corpus — a guessed alignment would put a claim about one verse onto another, and this table is what a later engine grounds a `same-as` on.]),
   ),
 )
 

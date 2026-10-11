@@ -82,6 +82,14 @@ impl Tokenizer {
         }
     }
 
+    /// Whether this tokeniser emits folded forms beside the terms (1.10).
+    ///
+    /// Added for [`crate::Analyze::id`], which has to name one of two analyses and cannot ask
+    /// a private field. Also what a command printing which analyzer it used reads.
+    pub fn folds(&self) -> bool {
+        self.fold
+    }
+
     pub fn terms(&self, text: &str) -> Vec<String> {
         let mut out = tokenize(text);
         if self.fold {

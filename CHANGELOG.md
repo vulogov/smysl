@@ -58,6 +58,145 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### Twelve tables, and three defects that only a corpus could find
+
+TX-P4 steps 3 and 4 finish RFC SMYSL-2.4 §3.8: the `said`, `composed` and `observed` range tables
+and the `align` table, which is the twelfth and last. `text align`, `text add --versification`,
+and `SMY-W451` registered now that something can raise it.
+
+**A range answers by reading the answer.** The three time tables hold rows in `lo` order with a
+max-`hi` tree over them, and a window descends it, pruning any subtree whose every interval ends
+before the window starts. Over 155,510 rows a day's window of an hourly corpus reads **24 rows
+for 24 answers** — 8.4 µs end to end through a reopened library. The clause asked for "without
+sorting the store" and that is asserted as a *count of rows read*, misses included, rather than
+as a time: a timing says this machine was fast, a count says the answer did not touch the corpus.
+
+**Undated is not a row.** `Interval::UNDATED` has no bounds, so it intersects every window: a
+table holding undated rows would answer "said during the 1990s" with every unit nobody has dated.
+A-2.4 rule 5 says undated is not early and not late, and the table holds the subjects *known* to
+overlap something — a half-bounded interval is one of those and an unbounded one is not.
+
+**An alignment needs the map to be in the library, not on the command line.** `align` maps a
+locator of one expression to a locator of another: Psalm 14 in a Hebrew-numbered Bible is Psalm 13
+in a Septuagint-numbered one, and no reader can see that because the numbering is not in the
+file. Each expression declares its numbering (`--versification`, manifest key 14) and a map
+connects two declarations — installed at `versification/<name>.tsv`, because the table is derived
+and the rule every table here is under is that a rebuild from the library alone reproduces it. A
+map that stayed in an argument would make the table reproducible only by whoever still had the
+argument. A chapter row carries its verses one level and no further; an exact row always wins,
+which is what a psalm whose verse numbering also moves needs; the reverse direction is built from
+the forward map and refused outright when that map is not injective, because a reverse that
+dropped one of two rows pointing at the same verse would answer with the wrong one. Nothing is
+guessed: an uncovered locator is counted (`SMY-W451`) and the count is what says whether a map
+covers a corpus.
+
+OQ-4 — the source and licence of *shipped* versification maps — turned out not to block the step.
+A map installed in a library is a mechanism; a map distributed with the crate is a dataset, and
+that question is still open with `data/versification/` still empty.
+
+**Three defects, none visible on any fixture in this repository.** This is the part worth keeping.
+
+| what | cost at 155k units | after | where it had been hiding |
+|---|---:|---:|---|
+| `journal` rebuilt by ordered `Vec` insert | 4.53 s | 58 ms | shipped in step 1, tests passing |
+| `time::engine`'s `seed` scanning the store per subject | 64.4 s for one axis | 51 ms | shipped in TX-P3, tests passing |
+| the postings query allocating a map per candidate | 270 ms p95 | 34 ms | step 2, before its first measurement |
+
+Each is one line or one loop, and each was in code whose suite was green. The instrument that
+found all three was a corpus of the size the phase is sized for — which is also what let step 3's
+tables be put in the set an open builds, on numbers rather than on a principle: `journal` 55 ms,
+`said` 99, `composed` 41, `observed` 10, against 1,898 ms for `postings`. Four tables within a
+factor of ten of each other belong in one class and the one an order of magnitude past them
+belongs in another. A cost class asserted in a doc comment is a claim; this phase learned to
+measure before writing one down.
+
+**The incremental builder for effective time recomputes, and that is correct rather than lazy.**
+One dating can move any subject's interval, and the only way to know which is to solve the
+network. The local path — extend with an arriving subject's own seed — is taken only when the
+batch holds nothing but units, manifests and text objects *and* the corpus has nothing dangling,
+which the engine already reports as unresolved datings and unbuilt constraints. That bit is in the
+dump, because while it is set an arriving unit can resolve a dating.
+
+### Sixty times faster to ask, four times faster to run, and the difference is the load
+
+`find` spent its time *building* an index rather than searching one — 7.06 s of 7.59 s at 155k
+units (F-10, SMYSL-2.8 M-5) — and nothing about that work is query-dependent. The terms of a unit
+are a fact about the unit. TX-P4 step 2 puts them in the `postings` table of RFC SMYSL-2.4 §3.8,
+beside the seven step 1 built, with the two builders every table there has and the same
+byte-comparison gate.
+
+**The two scoring paths agree bit for bit, and that is asserted rather than intended.** Not about
+the ranking: about the whole result — uid, `f32` score and per-term decomposition — over twelve
+query shapes and both tokenisers. A scorer that agreed about the order and disagreed in the fourth
+decimal would pass a looser test and would have changed every `--why` line the tool has printed,
+which `doc-output` compares. So `Bm25View` reproduces the `bm25` crate's arithmetic operation for
+operation, and sums over the query's tokens in order and with repetition.
+
+The fast implementation *looks* like it loses that order and does not. Scoring term-by-term across
+documents rather than document-by-document across terms is not a reassociation of the sum: each
+document's accumulator receives its contributions in query order either way. The two differences
+are exact. A term the document lacks contributed `idf · 0.0`, and adding zero to a non-negative
+float is the identity; a term the corpus lacks contributed the same zero to every document and is
+skipped whole.
+
+**Where the two paths genuinely differ, this one is right.** The `bm25` crate identifies a term by
+`hash32` of it and counts document frequency per hash, so two colliding terms share a `df` and a
+`tf` there. A table keyed by the term cannot collide. Over a 50k vocabulary the birthday bound puts
+a colliding pair at a few parts in a thousand — not theoretical at corpus scale — and the
+divergence is recorded rather than reproduced, because imitating a 32-bit hash to stay compatible
+with it would be preserving a defect.
+
+**The measurement, and the half of the clause that cannot be met here.** On 155,510 synthetic units
+with Appendix E's 25-word gists, in five texts, `--release`:
+
+| | before | after |
+|---|---:|---:|
+| one query, p95 of 20 | 2,034 ms | **34 ms** |
+| `find`, end to end | ~2.6 s | **659 ms** |
+| opening the library | 613 ms | 625 ms |
+| building every table once | — | 765 ms |
+
+The query is sixty times faster and inside the 200 ms the exit clause asks for. The command is
+four times faster and outside it, because 625 ms of what is left is parsing a 155k-unit catalog —
+SMYSL-2.8's M-7, "the sidecar never short-circuits a load", which is TX-P13's layered store and
+not this phase. No index can meet a clause written as "`find` p95" while the load costs three
+times the budget; which half moved is the useful thing to say.
+
+**A fixture of nine lines measures nothing: step 1's `journal` rebuild was quadratic.** Each row
+was inserted in order into a `Vec`, which moves the tail — **4.53 s** of a 4.96 s open at 155k
+units, six times the cost of the whole postings table, in the table step 1 had filed under
+"arithmetic over a log the open has already parsed". The reasoning was right about the table and
+wrong about the loop. Sorted once instead, it is **58 ms**. Nothing but a corpus of the size the
+phase is sized for was ever going to find that.
+
+**Partitioning had to be derived, because a unit does not say.** §3.8 partitions by manifest ×
+language and a unit says neither; what it says is a `source.reference` naming a part, which
+manifests record, each with one language. So the partition comes through the `by_part` and
+`manifests` tables with the head manifest deciding, and the language stays in the key for the day
+FC-1 gives a unit its own. Scoring sums over every partition: `df`, `docs` and `total_len` are
+additive over disjoint document sets, so the sum is the whole-corpus statistic exactly — which is
+what makes "identical to the in-memory path" reachable instead of approximate.
+
+**`objects_read` became a bitmask**, and the sidecar is version 2. Step 1's boolean was the right
+shape for two expensive tables and the wrong one for a third: `postings` reads no object and is
+still the dearest table here, so *which* tables an index holds stopped being a yes-or-no.
+
+**What is owed.** The sidecar is 169 MB at 155k units and would be 7 GB at the 10⁶ SMYSL-2.8 sizes
+for, because a posting is a 32-byte content-addressed uid and a `u32`. The usual remedy does not
+apply — a uid is a hash, so a postings list of them cannot be delta-encoded — and the fix is an
+internal dense document id, about 5 bytes a posting instead of 36. That is a format decision about
+the table and belongs with the backing `index.redb` decision this phase already owes, so it is
+recorded there rather than taken here. And `--library` has no corpus the CLI can give it: no
+command in this build puts a unit in a library. Ingest does, and ingest is TX-P5.
+
+**Two amendments to the signatures §4.3.5 specified.** `Bm25::over(postings, a)` cannot answer a
+query — `Query` filters on kernel type, status, schema and payload, and none of the four is a fact
+about a term — so it takes the store, and reads those facts from the units that scored rather than
+from every unit in the corpus. And `Postings` has six methods rather than four: `total_len`,
+because `avgdl` is corpus-wide and recomputing it per query is the scan the seam removes, and
+`tf(term, uid)`, because `--why` asks one document's term frequency and the four-method form could
+only answer by materialising a list as long as the corpus.
+
 ### An exit clause that caught two of the five things it had to
 
 **TX-P4 step 1, the substrate index.** §3.8's tables, with a `rebuild(&Library)` and an

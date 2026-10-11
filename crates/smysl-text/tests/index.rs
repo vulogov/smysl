@@ -17,11 +17,14 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use smysl_core::ids::Rdid;
-use smysl_core::ids::{AgentId, LangTag, Tid};
+use smysl_core::ids::{AgentId, LangTag, Mid, Tid};
+use smysl_core::types::library::Axis;
 use smysl_core::types::provenance::Hlc;
-use smysl_core::types::{Carry, PartEntry, Record, SourceKind, SourceRef};
+use smysl_core::types::{
+    Carry, Dating, DatingTarget, DatingValue, PartEntry, Record, SourceKind, SourceRef,
+};
 use smysl_core::{KernelType, Status, UnitCoreBuilder};
-use smysl_text::index::{Index, Table};
+use smysl_text::index::{Built, Index, Table};
 use smysl_text::library::{AddSpec, Library};
 use smysl_text::limits::Caps;
 use smysl_text::locator;
@@ -104,17 +107,47 @@ fn spec(alias: &str) -> AddSpec {
         .with_policy(policy())
 }
 
+/// The same, declaring a versification scheme (manifest key 14).
+///
+/// Line numbering rather than chapter and verse, because what the `align` table is being asked
+/// here is whether it maps *locators* — and `txt/1`'s locators are lines. The Psalms case the
+/// phase exit names is in `tests/align.rs`, where the locators are OSIS-shaped and the
+/// divergence is the real one.
+fn versified(alias: &str, scheme: &str) -> AddSpec {
+    let mut spec = spec(alias);
+    spec.versification = Some(scheme.to_string());
+    spec
+}
+
+/// A map between the fixture's two line numberings: the letter's line *n* is the notes' line
+/// *n+1*.
+///
+/// Three rows and six locators it says nothing about, so the table it produces has both rows and
+/// an uncovered count — `SMY-W451` is as much a part of this table as its rows are, and a
+/// fixture where every locator aligned would never exercise it.
+const LINE_MAP: &str =
+    "smysl/versification/1\nfrom\tnotes-lines\nto\tletter-lines\nL2\tL1\nL3\tL2\nL4\tL3\n";
+
 fn agent() -> AgentId {
     AgentId::new("human:vu").expect("an agent")
 }
 
 /// A unit whose source names a part, which is what puts a row in the journal.
 fn unit_from(tid: &Tid, locator: &str, gist: &str, status: Status) -> Record {
+    unit_at(tid, locator, gist, status, Some(1_726_000_000_000))
+}
+
+/// The same, with the `observed` instant said outright.
+///
+/// Every unit the fixture makes carries one, because three of the eleven tables are about time
+/// and a corpus of undated units leaves all three empty — which the non-vacuity half of the
+/// gate catches, and which is the honest reading of a fixture anyway: a unit extracted from a
+/// chat or a document has an instant its source recorded.
+fn unit_at(tid: &Tid, locator: &str, gist: &str, status: Status, observed: Option<u64>) -> Record {
+    let mut source = SourceRef::new(SourceKind::Doc, format!("{}#{locator}", tid.canonical()));
+    source.observed = observed;
     let core = UnitCoreBuilder::new(KernelType::Claim, gist, status)
-        .source(SourceRef::new(
-            SourceKind::Doc,
-            format!("{}#{locator}", tid.canonical()),
-        ))
+        .source(source)
         .build()
         .expect("a unit");
     Record::Unit(core)
@@ -130,24 +163,76 @@ fn grown(tag: &str) -> (Scratch, Library) {
     let dir = Scratch::new(tag);
     let mut lib = Library::create(dir.path()).expect("created");
 
+    // The map goes in before anything is indexed, because the `align` table is rebuilt from
+    // what the library holds — a map installed later is a table the next rebuild changes, which
+    // is exactly what `on_append`'s align arm does not pretend to catch.
+    smysl_text::versification::install(dir.path(), "lines", LINE_MAP).expect("installed a map");
+
     let notes = lib
         .add(
             &Input::new(NOTES.as_bytes()),
-            &spec("notes"),
+            &versified("notes", "notes-lines"),
             &Caps::DEFAULT,
         )
         .expect("added notes");
     assert!(notes.parts.len() >= 3, "the policy should cut nine lines");
 
+    // Everything after this line is maintained **incrementally**, which is what makes the gate
+    // a gate. Until TX-P4 step 2 this call was at the end of the fixture, and the consequence
+    // was quiet: `Library::open` builds five of the eight tables, so the three it leaves — the
+    // two object tables and `postings` — were *rebuilt* on both sides of a comparison that
+    // claimed to be rebuild against incremental. The redaction case caught the removal arms
+    // because it redacts after completing; nothing exercised the arrival arms. Completing here
+    // instead puts a second manifest, three units and a supersession through `on_append` with
+    // every table already built.
+    lib.complete_index();
+
     lib.add(
         &Input::new(LETTER.as_bytes()),
-        &spec("letter"),
+        &versified("letter", "letter-lines"),
         &Caps::DEFAULT,
     )
     .expect("added the letter");
 
+    let units = [
+        unit_from(&notes.parts[0], "L1", "the notes open", Status::Cited),
+        unit_from(&notes.parts[0], "L2", "the second line", Status::Cited),
+        unit_at(
+            notes.parts.last().expect("a part"),
+            "L9",
+            "the notes close",
+            Status::Measured,
+            // One unit with no instant of its own, so the time tables are not uniform: a table
+            // where every row looks alike cannot tell a row it should hold from one it should
+            // not.
+            None,
+        ),
+    ];
+    let Record::Unit(first) = &units[0] else {
+        panic!("a unit")
+    };
+    let dated = smysl_core::canonical_uid(first);
+    lib.append_records(&units).expect("appended units");
+
+    // A dating on the `composed` axis, which is the only way that table gets a row: a unit's own
+    // fields say when it was *said*, and nothing says when the work it quotes was composed. It
+    // also puts the one record type that can move any subject's time through `on_append`, which
+    // is the branch where the incremental builder recomputes rather than extends.
+    lib.append_records(&[Record::Dating(Dating::new(
+        DatingTarget::Unit(dated),
+        Axis::Composed,
+        DatingValue::Absolute("1890".to_string()),
+        agent(),
+        Hlc::new(1_726_100_000_000, 0, agent()),
+    ))])
+    .expect("appended a dating");
+
     // A second version of `notes`, so `manifests.head` has something to be wrong about and
-    // `by_part` has a tid two manifests record.
+    // `by_part` has a tid two manifests record. **After** the units, deliberately: the parts it
+    // shares with the first version change hands when it unseats the head, so the units
+    // extracted from them change partition. A fixture that appended it first would leave the
+    // `postings` builder's manifest arm — the one step here that reaches backwards — unexercised,
+    // and a probe confirmed that removing the arm then passes the gate.
     lib.append(
         &Input::new(NOTES_V2.as_bytes()),
         "notes",
@@ -156,22 +241,6 @@ fn grown(tag: &str) -> (Scratch, Library) {
     )
     .expect("appended notes");
 
-    lib.append_records(&[
-        unit_from(&notes.parts[0], "L1", "the notes open", Status::Cited),
-        unit_from(&notes.parts[0], "L2", "the second line", Status::Cited),
-        unit_from(
-            notes.parts.last().expect("a part"),
-            "L9",
-            "the notes close",
-            Status::Measured,
-        ),
-    ])
-    .expect("appended units");
-
-    // What `text add` leaves behind: the two object-derived tables built once, under the lock,
-    // by the command that is already writing. `Library::open` does not build them - see
-    // `Index::objects_read` - so a test that did not do this would be testing the partial index.
-    lib.complete_index();
     (dir, lib)
 }
 
@@ -625,7 +694,23 @@ fn a_redaction_sends_resolve_back_to_the_search_that_refuses() {
 #[test]
 fn every_table_is_named_and_says_which_step_builds_it() {
     assert_eq!(Table::ALL.len(), 12, "§3.8 names twelve tables");
-    assert_eq!(Table::BUILT.len(), 7, "step 1 builds seven of them");
+    assert_eq!(
+        Table::BUILT.len(),
+        Table::ALL.len(),
+        "seven in step 1, postings in step 2, three range tables in step 3, align in step 4 — \
+         every table §3.8 names is built"
+    );
+    assert_eq!(
+        Table::ON_OPEN.len(),
+        8,
+        "an open affords everything but the two object tables and postings"
+    );
+    for table in Table::ON_OPEN {
+        assert!(
+            table.is_built(),
+            "{table} is built on open and not built at all"
+        );
+    }
 
     let mut names: Vec<&str> = Table::ALL.iter().map(|t| t.as_str()).collect();
     names.sort_unstable();
@@ -641,24 +726,51 @@ fn every_table_is_named_and_says_which_step_builds_it() {
         );
         assert_eq!(
             table.is_built(),
-            table.step() == 1,
+            table.step() <= 4,
             "{table} is built by step {} and reports is_built() = {}",
             table.step(),
             table.is_built()
+        );
+        // Every built table has its own bit, and an unbuilt one still has a distinct position:
+        // the mask in the sidecar is read by position in `ALL`, so two tables sharing a bit
+        // would make a partial index claim the wrong table.
+        assert_ne!(table.bit(), 0, "{table} has no bit");
+        assert_eq!(
+            Table::ALL
+                .iter()
+                .filter(|other| other.bit() == table.bit())
+                .count(),
+            1,
+            "{table} shares its bit with another table"
         );
     }
     assert_eq!(Table::parse("vectors"), None, "that one is SMYSL-2.5's");
 
     // A table nobody built reports `None` rather than zero rows: an empty table and a table
-    // that does not exist are different sentences.
-    // A default index has read no object, so the two tables that need one report themselves as
-    // not built — which is the same sentence `postings` gets, for a different reason, and both
-    // are better than `0 rows` on a library full of readings.
+    // that does not exist are different sentences. A default index has built nothing at all, so
+    // every one of the twelve says so — which is the state `Index::default()` should be in and
+    // the state a half-written sidecar would decode into.
     let empty = Index::default();
+    assert_eq!(empty.built, Built::empty());
+    assert!(!empty.is_complete());
+    assert!(
+        empty.postings().is_none(),
+        "an unbuilt table is not an empty one"
+    );
     for table in Table::ALL {
-        let expected = table.is_built() && !matches!(table, Table::Segments | Table::Locators);
-        assert_eq!(empty.rows(*table).is_some(), expected, "{table}");
+        assert_eq!(empty.rows(*table), None, "{table}");
     }
+
+    // The mask round-trips, and a bit from a build that knows more tables than this one is
+    // dropped rather than refused.
+    let open = Built::of(Table::ON_OPEN);
+    assert!(open.has(Table::Manifests) && !open.has(Table::Postings));
+    assert_eq!(open.tables().count(), 8);
+    assert_eq!(Built::from_bits(open.bits()), open);
+    assert_eq!(Built::from_bits(0xffff), Built::of(Table::ALL));
+    assert_eq!(Built::of(Table::ALL), Built::of(Table::BUILT));
+    assert!(Built::of(Table::BUILT).is_complete());
+    assert!(!open.is_complete());
 }
 
 /// The sidecar round-trips.
@@ -674,5 +786,155 @@ fn the_sidecar_round_trips_through_its_own_encoding() {
     // on disk and a truncated write is the ordinary way one ends.
     for n in 0..bytes.len() {
         let _ = Index::from_bytes(&bytes[..n]);
+    }
+}
+
+/// A partition nobody is in any more is gone, not empty.
+///
+/// The probe that found this: removing `on_append`'s final `retain` leaves a vacated partition
+/// behind as a row with no documents, and the byte comparison in `grown`'s fixture does **not**
+/// notice — there the supersession moves two of three units and the third keeps the old
+/// partition alive. So the case needs a corpus where *every* unit changes hands, which is one
+/// unit on a part the successor also records.
+#[test]
+fn a_partition_nobody_is_in_any_more_is_gone_rather_than_empty() {
+    let dir = Scratch::new("vacated");
+    let mut lib = Library::create(dir.path()).expect("created");
+    let added = lib
+        .add(
+            &Input::new(NOTES.as_bytes()),
+            &spec("notes"),
+            &Caps::DEFAULT,
+        )
+        .expect("added");
+    lib.complete_index();
+    lib.append_records(&[unit_from(
+        &added.parts[0],
+        "L1",
+        "the notes open",
+        Status::Cited,
+    )])
+    .expect("appended a unit");
+    let before: Vec<String> = lib.index().postings.keys().map(|p| p.to_string()).collect();
+    assert_eq!(before.len(), 1, "one text, one partition");
+
+    lib.append(
+        &Input::new(NOTES_V2.as_bytes()),
+        "notes",
+        None,
+        &Caps::DEFAULT,
+    )
+    .expect("appended a second version");
+
+    let after: Vec<String> = lib.index().postings.keys().map(|p| p.to_string()).collect();
+    assert_eq!(
+        after.len(),
+        1,
+        "the unit moved to the successor's partition and the vacated one is still here: {after:?}"
+    );
+    assert_ne!(
+        before, after,
+        "the unit did not change hands, so this case is not the case it says it is"
+    );
+    assert_eq!(
+        lib.index().to_bytes(),
+        lib.reindex().to_bytes(),
+        "a vacated partition left behind is a byte the rebuild would not write"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The postings table against the index it replaces
+// ---------------------------------------------------------------------------
+
+/// The exit clause's second half, from the library's side.
+///
+/// `tests/postings.rs` in `smysl-retrieve` compares its own two paths; this compares the
+/// *persistent* table against the in-memory one built from the same store under the same chain.
+/// If these two disagree, the table is wrong even though both scorers are right.
+#[test]
+fn the_persistent_table_answers_what_an_in_memory_one_does() {
+    use smysl_retrieve::{Bm25, MemPostings, Postings as _, Query, Retriever as _};
+    use smysl_text::analyze::Chain;
+    use smysl_text::index::postings;
+
+    let (_dir, lib) = grown("as-memory");
+    let chain = Chain::new(&LangTag::new("en").expect("a tag"));
+    assert_eq!(
+        postings::analyzers(&lib.index().postings),
+        vec![chain.id()],
+        "every partition of a single-language library is under that language's chain"
+    );
+
+    let view = lib.index().postings().expect("the table is built");
+    let memory = MemPostings::index(lib.store(), &chain);
+
+    assert_eq!(
+        view.docs(),
+        memory.docs(),
+        "a different number of documents"
+    );
+    assert!(
+        view.docs() > 0,
+        "nothing was indexed, so nothing is compared"
+    );
+    assert_eq!(view.total_len(), memory.total_len());
+    for term in ["the", "notes", "line", "second"] {
+        assert_eq!(view.df(term), memory.df(term), "df of `{term}`");
+        assert_eq!(
+            view.postings(term),
+            memory.postings(term),
+            "postings of `{term}`"
+        );
+    }
+
+    // And the scores the two produce, which is what a caller actually sees.
+    for text in ["the notes", "second line", "close", "kangaroo"] {
+        let q = Query::new(text, 10);
+        assert_eq!(
+            Bm25::over(&view, &chain, lib.store()).search(&q),
+            Bm25::over(&memory, &chain, lib.store()).search(&q),
+            "the persistent table and the in-memory one disagree about `{text}`"
+        );
+    }
+    assert!(
+        Bm25::over(&view, &chain, lib.store())
+            .search(&Query::new("the notes", 10))
+            .len()
+            >= 2,
+        "the comparison matched almost nothing, so it compared almost nothing"
+    );
+}
+
+/// A partition is the manifest whose reading the units came out of, and it moves with the head.
+#[test]
+fn a_unit_belongs_to_the_partition_of_the_manifest_that_records_its_part() {
+    use smysl_text::index::postings::Partition;
+
+    let (_dir, lib) = grown("partitions");
+    let heads: Vec<&Mid> = lib
+        .index()
+        .manifests
+        .iter()
+        .filter(|(_, row)| row.head)
+        .map(|(mid, _)| mid)
+        .collect();
+    assert_eq!(heads.len(), 2, "two texts, two heads");
+
+    for partition in lib.index().postings.keys() {
+        match partition {
+            Partition::Text { mid, lang } => {
+                assert_eq!(lang, "en");
+                assert!(
+                    lib.index().manifests.contains_key(mid),
+                    "a partition names a manifest the catalog does not hold"
+                );
+            }
+            // Every unit in the fixture names a part, so a loose partition here would mean the
+            // partition lookup stopped finding the part.
+            // `Partition` is `#[non_exhaustive]`, so this arm is both the loose case and
+            // whatever a later step adds — either way, a unit with a part does not belong here.
+            _ => panic!("a unit with a part landed outside its text's partition"),
+        }
     }
 }

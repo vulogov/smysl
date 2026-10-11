@@ -33,6 +33,7 @@ pub use smysl::AgentActivity
 pub use smysl::AgentId
 pub use smysl::AgentKind
 pub use smysl::Allen
+pub use smysl::Analyze
 pub use smysl::AnyError
 pub use smysl::AppendReport
 pub use smysl::Artifact
@@ -44,6 +45,7 @@ pub use smysl::Axis
 pub use smysl::Backend
 pub use smysl::Block
 pub use smysl::Bm25
+pub use smysl::Bm25View
 pub use smysl::BuildOptions
 pub use smysl::BundleReport
 pub use smysl::Cached
@@ -128,6 +130,7 @@ pub use smysl::LodPlan
 pub use smysl::MIN_LETTERS
 pub use smysl::Manifest
 pub use smysl::Matcher
+pub use smysl::MemPostings
 pub use smysl::MergeError
 pub use smysl::MergeOptions
 pub use smysl::MergeReport
@@ -155,6 +158,7 @@ pub use smysl::PartText
 pub use smysl::Pass
 pub use smysl::PayloadFilter
 pub use smysl::Person
+pub use smysl::Postings
 pub use smysl::Probe
 pub use smysl::Profile
 pub use smysl::ProfileEstimator
@@ -308,6 +312,7 @@ pub use smysl::recipe_short
 pub use smysl::relink
 pub use smysl::resolve_label
 pub use smysl::rests_on
+pub use smysl::retrieve_analyze
 pub use smysl::retrieve_tokenize
 pub use smysl::retrieve_tokenize
 pub use smysl::reverse_closure
