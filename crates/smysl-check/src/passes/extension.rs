@@ -454,6 +454,63 @@ mod tests {
         assert!(r.is_clean());
     }
 
+    /// The declaration `x.text/v1` ships as a record (A-11, TX-P5 step 2), against the pass that
+    /// makes shipping it necessary.
+    ///
+    /// Ten relation kinds were in use across three crates before the declaration existed, and
+    /// every store that held one of them warned `SMY-W013` on every check — the warning was
+    /// correct and unactionable, because there was nothing to declare them with. This is the
+    /// half of "registered" that a registry alone does not buy.
+    #[test]
+    fn the_standard_text_schema_declares_every_kind_it_names() {
+        use smysl_core::schemas::text;
+
+        let a = UnitCoreBuilder::new(KernelType::Claim, "a", Status::Speculative)
+            .build()
+            .unwrap();
+        let b = UnitCoreBuilder::new(KernelType::Claim, "b", Status::Speculative)
+            .build()
+            .unwrap();
+        let (ua, ub) = (canonical_uid(&a), canonical_uid(&b));
+
+        let edges: Vec<Record> = text::RELATIONS
+            .iter()
+            .map(|k| {
+                Record::Relation(Relation::new(
+                    RelKind::parse(k).expect("a well-formed kind"),
+                    ua,
+                    ub,
+                ))
+            })
+            .collect();
+
+        let mut without = vec![Record::Unit(a.clone()), Record::Unit(b.clone())];
+        without.extend(edges.clone());
+        assert_eq!(
+            check(without, None).count(Code::W013),
+            text::RELATIONS.len(),
+            "every kind should warn while nothing declares it"
+        );
+
+        let mut with = vec![
+            Record::SchemaDecl(text::decl()),
+            Record::Unit(a),
+            Record::Unit(b),
+        ];
+        with.extend(edges);
+        let r = check(with, None);
+        assert_eq!(
+            r.count(Code::W013),
+            0,
+            "the declaration did not cover a kind"
+        );
+        assert_eq!(
+            r.count(Code::E012),
+            0,
+            "registered is not kernel, and must not claim to be"
+        );
+    }
+
     #[test]
     fn a_relation_declared_in_surface_text_does_not_warn() {
         // End to end from the text a person writes. The two tests either side of this one build

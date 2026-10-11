@@ -135,6 +135,68 @@ fn the_tree_covers_every_code_a_document_can_reach() {
 }
 
 // ---------------------------------------------------------------------------
+// A-2.4 rule 7: entities (TX-P5 step 2)
+// ---------------------------------------------------------------------------
+
+/// The code set a fixture pins cannot say *how many* units broke the rule, or which field each
+/// broke it with, and both matter: a pass that reported the first entity and stopped would pin
+/// the same set, and a message that said only "this entity is wrong" leaves a producer four
+/// fields to guess between.
+#[test]
+fn rule_7_reports_every_entity_and_names_the_field() {
+    let src = std::fs::read_to_string(check_dir().join("entity-provenance.smy"))
+        .expect("the fixture is missing");
+    let out = smysl::parse_surface(&src).expect("the fixture parses");
+    let store = Store::from_records(out.records.clone());
+    let report = check(
+        &store,
+        CheckOptions::default().with_labels(out.labels.clone()),
+    );
+    let messages: Vec<&str> = report
+        .iter()
+        .filter(|d| d.code == Code::E403)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(
+        messages.len(),
+        2,
+        "both entities, not the first: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("published")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("source.reference")),
+        "{messages:?}"
+    );
+}
+
+/// The control, programmatically: an entity whose provenance is exactly rule 7's is clean, and
+/// its uid does not depend on which window named it. The fifty-window form of this is a unit
+/// test beside the rule (`smysl_core::schemas::text`); what this adds is that the *checker*
+/// agrees with the producer about the same unit.
+#[test]
+fn an_entity_built_by_the_rule_passes_the_pass_that_enforces_it() {
+    use smysl_core::ids::LangTag;
+    use smysl_core::schemas::text;
+    use smysl_core::Record;
+
+    let en = LangTag::new("en").expect("a tag");
+    let unit = text::entity("Jerusalem", "kjv/1769", Some(&en)).expect("an entity");
+    assert!(text::rule_7_violations(&unit).is_empty());
+
+    let store = Store::from_records(vec![Record::SchemaDecl(text::decl()), Record::Unit(unit)]);
+    let report = check(&store, CheckOptions::default());
+    assert_eq!(
+        report.count(Code::E403),
+        0,
+        "the producer and the checker disagree: {:?}",
+        report.iter().collect::<Vec<_>>()
+    );
+}
+
+// ---------------------------------------------------------------------------
 // `SMY-E452`: no surface form, so no fixture
 // ---------------------------------------------------------------------------
 

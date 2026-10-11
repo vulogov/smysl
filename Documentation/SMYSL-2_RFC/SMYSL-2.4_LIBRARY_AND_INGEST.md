@@ -2766,8 +2766,69 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    The language is the **caller's** and not the manifest's: a manifest says what language the text
    is in, and a gist written about a Russian passage may be written in English — which is exactly
    what `SMY-W436` reports, and taking the field from the manifest would make that unreportable.
-2. `x.text/v1` declaration shipped as a schema record; entity units without span via
-   `provenance` (`ref: "alias:<alias>"`). *Exit:* the same entity from 50 windows is one uid.
+2. ~~`x.text/v1` declaration shipped as a schema record; entity units without span via
+   `provenance` (`ref: "alias:<alias>"`). *Exit:* the same entity from 50 windows is one uid.~~
+   **Done 2026-10-11.** `smysl_core::schemas::text` holds the declaration — the id, the revision,
+   the five types, the ten relation kinds, the eight payload keys with their A-7 types and enum
+   sets — plus `entity`, `rule_7_violations` and the `alias:` reference grammar.
+   `schemas::text::decl()` is the record. The library pass raises `SMY-E403` for a rule 7
+   violation; `fixtures/library/check/entity-{clean,provenance}.smy` are the control and the
+   defect, and `tests/library_check.rs` gains two tests that a code set cannot express.
+
+   **The exit clause is a unit test and the better form of it is the control beside it.** Fifty
+   calls give one uid, which is true and weak — a function that ignored its arguments would pass
+   it. `name_language_and_expression_each_separate_two_entities` is the other half: five calls
+   differing in one of the three things rule 7 says the identity is a function of give five
+   uids, and an absent language is a fifth answer rather than a synonym for `und`.
+
+   **The signature is the rule.** `entity(name, alias, lang)` returns a finished `UnitCore` and
+   not a builder, because rule 7's point is that nothing else is in the identity: a caller handed
+   a builder could add a `body`, and a `body` is hashed. The status is `cited` and not the
+   caller's for the same reason, and `cited` is the only status the rule leaves available —
+   `measured` is false, and `inferred` and `derived` both require `grounds`, which rule 7 forbids,
+   so `UnitCoreBuilder` would refuse them. `text:kind` is in the declaration and deliberately
+   unwritten: the payload is hashed, so a kind would split Jerusalem into a place and a concept
+   the first time two windows disagreed.
+
+   **`SMY-E403` now says two things, and the amendment asked for that.** A-2.4 rule 7 names
+   `SMY-E403` for a violation, where the code's other reading is a reference claiming a library
+   identity it does not have. The two are different defects, so the registry entry widened —
+   "a malformed library identity, or provenance the unit's type forbids" — rather than a new code
+   being allocated against accepted normative text. `SMY-W432` changed what it says one step ago
+   for a comparable reason. The diagnostic names *which* field broke the rule, because a producer
+   told only that its entity is wrong has four to guess between.
+
+   **Rule 7 lives in `smysl-core`, not in `provenance`.** The copy set is in `smysl-text` because
+   its hazard is a producer copying a manifest's title into ten thousand uids; an entity copies
+   nothing from a manifest and has no manifest to copy from, so that hazard cannot arise. What
+   decided it is the checker: `smysl-check` may not depend on `smysl-text` (§4.3.3 spends its one
+   edge on the `Time` pass), and a rule with one implementation in the producer and another in
+   the checker is a rule with two readings — which is how `SMY-W405` ended up needing
+   `PartResolver::locator` one step ago.
+
+   **What the declaration fixed that was already broken.** `x.text/same-as` was a constant in
+   `smysl-graph`, `x.text/quotes` another in `smysl-text`, `x.text/translates` a literal inside a
+   test: three spellings of a vocabulary whose entire purpose (A-11) is that two implementations
+   agree on the strings. Both constants are now re-exports of the declaration's. And every store
+   holding one of the ten kinds warned `SMY-W013` on every check, correctly and unactionably,
+   because nothing could declare them; `the_standard_text_schema_declares_every_kind_it_names`
+   pins both directions — ten warnings without the record, none with it, and no `SMY-E012`,
+   since registered is not kernel.
+
+   **`payload_shape` is absent, and that is A-7 rather than an omission.** Appendix C's
+   declaration carries a `fields:` map, and the structure that puts one on the wire — key 4
+   gaining a shape, key 5 gaining lenses — is A-7, which G0 did not accept. So the field table is
+   in code, where step 3b's converter needs it to write `text:holder` and `text:mode` from
+   structure, and key 4 stays the opaque CBOR it has been since the field existed. Writing a
+   structure into a hashed-adjacent record before the structure is agreed would put bytes in
+   stores that a later reading would have to honour or break. `x.query/v1` is absent for the
+   kindred reason: G0 accepted A-11's `x.text/v1` and left `x.query/v1` open. It arrives with the
+   saved query, in SMYSL-2.5.
+
+   **The spec gained rule 6 as well as rule 7.** Step 1's row in 2.3's landed-amendments table
+   claimed rule 6 — the copy set — and `provenance::stamp` did implement it, but §2.2 never said
+   it: the rule existed in code and in this RFC and in no normative document. Both are in §2.2
+   now, and §5.1 registers `x.text/v1` by name.
 3. Windows, owned ranges, node hint, span attachment, `Absent` behaviour, payload quote removal.
    *Exit:* §5.1 ingest tests.
 3a. **Consensus extraction** (§3.4): two passes per window by default, both staged, nothing

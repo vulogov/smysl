@@ -19,6 +19,7 @@ pub mod hash;
 pub mod ids;
 pub mod lang;
 pub mod quote;
+pub mod schemas;
 pub mod surface;
 pub mod types;
 

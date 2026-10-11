@@ -31,7 +31,9 @@ use smysl_graph::Store;
 use super::{Instant, Subject, TimeStatus};
 
 /// The relation an `x.text/v1` quotation is written as (A-11).
-pub const QUOTES: &str = "x.text/quotes";
+///
+/// Re-exported from the declaration rather than spelled again here (TX-P5 step 2).
+pub use smysl_core::schemas::text::QUOTES;
 
 /// Which rule produced a constraint, for a why-chain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

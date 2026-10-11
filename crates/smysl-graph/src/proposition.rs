@@ -39,10 +39,12 @@ use crate::Store;
 
 /// The relation kind a class is built from.
 ///
-/// `x.text/same-as`, as SMYSL-2.4 §3.6 and A-11's `x.text/v1` name it. A constant rather than a
-/// string literal at each use: it is the one piece of vocabulary this module and the engines
-/// that fill it have to agree on.
-pub const SAME_AS: &str = "x.text/same-as";
+/// `x.text/same-as`, as SMYSL-2.4 §3.6 and A-11's `x.text/v1` name it. **A re-export, not a
+/// second spelling**, since TX-P5 step 2 gave the schema a declaration: it was a literal here,
+/// another literal in `smysl-text`, and a third inside a test, and A-11's entire purpose is that
+/// two implementations agree on these strings. The name stays because this is where callers
+/// reach for it.
+pub use smysl_core::schemas::text::SAME_AS;
 
 /// How a class is formed.
 ///

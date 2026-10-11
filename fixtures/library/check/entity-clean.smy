@@ -1,0 +1,4 @@
+@doc smysl/0.1 { id: v/library-entity-clean }
+
+@x.text/entity ent/jerusalem { status: cited, lang: en, source: { kind: doc, ref: "alias:kjv/1769" } }
+~ Jerusalem

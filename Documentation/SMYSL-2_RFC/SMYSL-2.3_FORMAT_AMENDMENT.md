@@ -46,6 +46,7 @@ document and the wire free to drift, which is the condition §2.2 of the spec re
 | A-10 item 1 reserved words | §4 | TX-P1 (`@manifest`), TX-P2 step 4 (`@redact`), TX-P3 step 1 (`@date`) | — (reserved words, with no constants to compare) |
 | A-1 core key 9 `lang`, A-10 item 2 | §2.2, §4 | TX-P5 step 1 | the unit-core key table, in all three ports, and the `≥9` unknown-key row moving to `≥10`. The quoting rule has no constant: a bare `lang:` is the core key and a quoted `"lang":` is a payload key, which the parser decides by looking at the source and `SMY-W432` spent a release announcing |
 | A-2 `source` keys 5, 6, A-2.2, A-2.4 rules 1 and 6 | §2.2, §4 | TX-P5 step 1 | the whole `source` sub-map again, now 0..6, in all three ports. Rule 1 is enforced at three doors — `SourceRef::in_part` makes the illegal pair unreachable, the decoder refuses it, the surface parser names the rule — and rule 6's copy set is `provenance::stamp`, which now writes five of its six fields |
+| A-11 `x.text/v1`, A-2.4 rule 7 | §2.2, new §5.1 | TX-P5 step 2 | the schema's five types, ten relation kinds and eight payload key names, against `smysl_core::schemas::text` — the declaration is the single source and the two constants that used to spell these names are now re-exports of it. Rule 7 has no table: it is enforced by `schemas::text::entity`, whose three parameters *are* the identity, and checked by `rule_7_violations`, which the producer and the library pass share. The `fields:` map is **not** on the wire — schema declaration key 4 gaining a shape is A-7, which G0 did not accept — so the field table is in code and `payload_shape` is absent |
 
 Those are the amendments whose phase has landed. The rest wait for theirs, and the spec says
 nothing about them in the meantime — which is correct rather than a gap, since spec §8.1 makes
@@ -96,7 +97,7 @@ specific older reader, the amendment says so and states the cost.
 | # | amends | what | draft-3 id | activated in |
 |---|---|---|---|---|
 | A-1 | spec §2.2 | unit core key 9 `lang` | FC-1 | TX-P5 (**activated at step 1**, 2026-10-10) |
-| A-2 | spec §2.2 | `source` keys 4 `published`, 5 `span`, 6 `manifest`, and the copy and omission rules | FC-2, FC-3 | TX-P3 (4, **folded in at step 1** with A-2.3 and A-2.4 rules 2–4), TX-P5 (5, 6, **activated at step 1**, 2026-10-10, with rules 1 and 6) |
+| A-2 | spec §2.2 | `source` keys 4 `published`, 5 `span`, 6 `manifest`, and the copy and omission rules | FC-2, FC-3 | TX-P3 (4, **folded in at step 1** with A-2.3 and A-2.4 rules 2–4), TX-P5 (5, 6, **activated at step 1**, 2026-10-10, with rules 1 and 6; **rule 7 at step 2**, 2026-10-11, and rule 6's normative text with it — step 1 implemented the copy set and §2.2 had never stated it) |
 | A-3 | new spec §2.6 | library identities: tid, mid, rdid, did | — | TX-P1 (tid, mid, rdid), TX-P3 (did) |
 | A-4 | new spec §2.7 | record-set digest | — | TX-P0 |
 | A-5 | spec §3.1 | records 14 manifest, 15 part text, 17 dating, 18 part reading, 19 redaction; 16 reserved | FC-4 | TX-P1 (14, 15, 18), TX-P2 (19), TX-P3 (17, **folded in at step 1**) |
@@ -105,7 +106,7 @@ specific older reader, the amendment says so and states the cost.
 | A-8 | spec §3.1 | open enumerations: code 255 reserved; new codes for thread schemas, roles, detection kinds | FC-8 | TX-P0 (opening four; reserving 255 in five), TX-P1 (opening `admission`), TX-P8 (codes) |
 | A-9 | spec §3.1 | granularity key 5 `estimator`; estimator registry | FC-6 | TX-P0 |
 | A-10 | spec §4 | surface: reserved words, `lang`, `source` keys, `@schema` fields and lenses, strict `source` | — | per construct |
-| A-11 | spec §5 | standard extension schemas `x.text/v1`, `x.query/v1`; uid-typed payload keys | FC-5 | TX-P5, TX-P8 |
+| A-11 | spec §5 | standard extension schemas `x.text/v1`, `x.query/v1`; uid-typed payload keys | FC-5 | TX-P5 (`x.text/v1`, **activated at step 2**, 2026-10-11, as new spec §5.1; the `fields:` types wait for A-7), TX-P8 (`x.query/v1`, which G0 left open) |
 | A-12 | spec §6 | rules **N** (naming), **E** (effective time), **Z** (redaction); proposition classes; time contentions | — | TX-P2 (Z, **folded in at step 4**: §6's rule table and §3.1's record 19 both carry it), TX-P3 (E, **folded in at step 2** as §6.4, with the time contentions' derived-only rule), TX-P7 (classes), TX-P12 (N) |
 | A-13 | spec §7 | conformance: C-Read additions, new class **C-Library**, C-Produce and C-Merge additions | — | per phase |
 | A-14 | spec §8 | registry and activation | — | at acceptance |

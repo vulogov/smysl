@@ -270,6 +270,7 @@ pub use smysl::salience
 pub use smysl::salience_seed
 pub use smysl::satisfies_rule_l
 pub use smysl::schema_definition
+pub use smysl::schemas
 pub use smysl::script_of
 pub use smysl::surface
 pub use smysl::to_cbor

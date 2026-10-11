@@ -306,7 +306,7 @@ registry! {
     Library => {
         E401 = "SMY-E401", Error, "Structure hash or rdid does not match the part entry on re-read";
         E402 = "SMY-E402", Error, "Carrying text is refused by the licence recorded in the manifest";
-        E403 = "SMY-E403", Error, "Malformed tid, mid, did or rdid in a record";
+        E403 = "SMY-E403", Error, "A malformed library identity, or provenance the unit's type forbids";
         E410 = "SMY-E410", Error, "Malformed EDTF value in published or a dating";
         W411 = "SMY-W411", Warn,  "The observed instant lies outside the published interval";
         W412 = "SMY-W412", Warn,  "A live dating rule E could not apply: held, outranked, or applying to nothing";

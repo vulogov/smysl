@@ -58,6 +58,51 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### One name for the text vocabulary, and an entity that does not multiply
+
+TX-P5 step 2 ships `x.text/v1` as a declaration (A-11, new spec §5.1) and activates A-2.4 rule 7.
+
+**The vocabulary had three spellings and no declaration.** `x.text/same-as` was a constant in
+`smysl-graph`, `x.text/quotes` another in `smysl-text`, `x.text/translates` a literal inside a
+test — three copies of a set of strings whose entire purpose is that two implementations agree on
+them. `smysl_core::schemas::text` is now the one place: the id, the revision, five types, ten
+relation kinds, eight payload keys with their types and enum sets. The two constants became
+re-exports of it, so there is nothing left to disagree with.
+
+**And every store using one of them warned, correctly and unactionably.** An undeclared extension
+relation kind is `SMY-W013`, and until now nothing could declare these ten — the warning was a
+true statement with no available fix. `schemas::text::decl()` is the record that fixes it: ten
+warnings without it, none with it, and no `SMY-E012`, because registered is not kernel and must
+not claim to be.
+
+**An entity is its name, its language and its expression.** A-2.4 rule 7 forbids an
+`x.text/entity` a `span`, a `manifest`, a `published` date and `grounds`, and fixes its source at
+`alias:<expression alias>` — the expression, not a part. The consequence is the point: fifty
+extraction windows that each name Jerusalem produce one unit rather than fifty, and TX-P5's exit
+clause measures entity duplication at under 2% across windows. Give the unit a span and it is
+98%. `schemas::text::entity(name, alias, lang)` is the only door, it returns a finished core
+rather than a builder, and the three parameters are the whole identity — a caller handed a
+builder could add a `body`, and a `body` is hashed. The status is `cited` and not the caller's,
+which is also the only status the rule leaves available: `measured` is false, and `inferred` and
+`derived` both want `grounds`.
+
+**`SMY-E403` says two things now.** The amendment names it for a rule 7 violation, where its
+other reading is a reference claiming a library identity it does not have. Those are different
+defects, so the registry entry widened — "a malformed library identity, or provenance the unit's
+type forbids" — rather than a new code being minted against accepted normative text. The
+diagnostic names which field broke the rule; a producer told only that its entity is wrong has
+four to guess between.
+
+**What is not here.** `payload_shape` is absent. Appendix C's declaration carries a `fields:`
+map, and the structure that puts one on the wire is A-7, which G0 did not accept — so the field
+table is in code, where the ingest converter will need it, and schema declaration key 4 stays the
+opaque CBOR it has been since the field existed. `x.query/v1` is absent for the kindred reason:
+G0 accepted A-11's `x.text/v1` and left the other open. It arrives with the saved query.
+
+**The spec also gained rule 6.** Step 1 claimed the copy set and `provenance::stamp` did
+implement it, but §2.2 had never said it — the rule lived in code and in an RFC and in no
+normative document. Both rules are in §2.2 now.
+
 ### A unit can say what language it is in, and which bytes it came from
 
 TX-P5 step 1 activates FC-1 and FC-3 (RFC SMYSL-2.3 A-1 and A-2): unit core key 9 `lang`, and

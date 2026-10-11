@@ -227,6 +227,19 @@ Both present is permitted; `SMY-W411` is reported when the `observed` instant li
 `published` interval. Neither present means the unit is undated on the *said* axis — not early,
 not late.
 
+**The copy set.** A unit extracted from a part carries exactly these provenance fields:
+`source.reference` (the tid and, optionally, a locator), `span`, `manifest`, `published` *or*
+`observed` by the two rules above, core `lang`, and — for a source that records who spoke, such
+as a chat export — the payload key `text:speaker`. A producer MUST NOT copy other manifestation
+metadata onto a unit: not the title, not the creators, not a page number, not a URL. All of it is
+reachable through `manifest`, and all of it would be inside the uid.
+
+**Entities have no span.** A unit whose type is `x.text/entity` MUST NOT carry `span`,
+`manifest`, `published` or `grounds`, and its source is `{kind: doc, reference:
+"alias:<expression alias>"}` — the expression, not a part. Its identity is therefore a function
+of its name, its language and its expression, and one entity named in many extraction windows is
+one unit rather than one per window. A violation is `SMY-E403`.
+
 A **decoder** does not refuse a malformed `published`. The field is inside the uid, so a value
 that arrived has to leave again byte for byte or the unit silently changes identity, and a reader
 that refused it would make a whole store unopenable over one field. The malformed value is
@@ -897,6 +910,31 @@ degrade to a preserved-verbatim form and are reported (`SMY-W010`), never reject
 
 Decoding and surface parsing deliberately differ here: an unknown type on the wire degrades,
 but an unknown type in hand-written surface text is a typo and stays an error.
+
+### 5.1 Registered extension schemas
+
+One extension schema is **registered**, so that implementations agree on its names. Registration
+buys it nothing else: every rule of this section applies to it exactly as to a schema invented
+this afternoon, and nothing in it is kernel.
+
+`x.text/v1`, revision 1, for text research:
+
+- **Types**: `x.text/event`, `x.text/entity`, `x.text/theme`, `x.text/citation`, `x.text/meta`.
+  `x.text/entity` is the one with a rule of its own (§2.2, *entities have no span*).
+- **Relation kinds**: `x.text/same-as`, `x.text/entails`, `x.text/contradicts`,
+  `x.text/translates`, `x.text/quotes`, `x.text/alludes`, `x.text/mentions`, `x.text/replies`,
+  `x.text/precedes`, `x.text/summarises`.
+- **Payload keys**: `text:holder`, `text:mode`, `text:speaker`, `text:locator`, `text:when`,
+  `text:kind`, `meta:field`, `meta:value`.
+
+Holder, mode and speaker are payload keys of this schema and are **not** kernel fields. The
+kernel does not know what a speaker is, and a format that grew a field for every research
+question would stop being a kernel.
+
+A store that uses these names SHOULD carry the declaration as a record 8, as it must for any
+extension: an undeclared relation kind is `SMY-W013`, and the warning is unactionable if nothing
+can declare it. The types of the payload keys are not yet part of this document — schema
+declaration key 4 remains opaque CBOR that no implementation reads (§3.1).
 
 ## 6. The rules
 

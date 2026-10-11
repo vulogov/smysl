@@ -109,6 +109,14 @@ pub use smysl_core::types::{
 /// other is what a source said about when something happened.
 pub use smysl_core::edtf;
 
+/// The registered extension schemas (spec §5.1, RFC SMYSL-2.3 A-11).
+///
+/// A module rather than flat names, for the reason `edtf` is one: `text::ID`, `text::FIELDS` and
+/// `text::entity` are only unambiguous under the schema they belong to, and `Field` flat beside
+/// the kernel's types would read as a kernel concept, which is the one thing A-11 says a
+/// registered schema is not.
+pub use smysl_core::schemas;
+
 // ---- check ----------------------------------------------------------------
 pub use smysl_check::{
     check, check_and_fail_on, conformance, fidelity, granularity_distribution, CheckOptions,

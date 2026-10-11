@@ -1,8 +1,9 @@
 //! Pass 12 - the library (RFC SMYSL-2.4 §4.3.3).
 //!
-//! Four things a store can say about texts that cannot be true at once: a reference to a part,
-//! a manifest, a dating or a reading that is not a well-formed identity; one alias with two
-//! heads; text in a log; and an object whose bytes are not what its name says they are.
+//! Five things a store can say about texts that cannot be true at once: a reference to a part,
+//! a manifest, a dating or a reading that is not a well-formed identity; an entity unit carrying
+//! provenance A-2.4 rule 7 forbids it; one alias with two heads; text in a log; and an object
+//! whose bytes are not what its name says they are.
 //!
 //! # The plan's six codes are all here now
 //!
@@ -52,6 +53,7 @@ pub fn run(
     report: &mut Report,
 ) {
     malformed_identities(store, report);
+    entities(store, report);
     forks(store, report);
     text_in_the_log(store, report);
     if let Some(parts) = parts {
@@ -226,6 +228,54 @@ fn kind_of(claimed: &str) -> &'static str {
         "a dating identity"
     } else {
         "a reading identity"
+    }
+}
+
+/// `SMY-E403` — A-2.4 rule 7: an entity unit carrying provenance an entity may not have.
+///
+/// **A second meaning for one code, and the amendment asks for it.** A-2.4 rule 7 names
+/// `SMY-E403` for a violation, where the code's other reading is a reference claiming an
+/// identity it does not have. The two are not the same defect, and the registry entry had to
+/// widen to say so — "a malformed library identity, or provenance the unit's type forbids" —
+/// rather than a new code being allocated against an accepted normative text. `SMY-W432`
+/// changed what it says one step ago for a comparable reason, so the precedent is the
+/// repository's own.
+///
+/// The rule is four prohibitions and one requirement, and it exists for a counting reason: an
+/// entity's identity is a function of its name, its language and its expression, so fifty
+/// extraction windows that each name Jerusalem produce one unit. Give the unit a span and it
+/// becomes fifty, each true and each useless — TX-P5's exit clause measures entity duplication
+/// at under 2% across windows, and a span would make it 98%.
+///
+/// `smysl_core::schemas::text::rule_7_violations` is the one implementation, shared with the
+/// producer: this crate may not depend on `smysl-text`, so a copy here would be the same rule
+/// read twice.
+fn entities(store: &Store, report: &mut Report) {
+    for (uid, unit) in store.units() {
+        let broken = smysl_core::schemas::text::rule_7_violations(&unit.core);
+        if broken.is_empty() {
+            continue;
+        }
+        report.push(
+            Diagnostic::on(Code::E403, *uid)
+                .with_message(format!(
+                    "an `{}` carries {} ({})",
+                    smysl_core::schemas::text::ENTITY,
+                    if broken.len() == 1 {
+                        "a field"
+                    } else {
+                        "fields"
+                    },
+                    broken.join(", ")
+                ))
+                .with_suggestion(
+                    "an entity has no span, manifest, published date or grounds, and its \
+                     source is `alias:<expression alias>`: its identity is its name, its \
+                     language and its expression, which is what collapses one entity named in \
+                     many windows into one unit"
+                        .to_string(),
+                ),
+        );
     }
 }
 

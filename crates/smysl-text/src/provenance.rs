@@ -16,8 +16,18 @@
 //!
 //! Five of the six are written here as of TX-P5 step 1, where FC-1 and FC-3 gave the format
 //! `span`, `manifest` and core `lang`: the reference, the span and its manifest, `published` *or*
-//! `observed` by rules 2 to 5, and the language. `text:speaker` waits for the `x.text/v1` payload
-//! — a field the format does not have yet rather than a rule left unapplied.
+//! `observed` by rules 2 to 5, and the language. `text:speaker` is a name the declaration now
+//! carries ([`smysl_core::schemas::text`], TX-P5 step 2) and a value only a chat reader has, so
+//! it is written where the speaker is known — the ingest converter of step 3 — and not here.
+//!
+//! **Rule 7 is not here, and the reason is the reason this module exists.** A unit of type
+//! `x.text/entity` copies nothing from a manifest — A-2.4 rule 7 forbids it `span`, `manifest`,
+//! `published` and `grounds` outright — so the hazard this module guards against cannot arise
+//! for one, and the rule needs nothing a library knows. It lives in
+//! `smysl_core::schemas::text::entity`, beside the declaration that owns the type, where the
+//! *checker* can also reach it: `smysl-check` may not depend on this crate (§4.3.3 spends its
+//! one edge on the `Time` pass), and a rule with one implementation in the producer and another
+//! in the checker is a rule with two readings.
 
 use smysl_core::ids::LangTag;
 use smysl_core::types::{Manifest, SourceKind, SourceRef, UnitCoreBuilder};
