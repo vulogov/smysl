@@ -268,6 +268,24 @@ impl<'t> View<'t> {
         }
     }
 
+    /// Only the partitions named, which is how a scope narrower than the library is expressed.
+    ///
+    /// The three IDF scopes RFC SMYSL-2.5 §3.2 names — partition, collection, library — are all
+    /// this call with a different list, and that is the whole of OQ-14's answer in code: `df`,
+    /// `docs` and total length are counts over **disjoint** document sets, so summing the rows a
+    /// scope names gives that scope's statistics exactly, from one table and with no rebuild. A
+    /// collection is a set of manifests, so it is a set of partitions; a partition is one row;
+    /// the library is all of them.
+    ///
+    /// A partition this table does not hold is skipped rather than refused: a collection may
+    /// name an expression nothing has been extracted from yet, and that is an empty contribution
+    /// to a sum rather than a failed query.
+    pub fn of(table: &'t Table, partitions: &[Partition]) -> View<'t> {
+        View {
+            parts: partitions.iter().filter_map(|p| table.get(p)).collect(),
+        }
+    }
+
     /// Only the partitions analysed under `analyzer`.
     ///
     /// For the comparison with the in-memory path, and for a caller that wants one language's

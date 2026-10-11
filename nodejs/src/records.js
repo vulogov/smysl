@@ -64,6 +64,7 @@ export const UNIT_KEYS = new Map([
   [6, "status"],
   [7, "source"],
   [8, "payload"],
+  [9, "lang"],
 ]);
 
 export class Record {

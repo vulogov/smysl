@@ -58,6 +58,92 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### A unit can say what language it is in, and which bytes it came from
+
+TX-P5 step 1 activates FC-1 and FC-3 (RFC SMYSL-2.3 A-1 and A-2): unit core key 9 `lang`, and
+`source` keys 5 `span` and 6 `manifest`. The format spec's §2.2 is amended in place, all three
+ports carry the keys, and `SMY-E404` and `SMY-W405` are registered and raised — the two codes
+TX-P1 step 5 allocated and deliberately left out of the registry because the field they read did
+not exist.
+
+**"Old stores re-encode unchanged" is asserted twice, and the second is the one that counts.** A
+unit with no `lang` and no span writes no key 9, 5 or 6, so its bytes are the bytes it always had.
+That is a property of this build. The byte-pinned wire fixtures — written by releases that had
+never heard of these keys — still round-trip, and that is evidence about the format.
+
+**The quoting is load-bearing, which needed the parser to look at the source text.** A bare
+`lang:` on a unit is core key 9 and a quoted `"lang":` is a payload key (A-10 item 2) — and the
+header parser strips quotes from a key, so after parsing the two are the same four characters. The
+distinction is recoverable from the key's span, and `HObject::key_span` is what recovers it. The
+writer mirrors it: `lang` is the one payload key written **quoted**, where the other five
+collisions with header words have no surface form at all. That asymmetry is the right way round. A
+`lang` payload key was ordinary before this release, and refusing it a spelling would have taken
+it away from every document that has one.
+
+`SMY-W432` has therefore changed what it says rather than being retired. It shipped a release
+early to announce that these four characters were about to move between two hashed places — a move
+that changes a uid with nothing to report it. The move has happened, so the warning now says the
+language belongs in the core key rather than that it is going to.
+
+**Rule 1 is enforced at three doors and unreachable through the fourth.** A unit carrying a span
+must carry the manifest it is an offset into. `SourceRef::in_part` sets both and is the only
+public way to set either — the two fields are private for exactly that reason — the decoder
+refuses the pair's absence, and the surface parser names the rule. The decoder *refusing* is
+defensible here precisely because no release before this one could write key 5: there is no corpus
+to keep readable, which is the opposite of the argument that keeps a malformed `published` or an
+unrecognised `source.kind`.
+
+**`SMY-W405` needed `PartResolver` to grow a method.** A locator is `smysl-text`'s grammar and
+needs a reading to resolve against, and `smysl-check` may not depend on that crate — §4.3.3 spends
+its one edge on the `Time` pass. So the resolver answers instead, and its default answer is "I do
+not answer locator questions": a checker that gets it reports nothing, because *I could not look*
+is not a disagreement. An object store alone genuinely cannot answer, because a locator is a name
+in a reading.
+
+**The exit clause names the wrong code**, and this is the place to say so. It asks for
+"`W406`/`E404` fixtures", and `SMY-W406` is holder and speaker uids not in `deps` — which §4.3.1
+and the pass table both give to TX-P12 with FC-9's field types. It has nothing to do with FC-3.
+The pair this step owes is `SMY-E404` and `SMY-W405`, and both are raised now.
+
+`provenance::stamp` writes five of the copy set's six fields, where it wrote three. The language is
+the **caller's** and not the manifest's: a manifest says what language the text is in, and a gist
+written about a Russian passage may be written in English — which is what `SMY-W436` reports, and
+taking the field from the manifest would have made that unreportable.
+
+### OQ-14: IDF is computed over the scope the query declared
+
+The open question was "default IDF scope: partition, collection or library", and it had been
+provisional since draft 3 because per-partition indexes had to be *built* per call — the cost
+F-10 measured. TX-P4 step 2 removed that: `df`, `docs` and total length are counts over
+**disjoint** document sets, so summing the partitions a scope names gives that scope's statistics
+exactly, from one table and with no rebuild. A partition is one row, a collection a sum over the
+named rows, the library a sum over all of them (`postings::View::of`). The question stops being a
+storage decision and becomes the per-query flag `--idf partition|collection|library` that RFC
+SMYSL-2.5 §7 already anticipated.
+
+**The answer is sharper than a default: IDF is computed over the query's declared scope.** A
+*filter* — `within`, `--kind`, `--min-status`, `--schema`, `--payload` — says which units may be
+returned and never moves a term's weight, which is the rule 1.5 wrote into `Query::within`. A
+*scope* — `from collection:`, `find --library` — says what corpus the question is about, and that
+is what the counts are over. Those two had been read as a conflict between the draft's "default
+collection" and `within`'s "IDF still comes from the whole index"; under the distinction there
+was never one.
+
+**The default stays `collection`, and the two alternatives have concrete defects rather than
+merely different flavour.** *Partition*: a partition holding one document gives every term it
+holds the same `idf` — `ln(1 + 0.5/1.5)` — so the ranking inside it is by length normalisation
+alone, it takes rank 1 of its own partition, and §3.4's RRF then hands it a full `1/(k+1)`.
+Per-partition IDF systematically favours small texts. *Library*: it inflates `N` with corpora the
+query did not ask about, and for fixed `df` the ratio between two terms' `idf` compresses toward
+1 as `N` grows — adding an unrelated corpus flattens discrimination inside the one that was asked
+for. Both are asserted in `crates/smysl-text/tests/index.rs`, the second by showing that over the
+library a term in one unit outweighs a term in every unit by more than four times, and in a
+one-document scope the two contribute exactly the same.
+
+What is **not** answered is which scope ranks better. That needs relevance judgements, which are
+GE-T5 and GE-T10 material this repository does not hold, and saying so is the honest end of the
+question rather than a figure from a corpus nobody has.
+
 ### Twelve tables, and three defects that only a corpus could find
 
 TX-P4 steps 3 and 4 finish RFC SMYSL-2.4 §3.8: the `said`, `composed` and `observed` range tables

@@ -4,6 +4,7 @@ use core::fmt;
 
 use crate::edtf::Edtf;
 use crate::error::IdError;
+use crate::ids::Mid;
 use crate::types::unit::Extra;
 
 // ---------------------------------------------------------------------------
@@ -369,6 +370,36 @@ pub struct SourceRef {
     /// merely restate `observed` (rule 3). Those rules are a producer's, and they are applied
     /// in `smysl-text::provenance::stamp`.
     pub published: Option<String>,
+    /// The byte range of the part this unit was drawn from, half-open (SMYSL-2.3 A-2.1 key 5,
+    /// FC-3, 1.10).
+    ///
+    /// Offsets into the part's **normalised** bytes, which is the only thing a tid identifies:
+    /// the part text is NFC, LF-terminated and BOM-free before it is hashed, so a span means the
+    /// same bytes for everyone who can resolve the tid.
+    ///
+    /// **The span is authoritative and the locator is informative.** `reference` may carry
+    /// `#<locator>` after the tid, and a locator is a reader's name for a place — a verse, a
+    /// line, a JSON pointer. When the two disagree the span wins and `SMY-W405` is reported,
+    /// because the span is what the extraction actually read; a span past the part's length is
+    /// `SMY-E404`. Both are findings about a store and need the part, so the library check pass
+    /// raises them with a resolver.
+    ///
+    /// **Inside identity**, as the rest of `source` is: two units quoting different ranges of one
+    /// part are two units, and that is what makes a span-carrying unit traceable to the bytes it
+    /// came from rather than to the document it came from.
+    ///
+    /// A-2.4 rule 1 makes the manifest mandatory beside it, and this pair is **not public** for
+    /// that reason: [`SourceRef::in_part`] is the only way to set either, so a unit with a span
+    /// and no manifestation cannot be built rather than being built and then refused by a
+    /// checker. The decoder enforces the same rule on the way in, and the surface parser does
+    /// at the header.
+    pub(crate) span: Option<(u64, u64)>,
+    /// The manifestation the unit was extracted under: a mid (A-2.1 key 6, FC-3, 1.10).
+    ///
+    /// Required whenever the span is present, and set by the same constructor. It is also what
+    /// the copy rules point at: A-2.4 rule 6 forbids copying a manifest's title, creators, page
+    /// or URL onto a unit, precisely because this field makes all of it reachable.
+    pub(crate) manifest: Option<Mid>,
     /// Unknown keys from a future minor version, preserved verbatim (1.7).
     ///
     /// Every other record body has had one since 0.2 and this sub-map did not, which made it the
@@ -467,8 +498,36 @@ impl SourceRef {
             kind_code: None,
             observed: None,
             published: None,
+            span: None,
+            manifest: None,
             extra: Extra::new(),
         }
+    }
+
+    /// The part range and the manifestation it was read under (A-2.1 keys 5–6, 1.10).
+    ///
+    /// Both at once, because A-2.4 rule 1 says a unit carrying a span carries a manifest — a
+    /// setter for each would make the illegal state reachable in two steps and then refused at
+    /// `build`, which is a worse place to find out. `None` for an empty or reversed range, since
+    /// `[start, end)` with `start >= end` names no bytes: a span is a claim about text that was
+    /// read, and a claim about nothing is not one.
+    pub fn in_part(mut self, start: u64, end: u64, manifest: Mid) -> Option<SourceRef> {
+        if start >= end {
+            return None;
+        }
+        self.span = Some((start, end));
+        self.manifest = Some(manifest);
+        Some(self)
+    }
+
+    /// The part range this unit was drawn from, half-open (A-2.1 key 5).
+    pub fn span(&self) -> Option<(u64, u64)> {
+        self.span
+    }
+
+    /// The manifestation the span is an offset into (A-2.1 key 6).
+    pub fn manifest(&self) -> Option<&Mid> {
+        self.manifest.as_ref()
     }
 
     /// The instant the observation was taken, in milliseconds since the Unix epoch (1.8).

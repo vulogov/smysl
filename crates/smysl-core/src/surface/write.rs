@@ -190,6 +190,19 @@ pub fn resolution_has_surface_form(r: &Resolution) -> bool {
 /// different uid. Surface text cannot express that unit, so it travels as CBOR.
 const UNIT_HEADER_WORDS: &[&str] = &["status", "deps", "grounds", "source", "salience"];
 
+/// The payload keys that must be written **quoted**, because the bare spelling is a core key.
+///
+/// `lang` only, and it is not in [`UNIT_HEADER_WORDS`] on purpose. The other five collisions have
+/// no surface form at all: a payload key named `status` cannot be spelled, because quoting it
+/// changes nothing the parser can see. `lang` can, because SMYSL-2.3 A-10 item 2 makes the
+/// quoting load-bearing — a bare `lang:` is core key 9 and a quoted `"lang":` is a payload key,
+/// and the parser reads the source to tell them apart.
+///
+/// Which matters most for documents written *before* 1.10: a `lang` payload key was ordinary
+/// then, and refusing it a surface form would take the spelling away from every one of them.
+/// Quoting keeps it, which is what `SMY-W432` spent a release telling authors to do.
+const QUOTED_PAYLOAD_WORDS: &[&str] = &["lang"];
+
 /// Whether a unit can be written as surface text without becoming a different unit.
 ///
 /// Everything here is inside `UnitCore` and therefore inside the uid, so each case is the same
@@ -580,6 +593,11 @@ fn write_unit(out: &mut String, u: &UnitCore, ctx: &WriteContext) {
 
     let mut fields: Vec<String> = Vec::new();
     fields.push(format!("status: {}", u.status));
+    // Core key 9, spelled bare — which is what makes it the core key on the way back in. A
+    // payload key of the same name is written quoted; `quoted_key` is where that happens.
+    if let Some(tag) = &u.lang {
+        fields.push(format!("lang: {}", quoteless_or_quoted(tag.as_str())));
+    }
     if !u.deps.is_empty() {
         fields.push(format!("deps: [{}]", refs(&u.deps, ctx)));
     }
@@ -600,6 +618,12 @@ fn write_unit(out: &mut String, u: &UnitCore, ctx: &WriteContext) {
         }
         if let Some(p) = &s.published {
             src.push_str(&format!(", published: {}", quoteless_or_quoted(p)));
+        }
+        if let Some((start, end)) = s.span() {
+            src.push_str(&format!(", span: [{start}, {end}]"));
+        }
+        if let Some(mid) = s.manifest() {
+            src.push_str(&format!(", manifest: {}", mid.canonical()));
         }
         src.push_str(" }");
         fields.push(src);
@@ -781,6 +805,7 @@ fn quoted_key(s: &str) -> String {
     let needs_quotes = s.is_empty()
         || s.starts_with('#')
         || s.starts_with("//")
+        || QUOTED_PAYLOAD_WORDS.contains(&s)
         || s.chars()
             .any(|c| c.is_whitespace() || matches!(c, ':' | ',' | '{' | '}' | '"' | '\\'));
     if !needs_quotes {

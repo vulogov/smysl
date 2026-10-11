@@ -314,8 +314,30 @@ The planner lowers the AST in a fixed order. Each phase has one job and records 
    trait (§4.2). Plain `Store`: `store:` and the whole store. `smysl-text` (SMYSL-2.4) adds
    `texts`, `library`, `collection:`, `channel`, `import:` and catalog predicates.
 4. **Partitions.** The candidate set is split by `(manifest, lang)` when the catalog provides
-   them, else one partition. IDF scope (partition, collection, library; default collection,
-   OQ-14) is recorded.
+   them, else one partition. IDF scope (partition, collection, library; **default collection**)
+   is recorded.
+
+   **OQ-14 answered in TX-P4 step 2**, and the rule is sharper than a default: *IDF is computed
+   over the query's declared scope*. A **filter** — `within`, `kinds`, `min_status`, `schemas`,
+   `payload` — says which units may be returned and never moves a term's weight, which is the
+   rule 1.5 wrote into `Query::within`. A **scope** — `from collection:`, `find --library` —
+   says what corpus the question is about, and that is what `df` and `N` are counted over. The
+   two were never in conflict; the open question had them tangled.
+
+   What settled the default: the cost argument behind it is gone, and the two alternatives have
+   concrete defects. SMYSL-2.4's `postings` table is per partition and `df`, `docs` and total
+   length are counts over **disjoint** document sets, so each of the three scopes is exactly
+   computable from one table with no rebuild — partition is one row, collection a sum over the
+   named rows, library a sum over all (`postings::View::of`). *Partition* as a default fails on a
+   one-document partition: with `N = 1` every term it holds has the same `idf`, so the ranking
+   inside it is by length normalisation alone, it takes rank 1 of its own partition and a full
+   `1/(k + 1)` under §3.4's RRF — per-partition IDF systematically favours small texts. *Library*
+   inflates `N` with corpora the query did not ask about, and for fixed `df` the ratio between two
+   terms' `idf` compresses toward 1 as `N` grows, which flattens discrimination inside the corpus
+   that was asked for. Both are asserted in `smysl-text/tests/index.rs`.
+
+   What is **not** answered: which scope ranks better. That needs relevance judgements, which are
+   GE-T5 and GE-T10 material this repository does not hold.
 5. **Sources.** Each source stage yields a ranked or unranked set per partition.
 6. **Filters and time.** Predicates evaluate over **lensed** unit views (§3.9). Time predicates
    use SMYSL-2.4's effective-time engine; undated units are counted (`SMY-W415`).
@@ -388,6 +410,11 @@ the existing private `relink::successors` made public so query and relink cannot
 - One BM25 index per partition, built with `Bm25::index_subset` so IDF is the partition's
   (or the collection's, by IDF scope). Until SMYSL-2.4's persistent postings, the planner caches
   per-partition indexes for the duration of one invocation only.
+  - **Since TX-P4 step 2 there is no per-partition index to build.** `postings::View::of` takes
+    the partitions a scope names and sums their counts, which is exact because the sets are
+    disjoint; `Bm25::over` scores it. `Bm25::index_subset` is therefore not needed and was not
+    added — a second index per partition is the cost F-10 measured, and the whole point of the
+    table is that it is paid once.
 - Each partition is searched with its own analyzer (SMYSL-2.4 chain id, recorded).
 - **RRF.** `score(u) = Σ_p 1 / (k + rank_p(u))`, `k = 60`, ranks 1-based, partitions summed in
   sorted partition-key order, f64, ties by uid. The fused list is a function of integer ranks
@@ -1194,8 +1221,9 @@ E421, E422, E426, E427, W429, W430, W431. Existing: W036, E001.
 
 ## 9. Open questions
 
-Draft 3 questions this RFC touches: **OQ-14** (IDF scope; default collection, recorded per
-query), **OQ-15** (partial dependence; `Witnesses` trait leaves room), **OQ-16** (contentions
+Draft 3 questions this RFC touches: ~~**OQ-14**~~ **answered** (IDF over the query's declared
+scope, default collection, recorded per query — §3.2 step 4 has the reasoning and the two
+defects that decided it), **OQ-15** (partial dependence; `Witnesses` trait leaves room), **OQ-16** (contentions
 across stores; computed by merge into the scratch store until SMYSL-2.8), **OQ-21** (name `sq`;
 saved queries in the format — this RFC needs only FC-5's declaration), **OQ-22** (intent
 classifier; rules by default, `Classifier` port), **OQ-23** (closed op set; `Unknown` preserved),

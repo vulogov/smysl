@@ -4,14 +4,20 @@
 //! a manifest, a dating or a reading that is not a well-formed identity; one alias with two
 //! heads; text in a log; and an object whose bytes are not what its name says they are.
 //!
-//! # Two of the plan's codes are not here
+//! # The plan's six codes are all here now
 //!
-//! TX-P1 step 5 names six. `SMY-E404` is a span past a part's length and `SMY-W405` is a
-//! locator disagreeing with a span, and both read `SourceRef.span` — a field §4.3.1 gives to
-//! TX-P5. They are not implemented *and not registered*: a code in the registry that nothing
-//! can raise is a promise a reader greps for and finds nothing behind. [`SKIPPED`] is what the
-//! pass says about them instead, so "this build does not check that" is a thing a caller can
-//! read rather than something they have to infer from silence.
+//! TX-P1 step 5 named six and raised four. `SMY-E404` — a span past a part's length — and
+//! `SMY-W405` — a locator naming a different place than the span beside it — both read
+//! `SourceRef.span`, which FC-3 added in TX-P5 step 1, and both are raised here as of that step.
+//! They were left out of the registry until then rather than registered and unraisable, which is
+//! why [`SKIPPED`] is empty rather than deleted: the list is the shape of that promise, and it
+//! should still be printable when the next phase allocates a code this pass cannot yet raise.
+//!
+//! Both need the part, and `SMY-W405` needs a *locator resolved*, which is `smysl-text`'s grammar
+//! and needs a reading. This crate may not depend on that one, so the question goes to the
+//! resolver: `PartResolver::locator` answers it, and its default answer is "I do not answer
+//! locator questions" — which a checker reports as nothing, because "I could not look" is not a
+//! disagreement.
 //!
 //! # Why the object half is optional
 //!
@@ -37,16 +43,7 @@ use smysl_graph::Store;
 /// registry, because nothing in this build can raise them, and a `Code` for each would be the
 /// very entry the registry's own rule forbids. So this list is the only place they are named,
 /// and it stops being a list of strings on the day they become raisable.
-pub const SKIPPED: &[(&str, &str)] = &[
-    (
-        "SMY-E404",
-        "a span past the part's length; `source.span` arrives in TX-P5",
-    ),
-    (
-        "SMY-W405",
-        "a locator disagreeing with a span; `source.span` arrives in TX-P5",
-    ),
-];
+pub const SKIPPED: &[(&str, &str)] = &[];
 
 /// Run the pass. `parts` is the object store, when the caller has one.
 pub fn run(
@@ -59,7 +56,96 @@ pub fn run(
     text_in_the_log(store, report);
     if let Some(parts) = parts {
         objects(store, parts, report);
+        spans(store, parts, report);
     }
+}
+
+/// `SMY-E404` and `SMY-W405` — a unit's span against the part it names (TX-P5 step 1).
+///
+/// A span is a pair of byte offsets into a part's normalised bytes, and the part is the only
+/// thing that can say whether they are inside it. A locator, where the reference carries one, is
+/// a reader's name for a place; the span is authoritative and the locator is informative, so a
+/// disagreement is a warning about the *locator* and never a correction of the span.
+///
+/// A part that is absent or unreadable is not a defect here: `SMY-E446` is the diagnostic for
+/// bytes that are there and wrong, and a redacted part has no bytes by design. Neither is a span
+/// this pass can check, and reporting one would name the wrong thing.
+fn spans(
+    store: &Store,
+    parts: &(dyn PartResolver + Send + Sync + core::panic::RefUnwindSafe),
+    report: &mut Report,
+) {
+    for (uid, unit) in store.units() {
+        let Some(source) = unit.core.source.as_ref() else {
+            continue;
+        };
+        let Some((start, end)) = source.span() else {
+            continue;
+        };
+        // A-2.4 rule 1 makes this unreachable through any door this build has, and the pass does
+        // not assume it: a record from a producer that broke the rule is a record this check
+        // simply has nothing to resolve against.
+        let Some(mid) = source.manifest() else {
+            continue;
+        };
+        let Some(tid) = part_of_reference(&source.reference) else {
+            continue;
+        };
+
+        if let Resolved::Part(stored) = parts.part(&tid) {
+            let len = stored.text.len() as u64;
+            if end > len {
+                report.push(
+                    Diagnostic::new(Code::E404)
+                        .with_subject(Subject::Unit(*uid))
+                        .with_message(format!(
+                            "span {start}..{end} reaches past part `{}`, which holds {len} byte(s)",
+                            tid.canonical()
+                        )),
+                );
+            }
+        }
+
+        // The locator half. Only when the reference carries one, and only when the resolver
+        // answers locator questions at all.
+        let Some((_, locator)) = source.reference.split_once('#') else {
+            continue;
+        };
+        if locator.is_empty() {
+            continue;
+        }
+        let Some((at_tid, at)) = parts.locator(mid, locator) else {
+            continue;
+        };
+        if at_tid != tid || at.start != start || at.end != end {
+            report.push(
+                Diagnostic::new(Code::W405)
+                    .with_subject(Subject::Unit(*uid))
+                    .with_message(format!(
+                        "locator `{locator}` names {}..{} of `{}` and the span says {start}..{end} \
+                         of `{}`; the span wins",
+                        at.start,
+                        at.end,
+                        at_tid.canonical(),
+                        tid.canonical()
+                    ))
+                    .with_suggestion(
+                        "the span is authoritative: correct the locator, or leave it off the \
+                         reference"
+                            .to_string(),
+                    ),
+            );
+        }
+    }
+}
+
+/// The part a reference names, if it names one.
+///
+/// A second reading of the rule `smysl_graph::store::library`'s `part_of` holds, and it is here
+/// rather than borrowed because this crate may not depend on `smysl-graph`'s private modules —
+/// `Store::part_of_reference` is the public form and this pass has a `Store`, so it uses that.
+fn part_of_reference(reference: &str) -> Option<Tid> {
+    Store::part_of_reference(reference)
 }
 
 /// `SMY-E403` - a reference that names an identity and is not one.

@@ -12,7 +12,8 @@
         "grounds": [],
         "status": 1,
         "source": null,
-        "payload_hex": null
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a30065636c61696d016f61206d696e696d616c20636c61696d0601",
       "uid_hex": "b881713f530a8eaa700c201d486f78eefdf289e1058339ad92a5385fe82ba02e"
@@ -28,7 +29,8 @@
         "grounds": [],
         "status": 1,
         "source": null,
-        "payload_hex": null
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a30065636c61696d0178197468652073616d6520776f72647320656974686572207761790601",
       "uid_hex": "afe447af69a71821c3e7deb0476acac5597e72e4ee7d16fbe144fa54fa181117"
@@ -44,7 +46,8 @@
         "grounds": ["0101010101010101010101010101010101010101010101010101010101010101"],
         "status": 2,
         "source": null,
-        "payload_hex": null
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a40065636c61696d0178197468652073616d6520776f72647320656974686572207761790581582001010101010101010101010101010101010101010101010101010101010101010602",
       "uid_hex": "620dd5d2e93f2d51d35aa05b53408707d277b15b725ec96aff3ddcde75e66b83"
@@ -60,7 +63,8 @@
         "grounds": [],
         "status": 1,
         "source": null,
-        "payload_hex": null
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a4006766696e64696e670175612066696e64696e672077697468206120626f647902782874686520626f647920746578742c2077686963682069732061207365706172617465206669656c640601",
       "uid_hex": "9564f1715466b9711b973eb9754834f1068aa933e6d94aa341fc62fe411712f5"
@@ -76,7 +80,8 @@
         "grounds": [],
         "status": 1,
         "source": null,
-        "payload_hex": null
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a5006766696e64696e670175612066696e64696e6720776974682064657461696c026d74686520626f647920746578740378367468652064657461696c20746578742c206c6f6e676572207468616e2074686520626f647920616e642070696e6e6564206174204c320601",
       "uid_hex": "e192685a4722b9e705b0d30af9400e6189111c3c37343867eb995da7989ebf8a"
@@ -92,7 +97,8 @@
         "grounds": ["0101010101010101010101010101010101010101010101010101010101010101", "0909090909090909090909090909090909090909090909090909090909090909"],
         "status": 2,
         "source": null,
-        "payload_hex": null
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a50065636c61696d01781e6120636c61696d2072657374696e67206f6e2074776f2067726f756e647304825820030303030303030303030303030303030303030303030303030303030303030358200707070707070707070707070707070707070707070707070707070707070707058258200101010101010101010101010101010101010101010101010101010101010101582009090909090909090909090909090909090909090909090909090909090909090602",
       "uid_hex": "ab2736d86347864fad77e2844a86e4a9c3905237979494bb25a094098700c3a3"
@@ -107,8 +113,9 @@
         "deps": [],
         "grounds": [],
         "status": 5,
-        "source": { "kind": 2, "reference": "pool.wait_ms{shard=eu-west}", "captured": null, "observed": null, "published": null },
-        "payload_hex": null
+        "source": { "kind": 2, "reference": "pool.wait_ms{shard=eu-west}", "captured": null, "observed": null, "published": null, "span": null, "manifest": null },
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a4006865766964656e6365016d61206d6561737572656d656e74060507a2000201781b706f6f6c2e776169745f6d737b73686172643d65752d776573747d",
       "uid_hex": "e91474b52cdbb49dc029d4714e3cf10291c688b6c036d1174334c81c08dd37d6"
@@ -123,8 +130,9 @@
         "deps": [],
         "grounds": [],
         "status": 5,
-        "source": { "kind": 1, "reference": "analysis/tables/latency.csv", "captured": "2026-06-30", "observed": null, "published": null },
-        "payload_hex": null
+        "source": { "kind": 1, "reference": "analysis/tables/latency.csv", "captured": "2026-06-30", "observed": null, "published": null, "span": null, "manifest": null },
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a4006865766964656e6365017361206461746564206d6561737572656d656e74060507a3000101781b616e616c797369732f7461626c65732f6c6174656e63792e637376026a323032362d30362d3330",
       "uid_hex": "3e3447044c85811591a47fdd2079f7b10d451555327391b1d1cc43db70ed274a"
@@ -139,8 +147,9 @@
         "deps": [],
         "grounds": [],
         "status": 5,
-        "source": { "kind": 2, "reference": "pool.wait_ms", "captured": null, "observed": 1726500000123, "published": null },
-        "payload_hex": null
+        "source": { "kind": 2, "reference": "pool.wait_ms", "captured": null, "observed": 1726500000123, "published": null, "span": null, "manifest": null },
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a4006865766964656e636501781d61206d6561737572656d656e74207769746820616e20696e7374616e74060507a30002016c706f6f6c2e776169745f6d73031b00000191fb6b517b",
       "uid_hex": "d05c4b370375e893528413885a46d27883b548668011fc8bd468e649fa02d76b"
@@ -155,8 +164,9 @@
         "deps": [],
         "grounds": [],
         "status": 4,
-        "source": { "kind": 4, "reference": "a-book", "captured": null, "observed": null, "published": "1920~" },
-        "payload_hex": null
+        "source": { "kind": 4, "reference": "a-book", "captured": null, "observed": null, "published": "1920~", "span": null, "manifest": null },
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a4006865766964656e63650178246120706173736167652066726f6d2061206461746564206d616e69666573746174696f6e060407a300040166612d626f6f6b0465313932307e",
       "uid_hex": "6a6a38b54f5920172ee8c12b1240774350dde0f36db3c05736f64ee1d9423b90"
@@ -172,7 +182,8 @@
         "grounds": [],
         "status": 1,
         "source": null,
-        "payload_hex": null
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a30065636c61696d0175636166c3a9206c6174656e63792c20e4b8ade696870601",
       "uid_hex": "123511750baaeb33c87911f95813f6cfd4d32f4fed34471400e0f2a1e5cb5a1e"
@@ -188,7 +199,8 @@
         "grounds": [],
         "status": 1,
         "source": null,
-        "payload_hex": null
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a30065636c61696d0175636166c3a9206c6174656e63792c20e4b8ade696870601",
       "uid_hex": "123511750baaeb33c87911f95813f6cfd4d32f4fed34471400e0f2a1e5cb5a1e"
@@ -204,10 +216,62 @@
         "grounds": [],
         "status": 1,
         "source": null,
-        "payload_hex": "a1616b01"
+        "payload_hex": "a1616b01",
+        "lang": null
       },
       "core_bytes_hex": "a4006b6f62736572766174696f6e0171636172726965732061207061796c6f616406010844a1616b01",
       "uid_hex": "11239c9c32b244cd761ad14b788185dd0c71501f0670c6b3c7a472613986e440"
+    },
+    {
+      "name": "with-lang",
+      "core": {
+        "schema": "claim",
+        "gist": "Псалом 13 в синодальном переводе",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 1,
+        "source": null,
+        "payload_hex": null,
+        "lang": "ru"
+      },
+      "core_bytes_hex": "a40065636c61696d01783ad09fd181d0b0d0bbd0bed0bc20313320d0b220d181d0b8d0bdd0bed0b4d0b0d0bbd18cd0bdd0bed0bc20d0bfd0b5d180d0b5d0b2d0bed0b4d0b5060109627275",
+      "uid_hex": "e5d57a13b232fe50c7e2f89dddbfa2955e496a7122b239034e69422f977026f2"
+    },
+    {
+      "name": "lang-in-the-payload",
+      "core": {
+        "schema": "claim",
+        "gist": "Псалом 13 в синодальном переводе",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 1,
+        "source": null,
+        "payload_hex": "a1646c616e67627275",
+        "lang": null
+      },
+      "core_bytes_hex": "a40065636c61696d01783ad09fd181d0b0d0bbd0bed0bc20313320d0b220d181d0b8d0bdd0bed0b4d0b0d0bbd18cd0bdd0bed0bc20d0bfd0b5d180d0b5d0b2d0bed0b4d0b506010849a1646c616e67627275",
+      "uid_hex": "659042aac526fe08ea17d3ca5d89fd9cd191d30260212d55c5847e0c0c490ad6"
+    },
+    {
+      "name": "passage",
+      "core": {
+        "schema": "claim",
+        "gist": "a claim about bytes 198 to 252 of a part",
+        "body": null,
+        "detail": null,
+        "deps": [],
+        "grounds": [],
+        "status": 4,
+        "source": { "kind": 4, "reference": "t3:eirceirceirceirceirceirceirceirceirceirceirceirceira#Gen.1.3", "captured": null, "observed": null, "published": null, "span": [198, 252], "manifest": "1111111111111111111111111111111111111111111111111111111111111111" },
+        "payload_hex": null,
+        "lang": "en"
+      },
+      "core_bytes_hex": "a50065636c61696d0178286120636c61696d2061626f75742062797465732031393820746f20323532206f6620612070617274060407a4000401783f74333a656972636569726365697263656972636569726365697263656972636569726365697263656972636569726365697263656972612347656e2e312e33058218c618fc06582011111111111111111111111111111111111111111111111111111111111111110962656e",
+      "uid_hex": "842c3de8cbc2f4363362c9dbce5e0a6f3e5ee76a02afeeb2bcd4d17b341db9e8"
     },
     {
       "name": "status-speculative",
@@ -220,7 +284,8 @@
         "grounds": [],
         "status": 1,
         "source": null,
-        "payload_hex": null
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a30065636c61696d01766f6e6520676973742c207369782073746174757365730601",
       "uid_hex": "f07a96dd28a6b731b8cf4961e18c214ba2ed988c554824f4496a647791572c28"
@@ -236,7 +301,8 @@
         "grounds": ["0101010101010101010101010101010101010101010101010101010101010101"],
         "status": 2,
         "source": null,
-        "payload_hex": null
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a40065636c61696d01766f6e6520676973742c207369782073746174757365730581582001010101010101010101010101010101010101010101010101010101010101010602",
       "uid_hex": "936db219529480dd2c6748beeaa6700637e996d3b62375a4d9a2fce877b176b2"
@@ -252,7 +318,8 @@
         "grounds": ["0101010101010101010101010101010101010101010101010101010101010101"],
         "status": 3,
         "source": null,
-        "payload_hex": null
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a40065636c61696d01766f6e6520676973742c207369782073746174757365730581582001010101010101010101010101010101010101010101010101010101010101010603",
       "uid_hex": "0b82bbdcc27e527c1352b6dad5f561dc3f3e792a92a7ca270f4806653df01ce0"
@@ -267,8 +334,9 @@
         "deps": [],
         "grounds": [],
         "status": 4,
-        "source": { "kind": 4, "reference": "a-document", "captured": null, "observed": null, "published": null },
-        "payload_hex": null
+        "source": { "kind": 4, "reference": "a-document", "captured": null, "observed": null, "published": null, "span": null, "manifest": null },
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a40065636c61696d01766f6e6520676973742c20736978207374617475736573060407a20004016a612d646f63756d656e74",
       "uid_hex": "66e0cec64ad76773713a75552e31dbc190d6ed7a1949a7aaec88ac3473bc0f32"
@@ -283,8 +351,9 @@
         "deps": [],
         "grounds": [],
         "status": 5,
-        "source": { "kind": 4, "reference": "a-document", "captured": null, "observed": null, "published": null },
-        "payload_hex": null
+        "source": { "kind": 4, "reference": "a-document", "captured": null, "observed": null, "published": null, "span": null, "manifest": null },
+        "payload_hex": null,
+        "lang": null
       },
       "core_bytes_hex": "a40065636c61696d01766f6e6520676973742c20736978207374617475736573060507a20004016a612d646f63756d656e74",
       "uid_hex": "598424fd4e315379b09c59a31782ec38eebc164a9fda2a7ad9fbe7eee7955191"

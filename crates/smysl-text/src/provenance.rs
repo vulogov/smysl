@@ -14,10 +14,12 @@
 //! implementations that disagreed about whether to copy `published` would give the same passage
 //! two uids and neither would be wrong about anything else.
 //!
-//! What this release can write is the reference, `published` and `observed`. `span`, `manifest`
-//! and core `lang` arrive with FC-1 and FC-3 in TX-P5, and `text:speaker` with the `x.text/v1`
-//! payload; each is a field the format does not have yet rather than a rule left unapplied.
+//! Five of the six are written here as of TX-P5 step 1, where FC-1 and FC-3 gave the format
+//! `span`, `manifest` and core `lang`: the reference, the span and its manifest, `published` *or*
+//! `observed` by rules 2 to 5, and the language. `text:speaker` waits for the `x.text/v1` payload
+//! — a field the format does not have yet rather than a rule left unapplied.
 
+use smysl_core::ids::LangTag;
 use smysl_core::types::{Manifest, SourceKind, SourceRef, UnitCoreBuilder};
 use smysl_core::Tid;
 
@@ -46,6 +48,19 @@ pub struct Drawn<'a> {
     /// A chat reader gives one for every message; a Bible reader gives none, because a verse
     /// has no send time. The two cases are what rules 2 and 3 are about.
     pub observed: Option<u64>,
+    /// The byte range of the part the unit was extracted from, half-open (A-2.1 key 5, 1.10).
+    ///
+    /// **Authoritative**, where the locator is informative. `None` for an extractor that read a
+    /// whole part, or for one that cannot say which bytes it read — and a unit with no span is a
+    /// unit nothing can trace to its text, which is why ingest supplies one.
+    pub span: Option<(u64, u64)>,
+    /// The language the unit's text fields are written in (core key 9, A-1, 1.10).
+    ///
+    /// A reference rather than a value, so [`Drawn`] stays `Copy`. The caller's, not the
+    /// manifest's: the manifest says what language the *text* is in, and a gist written about a
+    /// Russian passage may be written in English — which is the defect `SMY-W436` reports, and
+    /// it could not be reported at all if this field were taken from the manifest.
+    pub lang: Option<&'a LangTag>,
 }
 
 /// Write the copy set onto a builder.
@@ -57,6 +72,19 @@ pub struct Drawn<'a> {
 /// (`SMY-E410`), not repaired where a unit is built.
 pub fn stamp(b: UnitCoreBuilder, d: &Drawn<'_>) -> UnitCoreBuilder {
     let mut source = SourceRef::new(SourceKind::Doc, reference(d));
+    // Rule 1, and the reason the pair is set by one call: a unit carrying a span carries the
+    // manifest it is an offset into. The mid is the manifest's own, never the caller's — a
+    // producer that could pass a different one could point a span at bytes it never read.
+    if let Some((start, end)) = d.span {
+        source = match source.clone().in_part(start, end, d.manifest.mid()) {
+            Some(with) => with,
+            // An empty or reversed range is no span rather than a refusal: `stamp` is
+            // infallible by design (see above), and a unit with no span is a weaker claim than
+            // one with a wrong span. The extractor that produced the range is where that is a
+            // defect, and `SMY-E404` is where a stored one is reported.
+            None => source,
+        };
+    }
     match (d.observed, d.manifest.published.as_deref()) {
         // Rule 2, **copy**: no `observed`, and the manifest says when it was published, so the
         // unit says so too. This is what makes a verse of the 1769 KJV dated at all: the part
@@ -81,7 +109,11 @@ pub fn stamp(b: UnitCoreBuilder, d: &Drawn<'_>) -> UnitCoreBuilder {
         // arm writes nothing rather than writing a zero.
         (None, None) => {}
     }
-    b.source(source)
+    let b = b.source(source);
+    match d.lang {
+        Some(tag) => b.lang(tag.clone()),
+        None => b,
+    }
 }
 
 /// `t3:<52 chars>` or that followed by `#` and a locator (A-2.2).
@@ -148,6 +180,8 @@ mod tests {
             locator: Some("Gen.1.1"),
             manifest: m,
             observed,
+            span: None,
+            lang: None,
         }
     }
 
@@ -274,5 +308,70 @@ mod tests {
         let m = manifest(Some("1769"));
         let d = drawn(&m, Some(5));
         assert_eq!(unit(&d), unit(&d));
+    }
+
+    /// Rule 1 and the copy set's two new members (FC-3): the span and the manifest it is an
+    /// offset into, written together and never apart.
+    #[test]
+    fn a_span_brings_its_manifest_and_nothing_else() {
+        let m = manifest(Some("1769"));
+        let d = Drawn {
+            span: Some((0, 54)),
+            ..drawn(&m, None)
+        };
+        let s = unit(&d);
+        assert_eq!(s.span(), Some((0, 54)));
+        assert_eq!(
+            s.manifest(),
+            Some(&m.mid()),
+            "the mid is the manifest's own, so a producer cannot point a span at another text"
+        );
+        // Still nothing else: the prohibition does not weaken because two fields were added.
+        assert!(!s.reference.contains("King James"));
+
+        // An empty range is no span rather than a refusal — `stamp` is infallible by design.
+        let empty = Drawn {
+            span: Some((10, 10)),
+            ..drawn(&m, None)
+        };
+        let s = unit(&empty);
+        assert_eq!(s.span(), None);
+        assert_eq!(
+            s.manifest(),
+            None,
+            "a dropped span must not leave its manifest behind"
+        );
+    }
+
+    /// Core key 9 is the caller's answer, not the manifest's.
+    ///
+    /// The manifest says what language the *text* is in; a gist written about a Russian passage
+    /// may be written in English, which is exactly the defect `SMY-W436` reports. Taking this
+    /// field from the manifest would make that defect unreportable.
+    #[test]
+    fn the_language_is_the_callers_and_not_the_manifests() {
+        let m = manifest(None);
+        assert_eq!(m.lang.as_str(), "en");
+        let ru = LangTag::new("ru").expect("a tag");
+        let core = stamp(
+            UnitCoreBuilder::new(KernelType::Claim, "a claim about a verse", Status::Cited),
+            &Drawn {
+                lang: Some(&ru),
+                ..drawn(&m, None)
+            },
+        )
+        .build()
+        .expect("a well-formed unit");
+        assert_eq!(core.lang.as_ref().map(|t| t.as_str()), Some("ru"));
+
+        // And absent stays absent: "the language of the view" is what a unit means by saying
+        // nothing, and inventing the manifest's tag would be answering for the extractor.
+        let core = stamp(
+            UnitCoreBuilder::new(KernelType::Claim, "a claim about a verse", Status::Cited),
+            &drawn(&m, None),
+        )
+        .build()
+        .expect("a well-formed unit");
+        assert_eq!(core.lang, None);
     }
 }

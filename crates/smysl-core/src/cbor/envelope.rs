@@ -59,6 +59,9 @@ pub fn unit_core_bytes(u: &UnitCore) -> Vec<u8> {
     m.put(keys::unit::STATUS, |e| e.uint(u.status.as_u8() as u64));
     m.put_opt(keys::unit::SOURCE, u.source.as_ref(), enc_source);
     m.put_opt(keys::unit::PAYLOAD, u.payload.as_ref(), |e, v| e.bytes(v));
+    // Key 9, written only when present: a unit without a `lang` encodes to the bytes it always
+    // did, which is what lets an old store re-encode unchanged (SMYSL-2.3 §0, FC-1).
+    m.put_opt(keys::unit::LANG, u.lang.as_ref(), |e, t| e.text(t.as_str()));
     m.put_extra(&u.extra);
     m.into_bytes()
 }
@@ -75,6 +78,14 @@ fn enc_source(e: &mut Enc, s: &SourceRef) {
     });
     m.put_opt(keys::source::PUBLISHED, s.published.as_ref(), |e, p| {
         e.text(p)
+    });
+    m.put_opt(keys::source::SPAN, s.span().as_ref(), |e, (start, end)| {
+        e.array_head(2);
+        e.uint(*start);
+        e.uint(*end);
+    });
+    m.put_opt(keys::source::MANIFEST, s.manifest(), |e, mid| {
+        e.bytes(mid.as_bytes())
     });
     // Rule X inside the sub-map, as every record body has done since 0.2. Without it a reader
     // that met a key it did not know re-encoded the unit without it and changed its uid.
@@ -657,6 +668,8 @@ fn dec_source(d: &mut Dec<'_>) -> Res<SourceRef> {
     let mut captured = None;
     let mut observed = None;
     let mut published = None;
+    let mut span = None;
+    let mut manifest = None;
     let mut raw_kind = None;
     let mut extra = Extra::new();
     read_map(d, &mut extra, |d, k| match k {
@@ -687,6 +700,25 @@ fn dec_source(d: &mut Dec<'_>) -> Res<SourceRef> {
             published = Some(d.text()?.to_string());
             Ok(true)
         }
+        keys::source::SPAN => {
+            // Two unsigned integers, `start < end`. Refused rather than kept for the reason
+            // `lang` is: no release before this one could write key 5, so a span that is not a
+            // span comes from a producer bound by A-2.1, and there is no corpus to keep readable.
+            if d.array_head()? != 2 {
+                return Err(bad(at));
+            }
+            let start = d.uint()?;
+            let end = d.uint()?;
+            if start >= end {
+                return Err(bad(at));
+            }
+            span = Some((start, end));
+            Ok(true)
+        }
+        keys::source::MANIFEST => {
+            manifest = Some(Mid::from_bytes(dec_bytes32(d)?));
+            Ok(true)
+        }
         _ => Ok(false),
     })?;
     let kind = kind.ok_or_else(|| bad(at))?;
@@ -694,6 +726,18 @@ fn dec_source(d: &mut Dec<'_>) -> Res<SourceRef> {
     s.captured = captured;
     s.observed = observed;
     s.published = published;
+    // A-2.4 rule 1 on the way in: a span with no manifestation names offsets into bytes nobody
+    // can say they obtained the same way. Enforced here as well as by `SourceRef::in_part`,
+    // because a record can arrive from any producer and the pair is inside the uid — a reader
+    // that dropped the span to make the record legal would change the unit's identity, and one
+    // that kept it would hold a record no rule allows.
+    match (span, manifest) {
+        (Some(_), None) => return Err(bad(at)),
+        (span, manifest) => {
+            s.span = span;
+            s.manifest = manifest;
+        }
+    }
     s.extra = extra;
     if kind == SourceKind::Unknown {
         // `source.kind` is inside the uid, so the code has to leave again exactly as it
@@ -749,6 +793,7 @@ fn dec_unit(d: &mut Dec<'_>) -> Res<UnitCore> {
     let mut status = None;
     let mut source = None;
     let mut payload = None;
+    let mut lang = None;
     let mut extra = Extra::new();
 
     read_map(d, &mut extra, |d, k| match k {
@@ -792,6 +837,16 @@ fn dec_unit(d: &mut Dec<'_>) -> Res<UnitCore> {
             payload = Some(d.bytes()?.to_vec());
             Ok(true)
         }
+        keys::unit::LANG => {
+            // Refused rather than kept, which is the opposite of what this decoder does for an
+            // unrecognised `source.kind` or a malformed `published` — and A-1 says so outright:
+            // "a tag that is not well-formed BCP-47 is `SMY-E001` at the surface and a decode
+            // error in CBOR". The difference is that those two have a corpus behind them, and a
+            // producer that wrote a malformed tag here is a producer of this release or later,
+            // bound by a rule that did not exist when the old stores were written.
+            lang = Some(LangTag::new(d.text()?).map_err(|_| bad(at))?);
+            Ok(true)
+        }
         _ => Ok(false),
     })?;
 
@@ -806,6 +861,7 @@ fn dec_unit(d: &mut Dec<'_>) -> Res<UnitCore> {
     b.grounds = grounds;
     b.source = source;
     b.payload = payload;
+    b.lang = lang;
     b.extra = extra;
     UnitCore::new(b).map_err(|_| bad(at))
 }

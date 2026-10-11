@@ -40,7 +40,7 @@ var understoodRecords = map[uint64]bool{
 // must survive a round trip verbatim.
 var UnitKeys = map[uint64]string{
 	0: "schema", 1: "gist", 2: "body", 3: "detail", 4: "deps",
-	5: "grounds", 6: "status", 7: "source", 8: "payload",
+	5: "grounds", 6: "status", 7: "source", 8: "payload", 9: "lang",
 }
 
 // Record is one record: a type code, its body, and the bytes it came from.

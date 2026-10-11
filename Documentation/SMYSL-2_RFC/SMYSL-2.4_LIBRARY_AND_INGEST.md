@@ -2712,8 +2712,60 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
 
 Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
 
-1. FC-1 (`lang`, core key 9; D-2 reserved word) and FC-3 (`span`, `manifest`); ports.
-   *Exit:* old stores re-encode unchanged; `W406`/`E404` fixtures.
+1. ~~FC-1 (`lang`, core key 9; D-2 reserved word) and FC-3 (`span`, `manifest`); ports.
+   *Exit:* old stores re-encode unchanged; `W406`/`E404` fixtures.~~ **Done 2026-10-10.**
+   `UnitCore.lang` (A-1), `SourceRef.span` and `SourceRef.manifest` (A-2.1 keys 5 and 6), the
+   surface spellings of all three, `SMY-E404` and `SMY-W405` raised by the library pass, the copy
+   set in `provenance::stamp`, the spec's §2.2 amended in place, and all three ports.
+   `crates/smysl-core/tests/passage_provenance.rs` (10 tests), two in
+   `crates/smysl-text/tests/object_check.rs`, two in `crates/smysl-text/src/provenance.rs`, and
+   three new cases in `fixtures/wire/uid/cases.json`.
+
+   **The exit clause names the wrong code.** `SMY-W406` is holder and speaker uids not in `deps`,
+   which §4.3.1 and the pass table both give to **TX-P12** with FC-9's field types — it has
+   nothing to do with FC-3. The pair this step owes is `SMY-E404` and `SMY-W405`, the two codes
+   TX-P1 step 5 allocated and deliberately left unregistered because the field they read did not
+   exist. Both are raised now and both are in the registry, which took the count from 79 to 81.
+
+   **"Old stores re-encode unchanged" is asserted twice, and the second is the one that counts.**
+   A unit with no `lang` and no span writes no key 9, 5 or 6, so its bytes are the bytes it always
+   had — and the byte-pinned wire fixtures, written by releases that had never heard of these
+   keys, still round-trip. The first is a property of this build; the second is evidence about
+   the format.
+
+   **The quoting is load-bearing, and that needed the parser to look at the source.** A-10 item 2
+   makes a bare `lang:` core key 9 and a quoted `"lang":` a payload key — and `HObject` strips
+   quotes from a key, so after parsing the two are the same four characters. The distinction is
+   recoverable from the key's span, which is what `HObject::key_span` is for. The writer's side is
+   the mirror: `lang` is the one payload key written **quoted**, where the other five header-word
+   collisions have no surface form at all. That asymmetry is the right way round — a `lang`
+   payload key was ordinary before this release, and refusing it a spelling would take it away
+   from every document that has one.
+
+   **`SMY-W432` has changed what it says rather than being retired.** The lint shipped a release
+   early to announce that these four characters were about to move between two hashed places; the
+   move has happened, so the warning now says the language belongs in the core key rather than
+   that it is going to. The code stays because stores written before this release still hold such
+   units.
+
+   **Rule 1 is enforced at three doors and unreachable through the fourth.** `SourceRef::in_part`
+   sets the span and the manifest together and is the only public way to set either — the fields
+   are private for that reason — the decoder refuses the pair's absence, and the surface parser
+   names the rule. The decoder refusing is defensible precisely because no release before this one
+   could write key 5: there is no corpus to keep readable, which is the opposite of the argument
+   that keeps a malformed `published` or an unknown `source.kind`.
+
+   **`SMY-W405` needed the resolver to grow a method.** A locator is `smysl-text`'s grammar and
+   needs a reading to resolve against; `smysl-check` may not depend on that crate (§4.3.3 spends
+   its one edge on the `Time` pass). So `PartResolver` gained `locator`, whose default answer is
+   "I do not answer locator questions" — and a checker that gets it reports nothing, because *I
+   could not look* is not a disagreement. An object store alone genuinely cannot answer: a locator
+   is a name in a reading.
+
+   **`provenance::stamp` writes five of the copy set's six fields now**, where it wrote three.
+   The language is the **caller's** and not the manifest's: a manifest says what language the text
+   is in, and a gist written about a Russian passage may be written in English — which is exactly
+   what `SMY-W436` reports, and taking the field from the manifest would make that unreportable.
 2. `x.text/v1` declaration shipped as a schema record; entity units without span via
    `provenance` (`ref: "alias:<alias>"`). *Exit:* the same entity from 50 windows is one uid.
 3. Windows, owned ranges, node hint, span attachment, `Absent` behaviour, payload quote removal.

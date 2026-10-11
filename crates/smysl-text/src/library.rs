@@ -1055,4 +1055,19 @@ impl PartResolver for Library {
     fn part(&self, tid: &Tid) -> Resolved {
         self.objects.part(tid)
     }
+
+    /// Where a locator points, for `SMY-W405` (1.10, TX-P5 step 1).
+    ///
+    /// Through [`Library::resolve`], so the answer is the index's when the index can give one
+    /// and the search's when it cannot — a checker asking this question gets the same answer
+    /// `text show` would, which is the only answer worth reporting a disagreement against.
+    ///
+    /// `None` for a locator that names nothing *and* for a manifest whose parts cannot be read:
+    /// the caller reports a disagreement, and "I could not look" is not one. A redacted part is
+    /// exactly that case — the bytes are gone by design, and `SMY-W405` is not the diagnostic
+    /// for a redaction.
+    fn locator(&self, mid: &Mid, locator: &str) -> Option<(Tid, std::ops::Range<u64>)> {
+        let loc = crate::locator::parse(locator).ok()?;
+        self.resolve(mid, &loc, &Caps::DEFAULT).ok().flatten()
+    }
 }

@@ -203,13 +203,16 @@ def main() -> int:
     source_kind = canon_map(table_after(text, "| value | kind |", 0, 1))
     record_codes = canon_map(table_after(text, "| code | record |", 0, 1))
 
-    # The unit-core table carries a `≥9` row for unknown keys, which is a rule rather than a
+    # The unit-core table carries an `≥10` row for unknown keys, which is a rule rather than a
     # key. Rows below are integers only, so it never parses — asserted so that the gate is not
     # quietly relying on a parser accident.
-    check("§2.2 unit core keys are 0..8", sorted(unit_keys), list(range(9)))
+    #
+    # 0..9 since 1.10: `lang` (A-1), the language the text fields are written in.
+    check("§2.2 unit core keys are 0..9", sorted(unit_keys), list(range(10)))
     check("§2.2 has six statuses", sorted(status), list(range(6)))
-    # 0..4 since 1.10: `published` (A-2.3), EDTF text, written only when present.
-    check("§2.2 source sub-map is 0..4", sorted(source_keys), [0, 1, 2, 3, 4])
+    # 0..6 since 1.10: `published` (A-2.3), then `span` and `manifest` (A-2.1, FC-3) — the byte
+    # range of the part a unit was drawn from and the manifestation it is an offset into.
+    check("§2.2 source sub-map is 0..6", sorted(source_keys), [0, 1, 2, 3, 4, 5, 6])
     # Six since 1.7's `node`, which the spec's table did not gain until 1.8 — found by this gate
     # once `observed` forced a look at the same section.
     check("§2.2 has six source kinds", sorted(source_kind), list(range(6)))
@@ -312,7 +315,7 @@ def main() -> int:
         "python: §2.2 source sub-map keys",
         named_ints(py_uid,
                    ["SOURCE_KIND", "SOURCE_REFERENCE", "SOURCE_CAPTURED", "SOURCE_OBSERVED",
-                    "SOURCE_PUBLISHED"],
+                    "SOURCE_PUBLISHED", "SOURCE_SPAN", "SOURCE_MANIFEST"],
                    r"^%s = (\d+)$"),
         {k: "source_" + v for k, v in source_keys.items()},
         "python names the source sub-map's keys SOURCE_*; the spec calls them kind/reference/…",
@@ -367,7 +370,7 @@ def main() -> int:
     check("go: §2.2 unit core keys",
           named_ints(go_uid,
                      ["keySchema", "keyGist", "keyBody", "keyDetail", "keyDeps", "keyGrounds",
-                      "keyStatus", "keySource", "keyPayload"],
+                      "keyStatus", "keySource", "keyPayload", "keyLang"],
                      r"^\t%s\s+= (\d+)$"),
           {k: "key" + v for k, v in unit_keys.items()})
     # Unanchored: gofmt packs several entries onto one line, so a `^\t`-anchored row regex
@@ -388,7 +391,8 @@ def main() -> int:
     check("go: §2.2 source sub-map keys",
           named_ints(go_uid,
                      ["keySourceKind", "keySourceReference", "keySourceCaptured",
-                      "keySourceObserved", "keySourcePublished"],
+                      "keySourceObserved", "keySourcePublished", "keySourceSpan",
+                      "keySourceManifest"],
                      r"^\t%s\s+= (\d+)$"),
           {k: "keysource" + v for k, v in source_keys.items()})
     check("go: §3 constraint 9 nesting bound",

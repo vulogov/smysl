@@ -942,18 +942,19 @@ measured the default. And where either side has no majority script it reports no
 
 #subsection("Library — texts, parts and the object store")
 
-Fourteen codes, new in 1.10.0, and all but two of the range RFC SMYSL-2.4 allocates. Six are
+Seventeen codes, new in 1.10.0, and the whole of the range RFC SMYSL-2.4 allocates. Six are
 raised by `smysl-text`, the crate that RFC adds for reading texts into a library, one by the
-store, two by the `library` check pass, four by the `time` pass, and `SMY-E410` by the surface
-parser as well as by `time` — refused where a value is written and reported where a store holds
-one. The two still absent are `SMY-E404` and `SMY-W405`, which read a unit's `source.span`: a
-field this release does not have, so neither is registered. A code nothing can trigger is worse
-than a missing one.
+store, four by the `library` check pass, four by the `time` pass, `SMY-W451` by `text align`, and
+`SMY-E410` by the surface parser as well as by `time` — refused where a value is written and
+reported where a store holds one.
 
-Two the pass is allocated are deliberately absent. `SMY-E404` (a span past a part's length) and
-`SMY-W405` (a locator disagreeing with a span) both read a unit's `source.span`, a field this
-release does not have, so neither is registered and the pass names them as what it does not
-check — which a caller can read, where silence would have to be guessed at.
+Two of them arrived last and were held back on purpose. `SMY-E404` (a span past a part's length)
+and `SMY-W405` (a locator naming a different place than the span beside it) both read a unit's
+`source.span`, which the format gained in this release; until it existed the pass named them as
+what it did *not* check, because a code in the registry that nothing can raise is a promise a
+reader greps for and finds nothing behind. Both are raised now, and both need the part — and
+`SMY-W405` needs a locator resolved, which the pass asks the resolver for rather than reaching
+into the library layer it may not depend on.
 
 #dtable(
   (auto, auto, 1fr),
@@ -962,6 +963,8 @@ check — which a caller can read, where silence would have to be guessed at.
     ([`SMY-E401`], [error], [A part was re-read and its structure hash or its `rdid` no longer matches the entry the manifest holds. The text is intact — that would be `SMY-E446` — so what changed is the *reading*, which is what happens when a reader is upgraded under a corpus. The message says which of the two identities moved.]),
     ([`SMY-E402`], [error], [A manifest asked to carry the text itself under a licence that does not permit redistributing it. The permissive list is compiled in and sorted; changing it is a code change with a test, and there is no override flag, because the one thing a flag would buy is the ability to ship someone else's text by accident.]),
     ([`SMY-E403`], [error], [A reference claims to be one of the four library identities and is not one. The four have text prefixes — `t3:`, `m3:`, `d3:`, `r3:` — so a reference either claims an identity or does not, and one that claims and fails is worse than a reference to nothing: a dangling reference says what it is, while an abbreviated identity is refused for the reason an abbreviated `uid` is, and the store's by-part index simply would not find the part.]),
+    ([`SMY-E404`], [error], [A unit's span reaches past the end of the part it names. A span is a pair of byte offsets into the part's normalised bytes, and the part is the only thing that can say whether they are inside it — so this needs the objects, and `check --library` is where it is raised. An absent or unreadable part is not this defect: bytes that are there and wrong are `SMY-E446`, and a redacted part has no bytes by design.]),
+    ([`SMY-W405`], [warn], [A unit's locator and its span name different places. The span is authoritative and the locator is informative, so this is a warning about the locator and never a correction of the span: the span is what the extraction actually read, and the locator is a reader's name for a place. Raised only when the resolver can resolve a locator at all — an object store alone cannot, because a locator is a name in a reading.]),
     ([`SMY-E410`], [error], [A malformed date where the format wants EDTF: a unit's `source.published`, or the `when:` value of an `@date` record. EDTF is ISO 8601-2 levels 0 and 1, which is what lets a title page saying "about 1920" be recorded as `1920~` rather than as a precision nobody has. Both fields sit inside an identity, so the parser accepts exactly one spelling of each value — `+1984`, `Y1984` and `1984-6-2` are refused for that reason and not because they are unclear. A *decoder* does not raise this: a value that arrived has to leave again byte for byte or the unit silently changes identity, so a malformed one in a store is reported by the `time` check pass instead.]),
     ([`SMY-W418`], [warn], [One alias has two manifest heads: two manifests for the same expression, neither superseding the other. Usually two people catalogued the same book without having met. Both heads are returned rather than one being chosen, and the fork is reported rather than recorded — the next manifest to arrive may be the one that joins them, and a record would then be a stale finding with a hash chain behind it.]),
     ([`SMY-W412`], [warn], [A live dating that rule E could not apply, reported rather than dropped. Two causes, and the message says which: the dating is **held** by a `canonical` commitment pending review, or it is less well evidenced than the value it would have overridden — somebody typed a date that disagrees with an instrument. The second is the whole point of the rule: a weakly evidenced value never quietly replaces a better one, and the disagreement is a thing to look at rather than a thing to lose. Derived and never written to a store, so a resolution names its derived id.]),

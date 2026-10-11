@@ -158,6 +158,9 @@ struct RawUnit {
     source: Option<SourceRef>,
     payload: Option<Vec<u8>>,
     salience: Option<f32>,
+    /// Core key 9 (A-1). `None` when the header did not write one *unquoted* — a quoted
+    /// `"lang":` stays in the payload, which is A-10 item 2's whole content.
+    lang: Option<crate::ids::LangTag>,
     span: Span,
 }
 
@@ -966,6 +969,30 @@ impl<'a> Parser<'a> {
                 }
             },
         };
+        // Core key 9 (A-1), and the one place in the format where **quoting changes meaning**
+        // (A-10 item 2): a bare `lang:` is the core key, a quoted `"lang":` is a payload key.
+        // `SMY-W432` shipped a release early to say this move was coming, because a key moving
+        // between two hashed places changes a unit's uid with nothing to report it.
+        let lang = match header.key_span("lang") {
+            Some(k) if self.src.as_bytes().get(k.start) == Some(&b'"') => None,
+            Some(_) => {
+                let v = header.take("lang").expect("the key is there");
+                match v.value.as_str().map(crate::ids::LangTag::new) {
+                    Some(Ok(tag)) => Some(tag),
+                    _ => {
+                        self.err(
+                            Code::E001,
+                            v.span,
+                            "`lang` is a BCP-47 tag; write `\"lang\":` for a payload key of that \
+                             name",
+                        );
+                        self.recover();
+                        return None;
+                    }
+                }
+            }
+            None => None,
+        };
         let salience = header
             .take("salience")
             .and_then(|v| v.value.as_f64())
@@ -995,6 +1022,7 @@ impl<'a> Parser<'a> {
             source,
             payload,
             salience,
+            lang,
             span,
         })
     }
@@ -1435,6 +1463,8 @@ impl<'a> Parser<'a> {
         "captured",
         "observed",
         "published",
+        "span",
+        "manifest",
     ];
 
     fn source(&mut self, v: &Spanned<HValue>) -> Option<SourceRef> {
@@ -1524,6 +1554,56 @@ impl<'a> Parser<'a> {
                 Some(txt)
             }
         };
+        // `[start, end]`, half-open, with `start < end` (A-2.1 key 5). Refused rather than
+        // dropped, like every other value in here: it is inside the uid.
+        let span = match o.get("span") {
+            None => None,
+            Some(c) => {
+                let pair = c.value.as_array().and_then(|a| match a {
+                    [a, b] => {
+                        let lo = a.value.as_int().and_then(|i| u64::try_from(i).ok())?;
+                        let hi = b.value.as_int().and_then(|i| u64::try_from(i).ok())?;
+                        (lo < hi).then_some((lo, hi))
+                    }
+                    _ => None,
+                });
+                match pair {
+                    Some(p) => Some(p),
+                    None => {
+                        self.err(
+                            Code::E001,
+                            c.span,
+                            "`span` is [start, end] with start < end, in bytes of the part",
+                        );
+                        return None;
+                    }
+                }
+            }
+        };
+        let manifest = match o.get("manifest") {
+            None => None,
+            Some(c) => match c.value.as_str().and_then(|t| Mid::parse(t).ok()) {
+                Some(m) => Some(m),
+                None => {
+                    self.err(Code::E001, c.span, "`manifest` is an `m3:` manifest id");
+                    return None;
+                }
+            },
+        };
+        // A-2.4 rule 1, at the one place a document can state the pair. The surface refuses what
+        // the decoder refuses and `SourceRef::in_part` makes unreachable — three doors, one rule.
+        let (span, manifest) = match (span, manifest) {
+            (Some(_), None) => {
+                self.err(
+                    Code::E001,
+                    v.span,
+                    "a `span` needs the `manifest` it is an offset into (SMYSL-2.3 A-2.4 rule 1)",
+                );
+                return None;
+            }
+            pair => pair,
+        };
+
         // Surface text cannot spell an unknown source kind: `kind:` parses against the named
         // set, so an open enumeration is the wire's business, not this parser's. A source that
         // arrived as CBOR with an unknown code keeps it; one written by hand cannot have one.
@@ -1531,6 +1611,13 @@ impl<'a> Parser<'a> {
         s.captured = captured;
         s.observed = observed;
         s.published = published;
+        if let (Some((start, end)), Some(mid)) = (span, manifest) {
+            s = s.in_part(start, end, mid)?;
+        } else if let Some(mid) = manifest {
+            // A manifest with no span is legal: a unit may name the manifestation it came from
+            // without quoting a range of it (A-2.1 makes key 6 optional on its own).
+            s.manifest = Some(mid);
+        }
         Some(s)
     }
 
@@ -2720,6 +2807,7 @@ fn resolve(
     b.grounds = grounds;
     b.source = u.source.clone();
     b.payload = u.payload.clone();
+    b.lang = u.lang.clone();
 
     match UnitCore::new(b) {
         Ok(core) => {

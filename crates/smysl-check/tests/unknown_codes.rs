@@ -91,17 +91,21 @@ fn a_store_with_no_unknown_codes_is_quiet() {
     );
 }
 
-/// `SMY-W432`: a payload key named `lang` is flagged before it becomes a core key.
+/// `SMY-W432`: a payload key named `lang`, now that the core key exists.
 ///
-/// The lint *is* the migration. When `lang` becomes unit core key 9, a document spelling it as a
-/// payload key has it move from the payload into the core — both hashed, so the uid changes and
-/// nothing reports it. Corpus-wide, and undetectable from inside one peer. Shipping the warning
-/// a release early is what gives an author somewhere to stand.
+/// The lint *was* the migration and the migration has happened. FC-1 activated in TX-P5 step 1,
+/// so a bare `lang:` on a unit is core key 9 — which is why the document below has to **quote**
+/// the key to get a payload one at all. What the warning says has changed with it: not "this will
+/// move", but "the language belongs in the core key you have just spelled in your payload".
+///
+/// The release of warning did its job in between: a document written before 1.10 with a bare
+/// `lang:` was told that these four characters were about to move between two hashed places, and
+/// an author who wanted it to stay a payload key had a spelling to reach for.
 #[test]
-fn a_lang_payload_key_is_flagged_before_it_moves() {
+fn a_quoted_lang_payload_key_is_still_flagged() {
     let doc = "@doc smysl/0.1 {\n  id: v/t\n  intent: test\n  lang: en\n  roots: [c/x]\n}\n\n\
-               @claim c/x { status: speculative, lang: en }\n\
-               ~ A claim carrying lang as a payload key, which a later release will move.\n";
+               @claim c/x { status: speculative, \"lang\": en }\n\
+               ~ A claim carrying lang as a payload key, quoted, which is now the only way.\n";
     let out = smysl_core::surface::parse_surface(doc).expect("this parses today");
     let store = Store::from_records(out.records);
     let report = check(&store, CheckOptions::strict());
@@ -110,8 +114,30 @@ fn a_lang_payload_key_is_flagged_before_it_moves() {
     assert_eq!(w432.len(), 1, "exactly one unit carries it");
     assert!(
         w432[0].message.contains("\"lang\":"),
-        "the advice must be actionable — quote it to keep it a payload key — got: {}",
+        "the advice must name the spelling that makes it a payload key — got: {}",
         w432[0].message
+    );
+}
+
+/// The other half of the same change: a bare `lang:` is the core key, and carries no warning.
+#[test]
+fn a_bare_lang_is_the_core_key_and_says_nothing() {
+    let doc = "@doc smysl/0.1 {\n  id: v/t\n  intent: test\n  lang: en\n  roots: [c/x]\n}\n\n\
+               @claim c/x { status: speculative, lang: ru }\n\
+               ~ Утверждение, язык которого записан в ядре единицы.\n";
+    let out = smysl_core::surface::parse_surface(doc).expect("this parses");
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let carried = out.records.iter().any(|r| match r {
+        smysl_core::Record::Unit(u) => u.lang.as_ref().map(|t| t.as_str()) == Some("ru"),
+        _ => false,
+    });
+    assert!(carried, "the bare attribute did not reach core key 9");
+
+    let store = Store::from_records(out.records);
+    let report = check(&store, CheckOptions::strict());
+    assert!(
+        !report.iter().any(|d| d.code == Code::W432),
+        "the core key was reported as a payload key"
     );
 }
 

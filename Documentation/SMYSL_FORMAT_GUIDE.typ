@@ -449,6 +449,12 @@ and stays capped there.
 
 A header key that is not one of the fields above is *not* an error. It is kept, verbatim,
 in the unit's payload and written back out in the same place — the surface half of rule X.
+
+One word is not available for this any more. `lang` on a unit is a *core* key — the language the
+unit's own text is written in, which is part of what the text says and therefore part of its
+identity — so a payload key of that name has to be written quoted: `"lang": …`. Saying nothing
+means "the language of the view that presents this unit", which is what every unit meant before
+the key existed. `und` and `mul` are permitted values, and both are different from silence.
 A reader from a later version, or from a team that records something yours does not, loses
 nothing by passing through yours.
 
@@ -491,6 +497,23 @@ source states it*, in EDTF: `1920`, `1920?` if the source hedges, `1920/1930` fo
 `201X` for a decade. The uncertainty belongs in the record, because the alternative is inventing
 `1920-01-01T00:00:00Z` and calling it provenance. The three answer different questions and a
 producer must not derive one from another.
+
+Two more arrive with the library layer, and they come as a pair. `span` is `[start, end]` — byte
+offsets into a part's normalised bytes, half-open — and `manifest` is the `m3:` id of the
+manifestation those offsets are an offset *into*. A unit carrying a span must carry its manifest,
+because offsets with no manifestation name a place in bytes nobody can say they obtained the same
+way; the format refuses the pair's absence rather than dropping the span, which is inside the
+unit's identity.
+
+```
+source: { kind: doc, ref: "t3:...#Ps.14.1", span: [198, 252], manifest: m3:... }
+```
+
+The span is **authoritative** and the locator after `#` is informative. A locator is a reader's
+name for a place — a verse, a line, a JSON pointer — and when the two disagree the span wins and
+`SMY-W405` says so; a span reaching past the end of its part is `SMY-E404`. That ordering is the
+whole reason to carry both: the span is what the extraction read, and the locator is what a
+person can say out loud.
 
 #dtable(
   (auto, auto, auto),

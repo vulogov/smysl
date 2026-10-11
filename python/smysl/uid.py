@@ -47,6 +47,10 @@ GROUNDS = 5
 STATUS = 6
 SOURCE = 7
 PAYLOAD = 8
+#: Core key 9: the language the text fields are written in (SMYSL-2.3 A-1, 1.10). Absent means
+#: "the language of the view", which is what every unit meant before; absent and present are
+#: different cores and therefore different uids.
+LANG = 9
 
 # The source sub-map.
 SOURCE_KIND = 0
@@ -54,6 +58,11 @@ SOURCE_REFERENCE = 1
 SOURCE_CAPTURED = 2
 SOURCE_OBSERVED = 3
 SOURCE_PUBLISHED = 4
+#: Source key 5: `[start, end)` byte offsets into the part's normalised bytes (A-2.1, 1.10).
+SOURCE_SPAN = 5
+#: Source key 6: the mid of the manifestation the span is an offset into. Required beside a span
+#: (A-2.4 rule 1).
+SOURCE_MANIFEST = 6
 
 UID_LEN = 32
 
@@ -113,6 +122,12 @@ class Source:
     observed: Optional[int] = None
     #: EDTF, as the source states it (1.10, key 4).
     published: Optional[str] = None
+    #: ``(start, end)`` byte offsets into the part, half-open (1.10, key 5).
+    span: Optional[tuple] = None
+    #: The 32-byte mid of the manifestation the span is an offset into (1.10, key 6). Required
+    #: whenever ``span`` is set: A-2.4 rule 1, and ``encode`` refuses the pair's absence rather
+    #: than writing a record no rule allows.
+    manifest: Optional[bytes] = None
 
     def encode(self) -> bytes:
         entries = [
@@ -125,6 +140,17 @@ class Source:
             entries.append((SOURCE_OBSERVED, _uint(self.observed)))
         if self.published is not None:
             entries.append((SOURCE_PUBLISHED, _text(self.published)))
+        if self.span is not None:
+            start, end = self.span
+            if start >= end:
+                raise ValueError("a span is [start, end) with start < end")
+            if self.manifest is None:
+                raise ValueError("a span needs the manifest it is an offset into (A-2.4 rule 1)")
+            entries.append((SOURCE_SPAN, _head(4, 2) + _uint(start) + _uint(end)))
+        if self.manifest is not None:
+            if len(self.manifest) != 32:
+                raise ValueError("a mid is 32 bytes")
+            entries.append((SOURCE_MANIFEST, _bytes(self.manifest)))
         return _map(entries)
 
 
@@ -153,7 +179,9 @@ class UnitCore:
     grounds: list[bytes] = field(default_factory=list)
     source: Optional[Source] = None
     payload: Optional[bytes] = None
-    # Unknown keys (≥ 9) carried verbatim, so a unit that round-tripped through an older
+    #: Core key 9: a BCP-47 tag, or ``None`` for "the language of the view" (1.10).
+    lang: Optional[str] = None
+    # Unknown keys (> 9) carried verbatim, so a unit that round-tripped through an older
     # implementation still hashes to the value it had (rule X).
     extra: dict[int, bytes] = field(default_factory=dict)
 
@@ -179,8 +207,10 @@ class UnitCore:
             entries.append((SOURCE, self.source.encode()))
         if self.payload is not None:
             entries.append((PAYLOAD, _bytes(self.payload)))
+        if self.lang is not None:
+            entries.append((LANG, _text(self.lang)))
         for k, raw in self.extra.items():
-            if k <= PAYLOAD:
+            if k <= LANG:
                 raise ValueError(f"key {k} is a kernel key, not an extension")
             entries.append((k, raw))
         return _map(entries)

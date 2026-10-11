@@ -196,23 +196,37 @@ fn text_in_a_log_blocks_c_library() {
 // What the pass does not check
 // ---------------------------------------------------------------------------
 
-/// The two codes the plan allocated and this build cannot raise, named in one place.
+/// The list of codes this pass cannot raise is **empty**, and that is this test moving as it
+/// said it would.
 ///
-/// The assertion is that they are **not** in the registry, which is the repository's own rule:
-/// a code a reader can grep for and find nothing behind is worse than a missing one. The day
-/// `SourceRef.span` lands, this test is what says the list has to move.
+/// It used to assert the opposite: `SMY-E404` and `SMY-W405` were named here and *not* in the
+/// registry, on the repository's rule that a code a reader can grep for and find nothing behind
+/// is worse than a missing one — and the doc comment said "the day `SourceRef.span` lands, this
+/// test is what says the list has to move". FC-3 landed it in TX-P5 step 1.
+///
+/// The constant stays rather than being deleted, with its invariant inverted: whatever is in it
+/// must be unregistered, and whatever the pass is allocated must be raisable. The next phase that
+/// allocates a code before it can raise one has somewhere to put it.
 #[test]
-fn the_unreachable_codes_are_named_and_unregistered() {
-    let names: Vec<&str> = SKIPPED.iter().map(|(code, _)| *code).collect();
-    assert_eq!(names, ["SMY-E404", "SMY-W405"]);
+fn the_pass_can_raise_every_code_it_is_allocated() {
+    assert!(
+        SKIPPED.is_empty(),
+        "a code is skipped again: {:?} — it must be unregistered and say what it waits for",
+        SKIPPED
+    );
     for (code, reason) in SKIPPED {
         assert!(
             Code::parse(code).is_none(),
             "{code} is registered; it belongs in the pass rather than in SKIPPED"
         );
+        assert!(!reason.is_empty(), "{code} must say what it waits for");
+    }
+    // And the two that were skipped are in the registry now, which is the other half of the
+    // same rule: a code the pass can raise must be a code a reader can look up.
+    for code in ["SMY-E404", "SMY-W405"] {
         assert!(
-            reason.contains("TX-P5"),
-            "{code} must say what it waits for"
+            Code::parse(code).is_some(),
+            "{code} is raised by the library pass and is not registered"
         );
     }
 }

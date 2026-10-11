@@ -330,7 +330,12 @@ mod tests {
         // alignment scheme does not cover is a finding something can make. Step 1 could not
         // have made it — there was no command that aligned two expressions, and the code would
         // have sat in the registry unraisable, which is what this count is kept for.
-        assert_eq!(Code::ALL.len(), 79);
+        // 81 as of TX-P5 step 1, with `SMY-E404` and `SMY-W405`: FC-3 gives a unit a `span` and
+        // the manifest it is an offset into, so the library pass can now compare a span against
+        // the part it names and a locator against the span beside it. Both were allocated in
+        // TX-P1 step 5 and left unregistered on purpose — the field they read did not exist —
+        // which is what this count is for.
+        assert_eq!(Code::ALL.len(), 81);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

@@ -33,15 +33,24 @@ function fromFixture(c) {
     deps: k.deps ?? [],
     grounds: k.grounds ?? [],
     status: k.status,
-    source: k.source,
+    source: k.source
+      ? {
+          ...k.source,
+          // The fixture spells a mid as hex, as it does every identity; the producer takes bytes.
+          manifest: k.source.manifest
+            ? Uint8Array.from(k.source.manifest.match(/../g).map((h) => parseInt(h, 16)))
+            : null,
+        }
+      : k.source,
     payload: k.payload_hex ? Uint8Array.from(k.payload_hex.match(/../g).map((h) => parseInt(h, 16))) : null,
+    lang: k.lang ?? null,
   };
 }
 
 test("the fixture file is the one this expects", () => {
   // A guard on the guard. Every assertion below is a loop over `cases`, and a loop over an
   // empty array passes — the same shape of vacuity `tests/doc_output.rs` records finding twice.
-  assert.equal(cases.length, 18, "18 cases, or this file is testing something else");
+  assert.equal(cases.length, 21, "21 cases, or this file is testing something else");
 });
 
 for (const c of cases) {

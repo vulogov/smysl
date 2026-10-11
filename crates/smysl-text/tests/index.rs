@@ -187,14 +187,24 @@ fn grown(tag: &str) -> (Scratch, Library) {
     // every table already built.
     lib.complete_index();
 
-    lib.add(
-        &Input::new(LETTER.as_bytes()),
-        &versified("letter", "letter-lines"),
-        &Caps::DEFAULT,
-    )
-    .expect("added the letter");
+    let letter = lib
+        .add(
+            &Input::new(LETTER.as_bytes()),
+            &versified("letter", "letter-lines"),
+            &Caps::DEFAULT,
+        )
+        .expect("added the letter");
 
     let units = [
+        // One unit from the letter, so the postings table has two partitions and one of them
+        // holds a single document. That is what the IDF-scope tests need (OQ-14): a scope of one
+        // partition with one unit in it is where per-partition IDF degenerates.
+        unit_from(
+            &letter.parts[0],
+            "L2",
+            "the engine was repaired",
+            Status::Cited,
+        ),
         unit_from(&notes.parts[0], "L1", "the notes open", Status::Cited),
         unit_from(&notes.parts[0], "L2", "the second line", Status::Cited),
         unit_at(
@@ -208,7 +218,7 @@ fn grown(tag: &str) -> (Scratch, Library) {
             None,
         ),
     ];
-    let Record::Unit(first) = &units[0] else {
+    let Record::Unit(first) = &units[1] else {
         panic!("a unit")
     };
     let dated = smysl_core::canonical_uid(first);
@@ -447,7 +457,11 @@ fn an_unreadable_sidecar_does_not_stop_a_library_opening() {
 fn the_journal_is_rebuilt_by_re_checking_stored_units() {
     let (_dir, mut lib) = grown("journal");
     let rows = lib.index().journal.clone();
-    assert_eq!(rows.len(), 3, "three units name a part");
+    assert_eq!(
+        rows.len(),
+        4,
+        "four units name a part: three of the notes and one of the letter"
+    );
     assert!(
         rows.windows(2).all(|w| w[0] < w[1]),
         "the journal is not in order"
@@ -937,4 +951,162 @@ fn a_unit_belongs_to_the_partition_of_the_manifest_that_records_its_part() {
             _ => panic!("a unit with a part landed outside its text's partition"),
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// IDF scope (OQ-14)
+// ---------------------------------------------------------------------------
+
+/// A filter never moves a score; a scope does. That is OQ-14's invariant, and it is the one part
+/// of the question that is not a matter of taste.
+///
+/// `within`, `--kind`, `--min-status`, `--schema` and `--payload` say which units may be
+/// *returned*; `from collection:` and `find --library` say what corpus the question is **about**.
+/// The first kind leaves every term's weight alone — the rule 1.5 wrote into `Query::within` —
+/// and the second is what IDF is computed over. Under that distinction RFC SMYSL-2.5's "default
+/// collection" and `within`'s "IDF still comes from the whole index" were never in conflict.
+#[test]
+fn a_filter_leaves_every_score_alone_and_a_scope_does_not() {
+    use smysl_core::KernelType;
+    use smysl_retrieve::{Bm25, Postings as _, Query, Retriever as _};
+    use smysl_text::analyze::Chain;
+    use smysl_text::index::postings::View;
+
+    let (_dir, lib) = grown("idf-scope");
+    let chain = Chain::new(&LangTag::new("en").expect("a tag"));
+    let table = &lib.index().postings;
+    let partitions: Vec<_> = table.keys().cloned().collect();
+    // Three: the letter, and the notes' two manifests — the parts the successor shares moved to
+    // it and the one it does not record stayed with the first.
+    assert_eq!(partitions.len(), 3, "the fixture needs several partitions");
+
+    let library = View::all(table);
+    let plain = Bm25::over(&library, &chain, lib.store()).search(&Query::new("the notes", 10));
+    assert!(plain.len() >= 2, "the query matched {}", plain.len());
+
+    // A filter: `claim` admits every unit of the fixture, and a status floor admits some of them.
+    // Neither may change a surviving hit's score by a single bit.
+    for filtered in [
+        Query::new("the notes", 10).kinds([KernelType::Claim]),
+        Query::new("the notes", 10).min_status(Status::Cited),
+        Query::new("the notes", 10).within(plain.iter().map(|h| h.uid)),
+    ] {
+        let hits = Bm25::over(&library, &chain, lib.store()).search(&filtered);
+        for hit in &hits {
+            let before = plain
+                .iter()
+                .find(|h| h.uid == hit.uid)
+                .expect("a filter returned a unit the unfiltered query did not");
+            assert_eq!(
+                hit.score, before.score,
+                "a filter re-weighted a term: {} was {} and is {}",
+                hit.uid, before.score, hit.score
+            );
+            assert_eq!(hit.terms, before.terms, "a filter moved a decomposition");
+        }
+        assert!(
+            !hits.is_empty(),
+            "the filter admitted nothing, so it proved nothing"
+        );
+    }
+
+    // A scope: the same query over one partition is a different corpus, so `docs` and therefore
+    // every `df`-derived weight differ. This is the half of OQ-14 that is a real choice.
+    let one = View::of(table, &partitions[..1]);
+    assert!(
+        one.docs() < library.docs(),
+        "the narrower scope is not narrower"
+    );
+    let narrow = Bm25::over(&one, &chain, lib.store()).search(&Query::new("the notes", 10));
+    let moved = narrow.iter().any(|hit| {
+        plain
+            .iter()
+            .find(|h| h.uid == hit.uid)
+            .is_some_and(|before| before.score != hit.score)
+    });
+    assert!(
+        moved,
+        "narrowing the scope changed no score, so the scope is not what IDF is computed over"
+    );
+
+    // And every scope is exact from the one table, because the counts are over disjoint sets.
+    assert_eq!(
+        View::of(table, &partitions).docs(),
+        library.docs(),
+        "the sum of the partitions is not the library"
+    );
+    assert_eq!(
+        partitions
+            .iter()
+            .map(|p| View::of(table, std::slice::from_ref(p)).docs())
+            .sum::<u32>(),
+        library.docs()
+    );
+}
+
+/// Why the default scope is not the partition: a partition of one document weighs every term
+/// alike.
+///
+/// With `N = 1` and `df = 1`, `idf` is `ln(1 + 0.5/1.5)` for every term the document holds — so a
+/// term the whole library shares and a term unique to that document contribute **the same**, and
+/// the ranking inside the partition is by length normalisation alone. Under RFC SMYSL-2.5 §3.4's
+/// RRF fusion that unit then takes rank 1 of its partition and a full `1/(k+1)`, which is how
+/// per-partition IDF comes to favour small texts systematically.
+#[test]
+fn a_one_document_scope_cannot_tell_a_common_term_from_a_rare_one() {
+    use smysl_retrieve::{Bm25, Postings as _, Query, Retriever as _};
+    use smysl_text::analyze::Chain;
+    use smysl_text::index::postings::{Partition, View};
+
+    let (_dir, lib) = grown("idf-degenerate");
+    let chain = Chain::new(&LangTag::new("en").expect("a tag"));
+    let table = &lib.index().postings;
+
+    // The letter's partition holds the one unit drawn from the letter.
+    // The partition with the letter's one unit in it, found by the term only that unit holds —
+    // the fixture has another single-document partition, and which of the two this is matters.
+    let letter = table
+        .iter()
+        .find(|(_, rows)| rows.docs() == 1 && rows.df("engine") == 1)
+        .map(|(p, _)| p.clone())
+        .expect("one partition holds the letter's only unit");
+    assert!(matches!(letter, Partition::Text { .. }));
+
+    let contributions = |view: &View<'_>| -> Vec<(String, f32)> {
+        Bm25::over(view, &chain, lib.store())
+            .search(&Query::new("the engine", 10))
+            .into_iter()
+            .find(|hit| view.doc_len(&hit.uid).is_some())
+            .map(|hit| hit.terms)
+            .unwrap_or_default()
+    };
+
+    // `the` is in every unit of the fixture and `engine` is in one of them.
+    let library = contributions(&View::all(table));
+    let common = library
+        .iter()
+        .find(|(t, _)| t == "the")
+        .expect("`the` matched");
+    let rare = library
+        .iter()
+        .find(|(t, _)| t == "engine")
+        .expect("`engine` matched");
+    assert!(
+        rare.1 > common.1 * 4.0,
+        "over the library a term in one unit should outweigh one in every unit: {rare:?} vs {common:?}"
+    );
+
+    let alone = contributions(&View::of(table, &[letter]));
+    let common = alone
+        .iter()
+        .find(|(t, _)| t == "the")
+        .expect("`the` matched");
+    let rare = alone
+        .iter()
+        .find(|(t, _)| t == "engine")
+        .expect("`engine` matched");
+    assert_eq!(
+        common.1, rare.1,
+        "a one-document scope distinguished two terms it has no statistics to distinguish"
+    );
 }

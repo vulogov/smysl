@@ -110,7 +110,7 @@ func TestStoresReencodeByteIdentically(t *testing.T) {
 func TestUnitCoreKeysMatchTheTable(t *testing.T) {
 	want := map[uint64]string{
 		0: "schema", 1: "gist", 2: "body", 3: "detail", 4: "deps",
-		5: "grounds", 6: "status", 7: "source", 8: "payload",
+		5: "grounds", 6: "status", 7: "source", 8: "payload", 9: "lang",
 	}
 	if len(smysl.UnitKeys) != len(want) {
 		t.Fatalf("key count: got %d, want %d", len(smysl.UnitKeys), len(want))
@@ -122,12 +122,15 @@ func TestUnitCoreKeysMatchTheTable(t *testing.T) {
 	}
 }
 
-func TestUnknownKeysAtNineAndAboveSurvive(t *testing.T) {
+// Ten, not nine, since 1.10: `lang` took key 9 (SMYSL-2.3 A-1). The row moved and the rule did
+// not — an implementation still treating 9 as unknown would carry the language as opaque bytes and
+// hash to the same uid, so this integer and the key table's highest row move together.
+func TestUnknownKeysAtTenAndAboveSurvive(t *testing.T) {
 	body := &smysl.Map{Entries: []smysl.Pair{
 		{Key: uint64(0), Value: "claim"},
 		{Key: uint64(1), Value: "a gist"},
 		{Key: uint64(6), Value: uint64(1)},
-		{Key: uint64(9), Value: "a later addition"},
+		{Key: uint64(10), Value: "a later addition"},
 	}}
 	raw, err := smysl.EncodeOne([]any{uint64(1), body})
 	if err != nil {
@@ -142,8 +145,8 @@ func TestUnknownKeysAtNineAndAboveSurvive(t *testing.T) {
 		t.Fatal("an unknown key did not survive a round trip")
 	}
 	m := records[0].Body.(*smysl.Map)
-	if v, ok := m.Get(uint64(9)); !ok || v != "a later addition" {
-		t.Fatalf("unknown key 9 lost: %v", v)
+	if v, ok := m.Get(uint64(10)); !ok || v != "a later addition" {
+		t.Fatalf("unknown key 10 lost: %v", v)
 	}
 }
 

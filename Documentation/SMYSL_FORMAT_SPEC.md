@@ -113,7 +113,8 @@ ascending key order, omitting absent optional fields entirely.
 | 6 | status | uint | required |
 | 7 | source | map | optional |
 | 8 | payload | bytes | optional |
-| ≥9 | unknown keys | any | preserved verbatim (§5, rule X) |
+| 9 | lang | text: a BCP-47 tag, lowercase, NFC | optional |
+| ≥10 | unknown keys | any | preserved verbatim (§5, rule X) |
 
 An absent optional field MUST be omitted, never encoded as `null`. `deps` and `grounds` are
 **sets**: deduplicated, and sorted by uid bytes.
@@ -148,6 +149,31 @@ uids *and* enforce a different monotonicity rule while believing itself conforma
 | 2 | captured | text | optional |
 | 3 | observed | uint, epoch milliseconds | optional |
 | 4 | published | text, EDTF (below) | optional |
+| 5 | span | array of two uint `[start, end]`, `start < end` | optional; requires key 1 to name a part |
+| 6 | manifest | 32 bytes: a mid (§2.6) | optional; required when key 5 is present |
+
+`lang` (key 9) is the language the unit's text fields are written in. An absent `lang` means
+"the language of the view that presents the unit" (§2.8, view key 6), which is what every unit
+meant before 1.10. Absent and present are different unit cores and different uids: the language
+a gist is written in is part of what it says. Producers SHOULD write `lang` on every unit whose
+text fields are natural language; a unit whose fields are not natural language — identifiers,
+data — omits it. `und` and `mul` are permitted values. A tag that is not well-formed BCP-47 is
+`SMY-E001` at the surface and a decode error in CBOR.
+
+**Passage provenance.** When a unit is drawn from a part (§2.6, record 15), its source has
+`kind: doc` (4) and its `reference` (key 1) is the part's tid in text form, optionally followed by
+`#` and a locator alias: `t3:<52 chars>[#<locator>]`. `span` (key 5) is a pair of byte offsets
+into the part's **normalised** bytes, half-open. `manifest` (key 6) names the manifestation the
+unit was extracted under.
+
+The span is authoritative and the locator is informative: when they disagree, the span wins and
+`SMY-W405` is reported. A span past the part's length is `SMY-E404`. A reference beginning `t3:`
+that is not a well-formed tid is `SMY-E403`. A unit carrying `span` MUST carry `manifest`; a
+record that does not is malformed, and a reader refuses it rather than dropping the span — the
+pair is inside the uid, so dropping it would change the unit's identity.
+
+No new source kind is introduced for a passage. A new `kind` value makes a store unreadable to
+readers that predate 1.9's open enumeration; new keys in this sub-map do not.
 
 `observed` was added in 1.8 and is written only when present, so a source without one encodes to
 the bytes it always did. It is the instant the observation was taken, **supplied by the

@@ -51,18 +51,25 @@ def test_unit_core_keys_match_the_table_in_2_2():
         6: "status",
         7: "source",
         8: "payload",
+        9: "lang",
     }
     assert smysl.UNIT_KEYS == expected, "the unit core's key assignment is the format"
 
 
-def test_keys_at_nine_and_above_are_unknown_and_kept():
-    """§2.2 and §5: `>= 9` is an unknown key preserved verbatim under rule X."""
-    body = {0: "claim", 1: "a gist", 6: 1, 9: "something a later version added"}
+def test_keys_at_ten_and_above_are_unknown_and_kept():
+    """§2.2 and §5: `>= 10` is an unknown key preserved verbatim under rule X.
+
+    Nine until 1.10, when `lang` took key 9 (A-1). The row moved rather than the rule: an
+    implementation that went on treating 9 as unknown would preserve the language as opaque bytes
+    and compute the same uid, which is why this test's integer and the key table's highest row
+    have to move together.
+    """
+    body = {0: "claim", 1: "a gist", 6: 1, 10: "something a later version added"}
     raw = smysl.encode_one([1, body])
     records = smysl.decode_store(raw)
     assert records[0].reencode() == raw
     named = records[0].unit_fields()
-    assert named[9] == "something a later version added", "an unknown key lost its integer"
+    assert named[10] == "something a later version added", "an unknown key lost its integer"
     assert "schema" in named and "gist" in named
 
 

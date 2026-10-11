@@ -285,7 +285,7 @@ registry! {
     Extension => {
         W409 = "SMY-W409", Warn,  "Unknown enumeration code - preserved verbatim, treated as unknown";
         W434 = "SMY-W434", Warn,  "Bundle carries records this build cannot interpret";
-        W432 = "SMY-W432", Warn,  "A payload key named `lang` becomes a unit core key in a later release";
+        W432 = "SMY-W432", Warn,  "A payload key named `lang` is the unit core key spelled unquoted";
     }
     Provider => {
         W435 = "SMY-W435", Warn,  "A chunk succeeded on a later attempt; the earlier error is kept";
@@ -319,6 +319,8 @@ registry! {
         E450 = "SMY-E450", Error, "Appending to a pseudonymised expression without its pseudonym key";
         E452 = "SMY-E452", Error, "A record 15 or 18 was offered to a log; text lives in the object store";
         W451 = "SMY-W451", Warn,  "An alignment scheme does not cover a locator; the pair is left unaligned and counted";
+        E404 = "SMY-E404", Error, "A unit's span reaches past the length of the part it names";
+        W405 = "SMY-W405", Warn,  "A unit's locator and its span name different places; the span wins";
     }
 }
 
@@ -642,8 +644,14 @@ mod tests {
     /// — until there was a command that aligned two expressions, nothing in this build could
     /// find an uncovered locator.
     ///
-    /// That completes RFC SMYSL-2.4's `E401`–`W459` range except `SMY-E404` and `SMY-W405`,
-    /// which read `SourceRef.span` and arrive with FC-3 in TX-P5.
+    /// 81 with `SMY-E404` and `SMY-W405` in TX-P5 step 1, where FC-3 gives a unit a `span` and a
+    /// `manifest` and the library pass can therefore compare them against the part: a span past
+    /// the part's length, and a locator naming a different place than the span beside it. They
+    /// were allocated in TX-P1 step 5 and deliberately left out of the registry, because the
+    /// field they read did not exist — this is that promise being kept rather than a late
+    /// addition.
+    ///
+    /// That completes RFC SMYSL-2.4's `E401`–`W459` range.
     ///
     /// Step 5's plan named six codes and two of them are **not** here. `SMY-E404` is a span
     /// past a part's length and `SMY-W405` is a locator disagreeing with a span; both read
@@ -652,7 +660,7 @@ mod tests {
     /// build can produce, which is the thing this comment exists to prevent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 79);
+        assert_eq!(Code::ALL.len(), 81);
     }
 
     #[test]

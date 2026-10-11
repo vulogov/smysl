@@ -499,6 +499,24 @@ pub enum Resolved {
 pub trait PartResolver: core::fmt::Debug {
     /// What is stored under `tid`.
     fn part(&self, tid: &Tid) -> Resolved;
+
+    /// Where a locator points in a manifest, when this resolver can say (1.10).
+    ///
+    /// For `SMY-W405`: a unit's `source.reference` may carry `#<locator>` after the tid, and the
+    /// span beside it is authoritative — so a checker has to be able to ask what the locator
+    /// names before it can report that the two disagree. A locator is `smysl-text`'s grammar and
+    /// needs a reading to resolve against, which `smysl-check` cannot reach (§4.3.3 allows it one
+    /// edge to that crate and spends it on the `Time` pass), so the resolver is asked instead.
+    ///
+    /// The default is `None`, meaning **this resolver does not answer locator questions** — not
+    /// that the locator names nothing. An object store alone cannot answer: a locator is a name
+    /// in a reading, and a reading belongs to a manifest. A caller that gets `None` reports
+    /// nothing, which is the same arrangement that makes the object half of the library pass
+    /// optional.
+    fn locator(&self, mid: &Mid, locator: &str) -> Option<(Tid, core::ops::Range<u64>)> {
+        let _ = (mid, locator);
+        None
+    }
 }
 
 /// Which of a unit's times a dating speaks about (record 17, key 1; rule E).

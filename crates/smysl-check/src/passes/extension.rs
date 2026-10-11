@@ -108,22 +108,24 @@ pub fn run(store: &Store, profile: Option<&ConsumerProfile>, report: &mut Report
         }
     }
 
-    // `SMY-W432` - a payload key named `lang`, which a later release turns into unit core key 9.
+    // `SMY-W432` - a payload key named `lang`, which is now unit core key 9 spelled unquoted.
     //
-    // The lint is the migration. When `lang` becomes a core key, a document that spells it as a
-    // payload key has it move from the payload into the core — both hashed, so the **uid
-    // changes, and nothing reports it**. Corpus-wide, and undetectable from inside one peer.
-    // Shipping the warning a release early is what gives an author somewhere to stand: quote it
-    // (`"lang":`) to keep it a payload key, or accept the move deliberately.
+    // The lint was the migration, and the migration has happened: FC-1 activated in TX-P5 step 1,
+    // so a bare `lang:` on a unit *is* the core key and a payload key of that name can only
+    // arrive quoted or from CBOR. What the warning says has therefore changed from "this will
+    // move" to "you have the core key's name in your payload" — the field exists now, and a unit
+    // carrying the language in two hashed places is a unit whose language nothing can agree on.
+    // The code stays rather than being retired: a store written before this release still holds
+    // such units, and the advice is still the advice.
     for r in store.iter() {
         if let smysl_core::Record::Unit(u) = r {
             if let Some(bytes) = &u.payload {
                 if let Ok(o) = smysl_core::surface::payload_to_object(bytes) {
                     if o.iter().any(|(k, _)| k.value == "lang") {
                         report.push(Diagnostic::new(Code::W432).with_message(
-                            "a payload key named `lang` becomes unit core key 9 in a later \
-                             release, which changes this unit's uid; write `\"lang\":` to keep \
-                             it a payload key",
+                            "a payload key named `lang` is unit core key 9 spelled unquoted \
+                             (1.10): the language belongs in the core key, and `\"lang\":` is \
+                             how a payload key of that name is written",
                         ));
                     }
                 }

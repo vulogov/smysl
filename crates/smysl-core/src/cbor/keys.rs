@@ -16,7 +16,14 @@ pub mod unit {
     pub const STATUS: u16 = 6;
     pub const SOURCE: u16 = 7;
     pub const PAYLOAD: u16 = 8;
-    pub const HIGHEST: u16 = PAYLOAD;
+    /// The language the unit's text fields are written in, BCP-47 (SMYSL-2.3 A-1, FC-1).
+    ///
+    /// Written only when present, so a unit without one encodes to the bytes it always did —
+    /// which is the whole of the compatibility claim §8.1 permits an addition under. Absent
+    /// means "the language of the view that presents the unit", which is what every unit meant
+    /// before 1.10, so an old store re-encodes unchanged.
+    pub const LANG: u16 = 9;
+    pub const HIGHEST: u16 = LANG;
 }
 
 /// Attestation (type code 2) - not hashed.
@@ -253,7 +260,19 @@ pub mod source {
     /// The publication date of the manifestation, EDTF text (SMYSL-2.3 A-2.3, FC-2). Written
     /// only when present, so a source without one encodes to the bytes it always did.
     pub const PUBLISHED: u16 = 4;
-    pub const HIGHEST: u16 = PUBLISHED;
+    /// Byte offsets into the part's normalised bytes, half-open `[start, end)` (A-2.1, FC-3).
+    ///
+    /// An array of two unsigned integers with `start < end`. Written only when present. The span
+    /// is **authoritative** and the locator in `reference` is informative: when they disagree the
+    /// span wins and `SMY-W405` is reported; a span past the part's length is `SMY-E404`.
+    pub const SPAN: u16 = 5;
+    /// The manifestation the unit was extracted under: 32 bytes, a mid (A-2.1, FC-3).
+    ///
+    /// Required whenever [`SPAN`] is present (A-2.4 rule 1): a span is a pair of offsets into a
+    /// part, and a part belongs to a reading of a manifest — without the mid the offsets name a
+    /// place in bytes nobody can say they obtained the same way.
+    pub const MANIFEST: u16 = 6;
+    pub const HIGHEST: u16 = MANIFEST;
 }
 
 /// GranularityProfile, nested inside a view under [`view::GRANULARITY`].
@@ -291,6 +310,7 @@ mod tests {
                     unit::STATUS,
                     unit::SOURCE,
                     unit::PAYLOAD,
+                    unit::LANG,
                 ],
             ),
             (
@@ -494,6 +514,8 @@ mod tests {
                     source::CAPTURED,
                     source::OBSERVED,
                     source::PUBLISHED,
+                    source::SPAN,
+                    source::MANIFEST,
                 ],
             ),
             (
