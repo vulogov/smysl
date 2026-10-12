@@ -35,7 +35,7 @@ deepseek  = ["model", "smysl-provider/deepseek"]
 # bytes and a manifest — and a caller ingesting a document has none of those and should not link
 # a reader layer to say so. `smysl-pack` joins this feature in step 4, where the ledger digest
 # arrives; it is left out until then rather than declared ahead of the code that needs it.
-text      = ["dep:smysl-text"]
+text      = ["dep:smysl-text", "dep:smysl-pack"]
 
 [dependencies]
 smysl-core     = { workspace = true }
@@ -47,6 +47,9 @@ smysl-provider = { workspace = true, optional = true }
 # `smysl-text` does not depend on this crate, so there is no cycle. Both are pure-tier, so no
 # MSRV floor moves.
 smysl-text     = { workspace = true, optional = true }
+# Behind `text` as well: the ledger digest is a pack over what has already been extracted
+# (§3.5), and packing is `smysl-pack`'s job rather than a second budget solver here.
+smysl-pack     = { workspace = true, optional = true }
 
 # All four drive `Ingestor` against providers, so none of them exists without `model`.
 [[test]]
@@ -64,3 +67,25 @@ required-features = ["model"]
 [[test]]
 name              = "consensus"
 required-features = ["model"]
+
+# Windowing and span attachment need no provider, so this one names `text` and not `model`:
+# a build that cannot call a model can still measure step 3b's probe set.
+[[test]]
+name              = "probe_set"
+required-features = ["text"]
+
+# Text ingest end to end, offline. Needs both features and a reader, which the dev-dependency
+# below supplies: a library has to hold a text before anything can window one.
+[[test]]
+name              = "text_gate"
+required-features = ["text", "model"]
+
+[[test]]
+name              = "redteam"
+required-features = ["text", "model"]
+
+[dev-dependencies]
+# `tests/text_gate.rs` and `tests/redteam.rs` build a real library on disk, which means reading
+# a file into one: `txt/1` is the smallest reader that produces nodes, and a dev-dependency is
+# the only place a reader belongs — nothing in the published tree of this crate reads a file.
+smysl-text     = { workspace = true, features = ["reader-txt"] }

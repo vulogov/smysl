@@ -25,7 +25,17 @@
 //! reading and a batch, which is also what makes them testable without egress.
 
 pub mod attach;
+pub mod attribution;
+pub mod digest;
+pub mod journal;
+#[cfg(feature = "model")]
+pub mod run;
 pub mod window;
 
 pub use attach::{attach, Attached, Attachment, Opts};
+pub use attribution::{attribution, quoted_spans, Attribution};
+pub use digest::{digest, Digest};
+pub use journal::Journal;
+#[cfg(feature = "model")]
+pub use run::{Target, TextIngest, TextReport};
 pub use window::{windows, Pane, Placed, TextWindow};

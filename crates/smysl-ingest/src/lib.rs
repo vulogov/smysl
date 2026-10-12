@@ -33,6 +33,10 @@ pub mod json_ast;
 pub(crate) mod monotone;
 #[cfg(feature = "model")]
 pub mod path;
+// Payload surgery for the two callers that edit one: lossless, sorted, and `pub(crate)` because
+// no consumer edits a payload — a producer builds one. Ungated: `repair` is in every build and
+// `text::attach` is not, so the module cannot belong to either side's feature.
+pub(crate) mod payload;
 /// Reachable for `tests/gate.rs`, which checks the prompt the ingest path actually sends.
 ///
 /// `FENCE` and `content_ingest_json` are what the gate asserts against, and asserting against
@@ -721,7 +725,7 @@ impl<'a> Ingestor<'a> {
         ))
     }
 
-    /// One chunk, with its repair budget. Always produces units (rule I).
+    /// One chunk of a document, with its repair budget. Always produces units (rule I).
     fn one_chunk(
         &self,
         provider: &dyn Provider,
@@ -730,8 +734,46 @@ impl<'a> Ingestor<'a> {
         usage: &mut Usage,
     ) -> ChunkOutcome {
         let template = self.template_for(path);
+        self.one_call(
+            provider,
+            path,
+            &template,
+            text,
+            text,
+            None,
+            &json_ast::Scope::default(),
+            self.opts.source.as_ref(),
+            usage,
+        )
+    }
 
-        let mut request = self.request(provider, &template, text, path);
+    /// One model call and its repair turns, whatever the call is about.
+    ///
+    /// Shared by document chunks and text windows, because the repair loop is the same loop and
+    /// two copies of it would drift in exactly the place that is hardest to notice: which
+    /// diagnostics buy another turn.
+    ///
+    /// `sent` is what the model is shown; `checked` is what a quote is verified against. For a
+    /// chunk they are one string. For a **window** they are not — the model sees each node
+    /// prefixed with its locator (§3.9.2) and a quote is checked against the nodes' own text, so
+    /// that a quote is not required to contain `[v.3]` to be `Present`.
+    #[allow(clippy::too_many_arguments)]
+    fn one_call(
+        &self,
+        provider: &dyn Provider,
+        path: IngestPath,
+        template: &prompt::Template,
+        sent: &str,
+        checked: &str,
+        digest: Option<&str>,
+        scope: &json_ast::Scope,
+        source: Option<&(smysl_core::SourceRef, SourcePolicy)>,
+        usage: &mut Usage,
+    ) -> ChunkOutcome {
+        let template = template.clone();
+        let text = checked;
+
+        let mut request = self.request_with(provider, &template, sent, digest, path);
         let mut calls = 0usize;
         // Every attempt's errors, marked by attempt. A degraded chunk used to report only the
         // last attempt's, which shows what the repair broke rather than what the model first
@@ -740,6 +782,9 @@ impl<'a> Ingestor<'a> {
         let mut history: Vec<Diagnostic> = Vec::new();
         let attempts = self.opts.repair_attempts as usize + 1;
         let mut last_answer = None;
+        // The last attempt's warnings, so a refused chunk still reports them: see the
+        // assignment below.
+        let mut last_warnings: Vec<Diagnostic> = Vec::new();
 
         for attempt in 0..=self.opts.repair_attempts {
             let completion = match provider.complete(&request) {
@@ -783,12 +828,8 @@ impl<'a> Ingestor<'a> {
             usage.estimated |= completion.usage.estimated;
             usage.retries += completion.usage.retries;
 
-            let (units, relations, mut diagnostics, labels) = repair::convert_labelled(
-                &completion.text,
-                path,
-                self.opts.rung,
-                self.opts.source.as_ref(),
-            );
+            let (units, relations, mut diagnostics, labels) =
+                repair::convert_scoped(&completion.text, path, self.opts.rung, source, scope);
 
             // Check every attributed quote against the text this chunk was drawn from.
             // A quote that is not in the source is a fabricated attribution, and an error -
@@ -855,6 +896,18 @@ impl<'a> Ingestor<'a> {
                 marked.message = format!("attempt {} of {attempts}: {}", attempt + 1, d.message);
                 history.push(marked);
             }
+            // The *last* attempt's warnings, kept for the degrade path below. A chunk that is
+            // refused used to report only its errors, which lost everything a warning had to
+            // say about the same answer: a text answer that supplied a speaker and cited a unit
+            // it was never shown reported the citation (an error) and not the speaker (a
+            // warning), so a reader saw a window fail for one reason and never learned the
+            // other. Replaced rather than appended, because the same warning from three
+            // attempts is one fact about the answer.
+            last_warnings = last
+                .iter()
+                .filter(|d| d.severity != smysl_core::Severity::Error)
+                .cloned()
+                .collect();
 
             if attempt < self.opts.repair_attempts {
                 let t = prompt::repair(
@@ -862,7 +915,11 @@ impl<'a> Ingestor<'a> {
                     &completion.text,
                     &repair::render_diagnostics(&last),
                 );
-                request = self.request(provider, &t, text, path);
+                // The repair template's user message holds the previous answer and the
+                // diagnostics, and no `{input}`: a correction turn is about the answer. So the
+                // window and its digest are not re-sent, which is what the document path has
+                // always done with its chunk.
+                request = self.request_with(provider, &t, sent, None, path);
             } else {
                 last_answer = Some((units, relations, labels, last));
             }
@@ -871,6 +928,7 @@ impl<'a> Ingestor<'a> {
         // Exhausted, but perhaps only by units whose defect is their own. Then those degrade
         // and their siblings are kept; see `repair::salvage`.
         let why = format!("{} attempt(s)", self.opts.repair_attempts + 1);
+        history.extend(last_warnings.iter().cloned());
         if let Some((units, relations, labels, last)) = &last_answer {
             if let Some(s) = repair::salvage(units, relations, labels, last, self.opts.rung, &why) {
                 history.extend(s.diagnostics);
@@ -944,15 +1002,22 @@ impl<'a> Ingestor<'a> {
         }
     }
 
-    fn request(
+    /// The request for one call, with a ledger digest in its own fence where there is one
+    /// (§3.9.2).
+    fn request_with(
         &self,
         provider: &dyn Provider,
         template: &prompt::Template,
         text: &str,
+        digest: Option<&str>,
         path: IngestPath,
     ) -> Request {
         let caps = provider.caps();
-        let mut r = Request::new(self.model_for(&caps), template.render(text))
+        let rendered = match digest {
+            Some(d) => template.render_with_digest(text, d),
+            None => template.render(text),
+        };
+        let mut r = Request::new(self.model_for(&caps), rendered)
             .with_system(&template.system)
             .with_max_output(self.opts.output_budget(&caps));
         r.temperature = self.opts.temperature;
@@ -1064,10 +1129,11 @@ mod tests {
         fn request_for(mode: StructuredMode) -> Request {
             let reg = Registry::default();
             let ing = Ingestor::new(&reg, IngestOptions::default());
-            ing.request(
+            ing.request_with(
                 &Fake(mode),
                 &prompt::content_ingest_json(),
                 "some text",
+                None,
                 IngestPath::JsonAst,
             )
         }
@@ -1106,10 +1172,11 @@ mod tests {
         fn the_surface_path_is_untouched() {
             let reg = Registry::default();
             let ing = Ingestor::new(&reg, IngestOptions::default());
-            let r = ing.request(
+            let r = ing.request_with(
                 &Fake(StructuredMode::JsonMode),
                 &prompt::content_ingest_surface(),
                 "some text",
+                None,
                 IngestPath::Surface,
             );
             assert!(r.schema.is_none());

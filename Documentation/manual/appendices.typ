@@ -455,8 +455,22 @@ Exits 5 while anything is open and 0 when nothing is, so a pipeline can gate on 
     ([`--lang-policy`], [`source`], [What language the model writes in. `source` — each unit in the language of its passage — is the only policy implemented, and `SMY-W436` reports a unit that is not in its passage's script.]),
     ([`--yes`], [—], [Commit the staged batch instead of exiting 10.]),
     ([`--dry-run`], [—], [Report what would be sent and to whom; make no call.]),
+    ([`--text`], [`WHO`], [Ingest an expression of the library at `--store` — its alias, or a manifest id — rather than a document. Windows of whole structure nodes, a span attached to every quote the text supports, and each window committed as it is staged. Needs `--yes`, because the journal entry that makes a window resumable is written after the commit.]),
+    ([`--window-level`], [`L`], [Fill windows with whole nodes at this level. The default is the reading's *leaves*: the finest division it offers, and the unit a span is attached inside. Reported either way.]),
+    ([`--digest-budget`], [`N`], [Tokens of ledger digest sent with each window, so a window is not extracted as though the expression began there. `0` sends none; 512 by default.]),
+    ([`--reextract`], [—], [Ignore the journal for this expression and extract every window again. The same answers give the same uids, so a re-extraction that changed nothing grows the corpus by nothing.]),
+    ([`--single-pass`], [—], [One extraction per window instead of two, and recorded in the recipe. Two is the default for `--text` alone: S0 measured a model bit-identical across 145 runs at temperature 0, so a second pass at 0 is the only one that can agree with the first.]),
   ),
 )
+
+#callout(label: "Note")[
+  `--text` and a `FILE` are two different ingests, and the flags above divide between them.
+  `--window-level`, `--digest-budget`, `--reextract` and `--single-pass` mean nothing to a
+  document, which has no reading, no expression and nothing already extracted from it; and
+  `.smysl/staged.smy` means nothing to a text ingest, which commits per window. Everything else
+  — the rung, the granularity, the path, the repair budget, the language policy, the prompt
+  override, `--temperature` — applies to both.
+]
 
 #section("attest")
 

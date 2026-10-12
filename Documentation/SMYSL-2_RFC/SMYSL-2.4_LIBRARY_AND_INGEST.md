@@ -806,6 +806,13 @@ shape.
 - **Chats.** Windows follow reply threads (substrate edges in the segment table), not wall-clock
   order.
 
+**Landed 2026-10-12** (§6 TX-P5 step 4), for the digest and the journal: `text::digest` packs
+`smysl_pack` over what the expression already holds, ranked by salience then reading order, and
+returns the text, the digest-local labels, the allowed uid set and a hash over what was sent. The
+labels are `l/n1 … l/nn` rather than `l/1`, because A-3's grammar refuses a label segment that
+begins with a digit. The per-window hash is in the journal entry, as this section says, and the
+*policy* — budget and ranking id — is in the recipe. `link` and `summarise` are TX-P7's.
+
 ### 3.6 Proposition layer (draft 3 §9)
 
 - **Edges.** `x.text/same-as` relations, staged, attested. Engines that are pure attest at rung
@@ -1071,6 +1078,15 @@ fences, fake JSON answers, requests to cite store uids, to set `measured`, to wr
 date, and bidirectional-override characters. Offline tests drive them with the `Scripted`
 provider playing an obedient model and assert the guard (§5.2). A canary test runs under
 `make live-ollama`.
+
+**Landed 2026-10-12** (§6 TX-P5 step 4), with five fixtures and five tests. What the suite can
+establish and a live run cannot: **when a model complies, the guard holds** — `measured` refused
+by rule T, a store uid outside the digest refused by `SMY-E442`, a date, a speaker, a language
+and a source dropped with `SMY-W444`, and a passage's own fence marker neutralised in the prompt
+while the stored bytes keep it, because a `tid` is the hash of those bytes and a span is an
+offset into them. Whether a given model complies is a live experiment whose answer changes with
+the endpoint; whether compliance reaches a record is a property of this code, and that is the
+half a corpus depends on.
 
 #### 3.9.3 Concurrency
 
@@ -3057,8 +3073,97 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    paragraph is not added to the template. *Exit:* the probe set — attribution-bearing passages
    with known reported speech — shows the asserted-as-reported rate **below 10%**, which is the
    threshold T8 fired on at 11.1–24.5%. This is a new phase-exit clause, not a refinement.
-4. Ledger digest, `E442`, journal, language policy, recipe fields, prompt templates with fences.
-   *Exit:* red-team suite; resume test.
+   **Built 2026-10-12; the exit is owed, and the reason is a finding.**
+   `smysl_ingest::text::attribution` writes `text:mode`, `text:speaker` and `text:holder` from
+   the node a span landed in, and `crates/smysl-ingest/tests/probe_set.rs` measures the clause
+   when a probe set is supplied (`SMYSL_PROBE_SET`) and reports it as owed when one is not.
+
+   **The paragraph is out of the prompt and there is an assertion keeping it out.**
+   `the_text_prompt_asks_for_no_provenance_and_names_no_holder` fails if the word appears in
+   either text template. That is T9 as a test rather than as a decision recorded once.
+
+   **`asserted` is written only where a holder is known, and never as a default.** The three
+   outcomes are: inside a reported-speech mark → `reported` and *no holder*, because the mark
+   says somebody else is speaking and not who; a node with a speaker → `asserted`, with that
+   speaker as `text:speaker` and an `x.text/entity` for them as `text:holder`, staged beside the
+   claim and in its `deps` (`SMY-W406`); neither → **nothing written**. A unit with no
+   structural evidence about its mode is a different record from one asserted by a known holder,
+   and §3.4 says `asserted` must not be a default.
+
+   **The finding: no reader in this build marks reported speech.** §3.4 says "reported-speech
+   spans the reader marks". The two markers real sources carry are USFM's `\wj … \wj*` and
+   OSIS's `<q who="…">`, and neither reader reads them; chat readers mark a *speaker* per
+   message, which is the holder and not the mode. So the marks are an **input** to windowing
+   (`Pane::with_reported`) and `attribution::quoted_spans` — paired quotation marks — is the one
+   supplier that works on any text. A modern edition that punctuates its quotations is handled;
+   a 1769 Bible is not, because Psalm 14:1 marks its reported clause with a comma and a capital
+   letter and nothing else. The harness asserts exactly that pair: the same claim comes out
+   `reported` with punctuation, nothing without it, and `reported` again as soon as a mark is
+   supplied — which locates the gap in the **reader** rather than in the converter. Closing it
+   is a reader change with identity consequences (a reading's `rdid`, a part's structure hash)
+   and belongs with the readers, not here.
+
+   **The probe set is owed for GE-T13's reason.** Attribution-bearing passages with known
+   reported speech are material this repository does not hold, and authoring them here would
+   make them a development set — the passages would be chosen by whoever wrote the detector.
+   The arithmetic is tested instead: a rate over the probes a human called `reported`, an absent
+   mode counted as a miss, probes called `asserted` outside the denominator, and 10% failing
+   because the clause says *below*.
+4. ~~Ledger digest, `E442`, journal, language policy, recipe fields, prompt templates with
+   fences. *Exit:* red-team suite; resume test.~~ **Done 2026-10-12.** `text/digest.rs`,
+   `text/journal.rs`, `text/run.rs` (`Ingestor::ingest_text`, `TextIngest`, `Target`,
+   `TextReport`), `json_ast::{Scope, convert_scoped}`, `repair::convert_scoped`,
+   `prompt::{ingest_text_json, ingest_text_surface, DIGEST_FENCE, neutralise_fences}`, four
+   recipe fields, `SMY-E442`, `SMY-W443` and `SMY-W444` registered, the `ingest --text` command
+   with `--window-level`, `--digest-budget`, `--reextract` and `--single-pass`, and both exit
+   clauses: `tests/text_gate.rs` (9 tests) and `tests/redteam.rs` (5 tests over
+   `fixtures/library/redteam/`).
+
+   **Six things this step had to settle that the clause does not say.**
+
+   **Commit then journal, and that ordering *is* the resume property.** An entry is appended
+   after its batch is committed, so a kill between the two costs one window — extracted again,
+   producing the same uids — and the unrecoverable case, a window recorded as done that no store
+   holds, cannot happen. It is why `ingest --text` commits per window and therefore requires
+   `--yes`: a run that staged to a file and committed later could not journal at all.
+
+   **The journal is a file, not the redb table §4.3.4 offers.** The correctness property is
+   *append then flush*, which a length-prefixed append-only file gives directly; the access
+   pattern argues nothing the other way, since a journal is read once per run and appended once
+   per window. A truncated tail — what a kill leaves — stops the read and keeps everything
+   before it, the rule `from_cbor_seq` already applies to a log.
+
+   **§3.5's `l/1` is not a label in this format.** A-3's grammar requires each segment of a
+   label to begin with a lowercase letter, so the digest labels are `l/n1 … l/nn`: one character
+   more, against a second label grammar for digests alone.
+
+   **The digest's fence is always rendered, even when the digest is empty.** The template is one
+   per run because the *recipe* is one per run, so a window that skipped the substitution would
+   send the literal `<<<SMYSL-DIGEST>>>` and an unfilled `{digest}`. An empty digest inside its
+   fence says "nothing has been extracted yet", which is what the first window of every
+   expression means.
+
+   **Dropping the answer's `source` forces the tool to supply one.** `cited` requires a source
+   or `UnitCoreBuilder` refuses the unit (`SMY-E032`), and a text answer's own `source` is
+   dropped (`SMY-W444`) — so `ingest_text` passes the window's own reference under
+   `SourcePolicy::Override`, **without a span**, and attachment adds the span where a quote
+   supports one. Without a span, because §3.4 says an unsupported quote is staged with no span:
+   a window-wide span would be true, useless, and would make the phase exit's coverage figure
+   meaningless. There is a test for the refusal in `json_ast`, because the constraint is what
+   makes the window source mandatory rather than an optimisation.
+
+   **A refused window used to lose its warnings.** The repair loop reported only errors from a
+   chunk it gave up on, so a red-team answer that cited a store uid *and* supplied a speaker
+   reported the citation and not the speaker: a reader saw one reason and never learned the
+   other. The last attempt's warnings are carried into the degrade path now. Found by the
+   red-team suite, which asserts both codes.
+
+   **Not in this step.** `pivot:<lang>` is still refused by name (`LangPolicy::parse`): the
+   pivot pass is a second extraction linked by `x.text/translates` with the source unit in
+   `deps`, and GE-T2's figures are measured under `source`. `link`, `summarise` and `same_as`
+   are TX-P7's. The path is chosen from the **largest window** rather than the expression's
+   size, or every Bible would take the surface path on the strength of its total length while
+   each call sees a few verses.
 5. *Exit for the phase (draft 3 §22, and changed by §1.1 items 2, 4 and 6):* resume after kill
    loses ≤ one batch; ≥ 95% of units carry a span; entity duplication < 2% across windows; the
    probe-set gate of 3b; **GE-T2 rerun** under the consensus policy (§5.5); and a **cost report**

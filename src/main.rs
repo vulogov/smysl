@@ -1361,6 +1361,37 @@ fn cli() -> Command {
                         .long("dry-run")
                         .help("Report what would be sent and to whom; make no call")
                         .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("text")
+                        .long("text")
+                        .value_name("WHO")
+                        .help("Ingest an expression of the library at --store: its alias, or a manifest id"),
+                )
+                .arg(
+                    Arg::new("window-level")
+                        .long("window-level")
+                        .value_name("L")
+                        .help("Fill windows with whole nodes at this level [default: the reading's leaves]"),
+                )
+                .arg(
+                    Arg::new("digest-budget")
+                        .long("digest-budget")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(u32))
+                        .help("Tokens of ledger digest sent with each window; 0 sends none [default: 512]"),
+                )
+                .arg(
+                    Arg::new("reextract")
+                        .long("reextract")
+                        .help("Ignore the journal for this expression and extract every window again")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("single-pass")
+                        .long("single-pass")
+                        .help("One extraction per window instead of two; recorded in the recipe (§3.4)")
+                        .action(ArgAction::SetTrue),
                 ),
             "attest" => sub
                 .arg(
@@ -5314,8 +5345,284 @@ fn load_registry(global: &ArgMatches) -> Result<smysl::Registry, ConfigError> {
 ///
 /// Exits 10 unless `--yes`: rule S says model output is staged and confirmed, and an exit
 /// code is how a pipeline learns that a decision is waiting for it.
+/// `ingest --text <alias|mid>`: one expression of a library, window by window (§4.4).
+///
+/// Commits as it goes, and that is not a convenience. The journal entry that makes a window
+/// resumable is written *after* its batch is committed, so a run that staged to a file and
+/// committed later could not write a journal at all — a kill would then lose everything or
+/// claim everything. `--yes` is therefore required rather than optional here, and says the same
+/// thing it says everywhere else: this writes to the store you named.
+#[cfg(all(feature = "ingest", feature = "text"))]
+fn cmd_ingest_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use smysl::text::library::Library;
+    use smysl::text::reading::Level;
+
+    let who = m.get_one::<String>("text").expect("checked by the caller");
+    let registry = match load_registry(global) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl ingest: {e}");
+            return e.code;
+        }
+    };
+    let Some(root) = store_arg(m, global) else {
+        eprintln!("smysl ingest: --text reads a library, so it needs one: pass --store <LIBRARY>");
+        return ExitCode::Usage;
+    };
+    let root = std::path::PathBuf::from(root);
+    if !m.get_flag("yes") && !m.get_flag("dry-run") {
+        eprintln!(
+            "smysl ingest: --text commits each window as it is staged, so it needs --yes; \
+             --dry-run reports what would be sent"
+        );
+        return ExitCode::Usage;
+    }
+    let mut lib = match Library::open(&root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl ingest: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+
+    // The target: an alias, or a manifest id for a corpus whose alias has forked.
+    let target = match smysl::Mid::parse(who) {
+        Ok(mid) => smysl::TextTarget::Manifest(mid),
+        Err(_) => smysl::TextTarget::Alias(who.clone()),
+    };
+
+    // The window level: the caller's, else the reading's leaves. Reported either way, because a
+    // default that decides how every claim was extracted is a default a reader has to see.
+    let level = match m.get_one::<String>("window-level") {
+        Some(l) => match Level::new(l) {
+            Some(level) => Some(level),
+            None => {
+                eprintln!("smysl ingest: `{l}` is not a level: lowercase, digits and `-`");
+                return ExitCode::Usage;
+            }
+        },
+        None => None,
+    };
+    let level = match level {
+        Some(l) => l,
+        None => match default_level(&lib, &target) {
+            Ok(l) => {
+                // Said once. A dry run reports the level in its own block below, and a real run
+                // reports it here — because a default that decides how every claim in a corpus
+                // was extracted is not a default to leave unsaid.
+                if !m.get_flag("dry-run") {
+                    println!("window-level {l} (the reading's leaves)");
+                }
+                l
+            }
+            Err(code) => return code,
+        },
+    };
+
+    let rung = m
+        .get_one::<String>("rung")
+        .and_then(|s| smysl::Rung::parse(s))
+        .unwrap_or(smysl::Rung::Document);
+    let mut opts = smysl::IngestOptions::at_rung(rung);
+    // Two passes per window is the default here and nowhere else (§3.4), because the doubling
+    // is `ingest --text`'s: `--single-pass` opts out and is recorded in the recipe.
+    opts = opts.with_passes(if m.get_flag("single-pass") {
+        smysl::Passes::Single
+    } else {
+        smysl::Passes::TEXT
+    });
+    if let Some(hop) = m.get_one::<u32>("hop") {
+        opts = opts.at_hop(*hop);
+    }
+    if let Some(g) = m.get_one::<String>("granularity") {
+        opts = opts.with_granularity(g);
+    }
+    if let Some(id) = m.get_one::<String>("estimator") {
+        match TokenEstimator::parse(id) {
+            Some(e) => opts = opts.with_estimator(e),
+            None => {
+                eprintln!("smysl ingest: unknown estimator `{id}`");
+                return ExitCode::Usage;
+            }
+        }
+    }
+    if let Some(n) = m.get_one::<usize>("max-output") {
+        opts = opts.with_max_output(*n);
+    }
+    if let Some(p) = m.get_one::<String>("lang-policy") {
+        match smysl::LangPolicy::parse(p) {
+            Ok(policy) => opts = opts.with_lang_policy(policy),
+            Err(e) => {
+                eprintln!("smysl ingest: {e}");
+                return ExitCode::Usage;
+            }
+        }
+    }
+    if let Some(n) = m.get_one::<String>("normaliser") {
+        opts = opts.with_normaliser(match n.as_str() {
+            "v2" => smysl::QuoteNormaliser::V2,
+            _ => smysl::QuoteNormaliser::V1,
+        });
+    }
+    if let Some(t) = m.get_one::<f32>("temperature").copied() {
+        if !(0.0..=2.0).contains(&t) {
+            eprintln!("smysl ingest: --temperature {t} is outside 0.0 to 2.0");
+            return ExitCode::Usage;
+        }
+        opts = opts.with_temperature(t);
+    }
+    if let Some(n) = m.get_one::<String>("repair").and_then(|s| s.parse().ok()) {
+        opts = opts.with_repair_attempts(n);
+    }
+    match load_prompt(m, global) {
+        Ok(Some(p)) => opts = opts.with_prompt(p),
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!("smysl ingest: prompt override: {e}");
+            return e.code;
+        }
+    }
+
+    let digest_budget = m.get_one::<u32>("digest-budget").copied().unwrap_or(512);
+
+    if m.get_flag("dry-run") {
+        let provider = match registry.for_task(smysl::Task::ContentIngest) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("smysl ingest: {e}");
+                return e.exit_code();
+            }
+        };
+        let caps = provider.caps();
+        println!("provider     {}", provider.id());
+        println!(
+            "egress       {}",
+            if caps.offline {
+                "no - local"
+            } else {
+                "YES - leaves the machine"
+            }
+        );
+        println!("expression   {who}");
+        println!("window-level {level}");
+        println!("passes       {} per window", opts.passes.count());
+        println!("digest       {digest_budget} token(s) per window");
+        println!("rung         {rung} (ceiling {})", smysl::ceiling(rung));
+        println!(
+            "max output   {} token(s) per call",
+            opts.output_budget(&caps)
+        );
+        return ExitCode::Success;
+    }
+
+    let mut ingest =
+        smysl::TextIngest::new(&mut lib, target, level).with_digest_budget(digest_budget);
+    ingest.reextract = m.get_flag("reextract");
+
+    let spin = Spinner::new(progress_style(global), format!("ingesting {who}"));
+    let outcome = smysl::Ingestor::new(&registry, opts).ingest_text(&mut ingest);
+    spin.finish("");
+
+    let report = match outcome {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl ingest: {e}");
+            return e.exit_code();
+        }
+    };
+    for d in &report.diagnostics {
+        eprintln!("smysl ingest: {d}");
+    }
+    println!(
+        "{} window(s), {} skipped, {} call(s), {} unit(s), {} entit(ies)",
+        report.windows, report.skipped, report.calls, report.units, report.entities
+    );
+    println!(
+        "spans        {} attached, {} without one{}",
+        report.spanned,
+        report.spanless,
+        match report.span_coverage() {
+            Some(r) => format!(" ({:.1}% coverage)", 100.0 * r),
+            None => String::new(),
+        }
+    );
+    println!(
+        "quotes       {} present, {} loose, {} absent",
+        report.verdicts.present, report.verdicts.loose, report.verdicts.absent
+    );
+    println!(
+        "tokens       {} in, {} out",
+        report.usage.input_tokens, report.usage.output_tokens
+    );
+    if let Some(r) = report.recipe {
+        println!("recipe       {}", smysl::recipe_short(&r));
+    }
+    ExitCode::Success
+}
+
+/// The reading's leaves, for a run that named no `--window-level`.
+#[cfg(all(feature = "ingest", feature = "text"))]
+fn default_level(
+    lib: &smysl::text::library::Library,
+    target: &smysl::TextTarget,
+) -> Result<smysl::text::reading::Level, ExitCode> {
+    use smysl::text::limits::Caps;
+
+    let mid = match target {
+        // `TextTarget` is `#[non_exhaustive]`: a variant a later release adds has no default
+        // level here, and saying so beats windowing it at a level nobody chose.
+        smysl::TextTarget::Alias(alias) => match lib.head(alias) {
+            Ok(mid) => mid,
+            Err(e) => {
+                eprintln!("smysl ingest: {alias}: {e}");
+                return Err(ExitCode::Failure);
+            }
+        },
+        smysl::TextTarget::Manifest(mid) => *mid,
+        _ => {
+            eprintln!("smysl ingest: that target needs an explicit --window-level");
+            return Err(ExitCode::Usage);
+        }
+    };
+    let Some(manifest) = lib.store().manifest(&mid) else {
+        eprintln!("smysl ingest: no manifest {}", mid.canonical());
+        return Err(ExitCode::Failure);
+    };
+    let Some(first) = manifest.parts.first() else {
+        eprintln!("smysl ingest: that expression has no parts");
+        return Err(ExitCode::Failure);
+    };
+    let structure = match lib.structure(&mid, &first.tid, &Caps::DEFAULT) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("smysl ingest: {}: {e}", first.tid.canonical());
+            return Err(ExitCode::Failure);
+        }
+    };
+    match smysl::ingest_text::window::leaf_level(&structure) {
+        Some(l) => Ok(l),
+        None => {
+            eprintln!("smysl ingest: that reading has no nodes to window");
+            Err(ExitCode::Failure)
+        }
+    }
+}
+
 #[cfg(feature = "ingest")]
 fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    // `--text` is a different ingest: the input is an expression of a library rather than a
+    // file, each window is committed as it is staged, and the journal is what makes a second
+    // run cheap. Dispatched before anything else because almost none of the document path's
+    // setup applies — there is no file to read and nothing to stage to a `staged.smy`.
+    #[cfg(feature = "text")]
+    if m.contains_id("text") && m.get_one::<String>("text").is_some() {
+        return cmd_ingest_text(m, global);
+    }
+    #[cfg(not(feature = "text"))]
+    if m.get_one::<String>("text").is_some() {
+        eprintln!("smysl ingest: --text needs the `text` feature; this build has no library layer");
+        return ExitCode::Usage;
+    }
     let style = progress_style(global);
     let registry = match load_registry(global) {
         Ok(r) => r,

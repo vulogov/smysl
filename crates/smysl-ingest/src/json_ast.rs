@@ -13,7 +13,7 @@
 //! uid: uids are content addresses over a canonical encoding it has never seen. Labels are
 //! resolved here, in dependency order, exactly as the surface parser does.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::surface::hjson::{parse_object_prefix, HObject, HValue, Spanned};
 use smysl_core::{
@@ -50,12 +50,97 @@ pub fn convert(raw: &str) -> Converted {
     convert_with(raw, None)
 }
 
+/// What an answer is allowed to name, and which rules it is read under (§3.9.2, §4.3.4).
+///
+/// Two things, because a text ingest changes both. **References** are limited to this batch's own
+/// labels and the ledger digest's: anything else that happens to resolve in the store is
+/// `SMY-E442`, because a model that can cite a unit it was never shown is a model whose grounds
+/// nobody can check. And **provenance is the tool's**: dates, speakers, spans, languages and
+/// sources in a text answer are dropped with `SMY-W444` rather than believed, since the ingest
+/// path writes all of them from the reading.
+///
+/// `Scope::default()` is the prose path, and reads exactly as `convert_with` always did: no
+/// digest, no restriction, and a tool-owned field is still an unknown field.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct Scope {
+    /// The digest's labels, resolvable but **not** part of the batch's own bindings: `l/n3` is a
+    /// name for one window's prompt, and staging it would bind it in the store.
+    pub labels: BTreeMap<Label, Uid>,
+    /// The uids the digest showed. A reference resolving to anything outside this and the batch
+    /// is `SMY-E442` when `enforce` is set.
+    pub allowed: BTreeSet<Uid>,
+    /// Whether to apply the text-answer rules: tool-owned fields dropped with `SMY-W444`, and
+    /// `node` accepted as the node hint.
+    pub text: bool,
+    /// Whether an out-of-scope reference is an error. Off by default, so the prose path keeps
+    /// accepting a full uid of a unit already in the store.
+    pub enforce: bool,
+}
+
+impl Scope {
+    /// The scope of one text window: its digest, enforced, under the text-answer rules.
+    pub fn for_text(labels: BTreeMap<Label, Uid>, allowed: BTreeSet<Uid>) -> Scope {
+        Scope {
+            labels,
+            allowed,
+            text: true,
+            enforce: true,
+        }
+    }
+}
+
+/// The payload key a model uses to say which node it read a claim in (§3.4).
+///
+/// Here rather than in `crate::text`, which is behind a feature: the *converter* writes it and
+/// the converter is in every build, so a build without the library layer still reads an answer
+/// the same way. `crate::text::attach::NODE_KEY` re-exports it, where the attachment that
+/// consumes it lives.
+///
+/// Informative in exactly the way a locator is: it narrows the search that attaches the span and
+/// decides nothing, which is why a wrong hint costs nothing.
+pub const NODE_KEY: &str = "ingest:node";
+
+/// The three payload keys step 3b writes from structure.
+///
+/// A subset of [`TOOL_OWNED`] and listed separately because these are *payload* keys: the
+/// surface path has to remove them from a built unit's payload, where the others are header
+/// fields it can simply not read.
+pub const ATTRIBUTION_OWNED: &[&str] = &["text:holder", "text:mode", "text:speaker"];
+
+/// The fields a text answer may not supply, because the ingest path writes them (§3.9.2).
+///
+/// `source`, `lang`, `span`, `published`, `observed` and `text:speaker` are the six §3.9.2 names;
+/// `text:holder` and `text:mode` are here too because step 3b writes them from structure, and a
+/// model that fills one is answering the question S0 measured it answering wrongly.
+pub const TOOL_OWNED: &[&str] = &[
+    "source",
+    "lang",
+    "span",
+    "manifest",
+    "published",
+    "observed",
+    "text:speaker",
+    "text:holder",
+    "text:mode",
+];
+
 /// [`convert`], with a caller-supplied source applied to each unit before it is built.
 pub fn convert_with(
     raw: &str,
     source: Option<&(smysl_core::SourceRef, smysl_core::SourcePolicy)>,
 ) -> Converted {
+    convert_scoped(raw, source, &Scope::default())
+}
+
+/// [`convert_with`], under a [`Scope`] (§4.3.4, TX-P5 step 4).
+pub fn convert_scoped(
+    raw: &str,
+    source: Option<&(smysl_core::SourceRef, smysl_core::SourcePolicy)>,
+    scope: &Scope,
+) -> Converted {
     let mut out = Converted::default();
+    let mut batch: BTreeSet<Uid> = BTreeSet::new();
 
     // A model asked for JSON sometimes wraps it in a fence. Unwrapping is charity, not
     // laxity: the alternative is spending a repair attempt on a formatting habit.
@@ -107,12 +192,21 @@ pub fn convert_with(
             );
             continue;
         };
-        match unit(o, i, &out.labels, source, &mut out.diagnostics) {
+        match unit(
+            o,
+            i,
+            &out.labels,
+            source,
+            scope,
+            &batch,
+            &mut out.diagnostics,
+        ) {
             Ok((core, label)) => {
                 let uid = canonical_uid(&core);
                 if let Some(l) = label {
                     out.labels.insert(l, uid);
                 }
+                batch.insert(uid);
                 out.units.push(core);
             }
             Err(d) => out.diagnostics.extend(d),
@@ -131,7 +225,7 @@ pub fn convert_with(
                 );
                 continue;
             };
-            match relation(o, i, &out.labels) {
+            match relation(o, i, &out.labels, scope, &batch) {
                 Ok(r) => out.relations.push(r),
                 Err(d) => out.diagnostics.extend(d),
             }
@@ -150,6 +244,8 @@ fn relation(
     o: &HObject,
     index: usize,
     labels: &BTreeMap<Label, Uid>,
+    scope: &Scope,
+    batch: &BTreeSet<Uid>,
 ) -> Result<Relation, Vec<Diagnostic>> {
     let mut errors = Vec::new();
 
@@ -176,7 +272,17 @@ fn relation(
 
     let mut endpoint = |key: &str| -> Option<Uid> {
         match o.get(key).and_then(|v| v.value.as_str()) {
-            Some(name) => match resolve(name, labels) {
+            Some(name) => match resolve(name, labels, scope) {
+                // An edge into something the model was not shown, like a `grounds` entry into
+                // one: `SMY-E442` rather than `SMY-E060`, because the unit is there and the
+                // permission is not.
+                Some(u) if scope.enforce && !in_scope(&u, scope, batch, labels) => {
+                    errors.push(Diagnostic::new(Code::E442).with_message(format!(
+                        "relation {index}: `{key}` names `{name}`, which is outside this batch \
+                         and its ledger digest"
+                    )));
+                    None
+                }
                 Some(u) => Some(u),
                 None => {
                     errors.push(Diagnostic::new(Code::E060).with_message(format!(
@@ -234,6 +340,8 @@ fn unit(
     index: usize,
     labels: &BTreeMap<Label, Uid>,
     caller: Option<&(smysl_core::SourceRef, smysl_core::SourcePolicy)>,
+    scope: &Scope,
+    batch: &BTreeSet<Uid>,
     warnings: &mut Vec<Diagnostic>,
 ) -> Result<(UnitCore, Option<Label>), Vec<Diagnostic>> {
     let mut errors = Vec::new();
@@ -247,9 +355,29 @@ fn unit(
         "payload", "quote",
     ];
     for key in o.keys() {
-        if !KNOWN.contains(&key) {
-            errors.push(at(format!("unknown field `{key}`")));
+        // Tool-owned first, and `source` is why the order matters: it is a *known* field of the
+        // prose schema and a forbidden one in a text answer, so a KNOWN check ahead of this
+        // would let it through on the strength of the other path's rules.
+        //
+        // A tool-owned field in a text answer is dropped and reported, where an invented field
+        // is still an error. The difference is that this one has a right answer the tool
+        // already holds: the reading says when the message was sent and which bytes it was
+        // drawn from, so a model's version of either is not a second opinion, it is noise
+        // inside a uid.
+        if scope.text && TOOL_OWNED.contains(&key) {
+            warnings.push(
+                Diagnostic::new(Code::W444)
+                    .with_message(format!(
+                        "unit {index}: `{key}` is written by the ingest path and was dropped"
+                    ))
+                    .with_suggestion("the reading supplies it; an answer's value is not used"),
+            );
+            continue;
         }
+        if KNOWN.contains(&key) || (scope.text && key == "node") {
+            continue;
+        }
+        errors.push(at(format!("unknown field `{key}`")));
     }
 
     let type_name = o.get("type").and_then(|v| v.value.as_str()).unwrap_or("");
@@ -301,12 +429,14 @@ fn unit(
         None => None,
     };
 
-    let (deps, mut dep_errors) = references(o, "deps", index, labels);
-    let (grounds, ground_errors) = references(o, "grounds", index, labels);
+    let (deps, mut dep_errors) = references(o, "deps", index, labels, scope, batch);
+    let (grounds, ground_errors) = references(o, "grounds", index, labels, scope, batch);
     dep_errors.extend(ground_errors);
     errors.extend(dep_errors);
 
-    let source = match o.get("source").map(|v| &v.value) {
+    // Under the text rules the answer's `source` has already been dropped above, so this reads
+    // `None` and the provenance comes from `text::attach` — the one place that may write it.
+    let source = match o.get("source").map(|v| &v.value).filter(|_| !scope.text) {
         Some(HValue::Object(s)) => match source_ref(s, index) {
             Ok(s) => Some(s),
             Err(d) => {
@@ -365,19 +495,31 @@ fn unit(
     // `crate::quote::verify` reads it back and checks it against the text the unit was
     // drawn from. A `source` names the document; this names the passage - and unlike the
     // rest of what a model asserts about itself, it is checkable.
-    if let Some(q) = o.get("quote").and_then(|v| v.value.as_str()) {
-        let span = smysl_core::Span::new(0, 0);
-        let mut obj = smysl_core::surface::hjson::HObject::default();
-        obj.insert(
-            smysl_core::surface::hjson::Spanned::new(crate::quote::QUOTE_KEY.to_string(), span),
+    let span = smysl_core::Span::new(0, 0);
+    let mut payload = smysl_core::surface::hjson::HObject::default();
+    let mut put = |key: &str, value: &str| {
+        payload.insert(
+            smysl_core::surface::hjson::Spanned::new(key.to_string(), span),
             smysl_core::surface::hjson::Spanned::new(
-                smysl_core::surface::hjson::HValue::Str(q.to_string()),
+                smysl_core::surface::hjson::HValue::Str(value.to_string()),
                 span,
             ),
         );
-        if let Some(p) = smysl_core::surface::payload::object_to_payload(&obj) {
-            b = b.payload(p);
+    };
+    if let Some(q) = o.get("quote").and_then(|v| v.value.as_str()) {
+        put(crate::quote::QUOTE_KEY, q);
+    }
+    // The node hint of a text answer (§3.4): the locator of the line the model read the claim
+    // in. It narrows span attachment and decides nothing, and `text::attach` removes it from the
+    // payload once a span is attached — so it is inside the uid for exactly as long as it is the
+    // only thing saying where the unit came from.
+    if scope.text {
+        if let Some(n) = o.get("node").and_then(|v| v.value.as_str()) {
+            put(NODE_KEY, n);
         }
+    }
+    if let Some(p) = smysl_core::surface::payload::object_to_payload(&payload) {
+        b = b.payload(p);
     }
 
     match b.build() {
@@ -401,6 +543,8 @@ fn references(
     key: &str,
     index: usize,
     labels: &BTreeMap<Label, Uid>,
+    scope: &Scope,
+    batch: &BTreeSet<Uid>,
 ) -> (Vec<Uid>, Vec<Diagnostic>) {
     let mut out = Vec::new();
     let mut errors = Vec::new();
@@ -422,7 +566,21 @@ fn references(
             );
             continue;
         };
-        match resolve(name, labels) {
+        match resolve(name, labels, scope) {
+            // Resolved, and then checked against what the model was actually shown: a uid it
+            // could not have seen is `SMY-E442` even though it names a real unit. That is the
+            // whole of the check — "it exists" is not "you were told about it".
+            Some(u) if scope.enforce && !in_scope(&u, scope, batch, labels) => errors.push(
+                Diagnostic::new(Code::E442)
+                    .with_message(format!(
+                        "unit {index}: `{key}` names `{name}`, which is outside this batch and \
+                         its ledger digest"
+                    ))
+                    .with_suggestion(
+                        "reference a label of this answer or of the digest; nothing else is in \
+                         scope",
+                    ),
+            ),
             Some(u) => out.push(u),
             // A dangling reference is `E060`, the same code `check` uses, so a caller sees
             // one vocabulary whether the problem came from a model or from a file.
@@ -440,13 +598,29 @@ fn references(
 /// Shared by units and relations so an edge resolves its endpoints by exactly the rule a
 /// `grounds` entry does. Two copies of this would drift, and the drift would show up as an
 /// edge that silently failed to attach.
-fn resolve(name: &str, labels: &BTreeMap<Label, Uid>) -> Option<Uid> {
+fn resolve(name: &str, labels: &BTreeMap<Label, Uid>, scope: &Scope) -> Option<Uid> {
     if let Ok(l) = Label::new(name) {
         if let Some(uid) = labels.get(&l) {
             return Some(*uid);
         }
+        // A digest label, which resolves and is deliberately not one of the batch's own
+        // bindings: `l/n3` names a unit for the length of one prompt, and binding it in the
+        // store would give a window's scratch name a place in a view.
+        if let Some(uid) = scope.labels.get(&l) {
+            return Some(*uid);
+        }
     }
     Uid::parse(name).ok()
+}
+
+/// Whether a resolved uid is one the answer was allowed to name (`SMY-E442`).
+fn in_scope(
+    uid: &Uid,
+    scope: &Scope,
+    batch: &BTreeSet<Uid>,
+    labels: &BTreeMap<Label, Uid>,
+) -> bool {
+    scope.allowed.contains(uid) || batch.contains(uid) || labels.values().any(|u| u == uid)
 }
 
 fn source_ref(o: &HObject, index: usize) -> Result<SourceRef, Diagnostic> {
@@ -781,5 +955,159 @@ mod tests {
             r#"{"units":[{"type":"claim","label":"NotALabel","gist":"g","status":"speculative"}]}"#,
         );
         assert!(out.has_errors());
+    }
+    /// A digest's label table and allowed set, as `text::digest` hands them over.
+    fn scope_of(uid: Uid) -> Scope {
+        let label = Label::new("l/n1").expect("a label");
+        Scope::for_text(
+            [(label, uid)].into_iter().collect(),
+            [uid].into_iter().collect(),
+        )
+    }
+
+    #[test]
+    fn a_digest_label_resolves_and_is_not_one_of_the_batch_s_own_bindings() {
+        let shown = Uid::parse(&format!("b3:{}", "a".repeat(52))).expect("a uid");
+        let raw = r#"{"units":[
+            {"type":"claim","label":"c/one","gist":"a claim","status":"inferred",
+             "grounds":["l/n1"],"quote":"a claim"}
+        ]}"#;
+        let out = convert_scoped(raw, None, &scope_of(shown));
+        assert!(!out.has_errors(), "{:?}", out.diagnostics);
+        assert_eq!(out.units.len(), 1);
+        assert!(
+            out.units[0].grounds.contains(&shown),
+            "the digest label did not resolve"
+        );
+        // The batch's own bindings are what a caller stages, and `l/n1` is not one of them:
+        // it names a unit for the length of one prompt.
+        assert_eq!(out.labels.len(), 1);
+        assert!(out
+            .labels
+            .contains_key(&Label::new("c/one").expect("a label")));
+    }
+
+    #[test]
+    fn a_uid_outside_the_digest_is_e442_even_though_it_is_a_real_unit() {
+        let shown = Uid::parse(&format!("b3:{}", "a".repeat(52))).expect("a uid");
+        let elsewhere = format!("b3:{}", "b".repeat(52));
+        let raw = format!(
+            r#"{{"units":[
+                {{"type":"claim","label":"c/one","gist":"a claim","status":"inferred",
+                 "grounds":["{elsewhere}"],"quote":"a claim"}}
+            ]}}"#
+        );
+        let out = convert_scoped(&raw, None, &scope_of(shown));
+        assert!(out.has_errors());
+        let codes: Vec<Code> = out.diagnostics.iter().map(|d| d.code).collect();
+        assert!(codes.contains(&Code::E442), "{codes:?}");
+        // And the prose path still accepts it: a caller staging against a store it can see is
+        // not the case this check is about.
+        let out = convert(&raw);
+        assert!(
+            !out.diagnostics.iter().any(|d| d.code == Code::E442),
+            "the prose path gained a restriction it never had",
+        );
+    }
+
+    #[test]
+    fn a_relation_into_something_the_model_was_not_shown_is_e442_too() {
+        let shown = Uid::parse(&format!("b3:{}", "a".repeat(52))).expect("a uid");
+        let elsewhere = format!("b3:{}", "c".repeat(52));
+        let raw = format!(
+            r#"{{"units":[
+                {{"type":"claim","label":"c/one","gist":"a claim","status":"speculative"}}
+            ],
+            "relations":[{{"kind":"causes","from":"c/one","to":"{elsewhere}"}}]}}"#
+        );
+        let out = convert_scoped(&raw, None, &scope_of(shown));
+        assert!(out.diagnostics.iter().any(|d| d.code == Code::E442));
+        assert!(out.relations.is_empty(), "the edge was kept");
+    }
+
+    #[test]
+    fn the_tool_owned_fields_of_a_text_answer_are_dropped_with_w444() {
+        let shown = Uid::parse(&format!("b3:{}", "a".repeat(52))).expect("a uid");
+        let raw = r#"{"units":[
+            {"type":"claim","label":"c/one","gist":"a claim","status":"cited",
+             "source":{"kind":"doc","ref":"somewhere else"},
+             "lang":"de","observed":123,"text:speaker":"mallory",
+             "quote":"a claim","node":"v.2"}
+        ]}"#;
+        // The text path always supplies the window's own source (`IngestOptions::with_source`,
+        // as `Ingestor::ingest_text` does), and it has to: dropping the answer's `source` leaves
+        // a `cited` unit without one, and `UnitCoreBuilder` refuses that (`SMY-E032`). The two
+        // rules are one rule — the tool writes the provenance — read from either end.
+        let window = (
+            smysl_core::SourceRef::new(smysl_core::SourceKind::Doc, "t3:a-part"),
+            smysl_core::SourcePolicy::Override,
+        );
+        let out = convert_scoped(raw, Some(&window), &scope_of(shown));
+        let w444 = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == Code::W444)
+            .count();
+        assert_eq!(w444, 4, "{:?}", out.diagnostics);
+        assert!(
+            !out.has_errors(),
+            "a dropped field is not an error: {:?}",
+            out.diagnostics
+        );
+        let u = &out.units[0];
+        assert_eq!(
+            u.source.as_ref().expect("the window's source").reference,
+            "t3:a-part",
+            "the answer's source was believed",
+        );
+        assert_eq!(u.lang, None);
+        // The node hint, on the other hand, is the model's to give and reaches the payload.
+        let payload = smysl_core::surface::payload::payload_to_object(
+            u.payload.as_deref().expect("a payload"),
+        )
+        .expect("a decodable payload");
+        assert_eq!(
+            payload.get(NODE_KEY).and_then(|v| v.value.as_str()),
+            Some("v.2"),
+        );
+        assert!(payload.get("text:speaker").is_none());
+    }
+
+    #[test]
+    fn dropping_a_source_leaves_a_cited_unit_unbuildable_which_is_why_the_tool_supplies_one() {
+        let shown = Uid::parse(&format!("b3:{}", "a".repeat(52))).expect("a uid");
+        let raw = r#"{"units":[
+            {"type":"claim","gist":"a claim","status":"cited",
+             "source":{"kind":"doc","ref":"somewhere else"},"quote":"a claim"}
+        ]}"#;
+        // No caller source: the answer's is dropped, nothing replaces it, and `cited` cannot be
+        // built. Stated as a test because it is the constraint that makes `--source` mandatory
+        // on the text path rather than an optimisation of it.
+        let out = convert_scoped(raw, None, &scope_of(shown));
+        assert!(out.has_errors());
+        assert!(out
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("measured/cited without source")));
+    }
+
+    #[test]
+    fn a_tool_owned_field_is_still_an_unknown_field_on_the_prose_path() {
+        let raw = r#"{"units":[
+            {"type":"claim","gist":"a claim","status":"speculative","observed":123}
+        ]}"#;
+        let out = convert(raw);
+        assert!(out.has_errors(), "the prose schema got laxer");
+        assert!(out.diagnostics.iter().all(|d| d.code != Code::W444));
+    }
+
+    #[test]
+    fn an_invented_field_is_an_error_in_a_text_answer_as_well() {
+        let shown = Uid::parse(&format!("b3:{}", "a".repeat(52))).expect("a uid");
+        let raw = r#"{"units":[
+            {"type":"claim","gist":"a claim","status":"speculative","confidence":0.9}
+        ]}"#;
+        let out = convert_scoped(raw, None, &scope_of(shown));
+        assert!(out.has_errors(), "an invented field was tolerated");
     }
 }

@@ -43,7 +43,6 @@
 //! **only when a span was attached**: a unit with no span keeps it, because then the quote is the
 //! only evidence a reviewer has of what was claimed.
 
-use std::collections::BTreeSet;
 use std::ops::Range;
 
 use smysl_core::diag::{Code, Diagnostic};
@@ -54,14 +53,18 @@ use smysl_core::{canonical_uid, Tid, Uid};
 use smysl_text::provenance::{stamp, Drawn};
 use smysl_text::Locator;
 
+use super::attribution::{self, Attribution};
 use super::window::{Placed, TextWindow, JOIN};
 
 /// The payload key a model uses to say which node it read (§3.4).
 ///
-/// Informative in exactly the way a locator is: it narrows the search and decides nothing. It is
-/// removed from the payload beside `ingest:quote` when a span is attached, for the same reason —
-/// it is a question's answer, not a property of the claim, and it is inside the uid.
-pub const NODE_KEY: &str = "ingest:node";
+/// Defined by the converter that writes it ([`crate::json_ast::NODE_KEY`]) and re-exported here,
+/// where the attachment that reads it lives: the converter is in every build and this module is
+/// behind a feature, so the key cannot belong to this side of the pair.
+///
+/// It is removed from the payload beside `ingest:quote` when a span is attached, because it is a
+/// question's answer rather than a property of the claim — and it is inside the uid.
+pub use crate::json_ast::NODE_KEY;
 
 /// Which scope a quote was found in. Recorded because GE-T2 measures stability of attribution,
 /// and "the hint was right" and "the hint was wrong and the part saved it" are different runs.
@@ -115,6 +118,8 @@ pub struct Attachment {
     pub span: Option<(u64, u64)>,
     /// The locator of the node the span fell in, as the reference carries it.
     pub locator: Option<String>,
+    /// What the structure said about who holds the claim and in what mode (step 3b).
+    pub attribution: Attribution,
 }
 
 /// One window's batch, after attachment.
@@ -125,6 +130,12 @@ pub struct Attached {
     pub diagnostics: Vec<Diagnostic>,
     /// One per unit that attributed a quote, in batch order.
     pub attachments: Vec<Attachment>,
+    /// The `x.text/entity` units the attributions produced — holders of what was attached.
+    ///
+    /// Beside the batch rather than inside it, so a caller can see what attachment *added* as
+    /// against what a model said. Both go to the store; `Ingestor::ingest_text` (step 4) stages
+    /// the two together.
+    pub entities: Vec<UnitCore>,
     pub spanned: usize,
     /// Units that attributed a quote the window does not support (`SMY-W441`).
     pub spanless: usize,
@@ -182,7 +193,16 @@ pub fn attach(units: Vec<UnitCore>, w: &TextWindow, o: &Opts<'_>) -> Attached {
                             ),
                     );
                 }
-                let (attached, after) = apply(unit, &hit, o);
+                let (attached, a, after) = apply(unit, &hit, o);
+                // The holder entity is staged beside the claim. Identical by rule 7 across
+                // windows, so the batch's own content addressing collapses the repeats and a
+                // conversation of forty messages from one speaker stages one entity.
+                if let Some(entity) = a.holder.clone() {
+                    let uid = canonical_uid(&entity);
+                    if !out.entities.iter().any(|e| canonical_uid(e) == uid) {
+                        out.entities.push(entity);
+                    }
+                }
                 out.attachments.push(Attachment {
                     before,
                     after,
@@ -192,6 +212,7 @@ pub fn attach(units: Vec<UnitCore>, w: &TextWindow, o: &Opts<'_>) -> Attached {
                     tid: Some(hit.tid),
                     span: Some((hit.part.start, hit.part.end)),
                     locator: Some(hit.locator.to_string()),
+                    attribution: a,
                 });
                 out.spanned += 1;
                 out.units.push(attached);
@@ -223,6 +244,7 @@ pub fn attach(units: Vec<UnitCore>, w: &TextWindow, o: &Opts<'_>) -> Attached {
                     tid: None,
                     span: None,
                     locator: None,
+                    attribution: Attribution::default(),
                 });
                 out.spanless += 1;
                 out.units.push(kept);
@@ -241,6 +263,8 @@ struct Hit {
     part: Range<u64>,
     locator: Locator,
     observed: Option<u64>,
+    /// The node the span starts in, for the attribution read off it (step 3b).
+    node: Placed,
     /// The quote occurs more than once in the node named (`SMY-W419`); only ever set for
     /// [`Scope::Named`], because that is the only scope whose job was to be unambiguous.
     ambiguous: bool,
@@ -333,6 +357,7 @@ fn place(w: &TextWindow, from: usize, to: usize, support: Support, which: Scope)
         part: start..end,
         locator: node.locator.clone(),
         observed: node.observed,
+        node: node.clone(),
         ambiguous: false,
     })
 }
@@ -379,10 +404,31 @@ fn occurs_again(text: &str, q: &str, n: Normaliser) -> bool {
 }
 
 /// Write the copy set, drop the tool's own payload keys, and rebuild.
-fn apply(unit: UnitCore, hit: &Hit, o: &Opts<'_>) -> (UnitCore, Uid) {
-    let payload = without_keys(unit.payload.as_deref(), &[quote::QUOTE_KEY, NODE_KEY]);
+fn apply(unit: UnitCore, hit: &Hit, o: &Opts<'_>) -> (UnitCore, Attribution, Uid) {
+    // §3.4, step 3b: who holds the claim and in what mode, from the node the span landed in.
+    // Read before the payload is rewritten, because the three keys it owns are dropped whatever
+    // the answer put in them — they are the tool's, and a model that fills one is answering a
+    // question nobody asked. `SMY-W444` reports that drop and arrives with step 4.
+    let a = attribution::attribution(&hit.part, &hit.node, o.manifest.alias.as_str(), o.lang);
+    let mut add: Vec<(&str, String)> = Vec::new();
+    if let Some(mode) = a.mode {
+        add.push(("text:mode", mode.to_string()));
+    }
+    if let Some(speaker) = a.speaker.as_deref() {
+        add.push(("text:speaker", speaker.to_string()));
+    }
+    if let Some(holder) = a.holder_uid() {
+        add.push(("text:holder", holder.canonical()));
+    }
+    let mut drop: Vec<&str> = vec![quote::QUOTE_KEY, NODE_KEY];
+    drop.extend_from_slice(attribution::OWNED);
+    let payload = crate::payload::rewrite(unit.payload.as_deref(), &drop, &add);
     let mut b = rebuild(unit.clone());
     b.payload = payload;
+    // `SMY-W406` wants a holder uid in `deps`, and `deps` is inside the uid — so it goes on
+    // before the unit is hashed, not after. The entity itself is staged beside the claim, or the
+    // dep would point at a unit nobody wrote.
+    b.deps.extend(attribution::holder_deps(&a));
     // One call writes the reference, the span, the manifest, `published`/`observed` and the
     // language. Nothing here assembles a `SourceRef` by hand — that is the prohibition
     // `provenance` exists to keep (D-1).
@@ -400,14 +446,14 @@ fn apply(unit: UnitCore, hit: &Hit, o: &Opts<'_>) -> (UnitCore, Uid) {
     match b.build() {
         Ok(core) => {
             let uid = canonical_uid(&core);
-            (core, uid)
+            (core, a, uid)
         }
         // Unreachable by construction: attachment adds a source, removes payload keys and never
         // raises a status, and every shape rule the builder enforces is about the fields it does
         // not touch. A library does not panic to prove a point, so the answer's own unit is kept.
         Err(_) => {
             let uid = canonical_uid(&unit);
-            (unit, uid)
+            (unit, Attribution::default(), uid)
         }
     }
 }
@@ -462,52 +508,6 @@ fn payload_str(unit: &UnitCore, key: &str) -> Option<String> {
         .get(key)
         .and_then(|v| v.value.as_str())
         .map(str::to_string)
-}
-
-/// The payload without the named keys, re-encoded from the entries' own bytes.
-///
-/// Byte surgery rather than a round trip through the HJSON value model: every other key in the
-/// payload belongs to a schema this crate knows nothing about, and re-encoding a value through a
-/// model that quantises floats would change a uid for a key nobody asked about. The entries that
-/// stay are copied verbatim, and dropping one from a sorted map leaves it sorted.
-///
-/// `None` when nothing is left, because a unit with no unknown keys carries no payload at all
-/// rather than an empty map — two encodings of one core would otherwise exist.
-fn without_keys(payload: Option<&[u8]>, keys: &[&str]) -> Option<Vec<u8>> {
-    use smysl_core::cbor::major;
-    use smysl_core::cbor::reader::Dec;
-    use smysl_core::cbor::writer::{enc, Enc};
-
-    let bytes = payload?;
-    let drop: BTreeSet<&str> = keys.iter().copied().collect();
-    let mut d = Dec::new(bytes);
-    let Ok(n) = d.map_head() else {
-        return payload.map(<[u8]>::to_vec);
-    };
-    let mut kept: Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(n);
-    for _ in 0..n {
-        let Ok(key) = d.text() else {
-            return payload.map(<[u8]>::to_vec);
-        };
-        let keep = !drop.contains(key);
-        let encoded = enc(|e| e.text(key));
-        let Ok(value) = d.skip_item() else {
-            return payload.map(<[u8]>::to_vec);
-        };
-        if keep {
-            kept.push((encoded, value.to_vec()));
-        }
-    }
-    if kept.is_empty() {
-        return None;
-    }
-    let mut e = Enc::new();
-    e.head(major::MAP, kept.len() as u64);
-    for (k, v) in kept {
-        e.raw(&k);
-        e.raw(&v);
-    }
-    Some(e.into_bytes())
 }
 
 #[cfg(test)]
@@ -869,5 +869,160 @@ mod tests {
             .span()
             .expect("a span");
         assert_eq!(&PSALM[start as usize..end as usize], quoted);
+    }
+    /// A chat-shaped pane: one message per line, with a speaker and an instant.
+    fn chat_window(speaker: &str, text: &str, reported: &[Range<u64>]) -> (TextWindow, Tid) {
+        let mut rows = rows_of(text);
+        for r in rows.iter_mut() {
+            r.speaker = Some(speaker.to_string());
+            r.observed = Some(1_700_000_000_000);
+        }
+        let structure = tree(&rows, text);
+        let tid = smysl_text::norm::Normalised::of(text).tid();
+        let panes = [Pane::new(tid, text, &structure, &rows).with_reported(reported)];
+        let (mut ws, _) = windows(
+            &panes,
+            &level(),
+            4096,
+            TokenEstimator::Utf8Div4,
+            &Segmenter::neutral(),
+        );
+        (ws.remove(0), tid)
+    }
+
+    #[test]
+    fn a_message_s_speaker_becomes_the_holder_the_mode_and_a_staged_entity() {
+        let text = "the pool wait rose to 1.9 seconds\n";
+        let (w, _) = chat_window("alice", text, &[]);
+        let m = manifest();
+        let out = attach(
+            vec![unit("the pool wait rose", "the pool wait rose", None)],
+            &w,
+            &opts(&m),
+        );
+        let u = &out.units[0];
+        let payload = smysl_core::surface::payload::payload_to_object(
+            u.payload.as_deref().expect("a payload"),
+        )
+        .expect("a decodable payload");
+        assert_eq!(
+            payload.get("text:mode").and_then(|v| v.value.as_str()),
+            Some(attribution::ASSERTED),
+        );
+        assert_eq!(
+            payload.get("text:speaker").and_then(|v| v.value.as_str()),
+            Some("alice"),
+        );
+        let entity = out.entities.first().expect("a staged holder");
+        assert_eq!(entity.gist, "alice");
+        let holder = canonical_uid(entity);
+        assert_eq!(
+            payload.get("text:holder").and_then(|v| v.value.as_str()),
+            Some(holder.canonical().as_str()),
+        );
+        // `SMY-W406` wants the holder in `deps`, and `deps` is inside the uid.
+        assert!(u.deps.contains(&holder));
+        assert_eq!(
+            out.attachments[0].attribution.mode,
+            Some(attribution::ASSERTED)
+        );
+    }
+
+    #[test]
+    fn one_speaker_over_many_messages_stages_one_entity() {
+        let text = "first thing\nsecond thing\nthird thing\n";
+        let (w, _) = chat_window("alice", text, &[]);
+        let m = manifest();
+        let out = attach(
+            vec![
+                unit("one", "first thing", None),
+                unit("two", "second thing", None),
+                unit("three", "third thing", None),
+            ],
+            &w,
+            &opts(&m),
+        );
+        assert_eq!(out.spanned, 3);
+        assert_eq!(out.entities.len(), 1, "rule 7 gives one entity per speaker");
+    }
+
+    #[test]
+    fn a_span_inside_a_reported_mark_is_reported_and_gets_no_holder() {
+        let text = "he said \u{201c}there is no God\u{201d} and left\n";
+        let marks = crate::text::attribution::quoted_spans(text);
+        assert_eq!(marks.len(), 1, "the scan found the quotation");
+        let (w, _) = chat_window("alice", text, &marks);
+        let m = manifest();
+        let out = attach(vec![unit("no God", "there is no God", None)], &w, &opts(&m));
+        let payload = smysl_core::surface::payload::payload_to_object(
+            out.units[0].payload.as_deref().expect("a payload"),
+        )
+        .expect("a decodable payload");
+        assert_eq!(
+            payload.get("text:mode").and_then(|v| v.value.as_str()),
+            Some(attribution::REPORTED),
+        );
+        assert_eq!(
+            payload.get("text:holder"),
+            None,
+            "a mark says someone else spoke, not who"
+        );
+        assert!(out.entities.is_empty());
+        assert!(out.units[0].deps.is_empty());
+    }
+
+    #[test]
+    fn a_verse_with_no_speaker_and_no_mark_gets_no_mode_at_all() {
+        let (w, _) = window(PSALM);
+        let m = manifest();
+        let out = attach(
+            vec![unit("he is good", "for he is good", None)],
+            &w,
+            &opts(&m),
+        );
+        assert_eq!(out.units[0].payload, None, "no mode, no speaker, no holder");
+        assert_eq!(out.attachments[0].attribution.mode, None);
+    }
+
+    #[test]
+    fn a_model_s_own_holder_and_mode_are_dropped_and_overwritten() {
+        let text = "the pool wait rose to 1.9 seconds\n";
+        let (w, _) = chat_window("alice", text, &[]);
+        let m = manifest();
+        let span = Span::new(0, 0);
+        let mut obj = HObject::default();
+        for (k, v) in [
+            (quote::QUOTE_KEY, "the pool wait rose"),
+            ("text:mode", "hypothetical"),
+            ("text:holder", "b3:deadbeef"),
+            ("text:speaker", "mallory"),
+        ] {
+            obj.insert(
+                Spanned::new(k.to_string(), span),
+                Spanned::new(HValue::Str(v.to_string()), span),
+            );
+        }
+        let mut b = UnitCoreBuilder::new(KernelType::Claim, "a claim", Status::Speculative);
+        b.payload = smysl_core::surface::payload::object_to_payload(&obj);
+        let out = attach(vec![b.build().expect("a unit")], &w, &opts(&m));
+        let payload = smysl_core::surface::payload::payload_to_object(
+            out.units[0].payload.as_deref().expect("a payload"),
+        )
+        .expect("a decodable payload");
+        assert_eq!(
+            payload.get("text:mode").and_then(|v| v.value.as_str()),
+            Some(attribution::ASSERTED),
+            "the structure overrules the answer",
+        );
+        assert_eq!(
+            payload.get("text:speaker").and_then(|v| v.value.as_str()),
+            Some("alice"),
+        );
+        let holder = payload
+            .get("text:holder")
+            .and_then(|v| v.value.as_str())
+            .expect("a holder");
+        assert_ne!(holder, "b3:deadbeef");
+        assert_eq!(payload.len(), 3, "and nothing else survives: {payload:?}");
     }
 }

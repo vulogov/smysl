@@ -59,6 +59,13 @@ pub struct Pane<'a> {
     pub structure: &'a Structure,
     /// The reading's rows, indexed by [`smysl_text::structure::Node::row`].
     pub rows: &'a [Segment],
+    /// Byte ranges of this part that are **reported speech**, in part coordinates.
+    ///
+    /// An input rather than something windowing discovers, because the thing that knows is
+    /// whatever marked them: a reader that reads USFM's `\wj` or OSIS's `<q who>` (none does
+    /// yet), or [`crate::text::attribution::quoted_spans`] over the text's own punctuation.
+    /// Empty is the honest default — "nothing is marked", not "nothing is reported".
+    pub reported: &'a [Range<u64>],
 }
 
 impl<'a> Pane<'a> {
@@ -68,7 +75,14 @@ impl<'a> Pane<'a> {
             text,
             structure,
             rows,
+            reported: &[],
         }
+    }
+
+    /// The part's reported-speech marks (§3.4, step 3b).
+    pub fn with_reported(mut self, marks: &'a [Range<u64>]) -> Pane<'a> {
+        self.reported = marks;
+        self
     }
 }
 
@@ -90,6 +104,12 @@ pub struct Placed {
     pub split: bool,
     /// The segment's `observed`, when the reading gave one.
     pub observed: Option<u64>,
+    /// The segment's speaker, when the reading gave one. A chat reader gives one per message;
+    /// a Bible reader gives none. This is what `text:speaker` and the holder are read from
+    /// (§3.4, step 3b).
+    pub speaker: Option<String>,
+    /// The part's reported-speech marks, clipped to this node.
+    pub reported: Vec<Range<u64>>,
 }
 
 impl Placed {
@@ -119,6 +139,26 @@ pub struct TextWindow {
 }
 
 impl TextWindow {
+    /// The window as a model is shown it: one node per line, each prefixed with its locator
+    /// (§3.9.2).
+    ///
+    /// Not [`TextWindow::text`], and the difference is load-bearing. This is what goes inside the
+    /// fence, because a model asked which node it read a claim in needs the names in front of it;
+    /// `text` is what a quote is **checked** against, so that a quote is not required to contain
+    /// `[v.3]` in order to be `Present`. Two strings for two jobs, and the attachment maps
+    /// offsets in the second.
+    pub fn rendered(&self) -> String {
+        let mut out = String::new();
+        for node in &self.nodes {
+            out.push('[');
+            out.push_str(&node.locator.to_string());
+            out.push_str("] ");
+            out.push_str(&self.text[node.at.clone()]);
+            out.push('\n');
+        }
+        out
+    }
+
     /// The nodes this window is responsible for.
     pub fn owned_nodes(&self) -> &[Placed] {
         &self.nodes[self.owned.start..self.owned.end]
@@ -148,6 +188,32 @@ impl TextWindow {
 /// two verses together.
 pub(crate) const JOIN: &str = "\n";
 
+/// The level a window should be filled with when the caller names none.
+///
+/// The **leaves**: the level of the most numerous nodes that have no children. A window of whole
+/// leaf nodes is the finest division the reading offers, and a leaf is the unit a locator names
+/// and a span is attached inside — so a coarser default would hand the model a chapter and then
+/// have nowhere narrower to anchor what it said about one verse of it.
+///
+/// Most numerous rather than "the deepest", because a reading may have one odd leaf at another
+/// level — a chapter with no verses marked, a day with no messages — and the odd one must not
+/// decide how the whole expression is windowed. `None` for a structure with no nodes at all.
+pub fn leaf_level(s: &Structure) -> Option<Level> {
+    let mut counts: std::collections::BTreeMap<&Level, usize> = std::collections::BTreeMap::new();
+    for node in s.nodes() {
+        if node.children.is_empty() {
+            *counts.entry(&node.level).or_default() += 1;
+        }
+    }
+    // Ties go to the level that sorts first, so the answer is the same on every run and on
+    // every machine: a default that depended on a hash map's order would make the recipe of an
+    // unparameterised run unreproducible.
+    counts
+        .into_iter()
+        .max_by_key(|(level, n)| (*n, std::cmp::Reverse((*level).clone())))
+        .map(|(level, _)| level.clone())
+}
+
 /// Fill windows over `panes` with the nodes at `level`.
 ///
 /// Returns the windows in order, and the diagnostics windowing itself produced — today exactly
@@ -170,7 +236,9 @@ pub fn windows(
             if text.trim().is_empty() {
                 continue;
             }
-            let observed = pane.rows.get(node.row as usize).and_then(|r| r.observed);
+            let row = pane.rows.get(node.row as usize);
+            let observed = row.and_then(|r| r.observed);
+            let speaker = row.and_then(|r| r.speaker.clone());
             let whole = Piece {
                 tid: pane.tid,
                 row: node.row,
@@ -180,6 +248,8 @@ pub fn windows(
                 tokens: est.count(text),
                 split: false,
                 observed,
+                speaker,
+                reported: super::attribution::clip(pane.reported, &node.range),
             };
             if whole.tokens <= budget {
                 pieces.push(whole);
@@ -222,6 +292,8 @@ struct Piece {
     tokens: u32,
     split: bool,
     observed: Option<u64>,
+    speaker: Option<String>,
+    reported: Vec<Range<u64>>,
 }
 
 /// Cut one oversized node at sentence boundaries.
@@ -274,6 +346,11 @@ fn piece_of(node: &Piece, from: usize, to: usize, est: TokenEstimator) -> Piece 
         text,
         split: true,
         observed: node.observed,
+        speaker: node.speaker.clone(),
+        reported: super::attribution::clip(
+            &node.reported,
+            &((node.part.start + from as u64)..(node.part.start + to as u64)),
+        ),
     }
 }
 
@@ -330,6 +407,8 @@ fn render(pieces: &[Piece], held: &[usize], owned: Range<usize>) -> TextWindow {
             at: start..text.len(),
             split: pieces[p].split,
             observed: pieces[p].observed,
+            speaker: pieces[p].speaker.clone(),
+            reported: pieces[p].reported.clone(),
         });
     }
     TextWindow {
@@ -538,5 +617,50 @@ mod tests {
             &Segmenter::neutral(),
         );
         assert_eq!(ws[0].owned_nodes()[0].observed, Some(1_700_000_000_000));
+    }
+    #[test]
+    fn the_rendered_window_names_every_node_and_the_searched_text_does_not() {
+        let text = "alpha one\nbeta two\n";
+        let (t, rows, structure) = pane(text);
+        let panes = [Pane::new(t, text, &structure, &rows)];
+        let (ws, _) = windows(
+            &panes,
+            &level("v"),
+            64,
+            TokenEstimator::Utf8Div4,
+            &Segmenter::neutral(),
+        );
+        let w = &ws[0];
+        assert_eq!(w.rendered(), "[v.1] alpha one\n[v.2] beta two\n");
+        assert!(
+            !w.text.contains('['),
+            "a quote would have to contain a locator to be present: {:?}",
+            w.text
+        );
+    }
+
+    #[test]
+    fn the_default_window_level_is_the_leaves() {
+        let text = "alpha one\nbeta two\n";
+        let (_t, rows, structure) = pane(text);
+        assert_eq!(leaf_level(&structure), Some(level("v")));
+        assert!(!rows.is_empty());
+    }
+
+    #[test]
+    fn one_odd_leaf_does_not_decide_how_an_expression_is_windowed() {
+        // Three verses at `v` and one section with no verses in it: the section is a leaf too,
+        // and it must not become the level every window is filled with.
+        let text = "one\ntwo\nthree\na section with nothing marked inside it\n";
+        let mut rows = Vec::new();
+        let mut at = 0u64;
+        for (i, line) in text.lines().enumerate() {
+            let len = line.len() as u64;
+            let lv = if i == 3 { level("section") } else { level("v") };
+            rows.push(Segment::new(at, at + len, lv, loc(i as u64 + 1)));
+            at += len + 1;
+        }
+        let structure = tree(&rows, text);
+        assert_eq!(leaf_level(&structure), Some(level("v")));
     }
 }

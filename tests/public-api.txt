@@ -234,6 +234,9 @@ pub use smysl::Subject
 pub use smysl::SupersessionPolicy
 pub use smysl::Target
 pub use smysl::Task
+pub use smysl::TextIngest
+pub use smysl::TextReport
+pub use smysl::TextTarget
 pub use smysl::Thread
 pub use smysl::ThreadId
 pub use smysl::ThreadSchema

@@ -220,6 +220,10 @@ pub use smysl_ingest::{consensus, Agreement, Passes};
 // cut from.
 #[cfg(all(feature = "ingest", feature = "text"))]
 pub use smysl_ingest::text as ingest_text;
+// The text ingest itself (§4.2, TX-P5 step 4). Rule A: `smysl ingest --text` is built out of
+// these four names and nothing else, so a library consumer can do what the CLI does.
+#[cfg(all(feature = "ingest", feature = "text"))]
+pub use smysl_ingest::text::{Target as TextTarget, TextIngest, TextReport};
 #[cfg(feature = "stage")]
 pub use smysl_ingest::{stage, Attesting, Staged};
 // `smysl import` is the only producer of `measured` units and the only unit-producing command
@@ -361,7 +365,12 @@ mod tests {
         // reading and attaching a span to a quote exist, so a node named twice over, a quote
         // the window does not hold and a node too large to show at once are all findings
         // something can make. `W419` had been allocated since draft 3 with nothing behind it.
-        assert_eq!(Code::ALL.len(), 84);
+        // 87 as of TX-P5 step 4, with `SMY-E442`, `SMY-W443` and `SMY-W444`: a text ingest
+        // sends a ledger digest, so a reference has a scope to be outside of; it fences the
+        // digest as well as the window, so a marker inside one can be neutralised; and it
+        // writes the provenance itself, so a field the answer had no business filling is
+        // dropped rather than believed.
+        assert_eq!(Code::ALL.len(), 87);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

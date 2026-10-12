@@ -58,6 +58,79 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### Who holds a claim, and what one window may say about another
+
+TX-P5 steps 3b and 4: the attribution written from structure, the ledger digest, the journal, the
+scope a model answer is read under, the text prompt templates, and `ingest --text`. SMYSL-2.4
+§3.4, §3.5, §3.9.2 and §6.
+
+**`text:mode` and `text:holder` come from the node, not the prompt.** S0 measured reported speech
+extracted *as asserted* in 11.1–24.5% of attribution-bearing units, every cell above the 10%
+threshold, and the arm that added a holder paragraph to the prompt did no better while
+introducing `SMY-E022` degradations. So the paragraph stays out — there is an assertion that fails
+if the word appears in either text template — and the three keys are written from the place the
+span landed in: inside a reported-speech mark gives `reported` and **no holder**, because a mark
+says someone else is speaking and not who; a node with a speaker gives `asserted`, that speaker
+as `text:speaker`, and an `x.text/entity` for them as `text:holder`, staged beside the claim and
+in its `deps`; neither gives **nothing**, because `asserted` is not a default and §3.4 says so.
+
+**The finding step 3b could not avoid.** §3.4 says "reported-speech spans the reader marks". *No
+reader in this build marks one.* The markers real sources carry are USFM's `\wj` and OSIS's
+`<q who="…">`, neither of which those readers read; chat readers mark a speaker, which is the
+holder and not the mode. So the marks are an input, and a punctuation scan is the one supplier
+that works on any text: a modern edition is handled, a 1769 Bible is not — Psalm 14:1 marks its
+reported clause with a comma and a capital letter. The probe-set harness asserts that pair in
+both directions and the clause is reported as **owed**, which locates the gap in the readers
+rather than in the converter. The probe set itself is material this repository does not hold;
+authoring it here would make it a development set, which is GE-T13's argument.
+
+**A window is told what has already been extracted.** The ledger digest packs what the expression
+holds under a token budget, ranked by salience then reading order, and renders it as `label: gist`
+lines inside a **second** fence — sharing the window's marker would let a window close the
+digest's. Its labels are the only outside names an answer may use: anything else that resolves in
+the store is `SMY-E442`. §3.5 writes those labels `l/1`; A-3's grammar refuses a label segment
+beginning with a digit, so they are `l/n1 … l/nn`.
+
+**Commit, then journal — and that ordering is the resume property.** An entry is written after
+its batch is committed, under a key naming the expression, the part, the window's **owned** byte
+range and the recipe. A kill between the two costs one window, re-extracted to the same uids; a
+window recorded as done that no store holds cannot happen. §4.3.4 offers a redb table or a file;
+this is the file, because the property is *append then flush* and a journal is read once per run.
+A truncated tail stops the read and keeps everything before it.
+
+**Provenance is the tool's, and the drop has a code.** A text answer supplying `source`, `lang`,
+`span`, `manifest`, `published`, `observed`, `text:speaker`, `text:holder` or `text:mode` has it
+dropped with `SMY-W444`: the reading knows when a message was sent and which bytes a claim came
+from, so a model's version is not a second opinion but noise inside an identity. Dropping the
+`source` is what forces the tool to supply one — `cited` without a source is refused by the
+builder — so `ingest_text` passes the window's reference with **no span**, and attachment adds
+the span where a quote supports one.
+
+**`ingest --text <alias>`**, with `--window-level` (default: the reading's leaves),
+`--digest-budget`, `--reextract` and `--single-pass`. Two passes per window is the default here
+and nowhere else. It commits as it goes, so it needs `--yes`; `--dry-run` reports the provider,
+the level, the passes and the budget before any egress.
+
+**A refused window used to lose its warnings.** The repair loop reported only errors from a chunk
+it gave up on, so an answer that cited a store uid *and* supplied a speaker reported the citation
+and not the speaker. The last attempt's warnings are carried into the degrade path now — found by
+the red-team suite, which asserts both codes.
+
+Three codes registered — `SMY-E442`, `SMY-W443`, `SMY-W444` — taking the registry to 87.
+
+New: `crates/smysl-ingest/src/text/{attribution,digest,journal,run}.rs`,
+`crates/smysl-ingest/src/payload.rs`, `crates/smysl-ingest/tests/{probe_set,text_gate,redteam}.rs`
+(3 + 9 + 5 tests), `fixtures/library/redteam/` (five passages and a README).
+Changed: `json_ast` gains `Scope`, `convert_scoped`, `NODE_KEY` and `TOOL_OWNED`; `repair` gains
+`convert_scoped` and the surface scrub; `prompt` gains the two text templates, `DIGEST_FENCE` and
+`neutralise_fences`; `recipe::Conditions` gains `window_level`, `digest_policy`, `segmenter` and
+`reader`; the repair loop is one function for chunks and windows; `Ingestor::ingest_text` is the
+new boundary; the manual gains a section and five flag rows.
+
+Not here: `pivot:<lang>` stays refused by name — the pivot pass links `x.text/translates` with
+the source unit in `deps`, and GE-T2's figures are measured under `source` — and `link`,
+`summarise` and `same_as` are TX-P7's.
+
 ### A quote is a place, once something has looked for it
 
 Text ingest's two halves that need no model: `smysl_ingest::text::window` cuts a reading into

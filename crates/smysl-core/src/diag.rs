@@ -324,6 +324,9 @@ registry! {
         W419 = "SMY-W419", Warn,  "Ambiguous attribution: the quote occurs more than once in the node named";
         W441 = "SMY-W441", Warn,  "An attributed quote was absent after repair; staged with no span and a capped status";
         W447 = "SMY-W447", Warn,  "A structure node larger than the window was split at sentence boundaries";
+        E442 = "SMY-E442", Error, "A model answer references a unit outside its batch and ledger digest";
+        W443 = "SMY-W443", Warn,  "Untrusted text contained a prompt fence marker; neutralised in the prompt only";
+        W444 = "SMY-W444", Warn,  "A tool-owned field in a model answer was dropped";
     }
 }
 
@@ -661,6 +664,11 @@ mod tests {
     /// could be raised before there was code that chose one — `W419` has been allocated since
     /// draft 3 and had nothing behind it until now.
     ///
+    /// 87 with `SMY-E442`, `SMY-W443` and `SMY-W444` in TX-P5 step 4, where a text ingest has a
+    /// ledger digest to scope a reference against, a second fence to neutralise a marker inside,
+    /// and an answer whose tool-owned fields are dropped rather than trusted. All three need a
+    /// prompt that sends a digest and a converter that reads one, which is what step 4 builds.
+    ///
     /// That completes RFC SMYSL-2.4's `E401`–`W459` range.
     ///
     /// Step 5's plan named six codes and two of them are **not** here. `SMY-E404` is a span
@@ -670,7 +678,7 @@ mod tests {
     /// build can produce, which is the thing this comment exists to prevent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 84);
+        assert_eq!(Code::ALL.len(), 87);
     }
 
     #[test]

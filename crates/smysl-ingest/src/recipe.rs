@@ -82,6 +82,30 @@ pub struct Conditions {
     /// window and one extracted once are not comparable, and `--single-pass` is a choice a
     /// reader of a corpus has to be able to see rather than assume.
     pub passes: Option<crate::Passes>,
+    /// The structure level the windows were filled with, for a text ingest (1.10, §4.3.4).
+    ///
+    /// `verse` and `chapter` are different runs in the way that matters most: a window is what
+    /// the model saw, so the level decides how much context every claim was extracted against.
+    /// Absent for any run that is not a text ingest, which is every run before this release.
+    pub window_level: Option<String>,
+    /// The ledger digest **policy**: its budget and its ranking id (1.10, §3.5).
+    ///
+    /// The policy and never the per-window hash. The recipe groups corroboration, so a value
+    /// that changed per window would put every window in a group of its own and no two
+    /// extractions of one expression would ever corroborate each other. The per-window digest
+    /// hash goes in the journal entry, which is what a rerun reads.
+    pub digest_policy: Option<(u32, String)>,
+    /// The segmenter that decided where a sentence ends (1.10).
+    ///
+    /// It decides where an oversized node is cut (`SMY-W447`), so two runs with different
+    /// segmenters showed the model different windows.
+    pub segmenter: Option<String>,
+    /// The reader that produced the reading the windows were cut from (1.10).
+    ///
+    /// A reading is what says where the nodes are; a reader upgraded under a corpus renumbers
+    /// them. Two extractions of one expression under two readers are not one recipe even though
+    /// the text is identical, because the *places* are not.
+    pub reader: Option<String>,
 }
 
 impl Conditions {
@@ -101,6 +125,10 @@ impl Conditions {
             framing: None,
             estimator: None,
             passes: None,
+            window_level: None,
+            digest_policy: None,
+            segmenter: None,
+            reader: None,
         }
     }
 
@@ -172,6 +200,25 @@ impl Conditions {
             crate::Passes::Single => None,
             other => Some(other),
         };
+        self
+    }
+
+    /// The text-ingest conditions: the window level, the digest policy, the segmenter and the
+    /// reader (§4.3.4).
+    ///
+    /// One setter for the four, because they arrive together or not at all: they are what a
+    /// *text* ingest adds, and a prose ingest has no reading to have any of them.
+    pub fn for_text(
+        mut self,
+        window_level: impl Into<String>,
+        digest_policy: Option<(u32, String)>,
+        segmenter: impl Into<String>,
+        reader: impl Into<String>,
+    ) -> Conditions {
+        self.window_level = Some(window_level.into());
+        self.digest_policy = digest_policy;
+        self.segmenter = Some(segmenter.into());
+        self.reader = Some(reader.into());
         self
     }
 
@@ -258,6 +305,25 @@ impl Conditions {
         if let Some(p) = self.passes {
             push(b, b"passes");
             push(b, p.id().as_bytes());
+        }
+        // The four text-ingest fields, each absent for a run that is not one — so every recipe
+        // any earlier release computed is byte for byte the recipe it was.
+        if let Some(l) = &self.window_level {
+            push(b, b"window-level");
+            push(b, l.as_bytes());
+        }
+        if let Some((budget, ranking)) = &self.digest_policy {
+            push(b, b"digest-policy");
+            push(b, &budget.to_be_bytes());
+            push(b, ranking.as_bytes());
+        }
+        if let Some(sg) = &self.segmenter {
+            push(b, b"segmenter");
+            push(b, sg.as_bytes());
+        }
+        if let Some(r) = &self.reader {
+            push(b, b"reader");
+            push(b, r.as_bytes());
         }
     }
 }
@@ -421,6 +487,72 @@ mod tests {
                 second.model.clone(),
                 second.recipe()
             )
+        );
+    }
+    #[test]
+    fn the_text_fields_are_absent_for_a_prose_ingest_and_hash_nothing() {
+        let prose = base();
+        let before = prose.recipe();
+        let still = base();
+        assert_eq!(still.recipe(), before, "a prose recipe is what it was");
+        let text = base().for_text("verse", None, "smysl/sentence/1", "osis/1");
+        assert_ne!(text.recipe(), before, "a text ingest is a different run");
+    }
+
+    #[test]
+    fn the_window_level_the_segmenter_and_the_reader_each_change_the_recipe() {
+        let at = |level: &str, seg: &str, reader: &str| {
+            base().for_text(level, None, seg, reader).recipe()
+        };
+        let one = at("verse", "smysl/sentence/1", "osis/1");
+        assert_ne!(one, at("chapter", "smysl/sentence/1", "osis/1"));
+        assert_ne!(one, at("verse", "smysl/sentence/2", "osis/1"));
+        assert_ne!(one, at("verse", "smysl/sentence/1", "usfm/1"));
+    }
+
+    #[test]
+    fn the_digest_policy_is_in_the_recipe_and_a_per_window_hash_could_not_be() {
+        let without = base().for_text("verse", None, "s/1", "osis/1").recipe();
+        let small = base()
+            .for_text(
+                "verse",
+                Some((512, "salience-then-order".to_string())),
+                "s/1",
+                "osis/1",
+            )
+            .recipe();
+        let large = base()
+            .for_text(
+                "verse",
+                Some((2048, "salience-then-order".to_string())),
+                "s/1",
+                "osis/1",
+            )
+            .recipe();
+        assert_ne!(without, small);
+        assert_ne!(small, large, "the budget decides what the model was shown");
+        // The *policy* is stable across the windows of one run, which is what lets two
+        // extractions of one expression corroborate each other at all: `family` drops the
+        // provider and the model and nothing else, so a per-window value here would put every
+        // window in a corroboration group of its own.
+        assert_eq!(
+            base()
+                .for_text(
+                    "verse",
+                    Some((512, "salience-then-order".to_string())),
+                    "s/1",
+                    "osis/1"
+                )
+                .family(),
+            base()
+                .for_text(
+                    "verse",
+                    Some((512, "salience-then-order".to_string())),
+                    "s/1",
+                    "osis/1"
+                )
+                .with_provider("another".to_string(), "model".to_string())
+                .family(),
         );
     }
 }
