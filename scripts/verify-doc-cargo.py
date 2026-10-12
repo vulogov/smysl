@@ -193,7 +193,10 @@ def check_feature_table():
             # The row names what the feature turns on, in backticks, before the em dash that
             # begins the explanation.
             head = claimed.split('—')[0]
-            named = set(re.findall(r'`([a-z][a-z0-9:_/-]*)`', head))
+            # `?` is in the class because a weak dependency feature carries one:
+            # `smysl-ingest?/text` is the manifest's own spelling, and a class without it
+            # captured `smysl-ingest` and reported a mismatch against a row that was exact.
+            named = set(re.findall(r'`([a-z][a-z0-9:_/?-]*)`', head))
             expected = set(real[name])
             # A row may name another crate's feature (`smysl-render/typst`); the manifest
             # spells those the same way, so they compare directly, but a row that summarises

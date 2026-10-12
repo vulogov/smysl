@@ -213,6 +213,13 @@ pub use smysl_ingest::{
 // corpus it already extracted needs and no ingest run can give it.
 #[cfg(feature = "ingest")]
 pub use smysl_ingest::{consensus, Agreement, Passes};
+// Windowing and span attachment (§3.4, TX-P5 step 3). The module rather than its items: a
+// caller does not pick one of these out — windowing produces the `TextWindow` that attachment
+// consumes, and the two are used together or not at all. Gated on both features because that
+// is what the code needs: `ingest` for the crate and `text` for the library layer a window is
+// cut from.
+#[cfg(all(feature = "ingest", feature = "text"))]
+pub use smysl_ingest::text as ingest_text;
 #[cfg(feature = "stage")]
 pub use smysl_ingest::{stage, Attesting, Staged};
 // `smysl import` is the only producer of `measured` units and the only unit-producing command
@@ -350,7 +357,11 @@ mod tests {
         // the part it names and a locator against the span beside it. Both were allocated in
         // TX-P1 step 5 and left unregistered on purpose — the field they read did not exist —
         // which is what this count is for.
-        assert_eq!(Code::ALL.len(), 81);
+        // 84 as of TX-P5 step 3, with `SMY-W419`, `SMY-W441` and `SMY-W447`: windowing a
+        // reading and attaching a span to a quote exist, so a node named twice over, a quote
+        // the window does not hold and a node too large to show at once are all findings
+        // something can make. `W419` had been allocated since draft 3 with nothing behind it.
+        assert_eq!(Code::ALL.len(), 84);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

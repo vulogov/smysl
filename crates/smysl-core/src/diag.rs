@@ -321,6 +321,9 @@ registry! {
         W451 = "SMY-W451", Warn,  "An alignment scheme does not cover a locator; the pair is left unaligned and counted";
         E404 = "SMY-E404", Error, "A unit's span reaches past the length of the part it names";
         W405 = "SMY-W405", Warn,  "A unit's locator and its span name different places; the span wins";
+        W419 = "SMY-W419", Warn,  "Ambiguous attribution: the quote occurs more than once in the node named";
+        W441 = "SMY-W441", Warn,  "An attributed quote was absent after repair; staged with no span and a capped status";
+        W447 = "SMY-W447", Warn,  "A structure node larger than the window was split at sentence boundaries";
     }
 }
 
@@ -651,6 +654,13 @@ mod tests {
     /// field they read did not exist — this is that promise being kept rather than a late
     /// addition.
     ///
+    /// 84 with `SMY-W419`, `SMY-W441` and `SMY-W447` in TX-P5 step 3, where windowing a reading
+    /// and attaching a span to a quote exist: a quote that occurs more than once in the node the
+    /// model named, a quote the window does not support after repair, and a structure node too
+    /// large for one window. All three are about a *place* in a text, which is why none of them
+    /// could be raised before there was code that chose one — `W419` has been allocated since
+    /// draft 3 and had nothing behind it until now.
+    ///
     /// That completes RFC SMYSL-2.4's `E401`–`W459` range.
     ///
     /// Step 5's plan named six codes and two of them are **not** here. `SMY-E404` is a span
@@ -660,7 +670,7 @@ mod tests {
     /// build can produce, which is the thing this comment exists to prevent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 81);
+        assert_eq!(Code::ALL.len(), 84);
     }
 
     #[test]

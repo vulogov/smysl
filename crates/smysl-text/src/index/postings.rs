@@ -317,7 +317,7 @@ impl Postings for View<'_> {
         // Uid order across partitions, as the seam requires. Within a partition the list is
         // already sorted; between them it is not, and a merge would be the same sort with more
         // code.
-        out.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        out.sort_unstable_by_key(|a| a.0);
         out
     }
 

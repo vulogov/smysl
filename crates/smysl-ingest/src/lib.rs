@@ -57,6 +57,12 @@ pub mod repair;
 #[doc(hidden)]
 pub mod schema;
 pub mod stage;
+/// Text ingest: windows over a reading, and the span attachment that anchors an answer in a
+/// part (SMYSL-2.4 §3.4, §4.3.4). Behind `text`, which links the library layer — a caller
+/// ingesting a document has no structure, no part bytes and no manifest, and should not pay for
+/// a reader tier to say so.
+#[cfg(feature = "text")]
+pub mod text;
 
 #[cfg(feature = "model")]
 use std::collections::BTreeMap;

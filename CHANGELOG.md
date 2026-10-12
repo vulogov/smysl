@@ -58,6 +58,79 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### A quote is a place, once something has looked for it
+
+Text ingest's two halves that need no model: `smysl_ingest::text::window` cuts a reading into
+windows, and `smysl_ingest::text::attach` turns the quote a unit attributed itself to into a byte
+range in a part. Behind a new `smysl-ingest/text` feature, re-exported from the facade as
+`smysl::ingest_text` under `ingest` **and** `text`. SMYSL-2.4 §3.4 and §6 TX-P5 step 3.
+
+**The model is never asked for a span.** It is asked for a quote, which is checkable against the
+text it was shown — `SMY-E307` and `SMY-W308` have checked exactly that since 1.3 — and the span
+is computed from the quote afterwards. A prompt asking for byte offsets would be asking a model to
+count, and a wrong count looks exactly like a right one until somebody opens the part.
+
+**A window is whole nodes, and the overlap is not owned.** Nodes at a chosen level are filled to a
+token budget, never split; each window after the first opens with the last node the previous
+window owned, so a claim near a boundary is visible whole to one call. The *owned* ranges, however,
+do not overlap at all: concatenated across every window they are every node exactly once, in
+order, which is what the test asserts. Without that distinction a boundary claim would be
+attached twice and every stability figure computed over the corpus would be measuring the double
+count.
+
+**A node bigger than the window is the one thing that splits, and it does not split inside a
+sentence.** `SMY-W447` reports the cut with the node's count and the budget it did not fit.
+A node that is one long sentence travels whole and over budget: half a sentence is not a place
+anything can be quoted from. The pieces partition the node, so every byte is shown exactly once.
+
+**Four scopes, narrowest first, and the hint can only narrow.** The node the answer named
+(`ingest:node`), then the owned nodes of that node's part, then the window's other parts, then
+the overlap. `Present` beats `Loose` inside a scope and the earliest occurrence wins; the first
+scope with a match wins outright. So an answer naming a node it did not read loses nothing an
+answer naming none would have had — there is a test for exactly that, with a hint pointing at the
+wrong verse and another pointing outside the window.
+
+**`SMY-W419` is where the narrowest scope cannot narrow.** The same quote twice inside the node
+named is ambiguous in the one scope whose job was to be unambiguous. The earliest occurrence is
+taken, because choosing differently would be unstable between two runs over one text, and the
+warning is what says the choice was arbitrary. Psalm 136 is in the fixture because it is the case
+the code is for.
+
+**A span does not cross a node boundary unless the bytes do.** §4.3.4 asks for the search to run
+per contiguous same-part run, and contiguity is checked rather than assumed: a window inserts its
+own separator between nodes, and two nodes adjacent in a *window* need not be adjacent in a
+*part*. A run is a maximal sequence of one part's nodes whose part ranges are adjacent with
+exactly that separator between them, which makes the offset map one affine shift across the whole
+run — so a quote spanning two consecutive verses attaches to the bytes it matched, and one
+spanning a gap gets no span rather than a span over text the part does not hold in that order.
+
+**The quote is removed only when a span was attached** (OQ-41). Both are inside the uid, so this
+is an identity change and it happens once, before anything is staged. A unit that got a span has
+something better than its quote; a unit that got none keeps it, because the quote is then the only
+evidence a reviewer has of what was claimed. The payload surgery copies the remaining entries'
+**own CBOR bytes** rather than round-tripping them through the HJSON value model: every other key
+belongs to a schema this crate knows nothing about, and re-encoding a float through a quantising
+model would move a uid for a key nobody asked about.
+
+**The `Absent` cap, and the half §3.4 did not state.** No span, status capped at `inferred` with
+grounds and `speculative` without, reported as `SMY-W441`. The addition is the other direction: a
+unit already at or under its ceiling comes back **byte-identical**, uid included. A cap that
+rewrote a speculative unit would move a uid to enforce a rule that changed nothing.
+
+Three codes registered — `SMY-W419`, `SMY-W441`, `SMY-W447` — taking the registry to 84. They are
+the first three about a *place* in a text, and none could be raised before there was code that
+chose one; `W419` has been allocated since draft 3 with nothing behind it.
+
+New: `crates/smysl-ingest/src/text/{mod,window,attach}.rs`, 17 in-crate tests between them.
+Changed: `smysl-ingest`'s `text` feature and its optional `smysl-text` edge, the facade's `text`
+feature (`smysl-ingest?/text`, weak so a `text` build without `ingest` acquires nothing), the
+diagnostic registry, RFC 2.4 §3.4/§6/§8, and the manual's Appendix B.
+
+Not here, deliberately: `Ingestor::ingest_text` and the `ingest --text` command. The prompt
+templates, the ledger digest and the journal are step 4, and an end-to-end test without them
+would exercise a path half of which does not exist. `smysl-pack` stays out of the `text` feature
+until the digest needs it.
+
 ### Two passes over one window, and the agreement a unit count cannot tell you
 
 TX-P5 step 3a. A window can now be extracted **twice** — `IngestOptions::with_passes(Passes::Consensus)` —

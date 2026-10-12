@@ -818,7 +818,7 @@ impl Postings for View {
             .flatten()
             .collect();
         // Uid order across partitions, as the seam requires and as the in-memory view does.
-        out.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        out.sort_unstable_by_key(|a| a.0);
         out
     }
 

@@ -352,6 +352,15 @@ crate-features: ## Each crate with features, alone, at its defaults and with non
 		echo "==> cargo test -p smysl-text --no-default-features --features $$f"; \
 		RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-text --no-default-features --features $$f; \
 	done
+	@# `smysl-ingest`'s `text`, without `model`. The same argument as `substrate-redb` above,
+	@# and the same shape: `src/text/` is entirely behind a feature, so a `use` it needs from a
+	@# sibling module compiles at `--all-features` and nowhere else. Without `model` as well as
+	@# with it, because windowing and span attachment call no provider — a build that gained a
+	@# dependency on `Ingestor` would be a design change, and this is where it would be caught.
+	@set -e; for f in "text" "text,model"; do \
+		echo "==> cargo test -p smysl-ingest --no-default-features --features $$f"; \
+		RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-ingest --no-default-features --features $$f; \
+	done
 	@# One mapper at a time: `--features gemini` alone warned on an unused `bearer`, and
 	@# `ingest` alone on an unused `Emitter`, while every multi-mapper row was clean.
 	@set -e; for m in ollama anthropic openai gemini deepseek; do \

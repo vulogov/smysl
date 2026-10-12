@@ -30,12 +30,23 @@ anthropic = ["model", "smysl-provider/anthropic"]
 openai    = ["model", "smysl-provider/openai"]
 gemini    = ["model", "smysl-provider/gemini"]
 deepseek  = ["model", "smysl-provider/deepseek"]
+# Text ingest (SMYSL-2.4 §4.3.4, TX-P5 step 3): windowing a reading and attaching a span to a
+# quote. Off by default, because the window and the span need a *library* — a structure, a part's
+# bytes and a manifest — and a caller ingesting a document has none of those and should not link
+# a reader layer to say so. `smysl-pack` joins this feature in step 4, where the ledger digest
+# arrives; it is left out until then rather than declared ahead of the code that needs it.
+text      = ["dep:smysl-text"]
 
 [dependencies]
 smysl-core     = { workspace = true }
 smysl-check    = { workspace = true }
 smysl-graph    = { workspace = true }
 smysl-provider = { workspace = true, optional = true }
+# Behind `text`. The edge runs this way because windowing reads a `Structure` and attachment
+# writes the copy set through `provenance::stamp`, both of which live where text lives; and
+# `smysl-text` does not depend on this crate, so there is no cycle. Both are pure-tier, so no
+# MSRV floor moves.
+smysl-text     = { workspace = true, optional = true }
 
 # All four drive `Ingestor` against providers, so none of them exists without `model`.
 [[test]]

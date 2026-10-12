@@ -951,11 +951,16 @@ measured the default. And where either side has no majority script it reports no
 
 #subsection("Library — texts, parts and the object store")
 
-Seventeen codes, new in 1.10.0, and the whole of the range RFC SMYSL-2.4 allocates. Six are
+Twenty codes, new in 1.10.0, and the whole of the range RFC SMYSL-2.4 allocates. Six are
 raised by `smysl-text`, the crate that RFC adds for reading texts into a library, one by the
-store, four by the `library` check pass, four by the `time` pass, `SMY-W451` by `text align`, and
-`SMY-E410` by the surface parser as well as by `time` — refused where a value is written and
-reported where a store holds one.
+store, four by the `library` check pass, four by the `time` pass, `SMY-W451` by `text align`,
+three by text ingest's windowing and span attachment, and `SMY-E410` by the surface parser as
+well as by `time` — refused where a value is written and reported where a store holds one.
+
+The last three are about a *place* in a text, which is why they could not arrive earlier: until
+there was code that cut a window and chose which bytes a quote names, nothing in this build could
+find the node named twice over, the quote the window does not hold, or the verse too long to show
+at once.
 
 Two of them arrived last and were held back on purpose. `SMY-E404` (a span past a part's length)
 and `SMY-W405` (a locator naming a different place than the span beside it) both read a unit's
@@ -985,6 +990,9 @@ into the library layer it may not depend on.
     ([`SMY-W449`], [warn], [An EDTF value that parses and names an instant no millisecond counter can hold — a `Y`-prefixed year of three hundred million, say. It is ordered as an *open bound* rather than clamped to the nearest representable instant, because a clamped bound is a claim nobody made and it would propagate through every ordering that touches it. The value itself is kept exactly as written.]),
     ([`SMY-E450`], [error], [An append to a pseudonymised expression with no pseudonym key. The key lives at `secrets/pseudonym.key` under the library root and is what makes a pseudonym stable across appends; without it the same speaker would be given a second name and the conversation would read as two people. The refusal happens before anything is written.]),
     ([`SMY-E452`], [error], [A part text or a part reading was offered to a log, and a log does not hold text. Text lives in the object store, and the whole batch is refused before a byte is written. The reason is the log's own integrity: a log holding text would one day have to be rewritten to honour a redaction, and rewriting an append-only log resets exactly the hash chain that would have shown the rewrite. Erasure is therefore always an unlink.]),
+    ([`SMY-W419`], [warn], [The quote a unit attributed itself to occurs more than once in the node the answer named. The earliest occurrence is taken and the warning says the choice was arbitrary — the alternative, picking some other occurrence, would be unstable between two runs over the same text, and a span that moves is worse than one that is merely coarse. A refrain is the usual cause: Psalm 136 ends twenty-six verses with "for his mercy endureth for ever". Raised only for the node the answer named, because that is the one scope whose job was to be unambiguous; a quote found three times in a chapter is not ambiguous in the same sense, since the search is then explicitly looking for the first of them.]),
+    ([`SMY-W441`], [warn], [A unit attributed itself to a quote the window does not support, after the repair turn that error buys. The unit is staged with *no span* and its status capped at `inferred` where it has grounds and `speculative` where it has none — not at `inferred` in both cases, because a unit with no grounds cannot be `inferred` at all. The quote is deliberately kept in the payload here, where a unit that received a span loses it: a spanless unit's quote is the only evidence a reviewer has of what was claimed. A unit already at or under its ceiling is left byte-identical, uid included.]),
+    ([`SMY-W447`], [warn], [A structure node is larger than the whole window budget, so it was cut at sentence boundaries to be shown at all. The only place anything splits a node, and nothing cuts inside a sentence: a node that is one long sentence travels whole and over budget rather than in half, because half a sentence is not a place anything can be quoted from. The pieces partition the node, so every byte of it is shown exactly once, and a span still names bytes of the whole part.]),
     ([`SMY-W451`], [warn], [An alignment scheme does not cover a locator, so the pair is left unaligned and counted. Two misses give the same answer: a scheme that says nothing about this locator, and one that maps it somewhere the other expression does not hold. The count is what says whether a map covers a corpus — a guessed alignment would put a claim about one verse onto another, and this table is what a later engine grounds a `same-as` on.]),
   ),
 )

@@ -775,6 +775,16 @@ refuses `inferred` without grounds (`ShapeError::GroundsRequired`), so draft 3's
 inferred" cannot be built. Reported as `SMY-W441`. Prose ingest keeps `E307` non-local, as
 `repair.rs` argues.
 
+**Landed 2026-10-12** (§6 TX-P5 step 3), as `smysl_ingest::text::{window, attach}` behind the
+`text` feature: windows of whole nodes with one node of overlap and owned ranges that partition
+the text, the four-scope search for a quote, `SMY-W419` where the node named is itself ambiguous,
+the cap above, and the removal of `ingest:quote` and `ingest:node` **only** from units that
+received a span. Two pure functions over a reading and a batch; no model is called and nothing is
+persisted, which is why the whole of it is tested without egress. The repair turn the paragraph
+above names is `repair.rs`'s and is unchanged — attachment is what happens after it, and what
+decides whether it was enough. Step 3's note in §6 carries the five points that decided the
+shape.
+
 ### 3.5 Linking (draft 3 §8)
 
 - **Ledger digest.** `smysl_pack::pack` over units already staged or stored for the expression,
@@ -2932,8 +2942,67 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    claimed rule 6 — the copy set — and `provenance::stamp` did implement it, but §2.2 never said
    it: the rule existed in code and in this RFC and in no normative document. Both are in §2.2
    now, and §5.1 registers `x.text/v1` by name.
-3. Windows, owned ranges, node hint, span attachment, `Absent` behaviour, payload quote removal.
-   *Exit:* §5.1 ingest tests.
+3. ~~Windows, owned ranges, node hint, span attachment, `Absent` behaviour, payload quote
+   removal. *Exit:* §5.1 ingest tests.~~ **Done 2026-10-12.** `smysl_ingest::text` behind a new
+   `text` feature: `window.rs` (`Pane`, `Placed`, `TextWindow`, `windows`) and `attach.rs`
+   (`Scope`, `Attachment`, `Attached`, `Opts`, `attach`), with 17 in-crate tests, the facade
+   re-export `smysl::ingest_text`, and `SMY-W419`, `SMY-W441` and `SMY-W447` registered — the
+   registry's first three codes about a *place* in a text, which is why none could be raised
+   before there was code that chose one.
+
+   **Five things this step had to settle that the clause does not say.**
+
+   **The model is never asked for a span, and that is what makes attachment a step.** It is
+   asked for a quote, which is checkable against the text it was shown — `SMY-E307` and
+   `SMY-W308` have checked exactly that since 1.3 — and the span is computed from the quote
+   here. A prompt that asked for byte offsets would be asking a model to count, and a wrong
+   count is indistinguishable from a right one until someone opens the part.
+
+   **"Owned ranges partition the text" needed the overlap to be excluded from them.** A window
+   after the first opens with the last node the previous window owned, so the *nodes* of two
+   windows overlap by one while the *owned* ranges do not overlap at all. `TextWindow::owned` is
+   an index range and `overlap` is the one carried node, and the test that matters is the one
+   asserting the owned nodes of every window, concatenated, are every node exactly once in
+   order. Without that split, a claim near a boundary would be attached twice, and GE-T2's
+   stability figure would be measuring double counting.
+
+   **A span must not cross a node boundary unless the bytes do.** §4.3.4 asks for the search to
+   run per contiguous same-part run; contiguity is checked here rather than assumed, because a
+   window's text inserts its own separator between nodes and two nodes that are adjacent in a
+   *window* need not be adjacent in a *part*. A run is therefore a maximal sequence of one
+   part's nodes whose part ranges are adjacent with exactly the separator between them, which
+   makes the window-offset-to-part-offset map one affine shift across the run. A quote spanning
+   a gap gets no span rather than a span over bytes the part does not hold in that order.
+
+   **The hint can only narrow, and `SMY-W419` is where even the narrowest scope cannot.** The
+   four scopes are tried narrowest first and the first with a match wins, so a model naming a
+   node it did not read loses nothing a model naming none would have had — the test asserts
+   exactly that. Psalm 136 is in the fixture because it is the case the code is for: a quote
+   that occurs twice inside the node named is ambiguous in the one scope whose job was to be
+   unambiguous, the earliest occurrence is taken because an arbitrary choice would be unstable
+   across reruns, and the warning is what says the choice was arbitrary.
+
+   **The quote is removed only when a span was attached.** Draft 3 reads as though removal were
+   a step; it is a *consequence*, and the condition is the point (OQ-41). A unit that got a span
+   has something better than its quote and the quote is inside its uid, so it goes. A unit that
+   got none keeps it, because then the quote is the only evidence a reviewer has of what was
+   claimed — and the payload surgery is done on the entries' own CBOR bytes rather than through
+   the HJSON value model, since every other key belongs to a schema this crate knows nothing
+   about and re-encoding a float through a quantising model would move a uid for a key nobody
+   asked about.
+
+   **What the `Absent` cap cannot be.** §3.4 already says `inferred` with grounds and
+   `speculative` without, because `UnitCoreBuilder` refuses `inferred` without grounds. The
+   thing worth adding is the other half: a unit already at or under its ceiling is left
+   **byte-identical**, uid included. A cap that rewrote a speculative unit would move a uid to
+   enforce a rule that changed nothing.
+
+   **Not in this step, and deliberately.** No `Ingestor::ingest_text` and no command: the
+   prompt templates, the ledger digest and the journal are step 4, and an end-to-end
+   `text_gate.rs` without them would be testing a path half of which does not exist. What is
+   here is two pure functions over a reading and a batch, which is also what makes them
+   testable with no egress at all. `smysl-pack` stays out of the `text` feature until the digest
+   needs it.
 3a. ~~**Consensus extraction** (§3.4): two passes per window by default, both staged, nothing
    deduplicated during ingest; `--single-pass` recorded in the recipe; `--temperature` above 0
    refused unless `--single-pass` is given. *Exit:* a window extracted twice at T=0 by the
@@ -3062,9 +3131,13 @@ meanings and are not repeated here.
 
 `453`–`459` are unallocated. SMYSL-2.3 may adopt `E446` as a C-Library obligation.
 
-**Registered as of TX-P1 step 5:** `E401`, `E402`, `E403`, `W418`, `E440`, `E445`, `E446` and
-`E452`, in a ninth diagnostic group (`Group::Library`) and in the manual's Appendix B. Step 2
-registered the first five, step 4 added `E452` and step 5 `E403` and `W418`. Eight, and not the
+**Registered as of TX-P5 step 3:** the eight of TX-P1 step 5 — `E401`, `E402`, `E403`, `W418`,
+`E440`, `E445`, `E446` and `E452`, in a ninth diagnostic group (`Group::Library`) and in the
+manual's Appendix B; step 2 registered the first five, step 4 added `E452` and step 5 `E403` and
+`W418` — then `E410` (TX-P3 step 1), `W412` and `W413` (step 2), `W411` and `W449` (step 3),
+`W451` (TX-P4 step 4), `E404` and `W405` (TX-P5 step 1), and `W419`, `W441` and `W447` in TX-P5
+step 3, where windowing a reading and attaching a span to a quote exist. Twenty, and the registry
+stands at 84. Eight, and not the
 twelve above plus the draft-3 codes this RFC emits, because those are the ones this build can
 raise; the rest enter the registry with the pass, reader or ingest path that raises them —
 including `E404` and `W405`, which step 5's own plan listed and which read a field TX-P5 adds. That is the repository's own rule — a code nothing can
