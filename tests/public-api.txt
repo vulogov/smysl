@@ -32,6 +32,7 @@ pub use smysl::Admission
 pub use smysl::AgentActivity
 pub use smysl::AgentId
 pub use smysl::AgentKind
+pub use smysl::Agreement
 pub use smysl::Allen
 pub use smysl::Analyze
 pub use smysl::AnyError
@@ -156,6 +157,7 @@ pub use smysl::PartReading
 pub use smysl::PartResolver
 pub use smysl::PartText
 pub use smysl::Pass
+pub use smysl::Passes
 pub use smysl::PayloadFilter
 pub use smysl::Person
 pub use smysl::Postings
@@ -269,6 +271,7 @@ pub use smysl::choose_ingest_path
 pub use smysl::closure
 pub use smysl::compact
 pub use smysl::conformance
+pub use smysl::consensus
 pub use smysl::cycles
 pub use smysl::dependents
 pub use smysl::dependents_via

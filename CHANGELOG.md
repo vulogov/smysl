@@ -58,6 +58,57 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### Two passes over one window, and the agreement a unit count cannot tell you
+
+TX-P5 step 3a. A window can now be extracted **twice** — `IngestOptions::with_passes(Passes::Consensus)` —
+with both results staged, and the run reports what the two passes agreed about by `identical-span`:
+same tid, same span, same gist. §1.1 item 2 of the SMYSL-2.4 re-plan asked for this because S0
+measured the judges at α 0.600, so the only agreement that can be established without one is the
+computed kind.
+
+**The clause said "nothing is deduplicated during ingest", and that was already true and not the
+point.** Two passes that find the same claim produce the same uid; the staged batch holds one
+record for it, and no policy can switch content addressing off. The consequence is that a unit
+count cannot answer the question consensus exists to ask. The fixture makes it concrete: the
+agreeing pair stages **3** units, the drifting pair stages **4**, so on the count alone the less
+stable extraction looks like the richer one. So the agreement is recorded by the run, over
+per-pass lists the ingestor keeps, rather than left to be recomputed from a batch that cannot
+express it.
+
+**`rate()` returns `None`, not 1.0, when nothing was comparable.** `identical-span` is a relation
+between *places*, and a unit with no span cannot establish it in either direction — which, before
+span attachment lands (step 3), is most units. A 1.0 from a window where nothing carried a span
+would be a stability claim about nothing, and GE-T2 reports this figure per language. `spanless`
+counts them instead.
+
+**The temperature refusal is before egress.** Two passes above temperature 0 are refused by
+`Ingestor::ingest` beside the prompt-override and granularity checks, so the caller is told before
+a single call is made rather than after paying for two answers that cannot be compared. The reason
+is MS-8's measurement and not a preference: arm L was bit-identical across all 145 runs at T=0 and
+shared *no uid at all* at T=0.7 on five of six inputs. `--single-pass` admits a temperature, and
+the recipe says which it was.
+
+**Two passes is not yet the default, and that is deliberate.** §3.4 scopes the doubling to
+`ingest --text`, which is step 3's command. The default stays `Single`, because a default of two
+would double the cost and the call count of every `ingest` in this release — document ingest,
+which no part of the pivot was about. `Passes::TEXT` is the constant the text path will take.
+
+**The recipe field is absent for a single pass**, following `normaliser` and `estimator`: every
+recipe computed before consensus existed is byte for byte the recipe it was, so a corpus already
+extracted still aggregates with one extracted after this. Only `consensus` is pushed, and it has
+to be — it is the policy GE-T2's stability is measured under.
+
+**One consequence the drifting fixture found, and kept.** A second pass that gives a label to a
+*different* unit loses the label: the first binding stands, the disagreeing unit stages without a
+name, and `SMY-W054` says so. That is the existing cross-chunk rule applied to passes, and it is
+the right outcome — a name that moved between two readings of one window names nothing reliably —
+but a disagreeing pass loses its labels rather than its units, which is worth knowing before
+reading a staged file.
+
+`crates/smysl-ingest/src/consensus.rs`, six tests in `crates/smysl-ingest/tests/consensus.rs`
+against `fixtures/ingest/consensus/`, and seven in the module. The fixture is load-bearing: its
+stated figures are read, not restated.
+
 ### The substrate index gets a backing store, and the MSRV argument that deferred it was wrong
 
 `substrate-redb` (off by default) puts the `postings` table in `index/substrate.redb` instead of

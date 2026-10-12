@@ -752,6 +752,13 @@ cannot agree by `identical-span` except by accident. `ingest --text` therefore r
 parameter, not a quality knob, and it is already inside the recipe (`recipe.rs`), so a corpus
 records which it was.
 
+**Landed 2026-10-12** (§6 TX-P5 step 3a), with the refusal **before egress**: a caller who asks
+for two passes at T=0.7 is told so by `Ingestor::ingest` before a single call is made, beside the
+prompt-override and granularity checks, rather than after paying for two answers that cannot be
+compared. The agreement is recorded by the run rather than recomputed from the batch, because the
+batch cannot answer it — two passes that found one claim produce one uid. Step 3a's note in §6
+carries the four points that decided the shape.
+
 **Holder and mode are structural from the first ingest** (§1.1 item 4). Draft 1 left this to the
 prompt. S0 measured reported speech extracted as asserted in 11.1–24.5% of attribution-bearing
 units across every model and coder pairing, every cell above the 10% threshold (T8), and the arm
@@ -2927,11 +2934,56 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    now, and §5.1 registers `x.text/v1` by name.
 3. Windows, owned ranges, node hint, span attachment, `Absent` behaviour, payload quote removal.
    *Exit:* §5.1 ingest tests.
-3a. **Consensus extraction** (§3.4): two passes per window by default, both staged, nothing
+3a. ~~**Consensus extraction** (§3.4): two passes per window by default, both staged, nothing
    deduplicated during ingest; `--single-pass` recorded in the recipe; `--temperature` above 0
    refused unless `--single-pass` is given. *Exit:* a window extracted twice at T=0 by the
    `Scripted` provider yields the `identical-span` agreement the fixture states, and the same
-   window at T=0.7 is refused rather than silently producing two disjoint sets.
+   window at T=0.7 is refused rather than silently producing two disjoint sets.~~
+   **Done 2026-10-12.** `smysl_ingest::consensus` (`Passes`, `Agreement`, `agreement`),
+   `IngestOptions::passes`, the recipe field, and six tests in
+   `crates/smysl-ingest/tests/consensus.rs` against `fixtures/ingest/consensus/`, which states
+   the agreement for an identical second pass and for a drifting one.
+
+   **Four things this step had to settle that the clause does not say.**
+
+   **"Nothing is deduplicated during ingest" is already true, and it is not what makes the
+   agreement readable.** Two passes that find the same claim produce the same uid, so the staged
+   batch holds one record for it — that is content addressing, and no policy can switch it off.
+   So a count of staged units cannot tell "both passes said this" from "one did": the agreeing
+   fixture stages 3 units and the drifting one stages 4, which on the count alone reads as the
+   *richer* extraction rather than the less stable one. The agreement is therefore **recorded by
+   the run** (`IngestReport::agreement`) over per-pass unit lists the ingestor keeps, rather than
+   recomputed later from the batch. Draft 3's wording would have left the figure unrecoverable.
+
+   **`identical-span` needs a span, and span attachment is step 3.** The key is tid, span, gist —
+   the tid and not the whole reference, since `reference` may carry `#<locator>` and the span is
+   authoritative where the two disagree (A-2.1 key 5). A unit with no span cannot establish the
+   relation in either direction, so `Agreement::spanless` counts those and `rate()` returns
+   `None` rather than 1.0 for a window where nothing was comparable: an empty comparison is not
+   perfect stability, and GE-T2 reports this figure per language. The fixture supplies the
+   window's own span through `--source`, which has existed since 1.6; per-unit spans narrow the
+   key and change nothing about the arithmetic.
+
+   **Two passes is not the default, and cannot be yet.** §3.4 scopes the doubling to
+   `ingest --text`, which is step 3's command. `IngestOptions::passes` defaults to
+   `Passes::Single`, because a default of two would double the cost and the call count of every
+   `ingest` in this release — document ingest, which no part of the pivot was about.
+   `Passes::TEXT` is the constant the text path takes, and the only thing step 3 owes this one is
+   to pass it.
+
+   **The recipe field is absent for a single pass.** `Some(Single)` and `None` hash the same,
+   following `normaliser` and `estimator`, so every recipe computed before consensus existed is
+   byte for byte the recipe it was — and a corpus already extracted still aggregates with one
+   extracted after this step. Only `consensus` is pushed, and it has to be: it is the policy
+   GE-T2's stability is measured under, so a figure computed across both policies would be a
+   figure about neither.
+
+   **One consequence found by the drifting fixture, and kept.** A second pass that gives a label
+   to a *different* unit loses the label: the first binding stands and the disagreeing unit is
+   staged without a name (`SMY-W054`). That is the pre-existing cross-chunk rule, and it is the
+   right outcome — a name that moved between two readings of one window names nothing reliably —
+   but it means a disagreeing pass loses its labels rather than its units, which a reviewer
+   reading a staged file should expect.
 3b. **Holder and mode written from structure** (§3.4), not from the prompt, and the holder
    paragraph is not added to the template. *Exit:* the probe set — attribution-bearing passages
    with known reported speech — shows the asserted-as-reported rate **below 10%**, which is the

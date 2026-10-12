@@ -37,7 +37,7 @@ smysl-check    = { workspace = true }
 smysl-graph    = { workspace = true }
 smysl-provider = { workspace = true, optional = true }
 
-# All three drive `Ingestor` against providers, so none of them exists without `model`.
+# All four drive `Ingestor` against providers, so none of them exists without `model`.
 [[test]]
 name              = "gate"
 required-features = ["model"]
@@ -48,4 +48,8 @@ required-features = ["model"]
 
 [[test]]
 name              = "lang_policy"
+required-features = ["model"]
+
+[[test]]
+name              = "consensus"
 required-features = ["model"]

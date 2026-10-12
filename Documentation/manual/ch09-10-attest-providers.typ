@@ -557,6 +557,17 @@ flag that overrides it — `--prompt`, `--path`, `--temperature` — and each is
 range- or value-checked when the file is loaded, so a configuration that cannot
 produce a request is refused before a call is paid for.
 
+One thing to know about `temperature` before text ingest asks it of you: there
+it is a correctness parameter rather than a quality knob. Text
+extraction runs each window twice by default and reports what the two passes
+agreed about, and the only agreement establishable without a judge is that two
+passes found the same bytes and wrote the same gist. Two runs above temperature
+0 share no identity at all — measured, not supposed: 145 runs of one local model
+were bit-identical at 0, and at 0.7 five of six inputs produced answers sharing
+no unit — so a temperature with two passes is refused before the first call,
+and `--single-pass` is how a caller says they meant to sample. The choice goes
+into the recipe either way, so a corpus records which of the two it is.
+
 `context_window` is also what Ollama is told, as `num_ctx`, with every request.
 The chunker sizes every chunk against it; Ollama's own default is smaller, so a
 chunk planned for a large window could be truncated by the server and answered

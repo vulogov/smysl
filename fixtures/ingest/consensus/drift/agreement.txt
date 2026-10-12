@@ -1,0 +1,5 @@
+passes 2
+comparable 4
+agreed 1
+spanless 0
+rate 0.250

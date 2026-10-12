@@ -74,6 +74,14 @@ pub struct Conditions {
     /// `None` and `Some(Utf8Div4)` are the same run and both add nothing to the hash — the
     /// `normaliser` precedent — so every recipe computed before this field existed is unchanged.
     pub estimator: Option<smysl_core::TokenEstimator>,
+    /// How many passes the window was extracted in, when it was not one (1.10, §3.4).
+    ///
+    /// `None` and `Some(Single)` are the same run and both add nothing to the hash — the
+    /// `normaliser` precedent — so every recipe computed before consensus existed is
+    /// unchanged. Only `Consensus` is pushed, and it has to be: a corpus extracted twice per
+    /// window and one extracted once are not comparable, and `--single-pass` is a choice a
+    /// reader of a corpus has to be able to see rather than assume.
+    pub passes: Option<crate::Passes>,
 }
 
 impl Conditions {
@@ -92,6 +100,7 @@ impl Conditions {
             lang_policy: None,
             framing: None,
             estimator: None,
+            passes: None,
         }
     }
 
@@ -149,6 +158,18 @@ impl Conditions {
     pub fn with_estimator(mut self, e: smysl_core::TokenEstimator) -> Conditions {
         self.estimator = match e {
             smysl_core::TokenEstimator::Utf8Div4 => None,
+            other => Some(other),
+        };
+        self
+    }
+
+    /// How many passes the window was extracted in.
+    ///
+    /// A single pass is recorded as absent, because it is what an absent field has always
+    /// meant.
+    pub fn with_passes(mut self, p: crate::Passes) -> Conditions {
+        self.passes = match p {
+            crate::Passes::Single => None,
             other => Some(other),
         };
         self
@@ -230,6 +251,13 @@ impl Conditions {
         if let Some(e) = self.estimator {
             push(b, b"estimator");
             push(b, e.id().as_bytes());
+        }
+        // Absent for a single pass, like `normaliser` above. Two passes is a different run in
+        // the strongest sense available: it is the policy §3.4 measures GE-T2's stability
+        // under, so a figure computed across both policies would be a figure about neither.
+        if let Some(p) = self.passes {
+            push(b, b"passes");
+            push(b, p.id().as_bytes());
         }
     }
 }

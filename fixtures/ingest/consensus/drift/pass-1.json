@@ -1,0 +1,4 @@
+{"units":[
+  {"type":"claim","label":"c/slow","gist":"the eu-west shard slowed on Thursday afternoon","status":"speculative"},
+  {"type":"evidence","label":"e/pool","gist":"connection pool wait time rose alongside request latency","status":"speculative"}
+]}

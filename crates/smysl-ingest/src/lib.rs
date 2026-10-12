@@ -15,6 +15,10 @@
 #[cfg(feature = "model")]
 pub mod attest;
 pub mod ceiling;
+/// Consensus extraction: how many passes a window gets, and what their agreement means
+/// (§3.4). Ungated — the agreement is computed over units and consults no model, so a build
+/// without the `model` feature can still read a corpus's stability.
+pub mod consensus;
 // Splitting a document into model-sized pieces. Internal since 0.13 (§1.2 S4): `Ingestor`
 // chunks as part of the path a caller actually takes.
 #[cfg(feature = "model")]
@@ -67,6 +71,8 @@ use smysl_provider::{Provider, ProviderError, Registry, Request, Task, Usage};
 
 #[cfg(feature = "model")]
 pub use attest::{attest, AttestOptions, AttestReport, Judgement, What};
+
+pub use consensus::{Agreement, Passes};
 
 /// What language the model writes in (F-6).
 ///
@@ -245,6 +251,16 @@ pub struct IngestOptions {
     /// quote check, the same rule T cap, the same staging. That is what distinguishes running an
     /// extraction through `ingest` from running it beside `ingest` in a separate script.
     pub prompt: Option<prompt::PromptOverride>,
+    /// How many times each input is extracted (1.10, §3.4).
+    ///
+    /// [`Passes::Single`] by default, which is what every release up to 1.10 did and what
+    /// document ingest keeps: the doubling §3.4 states belongs to `ingest --text`, and a
+    /// default of two would double the cost and the call count of every `ingest` that never
+    /// asked for consensus. The text path takes [`Passes::TEXT`].
+    ///
+    /// Recorded in the recipe, because a corpus built one way is not comparable with one built
+    /// the other, and refused above temperature 0 — see [`Passes::admits`].
+    pub passes: Passes,
     /// A source for the units, and how it combines with one the model wrote.
     ///
     /// For a caller who knows provenance exactly and does not want a model inventing it.
@@ -385,6 +401,12 @@ impl IngestOptions {
         self
     }
 
+    /// How many times to extract each input (§3.4).
+    pub fn with_passes(mut self, p: Passes) -> IngestOptions {
+        self.passes = p;
+        self
+    }
+
     /// Give units this source, combined with any the model wrote by `policy`.
     pub fn with_source(
         mut self,
@@ -445,6 +467,7 @@ impl Default for IngestOptions {
             hop: 0,
             agent,
             temperature: 0.0,
+            passes: Passes::default(),
             normaliser: smysl_core::quote::Normaliser::V1,
             lang_policy: LangPolicy::Source,
             max_output: 0,
@@ -479,6 +502,18 @@ pub struct IngestReport {
     pub recipe: Option<[u8; 32]>,
     pub family: Option<[u8; 32]>,
     pub usage: Usage,
+    /// How many times each chunk was extracted (1.10, §3.4). One unless the caller asked for
+    /// consensus; `chunks` counts the pieces of the input, not the extractions, so the calls a
+    /// consensus run makes are `chunks * passes` before any repair.
+    pub passes: usize,
+    /// What the passes agreed about, by `identical-span` (§3.4).
+    ///
+    /// `None` for a single pass: one extraction agrees with itself, and reporting that as
+    /// stability would be reporting the policy rather than a measurement. It is recorded here
+    /// rather than left to be recomputed later because the staged batch cannot answer it — two
+    /// passes that produced one unit produced one uid, so a count of staged units cannot tell
+    /// "both passes said this" from "one did".
+    pub agreement: Option<Agreement>,
     pub provider: Option<smysl_provider::ProviderId>,
     /// The model that ran, resolved: what the caller named, else the provider's own.
     ///
@@ -518,6 +553,13 @@ impl<'a> Ingestor<'a> {
             .opts
             .requested_path()
             .map_err(|e| ProviderError::Config(format!("prompt override {e}")))?;
+        // A second pass above temperature 0 buys no agreement (MS-8), and the refusal belongs
+        // here with the other configuration mistakes: before egress, rather than after paying
+        // for two extractions that cannot be compared.
+        self.opts
+            .passes
+            .admits(self.opts.temperature)
+            .map_err(ProviderError::Config)?;
         // Was accepted whatever it said and only hashed: `--granularity bogus` ran, and its
         // recipe differed from every real run's for a word nothing else read.
         let profile = self
@@ -565,6 +607,7 @@ impl<'a> Ingestor<'a> {
             .with_normaliser(self.opts.normaliser)
             .with_lang_policy(self.opts.lang_policy)
             .with_estimator(self.opts.estimator)
+            .with_passes(self.opts.passes)
             .with_framing(prompt::FRAMING)
             .with_schemas(["smysl.kernel/0.1".to_string()])
             .with_path(choice.path);
@@ -575,6 +618,7 @@ impl<'a> Ingestor<'a> {
 
         let mut report = IngestReport {
             chunks: chunks.len(),
+            passes: self.opts.passes.count(),
             path: Some(choice.path),
             recipe: Some(conditions.recipe()),
             family: Some(conditions.family()),
@@ -588,33 +632,55 @@ impl<'a> Ingestor<'a> {
         let mut units: Vec<UnitCore> = Vec::new();
         let mut relations: Vec<Relation> = Vec::new();
         let mut labels: BTreeMap<Label, Uid> = BTreeMap::new();
-        for piece in &chunks {
-            let out = self.one_chunk(provider, choice.path, &piece.text, &mut report.usage);
-            report.calls += out.calls;
-            report.degraded += out.degraded;
-            report.repaired += out.repaired;
-            report.diagnostics.extend(out.diagnostics);
-            units.extend(out.units);
-            relations.extend(out.relations);
-            // A model names units per chunk and cannot see the others, so two chunks can use one
-            // label for different units. The first keeps it, and the collision is reported
-            // rather than resolved by whichever chunk came last.
-            for (label, uid) in out.labels {
-                match labels.get(&label) {
-                    Some(existing) if *existing != uid => {
-                        report.diagnostics.push(
-                            Diagnostic::on(smysl_core::Code::W054, uid).with_message(format!(
-                                "`{label}` was given to a different unit in an earlier chunk; \
-                                 this one is staged without a name"
-                            )),
-                        );
-                    }
-                    Some(_) => {}
-                    None => {
-                        labels.insert(label, uid);
+        // One list per pass, so the agreement can be read afterwards. Keeping it is the whole
+        // point of consensus extraction: the staged batch merges what both passes found,
+        // because identical content is one unit, and a merged batch cannot be asked which pass
+        // produced what.
+        let mut per_pass: Vec<Vec<UnitCore>> = Vec::with_capacity(self.opts.passes.count());
+        for _pass in 0..self.opts.passes.count() {
+            let mut pass_units: Vec<UnitCore> = Vec::new();
+            for piece in &chunks {
+                let out = self.one_chunk(provider, choice.path, &piece.text, &mut report.usage);
+                report.calls += out.calls;
+                report.degraded += out.degraded;
+                report.repaired += out.repaired;
+                report.diagnostics.extend(out.diagnostics);
+                pass_units.extend(out.units);
+                relations.extend(out.relations);
+                // A model names units per chunk and cannot see the others, so two chunks can use
+                // one label for different units. The first keeps it, and the collision is
+                // reported rather than resolved by whichever chunk came last.
+                //
+                // A second pass is not a collision: it answers the same chunk, so it offers the
+                // same label for the same unit, and the `Some(existing) if *existing != uid`
+                // arm is what tells the two cases apart. A pass that named a *different* unit
+                // `c/one` is a real disagreement and is reported as one.
+                for (label, uid) in out.labels {
+                    match labels.get(&label) {
+                        Some(existing) if *existing != uid => {
+                            report.diagnostics.push(
+                                Diagnostic::on(smysl_core::Code::W054, uid).with_message(format!(
+                                    "`{label}` was given to a different unit in an earlier \
+                                     chunk; this one is staged without a name"
+                                )),
+                            );
+                        }
+                        Some(_) => {}
+                        None => {
+                            labels.insert(label, uid);
+                        }
                     }
                 }
             }
+            units.extend(pass_units.iter().cloned());
+            per_pass.push(pass_units);
+        }
+
+        // Recorded for a consensus run and left absent for a single pass: see
+        // `IngestReport::agreement`. Nothing here deduplicates, merges or votes — §3.4 reads
+        // the agreement, it does not act on it.
+        if self.opts.passes.count() > 1 {
+            report.agreement = Some(consensus::agreement(&per_pass));
         }
 
         // Chunk-boundary duplication self-heals: two chunks that produced the same claim

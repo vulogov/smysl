@@ -1,0 +1,5 @@
+{"units":[
+  {"type":"claim","label":"c/slow","gist":"the eu-west shard slowed on Thursday afternoon","status":"speculative"},
+  {"type":"evidence","label":"e/pool","gist":"the connection pool waited longer as latency rose","status":"speculative"},
+  {"type":"claim","label":"c/restart","gist":"the on-call engineer restarted the pooler at 16:40","status":"speculative"}
+]}

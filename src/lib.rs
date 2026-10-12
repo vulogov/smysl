@@ -206,6 +206,13 @@ pub use smysl_ingest::{
     attest, AttestOptions, AttestReport, IngestOptions, IngestPath, IngestReport, Ingestor,
     Judgement, LangPolicy, What, DEFAULT_REPAIR_ATTEMPTS,
 };
+// Consensus extraction (§3.4). `Passes` is `IngestOptions::with_passes`'s argument, so without
+// it the option is set-able only by a caller who depends on `smysl-ingest` directly — the rule A
+// violation the `import` block below records. `Agreement` is what `IngestReport` hands back,
+// and the module itself for `consensus::agreement`, which a caller measuring GE-T2 over a
+// corpus it already extracted needs and no ingest run can give it.
+#[cfg(feature = "ingest")]
+pub use smysl_ingest::{consensus, Agreement, Passes};
 #[cfg(feature = "stage")]
 pub use smysl_ingest::{stage, Attesting, Staged};
 // `smysl import` is the only producer of `measured` units and the only unit-producing command
