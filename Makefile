@@ -113,6 +113,20 @@ doc-gate: ## Rustdoc with warnings denied, as docs.rs would show it
 # red job saying nothing about the API. 0.10.0 and 0.12.0 were never published and never will
 # be; everything in them shipped in the release after.
 BASELINE  := 1.9.0
+# The baseline is taken from **this repository's tag**, not from the registry index, and that
+# is a reproducibility fix rather than a preference. `--baseline-version` resolves the version
+# through `index.crates.io` on every run even when the rustdoc for it is already cached, so a
+# slow or unreachable index makes the gate **panic** — `Operation timed out (os error 60)`,
+# exit 101, inside `rustdoc_gen`, which reads like a broken API rather than a broken network
+# and cost two full sweeps to attribute. `git` objects are local, so `--baseline-rev` cannot
+# fail that way.
+#
+# The two are the same API as long as the tag is what was published, which is what the release
+# procedure makes true, and it was checked crate by crate when this changed: `smysl-core`
+# against 1.9.0 reports 221 pass, 0 fail, 2 warn, 31 skip from either baseline. If a tag were
+# ever moved after a publish the two would diverge, and the tag is the one a reader of this
+# repository can verify.
+BASELINE_REV := v$(BASELINE)
 PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-render \
              smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl
 
@@ -270,7 +284,7 @@ semver: ## Report API breakage against the last published version
 		case " $(SEMVER_BREAKING) " in \
 			*" $$c "*) continue;; \
 		esac; \
-		$(CARGO) semver-checks check-release --baseline-version $(BASELINE) \
+		$(CARGO) semver-checks check-release --baseline-rev $(BASELINE_REV) \
 			--release-type patch -p $$c; \
 	done
 	@# Reported, not gated. Until 0.13 these were `continue`d with a one-line SKIP, which
@@ -283,7 +297,7 @@ semver: ## Report API breakage against the last published version
 		echo "=== deliberate breaks this cycle: reported, not gated on ==="; \
 		for c in $(SEMVER_BREAKING); do \
 			echo; echo "--- $$c"; \
-			$(CARGO) semver-checks check-release --baseline-version $(BASELINE) \
+			$(CARGO) semver-checks check-release --baseline-rev $(BASELINE_REV) \
 				--release-type patch -p $$c 2>&1 \
 				| grep -E '^--- failure|Summary semver' || true; \
 		done; \
