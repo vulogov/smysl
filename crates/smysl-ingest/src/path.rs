@@ -31,6 +31,14 @@ use crate::IngestPath;
 /// brace costs the whole batch.
 pub const SMALL_OUTPUT_THRESHOLD: usize = 4096;
 
+/// The same bound in **tokens**, for a caller whose size is measured in them ([`choose_tokens`]).
+///
+/// `SMALL_OUTPUT_THRESHOLD / 4`, which is the registered estimator's own ratio
+/// (`smysl/content/1`, F-2) for Latin text — so a caller that switched from one to the other
+/// over English is at the same threshold it was. What changes is every other script: see
+/// [`choose_tokens`].
+pub const SMALL_OUTPUT_TOKENS: u32 = (SMALL_OUTPUT_THRESHOLD / 4) as u32;
+
 /// Why a path was chosen. Reported so `ingest --dry-run` can explain itself rather than
 /// leaving a caller to infer the rule from the outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,11 +76,52 @@ pub struct Choice {
     pub reason: Reason,
 }
 
-/// Choose the ingest path (D-9).
+/// Choose the ingest path (D-9), from a size in **bytes**.
 pub fn choose(
     caps: &Capabilities,
     task: Task,
     expected_output: usize,
+    override_path: Option<IngestPath>,
+) -> Choice {
+    decide(
+        caps,
+        task,
+        expected_output > SMALL_OUTPUT_THRESHOLD,
+        override_path,
+    )
+}
+
+/// Choose the ingest path from a size in **tokens** (§3.7, TX-P5 step 5).
+///
+/// The same rule, in the unit a caller that has already budgeted a window has. A text ingest
+/// fills its windows to a *token* budget and then has to decide a path, and asking the byte
+/// question there makes the answer depend on the script: two bytes per character of Cyrillic
+/// put a Russian window over a 4 KiB bound that the same passage in English is comfortably
+/// under, so one corpus is extracted through the json-ast path and the other through the
+/// surface path — which §3.9.2 does not treat as equivalent, and which would make GE-T2's
+/// per-language figures figures about two different pipelines.
+///
+/// That is F-2's lesson in a second place. F-2 replaced a byte-based *window* bound for the
+/// same reason; this is the byte-based *path* bound beside it, found by measuring the phase
+/// exit in two languages rather than one.
+pub fn choose_tokens(
+    caps: &Capabilities,
+    task: Task,
+    expected_output: u32,
+    override_path: Option<IngestPath>,
+) -> Choice {
+    decide(
+        caps,
+        task,
+        expected_output > SMALL_OUTPUT_TOKENS,
+        override_path,
+    )
+}
+
+fn decide(
+    caps: &Capabilities,
+    task: Task,
+    bulk: bool,
     override_path: Option<IngestPath>,
 ) -> Choice {
     if let Some(path) = override_path {
@@ -98,7 +147,7 @@ pub fn choose(
                     reason: Reason::NoEnforcement,
                 };
             }
-            if expected_output > SMALL_OUTPUT_THRESHOLD {
+            if bulk {
                 return Choice {
                     path: IngestPath::Surface,
                     reason: Reason::BulkContent,

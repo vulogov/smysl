@@ -104,13 +104,16 @@ pub struct Agreement {
 }
 
 impl Agreement {
-    /// `agreed / comparable`, or `None` when nothing was comparable.
+    /// `agreed / comparable`, or `None` when there was nothing to compare.
     ///
-    /// `None` rather than 1.0. An empty comparison is not perfect stability, and GE-T2 reports
-    /// this figure per language — a 1.0 from a window where no unit carried a span would be a
-    /// stability claim about nothing.
+    /// `None` rather than 1.0, in both of the ways a comparison can be empty: no unit carried a
+    /// span, or there was **one pass**. One pass agrees with itself by construction — every key
+    /// it produced was produced by every pass — so a rate computed over it is 1.0 and means
+    /// nothing. GE-T2 reports this figure per language, and a stability claim about nothing is
+    /// worse than an absent one.
     pub fn rate(&self) -> Option<f64> {
-        (self.comparable > 0).then(|| self.agreed as f64 / self.comparable as f64)
+        (self.passes > 1 && self.comparable > 0)
+            .then(|| self.agreed as f64 / self.comparable as f64)
     }
 }
 
@@ -133,8 +136,9 @@ fn key(u: &UnitCore) -> Option<(String, (u64, u64), String)> {
 
 /// What the passes agreed about. Pure: it reads the units and writes nothing.
 ///
-/// Fewer than two passes is not an error — a single-pass run has an agreement of no passes
-/// rather than no answer — and `Agreement::rate` is `None` for it either way.
+/// Fewer than two passes is not an error — a single-pass run has an agreement of one pass rather
+/// than no answer — and [`Agreement::rate`] is `None` for it, because a single pass agrees with
+/// itself by construction.
 pub fn agreement(passes: &[Vec<UnitCore>]) -> Agreement {
     let mut seen: BTreeMap<(String, (u64, u64), String), BTreeSet<usize>> = BTreeMap::new();
     let mut spanless = 0usize;
@@ -232,9 +236,12 @@ mod tests {
     fn a_single_pass_run_scores_nothing() {
         let g = agreement(&[vec![unit("one", Some((0, 10)), "")]]);
         assert_eq!(g.passes, 1);
-        // One pass "agrees" with itself by construction, which is why the rate is the figure
-        // that is read and `passes` is reported beside it.
+        // One pass "agrees" with itself by construction — the count says so — and that is
+        // exactly why `rate` refuses to divide: the figure would be 1.0 for a run that measured
+        // no stability at all. Found by TX-P5 step 5, where the text path reports the agreement
+        // as a field rather than as an `Option`.
         assert_eq!(g.agreed, 1);
+        assert_eq!(g.rate(), None);
     }
 
     #[test]

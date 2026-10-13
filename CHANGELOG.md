@@ -58,6 +58,69 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### A phase sized by what it measured, and three numbers that were measuring the wrong thing
+
+TX-P5 step 5, the phase exit. The six clauses of SMYSL-2.4 §6 TX-P5 step 5, a cost report that
+replaces the planning figure the plan used to carry, and `ingest --text <who> --cost`. §3.7,
+§5.5, §6.
+
+**Three clauses are met, one is built and reported, two are owed.** Resume: eight windows, the
+journal truncated mid-append, **one** window re-sent and the store unchanged. Span coverage:
+**1.000**, against a control at **0.857**. Entity duplication across windows: **0.000** — three
+entity records for three speakers over nine windows, which is A-2.4 rule 7 and not a model's
+good behaviour. The **cost report** is built and measured. The **probe-set gate** of step 3b and
+**GE-T2's corpus** are owed, and both are material rather than code: each harness takes a
+directory and says the clause is owed without one.
+
+**The cost model stopped being a coefficient.** The plan used to size this phase at "≈ 1.6k in +
+≈ 1.2k out, ×1.3 for repairs" per chapter — a figure only ever given for English, against which
+S0 measured 3.96x for hosted Russian. So cost is a measurement now, read out of the journal per
+language, with the retry rate as its own term: `r` is repair turns per **first attempt**, because
+the model it feeds is `base × (1 + r)` and a denominator of *calls* would under-price a repaired
+window by a third. The two routes to a projection are kept apart in the one place a caller reads
+before using either: the measured tokens already contain the repairs they measured, so
+multiplying them by `(1 + r)` as well charges the repairs twice.
+
+**The journal was recording the run's running total against each window.** `input_tokens` was
+the usage counter at the moment the window was journalled, so a sum over a corpus charged the
+first window once per window and the mean grew with position. It is the window's own now, by
+difference, and three fields joined it — the language, the calls, and how many of those were
+repairs. An entry written before this release carries no call count, and that absence is what
+marks it: such entries are counted and left out of every total, because a sum of two different
+measurements is a figure about neither.
+
+**`Agreement::rate` reported 1.000 for a single pass.** One pass produced every key every pass
+produced, so it agreed with itself by construction — and the function's own documentation said
+the rate was `None` for that case, which was false. The document path never reached it because
+the field is an `Option` filled only for two passes; the text path reports the agreement as a
+plain field, which is how it surfaced. The rate requires two passes now.
+
+**The ingest path was chosen in bytes, so the same corpus in Russian took a different pipeline.**
+The path rule compares an expected output size against 4 KiB, and a text ingest handed it the
+widest window's *byte* length: two bytes per Cyrillic character put a Russian expression over the
+bound, so its answers were parsed by the **surface** parser while the English run's went through
+json-ast — which §3.9.2 does not treat as equivalent. GE-T2 reports per language, and the figure
+would have been a figure about two pipelines. `path::choose_tokens` asks the same question in the
+unit a window is already budgeted in, with the threshold expressed as a quarter of the byte one
+so English does not move. This is F-2's lesson in a second place: F-2 replaced a byte-based
+*window* bound in 1.10.0, and this was the byte-based *path* bound beside it. Found by running
+the exit in two languages rather than one — which is the only reason the second language was
+there.
+
+**What makes the coverage clause a measurement.** A quote the window does not hold never reaches
+the figure: the repair loop refuses it and the unit is degraded to opaque prose, which removes
+the quote before attachment sees it. The case the clause is about is a quote the *window* joins
+and the *part* does not — two nodes in different parts, adjacent on screen and not in any part's
+bytes — which is staged with no span and a capped status (`SMY-W441`). That is the control, and
+it is also why there are two spanless counters: one for units that attributed a quote and got no
+span, one for units that cannot establish `identical-span` however they came to have none.
+
+**New:** `smysl_ingest::text::cost`, `TextReport::{lang, path, retries, agreement, stability,
+retry_rate}`, `path::{choose_tokens, SMALL_OUTPUT_TOKENS}`, four journal fields, and
+`ingest --text <who> --cost` — which needs no provider, no network and no `--yes`, because it
+reads a file and prints arithmetic. Tests: `phase_exit.rs` (6), `ge_t2.rs` (5),
+`cmd_ingest_cost.rs` (3), and eight more in the crate.
+
 ### Who holds a claim, and what one window may say about another
 
 TX-P5 steps 3b and 4: the attribution written from structure, the ledger digest, the journal, the

@@ -885,6 +885,47 @@ which is the failure the ordering rules out. `--reextract` ignores the journal
 for one expression, and because the same answers produce the same uids, a
 re-extraction that changed nothing grows the corpus by nothing.
 
+#section("--cost: what the extraction actually cost")
+
+The journal records more than which windows are done. Each entry carries the
+window's own token counts, the calls it took, how many of those were repair
+turns, and the language of the expression — so what a corpus cost is a
+*measurement* you can read back, rather than a planning figure somebody chose.
+
+#screen(caption: "$ smysl ingest --text kjv --store ./lib --cost")[
+```
+expression   kjv
+en           1189 window(s), 2502 call(s), 124 repair turn(s)
+             retry rate 0.052 (repairs per first attempt)
+             tokens 1874300 in, 503100 out; per window 1576.4 in, 423.1 out
+             quotes 3421 present, 112 loose, 54 absent (95.4% supported)
+*            1189 window(s), 2502 call(s), 124 repair turn(s)
+             ...
+```
+]
+
+It needs no provider, no network and no `--yes`: it reads a file and prints
+arithmetic. The figures are grouped **per language** and never averaged into
+one, and that is not tidiness. The same material in Russian cost 3.38 times
+the English in the measurements this design was re-planned against, and
+almost all of the gap was the repair loop rather than tokenization — so a
+corpus sized on a single blended rate under-prices every window in the
+language that needed the repairs.
+
+The retry rate is repairs per *first attempt*, not per call, because that is
+the shape the cost model uses: the cost of a window is its base cost times
+`(1 + r)`. One caution comes with it. The token figures above already contain
+the repair turns that happened, so multiplying them by `(1 + r)` as well
+charges the repairs twice. Project from the measured tokens, or from an
+estimate with `(1 + r)` applied — never both.
+
+#callout(label: "Note")[
+  A window extracted by a build older than 1.10.0's text ingest recorded the
+  *run's* running token total rather than its own. Those entries still open,
+  and the report counts them and leaves them out of the sums rather than
+  adding two different measurements together; it says how many it set aside.
+]
+
 #whatsnext[
   A staged batch is just a store that happens to live at
   `.smysl/staged.smy` instead of wherever your real document lives — which

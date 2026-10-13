@@ -17,15 +17,22 @@
 //! its own rather than a field the prompt asks for: **the model is never asked for a span.** It
 //! is asked for a quote, which is checkable, and the span is computed from it here.
 //!
-//! # What this module does not do
+//! # What is pure here and what is not
 //!
-//! It does not call a model, score an answer, or decide what to keep. The ledger digest, the
-//! journal, the prompt templates and `ingest --text` itself are TX-P5 step 4; nothing here
-//! persists anything or reaches a provider. Windowing and attachment are pure functions over a
-//! reading and a batch, which is also what makes them testable without egress.
+//! [`window`](crate::text::window), [`attach`](mod@crate::text::attach),
+//! [`attribution`](mod@crate::text::attribution), [`digest`](mod@crate::text::digest) and
+//! [`cost`](mod@crate::text::cost) are functions over data: they call nothing, persist nothing and
+//! are testable with no egress at all. [`journal`](crate::text::journal) writes one file and
+//! [`run`](crate::text::run) is the part with a provider, a library and an order it has to do
+//! things in — which is where every decision about *when* lives, resume included.
+//!
+//! [`cost`](mod@crate::text::cost) is the last of them and reads the journal rather than a run: what
+//! an extraction cost is a measurement over what was done, which is why §6 TX-P5 step 5 sizes
+//! the phase from it instead of from a planning figure.
 
 pub mod attach;
 pub mod attribution;
+pub mod cost;
 pub mod digest;
 pub mod journal;
 #[cfg(feature = "model")]
@@ -34,6 +41,7 @@ pub mod window;
 
 pub use attach::{attach, Attached, Attachment, Opts};
 pub use attribution::{attribution, quoted_spans, Attribution};
+pub use cost::{cost, CostReport};
 pub use digest::{digest, Digest};
 pub use journal::Journal;
 #[cfg(feature = "model")]

@@ -470,6 +470,7 @@ ingest     --window-level
 ingest     --digest-budget
 ingest     --reextract
 ingest     --single-pass
+ingest     --cost
 ingest     --help
 attest     [PATH]
 attest     --config

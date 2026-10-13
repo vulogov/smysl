@@ -134,9 +134,43 @@ pub struct Entry {
     /// recipe groups corroboration, and a per-window value there would put every window in a
     /// group of its own (§3.5).
     pub digest: [u8; 32],
+    /// **This window's** input tokens, not the run's running total.
+    ///
+    /// Per window because the cost report divides by windows and multiplies by a retry rate
+    /// (§3.7): a cumulative figure would make every entry a function of the ones before it in
+    /// one run and incomparable across two.
     pub input_tokens: u64,
+    /// This window's output tokens.
     pub output_tokens: u64,
+    /// The language of the expression, as the manifest records it — `und` where it records
+    /// none. In the entry and not in the key: a window is not *different work* for being in
+    /// Russian, but the retry rate §3.7 wants is per language, and a journal is where it is
+    /// measured rather than assumed.
+    pub lang: String,
+    /// Calls this window cost, repair turns included. Zero marks an entry written before this
+    /// release, whose token figures are the run's running total rather than the window's.
+    pub calls: u32,
+    /// Of those calls, the repair turns: `calls - retries` is the number of first attempts,
+    /// which is one per pass. `r = retries / first attempts` is §3.7's retry term.
+    pub retries: u32,
     pub verdicts: Verdicts,
+}
+
+impl Entry {
+    /// Whether this entry's cost figures can be read.
+    ///
+    /// An entry written before TX-P5 step 5 recorded no call count and its tokens are the
+    /// *run's* running total at the moment the window was journalled. Those tokens cannot be
+    /// summed with per-window ones, so the cost report counts such entries and leaves them out
+    /// of the arithmetic rather than reporting a total that is two measurements added together.
+    pub fn priced(&self) -> bool {
+        self.calls > 0
+    }
+
+    /// First attempts: one per pass, repair turns excluded.
+    pub fn attempts(&self) -> u32 {
+        self.calls.saturating_sub(self.retries)
+    }
 }
 
 // Map keys, small unsigned integers as every record in this format uses (§7.1 constraint 1).
@@ -154,6 +188,11 @@ mod keys {
     pub const FROM: u16 = 11;
     pub const TO: u16 = 12;
     pub const RECIPE: u16 = 13;
+    // Added by TX-P5 step 5, for the cost report. A journal written before it decodes without
+    // them — rule X in the small — and `Entry::priced` is how that is noticed.
+    pub const LANG: u16 = 14;
+    pub const CALLS: u16 = 15;
+    pub const RETRIES: u16 = 16;
 }
 
 /// A journal, open for reading and appending.
@@ -293,6 +332,9 @@ fn encode(e: &Entry) -> Vec<u8> {
     m.put(keys::PRESENT, |enc| enc.uint(u64::from(e.verdicts.present)));
     m.put(keys::LOOSE, |enc| enc.uint(u64::from(e.verdicts.loose)));
     m.put(keys::ABSENT, |enc| enc.uint(u64::from(e.verdicts.absent)));
+    m.put(keys::LANG, |enc| enc.text(&e.lang));
+    m.put(keys::CALLS, |enc| enc.uint(u64::from(e.calls)));
+    m.put(keys::RETRIES, |enc| enc.uint(u64::from(e.retries)));
     let mut enc = Enc::new();
     m.finish(&mut enc);
     enc.into_bytes()
@@ -310,6 +352,9 @@ fn decode(bytes: &[u8]) -> Option<Entry> {
     let mut input = 0u64;
     let mut output = 0u64;
     let mut verdicts = Verdicts::default();
+    let mut lang = String::new();
+    let mut calls = 0u32;
+    let mut retries = 0u32;
     let mut prev = None;
     for _ in 0..n {
         let k = d.map_key(prev).ok()?;
@@ -342,6 +387,9 @@ fn decode(bytes: &[u8]) -> Option<Entry> {
             keys::PRESENT => verdicts.present = d.uint().ok()? as u32,
             keys::LOOSE => verdicts.loose = d.uint().ok()? as u32,
             keys::ABSENT => verdicts.absent = d.uint().ok()? as u32,
+            keys::LANG => lang = d.text().ok()?.to_string(),
+            keys::CALLS => calls = d.uint().ok()? as u32,
+            keys::RETRIES => retries = d.uint().ok()? as u32,
             // Rule X in the small: a key a later release added is skipped, not refused. A
             // journal is read by whatever build happens to resume a run.
             _ => {
@@ -360,6 +408,9 @@ fn decode(bytes: &[u8]) -> Option<Entry> {
         digest,
         input_tokens: input,
         output_tokens: output,
+        lang,
+        calls,
+        retries,
         verdicts,
     })
 }
@@ -383,6 +434,9 @@ mod tests {
             digest: [9; 32],
             input_tokens: 1200,
             output_tokens: 340,
+            lang: "en".to_string(),
+            calls: 3,
+            retries: 1,
             verdicts: Verdicts {
                 present: 3,
                 loose: 1,
@@ -496,6 +550,52 @@ mod tests {
         let mut j = Journal::in_memory();
         j.record(entry(key("kjv", 0, 1))).expect("recorded");
         assert!(j.contains(&key("kjv", 0, 1)));
+    }
+
+    #[test]
+    fn the_cost_fields_round_trip_and_a_first_attempt_is_not_a_retry() {
+        let dir = tempdir();
+        {
+            let mut j = Journal::open(&dir);
+            j.record(entry(key("synodal", 0, 1))).expect("recorded");
+        }
+        let got = Journal::open(&dir);
+        let e = got.get(&key("synodal", 0, 1)).expect("an entry");
+        assert_eq!(e.lang, "en");
+        assert_eq!(e.calls, 3);
+        assert_eq!(e.retries, 1);
+        assert_eq!(e.attempts(), 2, "two passes, one repair turn");
+        assert!(e.priced());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// An entry a build before TX-P5 step 5 wrote: the three keys are simply absent, and what
+    /// matters is that it still decodes — the tokens in it are a *run's* running total, and
+    /// `priced` is what keeps them out of a per-window sum.
+    #[test]
+    fn an_entry_written_before_the_cost_fields_decodes_and_says_it_is_unpriced() {
+        let k = key("kjv", 0, 1);
+        let mut inner = MapBuilder::new();
+        inner.put(keys::ALIAS, |enc| enc.text(&k.alias));
+        inner.put(keys::TID, |enc| enc.bytes(k.tid.as_bytes()));
+        inner.put(keys::FROM, |enc| enc.uint(k.owned.0));
+        inner.put(keys::TO, |enc| enc.uint(k.owned.1));
+        inner.put(keys::RECIPE, |enc| enc.bytes(&k.recipe));
+        let mut m = MapBuilder::new();
+        m.put(keys::KEY, |enc| enc.raw(&inner.into_bytes()));
+        m.put(keys::BATCH, |enc| enc.bytes(&[7; 32]));
+        m.put(keys::DIGEST, |enc| enc.bytes(&[9; 32]));
+        m.put(keys::INPUT, |enc| enc.uint(99_000));
+        m.put(keys::OUTPUT, |enc| enc.uint(9_000));
+        let mut enc = Enc::new();
+        m.finish(&mut enc);
+
+        let e = decode(&enc.into_bytes()).expect("the old shape still decodes");
+        assert_eq!(e.key, k);
+        assert_eq!(e.input_tokens, 99_000);
+        assert_eq!(e.lang, "");
+        assert_eq!(e.calls, 0);
+        assert!(!e.priced(), "an entry with no call count claimed a price");
     }
 
     /// A directory under the test temporary root, named for this test's own address.

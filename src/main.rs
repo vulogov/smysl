@@ -1392,6 +1392,12 @@ fn cli() -> Command {
                         .long("single-pass")
                         .help("One extraction per window instead of two; recorded in the recipe (§3.4)")
                         .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("cost")
+                        .long("cost")
+                        .help("With --text: report what the journal says this expression cost, per language; make no call")
+                        .action(ArgAction::SetTrue),
                 ),
             "attest" => sub
                 .arg(
@@ -5358,6 +5364,12 @@ fn cmd_ingest_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     use smysl::text::reading::Level;
 
     let who = m.get_one::<String>("text").expect("checked by the caller");
+    // The cost report reads the journal and nothing else: no provider, no egress, and no
+    // `--yes`, because there is nothing to commit. Handled before the registry is loaded, so a
+    // machine with no provider configured can still price what it already extracted.
+    if m.get_flag("cost") {
+        return cmd_ingest_cost(m, global, who);
+    }
     let registry = match load_registry(global) {
         Ok(r) => r,
         Err(e) => {
@@ -5550,12 +5562,110 @@ fn cmd_ingest_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "quotes       {} present, {} loose, {} absent",
         report.verdicts.present, report.verdicts.loose, report.verdicts.absent
     );
+    // The path is chosen rather than configured (D-9), and §3.9.2 does not treat the two as
+    // equivalent — so a run says which one it took.
+    if let Some(path) = report.path {
+        println!("path         {}", path.as_str());
+    }
+    // GE-T2's figure for this run (§5.5). Absent for a single pass, which agrees with nothing.
+    match report.stability() {
+        Some(r) => println!(
+            "stability    {:.3} identical-span ({} of {} place(s), {} uncomparable)",
+            r, report.agreement.agreed, report.agreement.comparable, report.agreement.spanless,
+        ),
+        None => println!("stability    - (one pass, or nothing comparable)"),
+    }
     println!(
         "tokens       {} in, {} out",
         report.usage.input_tokens, report.usage.output_tokens
     );
     if let Some(r) = report.recipe {
         println!("recipe       {}", smysl::recipe_short(&r));
+    }
+    ExitCode::Success
+}
+
+/// `ingest --text <who> --cost`: what the journal says an extraction cost (§3.7, §6 TX-P5
+/// step 5).
+///
+/// A measurement and not a plan. Draft 1 of SMYSL-2.4 sized this phase from "≈ 1.6k in + ≈ 1.2k
+/// out, ×1.3 for repairs" per chapter, a figure only ever given for English, and S0 measured
+/// 3.96x it for hosted Russian. So the retry rate is a **measured per-language term** and this
+/// is where a caller reads it.
+#[cfg(all(feature = "ingest", feature = "text"))]
+fn cmd_ingest_cost(m: &ArgMatches, global: &ArgMatches, who: &str) -> ExitCode {
+    use smysl::text::library::Library;
+
+    let Some(root) = store_arg(m, global) else {
+        eprintln!("smysl ingest: --cost reads a library's journal: pass --store <LIBRARY>");
+        return ExitCode::Usage;
+    };
+    let root = std::path::PathBuf::from(root);
+    let lib = match Library::open(&root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl ingest: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    // An alias names the windows the journal keyed; a manifest id names its expression's alias,
+    // because the journal keys on the alias and a fork of it is the same extraction history.
+    let alias = match smysl::Mid::parse(who) {
+        Ok(mid) => match lib.store().manifest(&mid) {
+            Some(manifest) => manifest.alias.clone(),
+            None => {
+                eprintln!("smysl ingest: no manifest {}", mid.canonical());
+                return ExitCode::Failure;
+            }
+        },
+        Err(_) => who.to_string(),
+    };
+
+    let journal = smysl::ingest_text::journal::Journal::open(&root);
+    let report = smysl::ingest_text::cost::cost(&journal, Some(&alias));
+    println!("expression   {alias}");
+    if report.total.windows == 0 {
+        println!("windows      0 (the journal records no window for this expression)");
+        return ExitCode::Success;
+    }
+    for row in report
+        .by_lang
+        .values()
+        .chain(std::iter::once(&report.total))
+    {
+        println!(
+            "{:<12} {} window(s), {} call(s), {} repair turn(s)",
+            row.lang, row.windows, row.calls, row.retries
+        );
+        match row.retry_rate() {
+            Some(r) => println!("             retry rate {r:.3} (repairs per first attempt)"),
+            None => println!("             retry rate - (nothing was attempted)"),
+        }
+        print!(
+            "             tokens {} in, {} out",
+            row.input_tokens, row.output_tokens
+        );
+        match row.tokens_per_window() {
+            Some((i, o)) => println!("; per window {i:.1} in, {o:.1} out"),
+            None => println!(),
+        }
+        println!(
+            "             quotes {} present, {} loose, {} absent{}",
+            row.verdicts.present,
+            row.verdicts.loose,
+            row.verdicts.absent,
+            match row.support_rate() {
+                Some(r) => format!(" ({:.1}% supported)", 100.0 * r),
+                None => String::new(),
+            }
+        );
+        if row.unpriced > 0 {
+            println!(
+                "             {} window(s) left out: written before this release, their tokens \
+                 are a run's running total",
+                row.unpriced,
+            );
+        }
     }
     ExitCode::Success
 }

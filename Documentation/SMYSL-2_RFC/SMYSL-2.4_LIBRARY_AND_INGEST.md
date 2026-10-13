@@ -73,7 +73,7 @@ prescribe the wrong remedy for the thing it measured.
 | 3 | class measures ship as exploration only | §3.6, §5.5 | lands as written; `anchored` becomes the only Bible engine, and adjacency (C3) is load-bearing where draft 1 treated it as a filter |
 | 4 | holder and mode structural from TX-P5's first ingest | §3.4, §6 TX-P5 | lands as written; the probe-set gate is a new exit clause, and the holder paragraph stays out of the prompt |
 | 5 | GE-T5 and GE-T2 restated relative to α | §5.5, §6 TX-P7 | **the 0.9 bar was never attainable** against a gold of α 0.600, so restating it is not a loosening |
-| 6 | FC-6 weights calibrated on M5; cost model revised | §3.7, §6 TX-P5 | **the weights are not what is miscalibrated.** S0 names the mechanism and it is the repair loop. Calibrating weights on pre-F-2 data would fit the estimator to a defect 1.10.0 removed. |
+| 6 | FC-6 weights calibrated on M5; cost model revised | §3.7, §6 TX-P5 | **the weights are not what is miscalibrated.** S0 names the mechanism and it is the repair loop. Calibrating weights on pre-F-2 data would fit the estimator to a defect 1.10.0 removed. **Landed 2026-10-12** as a measurement rather than a revision: the cost model's `r` comes out of the journal per language (`ingest --text --cost`), and no FC-6 weight moved. |
 
 **Item 2: consensus extraction cannot be validated by the machinery that would judge it.**
 "Extract twice per window and keep what both runs produce" needs a relation that says two units
@@ -906,6 +906,21 @@ begins with a digit. The per-window hash is in the journal entry, as this sectio
   rate per language, recorded in the journal rather than assumed — and the per-language figures
   are re-measured after F-2, because every Russian number S0 has was taken under the byte-based
   bound F-2 replaced. No FC-6 weight changes on this data.
+- **Landed 2026-10-12** (§6 TX-P5 step 5): `smysl_ingest::text::cost`, read by
+  `ingest --text <who> --cost`. `r` is `retries / first attempts` — repair turns over the calls
+  that were not repairs, because `base × (1 + r)` prices a first attempt — and the denominator
+  matters: over *calls* a window that repaired once would read 0.5 where the model wants 1.0.
+  The journal carries the language, the call count and the repair count per window, so the rate
+  is grouped rather than averaged: a corpus sized on a total would under-price every Russian
+  window in it by S0's 3.38x ratio. Two **measured routes** to a projection exist and must not be
+  multiplied — `tokens_per_window` already contains the repairs it measured, and `(1 + r)` prices
+  a projection made from the estimator's `base` over text nobody has extracted — which the module
+  says in the one place a caller reads before using either.
+- **The path choice was the same byte-based mistake F-2 fixed, in a second place.** A text ingest
+  chose json-ast or surface from its widest window's *byte* length against a 4 KiB bound, so one
+  expression in Russian took the surface path where the same passage in English took json-ast.
+  `path::choose_tokens` asks it in tokens. Found by running the phase exit in two languages; see
+  §6 TX-P5 step 5.
 
 ### 3.8 Substrate index (draft 3 §14.1–14.3)
 
@@ -1468,8 +1483,10 @@ New passes appended after `CommitmentSupport`, as the enum's comment requires:
 | `src/repair.rs` | `needs_repair` treats `E442` like `E060`; a text-ingest variant of `salvage` that keeps a unit whose only error is `E307`, applying §3.4's cap. `UNIT_LOCAL` is unchanged for prose ingest. |
 | `src/prompt.rs` | templates `ingest.text.json` / `ingest.text.surface`: node-per-line rendering inside `FENCE`, the digest inside `DIGEST_FENCE`, the language instruction for `source` / `pivot:L`, the `ingest:node` field; `neutralise_fences(input) -> (String, bool)` (`W443`). |
 | `src/recipe.rs` | `Conditions` gains `lang_policy`, `normaliser` (V1/V2, from SMYSL-2.1), `estimator`, `window_level`, `digest_policy` (budget and ranking id), `segmenter` and `reader` ids. Pushed in `push_shared`, so `family()` still drops only provider and model. |
-| `src/text/journal.rs` (new) | key `(alias, tid, node range, recipe)` → `{ staged batch hash, digest hash, tokens in/out, quote verdicts }`; stored in the redb `journal` table (or `<library>/journal.cbor` without `substrate-redb`). Rerun skips completed keys; within one expression a part extracted under an earlier manifest is skipped; `--reextract` ignores the journal for the head manifest. Resume after kill loses at most the batch in flight, because a key is written only after its batch is staged. |
+| `src/text/cost.rs` (new, step 5) | the cost report (§3.7): `cost(&Journal, Option<&alias>) -> CostReport`, one `Row` per language plus a total, each with windows, calls, repair turns, tokens, verdicts and the entries it could not price. `Row::retry_rate` is §3.7's `r` — repairs per *first attempt* — and `tokens_per_window`/`project` are the measured route, which the two must not be combined. |
+| `src/text/journal.rs` (new) | key `(alias, tid, node range, recipe)` → `{ staged batch hash, digest hash, tokens in/out, quote verdicts }`; step 5 adds the window's `lang`, its `calls` and its repair turns, and makes the token counts **the window's own** rather than the run's running total; stored in the redb `journal` table (or `<library>/journal.cbor` without `substrate-redb`). Rerun skips completed keys; within one expression a part extracted under an earlier manifest is skipped; `--reextract` ignores the journal for the head manifest. Resume after kill loses at most the batch in flight, because a key is written only after its batch is staged. |
 | `src/lib.rs` | `Ingestor::ingest_text`, `link`, `summarise`; `chunk` stays `pub(crate)`. |
+| `src/path.rs` (step 5) | `choose_tokens`, the path rule asked in **tokens** rather than bytes, with `SMALL_OUTPUT_TOKENS = SMALL_OUTPUT_THRESHOLD / 4`. The byte form sent a Russian expression down the surface path where the same passage in English took json-ast; `ingest_text` uses the token form and `TextReport::path` reports which was taken. |
 | `src/same_as.rs` (new) | turns engine proposals into staged `x.text/same-as` relations with tool attestations; `lexical` proposals above the recipe's threshold, or judged (OQ-44). |
 
 Pivot policy: a second pass over `source`-policy units of the scope, one unit per source unit,
@@ -1538,7 +1555,7 @@ Cmd { name: "same-as",   about: "Propose same-as edges; derive classes",        
 | `date set <target>` | `--axis said\|composed\|about --value EDTF\|offset:MS\|<allen>:<target> [--basis UID]` | pure | P3 |
 | `date order <a> before <b>` | `[--basis UID]` (sugar for a relative `date set`) | pure | P3 |
 | `date show <target>` | `[--axis A] [--why]` | pure | P3 |
-| `ingest --text <alias\|mid>[#range]` | `--lang-policy source\|pivot:L [--reextract] [--digest-budget N] [--window-level L] [--single-pass]` | model | P5 |
+| `ingest --text <alias\|mid>[#range]` | `--lang-policy source\|pivot:L [--reextract] [--digest-budget N] [--window-level L] [--single-pass] [--cost]` | model | P5 |
 | `link` | `--scope <alias\|mid…> [--budget N]` (an `sq` scope once SMYSL-2.5 lands) | model | P7 |
 | `summarise` | `--scope … --levels chapter,book` | model | P7 |
 | `same-as propose` | `--engine identical-span\|lexical\|anchored [--scope …]` (`semantic` reserved for SMYSL-2.5) | pure per engine; mixed as a command | P7 |
@@ -1662,6 +1679,7 @@ a later edit that made `reader-slack` a default feature has to be argued rather 
 | locks | second writer gets `E445` with the holder; `--break-lock`; library lock then shard locks in name order |
 | store | manifest-only append leaves `adjacency` untouched; `by_tid`/`by_mid` agree with `units_with_source_prefix("t3:<full tid>#")`; heads and `W418` |
 | ingest | windows never split a node except with `W447`; owned ranges partition the text; span attachment order (named node, owned, other owned, overlap); `W419` on Psalm 136's refrain; `Absent` → no span, cap per §3.4, `W441`; `ingest:quote` removed when a span is attached; tool-owned fields dropped (`W444`); `E442` on a uid outside the digest |
+| cost | the retry rate is repairs over *first attempts* and not over calls; rows are per language and never averaged; an alias nobody extracted has no figures rather than zeroed ones; a manifest with no language is a row of its own; an entry written before the per-window fields is counted and left out of every sum; a projection carries the repairs it measured |
 
 ### 5.2 Integration tests
 
@@ -1688,6 +1706,18 @@ a later edit that made `reader-slack` a default feature has to be argued rather 
   fences; a scripted "obedient" answer that cites a store uid outside the digest (`E442`), claims
   `measured` (rule T), supplies `published`/`observed`/`text:speaker`/`lang` (`W444`), or invents a
   relation kind `supersedes` (refused today) never reaches a staged record unchanged.
+- **The phase exit** (`crates/smysl-ingest/tests/phase_exit.rs`, added in TX-P5 step 5): the four
+  clauses of §6 TX-P5 step 5 that a scripted provider can measure — resume after a truncated
+  journal re-sends exactly one window of eight and the store is unchanged; span coverage, with a
+  control at 0.857 built from a quote the window joins and the part does not; entity duplication
+  across nine windows of a chat reading, against the speakers the reading has; and the cost
+  report, per window and per language, with a control that drives the retry rate off zero.
+- **GE-T2** (`crates/smysl-ingest/tests/ge_t2.rs`, added in TX-P5 step 5): the `identical-span`
+  figure in English and Russian, a drifting pass, a single pass, a spanless unit — and that both
+  languages choose one ingest path. The live arm (`SMYSL_GE_T2`, `SMYSL_INGEST_LIVE`) reports the
+  clause as owed when it is given no corpus.
+- **CLI cost report** (`tests/cmd_ingest_cost.rs`): `--cost` needs no provider and no `--yes`, and
+  an expression the journal has never seen is told so rather than priced at zero.
 - **CLI gates**: `cli-surface.txt`, `dispatch.rs`, `command_table_matches_section_23`,
   `xtask determinism` with the new registrations, `xtask check-purity` with `smysl-text` in
   `PURE_CRATES`.
@@ -1764,7 +1794,7 @@ The `.expected` format is the existing one (`fixtures/README.md`): exact code se
 | **GE-T4** (attribution fairness) | before TX-P5 | 200 hand-checked units per tier-1 language under normaliser v1 and v2 (SMYSL-2.1); v2 false-`Absent` > 1% in any language blocks TX-P5 |
 | **GE-T13** (effective time) | TX-P3 | synthetic chats with planted skews plus a public chronology with known relative orders; P-E4/P-E5 on real data; any planted skew undetected, or any false contested interval on consistent data, blocks TX-P4. **Ran in TX-P3 step 5** (`crates/smysl-text/tests/ge_t13.rs`), and three of its four clauses are met. *Synthetic chats with planted skews:* 64 generated chats, each a chain of messages quoting the one before it with one instant moved — every skew that contradicts an ordering is detected and every skew that leaves every ordering true is **not** reported, which is the half that matters equally: a detector that flagged everything would pass the first clause and fail the gate. *No false contested interval on consistent data:* the three chat fixtures, unmodified, report nothing. *P-E4/P-E5 on real data:* the same fixtures, with the real timestamps and the real reply graph — `telegram/1`'s `reply` and `slack/1`'s `thread` give five orderings between them, `whatsapp.txt` gives none because the export format records no reply — every interval contains the instant the export recorded, every planted skew is found, and one window dating with a `cited` basis puts the message back. The **units are synthesised**, and that is stated in the harness: a chat reaches a unit only through ingest, which is TX-P5, so there is no store of units from a chat for a gate that blocks TX-P4 to read. One row per message at its recorded instant and an `x.text/quotes` edge per reply is what ingest will build minus the model, which makes the *data* real and the units this harness's. *A public chronology with known relative orders* is **owed**: it is material this repository does not hold, and authoring one here would make it a development set — the same shape as GE-T1's Bibles and TX-P2 step 1's boundary gold. `SMYSL_CHRONOLOGY=<file>` (a TSV of `earlier<TAB>later` over EDTF dates) measures that clause with no code change; without it the harness says the clause is owed rather than passing quietly. |
 | ~~**GE-T14** (part size)~~ | ~~end of TX-P2~~ | **Ran in TX-P2 step 6; the curve is in §3.1 and the default is fixed at 1 KiB / 4 MiB.** Three of the four axes are independent of the size — growth costs at most two parts, a same-length correction one, a re-length every part after it — so the only trade is object count and catalog size against redaction granularity, and 64 KiB made one redaction remove sixteen days of a conversation. The measurement is synthetic and says so: every axis is a function of the structure alone, so the material still owed is only whether the node-size distributions match real corpora. `crates/smysl-text/tests/part_size.rs` asserts the curve rather than printing it. |
-| **GE-T2** (extraction stability) | rerun at TX-P5 | under the consensus policy (§3.4), not the single-pass policy draft 3 assumed. Stability is measured as `identical-span` agreement between the two passes — computed, not judged — and reported per language. The judged `J_class` form of GE-T2 waits for GE-T9 with GE-T5, for the reason in the row below. S0's pilot: `J_class` 1.000 local, 0.327 hosted, against a 0.6 threshold. |
+| **GE-T2** (extraction stability) | rerun at TX-P5 | under the consensus policy (§3.4), not the single-pass policy draft 3 assumed. Stability is measured as `identical-span` agreement between the two passes — computed, not judged — and reported per language. The judged `J_class` form of GE-T2 waits for GE-T9 with GE-T5, for the reason in the row below. S0's pilot: `J_class` 1.000 local, 0.327 hosted, against a 0.6 threshold. **Ran in TX-P5 step 5** (`crates/smysl-ingest/tests/ge_t2.rs`): the **instrument** is met and the **corpus is owed**. `TextReport::agreement` records the figure per run and `TextReport::lang` carries the language it is reported under, so the grouping is data rather than a caller's memory. Measured scripted: 1.000 in English and in Russian where both passes found the same places, 0.500 where the second pass drifted, `None` for a single pass — and that last one was a defect, since one pass agrees with itself by construction and `Agreement::rate` used to divide anyway. The two-language arm earned its keep: it found that the ingest **path** was chosen in bytes, so the Russian corpus was being extracted through the surface parser and the English one through json-ast, which would have made a per-language figure a figure about two pipelines. What is **owed** is the measurement itself, for GE-T13's reason — a corpus is material this repository does not hold, and it is the phase precondition GE-T4's own 200 hand-checked units per tier-1 language. `SMYSL_GE_T2=<dir>` with `SMYSL_INGEST_LIVE=1` measures it with no code change, against whichever provider the machine can reach; without them the harness says the clause is owed rather than passing quietly. The figure is **reported, not thresholded**: the computed form has no bar, because the bar it had (0.6) belongs to the judged form and that waits for GE-T9's human α. |
 | GE-T5 within-language arm, GE-T11 | TX-P7 | as draft 3 §23, **except the threshold** (§1.1 item 5, argued in §0.1). Draft 3's "precision ≥ 0.9 at recall 0.7" is measured against a gold, and S0's gold is three model coders whose binary α is 0.600 [0.550, 0.646] — so 0.9 is above what that gold can support, and the pilot's 0.835 and 0.712 measure the gold rather than the engines. Restated: an engine passes when its agreement with the pooled gold, scored on the coders' own scale, is **not distinguishable from the coders' agreement with each other** — it joins the pool rather than beating it. The absolute bar returns when **GE-T9** supplies a human α, which is still owed; until then every class figure is reported against the model-model ceiling, and `attested:2` is the default (§3.6). The cross-lingual arm of GE-T5 is SMYSL-2.5 and waits for TX-P10's S1 embeddings. |
 
 ### 5.6 Cross-implementation (C-Read additions, D-8)
@@ -3170,6 +3200,70 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    from the journal that replaces draft 3 §7.7's planning figures — now with a per-language retry
    rate as a separate term (§3.7), measured **after** F-2, since every non-English figure S0 has
    was taken under the bound F-2 replaced. The phase is not sized from a planning number at all.
+   **Measured 2026-10-12.** `smysl_ingest::text::cost` (the report), four journal fields, the
+   `ingest --text <who> --cost` command, and two harnesses:
+   `crates/smysl-ingest/tests/phase_exit.rs` (6 tests) and `crates/smysl-ingest/tests/ge_t2.rs`
+   (5 tests). **Three of the six clauses are met here, one is built and reported, and two are
+   owed** — and the division is not about effort, it is about what a provider that says what the
+   test told it to say can establish.
+
+   | clause | figure |
+   |---|---|
+   | resume loses ≤ one batch | **met.** 8 windows, the journal truncated mid-append, **1** window re-sent, and the store unchanged afterwards |
+   | ≥ 95% carry a span | **met, 1.000**, against a control at **0.857** |
+   | entity duplication < 2% | **met, 0.000.** 3 entity records for 3 speakers across 9 windows |
+   | probe-set gate (3b) | **owed.** No reader marks reported speech; the gap is the readers' (`\wj`, `<q who>`) |
+   | GE-T2 rerun | **instrument met, corpus owed.** 1.000 scripted in en and ru, 0.500 on a drifting pass, `None` on one pass |
+   | cost report | **built and measured.** Per language, from the journal, with the retry rate as its own term |
+
+   **Four things this step had to settle, and three of them are defects it found.**
+
+   **Step 4's journal recorded the *run's* running total against each window.** `input_tokens`
+   was `report.usage.input_tokens` at the moment the window was journalled, so summing a corpus
+   charges the first window once per window — the figure grows with position. It is the window's
+   own now, by difference, and three fields joined it: `lang`, `calls` and `retries`. An entry
+   written before this release has no call count, and that absence is what `Entry::priced` reads:
+   such entries are counted in `Row::unpriced` and left out of every total, because a sum of two
+   different measurements is a figure about neither. Rule X in the small, with a reason.
+
+   **`Agreement::rate` reported 1.000 for a single pass.** One pass produced every key every pass
+   produced, so `agreed == comparable` by construction, and the function's own documentation said
+   the rate was `None` for it — which was false. The document path never hit it because step 3a
+   wrapped the field in an `Option` and only filled it for two passes; the text path reports the
+   agreement as a plain field, which is how it surfaced. `rate` now requires two passes, and the
+   test that said "one pass agrees with itself" asserts the `None` beside the count.
+
+   **The path was chosen in bytes, so the same corpus in Russian took a different pipeline.**
+   `path::choose` compares an expected output size against 4 KiB; a text ingest passed its widest
+   window's **byte** length, and two bytes per Cyrillic character put a Russian expression over
+   the bound where the same passage in English was under it — so the Russian run's answers were
+   parsed by the *surface* parser while the English run's went through json-ast, which §3.9.2 does
+   not treat as equivalent. GE-T2 reports per language, and the figure would have been about two
+   pipelines. `path::choose_tokens` asks the same question in the unit a window is already
+   budgeted in, with the threshold expressed as `SMALL_OUTPUT_THRESHOLD / 4` so English does not
+   move. This is F-2's lesson in a second place: F-2 replaced a byte-based *window* bound, and
+   this was the byte-based *path* bound beside it. `ge_t2.rs` asserts both languages choose one
+   path, and `TextReport::path` reports which — a run says, because it was not configured.
+
+   **What makes the coverage clause a measurement is a quote the window holds and a part does
+   not.** A quote the window does *not* hold never reaches the figure: the repair loop refuses it
+   (`SMY-E307`) and the unit is degraded to opaque prose, which removes the quote, so attachment
+   never sees it. The case the clause is about is the one step 3's contiguity rule exists for — a
+   quote spanning two nodes that the *window* joins and the *part* does not, which is staged with
+   no span and a capped status (`SMY-W441`). That is the control, at 0.857, and it is also why
+   `TextReport::spanless` and `Agreement::spanless` are two counters: the first counts units that
+   attributed a quote and got no span, the second counts units that cannot establish
+   `identical-span` however they came to have no span.
+
+   **What is owed, and the shape of both debts is the same.** The probe set of 3b and GE-T2's
+   corpus are *material*, not code: the harnesses take them (`SMYSL_PROBE_SET`,
+   `SMYSL_GE_T2=<dir>` with `SMYSL_INGEST_LIVE=1`) and report the clause as owed without them,
+   which is GE-T13's precedent. Authoring either here would make it a development set chosen by
+   whoever wrote the extractor. The phase's precondition **GE-T4** is the same debt a third time,
+   and it is why the extraction steps can be *built* and reported here but not *passed*. The cost
+   report is the one clause nothing blocks any more: F-2 shipped in 1.10.0, so the per-language
+   figures wait only for a corpus and a caller's consent to spend a credential — and when they
+   come, they come out of the journal rather than out of a coefficient.
 
 ### TX-P7 — proposition layer and linking
 

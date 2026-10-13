@@ -460,12 +460,13 @@ Exits 5 while anything is open and 0 when nothing is, so a pipeline can gate on 
     ([`--digest-budget`], [`N`], [Tokens of ledger digest sent with each window, so a window is not extracted as though the expression began there. `0` sends none; 512 by default.]),
     ([`--reextract`], [—], [Ignore the journal for this expression and extract every window again. The same answers give the same uids, so a re-extraction that changed nothing grows the corpus by nothing.]),
     ([`--single-pass`], [—], [One extraction per window instead of two, and recorded in the recipe. Two is the default for `--text` alone: S0 measured a model bit-identical across 145 runs at temperature 0, so a second pass at 0 is the only one that can agree with the first.]),
+    ([`--cost`], [—], [With `--text`: report what the journal says this expression cost, per language, and make no call. Needs no provider and no `--yes` — it reads a file and prints a measurement.]),
   ),
 )
 
 #callout(label: "Note")[
   `--text` and a `FILE` are two different ingests, and the flags above divide between them.
-  `--window-level`, `--digest-budget`, `--reextract` and `--single-pass` mean nothing to a
+  `--window-level`, `--digest-budget`, `--reextract`, `--single-pass` and `--cost` mean nothing to a
   document, which has no reading, no expression and nothing already extracted from it; and
   `.smysl/staged.smy` means nothing to a text ingest, which commits per window. Everything else
   — the rung, the granularity, the path, the repair budget, the language policy, the prompt

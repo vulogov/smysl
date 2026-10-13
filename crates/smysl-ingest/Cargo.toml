@@ -84,8 +84,23 @@ required-features = ["text", "model"]
 name              = "redteam"
 required-features = ["text", "model"]
 
+# The phase exit's own figures (§6 TX-P5 step 5): resume, span coverage, entity duplication and
+# the cost report. The entity clause needs a reading with *speakers* in it, which is a chat
+# reader — hence the second dev-dependency feature below.
+[[test]]
+name              = "phase_exit"
+required-features = ["text", "model"]
+
+# GE-T2's rerun under the consensus policy (§5.5).
+[[test]]
+name              = "ge_t2"
+required-features = ["text", "model"]
+
 [dev-dependencies]
 # `tests/text_gate.rs` and `tests/redteam.rs` build a real library on disk, which means reading
 # a file into one: `txt/1` is the smallest reader that produces nodes, and a dev-dependency is
 # the only place a reader belongs — nothing in the published tree of this crate reads a file.
-smysl-text     = { workspace = true, features = ["reader-txt"] }
+# `tests/phase_exit.rs` adds `reader-telegram`: the entity-duplication clause measures one
+# holder across many windows, and a holder comes from a node with a *speaker* — which no
+# scripture reader produces and every chat reader does.
+smysl-text     = { workspace = true, features = ["reader-txt", "reader-telegram"] }

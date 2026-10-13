@@ -93,6 +93,16 @@ impl<'l> TextIngest<'l> {
 pub struct TextReport {
     pub alias: String,
     pub mid: Option<Mid>,
+    /// The language of the expression, as its manifest records it. Here because every figure
+    /// below is reported *per language* by the phase exit (§6 TX-P5 step 5) and by GE-T2, and a
+    /// report that did not carry one would have to be grouped by the caller remembering.
+    pub lang: String,
+    /// The path every call of this run took (D-9), or `None` for a run that made none.
+    ///
+    /// Reported because it is chosen rather than configured, and because §3.9.2 does not treat
+    /// the two as equivalent: a figure compared across two corpora that took different paths is
+    /// a figure about two pipelines. That is not hypothetical — see `choose_tokens`.
+    pub path: Option<crate::IngestPath>,
     /// Windows the run was responsible for.
     pub windows: usize,
     /// Windows the journal said were already done under this recipe.
@@ -107,6 +117,17 @@ pub struct TextReport {
     pub spanless: usize,
     pub degraded: usize,
     pub repaired: usize,
+    /// Repair turns, over the whole run: `calls - windows * passes` where nothing was skipped.
+    ///
+    /// Not [`smysl_provider::Usage::retries`], which counts a transport retrying one call. This
+    /// is the repair loop — a call made because the answer before it did not hold up — and it is
+    /// §3.7's `r`, the term the cost model multiplies a window's base cost by.
+    pub retries: usize,
+    /// What the passes agreed about, summed over the windows of this run (§3.4).
+    ///
+    /// This is GE-T2's figure under the consensus policy: `identical-span` agreement, computed
+    /// rather than judged, which §5.5 asks to be reported per language — hence [`TextReport::lang`].
+    pub agreement: crate::Agreement,
     pub verdicts: Verdicts,
     pub usage: Usage,
     pub recipe: Option<[u8; 32]>,
@@ -123,6 +144,23 @@ impl TextReport {
     pub fn span_coverage(&self) -> Option<f64> {
         let total = self.spanned + self.spanless;
         (total > 0).then(|| self.spanned as f64 / total as f64)
+    }
+
+    /// `identical-span` agreement between the passes, or `None` where nothing was comparable.
+    ///
+    /// GE-T2's stability figure (§5.5). `None` for a single-pass run, and for a run whose units
+    /// all came out spanless, for [`crate::Agreement::rate`]'s reason.
+    pub fn stability(&self) -> Option<f64> {
+        self.agreement.rate()
+    }
+
+    /// §3.7's retry term: repair turns per first attempt, or `None` where nothing was attempted.
+    ///
+    /// The cost of a window is `base(tokens) * (1 + r)`, so the denominator is the calls that
+    /// were *not* repairs — one per pass — and not the total.
+    pub fn retry_rate(&self) -> Option<f64> {
+        let attempts = self.calls.checked_sub(self.retries)?;
+        (attempts > 0).then(|| self.retries as f64 / attempts as f64)
     }
 }
 
@@ -167,6 +205,7 @@ impl Ingestor<'_> {
         let mut report = TextReport {
             alias: alias.clone(),
             mid: Some(mid),
+            lang: manifest.lang.as_str().to_string(),
             passes: self.opts.passes.count(),
             ..TextReport::default()
         };
@@ -204,13 +243,25 @@ impl Ingestor<'_> {
         report.windows = windows.len();
 
         // The path is chosen from the **largest window**, not from the size of the expression.
-        // `path::choose` reads its third argument as the output a call is expected to produce,
+        // `path::choose` reads its size argument as the output a call is expected to produce,
         // and for a document that is the document; for a text ingest it is one window, which is
         // bounded by the budget above. Passing the expression's length would send every Bible
         // down the surface path on the strength of its total size, when each call sees a few
         // verses (D-9, §3.9.2's "json-ast path preferred").
-        let widest = windows.iter().map(|w| w.text.len()).max().unwrap_or(0);
-        let path = crate::path::choose(&caps, Task::ContentIngest, widest, requested).path;
+        //
+        // In **tokens** and not bytes, which is `choose_tokens` rather than `choose`: a window
+        // is filled to a token budget, and asking the byte question of it makes the path depend
+        // on the script. Two bytes per Cyrillic character sent a Russian expression down the
+        // surface path where the same passage in English went down the json-ast one — found by
+        // measuring GE-T2 in two languages (§6 TX-P5 step 5), and the figure would otherwise
+        // have been about two pipelines.
+        let widest = windows
+            .iter()
+            .map(|w| self.opts.estimator.count(&w.text))
+            .max()
+            .unwrap_or(0);
+        let path = crate::path::choose_tokens(&caps, Task::ContentIngest, widest, requested).path;
+        report.path = Some(path);
 
         // The recipe, for the journal key and for every attestation of this run. One per run and
         // not one per window: that is what lets two extractions of one expression corroborate
@@ -278,6 +329,15 @@ impl Ingestor<'_> {
                 continue;
             }
 
+            // What this window costs is a difference, because `usage` and `calls` are the run's
+            // and a journal entry is one window's. Step 4 recorded the running total, which
+            // summed over a corpus gives a figure that counts the first window once per window.
+            let before = (
+                report.usage.input_tokens,
+                report.usage.output_tokens,
+                report.calls,
+            );
+
             let digest = super::digest::digest(t.lib.store(), &scope, t.digest_budget);
             let scope_for_answer = if digest.is_empty() {
                 Scope::for_text(BTreeMap::new(), BTreeSet::new())
@@ -313,7 +373,10 @@ impl Ingestor<'_> {
                 );
             }
 
-            let mut units: Vec<UnitCore> = Vec::new();
+            // One list per pass, kept apart until the agreement is computed: two passes that
+            // found one claim produce one uid, so a flattened batch cannot answer GE-T2's
+            // question (§3.4, step 3a).
+            let mut per_pass: Vec<Vec<UnitCore>> = Vec::new();
             let mut entities: Vec<UnitCore> = Vec::new();
             let mut relations: Vec<Relation> = Vec::new();
             let mut labels: BTreeMap<Label, Uid> = BTreeMap::new();
@@ -363,9 +426,20 @@ impl Ingestor<'_> {
                 for a in &attached.attachments {
                     verdicts.count(a.support);
                 }
-                units.extend(attached.units);
+                per_pass.push(attached.units);
                 entities.extend(attached.entities);
             }
+
+            // GE-T2 under the consensus policy, this window's share of it. Summed rather than
+            // averaged: a window with two comparable places weighs twice a window with one, and
+            // a mean over windows would let a window that extracted a single claim outvote a
+            // chapter.
+            let window_agreement = crate::consensus::agreement(&per_pass);
+            report.agreement.passes = window_agreement.passes;
+            report.agreement.comparable += window_agreement.comparable;
+            report.agreement.agreed += window_agreement.agreed;
+            report.agreement.spanless += window_agreement.spanless;
+            let units: Vec<UnitCore> = per_pass.into_iter().flatten().collect();
 
             report.verdicts.present += verdicts.present;
             report.verdicts.loose += verdicts.loose;
@@ -413,12 +487,21 @@ impl Ingestor<'_> {
             }
             scope.extend(staged.units.iter().map(smysl_core::canonical_uid));
 
+            // This window's calls, and of them the repair turns: one first attempt per pass,
+            // everything beyond that is the repair loop — which is the 73% S0 measured and the
+            // `r` of §3.7's cost model.
+            let window_calls = report.calls.saturating_sub(before.2);
+            let retries = window_calls.saturating_sub(self.opts.passes.count());
+            report.retries += retries;
             let entry = Entry {
                 key,
                 batch: batch_hash(&staged.units),
                 digest: digest.hash,
-                input_tokens: report.usage.input_tokens,
-                output_tokens: report.usage.output_tokens,
+                input_tokens: report.usage.input_tokens.saturating_sub(before.0),
+                output_tokens: report.usage.output_tokens.saturating_sub(before.1),
+                lang: report.lang.clone(),
+                calls: window_calls as u32,
+                retries: retries as u32,
                 verdicts,
             };
             if let Err(e) = journal.record(entry) {
