@@ -150,9 +150,18 @@ pub struct Entry {
     /// Calls this window cost, repair turns included. Zero marks an entry written before this
     /// release, whose token figures are the run's running total rather than the window's.
     pub calls: u32,
-    /// Of those calls, the repair turns: `calls - retries` is the number of first attempts,
-    /// which is one per pass. `r = retries / first attempts` is §3.7's retry term.
+    /// Of those calls, the repair turns: `calls - retries - pivots` is the number of first
+    /// attempts, which is one per pass. `r = retries / first attempts` is §3.7's retry term.
     pub retries: u32,
+    /// Of those calls, the pivot pass's (`--lang-policy pivot:<lang>`): one per window that had
+    /// anything to translate, and zero under the default policy.
+    ///
+    /// Neither a pass nor a repair turn, and in the entry so that it is neither in the
+    /// arithmetic: a window that was pivoted would otherwise read as a window that repaired, and
+    /// a language's retry rate would move with the policy it was extracted under rather than
+    /// with the model. Its tokens *are* in the two counts above, because they are what the
+    /// window cost.
+    pub pivots: u32,
     pub verdicts: Verdicts,
 }
 
@@ -167,9 +176,11 @@ impl Entry {
         self.calls > 0
     }
 
-    /// First attempts: one per pass, repair turns excluded.
+    /// First attempts: one per pass, repair turns and the pivot call excluded.
     pub fn attempts(&self) -> u32 {
-        self.calls.saturating_sub(self.retries)
+        self.calls
+            .saturating_sub(self.retries)
+            .saturating_sub(self.pivots)
     }
 }
 
@@ -193,6 +204,9 @@ mod keys {
     pub const LANG: u16 = 14;
     pub const CALLS: u16 = 15;
     pub const RETRIES: u16 = 16;
+    /// Added with the pivot policy, and absent — therefore zero — in every entry written under
+    /// `source`, which is every entry a journal of this release holds unless one was asked for.
+    pub const PIVOTS: u16 = 17;
 }
 
 /// A journal, open for reading and appending.
@@ -335,6 +349,7 @@ fn encode(e: &Entry) -> Vec<u8> {
     m.put(keys::LANG, |enc| enc.text(&e.lang));
     m.put(keys::CALLS, |enc| enc.uint(u64::from(e.calls)));
     m.put(keys::RETRIES, |enc| enc.uint(u64::from(e.retries)));
+    m.put(keys::PIVOTS, |enc| enc.uint(u64::from(e.pivots)));
     let mut enc = Enc::new();
     m.finish(&mut enc);
     enc.into_bytes()
@@ -355,6 +370,7 @@ fn decode(bytes: &[u8]) -> Option<Entry> {
     let mut lang = String::new();
     let mut calls = 0u32;
     let mut retries = 0u32;
+    let mut pivots = 0u32;
     let mut prev = None;
     for _ in 0..n {
         let k = d.map_key(prev).ok()?;
@@ -390,6 +406,7 @@ fn decode(bytes: &[u8]) -> Option<Entry> {
             keys::LANG => lang = d.text().ok()?.to_string(),
             keys::CALLS => calls = d.uint().ok()? as u32,
             keys::RETRIES => retries = d.uint().ok()? as u32,
+            keys::PIVOTS => pivots = d.uint().ok()? as u32,
             // Rule X in the small: a key a later release added is skipped, not refused. A
             // journal is read by whatever build happens to resume a run.
             _ => {
@@ -411,6 +428,7 @@ fn decode(bytes: &[u8]) -> Option<Entry> {
         lang,
         calls,
         retries,
+        pivots,
         verdicts,
     })
 }
@@ -437,6 +455,7 @@ mod tests {
             lang: "en".to_string(),
             calls: 3,
             retries: 1,
+            pivots: 0,
             verdicts: Verdicts {
                 present: 3,
                 loose: 1,

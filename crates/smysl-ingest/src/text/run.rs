@@ -123,6 +123,18 @@ pub struct TextReport {
     /// is the repair loop — a call made because the answer before it did not hold up — and it is
     /// §3.7's `r`, the term the cost model multiplies a window's base cost by.
     pub retries: usize,
+    /// Units the pivot pass wrote, and source units it did not cover (`SMY-W453`).
+    ///
+    /// Both zero under `--lang-policy source`, which is the default: there is no pass to run.
+    /// Counted as the pass produced them rather than as the store holds them, because what a
+    /// reader wants from these two is the pass's coverage — the staged total is `units`.
+    pub pivoted: usize,
+    pub pivot_missing: usize,
+    /// Calls the pivot pass made: one per window that had anything to translate.
+    ///
+    /// Separate from the repair loop and separate from the passes, because it is neither. See
+    /// [`TextReport::retry_rate`].
+    pub pivot_calls: usize,
     /// What the passes agreed about, summed over the windows of this run (§3.4).
     ///
     /// This is GE-T2's figure under the consensus policy: `identical-span` agreement, computed
@@ -158,8 +170,16 @@ impl TextReport {
     ///
     /// The cost of a window is `base(tokens) * (1 + r)`, so the denominator is the calls that
     /// were *not* repairs — one per pass — and not the total.
+    ///
+    /// The pivot pass is out of both terms. It is one call per window with no repair loop of its
+    /// own, so counting it as a first attempt would make the same corpus report a lower `r` for
+    /// having been pivoted — a figure about the policy rather than about the model. Its tokens
+    /// are in `usage` and in the journal, where a cost report reads them.
     pub fn retry_rate(&self) -> Option<f64> {
-        let attempts = self.calls.checked_sub(self.retries)?;
+        let attempts = self
+            .calls
+            .checked_sub(self.retries)?
+            .checked_sub(self.pivot_calls)?;
         (attempts > 0).then(|| self.retries as f64 / attempts as f64)
     }
 }
@@ -275,6 +295,7 @@ impl Ingestor<'_> {
             .with_temperature(self.opts.temperature)
             .with_normaliser(self.opts.normaliser)
             .with_lang_policy(self.opts.lang_policy)
+            .with_pivot_lang(self.opts.pivot())
             .with_estimator(self.opts.estimator)
             .with_passes(self.opts.passes)
             .with_framing(crate::prompt::FRAMING)
@@ -451,12 +472,50 @@ impl Ingestor<'_> {
             let mut seen = BTreeSet::new();
             batch.retain(|u| seen.insert(smysl_core::canonical_uid(u)));
 
+            // The pivot pass (§4.3.4), in this window and in this batch. One commit holds the
+            // units and their translations, which is what keeps the resume property true of the
+            // policy as well: a kill between the two commits would otherwise leave a window
+            // journalled as done with half of what it owes in the store.
+            let mut window_pivot_calls = 0usize;
+            if let Some(lang) = self.opts.pivot() {
+                let (pivoted, calls) = self.pivot_window(provider, lang, &batch, &mut report.usage);
+                window_pivot_calls = calls;
+                report.calls += calls;
+                report.pivot_calls += calls;
+                report.pivoted += pivoted.units.len();
+                report.pivot_missing += pivoted.missing.len();
+                report.diagnostics.extend(pivoted.diagnostics);
+                relations.extend(pivoted.relations);
+                for u in pivoted.units {
+                    if seen.insert(smysl_core::canonical_uid(&u)) {
+                        batch.push(u);
+                    }
+                }
+            }
+
+            // `x.text/v1`, declared with the first batch that uses it (A-11, step 2).
+            //
+            // Found by the pivot pass, and not caused by it: an `x.text/translates` edge in a
+            // store with no declaration is `SMY-W013` on every check of it afterwards — "a
+            // warning that was correct and unactionable", which is what `smysl-check`'s own
+            // test calls the state this repository was in before the declaration shipped. A
+            // text ingest has been writing `x.text/entity` units into undeclaring libraries all
+            // along; the edge is simply the first record whose *kind* the check looks up.
+            //
+            // Staged with the batch rather than appended first, because appending outside
+            // staging is what rule S forbids, and once rather than per window, because the
+            // store the next window sees already holds it.
+            let schemas = if uses_text_schema(&batch, &relations) && !declares_text(t.lib.store()) {
+                vec![smysl_core::schemas::text::decl()]
+            } else {
+                Vec::new()
+            };
             let staged = stage::prepare_under(
                 t.lib.store(),
                 batch,
                 relations,
                 labels,
-                Vec::new(),
+                schemas,
                 &attest,
                 Some(profile.clone()),
             );
@@ -489,9 +548,13 @@ impl Ingestor<'_> {
 
             // This window's calls, and of them the repair turns: one first attempt per pass,
             // everything beyond that is the repair loop — which is the 73% S0 measured and the
-            // `r` of §3.7's cost model.
+            // `r` of §3.7's cost model. The pivot pass's call is subtracted rather than counted
+            // as a repair: it is a different request, and a window that was pivoted would
+            // otherwise report a repair turn it never made.
             let window_calls = report.calls.saturating_sub(before.2);
-            let retries = window_calls.saturating_sub(self.opts.passes.count());
+            let retries = window_calls
+                .saturating_sub(self.opts.passes.count())
+                .saturating_sub(window_pivot_calls);
             report.retries += retries;
             let entry = Entry {
                 key,
@@ -502,6 +565,7 @@ impl Ingestor<'_> {
                 lang: report.lang.clone(),
                 calls: window_calls as u32,
                 retries: retries as u32,
+                pivots: window_pivot_calls as u32,
                 verdicts,
             };
             if let Err(e) = journal.record(entry) {
@@ -520,6 +584,77 @@ impl Ingestor<'_> {
         Ok(report)
     }
 
+    /// One pivot call for one window's batch (§4.3.4, `crate::text::pivot`).
+    ///
+    /// Returns what the pass produced and the calls it cost — one, or none where the window had
+    /// nothing to translate. There is **no repair loop** here, and the asymmetry with extraction
+    /// is deliberate: a repair turn exists to fix an answer that failed a check this crate can
+    /// run, and the only check available to a translation is whether a line came back. Asking
+    /// again for a line a model chose not to write doubles the cost of every pivoted window to
+    /// buy a line that would be unverifiable if it arrived. A missing line is reported
+    /// (`SMY-W453`) and a rerun under `--reextract` is the operator's to choose.
+    ///
+    /// A provider failure is a diagnostic and not a return, like every other failure in this
+    /// run: the extraction is already in the batch, and losing it because a translation could
+    /// not be fetched would be a worse outcome than a window with no translations in it.
+    fn pivot_window(
+        &self,
+        provider: &dyn smysl_provider::Provider,
+        lang: crate::PivotLang,
+        batch: &[UnitCore],
+        usage: &mut Usage,
+    ) -> (super::pivot::Pivoted, usize) {
+        let idx = super::pivot::translatable(batch);
+        let sources: Vec<&UnitCore> = idx.iter().map(|&i| &batch[i]).collect();
+        if sources.is_empty() {
+            return (super::pivot::Pivoted::default(), 0);
+        }
+
+        let template = crate::prompt::pivot_gists(lang.as_str());
+        let rendered = template.render(&super::pivot::render(&sources));
+        let caps = provider.caps();
+        let mut request = smysl_provider::Request::new(self.model_for(&caps), rendered)
+            .with_system(&template.system)
+            .with_max_output(self.opts.output_budget(&caps));
+        request.temperature = self.opts.temperature;
+
+        match provider.complete(&request) {
+            Ok(c) => {
+                usage.input_tokens += c.usage.input_tokens;
+                usage.output_tokens += c.usage.output_tokens;
+                usage.estimated |= c.usage.estimated;
+                usage.retries += c.usage.retries;
+                let answer = super::pivot::parse_answer(&c.text, sources.len());
+                (super::pivot::units(&sources, &answer, lang.as_str()), 1)
+            }
+            Err(e) => {
+                // Counted as a call on the same rule as `one_call`'s: an error the endpoint
+                // returned is a call made, and usually billed.
+                let billed = !matches!(
+                    e,
+                    ProviderError::Unreachable
+                        | ProviderError::OfflineViolation
+                        | ProviderError::Config(_)
+                        | ProviderError::StructuredUnsupported
+                );
+                let mut out = super::pivot::Pivoted::default();
+                out.missing
+                    .extend(sources.iter().map(|u| smysl_core::canonical_uid(u)));
+                out.diagnostics.push(
+                    Diagnostic::new(Code::W453)
+                        .with_message(format!(
+                            "the pivot pass could not be run for {} unit(s): {e}",
+                            sources.len()
+                        ))
+                        .with_suggestion(
+                            "they are staged in the source language only; a rerun asks again",
+                        ),
+                );
+                (out, usize::from(billed))
+            }
+        }
+    }
+
     /// The text template for this path, with a caller's override applied as elsewhere.
     fn text_template(&self, path: IngestPath, digest: bool) -> crate::prompt::Template {
         let base = match path {
@@ -531,6 +666,23 @@ impl Ingestor<'_> {
             None => base,
         }
     }
+}
+
+/// Whether a batch holds anything the `x.text/v1` declaration is about.
+fn uses_text_schema(batch: &[UnitCore], relations: &[Relation]) -> bool {
+    const PREFIX: &str = "x.text/";
+    batch.iter().any(|u| u.schema.as_str().starts_with(PREFIX))
+        || relations
+            .iter()
+            .any(|r| r.kind.as_str().starts_with(PREFIX))
+}
+
+/// Whether the store already carries that declaration, at any revision.
+fn declares_text(store: &smysl_graph::Store) -> bool {
+    store.iter().any(|r| {
+        matches!(r, smysl_core::Record::SchemaDecl(d)
+            if d.id.as_str() == smysl_core::schemas::text::ID)
+    })
 }
 
 /// A part, held so the windowing can borrow it.

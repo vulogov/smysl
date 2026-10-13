@@ -58,6 +58,67 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### One corpus in two languages, and the translation that is not an extraction
+
+`--lang-policy pivot:<lang>`, the last thing TX-P5 owed in code (SMYSL-2.4 §4.3.4, §5.2, F-6).
+Extraction runs under `source` as it always did, and then a second pass writes one unit per unit
+whose `gist` is in the language asked for, carrying the source unit in `deps` so rule M caps it
+and an `x.text/translates` edge back to it.
+
+**It is a translation and not a second extraction, and that is the whole design.** The quote
+stays the passage's own words — a translated quote could not be `Present` against the text it
+came from — so a pivot unit is a claim about the same bytes as its source, with the same span.
+The model is asked for a sentence and nothing else: the span, the status, the source and the
+payload are copied from the unit being translated, and the units are built here. A pivot pass
+therefore cannot invent a place, a claim or a relation, and the worst a bad answer can do is
+produce a wrong sentence or no sentence at all.
+
+**Three things the one-line plan did not say.** `body` and `detail` do not come along, because
+FC-1's `lang` is one field for every text field of a unit and a unit with an English gist and a
+Russian body would be lying about one of them — the pivot unit is an L0 statement whose L1 is
+one `deps` hop away. Entities are not translated, because A-2.4 rule 7 makes an entity's identity
+its name, its language and its expression, so translating `Иерусалим` would mint a second entity
+rather than add a language to one; saying those two are one thing is `x.text/same-as`, which is
+TX-P7's engine and its judgement to make. And the pass has **no repair loop**: a repair turn
+exists to fix an answer that failed a check, and the only check available to a translation is
+whether a line came back, so asking again would double the cost of every pivoted window to buy a
+line that would be unverifiable if it arrived. A missing line is `SMY-W453` and the unit is
+staged in its own language.
+
+**The call is out of the retry rate, and in the token counts.** §3.7's `r` is repair turns per
+first attempt, and a pivot call is a first attempt of a *different* request — translate these
+gists, not extract from this window. Counted as one, the same corpus would report a lower `r`
+for having been pivoted: a figure about the policy rather than about the model. So the journal
+records it separately (`pivots`), the cost report subtracts it from `attempts`, and its tokens
+stay where they belong, in what the window cost.
+
+**A type the semver gate sent back.** The plan wrote the policy as `Pivot(LangTag)` and it was
+built that way. `LangPolicy` has been an all-unit enum since 1.9, so `LangPolicy::Source as
+isize` compiles against it, and a variant carrying data takes those discriminants away —
+`enum_discriminants_undefined_non_unit_variant`, a major change, and a major change here is a
+2.0. Naming a language is not worth a major version, so `Pivot` is a unit variant and the tag is
+its parameter: `IngestOptions::pivot_lang` beside it, `IngestOptions::pivot()` the single place
+the two are read, and `LangPolicy::parse_with_lang` where `parse` keeps the signature it
+published. The gate caught it after the code was written and the tests passed, which is the
+argument for running it before a commit and not before a release.
+
+**Two defects found by building it.** An `x.text/translates` edge is the first record a text
+ingest stages whose *kind* the check looks up, and nothing had ever declared `x.text/v1` in a
+library — so every check of such a store reported `SMY-W013`, "a warning that is correct and
+unactionable", which is the state `smysl-check`'s own test describes. The declaration is staged
+with the first batch that uses the schema now, once per library. Entities had been in that state
+since step 3b; the edge is what made it visible. And `--lang-policy` carried a closed list of one
+value, so the flag could not have taken a language even once the policy existed.
+
+A recipe distinguishes `pivot:ru` from `pivot:en`, because they are two different things to have
+asked for and a recipe that called both `pivot` would let two incomparable corpora corroborate
+each other (§3.5). It pushes them as two components — the policy, then the language — so every
+`source` recipe is byte-identical to the one 1.9 computed. A document ingest refuses the policy before egress: it has no
+reading to attach a translation to, and handing back gists in the document's own language under a
+recipe that says `pivot:ru` is the one failure F-6's policy exists to rule out.
+
+What TX-P5 still owes is material: GE-T4, step 3b's probe set, GE-T2's corpus.
+
 ### A phase sized by what it measured, and three numbers that were measuring the wrong thing
 
 TX-P5 step 5, the phase exit. The six clauses of SMYSL-2.4 §6 TX-P5 step 5, a cost report that

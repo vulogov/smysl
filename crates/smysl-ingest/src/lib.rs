@@ -84,32 +84,117 @@ pub use attest::{attest, AttestOptions, AttestReport, Judgement, What};
 
 pub use consensus::{Agreement, Passes};
 
+/// A language tag small enough to copy.
+///
+/// [`LangPolicy`] has to carry the pivot language — a recipe that recorded `pivot` without
+/// saying *which* language would give two incomparable corpora one identity — and `LangPolicy`
+/// is `Copy`, which it has been since 1.9 and which cannot be taken back without a major
+/// version. A `LangTag` is a `String`, so it cannot go in the variant; the grammar is the only
+/// thing worth sharing, and [`LangTag::new`](smysl_core::LangTag) is what defines it.
+///
+/// So this is that grammar with the bound it already states — a tag is at most 35 bytes — held
+/// inline. Ordering is the byte ordering of the tag, because the unused bytes are zero and a
+/// shorter tag is a prefix of the longer ones it sorts before.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PivotLang {
+    tag: [u8; PivotLang::CAP],
+    len: u8,
+}
+
+impl PivotLang {
+    /// The longest tag `LangTag::new` admits.
+    pub const CAP: usize = 35;
+
+    /// Parse a tag, with `LangTag`'s grammar and no second opinion about it.
+    ///
+    /// The error names the tag rather than the grammar, because the caller that reaches this is
+    /// `LangPolicy::parse` and what it prefixes is a policy name.
+    pub fn new(s: &str) -> Result<PivotLang, String> {
+        let tag =
+            smysl_core::LangTag::new(s).map_err(|_| format!("`{s}` is not a language tag"))?;
+        let b = tag.as_str().as_bytes();
+        // Unreachable while `CAP` is `LangTag`'s own bound, and checked rather than asserted so
+        // that a later widening there is a refusal here instead of a panic.
+        if b.len() > PivotLang::CAP {
+            return Err(format!("`{s}` is longer than {} bytes", PivotLang::CAP));
+        }
+        let mut buf = [0u8; PivotLang::CAP];
+        buf[..b.len()].copy_from_slice(b);
+        Ok(PivotLang {
+            tag: buf,
+            len: b.len() as u8,
+        })
+    }
+
+    pub fn as_str(&self) -> &str {
+        // Valid UTF-8 by construction: `LangTag` admits ASCII alphanumerics and `-` only.
+        std::str::from_utf8(&self.tag[..self.len as usize]).unwrap_or("")
+    }
+
+    /// The tag as the core carries it, for the `lang` of a unit this pass writes.
+    pub fn tag(&self) -> smysl_core::LangTag {
+        smysl_core::LangTag::new(self.as_str()).unwrap_or_default()
+    }
+}
+
+impl std::fmt::Display for PivotLang {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.pad(self.as_str())
+    }
+}
+
+impl std::fmt::Debug for PivotLang {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PivotLang({})", self.as_str())
+    }
+}
+
 /// What language the model writes in (F-6).
 ///
-/// `Source` is the only policy 1.9 implements and the only one it accepts: write each gist in
-/// the language of the passage it came from. It is also the only policy that keeps the quote
-/// check honest, since a translated quote cannot be `Present` against the text it came from.
+/// `Source` writes each gist in the language of the passage it came from. It is the policy that
+/// keeps the quote check honest without any help, since a translated quote cannot be `Present`
+/// against the text it came from.
 ///
-/// `pivot:<lang>` — extract into one working language and keep the original as the quote — is
-/// SMYSL-2.4's, and is refused here rather than ignored: a caller who names it is asking for
-/// something this release does not do, and silently giving them `Source` would hand back
-/// gists in whatever language the passage used while they believed otherwise.
+/// `Pivot` extracts under `Source` and then **translates the gist** of each unit into one
+/// working language, as a second pass whose output carries the source unit in `deps`
+/// (SMYSL-2.4 §4.3.4). It is not a different extraction: the quote, the span and the place are
+/// the source unit's, and what moves language is the one field the pass asked for. Only
+/// `ingest --text` implements it — a document ingest has no second pass to run, and is refused
+/// rather than quietly given `Source`.
+///
+/// # Why the language is not in the variant
+///
+/// `Pivot` is a unit variant, and the tag it writes in lives beside it — in
+/// [`IngestOptions::pivot_lang`] and [`Conditions`](crate::recipe::Conditions) — rather than
+/// inside it. `LangPolicy` has been an all-unit enum since 1.9, so `LangPolicy::Source as isize`
+/// compiles against it downstream; a variant carrying data takes those discriminants away, which
+/// `cargo-semver-checks` calls `enum_discriminants_undefined_non_unit_variant` and the project
+/// calls a 2.0. Naming a language is not worth a major version, so the policy stayed the family
+/// and the language became its parameter. The pairing is read in one place —
+/// [`IngestOptions::pivot`] — which is what keeps `Pivot` with no language from meaning anything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[non_exhaustive]
 pub enum LangPolicy {
     #[default]
     Source,
+    Pivot,
 }
 
 impl LangPolicy {
-    /// The identifier a recipe records.
+    /// The policy's name, without its language.
     pub const fn id(self) -> &'static str {
         match self {
             LangPolicy::Source => "source",
+            LangPolicy::Pivot => "pivot",
         }
     }
 
-    /// Parse a policy name, refusing the one that is reserved.
+    /// Parse a policy name, keeping the family and dropping the language.
+    ///
+    /// The signature 1.9 published, and what a caller that only has to *record* the policy
+    /// wants. A caller that has to run the pass needs the tag, which is what
+    /// [`LangPolicy::parse_with_lang`] returns; the grammar is one grammar, so everything this
+    /// accepts that one accepts and everything one refuses the other refuses.
     ///
     /// The error is a `String` rather than SMYSL-2.1's proposed `ProviderError::Config`:
     /// `ProviderError` arrives with the `model` feature, and `Conditions` has to hold a policy
@@ -117,13 +202,31 @@ impl LangPolicy {
     /// error type for one message is worse than the message. The caller prefixes it, so what a
     /// user sees is unchanged.
     pub fn parse(s: &str) -> Result<LangPolicy, String> {
+        LangPolicy::parse_with_lang(s).map(|(policy, _)| policy)
+    }
+
+    /// Parse a policy name together with the language it writes in, where it names one.
+    pub fn parse_with_lang(s: &str) -> Result<(LangPolicy, Option<PivotLang>), String> {
         match s {
-            "source" => Ok(LangPolicy::Source),
-            p if p.starts_with("pivot:") => Err(format!(
-                "`{p}` is reserved for a later release; only `source` is implemented"
-            )),
+            "source" => Ok((LangPolicy::Source, None)),
+            p if p.starts_with("pivot:") => {
+                let lang = &p["pivot:".len()..];
+                if lang.is_empty() {
+                    return Err("`pivot:` names no language; expected `pivot:<lang>`".to_string());
+                }
+                // `und` is a real answer for a unit whose language nobody knows, and not a
+                // language anything can be translated *into*. Refused by name for the same
+                // reason the whole policy is: a pass told to write in "undetermined" would
+                // write in whatever the model prefers, which is the defect F-6 exists for.
+                if lang == "und" || lang == "mul" {
+                    return Err(format!(
+                        "`{lang}` is not a language to write in; name one language"
+                    ));
+                }
+                Ok((LangPolicy::Pivot, Some(PivotLang::new(lang)?)))
+            }
             other => Err(format!(
-                "`{other}` is not a language policy; expected `source`"
+                "`{other}` is not a language policy; expected `source` or `pivot:<lang>`"
             )),
         }
     }
@@ -240,6 +343,14 @@ pub struct IngestOptions {
     /// it: a run under a policy and a run under none are different runs, and before 1.9 there
     /// was no policy at all, so nothing was recorded and nothing was asked for.
     pub lang_policy: LangPolicy,
+    /// The language [`LangPolicy::Pivot`] writes in (1.10).
+    ///
+    /// Beside the policy rather than inside it, for the reason [`LangPolicy`] gives. Read
+    /// through [`IngestOptions::pivot`], which is where the two fields become one answer:
+    /// a tag set under `Source` is a leftover and not an instruction, and `Pivot` with no
+    /// tag is a policy that never says what to write in. Set by
+    /// [`IngestOptions::with_pivot`], which cannot produce either.
+    pub pivot_lang: Option<PivotLang>,
     /// Which comparison form the quote check uses (1.9).
     ///
     /// `V1` by default, which is what every release up to 1.8 checked with. `V2` answers the
@@ -316,9 +427,35 @@ impl IngestOptions {
     }
 
     /// What language the model writes in.
+    ///
+    /// Sets the family only. A policy of [`LangPolicy::Pivot`] needs a language too, which is
+    /// what [`IngestOptions::with_pivot`] sets; this one clears any tag a previous call left,
+    /// so `with_lang_policy(Source)` is `source` and not `source` with a forgotten pivot in it.
     pub fn with_lang_policy(mut self, p: LangPolicy) -> IngestOptions {
         self.lang_policy = p;
+        if p != LangPolicy::Pivot {
+            self.pivot_lang = None;
+        }
         self
+    }
+
+    /// Translate each gist into `lang` after extracting under `Source` (F-6, §4.3.4).
+    pub fn with_pivot(mut self, lang: PivotLang) -> IngestOptions {
+        self.lang_policy = LangPolicy::Pivot;
+        self.pivot_lang = Some(lang);
+        self
+    }
+
+    /// The language the pivot pass writes in, or `None` under any other policy.
+    ///
+    /// The one reader of the two fields together: `Some` only when the policy asked for a
+    /// pivot *and* named the language, so a caller that assigned the fields directly cannot
+    /// get a pass that runs without knowing what to write in.
+    pub fn pivot(&self) -> Option<PivotLang> {
+        match self.lang_policy {
+            LangPolicy::Pivot => self.pivot_lang,
+            _ => None,
+        }
     }
 
     /// Which comparison form the quote check uses.
@@ -480,6 +617,7 @@ impl Default for IngestOptions {
             passes: Passes::default(),
             normaliser: smysl_core::quote::Normaliser::V1,
             lang_policy: LangPolicy::Source,
+            pivot_lang: None,
             max_output: 0,
             model: String::new(),
             prompt: None,
@@ -570,6 +708,21 @@ impl<'a> Ingestor<'a> {
             .passes
             .admits(self.opts.temperature)
             .map_err(ProviderError::Config)?;
+        // A pivot over a document is refused here rather than ignored. The pass that writes the
+        // other language is `text::pivot`, and it needs units with a place in a part to hang a
+        // translation on — which is what a document ingest does not have. Accepting it would
+        // hand back gists in the document's own language while the recipe said `pivot:L`, and
+        // that is the one failure F-6's policy exists to rule out.
+        if self.opts.lang_policy == LangPolicy::Pivot {
+            let named = match self.opts.pivot_lang {
+                Some(l) => format!("pivot:{l}"),
+                None => "pivot".to_string(),
+            };
+            return Err(ProviderError::Config(format!(
+                "`{named}` is implemented for `ingest --text`, which has a reading to attach \
+                 the translation to; document ingest takes `source`"
+            )));
+        }
         // Was accepted whatever it said and only hashed: `--granularity bogus` ran, and its
         // recipe differed from every real run's for a word nothing else read.
         let profile = self
@@ -847,7 +1000,11 @@ impl<'a> Ingestor<'a> {
             // variant falling through to this call would inherit a comparison that is wrong
             // for it. The match makes that a compile error instead.
             match self.opts.lang_policy {
-                LangPolicy::Source => {
+                // The extraction pass is a `Source` pass under either policy, which is what
+                // makes this comparison the right one for both: `Pivot` translates the gists
+                // afterwards (`text::pivot`), and the units it writes are checked against the
+                // language they were asked for rather than against the passage's.
+                LangPolicy::Source | LangPolicy::Pivot => {
                     diagnostics.extend(smysl_core::lang::verify(&units, text));
                 }
             }

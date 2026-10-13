@@ -20,8 +20,8 @@
 //! # What is pure here and what is not
 //!
 //! [`window`](crate::text::window), [`attach`](mod@crate::text::attach),
-//! [`attribution`](mod@crate::text::attribution), [`digest`](mod@crate::text::digest) and
-//! [`cost`](mod@crate::text::cost) are functions over data: they call nothing, persist nothing and
+//! [`attribution`](mod@crate::text::attribution), [`digest`](mod@crate::text::digest),
+//! [`cost`](mod@crate::text::cost) and [`pivot`](mod@crate::text::pivot) are functions over data: they call nothing, persist nothing and
 //! are testable with no egress at all. [`journal`](crate::text::journal) writes one file and
 //! [`run`](crate::text::run) is the part with a provider, a library and an order it has to do
 //! things in — which is where every decision about *when* lives, resume included.
@@ -29,12 +29,17 @@
 //! [`cost`](mod@crate::text::cost) is the last of them and reads the journal rather than a run: what
 //! an extraction cost is a measurement over what was done, which is why §6 TX-P5 step 5 sizes
 //! the phase from it instead of from a planning figure.
+//!
+//! [`pivot`](mod@crate::text::pivot) is a function over data too, and over a model's answer
+//! rather than over a passage: it is what `--lang-policy pivot:<lang>` writes once the answer is
+//! back, and it writes the units itself so that a translation pass cannot invent a place.
 
 pub mod attach;
 pub mod attribution;
 pub mod cost;
 pub mod digest;
 pub mod journal;
+pub mod pivot;
 #[cfg(feature = "model")]
 pub mod run;
 pub mod window;
@@ -44,6 +49,7 @@ pub use attribution::{attribution, quoted_spans, Attribution};
 pub use cost::{cost, CostReport};
 pub use digest::{digest, Digest};
 pub use journal::Journal;
+pub use pivot::Pivoted;
 #[cfg(feature = "model")]
 pub use run::{Target, TextIngest, TextReport};
 pub use window::{windows, Pane, Placed, TextWindow};

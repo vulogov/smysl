@@ -58,6 +58,10 @@ pub struct Row {
     pub calls: u64,
     /// Of those calls, the repair turns.
     pub retries: u64,
+    /// Of those calls, the pivot pass's: one per window that had anything to translate, under
+    /// `--lang-policy pivot:<lang>` and zero otherwise. Out of [`Row::attempts`] for the reason
+    /// stated there.
+    pub pivots: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub verdicts: Verdicts,
@@ -79,6 +83,7 @@ impl Row {
         }
         self.calls += u64::from(e.calls);
         self.retries += u64::from(e.retries);
+        self.pivots += u64::from(e.pivots);
         self.input_tokens += e.input_tokens;
         self.output_tokens += e.output_tokens;
         self.verdicts.present += e.verdicts.present;
@@ -91,9 +96,18 @@ impl Row {
         self.windows - self.unpriced
     }
 
-    /// First attempts: one per pass, repair turns excluded.
+    /// First attempts: one per pass, repair turns and the pivot pass excluded.
+    ///
+    /// The pivot call is a first attempt of a *different request* — translate these gists, not
+    /// extract from this window — and it has no repair loop, so including it would divide the
+    /// repair turns of one request by the attempts of two. The same corpus would then report a
+    /// lower `r` for having been pivoted, which is a figure about the policy and not about the
+    /// model. Its tokens stay in `input_tokens` and `output_tokens`, because they are what the
+    /// window cost.
     pub fn attempts(&self) -> u64 {
-        self.calls.saturating_sub(self.retries)
+        self.calls
+            .saturating_sub(self.retries)
+            .saturating_sub(self.pivots)
     }
 
     /// §3.7's `r`: repair turns per first attempt, or `None` where nothing was attempted.
@@ -195,6 +209,7 @@ mod tests {
             lang: lang.to_string(),
             calls,
             retries,
+            pivots: 0,
             verdicts: Verdicts {
                 present: 2,
                 loose: 1,

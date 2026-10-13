@@ -452,7 +452,7 @@ Exits 5 while anything is open and 0 when nothing is, so a pipeline can gate on 
     ([`--granularity`], [`P`], [Granularity preset recorded in the recipe: `coarse`, `default` (or `standard`), `fine`.]),
     ([`--path`], [`auto|surface|json-ast`], [Override the path D-9 would choose.]),
     ([`--repair`], [`N`], [Repair attempts before a span degrades to opaque prose.]),
-    ([`--lang-policy`], [`source`], [What language the model writes in. `source` — each unit in the language of its passage — is the only policy implemented, and `SMY-W436` reports a unit that is not in its passage's script.]),
+    ([`--lang-policy`], [`source`], [What language the model writes in. `source` writes each unit in the language of its passage, and `SMY-W436` reports a unit that is not in its passage's script. `pivot:<lang>` — on `ingest --text` only — extracts under `source` and then translates each gist into that language, writing one extra unit per unit with the original in `deps` and an `x.text/translates` edge back to it; a line the model does not return is `SMY-W453` and that unit stays in its own language. A document ingest has no reading to attach a translation to and refuses the policy rather than quietly extracting in the passage's language.]),
     ([`--yes`], [—], [Commit the staged batch instead of exiting 10.]),
     ([`--dry-run`], [—], [Report what would be sent and to whom; make no call.]),
     ([`--text`], [`WHO`], [Ingest an expression of the library at `--store` — its alias, or a manifest id — rather than a document. Windows of whole structure nodes, a span attached to every quote the text supports, and each window committed as it is staged. Needs `--yes`, because the journal entry that makes a window resumable is written after the commit.]),
@@ -951,6 +951,12 @@ write each gist in the language of its passage, and nothing checked whether it d
 behind SMYSL-2 measured both directions of the failure on one corpus: a local model wrote 78.6%
 of its Russian gists in Latin script, and a hosted one wrote every gist of an English chapter in
 Chinese. Both staged without a remark.
+
+The same code reports the same defect for the pivot policy, with the comparand the policy named
+rather than the passage's: `--lang-policy pivot:ru` asks for Russian, and a gist that comes back
+in English is the identical failure measured against a different expectation. Where the script of
+a language is one this build cannot name, nothing is reported either way — a bound nobody can
+evaluate is not a bound that passed.
 
 The check counts letters by script and asks whether the passage's own script has *vanished* from
 the unit — below a quarter of its letters — rather than which script leads. That distinction is

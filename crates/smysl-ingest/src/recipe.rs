@@ -58,6 +58,14 @@ pub struct Conditions {
     /// pushed, so 1.9's runs are distinguishable from 1.8's — which they are, because the
     /// templates now carry `LANG_RULE` and the version bump says so too.
     pub lang_policy: Option<crate::LangPolicy>,
+    /// The language a `pivot` policy writes in (1.10).
+    ///
+    /// Its own component because `LangPolicy` does not carry it — see that type — and the
+    /// recipe has to tell `pivot:en` from `pivot:ru`: they ask the model for two different
+    /// things, and a resume that matched them would reuse a Russian window for an English
+    /// run. Absent under `source`, so every recipe computed before this field existed is
+    /// unchanged.
+    pub pivot_lang: Option<crate::PivotLang>,
     /// The framing scheme the input was sent under (1.9).
     ///
     /// `Some("smysl/fence/1")` for every run 1.9 makes. It is recorded because a prompt
@@ -122,6 +130,7 @@ impl Conditions {
             source: None,
             normaliser: None,
             lang_policy: None,
+            pivot_lang: None,
             framing: None,
             estimator: None,
             passes: None,
@@ -166,6 +175,12 @@ impl Conditions {
     /// The language policy the run was asked under.
     pub fn with_lang_policy(mut self, p: crate::LangPolicy) -> Conditions {
         self.lang_policy = Some(p);
+        self
+    }
+
+    /// The language a `pivot` policy writes in.
+    pub fn with_pivot_lang(mut self, l: Option<crate::PivotLang>) -> Conditions {
+        self.pivot_lang = l;
         self
     }
 
@@ -287,6 +302,13 @@ impl Conditions {
         if let Some(p) = self.lang_policy {
             push(b, b"lang-policy");
             push(b, p.id().as_bytes());
+        }
+        // Pushed after the policy and keyed separately, because it is a second thing that was
+        // asked for and not a different spelling of the first: `pivot:en` and `pivot:ru` are
+        // two recipes, while `source` pushes exactly the bytes it pushed in 1.9.
+        if let Some(l) = self.pivot_lang {
+            push(b, b"pivot-lang");
+            push(b, l.as_str().as_bytes());
         }
         if let Some(f) = self.framing {
             push(b, b"framing");

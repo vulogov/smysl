@@ -1351,7 +1351,7 @@ impl Bm25 { pub fn index_analyzed(store: &Store, a: &dyn Analyze) -> Bm25;
 ```rust
 pub struct TextIngest<'l> { pub lib: &'l Library, pub target: TextTarget, pub lang_policy: LangPolicy,
     pub reextract: bool, pub digest_budget: u32 }
-pub enum LangPolicy { Source, Pivot(LangTag) }
+pub enum LangPolicy { Source, Pivot }   // landed: the tag sits beside it, see below
 impl Ingestor { pub fn ingest_text(&self, t: &TextIngest<'_>, attest: &dyn Attesting) -> Result<TextReport, ProviderError>; }
 pub mod text { pub fn windows(s: &Structure, level: Level, budget: u32, est: &dyn Estimate) -> Vec<TextWindow>; }
 pub fn link(&self, scope: &BTreeSet<Uid>, budget: LinkBudget) -> Result<Staged, ProviderError>;     // on Ingestor
@@ -1481,16 +1481,66 @@ New passes appended after `CommitmentSupport`, as the enum's comment requires:
 | `src/text/digest.rs` (new) | ledger digest via `smysl_pack::pack`; rendering with `l/n` labels; returns `(text, labels, allowed: BTreeSet<Uid>, hash)` |
 | `src/json_ast.rs` | `convert_scoped(raw, &Scope)`: `resolve` unchanged, then a resolved uid outside `Scope.allowed ∪ batch` is `E442`; text answers drop tool-owned fields (`W444`); `text:holder`/`text:speaker` labels resolved to canonical uids (§3.4). The surface path (`repair::convert_labelled`) gets the same scope check after parsing. |
 | `src/repair.rs` | `needs_repair` treats `E442` like `E060`; a text-ingest variant of `salvage` that keeps a unit whose only error is `E307`, applying §3.4's cap. `UNIT_LOCAL` is unchanged for prose ingest. |
-| `src/prompt.rs` | templates `ingest.text.json` / `ingest.text.surface`: node-per-line rendering inside `FENCE`, the digest inside `DIGEST_FENCE`, the language instruction for `source` / `pivot:L`, the `ingest:node` field; `neutralise_fences(input) -> (String, bool)` (`W443`). |
+| `src/prompt.rs` | templates `ingest.text.json` / `ingest.text.surface`: node-per-line rendering inside `FENCE`, the digest inside `DIGEST_FENCE`, the `ingest:node` field; `neutralise_fences(input) -> (String, bool)` (`W443`). The language instruction is **not** a parameter of these: `pivot:L` is a second call with a template of its own (`ingest.text.pivot`, `pivot_gists(tag)`), because a prompt that asked for extraction and translation at once was asking for two things and the extraction templates' bytes decide a recipe. |
 | `src/recipe.rs` | `Conditions` gains `lang_policy`, `normaliser` (V1/V2, from SMYSL-2.1), `estimator`, `window_level`, `digest_policy` (budget and ranking id), `segmenter` and `reader` ids. Pushed in `push_shared`, so `family()` still drops only provider and model. |
 | `src/text/cost.rs` (new, step 5) | the cost report (§3.7): `cost(&Journal, Option<&alias>) -> CostReport`, one `Row` per language plus a total, each with windows, calls, repair turns, tokens, verdicts and the entries it could not price. `Row::retry_rate` is §3.7's `r` — repairs per *first attempt* — and `tokens_per_window`/`project` are the measured route, which the two must not be combined. |
-| `src/text/journal.rs` (new) | key `(alias, tid, node range, recipe)` → `{ staged batch hash, digest hash, tokens in/out, quote verdicts }`; step 5 adds the window's `lang`, its `calls` and its repair turns, and makes the token counts **the window's own** rather than the run's running total; stored in the redb `journal` table (or `<library>/journal.cbor` without `substrate-redb`). Rerun skips completed keys; within one expression a part extracted under an earlier manifest is skipped; `--reextract` ignores the journal for the head manifest. Resume after kill loses at most the batch in flight, because a key is written only after its batch is staged. |
+| `src/text/journal.rs` (new) | key `(alias, tid, node range, recipe)` → `{ staged batch hash, digest hash, tokens in/out, quote verdicts }`; step 5 adds the window's `lang`, its `calls`, its repair turns and the pivot pass's calls (`pivots`, out of the retry-rate denominator and in the token counts), and makes the token counts **the window's own** rather than the run's running total; stored in the redb `journal` table (or `<library>/journal.cbor` without `substrate-redb`). Rerun skips completed keys; within one expression a part extracted under an earlier manifest is skipped; `--reextract` ignores the journal for the head manifest. Resume after kill loses at most the batch in flight, because a key is written only after its batch is staged. |
 | `src/lib.rs` | `Ingestor::ingest_text`, `link`, `summarise`; `chunk` stays `pub(crate)`. |
 | `src/path.rs` (step 5) | `choose_tokens`, the path rule asked in **tokens** rather than bytes, with `SMALL_OUTPUT_TOKENS = SMALL_OUTPUT_THRESHOLD / 4`. The byte form sent a Russian expression down the surface path where the same passage in English took json-ast; `ingest_text` uses the token form and `TextReport::path` reports which was taken. |
 | `src/same_as.rs` (new) | turns engine proposals into staged `x.text/same-as` relations with tool attestations; `lexical` proposals above the recipe's threshold, or judged (OQ-44). |
+| `src/text/pivot.rs` (new, the pivot policy) | `translatable(&batch)` (claims, never entities), `render(&sources)` (numbered gists, one line each), `parse_answer(&answer, sent)` and `units(&sources, &answer, lang) -> Pivoted`. The units are written **here** from the ones they translate — the model supplies a sentence and nothing else — so the span, the status, the source and the payload are copied and a pivot pass cannot invent a place. `SMY-W453` for a line that did not come back, `SMY-W436` for one in the wrong script. |
 
 Pivot policy: a second pass over `source`-policy units of the scope, one unit per source unit,
 linked by `x.text/translates`, with the source unit in `deps` so rule M caps it.
+**Landed 2026-10-13**, as written in intent but not in type, with five things the one-sentence
+plan did not say and the implementation had to decide.
+
+**It is not an extraction in another language.** Extraction runs under `source` whatever the
+policy says — the quote is the passage's own words, because a translated quote cannot be
+`Present` against the text it came from — and the pass translates the `gist` of each unit
+afterwards. A pivot unit is therefore a claim about the same bytes as its source, carrying the
+same span, and `TextReport::path`, `verdicts` and the agreement figures are unmoved by the
+policy.
+
+**`body` and `detail` do not come along.** FC-1's `lang` is one field for every text field of a
+unit, so a unit with an English gist and a Russian body would be lying about one of them. The
+pivot unit is an L0 statement whose L1 is one `deps` hop away.
+
+**Entities are left alone.** A-2.4 rule 7 makes an entity's identity its name, its language and
+its expression, so translating `Иерусалим` does not add a language to an entity — it mints a
+second one. Saying those two are one thing is `x.text/same-as`, TX-P7's engine and its judgement
+to make, not a side effect of a translation pass.
+
+**The pass has no repair loop, and the asymmetry is deliberate.** A repair turn exists to fix an
+answer that failed a check this crate can run, and the only check available to a translation is
+whether a line came back. Asking again for a line a model chose not to write doubles the cost of
+every pivoted window to buy a line that would be unverifiable if it arrived. A missing line is
+`SMY-W453` and the unit is staged in its own language; `--reextract` is the operator's to choose.
+Its call is also **out of the retry-rate denominator** (§3.7): it is a first attempt of a
+different request, and counting it would make the same corpus report a lower `r` for having been
+pivoted.
+
+**The language is not in the variant, and that is semver's doing.** This plan wrote
+`Pivot(LangTag)`, and it was built that way first. `LangPolicy` has been an all-unit enum since
+1.9, so `LangPolicy::Source as isize` compiles against it; a variant carrying data takes those
+discriminants away, which `cargo-semver-checks` reports as
+`enum_discriminants_undefined_non_unit_variant` — a **major** change, and this project's
+`SEMVER_BREAKING` is empty, so a major change is a 2.0. Naming a language is not worth a major
+version. `Pivot` is therefore a unit variant and the tag is its parameter, held beside it in
+`IngestOptions::pivot_lang` and `Conditions::pivot_lang`, with `IngestOptions::pivot()` the one
+place the pair is read so that "pivot with no language" cannot reach the pass. The recipe pushes
+the two as two components, `"lang-policy" ‖ "pivot"` then `"pivot-lang" ‖ "ru"`, which keeps
+`pivot:en` and `pivot:ru` distinct recipes and leaves every `source` recipe byte-identical to
+1.9's. `LangPolicy::parse` keeps the signature it published; `parse_with_lang` returns the pair.
+The gate caught this after the code was written and tested, which is the argument for running it
+before a commit rather than before a release.
+
+One defect found by building it. An `x.text/translates` edge is the first record a text ingest
+stages whose *kind* the check looks up, and `x.text/v1` was declared nowhere in a library — so
+every check of such a store would report `SMY-W013`, "a warning that is correct and
+unactionable", which is the state `smysl-check`'s own test describes. `ingest_text` now stages
+the declaration with the first batch that uses the schema, once per library rather than once per
+window. Entities had been in that state since step 3b; the edge is what made it visible.
 
 #### 4.3.5 `smysl-retrieve`
 
@@ -1700,7 +1750,12 @@ a later edit that made `reader-slack` a default feature has to be argued rather 
   derived contention id.
 - **Text ingest offline** (`crates/smysl-ingest/tests/text_gate.rs`, `Scripted` provider): spans
   attached, D-1 copy set exact, journal resume after a simulated kill between batches re-sends at
-  most one batch, `--reextract`, pivot policy produces `x.text/translates` with deps.
+  most one batch, `--reextract`, pivot policy produces `x.text/translates` with deps — **met**:
+  one Russian unit per English one, each carrying its source in `deps` and an edge back to it,
+  the span the source's, and `pivot:en`, `pivot:ru` and `source` three recipes. With two
+  controls: a pass that returns nothing reports `SMY-W453` per unit and stages no edge, and a
+  *document* ingest refuses the policy before egress rather than extracting in the passage's
+  language.
 - **Red team** (`crates/smysl-ingest/tests/redteam.rs`): for each fixture in
   `fixtures/library/redteam/`, the rendered prompt contains exactly two input fences and two digest
   fences; a scripted "obedient" answer that cites a store uid outside the digest (`E442`), claims
@@ -3188,10 +3243,9 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    other. The last attempt's warnings are carried into the degrade path now. Found by the
    red-team suite, which asserts both codes.
 
-   **Not in this step.** `pivot:<lang>` is still refused by name (`LangPolicy::parse`): the
-   pivot pass is a second extraction linked by `x.text/translates` with the source unit in
-   `deps`, and GE-T2's figures are measured under `source`. `link`, `summarise` and `same_as`
-   are TX-P7's. The path is chosen from the **largest window** rather than the expression's
+   **Not in this step.** `pivot:<lang>` is refused by name (`LangPolicy::parse`) while GE-T2's
+   figures are being measured under `source`; it landed **after** step 5, see §4.3.4 and the end of
+   the step 5 note below. `link`, `summarise` and `same_as` are TX-P7's. The path is chosen from the **largest window** rather than the expression's
    size, or every Bible would take the surface path on the strength of its total length while
    each call sees a few verses.
 5. *Exit for the phase (draft 3 §22, and changed by §1.1 items 2, 4 and 6):* resume after kill
@@ -3265,6 +3319,21 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    figures wait only for a corpus and a caller's consent to spend a credential — and when they
    come, they come out of the journal rather than out of a coefficient.
 
+   **`pivot:<lang>`, the last thing the phase owed in code. Landed 2026-10-13.** Left until
+   after the exit deliberately, and the reason is in the exit itself: GE-T2's figures are
+   measured under `source`, and a policy that added a second call per window while they were
+   being taken would have been a change to the thing being measured. With them taken, the policy
+   is what §4.3.4 specifies — extraction under `source`, then one translated unit per unit with
+   the source in `deps` and an `x.text/translates` edge — and it is `crates/smysl-ingest/
+   tests/text_gate.rs` that pins the clause (§5.2) with two controls beside it. Three decisions
+   the one-line plan did not contain, each argued at §4.3.4: `body` and `detail` do not come
+   along, because one `lang` covers every text field; entities are not translated, because A-2.4
+   rule 7 would make a translation a second entity rather than a second language; and the pass
+   has no repair loop, because the only check available to a translation is whether a line came
+   back. It also found the `x.text/v1` declaration missing from every library a text ingest had
+   ever written to. What TX-P5 still owes is material only: GE-T4, 3b's probe set, GE-T2's
+   corpus.
+
 ### TX-P7 — proposition layer and linking
 
 (TX-P6, `sq`, is SMYSL-2.5. `link` and `summarise` accept alias/mid scopes until it lands.)
@@ -3327,8 +3396,9 @@ meanings and are not repeated here.
 | `SMY-E450` | appending to a pseudonymised expression without its pseudonym key | `text append` (**raisable since TX-P2 step 3**; `--pseudonymise` landed in step 2 and the code was deliberately left unregistered until there was an append to refuse) |
 | `SMY-W451` | an alignment scheme does not cover a locator; the pair is left unaligned and counted | `text align`, `anchored` engine |
 | `SMY-E452` | a record 15 or 18 was offered to a log; text lives in the object store (OQ-39) | `append`, `check` |
+| `SMY-W453` | the pivot pass returned no translation for a unit; it is staged in the source language only | `ingest --text --lang-policy pivot:L` |
 
-`453`–`459` are unallocated. SMYSL-2.3 may adopt `E446` as a C-Library obligation.
+`454`–`459` are unallocated. SMYSL-2.3 may adopt `E446` as a C-Library obligation.
 
 **Registered as of TX-P5 step 3:** the eight of TX-P1 step 5 — `E401`, `E402`, `E403`, `W418`,
 `E440`, `E445`, `E446` and `E452`, in a ninth diagnostic group (`Group::Library`) and in the

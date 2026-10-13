@@ -204,7 +204,7 @@ pub use smysl_ingest::recipe::short as recipe_short;
 #[cfg(feature = "ingest")]
 pub use smysl_ingest::{
     attest, AttestOptions, AttestReport, IngestOptions, IngestPath, IngestReport, Ingestor,
-    Judgement, LangPolicy, What, DEFAULT_REPAIR_ATTEMPTS,
+    Judgement, LangPolicy, PivotLang, What, DEFAULT_REPAIR_ATTEMPTS,
 };
 // Consensus extraction (§3.4). `Passes` is `IngestOptions::with_passes`'s argument, so without
 // it the option is set-able only by a caller who depends on `smysl-ingest` directly — the rule A
@@ -255,7 +255,7 @@ pub use smysl_core::quote::{
 // pipeline that builds its own units still wants to know whether the model answered in the
 // language it was asked in. Ungated — it is a table of code points and does no I/O.
 pub use smysl_core::lang::{
-    script_of, verify as lang_verify, Script, Scripts, ABSENT_PERCENT, MIN_LETTERS,
+    script_of, script_of_lang, verify as lang_verify, Script, Scripts, ABSENT_PERCENT, MIN_LETTERS,
 };
 /// The string-valued entries of a unit's payload (1.6). What `Query::with_payload` filters on, and
 /// what a caller reads to answer "what kind of thing does this extension schema say this is".
@@ -370,7 +370,13 @@ mod tests {
         // digest as well as the window, so a marker inside one can be neutralised; and it
         // writes the provenance itself, so a field the answer had no business filling is
         // dropped rather than believed.
-        assert_eq!(Code::ALL.len(), 87);
+        // 88 with `SMY-W453`, raised by the pivot policy's pass: a model asked for one line per
+        // unit and one line does not come back, so a unit stays in the language of its passage
+        // under a recipe that says otherwise. Reported rather than left to a count, because the
+        // silent version is the failure F-6's policy exists to rule out. The wrong-*language*
+        // case takes no number of its own — it is `SMY-W436` measured against the language that
+        // was asked for rather than the passage's.
+        assert_eq!(Code::ALL.len(), 88);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

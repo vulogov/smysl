@@ -64,6 +64,9 @@ struct Scripted {
     id: ProviderId,
     caps: Capabilities,
     answers: Mutex<Vec<String>>,
+    /// Answers for the pivot pass, which is a different request and so a different script.
+    /// Empty means "the model returned nothing", which is a case with a diagnostic of its own.
+    translations: Mutex<Vec<String>>,
     sent: Arc<Mutex<Vec<Request>>>,
     calls: Arc<AtomicUsize>,
 }
@@ -78,9 +81,15 @@ impl Scripted {
             id: ProviderId::new("scripted").unwrap(),
             caps,
             answers: Mutex::new(answers),
+            translations: Mutex::new(Vec::new()),
             sent: Arc::new(Mutex::new(Vec::new())),
             calls: Arc::new(AtomicUsize::new(0)),
         }
+    }
+
+    fn translating(self, answers: Vec<String>) -> Scripted {
+        *self.translations.lock().unwrap() = answers;
+        self
     }
 }
 
@@ -94,7 +103,14 @@ impl Provider for Scripted {
     fn complete(&self, req: &Request) -> Result<Completion, ProviderError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.sent.lock().unwrap().push(req.clone());
-        let mut answers = self.answers.lock().unwrap();
+        // Which script to answer from is read off the request, not off a call count: the pivot
+        // pass makes its call in the middle of a window's work, and a test that counted calls
+        // would break the moment a pass or a repair turn was added.
+        let mut answers = if req.system.contains("BCP-47") {
+            self.translations.lock().unwrap()
+        } else {
+            self.answers.lock().unwrap()
+        };
         // The last answer repeats: a model at temperature 0 is consistent, and a repair turn
         // that silently got a *different* answer would hide which turn the test measured.
         let a = if answers.len() > 1 {
@@ -121,6 +137,20 @@ struct Driver {
 
 fn driver(answers: Vec<String>) -> Driver {
     let p = Scripted::saying(answers);
+    let calls = Arc::clone(&p.calls);
+    let sent = Arc::clone(&p.sent);
+    let id = p.id();
+    Driver {
+        registry: Registry::new()
+            .with_provider(Box::new(p))
+            .route(Task::ContentIngest, id),
+        calls,
+        sent,
+    }
+}
+
+fn driver_translating(answers: Vec<String>, translations: Vec<String>) -> Driver {
+    let p = Scripted::saying(answers).translating(translations);
     let calls = Arc::clone(&p.calls);
     let sent = Arc::clone(&p.sent);
     let id = p.id();
@@ -177,6 +207,18 @@ fn library(tag: &str) -> (Scratch, Library) {
     (dir, lib)
 }
 
+/// Apply a `--lang-policy` string to options, the way the CLI does.
+///
+/// The family and the language are two fields now (see `LangPolicy`), and a test that set only
+/// the first would be testing a policy no CLI invocation can produce.
+fn policied(o: IngestOptions, named: &str) -> IngestOptions {
+    let (policy, lang) = smysl_ingest::LangPolicy::parse_with_lang(named).expect("a policy");
+    match lang {
+        Some(l) => o.with_pivot(l),
+        None => o.with_lang_policy(policy),
+    }
+}
+
 fn opts(passes: Passes) -> IngestOptions {
     IngestOptions::at_rung(Rung::Document)
         .with_passes(passes)
@@ -192,6 +234,17 @@ fn ingest(
     digest_budget: u32,
     reextract: bool,
 ) -> smysl_ingest::text::TextReport {
+    ingest_with(lib, d, opts(passes), digest_budget, reextract)
+}
+
+/// As [`ingest`], with the options the caller built — which is how a policy gets in.
+fn ingest_with(
+    lib: &mut Library,
+    d: &Driver,
+    o: IngestOptions,
+    digest_budget: u32,
+    reextract: bool,
+) -> smysl_ingest::text::TextReport {
     let mut t = TextIngest::new(
         lib,
         Target::Alias("incident".to_string()),
@@ -199,7 +252,7 @@ fn ingest(
     )
     .with_digest_budget(digest_budget);
     t.reextract = reextract;
-    Ingestor::new(&d.registry, opts(passes))
+    Ingestor::new(&d.registry, o)
         .ingest_text(&mut t)
         .expect("the run reached the provider")
 }
@@ -567,4 +620,223 @@ fn a_journal_key_names_the_owned_range_and_not_what_the_window_was_shown() {
     assert!(entry.input_tokens > 0);
     assert_eq!(entry.verdicts.total(), 1, "one quote, one verdict");
     assert_eq!(entry.key.tid, tid);
+}
+
+// ---------------------------------------------------------------------------
+// The pivot policy (§4.3.4, §5.2, TX-P5)
+// ---------------------------------------------------------------------------
+
+/// The three quotes, one per window, so every extraction lands a span of its own.
+fn three_answers() -> Vec<String> {
+    vec![
+        answer(
+            "c/pool",
+            "the pool wait rose",
+            "the pool wait rose to 1.9 seconds",
+            "L1",
+        ),
+        answer(
+            "c/rollback",
+            "the rollback returned p99 to baseline",
+            "the rollback returned p99 to baseline",
+            "L2",
+        ),
+        answer(
+            "c/shard",
+            "the shard was never replaced",
+            "the shard was never replaced",
+            "L3",
+        ),
+    ]
+}
+
+/// `--lang-policy pivot:ru`: one unit per unit, in the language asked for, with the source in
+/// `deps` and an `x.text/translates` edge back to it.
+///
+/// This is SMYSL-2.4 §5.2's clause for the policy, and the reason it is an end-to-end test
+/// rather than a unit test of `text::pivot` is the part a unit test cannot reach: that the
+/// translations are in the **same batch and the same commit** as the units they translate, so a
+/// window is never journalled as done holding half of what it owes.
+#[test]
+fn the_pivot_policy_writes_a_translation_per_unit_with_the_source_in_deps() {
+    let (_dir, mut lib) = library("pivot");
+    let d = driver_translating(
+        three_answers(),
+        vec![
+            "1\tзадержка пула выросла".to_string(),
+            "1\tоткат вернул p99 к исходному уровню".to_string(),
+            "1\tшард так и не заменили".to_string(),
+        ],
+    );
+    let report = ingest_with(
+        &mut lib,
+        &d,
+        opts(Passes::Single)
+            .with_pivot(smysl_ingest::PivotLang::new("ru").expect("a language tag")),
+        0,
+        false,
+    );
+
+    let windows = report.windows;
+    assert!(windows >= 2, "{report:?}");
+    assert_eq!(report.pivoted, windows, "{:?}", report.diagnostics);
+    assert_eq!(report.pivot_missing, 0);
+    assert_eq!(
+        report.pivot_calls, windows,
+        "one call per window, and no repair turn"
+    );
+
+    // The pass is not a pass of the extraction, so it is not a repair turn either: one
+    // extraction call and one pivot call per window, and a retry rate of nothing repaired.
+    assert_eq!(report.calls, windows * 2, "{report:?}");
+    assert_eq!(report.retries, 0);
+    assert_eq!(report.retry_rate(), Some(0.0));
+
+    let translated: Vec<_> = lib
+        .store()
+        .units()
+        .filter(|(_, u)| u.core.lang.as_ref().is_some_and(|l| l.as_str() == "ru"))
+        .collect();
+    assert_eq!(
+        translated.len(),
+        windows,
+        "one Russian unit per English one"
+    );
+
+    let edges = lib
+        .store()
+        .relations_of_kind(&smysl_core::RelKind::Extension(
+            smysl_core::schemas::text::TRANSLATES.to_string(),
+        ));
+    assert_eq!(edges.len(), windows, "an edge per translation");
+
+    // And the declaration the edge needs, or every check of this library afterwards reports
+    // `SMY-W013` about a kind this build does in fact define (A-11).
+    assert_eq!(
+        report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == smysl_core::Code::W013)
+            .count(),
+        0,
+        "{:?}",
+        report.diagnostics
+    );
+
+    for (uid, unit) in &translated {
+        // Rule M reads `deps`, a reader reads the edge, and both have to name the same unit.
+        let edge = edges
+            .iter()
+            .find(|e| &e.from == *uid)
+            .expect("the translation has an edge of its own");
+        assert!(
+            unit.core.deps.contains(&edge.to),
+            "the source of the translation is not in its deps"
+        );
+        let source = lib.store().get(&edge.to).expect("the source unit");
+        assert_eq!(
+            source.core.lang.as_ref().map(|l| l.as_str()),
+            Some("en"),
+            "the edge points at the unit in the passage's language"
+        );
+        // The place came from the source unit and not from the model, which is why the pivot
+        // prompt never mentions one.
+        assert_eq!(
+            unit.core.source.as_ref().and_then(|s| s.span()),
+            source.core.source.as_ref().and_then(|s| s.span()),
+            "the translation is a claim about the same bytes"
+        );
+    }
+}
+
+/// The recipe records the language, not just the policy.
+///
+/// `pivot:en` and `pivot:ru` are two different things to have asked for, and a recipe that
+/// called both `pivot` would let two incomparable corpora corroborate each other (§3.5).
+#[test]
+fn two_pivot_languages_are_two_recipes_and_source_is_a_third() {
+    let mut recipes = Vec::new();
+    for policy in ["source", "pivot:en", "pivot:ru"] {
+        let (_dir, mut lib) = library(&format!("recipe-{}", policy.replace(':', "-")));
+        let d = driver_translating(three_answers(), vec!["1\tsomething".to_string()]);
+        let report = ingest_with(
+            &mut lib,
+            &d,
+            policied(opts(Passes::Single), policy),
+            0,
+            false,
+        );
+        recipes.push(report.recipe.expect("a recipe"));
+    }
+    assert_ne!(
+        recipes[0], recipes[1],
+        "`source` and `pivot:en` are one recipe"
+    );
+    assert_ne!(
+        recipes[1], recipes[2],
+        "`pivot:en` and `pivot:ru` are one recipe"
+    );
+}
+
+/// The control: a pass that returns nothing leaves the extraction alone and says so.
+///
+/// There is no repair turn for a missing line — see `Ingestor::pivot_window` — so what a reader
+/// gets is the units in their own language and one `SMY-W453` per unit that was not translated.
+/// The alternative, a silently untranslated store under a recipe that says `pivot:ru`, is the
+/// failure F-6's policy exists to rule out.
+#[test]
+fn control_a_pivot_pass_that_returns_nothing_reports_every_unit_it_did_not_translate() {
+    let (_dir, mut lib) = library("pivot-silent");
+    let d = driver_translating(three_answers(), vec![String::new()]);
+    let report = ingest_with(
+        &mut lib,
+        &d,
+        opts(Passes::Single)
+            .with_pivot(smysl_ingest::PivotLang::new("ru").expect("a language tag")),
+        0,
+        false,
+    );
+
+    assert_eq!(report.pivoted, 0);
+    assert_eq!(report.pivot_missing, report.windows, "{report:?}");
+    assert_eq!(
+        report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == smysl_core::Code::W453)
+            .count(),
+        report.windows,
+    );
+    assert!(
+        report.units >= report.windows,
+        "the extraction was kept: {report:?}"
+    );
+    assert!(
+        lib.store()
+            .relations_of_kind(&smysl_core::RelKind::Extension(
+                smysl_core::schemas::text::TRANSLATES.to_string(),
+            ))
+            .is_empty(),
+        "an untranslated unit got an edge anyway"
+    );
+}
+
+/// A document ingest has nothing to attach a translation to, and says so before egress.
+#[test]
+fn a_document_ingest_refuses_the_policy_instead_of_quietly_extracting_in_the_passage() {
+    let (_dir, lib) = library("pivot-document");
+    let d = driver(three_answers());
+    let e = Ingestor::new(
+        &d.registry,
+        opts(Passes::Single)
+            .with_pivot(smysl_ingest::PivotLang::new("ru").expect("a language tag")),
+    )
+    .ingest(lib.store(), "the pool wait rose to 1.9 seconds.")
+    .expect_err("a document ingest cannot pivot");
+    assert!(format!("{e}").contains("pivot:ru"), "{e}");
+    assert_eq!(
+        d.calls.load(Ordering::SeqCst),
+        0,
+        "it was refused before egress"
+    );
 }

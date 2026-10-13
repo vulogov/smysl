@@ -1314,8 +1314,14 @@ fn cli() -> Command {
                     Arg::new("lang-policy")
                         .long("lang-policy")
                         .value_name("P")
-                        .value_parser(["source"])
-                        .help("What language the model writes in [default: source]"),
+                        // Not a closed list any more, and it cannot be one: `pivot:<lang>`
+                        // names a language, so the set of accepted values is the set of
+                        // language tags. `LangPolicy::parse` is what refuses the rest, and it
+                        // says which part was wrong — the policy or the tag.
+                        .help(
+                            "What language the model writes in: source, or pivot:<lang> with \
+                             --text [default: source]",
+                        ),
                 )
                 .arg(
                     Arg::new("normaliser")
@@ -5462,8 +5468,13 @@ fn cmd_ingest_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         opts = opts.with_max_output(*n);
     }
     if let Some(p) = m.get_one::<String>("lang-policy") {
-        match smysl::LangPolicy::parse(p) {
-            Ok(policy) => opts = opts.with_lang_policy(policy),
+        match smysl::LangPolicy::parse_with_lang(p) {
+            Ok((policy, lang)) => {
+                opts = opts.with_lang_policy(policy);
+                if let Some(l) = lang {
+                    opts = opts.with_pivot(l);
+                }
+            }
             Err(e) => {
                 eprintln!("smysl ingest: {e}");
                 return ExitCode::Usage;
@@ -5574,6 +5585,13 @@ fn cmd_ingest_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             r, report.agreement.agreed, report.agreement.comparable, report.agreement.spanless,
         ),
         None => println!("stability    - (one pass, or nothing comparable)"),
+    }
+    // Printed only under the policy that runs it, so a `source` run's output is unchanged.
+    if report.pivot_calls > 0 || report.pivoted > 0 || report.pivot_missing > 0 {
+        println!(
+            "pivot        {} translated, {} not ({} call(s))",
+            report.pivoted, report.pivot_missing, report.pivot_calls
+        );
     }
     println!(
         "tokens       {} in, {} out",
@@ -5823,12 +5841,20 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if let Some(p) = path_arg.as_deref().and_then(smysl::IngestPath::parse) {
         opts = opts.with_path(p);
     }
-    // One accepted value, and the flag exists so that a caller can say it rather than assume
-    // it: `pivot:<lang>` is a later release's, and `LangPolicy::parse` refuses it by name
-    // instead of falling back to `source` and handing back gists in the passage's language.
+    // `pivot:<lang>` belongs to `--text`, which has a reading to attach a translation to.
+    // Refused here as a usage error rather than left to the library's pre-egress refusal, so
+    // that a caller who named it on the wrong command gets exit 2 and a sentence saying where
+    // it does work — and not a provider error after a registry load.
     if let Some(p) = m.get_one::<String>("lang-policy") {
-        match smysl::LangPolicy::parse(p) {
-            Ok(policy) => opts = opts.with_lang_policy(policy),
+        match smysl::LangPolicy::parse_with_lang(p) {
+            Ok((_, Some(l))) => {
+                eprintln!(
+                    "smysl ingest: `pivot:{l}` is for `ingest --text <alias>`, which has a \
+                     reading to attach the translation to; document ingest takes `source`"
+                );
+                return ExitCode::Usage;
+            }
+            Ok((policy, None)) => opts = opts.with_lang_policy(policy),
             Err(e) => {
                 eprintln!("smysl ingest: {e}");
                 return ExitCode::Usage;

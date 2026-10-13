@@ -327,6 +327,7 @@ registry! {
         E442 = "SMY-E442", Error, "A model answer references a unit outside its batch and ledger digest";
         W443 = "SMY-W443", Warn,  "Untrusted text contained a prompt fence marker; neutralised in the prompt only";
         W444 = "SMY-W444", Warn,  "A tool-owned field in a model answer was dropped";
+        W453 = "SMY-W453", Warn,  "The pivot pass returned no translation for a unit; it is staged in the source language only";
     }
 }
 
@@ -669,7 +670,16 @@ mod tests {
     /// and an answer whose tool-owned fields are dropped rather than trusted. All three need a
     /// prompt that sends a digest and a converter that reads one, which is what step 4 builds.
     ///
-    /// That completes RFC SMYSL-2.4's `E401`–`W459` range.
+    /// 88 with `SMY-W453` in TX-P5's pivot policy, the first of the range's seven free numbers
+    /// to be spent: `pivot:<lang>` asks a model for one line per unit, and a line that does not
+    /// come back is a unit with no translation. Reported rather than inferred from a count,
+    /// because the alternative — a staged unit that silently stayed in the source language — is
+    /// the policy failure F-6 exists to report. A translation that comes back in the *wrong*
+    /// language reuses `SMY-W436` instead of taking a number of its own: it is the same defect
+    /// that code already names, measured against the language asked for rather than the
+    /// passage's.
+    ///
+    /// That leaves `454`–`459` of RFC SMYSL-2.4's `E401`–`W459` range unallocated.
     ///
     /// Step 5's plan named six codes and two of them are **not** here. `SMY-E404` is a span
     /// past a part's length and `SMY-W405` is a locator disagreeing with a span; both read
@@ -678,7 +688,7 @@ mod tests {
     /// build can produce, which is the thing this comment exists to prevent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 87);
+        assert_eq!(Code::ALL.len(), 88);
     }
 
     #[test]

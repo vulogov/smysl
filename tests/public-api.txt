@@ -160,6 +160,7 @@ pub use smysl::Pass
 pub use smysl::Passes
 pub use smysl::PayloadFilter
 pub use smysl::Person
+pub use smysl::PivotLang
 pub use smysl::Postings
 pub use smysl::Probe
 pub use smysl::Profile
@@ -334,6 +335,7 @@ pub use smysl::satisfies_rule_l
 pub use smysl::schema_definition
 pub use smysl::schemas
 pub use smysl::script_of
+pub use smysl::script_of_lang
 pub use smysl::stage
 pub use smysl::surface
 pub use smysl::text

@@ -448,7 +448,6 @@ ingest     [possible values: surface, cbor]
 ingest     --max-output
 ingest     --strict
 ingest     --lang-policy
-ingest     [possible values: source]
 ingest     --offline
 ingest     --no-color
 ingest     --normaliser

@@ -177,6 +177,96 @@ impl Scripts {
     }
 }
 
+/// Which script a language is ordinarily written in, where this build can say.
+///
+/// The table is deliberately short and deliberately incomplete. It exists for one caller — the
+/// pivot pass, which asks a model to write in a named language and has to be able to tell
+/// whether it did (`SMY-W436`) — and the only honest answer for a language not listed here is
+/// *unevaluable*, on `SMY-W025`'s principle that a bound nobody can evaluate is not a bound
+/// that passed. Adding a row is adding a claim about a language, and a wrong row would report
+/// a correct translation as a policy failure.
+///
+/// A **script subtag wins** where the tag carries one: `sr-Latn` is Latin whatever `sr` alone
+/// would be, which is the one case where a two-script language has said which one it means.
+/// Several languages are written in two scripts with no subtag to say which — Serbian,
+/// Kurdish, Punjabi, Azerbaijani — and those are left out rather than guessed.
+pub fn script_of_lang(tag: &str) -> Option<Script> {
+    /// Primary subtags whose script this build is prepared to name.
+    const BY_LANG: &[(&str, Script)] = &[
+        // Latin: the five `lingua` is built for, then the rest of the tier this build's readers
+        // and analyzers already name.
+        ("en", Script::Latin),
+        ("ru", Script::Cyrillic),
+        ("es", Script::Latin),
+        ("fr", Script::Latin),
+        ("de", Script::Latin),
+        ("it", Script::Latin),
+        ("pt", Script::Latin),
+        ("nl", Script::Latin),
+        ("pl", Script::Latin),
+        ("cs", Script::Latin),
+        ("sv", Script::Latin),
+        ("da", Script::Latin),
+        ("fi", Script::Latin),
+        ("tr", Script::Latin),
+        ("id", Script::Latin),
+        ("vi", Script::Latin),
+        ("ro", Script::Latin),
+        ("hu", Script::Latin),
+        ("la", Script::Latin),
+        // Cyrillic.
+        ("uk", Script::Cyrillic),
+        ("be", Script::Cyrillic),
+        ("bg", Script::Cyrillic),
+        ("mk", Script::Cyrillic),
+        ("kk", Script::Cyrillic),
+        // The rest, one script each and no second one in use.
+        ("el", Script::Greek),
+        ("grc", Script::Greek),
+        ("zh", Script::Cjk),
+        ("ja", Script::Cjk),
+        ("ko", Script::Cjk),
+        ("ar", Script::Arabic),
+        ("fa", Script::Arabic),
+        ("ur", Script::Arabic),
+        ("he", Script::Hebrew),
+        ("yi", Script::Hebrew),
+        ("hi", Script::Devanagari),
+        ("mr", Script::Devanagari),
+        ("ne", Script::Devanagari),
+        ("sa", Script::Devanagari),
+    ];
+    /// Script subtags, by the ISO 15924 code a BCP-47 tag spells them with.
+    const BY_SUBTAG: &[(&str, Script)] = &[
+        ("latn", Script::Latin),
+        ("cyrl", Script::Cyrillic),
+        ("grek", Script::Greek),
+        ("hani", Script::Cjk),
+        ("hans", Script::Cjk),
+        ("hant", Script::Cjk),
+        ("jpan", Script::Cjk),
+        ("kore", Script::Cjk),
+        ("arab", Script::Arabic),
+        ("hebr", Script::Hebrew),
+        ("deva", Script::Devanagari),
+    ];
+
+    let mut parts = tag.split('-');
+    let primary = parts.next().unwrap_or("");
+    for seg in parts {
+        if let Some((_, s)) = BY_SUBTAG
+            .iter()
+            .find(|(code, _)| seg.eq_ignore_ascii_case(code))
+        {
+            return Some(*s);
+        }
+    }
+    BY_LANG
+        .iter()
+        .find(|(l, _)| primary.eq_ignore_ascii_case(l))
+        .map(|(_, s)| *s)
+}
+
 /// Letters a text needs before it is worth asking what script it is in.
 ///
 /// Below this a majority is one or two characters, and a gist like `OK` or `p95` would be
