@@ -1,0 +1,23 @@
+# A paragraph reprinted under two expressions, and a second paragraph that is not (TX-P7
+# step 2, SMYSL-2.4 §3.6).
+#
+# The first two units name the same bytes of the same part under two different manifests: a
+# collection, and an anthology that reprinted the paragraph. That is what `identical-span`
+# proposes on, and it is the shape of the engine's whole argument — a tid is BLAKE3 over a
+# part's normalised bytes, so the same tid is the same text and not similar text.
+#
+# The third unit is at other bytes of the same part under one of those manifests, and is here
+# so that an engine proposing every pair fails against this file rather than passing.
+#
+# The ids are canonical and the part behind them is not in this repository: nothing reads it.
+# What a same-as engine reads is which part, which manifest and which bytes a unit *says* it
+# came from, which is all a unit is allowed to carry about its source (A-2.4).
+
+@claim { status: cited, lang: en, source: { kind: doc, ref: "t3:2ruhul6f4o3a735poauxd3snjdxdzol44imwk7gfse5jed2rb5ra#p.1", span: [0, 120], manifest: m3:2ruhul6f4o3a735poauxd3snjdxdzol44imwk7gfse5jed2rb5ra } }
+~ The porter saw nobody pass and was looking at the mud.
+
+@claim { status: cited, lang: en, source: { kind: doc, ref: "t3:2ruhul6f4o3a735poauxd3snjdxdzol44imwk7gfse5jed2rb5ra#p.1", span: [0, 120], manifest: m3:4ruhul6f4o3a735poauxd3snjdxdzol44imwk7gfse5jed2rb5ra } }
+~ The porter saw nobody pass and was looking at the mud.
+
+@claim { status: cited, lang: en, source: { kind: doc, ref: "t3:2ruhul6f4o3a735poauxd3snjdxdzol44imwk7gfse5jed2rb5ra#p.2", span: [120, 240], manifest: m3:2ruhul6f4o3a735poauxd3snjdxdzol44imwk7gfse5jed2rb5ra } }
+~ A ship is owned, sailed and insured by three different men.

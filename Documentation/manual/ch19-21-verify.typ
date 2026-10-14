@@ -1046,7 +1046,7 @@ asserts byte-identical output across all sixteen runs per operation:
 ```
 xtask determinism (rule D)
   matrix: 8 permutations
-  10 operations registered: rule D's five, and 5 since
+  12 operations registered: rule D's five, and 7 since
   pack: identical across 16 runs
   salience: identical across 16 runs
   merge: identical across 16 runs
@@ -1056,6 +1056,8 @@ xtask determinism (rule D)
   text_redact: identical across 16 runs
   text_append: identical across 16 runs
   date_show: identical across 16 runs
+  same_as_propose: identical across 16 runs
+  same_as_classes: identical across 16 runs
   render: identical across 16 runs
 ok
 ```
@@ -1114,7 +1116,7 @@ cannot promise anything about.
 xtask check-purity (rules A, B)
   dependency tree (--no-default-features): 31 crates, none forbidden
   pure crates: 8 checked, at default features and at --all-features
-  source scan: 133 files, 7 symbols
+  source scan: 137 files, 7 symbols
   rule A: 2 CLI files reach only the facade
 ok
 ```

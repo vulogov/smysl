@@ -58,6 +58,134 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### Three engines for one claim, and the gate that had been waiting on five quotes
+
+TX-P7 step 2 (SMYSL-2.4 §3.6, §4.4), and **G1 passes**.
+
+#### G1, and the five quotes it rested on
+
+GE-T4's last 29 refusals came back ruled, by hand, every one of them — including the 24 a rule
+of the instrument had already decided. The figure is therefore nobody's arithmetic about
+elisions: `29 ruled by hand, 0 decided by rule, 0 left to read`. **0.0000 false-`Absent` in all
+five tier-1 languages**, under both normalisers, against a bar of two units in 200.
+
+The five that had been a reader's did not turn on the brackets, and the finding is worth more
+than the number. Each is real King James text taken from the chapter **next to** the one its
+unit cites, and each `source` in that corpus is exactly one chapter: `[having] sorrow in my
+heart daily` is Psalm 13:2 under a Psalm 14 part; Shimei is 1 Kings 2:8 under 1 Kings 3; the
+thunders of Sinai are Exodus 19:16 under Exodus 20, and that quote carries its own verse
+reference as a prefix; `that giveth to all [men] liberally` is James 1:5 under James 2; and
+`The heart shall rejoice in thy salvation` is Psalm 13:5, where it reads *my* heart. So the
+question was the one the worklist's own header asks — is the quote in the text **this unit
+cites** — and the bracketed supplied words were a second difference on three of the five rows
+rather than the thing being decided. Every refusal in the whole sample has one shape after all:
+a model quoting past the window it was shown.
+
+That was the last clause G1 held. GE-T14 passed in TX-P2, GE-T13 over the public chronology,
+GE-T1 over the five Bibles on two platforms with three ports agreeing, and the cost report has
+replaced the planning figures. Identity is fixed, and units may be written at scale.
+
+#### The engines
+
+`smysl_text::proposition`: `identical-span`, `lexical` and `anchored` behind one `Engine`
+trait, beside the retrieval and the alignment they need. Counting stays in `smysl-graph`, where
+TX-P2 put it and where a checker can reach it — A-13 gives `C-Library` the obligation to derive
+`strict` classes, and `smysl-check` may not depend on `smysl-text`.
+
+Each answers the same question from different evidence, and S0 measured what each is worth.
+`identical-span` is the one that is not a guess: a tid is BLAKE3 over a part's normalised bytes,
+so two manifests carrying one tid carry the same *text*, and two units naming the same range of
+it and saying the same thing are one proposition extracted twice. `lexical` is BM25 neighbours
+within one language, filtered by adjacency — 0.789 → 0.835 same-language in S0, which is why
+§3.6 calls adjacency load-bearing rather than a filter. `anchored` is a versification alignment,
+exact where a cosine is not: Genesis 3:5 and Бытие 3:5 share no term, and the alignment says
+they are one place from the library alone.
+
+Nothing here accepts its own proposals. `smysl_ingest::same_as::propose` is the only thing that
+turns one into a record — one `x.text/same-as` edge and one attestation at rung `computed` by
+`tool:smysl-same-as-<engine>` — staged under rule S, which is what keeps OQ-44 a question
+somebody can still ask. Two engines proposing one pair are two agents on one rid, and that is
+what makes `attested:2`, §3.6's default for corpus measures, answerable at all.
+
+#### The anthology test, in a form the sentence does not require
+
+Step 2's exit is one line: *a paragraph reprinted under two expressions forms one class by
+`identical-span`*. An engine that proposed every pair of units in the store would satisfy it.
+
+So the library holds **two** paragraphs, each reprinted, and the exit asserts two classes of two
+rather than one class of four. Beside them sit the two units that must not be proposed: one
+carrying the first pair's gist word for word over the *second* paragraph's bytes, which an
+engine keyed on the gist alone proposes, and a second extraction of the first paragraph under
+one of its own manifests, which an engine ignoring the manifest proposes — §3.6 excludes it
+because two extractions under one manifest are a duplicate rather than a reprint, and `merge` is
+what a duplicate is for.
+
+#### Five decisions the one-line plan did not contain
+
+A proposal is a `Proposal { a, b, why }` and not §4.2's `(Uid, Uid)`, because a pair cannot say
+why. An engine that proposes 4,000 edges over five Bibles is either finding the alignment or
+finding that every verse looks like every other verse, and the difference is one sentence per
+edge — which `same-as propose` prints, an adjudicator reads and GE-T5's sheet needs. The pair is
+held in uid order, so a symmetric claim has one spelling and `attested:n` cannot count one
+engine as two.
+
+`Anchored` takes the **alignment table**, not §4.2's `{ lib, scheme }`. A library and a scheme
+name mean rebuilding the alignment inside `propose` — every locator table in the corpus — and
+make the answer depend on a map installed since the index was built. §3.8's gate is that the
+table is reproducible from the library alone, `Index` already holds it, and the scheme is per
+manifest pair and in the table's own rows, so naming one would have let a caller ask for an
+alignment that was not the one computed.
+
+**Adjacency defaults to on and is switchable.** The default is S0's measured configuration;
+`--no-adjacent` exists because the 0.789 figure has to stay reproducible, and an engine that
+could only be run in its good configuration could never be shown to be better than its bad one.
+The rule is "same stem, final component equal or one apart", and it deliberately does not cross
+a chapter seam: `Gen.3.24` and `Gen.4.1` are consecutive verses of scripture and are not
+adjacent by this rule, because the rule cannot know Genesis 3 has 24 verses without reading the
+structure — and one that guessed would be wrong at the end of every chapter in the other
+direction. Shrinking the candidate set is the whole point; missing the pair that straddles a
+break costs less than admitting every pair whose numbers happen to be one apart.
+
+An edge the store already holds is **counted, not staged again**: a rid is derived from the kind
+and the endpoints, so a rerun produces byte-identical records and staging them would be a lie
+about what the run found. A **withdrawn** edge is the exception and is proposed again —
+withdrawal is a person judging that two units are not one proposition, and an engine
+disagreeing with a person is exactly the thing that should become visible. `Store::is_withdrawn`
+keeps it out of the classes either way.
+
+And the command is `Purity::Pure`, where §4.4 drafted `pure per engine; mixed as a command`.
+Every engine in this build is a computation over records; the one that would make the row mixed
+is `semantic`, which is SMYSL-2.5's and is the value clap refuses rather than a value that
+parses and then says it is not in this build. `--dry-run` was added for the determinism matrix,
+because §4.4 registers `same-as propose` there and an operation run sixteen times to prove it is
+a function of its input must not write a sidecar each time. `propose` needs the staging layer
+and `classes` does not, so a build with `text` and no `ingest` answers the pure half and says so
+about the other.
+
+#### Two defects found by building it
+
+`--yes` over a **surface** store is refused, because an attestation has no surface form and
+committing would keep the edge and lose the agent that proposed it — the one record that makes
+`attested:n` answerable. That refusal has been in `commit_staged` since 1.9 and had never been
+exercised by a command whose batch is *all* attestations; it is asserted now.
+
+And three engines wanted three readings of A-2.2's `t3:…#locator` grammar. `proposition::place`
+is the one place a unit's source is taken apart, because proposals from different engines are
+meant to be comparable and `attested:n` is what reads them — two engines that disagreed about
+where a unit came from would have agreed about nothing.
+
+New: `smysl_text::proposition` (`Engine`, `Proposal`, `IdenticalSpan`, `Lexical`, `Anchored`,
+`engine`, and re-exports of `classes`/`Policy`/`Class`/`SAME_AS`), `smysl_ingest::same_as`
+(`propose`, `Proposals`), the `same-as` command, `fixtures/library/same-as/anthology.smy`, and
+two rows in the determinism matrix.
+
+Tests: four in `proposition`, five in `crates/smysl-ingest/tests/same_as.rs` (the exit, a second
+run that stages nothing, a scope, and the two other engines on the same store), one in
+`crates/smysl-text/tests/align.rs` (`anchored` across the versification, with the other two
+shown to be blind to it), and five in `tests/cmd_same_as.rs`.
+
+What TX-P7 still owes: step 3 (`link`, `summarise`) and step 4 (GE-T5).
+
 ### Two gates that had been waiting on material, and the material
 
 G1's four experiments were never four pieces of work. GE-T14 passed in TX-P2 and GE-T4's

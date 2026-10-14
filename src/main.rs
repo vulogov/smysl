@@ -152,6 +152,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "ui",        about: "Terminal UI",                                         purity: Purity::Pure,  phase: "SM-P15" , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "text",      about: "Library: add, append, list and show texts",           purity: Purity::Pure,  phase: "TX-P1"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "date",      about: "Write datings; show effective time and why",          purity: Purity::Pure,  phase: "TX-P3"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "same-as",    about: "Propose same-as edges; derive classes",               purity: Purity::Pure,  phase: "TX-P7"  , impure_when: None , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -615,6 +616,72 @@ fn cli() -> Command {
                     Arg::new("dry-run")
                         .long("dry-run")
                         .help("Report what would be written, and write nothing")
+                        .action(ArgAction::SetTrue),
+                ),
+            "same-as" => sub
+                .arg(
+                    Arg::new("action")
+                        .required(true)
+                        .value_name("ACTION")
+                        .value_parser(["propose", "classes"])
+                        .help("propose edges with an engine, or derive the classes edges add up to"),
+                )
+                .arg(
+                    Arg::new("engine")
+                        .long("engine")
+                        .value_name("E")
+                        // `semantic` is reserved for SMYSL-2.5 and deliberately not listed:
+                        // a value that parsed and then said "not in this build" reads like a
+                        // defect, and a value clap refuses reads like what it is.
+                        .value_parser(["identical-span", "lexical", "anchored"])
+                        .help("Which evidence proposes a pair (`propose`)"),
+                )
+                .arg(
+                    Arg::new("policy")
+                        .long("policy")
+                        .value_name("P")
+                        .default_value("strict")
+                        .help("`strict` (normative), `component`, or `attested:N` (`classes`)"),
+                )
+                .arg(
+                    Arg::new("scope")
+                        .long("scope")
+                        .value_name("WHO")
+                        .num_args(1..)
+                        .help("Restrict to the units drawn from these aliases or mids"),
+                )
+                .arg(
+                    Arg::new("neighbours")
+                        .long("neighbours")
+                        .short('n')
+                        .value_name("K")
+                        .default_value("5")
+                        .value_parser(clap::value_parser!(usize))
+                        .help("Neighbours per unit (`--engine lexical`)"),
+                )
+                .arg(
+                    Arg::new("no-adjacent")
+                        .long("no-adjacent")
+                        .help("Keep pairs that are not in the same or a neighbouring place (`--engine lexical`)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .value_name("MS")
+                        .help("Wall clock for the attestations, in milliseconds")
+                        .value_parser(clap::value_parser!(u64)),
+                )
+                .arg(
+                    Arg::new("yes")
+                        .long("yes")
+                        .help("Commit the staged edges instead of leaving them for review")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .help("Report what would be staged, and write nothing")
                         .action(ArgAction::SetTrue),
                 ),
             "view" => sub
@@ -6898,6 +6965,7 @@ fn main() -> ProcExitCode {
         "ui" => cmd_ui(sub, &matches),
         "text" => cmd_text(sub, &matches),
         "date" => cmd_date(sub, &matches),
+        "same-as" => cmd_same_as(sub, &matches),
         _ => {
             // Unreachable while every command in `COMMANDS` has an arm above, which
             // `command_table_matches_section_23` enforces. Kept as the honest answer if one
@@ -8224,6 +8292,360 @@ fn cmd_date(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
     ExitCode::Usage
 }
 
+// ---------------------------------------------------------------------------
+// `same-as` — proposing edges and counting classes (RFC SMYSL-2.4 §3.6, TX-P7 step 2)
+// ---------------------------------------------------------------------------
+
+/// `smysl same-as propose|classes`.
+///
+/// Two halves that look alike and are not. `classes` is a **read**: it counts what the store's
+/// edges already add up to under A-12.4 and writes nothing. `propose` runs an engine and
+/// **stages** what it finds, under rule S like any other batch, because a tool that accepted
+/// its own proposals would make OQ-44 — may a lexical proposal be auto-accepted? — a question
+/// nobody could ask.
+///
+/// `Purity::Pure` in the command table, and that is the whole of the claim: every engine in
+/// this build is a computation over records. `semantic` is SMYSL-2.5's and is the value clap
+/// refuses here; if it lands, this row becomes `Mixed` and §4.4's table says so already.
+#[cfg(feature = "text")]
+fn cmd_same_as(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let action = m
+        .get_one::<String>("action")
+        .map(String::as_str)
+        .expect("required");
+    let path = match store_path(m, global, "same-as") {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+    warn_output_is_a_report(global, "same-as");
+    match action {
+        "propose" => same_as_propose(m, global, &path),
+        "classes" => same_as_classes(m, &path),
+        other => {
+            eprintln!("smysl same-as: unknown action `{other}`");
+            ExitCode::Usage
+        }
+    }
+}
+
+#[cfg(not(feature = "text"))]
+fn cmd_same_as(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl same-as: needs the library layer (build with --features text)");
+    ExitCode::Usage
+}
+
+/// A library if the path is one, and the plain store otherwise.
+///
+/// Both are legitimate. `identical-span` and `lexical` read units and nothing else, so a store
+/// of text units exported from a library is a fair thing to run them over; `anchored` reads an
+/// alignment, which only a library has. The difference is reported where it bites rather than
+/// refused up front.
+#[cfg(feature = "text")]
+enum Corpus {
+    Library(Box<smysl::text::library::Library>),
+    // Both boxed, and the store for the reason clippy gives: a `Store` is some 2.6 KiB of
+    // indexes, so an unboxed variant makes every `Corpus` that big whichever one it holds.
+    Store(Box<Store>, std::collections::BTreeMap<smysl::Label, Uid>),
+}
+
+#[cfg(feature = "text")]
+impl Corpus {
+    fn open(path: &str) -> Result<Corpus, String> {
+        let root = std::path::Path::new(path);
+        if root.join("LIBRARY").exists() {
+            return smysl::text::library::Library::open(root)
+                .map(|l| Corpus::Library(Box::new(l)))
+                .map_err(|e| e.to_string());
+        }
+        load_store(path).map(|(s, l)| Corpus::Store(Box::new(s), l))
+    }
+
+    fn store(&self) -> &Store {
+        match self {
+            Corpus::Library(l) => l.store(),
+            Corpus::Store(s, _) => s,
+        }
+    }
+
+    /// The uids `--scope` names, or `None` for the whole corpus.
+    ///
+    /// A scope is written in aliases and mids, because that is how a person holds a corpus —
+    /// and it is applied as a set of **units**, because that is what an engine takes. A unit is
+    /// in scope when the manifest its span is an offset into is one of the named ones, which is
+    /// the only link between a unit and an expression that A-2.4 lets a unit carry.
+    fn scope(&self, names: &[String]) -> Result<std::collections::BTreeSet<Uid>, String> {
+        use std::collections::BTreeSet;
+        let mut mids: BTreeSet<smysl::text::Mid> = BTreeSet::new();
+        for name in names {
+            if let Ok(mid) = smysl::text::Mid::parse(name) {
+                mids.insert(mid);
+                continue;
+            }
+            match self {
+                Corpus::Library(l) => match l.head(name) {
+                    Ok(mid) => {
+                        mids.insert(mid);
+                    }
+                    Err(e) => return Err(format!("--scope {name}: {e}")),
+                },
+                Corpus::Store(..) => {
+                    return Err(format!(
+                        "--scope {name}: an alias needs a library to resolve it; pass an `m3:` \
+                         manifest id, or point --store at the library"
+                    ))
+                }
+            }
+        }
+        let scope: BTreeSet<Uid> = self
+            .store()
+            .units()
+            .filter(|(_, u)| {
+                u.core
+                    .source
+                    .as_ref()
+                    .and_then(|s| s.manifest())
+                    .is_some_and(|m| mids.contains(m))
+            })
+            .map(|(uid, _)| *uid)
+            .collect();
+        if scope.is_empty() {
+            return Err("--scope names no unit in this corpus".to_string());
+        }
+        Ok(scope)
+    }
+}
+
+#[cfg(feature = "text")]
+fn same_as_scope(
+    m: &ArgMatches,
+    corpus: &Corpus,
+) -> Result<Option<std::collections::BTreeSet<Uid>>, ExitCode> {
+    let Some(names) = m.get_many::<String>("scope") else {
+        return Ok(None);
+    };
+    let names: Vec<String> = names.cloned().collect();
+    match corpus.scope(&names) {
+        Ok(s) => Ok(Some(s)),
+        Err(e) => {
+            eprintln!("smysl same-as: {e}");
+            Err(ExitCode::Usage)
+        }
+    }
+}
+
+/// `propose` needs the staging layer, which `classes` does not.
+///
+/// Counting classes reads records; proposing stages a batch, and a batch is `smysl-ingest`'s.
+/// A build with the library layer and no ingest crate can therefore answer the pure half and
+/// says so about the other, rather than offering an action it cannot complete.
+#[cfg(not(all(feature = "text", feature = "ingest")))]
+#[cfg(feature = "text")]
+fn same_as_propose(_m: &ArgMatches, _global: &ArgMatches, _path: &str) -> ExitCode {
+    eprintln!(
+        "smysl same-as propose: staging needs the ingest layer (build with --features ingest);          `same-as classes` is pure and works in this build"
+    );
+    ExitCode::Usage
+}
+
+#[cfg(all(feature = "text", feature = "ingest"))]
+fn same_as_propose(m: &ArgMatches, global: &ArgMatches, path: &str) -> ExitCode {
+    use smysl::text::proposition::{Anchored, Engine, IdenticalSpan, Lexical};
+
+    let Some(engine) = m.get_one::<String>("engine") else {
+        eprintln!("smysl same-as propose: --engine is required; the engine is the evidence");
+        return ExitCode::Usage;
+    };
+    let mut corpus = match Corpus::open(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("smysl same-as propose: {path}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let scope = match same_as_scope(m, &corpus) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+
+    // The clock is supplied, never read (guarantee A2): a replayed run produces the same
+    // attestations, and an engine is exactly the sort of thing that gets replayed.
+    let now = smysl::Hlc::new(
+        m.get_one::<u64>("at").copied().unwrap_or_else(now_millis),
+        0,
+        match AgentId::new(format!("tool:smysl-same-as-{engine}")) {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("smysl same-as propose: {e}");
+                return ExitCode::Failure;
+            }
+        },
+    );
+
+    // The alignment, held outside the match so the borrow outlives the engine that reads it.
+    let table = match (engine.as_str(), &corpus) {
+        ("anchored", Corpus::Library(l)) => Some(l.index().align.clone()),
+        ("anchored", Corpus::Store(..)) => {
+            eprintln!(
+                "smysl same-as propose: --engine anchored reads a versification alignment, which \
+                 only a library has: point --store at the library"
+            );
+            return ExitCode::Usage;
+        }
+        _ => None,
+    };
+    let lexical = Lexical {
+        k: m.get_one::<usize>("neighbours").copied().unwrap_or(5),
+        adjacent_only: !m.get_flag("no-adjacent"),
+    };
+    let chosen: Box<dyn Engine> = match engine.as_str() {
+        "identical-span" => Box::new(IdenticalSpan),
+        "lexical" => Box::new(lexical),
+        "anchored" => Box::new(Anchored::new(table.as_ref().expect("set above"))),
+        other => {
+            eprintln!("smysl same-as propose: unknown engine `{other}`");
+            return ExitCode::Usage;
+        }
+    };
+
+    let found = smysl::same_as::propose(corpus.store(), chosen.as_ref(), scope.as_ref(), now);
+    let Some(staged) = found.staged else {
+        println!(
+            "{}: {} proposal(s), all of which this store already holds",
+            found.engine, found.already
+        );
+        return ExitCode::Success;
+    };
+    for p in &found.proposals {
+        println!("  {} {} — {}", p.a.short(), p.b.short(), p.why);
+    }
+    if staged.has_errors() {
+        eprintln!("smysl same-as propose: the batch did not check clean");
+        for d in &staged.report.diagnostics {
+            eprintln!("  {d}");
+        }
+        return ExitCode::Failure;
+    }
+
+    // `--dry-run` before anything is written, and it is in the determinism matrix for exactly
+    // that reason: a pure engine's output is a function of its input, and an operation that
+    // left a sidecar behind could not be run twice to prove it.
+    if m.get_flag("dry-run") {
+        println!(
+            "{} edge(s) would be staged by {} ({} already held)",
+            staged.relations.len(),
+            found.engine,
+            found.already
+        );
+        return ExitCode::Success;
+    }
+
+    let root = project_root(global);
+    if m.get_flag("yes") {
+        let records = staged.records();
+        let n = staged.relations.len();
+        match &mut corpus {
+            Corpus::Library(l) => {
+                if let Err(e) = l.append_records(&records) {
+                    eprintln!("smysl same-as propose: {e}");
+                    return ExitCode::Failure;
+                }
+                let _ = smysl::stage::discard(&root);
+            }
+            Corpus::Store(store, labels) => {
+                if let Err(e) = smysl::stage::write(&root, &staged) {
+                    eprintln!("smysl same-as propose: {e}");
+                    return ExitCode::Failure;
+                }
+                let store = &*store;
+                if let Err(code) = commit_staged("same-as", path, &root, &records, store, labels) {
+                    return code;
+                }
+            }
+        }
+        println!("{n} edge(s) proposed by {} and committed", found.engine);
+        return ExitCode::Success;
+    }
+
+    if let Err(e) = smysl::stage::write(&root, &staged) {
+        eprintln!("smysl same-as propose: {e}");
+        return ExitCode::Failure;
+    }
+    println!(
+        "{} edge(s) staged in {} by {} ({} already held); review, then `smysl merge --staged`",
+        staged.relations.len(),
+        root.join(smysl::stage::PATH).display(),
+        found.engine,
+        found.already
+    );
+    // Rule S, as every staging command: exit 10 is how a pipeline is told that nothing is
+    // committed yet.
+    ExitCode::Staged
+}
+
+#[cfg(feature = "text")]
+fn same_as_classes(m: &ArgMatches, path: &str) -> ExitCode {
+    use smysl::text::proposition::{classes, Policy};
+
+    let policy = m
+        .get_one::<String>("policy")
+        .map(String::as_str)
+        .unwrap_or("strict");
+    let policy = match policy {
+        "strict" => Policy::Strict,
+        "component" => Policy::Component,
+        other => match other.strip_prefix("attested:").map(str::parse::<u32>) {
+            Some(Ok(n)) if n > 0 => Policy::Attested(n),
+            _ => {
+                eprintln!(
+                    "smysl same-as classes: --policy `{other}` is not `strict`, `component` or \
+                     `attested:N` with N at least 1"
+                );
+                return ExitCode::Usage;
+            }
+        },
+    };
+    let corpus = match Corpus::open(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("smysl same-as classes: {path}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let scope = match same_as_scope(m, &corpus) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+
+    let found = classes(corpus.store(), policy, scope.as_ref());
+    let mut members = 0usize;
+    for class in &found {
+        members += class.len();
+        match class.diameter {
+            Some(d) => println!(
+                "  {} ({} member(s), diameter {d})",
+                class.id.short(),
+                class.len()
+            ),
+            None => println!("  {} ({} member(s))", class.id.short(), class.len()),
+        }
+        for uid in &class.members {
+            if *uid != class.id {
+                println!("      {}", uid.short());
+            }
+        }
+    }
+    // The count and the singletons, because a run of this command is usually a question about
+    // one of them. A singleton class is not a failure (A-12.4): it means a unit is claimed to
+    // be the same proposition as something and the claims do not agree closely enough to put
+    // them together, which is a thing to read.
+    let singletons = found.iter().filter(|c| c.len() == 1).count();
+    println!(
+        "{} class(es) over {members} unit(s), {singletons} of them singleton(s)",
+        found.len()
+    );
+    ExitCode::Success
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -8354,7 +8776,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 28);
+        assert_eq!(COMMANDS.len(), 29);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -8386,7 +8808,8 @@ mod tests {
                 "reindex",
                 "ui",
                 "text",
-                "date"
+                "date",
+                "same-as"
             ]
         );
     }

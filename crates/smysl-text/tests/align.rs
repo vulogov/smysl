@@ -384,3 +384,122 @@ fn installing_a_map_puts_it_where_the_rebuild_looks() {
         "a refused map left a file behind for every later rebuild to skip"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The `anchored` same-as engine over this alignment (TX-P7 step 2, §3.6)
+// ---------------------------------------------------------------------------
+
+/// A unit drawn from `alias` at `locator`, saying `gist`.
+///
+/// Through `provenance::stamp`, so the reference and the manifest are written by the one
+/// function allowed to write them — an engine reading a reference the test had assembled by
+/// hand would be an engine tested against this file's spelling of A-2.2.
+fn unit_at(lib: &Library, alias: &str, locator_text: &str, gist: &str) -> smysl_core::UnitCore {
+    use smysl_core::{KernelType, Status, UnitCoreBuilder};
+    use smysl_text::provenance::{stamp, Drawn};
+
+    let mid = lib.head(alias).expect("a head");
+    let manifest = lib.store().manifest(&mid).expect("its manifest").clone();
+    let at = lib
+        .passage(
+            alias,
+            &locator::parse(locator_text).expect("a locator"),
+            &Caps::DEFAULT,
+        )
+        .expect("the passage");
+    let lang = manifest.lang.clone();
+    let b = UnitCoreBuilder::new(KernelType::Claim, gist, Status::Cited);
+    stamp(
+        b,
+        &Drawn {
+            tid: at.tid,
+            locator: Some(locator_text),
+            manifest: &manifest,
+            observed: None,
+            span: Some((at.range.start, at.range.end)),
+            lang: Some(&lang),
+        },
+    )
+    .build()
+    .expect("a unit")
+}
+
+/// The engine proposes across the alignment and nowhere else.
+///
+/// This is the clause §3.6 means by "`anchored` alone is used for the Bibles, and it is also
+/// the right engine there": the two gists share no term, so `lexical` cannot see the pair at
+/// all, and the alignment sees it exactly. The two psalters' parts have different tids, so
+/// `identical-span` cannot see it either — which is the whole reason there are three engines.
+#[test]
+fn the_anchored_engine_proposes_across_the_versification() {
+    use smysl_text::proposition::{Anchored, Engine, IdenticalSpan, Lexical};
+
+    let (_dir, mut lib, _kjv, _synodal) = two_psalters("anchored");
+
+    let english = unit_at(
+        &lib,
+        "kjv",
+        "Ps.14.1",
+        "The fool says in his heart there is no God.",
+    );
+    let russian = unit_at(
+        &lib,
+        "synodal",
+        "Ps.13.1",
+        "Сказал безумец в сердце своём: нет Бога.",
+    );
+    // A third place, aligned to nothing in the map: Psalm 15 has no row, so no proposal may
+    // reach it however much it looks like the others.
+    let unaligned = unit_at(
+        &lib,
+        "kjv",
+        "Ps.15.1",
+        "The fool says in his heart there is no God.",
+    );
+    let (a, b, c) = (
+        smysl_core::canonical_uid(&english),
+        smysl_core::canonical_uid(&russian),
+        smysl_core::canonical_uid(&unaligned),
+    );
+    lib.append_records(&[
+        smysl_core::Record::Unit(english),
+        smysl_core::Record::Unit(russian),
+        smysl_core::Record::Unit(unaligned),
+    ])
+    .expect("the units append");
+
+    let table = lib.index().align.clone();
+    let found = Anchored::new(&table).propose(lib.store(), None);
+    let pairs: Vec<(_, _)> = found.iter().map(|p| (p.a, p.b)).collect();
+    let expected = if a <= b { (a, b) } else { (b, a) };
+    assert_eq!(
+        pairs,
+        vec![expected],
+        "exactly the aligned pair: {:#?}",
+        found
+    );
+    assert!(
+        found[0].why.contains("Ps.14.1") && found[0].why.contains("Ps.13.1"),
+        "a proposal has to name the two places: {}",
+        found[0].why
+    );
+    assert!(
+        found[0].why.contains("kjv-synodal"),
+        "and the map that aligned them: {}",
+        found[0].why
+    );
+    assert!(
+        !found.iter().any(|p| p.a == c || p.b == c),
+        "Psalm 15 is in no row of the map"
+    );
+
+    // The other two engines, on the same store, for the reason there are three of them.
+    assert!(
+        IdenticalSpan.propose(lib.store(), None).is_empty(),
+        "two psalters do not share a part"
+    );
+    assert!(
+        Lexical::default().propose(lib.store(), None).is_empty(),
+        "an English gist and a Russian one share no term, and are in different language groups"
+    );
+}

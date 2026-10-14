@@ -10,7 +10,8 @@
 //!
 //! SM-P0 ships the harness with no operations registered. Each later phase registers its
 //! operation as it lands: `pack` (SM-P9), `merge` (SM-P6), `derive_thread` (SM-P11),
-//! `salience` (SM-P8), `render` (SM-P12), and `text add` / `text show` (TX-P1).
+//! `salience` (SM-P8), `render` (SM-P12), `text add` / `text show` (TX-P1), `date show`
+//! (TX-P3) and `same-as propose` / `same-as classes` (TX-P7).
 //!
 //! # Operations that write
 //!
@@ -403,6 +404,55 @@ const OPS: &[Op] = &[
         ],
         setup: None,
     },
+    Op {
+        name: "same_as_propose",
+        // TX-P7 step 2, and §4.4 names this operation outright. What is compared is stdout:
+        // which pairs the engine proposed, in which order, and the sentence saying why. An
+        // engine whose grouping depended on record order, or whose proposals came back in
+        // whatever order a hash map iterated, differs here — and the `ru_RU.UTF-8` row of the
+        // matrix is the one a case-folding comparison would betray.
+        //
+        // `--dry-run`, because a staging command writes a sidecar and an operation that is run
+        // four times to prove it is a function of its input must not be.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli,ingest",
+            "--",
+            "same-as",
+            "propose",
+            "--engine",
+            "identical-span",
+            "--dry-run",
+            "-s",
+            "fixtures/library/same-as/anthology.smy",
+        ],
+        setup: None,
+    },
+    Op {
+        name: "same_as_classes",
+        // A-12.4's greedy clique partition, which is the normative one: two implementations
+        // that disagree about the classes of one store disagree about how many propositions it
+        // holds. The fixture holds no edge, so what this pins is the *report* — the counts and
+        // the singleton line — and the operation is registered against the day it holds one.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli,text",
+            "--",
+            "same-as",
+            "classes",
+            "-s",
+            "fixtures/library/same-as/anthology.smy",
+        ],
+        setup: None,
+    },
 ];
 
 /// Two-stage operations, run as a shell pipeline. `render` needs a thread, and the only
@@ -431,9 +481,10 @@ pub fn run(root: &Path) -> Result<(), String> {
         println!("  no operations registered yet");
         return Ok(());
     }
-    // Rule D names five. `text add` and `text show` are TX-P1's and are not in §25's list
-    // because they did not exist when it was written; they are here because they are pure
-    // operations whose output must be a function of their input, which is all rule D says.
+    // Rule D names five. `text add`, `text show`, `date show` and the two `same-as`
+    // operations are SMYSL-2.4's and are not in §25's list because they did not exist when it
+    // was written; they are here because they are pure operations whose output must be a
+    // function of their input, which is all rule D says.
     let registered = OPS.len() + PIPELINES.len();
     println!(
         "  {registered} operations registered: rule D's five, and {} since",

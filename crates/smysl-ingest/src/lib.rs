@@ -56,6 +56,12 @@ pub mod recipe;
 /// how a caller sets its budget.
 #[doc(hidden)]
 pub mod repair;
+/// Staging same-as proposals as edges (TX-P7 step 2).
+///
+/// Behind `text` for the reason every other text module is: the engines live in
+/// `smysl-text`, and a default build of this crate links no library layer.
+#[cfg(feature = "text")]
+pub mod same_as;
 /// Reachable for `smysl-eval`'s `quoting_live.rs`, which sends `batch_schema()` to live
 /// providers to measure whether they honour it.
 #[doc(hidden)]

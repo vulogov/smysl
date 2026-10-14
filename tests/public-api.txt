@@ -331,6 +331,7 @@ pub use smysl::role_weights
 pub use smysl::salience
 pub use smysl::salience
 pub use smysl::salience_seed
+pub use smysl::same_as
 pub use smysl::satisfies_rule_l
 pub use smysl::schema_definition
 pub use smysl::schemas

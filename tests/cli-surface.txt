@@ -618,3 +618,28 @@ date       --quiet
 date       --verbose
 date       --seed-check
 date       --help
+same-as    <ACTION>
+same-as    [possible values: propose, classes]
+same-as    --config
+same-as    --engine
+same-as    [possible values: identical-span, lexical, anchored]
+same-as    --policy
+same-as    --store
+same-as    --output
+same-as    --scope
+same-as    --format
+same-as    [possible values: surface, cbor]
+same-as    --neighbours
+same-as    --no-adjacent
+same-as    --strict
+same-as    --at
+same-as    --offline
+same-as    --no-color
+same-as    --yes
+same-as    --dry-run
+same-as    --noprogress
+same-as    --json
+same-as    --quiet
+same-as    --verbose
+same-as    --seed-check
+same-as    --help

@@ -224,6 +224,11 @@ pub use smysl_ingest::text as ingest_text;
 // these four names and nothing else, so a library consumer can do what the CLI does.
 #[cfg(all(feature = "ingest", feature = "text"))]
 pub use smysl_ingest::text::{Target as TextTarget, TextIngest, TextReport};
+// Staging same-as proposals (§3.6, TX-P7 step 2). The module rather than its items, for the
+// same reason `ingest_text` is: `propose` returns a `Proposals` whose fields are the thing a
+// caller reads, and the engines it is given live in `text::proposition`.
+#[cfg(all(feature = "ingest", feature = "text"))]
+pub use smysl_ingest::same_as;
 #[cfg(feature = "stage")]
 pub use smysl_ingest::{stage, Attesting, Staged};
 // `smysl import` is the only producer of `measured` units and the only unit-producing command

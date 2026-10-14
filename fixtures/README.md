@@ -1,12 +1,19 @@
 # Fixtures
 
-Five trees, with different jobs.
+Six trees, with different jobs.
 
 | Tree | Contents | Consumed by |
 |---|---|---|
 | `corpus/` | F1–F8 (§27.2): whole stores exercising a design property each | unit, property, and integration tests |
 | `conformance/` | `.smy` / `.cbor` inputs plus the exact diagnostic set each must produce | the external conformance suite |
 | `golden/` | canonical encodings, rendered artifacts, `--explain` output | golden tests |
+| `library/same-as/` | `anthology.smy` — a paragraph reprinted under two expressions, and one that is not | `same-as propose`/`classes` in the determinism matrix (`xtask determinism`) |
+
+`library/same-as/anthology.smy` holds three units and no part: a same-as engine reads which part,
+which manifest and which bytes a unit *says* it came from, which is all A-2.4 lets a unit carry
+about its source, so the ids are canonical and nothing behind them is in this repository. The
+third unit is at other bytes of the same part, and it is there so that an engine proposing every
+pair fails against the file rather than passing.
 
 Two trees hold **gate material** rather than fixtures, and the difference is who they are
 addressed to: a fixture is an instrument, and these are the things being measured.
