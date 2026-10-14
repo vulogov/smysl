@@ -365,3 +365,58 @@ def test_carry_outside_its_three_values_is_refused():
     with pytest.raises(smysl.LibraryError, match="carry"):
         smysl.Manifest.decode(base)
     assert smysl.CARRY == {0: "none", 1: "ref", 2: "text"}
+
+
+# -- GE-T1's port clause over corpus material ----------------------------------------------
+#
+# `fixtures/library/bibles/wire/` is one expression a reader actually produced: Ruth in the
+# Russian Synodal edition, four parts, 89 segment rows. Everything above checks the derivations
+# against a fixture written to exercise them; this checks them against a reader's own output,
+# which is the half GE-T1 asks of a port and which two sentences cannot reach.
+#
+# The claim that is new is the last one: a segment row's `start` and `end` are **byte** offsets.
+# Over Cyrillic, an implementation that indexed by character derives every identity correctly
+# and resolves every span half as wide, and nothing before this bundle could tell the two apart.
+
+BIBLE = Path(__file__).parents[2] / "fixtures" / "library" / "bibles" / "wire"
+BIBLE_IDS = json.loads((BIBLE / "ids.json").read_text())
+BIBLE_RECORDS = (BIBLE / "records.cbor").read_bytes()
+
+
+def test_the_corpus_bundle_is_a_corpus():
+    assert BIBLE_IDS["edition"] == "russyn"
+    assert len(BIBLE_IDS["parts"]) == 4, "Ruth's four chapters"
+    assert sum(p["segments"] for p in BIBLE_IDS["parts"]) == 89
+    assert BIBLE_RECORDS
+
+
+def test_the_corpus_bundle_derives_every_identity_it_carries():
+    records = smysl.decode_store(BIBLE_RECORDS)
+    manifest = next(smysl.Manifest.decode(r.body) for r in records if r.code == 14)
+    assert manifest.mid().hex() == BIBLE_IDS["manifest"]["mid_hex"]
+    assert manifest.fields["reader"] == "usfm/1"
+    assert manifest.fields["versification"] == "synodal"
+    assert manifest.alias == BIBLE_IDS["manifest"]["alias"]
+
+    texts = [smysl.PartText.decode(r.body) for r in records if r.code == 15]
+    readings = [smysl.PartReading.decode(r.body) for r in records if r.code == 18]
+    assert len(texts) == len(readings) == len(BIBLE_IDS["parts"])
+    for text, reading, expected in zip(texts, readings, BIBLE_IDS["parts"]):
+        assert text.tid.hex() == expected["tid_hex"]
+        assert text.verify()
+        assert smysl.is_normalised(text.text)
+        assert len(text.text) == expected["length"]
+        assert reading.rdid().hex() == expected["rdid_hex"]
+        assert reading.structure_hash().hex() == expected["structure_hex"]
+        assert reading.reader == "usfm/1"
+
+        rows = reading.rows()
+        assert len(rows) == expected["segments"]
+        # Bytes, not characters. Slicing `bytes` at an offset inside a character gives a value
+        # that does not decode, so a round trip through UTF-8 is the whole check — and it is a
+        # real one here, where the text is two bytes a letter.
+        assert not text.text.isascii()
+        for row in rows:
+            start, end = row["start"], row["end"]
+            assert 0 <= start <= end <= len(text.text)
+            text.text[start:end].decode("utf-8")

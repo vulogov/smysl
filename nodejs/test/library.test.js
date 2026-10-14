@@ -346,3 +346,71 @@ test("carry outside its three values is refused", () => {
     [2, "text"],
   ]);
 });
+
+// --- GE-T1's port clause over corpus material ------------------------------------------------
+//
+// `fixtures/library/bibles/wire/` is one expression a reader actually produced: Ruth in the
+// Russian Synodal edition, four parts, 89 segment rows. Everything above checks the derivations
+// against a fixture written to exercise them; this checks them against a reader's own output,
+// which is the half GE-T1 asks of a port and which two sentences cannot reach.
+//
+// The claim that is new is the last one: a segment row's `start` and `end` are **byte** offsets.
+// Over Cyrillic, an implementation that indexed by code unit — which in JavaScript is the one
+// you get for free — derives every identity correctly and resolves every span half as wide, and
+// nothing before this bundle could tell the two apart.
+
+const BIBLE = new URL("../../fixtures/library/bibles/wire/", import.meta.url);
+const BIBLE_IDS = JSON.parse(fs.readFileSync(new URL("ids.json", BIBLE), "utf8"));
+const BIBLE_RECORDS = new Uint8Array(fs.readFileSync(new URL("records.cbor", BIBLE)));
+
+test("the corpus bundle is a corpus", () => {
+  assert.equal(BIBLE_IDS.edition, "russyn");
+  assert.equal(BIBLE_IDS.parts.length, 4, "Ruth's four chapters");
+  assert.equal(
+    BIBLE_IDS.parts.reduce((n, p) => n + p.segments, 0),
+    89,
+  );
+  assert.ok(BIBLE_RECORDS.length > 20000, "that is no book of scripture");
+});
+
+test("the corpus bundle derives every identity it carries", () => {
+  const all = smysl.decodeStore(BIBLE_RECORDS);
+  const pick = (code) => all.filter((r) => r.code === code);
+
+  const record = pick(14)[0];
+  const manifest = smysl.Manifest.decode(record);
+  assert.equal(toHex(manifest.mid()), BIBLE_IDS.manifest.mid_hex);
+  assert.equal(manifest.alias, BIBLE_IDS.manifest.alias);
+  assert.ok(smysl.canonicalBodyMatches(record), "the encoder disagrees about a real manifest");
+  assert.deepEqual([...smysl.bodyBytes(record)], [...unhex(BIBLE_IDS.manifest.body_hex)]);
+
+  const texts = pick(15).map((r) => smysl.PartText.decode(r));
+  const readings = pick(18).map((r) => smysl.PartReading.decode(r));
+  assert.equal(texts.length, BIBLE_IDS.parts.length);
+  assert.equal(readings.length, BIBLE_IDS.parts.length);
+
+  const utf8 = new TextDecoder("utf-8", { fatal: true });
+  texts.forEach((text, i) => {
+    const want = BIBLE_IDS.parts[i];
+    const reading = readings[i];
+    assert.equal(toHex(text.tid), want.tid_hex);
+    assert.ok(text.verify());
+    assert.ok(smysl.isNormalised(text.text));
+    assert.equal(text.text.length, want.length);
+    assert.equal(toHex(reading.rdid()), want.rdid_hex);
+    assert.equal(toHex(reading.structureHash()), want.structure_hex);
+    assert.equal(reading.reader, "usfm/1");
+
+    const rows = reading.rows();
+    assert.equal(rows.length, want.segments);
+    assert.ok(text.text.some((b) => b > 0x7f), "the Cyrillic is the point");
+    for (const row of rows) {
+      const start = Number(row.get("start"));
+      const end = Number(row.get("end"));
+      assert.ok(start <= end && end <= text.text.length, `[${start},${end}) is outside the part`);
+      // A slice that begins or ends inside a character does not decode under `fatal`, which is
+      // the whole check: these are byte offsets into UTF-8 and not indices into a string.
+      utf8.decode(text.text.subarray(start, end));
+    }
+  });
+});

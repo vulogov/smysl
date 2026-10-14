@@ -9,7 +9,7 @@
 //! | no false contested interval on consistent data | the three chat fixtures, unmodified |
 //! | synthetic chats with planted skews, every skew detected | the same stores, one instant moved |
 //! | `P-E4`/`P-E5` on real data | the same stores — real timestamps and real reply structure, **synthesised units** |
-//! | a public chronology with known relative orders | **owed**; the harness takes one, nothing here holds one |
+//! | a public chronology with known relative orders | `fixtures/chronology/public.tsv` — public dates, ours only in the choosing |
 //!
 //! # Why the units are synthesised, and why that is not a cheat
 //!
@@ -27,14 +27,17 @@
 //! timing, and a `P-E4` interval containing the truth is a claim about real instants. Neither
 //! is a claim about ingest.
 //!
-//! # The clause that is owed
+//! # The clause that needed material from outside
 //!
-//! "A public chronology with known relative orders" is material this repository does not hold,
-//! and authoring one here would make it a development set — the same shape as GE-T1's five
-//! Bibles and TX-P2 step 1's 500-sentence boundary gold. Point the harness at one with
-//! `SMYSL_CHRONOLOGY=<file>`, a TSV of `earlier<TAB>later` over EDTF dates, and that clause is
-//! measured with no code change. Without it the harness says so and the debt stays recorded in
-//! SMYSL-2.4 §5.5.
+//! "A public chronology with known relative orders" is the one clause no amount of code here
+//! could answer, because a chronology authored beside the engine it grades is a development
+//! set. `fixtures/chronology/public.tsv` is the narrowest thing that is not: the dates are
+//! public record and every line carries a note naming the events, so the order is checkable
+//! against what a reader already knows and the only authored part is which pairs were picked.
+//! They were picked to be awkward — approximate and uncertain values, unspecified digits,
+//! seasons, intervals, open ends, a negative year and a `Y`-year — and the pairs that can
+//! support it claim `disjoint`, which a widened extent fails. `SMYSL_CHRONOLOGY=<file>`
+//! replaces the material with somebody else's and needs no code change.
 
 use std::collections::BTreeMap;
 
@@ -586,49 +589,122 @@ fn synthetic_chats_with_planted_skews() {
     );
 }
 
-/// The clause this repository cannot answer for itself.
+/// The clause that needed material, and the material it now has.
 ///
 /// A chronology is a list of pairs whose order is known independently of any corpus — which is
 /// what makes it a measurement rather than a restatement of the engine's own arithmetic. The
-/// harness is here; the material is owed, and recorded in SMYSL-2.4 §5.5 beside GE-T1's Bibles.
+/// pairs in `fixtures/chronology/public.tsv` are public record, one note per line naming the
+/// events, so a reader checks the order against what they already know rather than against
+/// anything written here. What this repository authored is the *selection*, and the selection
+/// is chosen to be awkward: approximate and uncertain values, unspecified digits, seasons,
+/// intervals, open ends, a negative year and a `Y`-year.
+///
+/// Two relations, because one of them cannot fail. `before` says the earlier value's extent may
+/// not start after the later one's ends, and that is all a pair of overlapping extents can
+/// claim — but it is also satisfied by an engine that widened every extent to a century.
+/// `disjoint` is the stronger claim, made only where the material supports it: the earlier thing
+/// had finished before the later one began, so the extents may not overlap. An engine that
+/// computed extents too wide fails on those, which is the difference between a gate and a
+/// formality.
+///
+/// A pair whose bounds are open on the side being compared is **not decidable**, and is counted
+/// and reported rather than passed: `../1800` names no beginning and `1900/..` names no end, so
+/// neither excludes anything and neither can be contradicted. A chronology that was mostly
+/// undecidable would report a long run of satisfied pairs while measuring nothing, so the
+/// decidable ones must be the bulk of it.
+///
+/// It bites. Writing the file found two things before it passed: spring and autumn of 1918 are
+/// *not* disjoint here, which is OQ-71(b) working as decided (a season is its year, because
+/// EDTF fixes no hemisphere), and a `Y`-year of 13.8 billion is refused outright, because this
+/// build bounds that year to 32 bits.
+///
+/// `SMYSL_CHRONOLOGY=<file>` replaces the material without touching the code.
 #[test]
 fn a_public_chronology_orders_as_it_should() {
-    let Some(path) = std::env::var_os("SMYSL_CHRONOLOGY") else {
-        println!(
-            "  no chronology: set SMYSL_CHRONOLOGY=<file> (TSV of earlier<TAB>later, EDTF).\n  \
-             GE-T13's fourth clause is owed, not met."
-        );
-        return;
-    };
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("{}: {e}", path.to_string_lossy()));
-    let mut pairs = 0usize;
+    const OURS: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/chronology/public.tsv"
+    );
+    let path = std::env::var_os("SMYSL_CHRONOLOGY")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(OURS));
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+
+    let (mut pairs, mut decided, mut strict) = (0usize, 0usize, 0usize);
+    let mut undecidable: Vec<String> = Vec::new();
     for (n, line) in text.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let Some((a, b)) = line.split_once('\t') else {
+        let mut col = line.split('\t');
+        let (Some(a), Some(b)) = (col.next(), col.next()) else {
             panic!("line {}: `{line}` is not `earlier<TAB>later`", n + 1);
         };
-        let ea =
-            smysl_core::edtf::parse(a.trim()).unwrap_or_else(|e| panic!("line {}: {e}", n + 1));
-        let eb =
-            smysl_core::edtf::parse(b.trim()).unwrap_or_else(|e| panic!("line {}: {e}", n + 1));
+        let (a, b) = (a.trim(), b.trim());
+        // A two-column line is the published format and means `before`. A third column names
+        // the relation, and a name this build does not know is an error rather than a weaker
+        // claim quietly made — the same rule the labels file follows.
+        let disjoint = match col.next().map(str::trim).filter(|r| !r.is_empty()) {
+            None | Some("before") => false,
+            Some("disjoint") => true,
+            Some(other) => panic!("line {}: `{other}` is not `before` or `disjoint`", n + 1),
+        };
+        let ea = smysl_core::edtf::parse(a).unwrap_or_else(|e| panic!("line {}: {e}", n + 1));
+        let eb = smysl_core::edtf::parse(b).unwrap_or_else(|e| panic!("line {}: {e}", n + 1));
         let ia = smysl_text::time::edtf::to_interval(&ea);
         let ib = smysl_text::time::edtf::to_interval(&eb);
+        pairs += 1;
+
         // The claim is that the engine does not *contradict* a known order: the earlier date's
         // extent may not start after the later one's ends. It is not that the extents are
-        // disjoint — `1066` before `11xx` is a true order between overlapping extents.
-        if let (Bound::At(lo), Bound::At(hi)) = (ia.lo, ib.hi) {
-            assert!(
-                lo.0 < hi.0,
-                "line {}: `{a}` is known to precede `{b}` and its extent starts after the other ends",
-                n + 1
-            );
+        // disjoint — `1066` before `11xx` is a true order between overlapping extents, and
+        // `disjoint` is how a line asks for the stronger reading.
+        let (lo, hi, ahi, blo) = (ia.lo, ib.hi, ia.hi, ib.lo);
+        match (lo, hi) {
+            (Bound::At(lo), Bound::At(hi)) => {
+                assert!(
+                    lo.0 < hi.0,
+                    "line {}: `{a}` is known to precede `{b}` and its extent starts after the \
+                     other ends",
+                    n + 1
+                );
+                decided += 1;
+            }
+            _ => undecidable.push(format!("{a} before {b}")),
         }
-        pairs += 1;
+        if disjoint {
+            // A value open on only one side lands in neither count and owes no ruling; if the
+            // weak form was undecidable too it is already named in `undecidable`.
+            if let (Bound::At(ahi), Bound::At(blo)) = (ahi, blo) {
+                assert!(
+                    ahi.0 <= blo.0,
+                    "line {}: `{a}` is known to have ended before `{b}` began, and the two \
+                     extents overlap: {ia:?} / {ib:?}",
+                    n + 1
+                );
+                strict += 1;
+            }
+        }
     }
     assert!(pairs > 0, "the chronology is empty");
-    println!("  chronology: {pairs} known orders, none contradicted");
+    println!(
+        "  chronology: {pairs} known orders, {decided} decidable and none contradicted, \
+         {strict} of them disjoint as claimed"
+    );
+    for u in &undecidable {
+        println!("    not decidable (an open bound on the side compared): {u}");
+    }
+    // A chronology whose values the engine cannot bound is not a measurement of ordering, and a
+    // run of satisfied-by-vacuity pairs reads exactly like a run of passing ones. Most of it has
+    // to be decidable for the clause to be answered at all.
+    assert!(
+        decided * 3 >= pairs * 2,
+        "only {decided} of {pairs} pairs were decidable: that is a report about missing bounds \
+         rather than about order"
+    );
+    assert!(
+        strict > 0,
+        "no pair made the disjoint claim, so nothing here could have caught a widened extent"
+    );
 }

@@ -20,6 +20,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 type libPart struct {
@@ -655,5 +656,146 @@ func TestCarryOutsideItsThreeValuesIsRefused(t *testing.T) {
 	}
 	if Carry[0] != "none" || Carry[1] != "ref" || Carry[2] != "text" {
 		t.Error("the carry table has moved")
+	}
+}
+
+// --- GE-T1's port clause over corpus material ------------------------------------------------
+//
+// The bundle in `fixtures/library/bibles/wire/` is one expression a reader actually produced:
+// Ruth in the Russian Synodal edition, four parts, 89 segment rows. Everything above checks the
+// derivations against a fixture written to exercise them; this checks them against a reader's
+// own output, which is the half GE-T1 asks of a port and which two sentences cannot reach.
+//
+// The new claim is the last one in this file: a segment row's `start` and `end` are **byte**
+// offsets. Over Cyrillic, an implementation that indexed by character derives every identity
+// correctly and resolves every span one letter wide, and nothing before this fixture could have
+// told the difference.
+func bibleFixtures(t *testing.T) (libVectors, []*Record) {
+	t.Helper()
+	raw, err := os.ReadFile("../fixtures/library/bibles/wire/ids.json")
+	if err != nil {
+		t.Fatalf("the bundle is missing: %v", err)
+	}
+	var v libVectors
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatalf("the bundle does not parse: %v", err)
+	}
+	if len(v.Parts) != 4 {
+		t.Fatalf("%d parts, want Ruth's four", len(v.Parts))
+	}
+	data, err := os.ReadFile("../fixtures/library/bibles/wire/records.cbor")
+	if err != nil {
+		t.Fatalf("the records are missing: %v", err)
+	}
+	records, err := DecodeStore(data)
+	if err != nil {
+		t.Fatalf("the records do not decode: %v", err)
+	}
+	return v, records
+}
+
+func TestTheCorpusBundleDerivesEveryIdentityItCarries(t *testing.T) {
+	v, records := bibleFixtures(t)
+
+	manifest := of(records, 14)[0]
+	m, err := DecodeManifest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mid, err := m.Mid()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hex.EncodeToString(mid); got != v.Manifest.MidHex {
+		t.Errorf("mid: got %s, want %s", got, v.Manifest.MidHex)
+	}
+	body, err := BodyBytes(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(body, unhex(t, v.Manifest.BodyHex)) {
+		t.Error("the sliced body is not the preimage the bundle records")
+	}
+	ok, err := CanonicalBody(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Error("the encoder disagrees about the canonical form of a real manifest")
+	}
+
+	texts, readings := of(records, 15), of(records, 18)
+	if len(texts) != len(v.Parts) || len(readings) != len(v.Parts) {
+		t.Fatalf("%d texts and %d readings, want %d of each", len(texts), len(readings), len(v.Parts))
+	}
+	for i := range v.Parts {
+		p, err := DecodePartText(texts[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hex.EncodeToString(p.Tid) != v.Parts[i].TidHex {
+			t.Errorf("part %d tid", i)
+		}
+		if !p.Verify() {
+			t.Errorf("part %d does not verify", i)
+		}
+		if !IsNormalised(p.Text) {
+			t.Errorf("part %d is not normalised", i)
+		}
+		if uint64(len(p.Text)) != v.Parts[i].Length {
+			t.Errorf("part %d is %d bytes, the bundle says %d", i, len(p.Text), v.Parts[i].Length)
+		}
+
+		g, err := DecodePartReading(readings[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		rdid, err := g.Rdid()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hex.EncodeToString(rdid) != v.Parts[i].RdidHex {
+			t.Errorf("reading %d rdid", i)
+		}
+		sh, err := g.StructureHash()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hex.EncodeToString(sh) != v.Parts[i].StructureHex {
+			t.Errorf("reading %d structure hash", i)
+		}
+		if g.Reader != "usfm/1" {
+			t.Errorf("reading %d reader %q", i, g.Reader)
+		}
+
+		rows, err := g.Rows()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) < 19 {
+			t.Errorf("reading %d has %d rows, which is no chapter of Ruth", i, len(rows))
+		}
+		// The offsets are bytes. `utf8.RuneStart` on the byte at an offset is false exactly when
+		// the offset lands inside a character, which is where a port that counted runes arrives.
+		for n, row := range rows {
+			start, sok := row["start"].(uint64)
+			end, eok := row["end"].(uint64)
+			if !sok || !eok {
+				t.Fatalf("reading %d row %d: start and end are not integers", i, n)
+			}
+			if end > uint64(len(p.Text)) || start > end {
+				t.Errorf("reading %d row %d: [%d,%d) is not inside %d bytes", i, n, start, end, len(p.Text))
+				continue
+			}
+			if start < uint64(len(p.Text)) && !utf8.RuneStart(p.Text[start]) {
+				t.Errorf("reading %d row %d: start %d is inside a character", i, n, start)
+			}
+			if end < uint64(len(p.Text)) && !utf8.RuneStart(p.Text[end]) {
+				t.Errorf("reading %d row %d: end %d is inside a character", i, n, end)
+			}
+			if !utf8.Valid(p.Text[start:end]) {
+				t.Errorf("reading %d row %d: the span is not valid UTF-8", i, n)
+			}
+		}
 	}
 }

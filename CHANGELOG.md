@@ -58,6 +58,85 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### Two gates that had been waiting on material, and the material
+
+G1's four experiments were never four pieces of work. GE-T14 passed in TX-P2 and GE-T4's
+hand-checking is down to five units; the other two had been **owed since TX-P1 and TX-P3** for the
+same reason, which was never code: each needed a corpus this repository does not hold, and
+authoring one beside the engine that would be graded by it makes a development set. Both are paid
+here, in the two different ways the two clauses allow.
+
+**GE-T13's chronology: public dates, ours only in the choosing.** `fixtures/chronology/public.tsv`
+is 45 pairs whose order is a matter of record — Caesar before the fall of Rome, Hastings before
+Magna Carta, Sputnik before Gagarin before Apollo 11 — with the events named on every line, so a
+reader checks the order against what they already know and disagrees with the *pair* rather than
+with the engine. What is authored is the selection, and the selection was made to be awkward
+rather than to pass: approximate and uncertain values, unspecified digits, seasons, intervals,
+open ends, a negative year and a `Y`-year.
+
+The file carries **two relations**, because one of them cannot fail. `before` — the two-column
+form the harness published — says the earlier value's extent may not start after the later one's
+ends, which is all that two overlapping extents can claim, and is also satisfied by an engine that
+widened every date to a century. `disjoint` says the earlier thing had finished before the later
+one began, so the extents may not overlap, and it is claimed only where the material supports it:
+39 of the 43 decidable pairs. That is the difference between a gate and a formality. A pair open on
+the side being compared is **not decidable** — `../1800` names no beginning — and is counted and
+reported rather than passed, with most of the file required to be decidable, because a run of
+satisfied-by-vacuity pairs reads exactly like a run of passing ones.
+
+It bit twice before it passed, which is the argument for the whole exercise. Spring and autumn of
+1918 are **not** ordered here: OQ-71(b) working as decided, a season being its year because EDTF
+fixes no hemisphere, so the pair claims `before` and says why in the file. And a `Y`-year of 13.8
+billion is refused outright, this build bounding that year to 32 bits — so the universe does not
+get to precede the ides of March, and the oldest stone tools do.
+
+**GE-T1's five Bibles: the corpus stays out and the measurement comes in.**
+`crates/smysl-text/tests/ge_t1_bibles.rs` takes `SMYSL_GE_T1=<dir>` of `<edition>/*.usfm` and
+builds a real library per edition — `Library::create`, then `Library::add` per book through
+`usfm/1` — over the five GE-T1 names: Luther 1912, the KJV, Segond 1910, the Russian Synodal and
+Reina-Valera 1909. Each is the 66-book canon, 1,189 chapters, 3.9 to 6.1 MB. What comes into the
+repository is not the scripture but the **measurement**: seven kilobytes of `expected.tsv` holding,
+per edition, the digest of the input bytes, the counts, and a **roll** — BLAKE3 over the canonical
+listing of every alias, mid, tid, length, structure hash and rdid — plus the first and last book's
+identities in full, so a moved roll has somewhere to start. That is what makes "the same on two
+platforms" a comparison rather than two people agreeing over a phone call.
+
+**Two platforms have run it**: macOS on arm64 and Linux on arm64, identical rolls on all five
+editions. Worth naming what that tests, because it is not the hashing — BLAKE3 and canonical CBOR
+are platform-independent by construction — it is *reading files*: line endings, NFC through a
+different Unicode table, and the part policy's arithmetic over real chapter lengths. The one thing
+still outstanding on that clause is its *architecture* half, Linux x86-64, and that belongs in CI
+rather than on a desk.
+
+**And CI compares on every push**, because 112 KiB of the corpus is small enough to commit:
+`fixtures/library/bibles/slice/` is Ruth and Jude in all five editions — whole books, not
+excerpts, in five scripts, a four-part expression and a one-part one — measured by the same
+function against `slice.tsv`, with no corpus to arrange and no environment variable to remember.
+A slice is not the five Bibles and does not pretend to be; what it buys is that the two-platform
+comparison happens when nobody is looking.
+
+**The ports recompute over a reader's own output now.** `fixtures/library/bibles/wire/` is the
+Russian Ruth as `usfm/1` read it — four parts, 89 segment rows — in the shape `wire/ids.json`
+already had, and Python, JavaScript and Go each derive its mid, tids, rdids and structure hashes
+and agree. One edition, because what a port *derives* is language-independent while what a port can
+get **wrong** is reading a byte offset out of a segment table over multibyte text. Cyrillic is
+where an implementation that indexed by character — or by code unit, which in JavaScript is the one
+you get for free — produces every identity correctly and every span half as wide, and nothing in
+the old fixture could have told the difference. So each port now decodes every row's span as UTF-8
+and fails if an offset lands inside a letter.
+
+Three defects in the instruments, all found by running them. Two scratch libraries in one test
+file shared a directory name, so one test deleted the other's store mid-build — the exact hazard a
+determinism gate must not have inside its own harness. The GE-T1 fixture asserted 1,189 parts for
+1,189 chapters, which is wrong by design: `usfm/1` cuts on chapter, so a part is one or more whole
+chapters and the policy's 1 KiB minimum merges the short ones, landing at 1,139–1,164. And eBible
+writes the older Paratext book codes — `JOH`, `MAR`, `JAM`, `SOL` — so the conversion to USFM maps
+eleven of them and carries the 66-book canon, skipping a deuterocanon this build's book table does
+not hold.
+
+What is still owed on GE-T1's row is the **JSON series**, alone. `SMYSL_GE_T1` and
+`SMYSL_CHRONOLOGY` both still replace the material with somebody else's and need no code change.
+
 ### The hand-checking GE-T4 asks for, reduced to five units
 
 G1's precondition is 200 hand-checked units per tier-1 language under both normalisers, with
@@ -916,7 +995,8 @@ a claim about ingest.
 material this repository does not hold, and authoring one here would make it a development set —
 the same shape as GE-T1's five Bibles and the 500-sentence boundary gold. `SMYSL_CHRONOLOGY=<file>`
 measures it with no code change. Without it the harness prints that the clause is owed, which is
-the difference between a gate and a green light.
+the difference between a gate and a green light. *(Paid later in 1.10.0 —
+`fixtures/chronology/public.tsv`, and the entry at the top of this release says how.)*
 
 **What `whatsapp.txt` cannot contribute, and why that is right.** A WhatsApp export records no
 reply, so there is no ordering in it for a skew to contradict — and a harness that detected one

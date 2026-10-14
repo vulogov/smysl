@@ -35,6 +35,14 @@ implementation but the reference one reads USFM or OSIS, deliberately, because t
 whether three implementations agree on the identity of a record — not whether three parsers
 agree with each other.
 
+Since 1.10.0 the same derivations also run over `fixtures/library/bibles/wire/`, which **is** a
+reader's output: the book of Ruth in the Russian Synodal edition as `usfm/1` read it, four parts
+and 89 segment rows, carried for GE-T1's corpus clause. Still not a reader here — the bundle is
+records, not scripture — but it moves one claim out of reach of a hand-written fixture. A segment
+row's `start` and `end` are **byte** offsets, and over Cyrillic an implementation that indexed by
+character derives every identity correctly and resolves every span half as wide. So every row's
+span is decoded as UTF-8, and a span that began or ended inside a letter fails.
+
 ```sh
 cd nodejs
 npm test          # 126 tests, no install step, Node 18+
