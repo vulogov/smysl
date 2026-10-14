@@ -58,6 +58,38 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### The hand-checking GE-T4 asks for, reduced to forty-five units
+
+G1's precondition is 200 hand-checked units per tier-1 language under both normalisers, with
+v2's false-`Absent` rate above 1% blocking TX-P5. The instrument is now in the tree
+(`tests/ge_t4.rs`) and the corpus is scored.
+
+**A `Present` verdict cannot be a false `Absent`, and that is the whole saving.** A false
+`Absent` is a quote a reader would call verbatim that the check rejects, so of a 200-unit sample
+only the units the check does *not* settle can possibly be mislabelled — the rest are the
+denominator and nobody has to read them. Over the S0 spike's run tree, 730 staged documents give
+a sample of 200 in each of five languages and an adjudication worklist of **45 units**: en 27,
+ru 10, es 5, fr 2, de 1. The harness asserts that claim rather than stating it, because a
+worklist that quietly carried settled units would turn an afternoon into the reason the row
+stays owed for another phase.
+
+**The bar is two units.** 1% of 200 is 2, so three verbatim quotes among English's 21 `Absent`s
+block the phase. A language nobody has ruled on reports its rate as *owed* and not as 0.0 — the
+choice `Row::retry_rate` and `Agreement::rate` both make, and here it is the only thing standing
+between this gate and passing itself.
+
+**Two findings from the scoring alone.** The v1/v2 disagreement set is **not** empty: S0 found
+no disagreement over 5,560 quotes, and one Russian quote in this sample — a verse quoted with
+its own locator attached — is `Loose` under v1 and `Present` under v2, with a three-byte
+difference in the span. And the `Absent`s are dominated by two shapes a reader will rule *not*
+verbatim: a quote with an elision in it, and a quote from a passage the unit did not cite. Both
+are the model's error rather than the check's, which is exactly the distinction this row exists
+to draw.
+
+The units are the spike's rather than this build's, and the row says so. That is sound here and
+would not be for GE-T2: GE-T4 asks about the quote *check*, which is the same code either way.
+No provider was called to produce any of this.
+
 ### One corpus in two languages, and the translation that is not an extraction
 
 `--lang-policy pivot:<lang>`, the last thing TX-P5 owed in code (SMYSL-2.4 §4.3.4, §5.2, F-6).
