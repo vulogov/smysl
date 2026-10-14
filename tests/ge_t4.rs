@@ -13,13 +13,39 @@
 //! rejects anyway — the failure mode F-3 exists for, measured per language because the whole
 //! question is whether the instrument is as fair to Russian as it is to English.
 //!
-//! A `Present` verdict cannot be a false `Absent`. That is not a convenience, it is the whole
-//! shape of the labour: of a 200-unit sample, only the units the check does **not** call
-//! `Present` can possibly be mislabelled, so those are the only ones a person has to read. The
-//! rest are the denominator. [`worklist`] is that set and nothing else, and
-//! `the_worklist_is_exactly_what_a_person_has_to_read` asserts it, because a worklist that
-//! quietly included settled units would turn a short afternoon into the reason this row stays
-//! owed for another phase.
+//! Only an `Absent` can be a false `Absent`. That is not a convenience, it is the whole shape of
+//! the labour: of a 200-unit sample, a ruling can move the figure only on the units the check
+//! **refused**, so those are the only ones a person has to read. The rest are the denominator.
+//!
+//! The first version of this harness collected everything that was not `Present` under both
+//! forms, which read well and was wrong by a third: a `Loose` verdict cannot be a false
+//! `Absent` either — `SMY-E307` refuses an attribution on `Absent` and not on `Loose` — so
+//! sixteen of the first forty-five rows were units whose ruling could not have changed the
+//! result by one unit. [`worklist`] is now the `Absent`s and nothing else, and
+//! `a_loose_verdict_is_not_a_persons_problem` asserts the exclusion. A worklist that quietly
+//! carried settled units is how an afternoon becomes the reason a row stays owed for a phase.
+//!
+//! # What a rule can decide, and what it must not
+//!
+//! Two of the shapes in that set are **decidable**, and [`decide`] decides them with evidence
+//! rather than leaving them to a reader:
+//!
+//! - A quote with an **elision** in it (`...` or `…`) is stitched from two places. It is not in
+//!   the source word for word by inspection of the quote alone.
+//! - A quote the check calls `Present` against **a text the unit did not cite** is a real quote
+//!   of the wrong place. `Absent` against the source it *did* cite is then the check working,
+//!   and the error is the model's — it quoted past its window, from the edition rather than from
+//!   the passage. The texts searched are every passage of the corpus plus whatever
+//!   `SMYSL_GE_T4_CORPUS` points at, which is what the second variable is for: a corpus cut into
+//!   chapters cannot witness a quote from the chapter *before* the one it holds, and the full
+//!   edition can.
+//!
+//! Each carries the evidence into the worklist — the rule, and for the second the passage it was
+//! found in — so any of them can be audited and **a person's ruling overrides it**
+//! (`a_persons_ruling_overrides_a_rule`). What no rule here decides is whether a quote that is
+//! merely *different* from the source is verbatim: paraphrase, mangling and punctuation are
+//! judgements, and a rule that guessed at them would be the author of the instrument supplying
+//! his own gold.
 //!
 //! # The instrument, offline
 //!
@@ -43,6 +69,8 @@
 //!                            texts their units cite, in any layout: each unit names its own
 //!                            source in `source.ref`, and the language comes from a
 //!                            `manifest.tsv` (columns `file` and `lang`) where one is present
+//! SMYSL_GE_T4_CORPUS=<dir>   further texts to witness a misplaced quote — the full editions
+//!                            the passages were cut from. Searched, never scored against.
 //! SMYSL_GE_T4_LABELS=<file>  one ruling per line: `<uid><TAB>verbatim|not-verbatim`
 //! SMYSL_GE_T4_OUT=<file>     where to write the worklist (default `target/ge_t4/worklist.tsv`)
 //! ```
@@ -73,6 +101,8 @@ const BAR: f64 = 0.01;
 struct Scored {
     uid: String,
     lang: String,
+    /// The source file the unit cites, which is what a reader has to open to rule on it.
+    source: String,
     quote: String,
     gist: String,
     v1: QuoteSupport,
@@ -82,9 +112,13 @@ struct Scored {
 }
 
 impl Scored {
-    /// Whether a person has to read this one: see the module's second section.
+    /// Whether a ruling on this one could move the figure: see the module's second section.
+    ///
+    /// `Absent` under either form, and not "anything but `Present`". The rate counts a quote a
+    /// reader called verbatim that the check called `Absent`, so a `Loose` unit's ruling is
+    /// labour that cannot change the result — and `Loose` is not what `SMY-E307` refuses on.
     fn disputed(&self) -> bool {
-        self.v1 != QuoteSupport::Present || self.v2 != QuoteSupport::Present
+        self.v1 == QuoteSupport::Absent || self.v2 == QuoteSupport::Absent
     }
 }
 
@@ -134,22 +168,30 @@ impl Verdicts {
 }
 
 impl Row {
-    /// The false-`Absent` rate, or `None` where nobody has ruled.
+    /// The false-`Absent` rate, or `None` where nobody has ruled on anything that could be one.
     ///
-    /// `None` rather than zero, the choice `Row::retry_rate` and `Agreement::rate` both make: a
-    /// language nobody has hand-checked has no rate, and 0.0 would read as the best possible
-    /// result of the measurement that was never taken — which is the one way this row could
-    /// pass without the material it exists to require.
-    fn false_absent(&self, hits: usize) -> Option<f64> {
+    /// `None` rather than zero where a ruling is owed, the choice `Row::retry_rate` and
+    /// `Agreement::rate` both make: 0.0 would read as the best possible result of a measurement
+    /// nobody took, which is the one way this row could pass without the material it exists to
+    /// require.
+    ///
+    /// But a language the check **never refused** has a rate of exactly zero and owes nobody a
+    /// ruling: a false `Absent` needs an `Absent`, and there is none to rule on. Reporting that
+    /// as owed would be the opposite error — material demanded for a figure already determined.
+    /// Three of the five languages in the spike's sample are in that position.
+    fn false_absent(&self, hits: usize, refusals: usize) -> Option<f64> {
+        if refusals == 0 {
+            return Some(0.0);
+        }
         (self.labelled > 0).then(|| hits as f64 / self.n as f64)
     }
 
     fn v1_rate(&self) -> Option<f64> {
-        self.false_absent(self.false_absent_v1)
+        self.false_absent(self.false_absent_v1, self.v1.absent)
     }
 
     fn v2_rate(&self) -> Option<f64> {
-        self.false_absent(self.false_absent_v2)
+        self.false_absent(self.false_absent_v2, self.v2.absent)
     }
 }
 
@@ -203,6 +245,16 @@ fn score(
         scored.push(Scored {
             uid: smysl::canonical_uid(u).canonical(),
             lang: lang.to_string(),
+            source: u
+                .source
+                .as_ref()
+                .and_then(|s| {
+                    Path::new(&s.reference)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.to_string())
+                })
+                .unwrap_or_default(),
             quote,
             gist: u.gist.clone(),
             v1,
@@ -238,6 +290,58 @@ fn sample(all: Vec<Scored>) -> BTreeMap<String, Vec<Scored>> {
 /// The units a person has to read: everything the check did not settle as `Present`.
 fn worklist(units: &[Scored]) -> Vec<&Scored> {
     units.iter().filter(|s| s.disputed()).collect()
+}
+
+/// A ruling a rule can make, with the evidence for it.
+///
+/// `None` is the honest answer for everything else: see the module's third section.
+fn decide(u: &Scored, corpus: &BTreeMap<String, String>) -> Option<(Label, String)> {
+    if u.quote.contains("...") || u.quote.contains('\u{2026}') {
+        return Some((Label::NotVerbatim, "elision".to_string()));
+    }
+    // The strongest form of the check, against every passage but the one it cited. V2 rather
+    // than V1 so the rule cannot call a quote misplaced on a typographic difference alone.
+    for (name, text) in corpus {
+        if *name == u.source {
+            continue;
+        }
+        if smysl::quote_support_with(QuoteNormaliser::V2, &u.quote, text) == QuoteSupport::Present {
+            return Some((Label::NotVerbatim, format!("present in {name}")));
+        }
+    }
+    None
+}
+
+/// Every ruling a rule can make over a sample, by uid.
+fn decided(
+    by_lang: &BTreeMap<String, Vec<Scored>>,
+    corpus: &BTreeMap<String, String>,
+) -> BTreeMap<String, (Label, String)> {
+    let mut out = BTreeMap::new();
+    for units in by_lang.values() {
+        for u in units.iter().filter(|u| u.disputed()) {
+            if let Some(d) = decide(u, corpus) {
+                out.insert(u.uid.clone(), d);
+            }
+        }
+    }
+    out
+}
+
+/// The rulings in force: a person's where there is one, a rule's otherwise.
+///
+/// A person wins. A rule exists to spare a reader the units whose answer is already determined,
+/// never to overrule one who looked.
+fn rulings(
+    human: &BTreeMap<String, Label>,
+    rules: &BTreeMap<String, (Label, String)>,
+) -> BTreeMap<String, Label> {
+    let mut out: BTreeMap<String, Label> =
+        rules.iter().map(|(k, (l, _))| (k.clone(), *l)).collect();
+    for (uid, label) in human {
+        out.insert(uid.clone(), *label);
+    }
+    out
 }
 
 fn tally(units: &[Scored], labels: &BTreeMap<String, Label>) -> Row {
@@ -282,27 +386,41 @@ fn span(s: &Option<Range<usize>>) -> String {
 }
 
 /// The worklist as a file a person can rule on and hand back as `SMYSL_GE_T4_LABELS`.
-fn worklist_tsv(by_lang: &BTreeMap<String, Vec<Scored>>) -> String {
+///
+/// Rows a rule decided arrive with the label filled in and the reason beside it, so the file is
+/// a record of what was decided and how, not only a list of what is left. Editing one is how a
+/// reader overrules it.
+fn worklist_tsv(
+    by_lang: &BTreeMap<String, Vec<Scored>>,
+    rules: &BTreeMap<String, (Label, String)>,
+) -> String {
     let mut out = String::from(
-        "# GE-T4 adjudication worklist. Rule on each row and keep the first two columns:\n\
-         #   <uid><TAB>verbatim        the quote is in the source text THIS UNIT CITES,\n\
-         #                                word for word\n\
-         #   <uid><TAB>not-verbatim    it is not: it elides (`...`), it paraphrases, or it\n\
-         #                                quotes a passage the unit did not cite\n\
-         # Only units the check did not call `present` under both forms are here; a `present`\n\
-         # cannot be a false `absent`. The rest of the sample is the denominator.\n\
-         uid\tlabel\tlang\tv1\tv2\tv1_span\tv2_span\tquote\tgist\n",
+        "# GE-T4 adjudication worklist. Rule on each row by filling in `label`:\n\
+         #   verbatim        the quote is in the source text THIS UNIT CITES, word for word\n\
+         #   not-verbatim    it is not\n\
+         # Only units the check called `absent` are here: the rate counts a verbatim quote\n\
+         # scored `absent`, so a `present` or a `loose` ruling cannot move it. The rest of the\n\
+         # sample is the denominator and needs no reading.\n\
+         # A row with `evidence` was decided by rule, not by a person. Overrule it by changing\n\
+         # `label`; a person's ruling always wins.\n\
+         uid\tlabel\tevidence\tlang\tsource\tv1\tv2\tquote\tgist\n",
     );
     for (lang, units) in by_lang {
         for u in worklist(units) {
+            let (label, evidence) = match rules.get(&u.uid) {
+                Some((Label::Verbatim, e)) => ("verbatim", e.as_str()),
+                Some((Label::NotVerbatim, e)) => ("not-verbatim", e.as_str()),
+                None => ("", ""),
+            };
             out.push_str(&format!(
-                "{}\t\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
                 u.uid,
+                label,
+                evidence,
                 lang,
+                u.source,
                 verdict(u.v1),
                 verdict(u.v2),
-                span(&u.v1_span),
-                span(&u.v2_span),
                 tsv(&u.quote),
                 tsv(&u.gist),
             ));
@@ -522,7 +640,7 @@ mod instrument {
         }
         // And the file a person is handed carries the unruled column and the two spans.
         let by_lang = sample(units);
-        let out = worklist_tsv(&by_lang);
+        let out = worklist_tsv(&by_lang, &BTreeMap::new());
         assert!(out.contains("not-verbatim"), "{out}");
         assert_eq!(
             out.lines().filter(|l| l.starts_with("u")).count()
@@ -533,6 +651,10 @@ mod instrument {
     }
 
     /// A language nobody has ruled on has no rate — not a perfect one.
+    ///
+    /// And the two forms are owed independently, which the ё/е probe shows in one unit: v1
+    /// refused it, so v1's rate waits for a reader; v2 did not refuse anything, so v2's rate is
+    /// zero and waits for nobody. That asymmetry is the whole of what GE-T4 reports.
     #[test]
     fn an_unlabelled_language_reports_no_rate_rather_than_a_passing_one() {
         let source = "все пошли домой.";
@@ -542,7 +664,8 @@ mod instrument {
         assert_eq!(row.n, 1);
         assert_eq!(row.labelled, 0);
         assert_eq!(row.v1_rate(), None, "0.0 would be this gate passing itself");
-        assert_eq!(row.v2_rate(), None);
+        assert_eq!(row.v2.absent, 0, "v2 found it");
+        assert_eq!(row.v2_rate(), Some(0.0), "nothing for v2 to be wrong about");
     }
 
     /// 200 per language, deduplicated, and the same 200 on every machine.
@@ -593,6 +716,139 @@ mod instrument {
         both.extend(ru);
         let by_lang = sample(both);
         assert_eq!(by_lang.len(), 1, "one language: the uids collide by design");
+    }
+
+    /// A `Loose` verdict is the check hedging, not refusing, and no ruling on it moves the rate.
+    ///
+    /// The first version of this harness put these on the worklist — sixteen of forty-five rows
+    /// over the spike corpus — which is a third of a person's afternoon spent on units whose
+    /// answer could not change the result by one. `SMY-E307` refuses on `Absent`.
+    #[test]
+    fn a_loose_verdict_is_not_a_persons_problem() {
+        let source = "Il a dit « Liberté » hier. the pool wait rose to 1.9 seconds.";
+        let staged = doc(&[
+            ("hedged", "«Liberté»"),
+            ("refused", "the shard was never replaced"),
+            ("settled", "the pool wait rose to 1.9 seconds"),
+        ]);
+        let units = score(&staged, source, "fr", None).expect("the document parses");
+        let hedged = units
+            .iter()
+            .find(|u| u.gist == "hedged")
+            .expect("the probe");
+        assert_eq!(
+            (hedged.v1, hedged.v2),
+            (QuoteSupport::Loose, QuoteSupport::Present),
+            "the guillemet probe is `Loose` under v1: fixtures/quote/v2.tsv row 1"
+        );
+        let list = worklist(&units);
+        assert_eq!(list.len(), 1, "{list:#?}");
+        assert_eq!(
+            list[0].gist, "refused",
+            "only a refusal is a person's problem"
+        );
+
+        // And a ruling on it is not arithmetic: labelling the hedged unit verbatim leaves the
+        // rate exactly where it was, which is why reading it was never worth an afternoon.
+        let labels = [(hedged.uid.clone(), Label::Verbatim)]
+            .into_iter()
+            .collect();
+        assert_eq!(tally(&units, &labels).false_absent_v1, 0);
+    }
+
+    /// An elided quote is stitched from two places, and the quote alone says so.
+    #[test]
+    fn an_elided_quote_is_decided_by_rule_and_not_by_a_person() {
+        let source = "I ask one petition of thee, deny me not.";
+        let staged = doc(&[(
+            "elided",
+            "I ask one petition... that he give me Abishag to wife",
+        )]);
+        let units = score(&staged, source, "en", None).expect("the document parses");
+        assert_eq!(units[0].v2, QuoteSupport::Absent, "and so on the worklist");
+        let (label, why) = decide(&units[0], &BTreeMap::new()).expect("a rule decides it");
+        assert_eq!(label, Label::NotVerbatim);
+        assert_eq!(why, "elision");
+    }
+
+    /// A real quote of the wrong passage is the model's error, and the corpus proves it.
+    #[test]
+    fn a_quote_from_a_passage_the_unit_did_not_cite_is_decided_by_rule() {
+        let cited = "And Adam knew Eve his wife; and she conceived, and bare Cain.";
+        let elsewhere = "But every man is tempted, when he is drawn away of his own lust.";
+        let staged = doc(&[("outside", "every man is tempted, when he is drawn away")]);
+        let units = score(&staged, cited, "en", None).expect("the document parses");
+        assert_eq!(
+            units[0].v2,
+            QuoteSupport::Absent,
+            "absent from what it cited"
+        );
+
+        let corpus: BTreeMap<String, String> = [
+            ("s.txt".to_string(), cited.to_string()),
+            ("jas.txt".to_string(), elsewhere.to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let (label, why) = decide(&units[0], &corpus).expect("a rule decides it");
+        assert_eq!(label, Label::NotVerbatim);
+        assert_eq!(why, "present in jas.txt");
+
+        // The control, and the reason the rule skips the cited source: a quote that *is* in the
+        // passage it cited is not evidence of anything, and a rule that counted it would
+        // decide every unit by finding it where it was supposed to be.
+        let staged = doc(&[("inside", "she conceived, and bare Cain")]);
+        let inside = score(&staged, cited, "en", None).expect("parses");
+        assert_eq!(inside[0].v2, QuoteSupport::Present);
+        assert!(!inside[0].disputed(), "a present verdict is not disputed");
+    }
+
+    /// A rule spares a reader; it never overrules one.
+    #[test]
+    fn a_persons_ruling_overrides_a_rule() {
+        let source = "the pool wait rose to 1.9 seconds.";
+        let staged = doc(&[("elided", "the pool wait... the shard was never replaced")]);
+        let units = score(&staged, source, "en", None).expect("the document parses");
+        let by_lang = sample(units.clone());
+        let rules = decided(&by_lang, &BTreeMap::new());
+        assert_eq!(rules.len(), 1, "the elision rule fires");
+
+        // Nobody has looked: the rule stands, and the rate counts it as the rule said.
+        let standing = rulings(&BTreeMap::new(), &rules);
+        assert_eq!(standing[&units[0].uid], Label::NotVerbatim);
+        assert_eq!(tally(&units, &standing).false_absent_v2, 0);
+
+        // A reader looked and disagreed: a reader wins, and the figure moves.
+        let human = [(units[0].uid.clone(), Label::Verbatim)]
+            .into_iter()
+            .collect();
+        let ruled = rulings(&human, &rules);
+        assert_eq!(ruled[&units[0].uid], Label::Verbatim);
+        assert_eq!(tally(&units, &ruled).false_absent_v2, 1);
+
+        // And the worklist says which rows a rule decided, so one can be found and audited.
+        let out = worklist_tsv(&by_lang, &rules);
+        assert!(out.contains("\tnot-verbatim\telision\t"), "{out}");
+    }
+
+    /// A language the check never refused is at zero, and owes nobody an afternoon.
+    ///
+    /// The mirror of the test above: `None` is right when a ruling is owed and wrong when the
+    /// figure is already determined. A false `Absent` needs an `Absent`.
+    #[test]
+    fn a_language_with_no_refusals_is_at_zero_and_not_owed() {
+        let source = "the pool wait rose to 1.9 seconds. the rollback returned p99 to baseline.";
+        let staged = doc(&[
+            ("a", "the pool wait rose to 1.9 seconds"),
+            ("b", "the rollback returned p99 to baseline"),
+        ]);
+        let units = score(&staged, source, "en", None).expect("the document parses");
+        let row = tally(&units, &BTreeMap::new());
+        assert_eq!((row.v1.absent, row.v2.absent), (0, 0));
+        assert_eq!(row.labelled, 0, "there was nothing to rule on");
+        assert_eq!(row.v1_rate(), Some(0.0));
+        assert_eq!(row.v2_rate(), Some(0.0));
+        assert!(worklist(&units).is_empty(), "and no worklist either");
     }
 
     /// A ruling this harness cannot read is an error, not a silent `not-verbatim`.
@@ -695,10 +951,28 @@ fn ge_t4_attribution_fairness_per_language() {
         root.display()
     );
 
-    let labels = match std::env::var("SMYSL_GE_T4_LABELS") {
+    let human = match std::env::var("SMYSL_GE_T4_LABELS") {
         Ok(p) => read_labels(Path::new(&p)).expect("the labels file reads"),
         Err(_) => BTreeMap::new(),
     };
+    // Every passage of the corpus, for the rule that asks whether a quote belongs to a
+    // different one. Loaded once; the passages are the material, so there are tens of them.
+    let mut corpus: BTreeMap<String, String> = texts
+        .iter()
+        .filter_map(|(n, p)| std::fs::read_to_string(p).ok().map(|t| (n.clone(), t)))
+        .collect();
+    // The editions, where they were given. A passage file cannot witness a quote from the
+    // chapter before it, which is the shape every refusal in the spike's sample turned out to
+    // have: a model quoting past the window it was shown, from the book rather than the passage.
+    if let Ok(more) = std::env::var("SMYSL_GE_T4_CORPUS") {
+        for (name, path) in sources(Path::new(&more)) {
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                corpus.insert(name, text);
+            }
+        }
+    }
+    let rules = decided(&by_lang, &corpus);
+    let labels = rulings(&human, &rules);
 
     let out = PathBuf::from(
         std::env::var("SMYSL_GE_T4_OUT").unwrap_or_else(|_| "target/ge_t4/worklist.tsv".into()),
@@ -706,7 +980,7 @@ fn ge_t4_attribution_fairness_per_language() {
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("the worklist directory");
     }
-    std::fs::write(&out, worklist_tsv(&by_lang)).expect("the worklist is written");
+    std::fs::write(&out, worklist_tsv(&by_lang, &rules)).expect("the worklist is written");
 
     println!(
         "GE-T4 over {} staged document(s){}{}",
@@ -725,9 +999,20 @@ fn ge_t4_attribution_fairness_per_language() {
     println!("lang  n    short  disagree  v1 P/L/A      v2 P/L/A      false-absent v1  v2");
 
     let mut blocked = Vec::new();
+    let mut provisional = false;
     for (lang, units) in &by_lang {
         let row = tally(units, &labels);
+        // A language with a refusal nobody has ruled on has a rate that can still move, and in
+        // the one direction that matters: were all five of the spike's English residue ruled
+        // verbatim, its rate would be 0.0250 and the phase would be blocked. Printing that as
+        // a settled 0.0000 is how a provisional figure becomes a passed gate.
+        let left = worklist(units)
+            .iter()
+            .filter(|s| !labels.contains_key(&s.uid))
+            .count();
+        provisional |= left > 0;
         let rate = |r: Option<f64>| match r {
+            Some(v) if left > 0 => format!("{v:.4}*"),
             Some(v) => format!("{v:.4}"),
             None => "owed".to_string(),
         };
@@ -748,7 +1033,32 @@ fn ge_t4_attribution_fairness_per_language() {
             }
         }
     }
+    if provisional {
+        println!(
+            "* provisional: the language has refusals nobody has ruled on, and the rate can only \
+             rise"
+        );
+    }
 
+    // Every unit the two forms disagree about, with both spans. S0 reported this set empty over
+    // 5,560 quotes, so a row here is a case the pilot did not see — and the span is half of
+    // what makes it one: two forms can agree on `Present` and still disagree on *where*, which
+    // is the defect F-3 was raised for and the reason the span is printed rather than the
+    // verdict alone.
+    for (lang, units) in &by_lang {
+        for u in units.iter().filter(|u| u.v1 != u.v2) {
+            println!(
+                "disagreement {lang}: v1 {} {} / v2 {} {} — {}",
+                verdict(u.v1),
+                span(&u.v1_span),
+                verdict(u.v2),
+                span(&u.v2_span),
+                u.quote.chars().take(60).collect::<String>(),
+            );
+        }
+    }
+
+    let disputed: usize = by_lang.values().map(|u| worklist(u).len()).sum();
     let unruled: usize = by_lang
         .values()
         .map(|u| {
@@ -759,15 +1069,21 @@ fn ge_t4_attribution_fairness_per_language() {
         })
         .sum();
     println!("worklist: {}", out.display());
+    println!(
+        "{disputed} unit(s) the check refused: {} ruled by hand, {} decided by rule, {unruled} \
+         left to read",
+        human.len(),
+        rules.keys().filter(|k| !human.contains_key(*k)).count(),
+    );
     if labels.is_empty() {
         println!(
-            "GE-T4: the corpus is scored and the clause is owed. {unruled} unit(s) need a \
-             ruling; the rest of the sample cannot be a false `absent`."
+            "GE-T4: the corpus is scored and the clause is owed. Fill in `label` on the \
+             worklist and pass it back as SMYSL_GE_T4_LABELS to measure the rate."
         );
         return;
     }
     if unruled > 0 {
-        println!("{unruled} disputed unit(s) are still unruled; the rate is over what is ruled.");
+        println!("the rate below is over what is ruled; {unruled} unit(s) are not");
     }
     assert!(
         blocked.is_empty(),
