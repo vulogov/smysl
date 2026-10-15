@@ -1,6 +1,6 @@
 # Fixtures
 
-Eight trees, with different jobs.
+Nine trees, with different jobs.
 
 | Tree | Contents | Consumed by |
 |---|---|---|
@@ -15,7 +15,7 @@ about its source, so the ids are canonical and nothing behind them is in this re
 third unit is at other bytes of the same part, and it is there so that an engine proposing every
 pair fails against the file rather than passing.
 
-Two trees hold **gate material** rather than fixtures, and the difference is who they are
+Five trees hold **gate material** rather than fixtures, and the difference is who they are
 addressed to: a fixture is an instrument, and these are the things being measured.
 
 | Tree | Contents | Consumed by |
@@ -24,6 +24,7 @@ addressed to: a fixture is an instrument, and these are the things being measure
 | `library/bibles/` | `expected.tsv` and `slice.tsv`, the identities five scripture libraries build to; `slice/`, Ruth and Jude in five editions; `wire/`, one expression the three ports recompute | GE-T1's corpus clause (`crates/smysl-text/tests/ge_t1_bibles.rs`, `gen_bible_wire.rs`, and the three ports' library suites) |
 | `library/link/` | `planted.tsv`, fifty pairs of claims that cannot both be true, each half cited in a different book | GE-T11 (`crates/smysl-text/tests/ge_t11.rs`) |
 | `proposition/ge-t5/` | `paraphrase.tsv`, a second English expression of Ruth — forty restatements and ten near-misses; `sheet.tsv`, three scripted coders over the pool | GE-T5's within-language arm (`crates/smysl-text/tests/ge_t5.rs`) |
+| `attribution/probes/` | Mark 14-15 in two editions of scripture, and `probes.tsv`: every utterance of Mark 15 in both, with the verse, the expected mode and how the source marks it | TX-P5 step 3b's probe-set gate (`crates/smysl-ingest/tests/probe_set.rs`) |
 
 `library/bibles/slice/` is 112 KiB of public-domain scripture, carried because a two-platform
 comparison that needs three megabytes mounted first is a comparison nobody runs. The whole corpus
@@ -42,6 +43,22 @@ with disagreement written in at fixed intervals chosen so that α comes out at S
 exists so the instrument runs on every `make test`, and the harness reports GE-T5's clause as
 *owed* rather than met whenever it is the sheet in use. Three coders judging independently is what
 is owed; `SMYSL_GE_T5_SHEET=<file>` is how somebody else's sheet decides the clause.
+
+`attribution/probes/` is the probe set TX-P5 step 3b exits on, and it is **material** with the
+authored part removed rather than defended. Two editions of Mark 14-15 came from eBible's USFM
+distributions, which is not where `library/bibles/slice/` came from: that slice was built out of
+eBible's *verse-per-line* files, which carry no markup at all, which is why its `eng-kjv/` has no
+`\wj` in it and why a probe set could not be drawn from it. The two editions carry the same 47
+verses, one marking the words of Jesus and punctuating nothing (the 1769 text) and one marking them
+and punctuating every quotation (the World English Bible), so the two arms of the gate differ in
+nothing but typography. **Every** utterance of Mark 15 is probed in both, one probe each and at the
+verse it begins in, so no verse was chosen — the chapter was, for the reason that the Passion
+narrative is where ten speakers take their turn, from Pilate to the centurion. A probe's `expected` is read off the verse's frame (a verb of saying attributing the clause
+to somebody, or nothing) and its `marking` off the source file, so both labels are checkable by
+opening the file; its `locator` is load-bearing, because a short quote matched loosely attaches to
+the wrong verse. Chapter 14 is carried and not probed: it is what makes chapter 15's probes read
+out of a part that does not begin at byte zero, which is how the set found that a row's marks were
+not being shifted with the row. `SMYSL_PROBE_SET=<dir>` replaces the whole directory.
 
 `library/link/planted.tsv` is the other file here a person wrote from nothing, and its header
 says so before it says anything else. GE-T11 asks for fifty *far* contradictions, which no corpus

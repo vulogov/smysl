@@ -273,6 +273,12 @@ pub fn group(
 ///
 /// Nothing caught this until now because every reader fixture in the tree produces exactly one
 /// part, and for one part the shift is zero.
+///
+/// The row's **reported-speech marks shift with it**, and that was a second instance of the same
+/// defect, found the same way: a mark is a byte range into the part, so a mark left at the whole
+/// text's offsets points past the part that carries it, and the first thing to read one — a probe
+/// set over two chapters of Mark, which is two parts — indexed outside the part's text. One part
+/// hid it twice.
 pub fn local_rows(rows: &[Segment], range: &std::ops::Range<u64>) -> Vec<Segment> {
     rows.iter()
         .filter(|r| r.start >= range.start && r.end <= range.end)
@@ -280,6 +286,10 @@ pub fn local_rows(rows: &[Segment], range: &std::ops::Range<u64>) -> Vec<Segment
             let mut row = r.clone();
             row.start -= range.start;
             row.end -= range.start;
+            for mark in &mut row.reported {
+                mark.start -= range.start;
+                mark.end -= range.start;
+            }
             row
         })
         .collect()
@@ -310,6 +320,8 @@ mod tests {
     fn even(n: usize, size: u64) -> Vec<std::ops::Range<u64>> {
         (0..n as u64).map(|i| i * size..(i + 1) * size).collect()
     }
+
+    use crate::reading::Mark;
 
     fn row(start: u64, end: u64, loc: &str) -> Segment {
         Segment::new(
@@ -431,6 +443,29 @@ mod tests {
         // The first part is the case that hid this: its shift is zero.
         let first = local_rows(&rows, &(0..10));
         assert_eq!((first[0].start, first[0].end), (0, 10));
+    }
+
+    /// A mark inside a row shifts with the row, which one part hid as thoroughly as the row.
+    ///
+    /// The probe set for TX-P5 step 3b is two chapters of Mark, so it is two parts, and it was
+    /// the first thing in the tree to read a mark out of a part that does not begin at zero.
+    /// Chapter 15's marks came back at chapter 14's offsets and indexed past the end of their
+    /// own part's text. A mark is a range into the part, like the row that carries it.
+    #[test]
+    fn a_marks_offsets_are_the_parts_own_too() {
+        let mut second = row(10, 25, "L2");
+        second.reported.push(Mark::new(14, 20));
+        let rows = vec![row(0, 10, "L1"), second];
+
+        let part = local_rows(&rows, &(10..25));
+        assert_eq!((part[0].start, part[0].end), (0, 15));
+        let mark = &part[0].reported[0];
+        assert_eq!(
+            (mark.start, mark.end),
+            (4, 10),
+            "the mark shifted with its row, and stays inside it"
+        );
+        assert!(mark.end <= part[0].end, "a mark cannot end past its row");
     }
 
     /// A row straddling a boundary belongs to neither part.

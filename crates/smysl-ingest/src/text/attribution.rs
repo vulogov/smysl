@@ -137,31 +137,43 @@ pub fn attribution(
     }
 }
 
-/// The reported-speech marks of one part: the reader's own, or the punctuation scan.
+/// The reported-speech marks of one part: the reader's own and the punctuation scan's, joined.
 ///
-/// **The reader's marks win, and the scan is not added to them.** An edition that marks its
-/// reported speech has said which clauses are reported; running [`quoted_spans`] over it as
-/// well would re-admit exactly the heuristic the marks replace, and on a Bible that both marks
-/// the words of Jesus and punctuates its narrative quotations the two suppliers disagree about
-/// every verse of dialogue. So the choice is per part and it is a choice, not a union.
+/// **Both suppliers are positive evidence and neither claims completeness, so they are joined
+/// rather than ranked.** This was decided the other way first — the reader's marks winning
+/// outright, with the scan kept only for a part that had no marks at all — on the reasoning that
+/// an edition marking its reported speech has already said which clauses are reported, so adding
+/// the scan would re-admit the heuristic the marks replace.
 ///
-/// Which means a part whose reader marked *nothing* still gets the scan, and that is right for
-/// the reason §3.4 gives: an empty mark list means "nothing is marked", not "nothing is
-/// reported", and the scan is the supplier of last resort rather than a second opinion.
+/// Measuring it killed it. USFM's `\wj` does not mark reported speech: it marks the **words of
+/// Jesus**, which is one holder out of however many a passage has. Over Mark 14-15 in the World
+/// English Bible the reader finds 30 marks and the scan finds 54 — Pilate, the high priest, the
+/// maid in the courtyard, the centurion and the crowd are all punctuated by that edition and
+/// none of them is `\wj`. Ranking the suppliers therefore *lost* every speaker but one in an
+/// edition that had marked and punctuated them both, and lost them precisely because the edition
+/// had marked anything at all. The same holds for OSIS: `<q who>` is used per edition, and
+/// nothing in either format asserts that every reported clause carries a marker.
 ///
-/// The marks come off the rows, where [`smysl_text::reading::Mark`] put them (key 9), and are
-/// sorted into part order here: a row's marks are sorted within the row, and the rows of a
-/// reading are in document order, so the concatenation is already sorted — sorting again costs
-/// nothing and does not depend on that remaining true.
+/// What the join costs is the scan's false positives — a quoted title, a scare quote — in parts
+/// that also carry marks. That cost was already accepted everywhere else: the scan was the sole
+/// supplier for every unmarked part before the readers learned either marker, and a mode is only
+/// ever written *because* some supplier says `reported`, never because none does.
+///
+/// Overlap is expected and harmless rather than merged: an edition that marks `\wj` *and* puts
+/// quotation marks round the same clause yields two spans over nearly the same bytes, and
+/// [`attribution`] asks whether a claim's span is contained in **any** mark. Exact duplicates
+/// are dropped, because they say nothing twice.
+///
+/// The reader's marks come off the rows, where [`smysl_text::reading::Mark`] put them (key 9).
+/// Both sets are part-local byte ranges, and the result is sorted into part order.
 pub fn marks_of(rows: &[smysl_text::reading::Segment], text: &str) -> Vec<Range<u64>> {
     let mut out: Vec<Range<u64>> = rows
         .iter()
         .flat_map(|r| r.reported.iter().map(|m| m.start..m.end))
+        .chain(quoted_spans(text))
         .collect();
-    if out.is_empty() {
-        return quoted_spans(text);
-    }
     out.sort_by_key(|a| (a.start, a.end));
+    out.dedup();
     out
 }
 
@@ -361,13 +373,20 @@ mod tests {
         assert_eq!(got, vec![10..40, 60..65]);
     }
 
-    /// A reader's own marks are used, and the punctuation scan is not added to them.
+    /// A reader's marks and the scan's are joined, and a duplicate is said once.
+    ///
+    /// The decision this reverses, and why: `\wj` marks the words of one speaker, so an edition
+    /// that marks and punctuates its dialogue reports more speech through its punctuation than
+    /// through its markers, and letting the markers win lost the rest of the cast.
     #[test]
-    fn a_readers_marks_replace_the_punctuation_scan_rather_than_joining_it() {
+    fn a_readers_marks_are_joined_with_the_punctuation_scan_rather_than_replacing_it() {
         use smysl_text::reading::{Level, Mark, Segment};
-        let text = "And Boaz said, \u{201c}The LORD be with you.\u{201d} And he answered.";
+        // Boaz is punctuated and not marked; the reapers' answer is marked and not punctuated.
+        let text = "And Boaz said, \u{201c}The LORD be with you.\u{201d} And they answered \
+                    him, The LORD bless thee.";
         let quoted = quoted_spans(text);
         assert_eq!(quoted.len(), 1, "the scan finds the punctuated clause");
+        let answer = text.find("The LORD bless thee.").expect("the clause") as u64;
 
         let row = Segment::new(
             0,
@@ -375,13 +394,32 @@ mod tests {
             Level::new("verse").expect("a level"),
             "Ruth.2.4".parse().expect("a locator"),
         )
-        .with_mark(Mark::new(0, 13));
+        .with_mark(Mark::new(answer, text.len() as u64));
         let marks = marks_of(&[row], text);
         assert_eq!(
-            marks,
-            vec![0..13],
-            "the reader marked one span, so that is the answer and the scan is not consulted"
+            marks.len(),
+            2,
+            "one clause from each supplier, and neither one dropped: {marks:?}"
         );
+        assert_eq!(marks[0], quoted[0]);
+        assert_eq!(marks[1].start, answer);
+    }
+
+    /// The same bytes from both suppliers are one mark, because they say the same thing twice.
+    #[test]
+    fn a_clause_both_marked_and_punctuated_is_one_mark() {
+        use smysl_text::reading::{Level, Mark, Segment};
+        let text = "And Boaz said, \u{201c}The LORD be with you.\u{201d}";
+        let quoted = quoted_spans(text);
+        assert_eq!(quoted.len(), 1);
+        let row = Segment::new(
+            0,
+            text.len() as u64,
+            Level::new("verse").expect("a level"),
+            "Ruth.2.4".parse().expect("a locator"),
+        )
+        .with_mark(Mark::new(quoted[0].start, quoted[0].end));
+        assert_eq!(marks_of(&[row], text), quoted);
     }
 
     /// A part whose reader marked nothing still gets the scan.

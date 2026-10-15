@@ -3305,10 +3305,24 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
       platform's identifier for a living person, and keying it would destroy its only use while
       protecting nobody. A transcript whose speakers *are* people belongs in a chat reader,
       where `speaker` is keyed.
-   4. **The reader's marks replace the punctuation scan rather than joining it.** Per part: an
+   4. ~~**The reader's marks replace the punctuation scan rather than joining it.** Per part: an
       edition that marks its reported speech has said which clauses are reported, and adding the
       scan on top would re-admit the heuristic the marks replace. A part whose reader marked
-      nothing still gets the scan, because an empty list means "nothing is marked".
+      nothing still gets the scan, because an empty list means "nothing is marked".~~
+      **Reversed 2026-10-15 by the probe set, and the premise was simply false.** `\wj` does not
+      mark reported speech; it marks the **words of Jesus**, which is one holder out of however
+      many a passage has. Over Mark 14-15 in the World English Bible — an edition that marks *and*
+      punctuates — the reader finds 30 marks and the scan finds 54: Pilate, the high priest, the
+      maid in the courtyard, the centurion and the crowd are all punctuated by that edition and
+      none of them is `\wj`. Ranking the suppliers therefore lost every speaker but one, and lost
+      them precisely *because* the edition had marked anything at all. Nothing in either format
+      asserts that every reported clause carries a marker, so the two are **joined**: both are
+      positive evidence, neither claims completeness, exact duplicates are said once, and overlap
+      is left alone because attribution asks whether a claim's span is contained in **any** mark.
+      What the join costs is the scan's false positives in parts that also carry marks, and that
+      cost was already accepted everywhere else — the scan was the sole supplier for every
+      unmarked part before the readers learned either marker, and a mode is only ever written
+      *because* some supplier says `reported`, never because none does.
    5. **Marks merge across a separator and not across a word.** One clause arrives in as many
       fragments as its source divides it into — an XML entity, a `\nd` inside a `\wj`, a
       quotation reopened after a line break — so two marks with only whitespace between them and
@@ -3322,12 +3336,52 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    identities never depended on the name, since a structure hash is taken over the table's
    bytes and rule X keeps what a port does not know.
 
-   **The probe set is owed for GE-T13's reason.** Attribution-bearing passages with known
+   ~~**The probe set is owed for GE-T13's reason.** Attribution-bearing passages with known
    reported speech are material this repository does not hold, and authoring them here would
-   make them a development set — the passages would be chosen by whoever wrote the detector.
-   The arithmetic is tested instead: a rate over the probes a human called `reported`, an absent
-   mode counted as a miss, probes called `asserted` outside the denominator, and 10% failing
-   because the clause says *below*.
+   make them a development set — the passages would be chosen by whoever wrote the detector.~~
+   **Paid 2026-10-15, and the clause is met at 0.0% over 17 probes.**
+   `fixtures/attribution/probes/` is Mark 14-15 in two editions from eBible's USFM
+   distributions — `eng-kjv`, the 1769 text, which marks the words of Jesus and punctuates
+   nothing; and `engwebp`, the World English Bible, which marks them and punctuates every
+   quotation. The same 47 verses in both, so the two arms differ in nothing but typography.
+   `SMYSL_PROBE_SET=<dir>` still replaces the material with somebody else's, which is GE-T13's
+   arrangement.
+
+   The development-set objection is answered the way GE-T13 answered it — by removing the
+   choice rather than defending it. **Every utterance in Mark 15 is probed, in both editions**,
+   one probe each and at the verse it begins in, so no verse was picked; the chapter was picked,
+   for the reason that the Passion narrative is where ten speakers take their turn — Pilate,
+   Jesus, the crowd, the soldiers, the passers-by, the chief priests, a bystander, the man with
+   the sponge, the centurion, and a verse of scripture quoted as if it spoke. The labels are two facts and no opinions:
+   `expected` is `reported` where the verse frames the clause with a **verb of saying**
+   attributing it to somebody and `none` where it does not, so the gloss `which is, being
+   interpreted, The place of a skull` and the superscription that `was written over` are not
+   sayings; `marking` is `wj`, `quoted`, `both` or `bare`, which anybody can check by opening
+   the file.
+
+   **What is gated and what is reported.** Only the 17 probes whose own edition marks or
+   punctuates the clause are in the gated denominator, and they measure **0.0%**. The 13 whose
+   edition leaves the clause to a comma and a capital letter are the typography arm: they come
+   out at **100%**, and they are counted and reported rather than passed or failed, which is
+   GE-T13's rule for a date pair open on the side being compared. Folding them in would make
+   the figure a figure about punctuation — §3.4's supplier list is the reader's marks and the
+   punctuation scan, and a 1769 Bible offers neither. Six further probes expect **no** mode and
+   measure the error in the other direction: **3 of 6** got one, all of them in the edition that
+   puts quotation marks round a gloss or an inscription, which is the price of the join in
+   decision 4 and is reported rather than thresholded, T8's defect being the opposite direction.
+
+   **It found two defects on its first run, both hidden by the same thing — one part.**
+   `part::local_rows` shifts a row to its part's own offsets, and left the marks *inside* the
+   row at the whole text's, so chapter 15's marks pointed past the end of chapter 15; every
+   reader fixture in the tree until now produced exactly one part, for which the shift is zero.
+   And a probe needs a **locator**, not just a quote: the quote search has four scopes and
+   matches under a normaliser, so `Thou sayest it.` at 15:2 attached to Peter's `I know not,
+   neither understand I what thou sayest.` at 14:68 — the previous chapter, the previous part —
+   and was scored against the wrong verse, which is how the gate first reported 11.8%. A probe
+   now names its verse, only the part holding that verse is searched, and an attachment landing
+   anywhere else is reported rather than scored. Chapter 14 is carried and not probed for
+   exactly this reason: it makes chapter 15's probes read out of a part that does not begin at
+   byte zero.
 4. ~~Ledger digest, `E442`, journal, language policy, recipe fields, prompt templates with
    fences. *Exit:* red-team suite; resume test.~~ **Done 2026-10-12.** `text/digest.rs`,
    `text/journal.rs`, `text/run.rs` (`Ingestor::ingest_text`, `TextIngest`, `Target`,
@@ -3400,7 +3454,7 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    | resume loses ≤ one batch | **met.** 8 windows, the journal truncated mid-append, **1** window re-sent, and the store unchanged afterwards |
    | ≥ 95% carry a span | **met, 1.000**, against a control at **0.857** |
    | entity duplication < 2% | **met, 0.000.** 3 entity records for 3 speakers across 9 windows |
-   | probe-set gate (3b) | **owed on material, and the readers no longer owe anything.** `usfm/1` reads `\wj … \wj*` and `osis/1` reads `<q who="…">`, both into reading key 9 (2026-10-15); what is left owed is a probe set, for GE-T13's reason |
+   | probe-set gate (3b) | **met at 0.0%, over 17 probes whose edition marks or punctuates the clause** (2026-10-15). `usfm/1` reads `\wj … \wj*` and `osis/1` reads `<q who="…">`, both into reading key 9; `fixtures/attribution/probes/` is Mark 14-15 in two editions of scripture with every utterance of Mark 15 probed in both. The 13 probes whose edition punctuates nothing come out at 100% and are reported, not gated — GE-T13's rule for a pair open on the side compared |
    | GE-T2 rerun | **instrument met, corpus owed.** 1.000 scripted in en and ru, 0.500 on a drifting pass, `None` on one pass |
    | cost report | **built and measured.** Per language, from the journal, with the retry rate as its own term |
 
@@ -3443,15 +3497,18 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    attributed a quote and got no span, the second counts units that cannot establish
    `identical-span` however they came to have no span.
 
-   **What is owed, and the shape of both debts is the same.** The probe set of 3b and GE-T2's
-   corpus are *material*, not code: the harnesses take them (`SMYSL_PROBE_SET`,
-   `SMYSL_GE_T2=<dir>` with `SMYSL_INGEST_LIVE=1`) and report the clause as owed without them,
-   which is GE-T13's precedent. Authoring either here would make it a development set chosen by
-   whoever wrote the extractor. The phase's precondition **GE-T4** is the same debt a third time,
-   and it is why the extraction steps can be *built* and reported here but not *passed*. The cost
-   report is the one clause nothing blocks any more: F-2 shipped in 1.10.0, so the per-language
-   figures wait only for a corpus and a caller's consent to spend a credential — and when they
-   come, they come out of the journal rather than out of a coefficient.
+   **What is owed, and 3b's half of it is paid.** The probe set of 3b and GE-T2's corpus were
+   *material*, not code: the harnesses take them (`SMYSL_PROBE_SET`, `SMYSL_GE_T2=<dir>` with
+   `SMYSL_INGEST_LIVE=1`) and reported the clause as owed without them, which is GE-T13's
+   precedent. **3b's probe set was paid 2026-10-15** the way GE-T13's chronology was: by taking
+   public material and removing the choice of what to probe, rather than by authoring passages
+   and defending the choice. GE-T2's corpus is not the same debt after all — it needs a model and
+   a credential, where a probe set needs neither, and that is why one of the two could be paid
+   from a download. The phase's precondition **GE-T4** remains, and it is why the extraction steps
+   can be *built* and reported here but not *passed*. The cost report is the one clause nothing
+   blocks any more: F-2 shipped in 1.10.0, so the per-language figures wait only for a corpus and
+   a caller's consent to spend a credential — and when they come, they come out of the journal
+   rather than out of a coefficient.
 
    **`pivot:<lang>`, the last thing the phase owed in code. Landed 2026-10-13.** Left until
    after the exit deliberately, and the reason is in the exit itself: GE-T2's figures are
@@ -3465,8 +3522,9 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    rule 7 would make a translation a second entity rather than a second language; and the pass
    has no repair loop, because the only check available to a translation is whether a line came
    back. It also found the `x.text/v1` declaration missing from every library a text ingest had
-   ever written to. What TX-P5 still owes is material only: GE-T4, 3b's probe set, GE-T2's
-   corpus.
+   ever written to. What TX-P5 still owes is material only, and one item less of it since
+   2026-10-15: GE-T4 and GE-T2's corpus, both of which need a model and a credential. 3b's probe
+   set needed neither and is paid.
 
 ### TX-P7 — proposition layer and linking
 

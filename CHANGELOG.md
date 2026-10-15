@@ -58,6 +58,64 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### The probe set that reversed one of its own decisions
+
+**TX-P5 step 3b's exit clause is met: 0.0% asserted-as-reported, over 17 probes.** The clause has
+stood owed since 2026-10-12 for GE-T13's reason — attribution-bearing passages with known reported
+speech are material, and authoring them here would make them a development set chosen by whoever
+wrote the detector. `fixtures/attribution/probes/` pays it the way `fixtures/chronology/public.tsv`
+paid GE-T13's fourth clause: by taking public material and **removing** the authored choice rather
+than defending it. Mark 14-15 in two editions from eBible's USFM distributions — the 1769 KJV,
+which marks the words of Jesus and punctuates nothing, and the World English Bible, which marks
+them and punctuates every quotation — the same 47 verses in both, and **every** speech act of Mark
+15 probed in each. A verse was not picked; the chapter was, because the Passion narrative is where
+ten speakers take their turn: Pilate, Jesus, the crowd, the soldiers, the passers-by, the chief
+priests, a bystander, the man with the sponge, the centurion, and a verse of scripture quoted as if
+it spoke. One probe per **utterance**, at the verse it begins in, and an utterance running into the
+next verse is probed on the part inside its own.
+
+**What is gated, and what is counted and reported instead.** 17 probes whose own edition marks or
+punctuates the clause measure **0.0%**. The 13 whose edition leaves it to a comma and a capital
+letter come out at **100%**, and they are reported rather than passed or failed — GE-T13's rule for
+a date pair open on the side being compared, and for the same reason: §3.4's suppliers are the
+reader's marks and the punctuation scan, so a figure that folded those in would be a figure about
+typography. Six more probes expect **no** mode and measure the opposite error from T8's; **3 of 6**
+got one, every one of them where the World English Bible puts quotation marks round a gloss on a
+name or an inscription. That is the price of the join below, reported and not thresholded.
+
+**The join, which the measurement forced.** `marks_of` preferred a reader's marks over the
+punctuation scan, per part, on the reasoning that an edition marking its reported speech has said
+which clauses are reported. The premise was false: `\wj` marks the **words of Jesus**, not reported
+speech. Over these two chapters the reader finds 30 marks and the scan 54 — Pilate, the high
+priest, the maid in the courtyard, the centurion and the crowd are punctuated by that edition and
+none of them is `\wj` — so ranking the suppliers lost every speaker but one, and lost them
+*because* the edition had marked anything at all. They are joined now: both are positive evidence,
+neither claims completeness, duplicates are said once, and overlap is left alone because
+attribution asks whether a span is contained in **any** mark. SMYSL-2.4 §6 step 3b decision 4 is
+struck through with the numbers that struck it.
+
+**Two defects, both hidden by the same thing.** Every reader fixture in this tree until now
+produced exactly **one** part, for which a part's offset shift is zero — the trap
+`part::local_rows` already had a paragraph about, sprung a second time one line further in. It
+shifted each row to its part's own offsets and left the marks *inside* the row at the whole text's,
+so chapter 15's marks pointed past the end of chapter 15. Chapter 14 is carried in the probe set
+and never probed, precisely so that chapter 15's probes read out of a part that does not begin at
+byte zero. The second: a probe needs a **locator** as well as a quote. The quote search has four
+scopes and matches under a normaliser, so `Thou sayest it.` at 15:2 attached to Peter's `I know
+not, neither understand I what thou sayest.` at 14:68 — the previous chapter, the previous part —
+and the mode was read off the wrong verse. That is how the gate first reported 11.8% rather than
+0.0%: a real number, measured against the wrong text. A probe now names its verse, only the part
+holding that verse is searched, and an attachment landing anywhere else is reported rather than
+scored.
+
+**And the harness can now read a corpus at all.** It built its own rows from a passage's lines,
+which meant it could only ever have measured the punctuation scan: `\wj` and `<q who>` reach a
+measurement through a reading, so a `.usfm` or `.osis` probe file is read by its **reader**, through
+a library, part by part. `SMYSL_PROBE_SET=<dir>` still replaces the material with somebody else's,
+and a three-column probe set written against the first draft of the format still runs — with its
+marking read as unknown and therefore *gated*, since an unstated marking must not let a probe opt
+out of the figure.
+
 ### The marker whose position survives, and the four things that follow from keeping it
 
 **Reading key 9: reported-speech marks, and two readers that write them.** TX-P5 step 3b built
@@ -90,6 +148,8 @@ as well re-admits exactly the heuristic the marks replace — on a Bible that ma
 Jesus *and* punctuates its narrative dialogue the two suppliers disagree about every verse of it.
 A part whose reader marked nothing still gets the scan, because an empty list means "nothing is
 marked" and not "nothing is reported".
+*Superseded the same week by the probe set, which measured the premise and found it false — see
+"The probe set that reversed one of its own decisions" above. The two suppliers are joined.*
 
 **Marks merge across a separator and not across a word.** One clause arrives in as many fragments
 as its source divides it into: an XML entity mid-sentence, a `\nd` inside a `\wj`, a quotation
