@@ -1,0 +1,89 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Library,
+                    ],
+                },
+            ),
+            source: Some(
+                Find {
+                    text: Str(
+                        "faith",
+                    ),
+                    engine: Some(
+                        Lex,
+                    ),
+                    lang: None,
+                },
+            ),
+            filters: [
+                Filter {
+                    pred: And(
+                        [
+                            Cmp {
+                                field: FieldRef {
+                                    pin: None,
+                                    name: "lang",
+                                },
+                                op: Eq,
+                                value: Word(
+                                    "en",
+                                ),
+                            },
+                            Cmp {
+                                field: FieldRef {
+                                    pin: None,
+                                    name: "mode",
+                                },
+                                op: Eq,
+                                value: Word(
+                                    "reported",
+                                ),
+                            },
+                        ],
+                    ),
+                    lens_none: false,
+                },
+            ],
+            times: [],
+            traversals: [
+                Traversal {
+                    edge: Named(
+                        Grounds,
+                    ),
+                    depth: Some(
+                        Int(
+                            2,
+                        ),
+                    ),
+                },
+            ],
+            closures: [],
+        },
+    ),
+    ordering: [
+        OrderBy {
+            keys: [
+                SortKey {
+                    target: Salience,
+                    dir: Some(
+                        Descending,
+                    ),
+                },
+            ],
+            lens_none: false,
+        },
+    ],
+    shaping: [
+        Limit {
+            count: Int(
+                10,
+            ),
+        },
+    ],
+    output: None,
+}

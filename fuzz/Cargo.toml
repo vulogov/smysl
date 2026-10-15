@@ -17,6 +17,7 @@ smysl-graph = { path = "../crates/smysl-graph" }
 smysl-pack = { path = "../crates/smysl-pack", features = ["branch-and-bound"] }
 smysl-thread = { path = "../crates/smysl-thread" }
 smysl-check = { path = "../crates/smysl-check" }
+smysl-query = { path = "../crates/smysl-query" }
 # Every reader, so one target covers all nine and the purity gate's feature split is exercised
 # by the fuzzer rather than only by the test suite.
 smysl-text = { path = "../crates/smysl-text", features = [
@@ -95,5 +96,11 @@ doc = false
 [[bin]]
 name = "time_engine"
 path = "fuzz_targets/time_engine.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "sq_parse"
+path = "fuzz_targets/sq_parse.rs"
 test = false
 doc = false

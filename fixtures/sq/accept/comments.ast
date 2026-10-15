@@ -1,0 +1,29 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Library,
+                    ],
+                },
+            ),
+            source: Some(
+                Text {
+                    alias: "kjv-1769",
+                    at: Locator(
+                        "Ps.14",
+                    ),
+                },
+            ),
+            filters: [],
+            times: [],
+            traversals: [],
+            closures: [],
+        },
+    ),
+    ordering: [],
+    shaping: [],
+    output: None,
+}

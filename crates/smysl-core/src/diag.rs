@@ -180,7 +180,7 @@ macro_rules! registry {
 }
 
 registry! {
-    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library }
+    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library, Query }
 
     // --- Parse and encoding ------------------------------------------------
     Parse => {
@@ -328,6 +328,18 @@ registry! {
         W443 = "SMY-W443", Warn,  "Untrusted text contained a prompt fence marker; neutralised in the prompt only";
         W444 = "SMY-W444", Warn,  "A tool-owned field in a model answer was dropped";
         W453 = "SMY-W453", Warn,  "The pivot pass returned no translation for a unit; it is staged in the source language only";
+    }
+
+    // --- The query language (RFC SMYSL-2.9), in the order the parser raises them --------------
+    //
+    // Three, not the whole of SMYSL-2.5's range: these are what a lexer, a parser and a printer
+    // can produce. `E461` (a stage this build will not plan) and `E462` (an undeclared relation
+    // kind) belong to the planner and arrive with it, on the rule the library block above
+    // states — a code nothing can trigger is worse than a missing one.
+    Query => {
+        E427 = "SMY-E427", Error, "Unsupported sq version in a `using` clause";
+        E460 = "SMY-E460", Error, "sq syntax error, or a parameter left unbound";
+        W510 = "SMY-W510", Warn,  "A string literal is not in NFC; it is matched byte-exactly as written";
     }
 }
 
@@ -679,6 +691,20 @@ mod tests {
     /// that code already names, measured against the language asked for rather than the
     /// passage's.
     ///
+    /// 91 with `SMY-E427`, `SMY-E460` and `SMY-W510` in TX-P6 step 1, where a lexer, a parser
+    /// and a canonical printer for `sq/1` exist (RFC SMYSL-2.9). They are the three a parse can
+    /// produce: a `using` clause naming a version this build does not support, a syntax error or
+    /// an unbound `$parameter`, and a string literal that is not in NFC. The last is a *warning*
+    /// and not an error on purpose — SMYSL-2.9's QG-5 keeps a literal's bytes exactly as written,
+    /// because a quote must match a corpus byte for byte, and the hazard that creates is a
+    /// non-NFC quote matching nothing at all while looking correct on screen. Silence there is
+    /// the worst available outcome, so the parse succeeds and says so.
+    ///
+    /// `SMY-E461` and `SMY-E462` are allocated by RFC SMYSL-2.5 and are **not** here: the first
+    /// refuses a stage this build will not plan and the second an undeclared relation kind, and
+    /// both need a planner, which TX-P6 step 2 builds. That leaves `E511`–`W519` of SMYSL-2.9's
+    /// own range unallocated.
+    ///
     /// That leaves `454`–`459` of RFC SMYSL-2.4's `E401`–`W459` range unallocated.
     ///
     /// Step 5's plan named six codes and two of them are **not** here. `SMY-E404` is a span
@@ -688,7 +714,7 @@ mod tests {
     /// build can produce, which is the thing this comment exists to prevent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 88);
+        assert_eq!(Code::ALL.len(), 91);
     }
 
     #[test]
@@ -699,7 +725,7 @@ mod tests {
                 "group {g} has no codes"
             );
         }
-        assert_eq!(Group::ALL.len(), 9);
+        assert_eq!(Group::ALL.len(), 10);
     }
 
     #[test]

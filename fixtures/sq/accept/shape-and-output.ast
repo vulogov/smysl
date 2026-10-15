@@ -1,0 +1,36 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Library,
+                    ],
+                },
+            ),
+            source: None,
+            filters: [],
+            times: [],
+            traversals: [],
+            closures: [],
+        },
+    ),
+    ordering: [],
+    shaping: [
+        Pack {
+            tokens: Int(
+                4000,
+            ),
+            as_view: true,
+        },
+    ],
+    output: Some(
+        Measure(
+            [
+                "t1",
+                "t2.detail",
+            ],
+        ),
+    ),
+}

@@ -1,0 +1,2 @@
+from library
+match (a)-[:grounds]->(b) where a.kind = claim

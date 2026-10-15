@@ -1,0 +1,10 @@
+from store:a
+find "pool"
+union
+(
+from store:b
+find "contention"
+intersect
+from store:c
+)
+count

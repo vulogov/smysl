@@ -1,0 +1,34 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Library,
+                    ],
+                },
+            ),
+            source: Some(
+                Find {
+                    text: Str(
+                        "faith",
+                    ),
+                    engine: Some(
+                        Lex,
+                    ),
+                    lang: Some(
+                        Any,
+                    ),
+                },
+            ),
+            filters: [],
+            times: [],
+            traversals: [],
+            closures: [],
+        },
+    ),
+    ordering: [],
+    shaping: [],
+    output: None,
+}

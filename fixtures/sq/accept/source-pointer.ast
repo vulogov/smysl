@@ -1,0 +1,32 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Store(
+                            Ident(
+                                "config",
+                            ),
+                        ),
+                    ],
+                },
+            ),
+            source: Some(
+                Pointer(
+                    "/database/pool/max_size",
+                ),
+            ),
+            filters: [],
+            times: [],
+            traversals: [],
+            closures: [],
+        },
+    ),
+    ordering: [],
+    shaping: [],
+    output: Some(
+        Json,
+    ),
+}

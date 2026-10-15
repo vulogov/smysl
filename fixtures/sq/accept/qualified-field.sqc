@@ -1,0 +1,4 @@
+using sq/1
+using x.text/v1@1
+from library
+where x.text/v1@1:text:mode = reported with lens none

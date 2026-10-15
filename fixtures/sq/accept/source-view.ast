@@ -1,0 +1,22 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: None,
+            source: Some(
+                View(
+                    "v/incidents.q3",
+                ),
+            ),
+            filters: [],
+            times: [],
+            traversals: [],
+            closures: [],
+        },
+    ),
+    ordering: [],
+    shaping: [],
+    output: Some(
+        Spans,
+    ),
+}

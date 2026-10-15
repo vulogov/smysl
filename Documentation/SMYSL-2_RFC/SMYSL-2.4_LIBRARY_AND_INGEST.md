@@ -3445,9 +3445,10 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    **Measured 2026-10-12.** `smysl_ingest::text::cost` (the report), four journal fields, the
    `ingest --text <who> --cost` command, and two harnesses:
    `crates/smysl-ingest/tests/phase_exit.rs` (6 tests) and `crates/smysl-ingest/tests/ge_t2.rs`
-   (5 tests). **Three of the six clauses are met here, one is built and reported, and two are
-   owed** — and the division is not about effort, it is about what a provider that says what the
-   test told it to say can establish.
+   (5 tests). **Three of the six clauses were met here, one was built and reported, and two were
+   owed** — and the division was not about effort, it was about what a provider that says what
+   the test told it to say can establish. The two that were owed were owed as *material*, and
+   both were paid on 2026-10-15, so **all six are settled** and the phase owes nothing.
 
    | clause | figure |
    |---|---|

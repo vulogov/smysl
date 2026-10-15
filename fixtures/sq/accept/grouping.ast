@@ -1,0 +1,42 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Library,
+                    ],
+                },
+            ),
+            source: None,
+            filters: [],
+            times: [],
+            traversals: [],
+            closures: [],
+        },
+    ),
+    ordering: [
+        GroupBy {
+            field: FieldRef {
+                pin: None,
+                name: "lang",
+            },
+            lens_none: true,
+        },
+        CompareBy {
+            field: FieldRef {
+                pin: None,
+                name: "status",
+            },
+            lens_none: false,
+        },
+        AlignByClass {
+            policy: Some(
+                "strict",
+            ),
+        },
+    ],
+    shaping: [],
+    output: None,
+}

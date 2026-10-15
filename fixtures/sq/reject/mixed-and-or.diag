@@ -1,0 +1,1 @@
+SMY-E460 46..48 `and` and `or` may not be mixed without parentheses; write `(a and b) or c` or `a and (b or c)`

@@ -1,0 +1,61 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Library,
+                    ],
+                },
+            ),
+            source: None,
+            filters: [],
+            times: [],
+            traversals: [
+                Traversal {
+                    edge: Out(
+                        "grounds",
+                    ),
+                    depth: None,
+                },
+                Traversal {
+                    edge: In(
+                        "x.text/quotes",
+                    ),
+                    depth: None,
+                },
+                Traversal {
+                    edge: Both(
+                        "x.text/mentions",
+                    ),
+                    depth: Some(
+                        Int(
+                            3,
+                        ),
+                    ),
+                },
+                Traversal {
+                    edge: Named(
+                        RestsOn,
+                    ),
+                    depth: None,
+                },
+                Traversal {
+                    edge: Named(
+                        Lineage,
+                    ),
+                    depth: Some(
+                        Int(
+                            1,
+                        ),
+                    ),
+                },
+            ],
+            closures: [],
+        },
+    ),
+    ordering: [],
+    shaping: [],
+    output: None,
+}

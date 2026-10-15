@@ -1,6 +1,6 @@
 # Fixtures
 
-Ten trees, with different jobs.
+Eleven trees, with different jobs.
 
 | Tree | Contents | Consumed by |
 |---|---|---|
@@ -8,6 +8,7 @@ Ten trees, with different jobs.
 | `conformance/` | `.smy` / `.cbor` inputs plus the exact diagnostic set each must produce | the external conformance suite |
 | `golden/` | canonical encodings, rendered artifacts, `--explain` output | golden tests |
 | `library/same-as/` | `anthology.smy` — a paragraph reprinted under two expressions, and one that is not | `same-as propose`/`classes` in the determinism matrix (`xtask determinism`) |
+| `sq/` | `accept/*.sq` with the tree and the canonical text each parses to, `reject/*.sq` with the one diagnostic each must produce | the `sq/1` grammar goldens (`crates/smysl-query/tests/grammar.rs`) |
 
 `library/same-as/anthology.smy` holds three units and no part: a same-as engine reads which part,
 which manifest and which bytes a unit *says* it came from, which is all A-2.4 lets a unit carry
@@ -78,6 +79,19 @@ on request — so they are planted, in the idiom of `library/bibles/slice/eng-kj
 in two different books. A recall measured over a set its own author wrote is a statement about the
 instrument; `SMYSL_GE_T11_PLANTED=<file>` and `SMYSL_GE_T11_CORPUS=<dir>` are how it becomes a
 statement about the linker.
+
+`sq/` is the grammar's conformance suite (RFC SMYSL-2.9 §5) and it is **external** for the
+reason the conformance tree is: three more implementations of this grammar are coming — the
+Python, Go and JavaScript ports SMYSL-2.5 §3.1 writes the parser for — and they validate against
+these artifacts rather than against a Rust test. Each accept case carries two expectations, which
+fail for different reasons: `.ast` is the tree, so a parser change shows up there, and `.sqc` is
+the canonical text, so a printer change that leaves the tree alone is still a reviewable diff.
+The `.ast` dump leaves spans out, because a span is a byte offset and every expectation would
+churn on an edit to the whitespace above it; spans are asserted in `reject/*.diag`, which carry
+one each along with the code and the message. The reject set holds a near-miss of every accept
+case on purpose: in a hand-written recursive-descent parser the risk is never ambiguity, it is
+unintended acceptance, which no accept case can detect. `SMYSL_BLESS=1` rewrites every
+expectation and should be a decision rather than a habit.
 
 The conformance tree is deliberately **external** — fixture files plus expected
 diagnostics, no Rust — so a second implementation in another language validates against

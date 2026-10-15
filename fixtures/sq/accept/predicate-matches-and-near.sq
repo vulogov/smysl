@@ -1,0 +1,3 @@
+from library
+where matches "pool exhaustion"
+where near("database contention", 0.8)

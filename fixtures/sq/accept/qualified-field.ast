@@ -1,0 +1,49 @@
+Query {
+    header: [
+        Sq {
+            version: 1,
+        },
+        Schema {
+            id: "x.text/v1",
+            revision: 1,
+        },
+    ],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Library,
+                    ],
+                },
+            ),
+            source: None,
+            filters: [
+                Filter {
+                    pred: Cmp {
+                        field: FieldRef {
+                            pin: Some(
+                                SchemaPin {
+                                    id: "x.text/v1",
+                                    revision: 1,
+                                },
+                            ),
+                            name: "text:mode",
+                        },
+                        op: Eq,
+                        value: Word(
+                            "reported",
+                        ),
+                    },
+                    lens_none: true,
+                },
+            ],
+            times: [],
+            traversals: [],
+            closures: [],
+        },
+    ),
+    ordering: [],
+    shaping: [],
+    output: None,
+}

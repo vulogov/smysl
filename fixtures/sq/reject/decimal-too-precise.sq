@@ -1,0 +1,2 @@
+from library
+where near("x", 0.123456)

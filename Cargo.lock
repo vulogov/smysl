@@ -1822,6 +1822,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "smysl-query"
+version = "1.10.0"
+dependencies = [
+ "smysl-core",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "smysl-render"
 version = "1.10.0"
 dependencies = [

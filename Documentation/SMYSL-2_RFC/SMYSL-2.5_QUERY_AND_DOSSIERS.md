@@ -46,7 +46,7 @@ Two findings from reading the code change the design and are called out where th
 ## 1. Scope
 
 **In:**
-- `sq/1` grammar (draft 3 Appendix C, with the additions in §3.1), parser, AST, planner,
+- `sq/1` grammar (**SMYSL-2.9**, with the additions in §3.1), parser, AST, planner,
   executor, `--explain`, `--why`, `--seed-check`, `--save`, reruns, `diff` of result sets.
 - Operator-to-API mapping for every stage (§3.3).
 - Partitions and RRF fusion (§3.4), language bridges (§3.5), the independent-witness hook (§3.7).
@@ -265,7 +265,10 @@ Everything below was read at `d25ec9e` in `/tmp/smysl`. "(unverified)" marks wha
 
 ### 3.1 The language: `sq/1` as implemented
 
-Grammar: draft 3 Appendix C. The implementation fixes what the sketch leaves open:
+Grammar: **SMYSL-2.9**, which carries the productions themselves. Draft 3's Appendix C is
+not in this repository, so 2.9 recovers the grammar from this document's own surface forms —
+chiefly §3.3's table — and marks as an addition anything it had to supply. The deltas below
+are normative over it and are what the implementation fixes that the sketch left open:
 
 - **Version.** A query without `using sq/N` runs under `sq/1`. `SUPPORTED_SQ = ["sq/1"]`;
   anything else is `SMY-E427`.
@@ -283,9 +286,13 @@ Grammar: draft 3 Appendix C. The implementation fixes what the sketch leaves ope
     templates. An unbound parameter is `SMY-E460`.
   - `explain` and `why` are CLI flags, not stages.
   - `with lens none` on a stage disables lensing for qualified access only; unqualified access
-    is always lensed (§3.9).
+    is always lensed (§3.9). **This sentence and §3.9 disagree** and SMYSL-2.9 OQ-77 records it:
+    §3.9 says a qualified `x.text/v1@1:text:mode` reads raw unconditionally, which would leave
+    this modifier with nothing to do. Either qualified access is normally lensed forward from
+    the named revision, or this sentence is stale. SMYSL-2.9 §4.7 fixes the modifier's
+    *placement* and leaves its meaning to this question.
 - **`match`** (Cypher-like patterns) is parsed into an AST node and refused by the planner with
-  `SMY-E461` until a later phase (OQ-50). Every other stage in Appendix C is planned.
+  `SMY-E461` until a later phase (OQ-50). Every other stage in SMYSL-2.9 §4 is planned.
 
 **Parser approach: hand-written recursive descent with a small mode-aware lexer.** Reasons:
 1. The tree's own parsers are hand-written (`surface/lex.rs`, `surface/parse.rs`, 2,243 lines)
@@ -749,7 +756,7 @@ pub trait Translator {
 |---|---|
 | `src/lib.rs` | re-exports, `SUPPORTED_SQ`, `Purity` |
 | `src/lex.rs` | mode-aware lexer, spans |
-| `src/parse.rs` | recursive descent per Appendix C + §3.1 additions |
+| `src/parse.rs` | recursive descent per SMYSL-2.9 §4 + §3.1 additions |
 | `src/ast.rs` | `Query`, `Stage`, `Pred`, `Source`, `Expand`, … |
 | `src/resolve.rs` | field and relation resolution, `using` pins, compile-forward |
 | `src/plan.rs` | planner phases, `Plan`, `PlanStep`, purity |
@@ -1027,7 +1034,7 @@ output:    pack 2000 tokens  estimator smysl/script-aware/1
 
 ### 5.1 Grammar golden tests (`crates/smysl-query/tests/grammar.rs`)
 
-- `fixtures/sq/accept/*.sq` with `*.ast` (pretty-printed AST): every Appendix C production, the
+- `fixtures/sq/accept/*.sq` with `*.ast` (pretty-printed AST): every SMYSL-2.9 §4 production, the
   §11.1 and §11.5 examples, comments and `#` in locators, multi-word keywords, parameters.
 - `fixtures/sq/reject/*.sq` with `*.diag`: one expected `SMY-E460` (span, message) per file:
   unterminated string, dangling `|`, `depth` without number, `using sq/2` (`E427`), unbound `$x`.

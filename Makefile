@@ -135,7 +135,8 @@ PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-re
 # join PUBLISHED at the release that first publishes them.
 #
 # `smysl-text` is new in 1.10.0 (RFC SMYSL-2.4, TX-P1).
-UNPUBLISHED := smysl-text
+# `smysl-query` is new in 1.10.0 (RFC SMYSL-2.9, TX-P6 step 1).
+UNPUBLISHED := smysl-text smysl-query
 
 # The library crates behind the facade: everything published except the facade itself, plus
 # the ones not published yet. Their *surface* is watched from the first commit — `api-check`

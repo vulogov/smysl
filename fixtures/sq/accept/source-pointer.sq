@@ -1,0 +1,3 @@
+from store:config
+pointer("/database/pool/max_size")
+json

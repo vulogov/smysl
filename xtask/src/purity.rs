@@ -151,6 +151,11 @@ const PURE_CRATES: &[&str] = &[
     // where the plan put it: the readers land in step 3, and a gate that arrives after the
     // code it is meant to constrain is a gate that has to be argued with instead of obeyed.
     "smysl-text",
+    // The query language (SMYSL-2.9, TX-P6 step 1). `default = []` and one dependency,
+    // `smysl-core`, for spans and diagnostics: a grammar that reads a store would not be a
+    // grammar. Registered with the crate rather than at the end of the phase, because the
+    // list is cheapest to obey before anything has been added that breaks it.
+    "smysl-query",
 ];
 
 /// Rule A, as `src/lib.rs` states it: *"no CLI capability may be unreachable from here, and

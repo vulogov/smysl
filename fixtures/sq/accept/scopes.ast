@@ -1,0 +1,44 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Store(
+                            Ident(
+                                "main",
+                            ),
+                        ),
+                        Collection(
+                            Ident(
+                                "kjv",
+                            ),
+                        ),
+                        Import(
+                            Ident(
+                                "batch-7",
+                            ),
+                        ),
+                        Channel(
+                            Str(
+                                "general chat",
+                            ),
+                        ),
+                        Channels,
+                        Library,
+                        Texts,
+                    ],
+                },
+            ),
+            source: None,
+            filters: [],
+            times: [],
+            traversals: [],
+            closures: [],
+        },
+    ),
+    ordering: [],
+    shaping: [],
+    output: None,
+}

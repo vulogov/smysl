@@ -1,0 +1,36 @@
+[package]
+name        = "smysl-query"
+description = "smysl query language sq/1: lexer, parser, AST and canonical printer"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+# docs.rs builds with default features unless told otherwise, which for this crate meant
+# publishing a partial API: the feature-gated modules simply were not there. Set on every
+# published crate rather than only the five with features today, so a crate that gains one
+# later does not silently reintroduce the gap.
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+
+[dependencies]
+# For `Span`, `Code`, `Diagnostic` and `Report`. The grammar's errors are the tree's errors:
+# SMYSL-2.9 §2 gives four reasons for matching `smysl-core`'s `surface/` idiom, and a shared
+# diagnostic type is the one a caller sees.
+smysl-core = { workspace = true }
+# QG-5 keeps a string literal's bytes exactly as written, which creates the one hazard worth a
+# diagnostic: a quote that is not in NFC looks right on screen and matches nothing. `SMY-W510`
+# needs a quick-check scan to say so. `smysl-core` already carries this crate, so the pure
+# dependency tree does not grow by adding it here.
+unicode-normalization = { workspace = true }
+
+# The grammar goldens (SMYSL-2.9 §5). The fixture tree is language-free, like
+# `fixtures/conformance/`, because three more implementations of this grammar are coming and
+# they validate against the same artifacts.
+[[test]]
+name = "grammar"
