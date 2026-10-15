@@ -18,24 +18,68 @@
 //! languages, because the grouping is per language and a harness that only ever ran English would
 //! not have exercised one.
 //!
-//! # The measurement, which is owed
+//! # The measurement, which is paid
 //!
 //! What GE-T2 actually asks — how stable a *model* is over a corpus — cannot be answered by a
-//! provider that says what the test told it to say. It needs egress and it needs a corpus, and
-//! the corpus is the phase's own precondition **GE-T4**: 200 hand-checked units per tier-1
-//! language, material this repository does not hold. So the live arm runs only when it is given
-//! both, and says which is missing otherwise:
+//! provider that says what the test told it to say. It needs egress and it needs a corpus.
 //!
 //! ```text
-//! SMYSL_INGEST_LIVE=1   consent to spend a credential (as `providers_live.rs`)
-//! SMYSL_GE_T2=<dir>     a corpus: <dir>/<lang>.txt, one file per language
+//! SMYSL_INGEST_LIVE=1        consent to spend a credential (as `providers_live.rs`)
+//! SMYSL_GE_T2=<dir>          another corpus: <dir>/<lang>.txt, one file per language
+//! SMYSL_GE_T2_MODEL=<name>   another model, in place of the provider's default
 //! ```
 //!
-//! Authoring that corpus here would make it a development set — the passages would be chosen by
-//! whoever wrote the extractor — which is the same reason GE-T13's chronology and step 3b's probe
-//! set are owed rather than invented. The figure is reported, never thresholded: §5.5 gives the
-//! computed form no bar, because the bar it had (0.6 on `J_class`) belongs to the judged form and
-//! that waits for GE-T9's human α.
+//! The corpus is `fixtures/stability/corpus/`, and the development-set objection is answered the
+//! way GE-T13's chronology and step 3b's probe set answered it — by removing the authored choice
+//! rather than defending it. The passages are the S0 spike's, fixed in SMYSL-2.2 before this code
+//! existed, and the rule that selects three of its eleven is mechanical: every reference all five
+//! tier-1 languages carry. That leaves 26 verses of narrative, 26 of law and 7 of poetry in each
+//! language, 59 lines in every file, so the only thing varying between five reported figures is
+//! the language. See that directory's README for provenance and hashes.
+//!
+//! The figure is reported, never thresholded: §5.5 gives the computed form no bar, because the
+//! bar it had (0.6 on `J_class`) belongs to the judged form and that waits for GE-T9's human α.
+//!
+//! # What it measured, and why one run is not an estimate
+//!
+//! Three runs of all five languages against hosted `deepseek-chat` at temperature 0. Span
+//! coverage was **1.000** in every language of every run — every unit extracted got a span — and
+//! the `identical-span` rate was:
+//!
+//! ```text
+//! lang     run A   run B   run C   spread
+//! de       0.024   0.412   0.078    0.388
+//! en       0.452   0.769   0.132    0.637
+//! es       0.000   0.333   0.047    0.333
+//! fr       0.047   0.024   0.391    0.367
+//! ru       0.265   0.481   0.030    0.452
+//! ```
+//!
+//! Re-running one language moves the figure by 0.333 to 0.637. Changing the language inside one
+//! run moves it by 0.361 to 0.745. The two are the same size, and the ranking does not survive a
+//! rerun — the best language is en, then en, then fr, and the worst is es, then fr, then ru. So
+//! **the per-language figure §5.5 asks for is not resolved by one run per language**, and a table
+//! of five numbers taken from a single run would have been a table of sampling noise. That is the
+//! measurement's own finding about the measurement, and it is why the figures above are reported
+//! as a spread over three runs rather than as five numbers.
+//!
+//! This is consistent with what S0 already had — `J_class` 1.000 local against 0.327 hosted, and
+//! MS-8's 145 bit-identical runs, which were the **local** arm. Temperature is not the
+//! explanation: `IngestOptions` defaults it to 0, `openai_compat::body` puts `"temperature": 0.0`
+//! on the wire, and [`Passes::admits`] refuses anything above it. A hosted model is simply not
+//! reproducible at temperature 0, and `admits` cannot see that, because it checks the temperature
+//! a caller configured and not whether the provider honours it.
+//!
+//! # Reading the figure at all
+//!
+//! `identical-span` includes the **gist** (§3.5), so a pass that found the same bytes and wrote a
+//! different sentence about them counts as a disagreement. Over a live corpus that is most of the
+//! figure: French run B is 0.024 by `identical-span` and 0.680 by
+//! [`smysl_ingest::Agreement::place_rate`], the same comparison with the gist left out — the two
+//! passes found the same 17 of 25 places and re-worded nearly all of them. The live arm reports
+//! both, because the reported figure alone does not say whether the instability is in the finding
+//! or only in the wording, and the two have different remedies. A scripted provider cannot tell
+//! them apart: it returns one string by construction, so its passes agree on the wording free.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -333,19 +377,19 @@ fn a_spanless_unit_is_excluded_from_the_figure_rather_than_counted_against_it() 
 /// missing. See the module doc: the corpus is GE-T4's material and this repository does not
 /// hold it.
 #[test]
-fn the_rerun_over_a_corpus_is_owed_until_it_is_given_one() {
+fn the_rerun_over_a_corpus_is_owed_until_a_credential_is_spent() {
     let live = std::env::var("SMYSL_INGEST_LIVE").unwrap_or_default();
-    let corpus = std::env::var("SMYSL_GE_T2").unwrap_or_default();
-    if live.trim().is_empty() || corpus.trim().is_empty() {
+    if live.trim().is_empty() {
         eprintln!(
             "GE-T2 rerun OWED: the instrument above is measured; the figure needs \
-             SMYSL_INGEST_LIVE=1 and SMYSL_GE_T2=<dir> with <lang>.txt per tier-1 language. \
-             The corpus is the phase precondition GE-T4's 200 hand-checked units per language, \
-             which this repository does not hold."
+             SMYSL_INGEST_LIVE=1, because it spends a credential and is never taken by \
+             accident. The corpus is no longer owed: `fixtures/stability/corpus/` holds one \
+             per tier-1 language, and SMYSL_GE_T2=<dir> replaces it with somebody else's."
         );
         return;
     }
-    let dir = PathBuf::from(&corpus);
+    let dir = corpus_dir();
+    let corpus = dir.display().to_string();
     let provider = match reachable() {
         Some(p) => p,
         None => panic!("SMYSL_INGEST_LIVE is set and no configured provider is reachable"),
@@ -372,7 +416,7 @@ fn the_rerun_over_a_corpus_is_owed_until_it_is_given_one() {
         let opts = IngestOptions::at_rung(Rung::Document)
             .with_passes(Passes::TEXT)
             .with_model(&model)
-            .with_max_output(800)
+            .with_max_output(OUTPUT)
             .with_agent(smysl_core::AgentId::new("tool:ge-t2").expect("an agent"));
         let mut t = TextIngest::new(
             &mut lib,
@@ -392,6 +436,16 @@ fn the_rerun_over_a_corpus_is_owed_until_it_is_given_one() {
             report.stability(),
             report.span_coverage(),
         );
+        // The decomposition, because the reported figure alone cannot be read. `identical-span`
+        // includes the gist (§3.5), so a pass that found the same bytes and re-worded its
+        // sentence counts as disagreement; `place_rate` is the same question with the gist left
+        // out. Reported beside the figure rather than instead of it.
+        eprintln!(
+            "GE-T2 ({lang}, {id}): places comparable {}, agreed {}, place rate {:?}",
+            report.agreement.comparable_places,
+            report.agreement.agreed_places,
+            report.agreement.place_rate(),
+        );
         // Reported, not thresholded (§5.5). What *is* asserted is that the rerun measured
         // something: a run whose every unit came out spanless has no stability figure, and
         // reporting the clause as met on it would be reporting the absence of a measurement.
@@ -403,6 +457,35 @@ fn the_rerun_over_a_corpus_is_owed_until_it_is_given_one() {
     }
     assert!(ran > 0, "SMYSL_GE_T2={corpus} holds no <lang>.txt file");
 }
+
+/// The committed corpus, or whichever one the caller named.
+fn corpus_dir() -> PathBuf {
+    match std::env::var("SMYSL_GE_T2") {
+        Ok(d) if !d.trim().is_empty() => PathBuf::from(d),
+        _ => Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/stability/corpus"),
+    }
+}
+
+/// The window geometry every provider is configured with, and the reason it is not the
+/// provider's own.
+///
+/// GE-T2 reports **per language**, and the figure has to be about the language. Two providers
+/// with different context windows chunk the same text differently — `Window::for_context` splits
+/// one context between the prompt, the input and an output reserve — so a figure taken against
+/// whichever provider a machine could reach would be a figure about that machine's chunking.
+/// The S0 spike settled this already and for the same reason: SMYSL-2.2 §4 sets
+/// `context_window: 32768` and `max_output: 8192` in *both* providers it measured, "so the
+/// windows are identical". These are those numbers.
+///
+/// This is also the defect the live arm shipped with. It set `max_output` to **800** — a value
+/// carried over from the scripted instrument above, where an answer is one line of JSON — and
+/// never set `context_window` at all, so it kept `ProviderConfig::default()`'s 4096. Against a
+/// real corpus every answer was cut off at the limit (`SMY-W304`), every span degraded to opaque
+/// prose, and `comparable` was 0: the arm reported *nothing was comparable* rather than a
+/// figure, and it would have done so against any corpus and any provider. A scripted provider
+/// cannot catch it, because its answers fit in any budget.
+const CONTEXT: usize = 32_768;
+const OUTPUT: usize = 8_192;
 
 /// The first configured provider this machine can reach, built as `providers_live.rs` builds one.
 fn reachable() -> Option<Box<dyn Provider>> {
@@ -436,8 +519,24 @@ fn reachable() -> Option<Box<dyn Provider>> {
         }
         let mut cfg = ProviderConfig::new(ProviderId::new(id).unwrap(), kind);
         cfg.endpoint = endpoint.into();
-        cfg.model = model.into();
-        cfg.max_output = 800;
+        // `SMYSL_GE_T2_MODEL` names the model, because the default cannot be right for every
+        // machine and Ollama is tried first.
+        //
+        // It was added to find out whether the Ollama arm's result was the model's fault, and
+        // the answer is **no**: over this corpus `llama3.2` (3B) and `qwen2.5:14b-instruct`
+        // both return one opaque unit per pass, two spanless units, nothing comparable — while
+        // the same corpus against `deepseek-chat` attaches every unit it extracts (span
+        // coverage 1.000 in all five languages, three runs). Every Ollama call answered 200.
+        // So the local arm is not measurable here, and the cause is in the path rather than in
+        // the model's size. SMYSL-2.1 H-10 and 2.2 O-3 both flag this mapper as unverified for
+        // want of an Ollama to test against; this is the first measurement of it over a real
+        // corpus, and diagnosing it is its own work, not GE-T2's.
+        cfg.model = std::env::var("SMYSL_GE_T2_MODEL")
+            .ok()
+            .filter(|m| !m.trim().is_empty())
+            .unwrap_or_else(|| model.to_string());
+        cfg.context_window = CONTEXT;
+        cfg.max_output = OUTPUT;
         cfg.timeout_secs = 120;
         cfg.api_key_env = key.map(str::to_string);
         let Ok(provider) = smysl_provider::map::build(&cfg) else {

@@ -58,6 +58,77 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### The last material TX-P5 owed, and the figure that could not be taken once
+
+GE-T2's corpus is paid, which leaves TX-P5 owing no material at all. It is
+`fixtures/stability/corpus/` — one file per tier-1 language, and the development-set
+objection is answered the way the probe set answered it the same day, by removing the
+authored choice rather than defending it. The passages are the S0 extraction spike's,
+fixed in SMYSL-2.2 before this code existed, and the rule that takes three of its eleven
+is mechanical: every reference all five languages carry. Each file is then 26 verses of
+narrative, 26 of law and 7 of poetry, 59 lines, so the only thing varying between five
+reported figures is the language. The eight references the spike has in English and
+Russian only are left out for that reason: a figure reported *per language* that included
+them would have been partly a figure about genre.
+
+Three runs of all five languages, hosted `deepseek-chat`, temperature 0. Span coverage was
+**1.000** in every language of every run. The `identical-span` rate:
+
+    de  0.024 / 0.412 / 0.078        es  0.000 / 0.333 / 0.047
+    en  0.452 / 0.769 / 0.132        fr  0.047 / 0.024 / 0.391
+                                     ru  0.265 / 0.481 / 0.030
+
+The finding is the spread, not the figures. Re-running one language moves it by 0.333 to
+0.637; changing the language inside one run moves it by 0.361 to 0.745. The two are the
+same size, and the ranking does not survive a rerun — the best language is en, then en,
+then fr, and the worst is es, then fr, then ru. So the per-language figure §5.5 asks for
+is **not resolved by one run per language**, and five numbers from a single run would have
+been five numbers of sampling noise. They are recorded as a spread over three runs
+instead. The clause is reported and not thresholded, so nothing is blocked either way.
+
+Temperature was checked rather than assumed: `IngestOptions` defaults it to 0,
+`openai_compat::body` puts `"temperature": 0.0` on the wire, and `Passes::admits` refuses
+anything above it. The result instead reproduces what S0 already had from the other side —
+`J_class` 1.000 local against 0.327 hosted, and MS-8's 145 bit-identical runs were the
+*local* arm. A hosted model is not reproducible at temperature 0, and `admits` cannot see
+that, because it checks the temperature a caller configured and not whether the provider
+honours it. OQ-74 records it.
+
+The figure could not be read as it stood, so `Agreement` gained `comparable_places`,
+`agreed_places` and `place_rate`: the same comparison with the **gist** left out.
+`identical-span` includes the gist by §3.5, so a pass that found the same bytes and wrote a
+different sentence about them counts as a disagreement, and over a live corpus that is most
+of the figure — French run B is 0.024 with the gist and 0.680 without, the two passes having
+found the same 17 of 25 places and re-worded nearly all of them. It is reported beside the
+figure and never instead of it; GE-T2's reported figure stays `rate`.
+
+Two defects, both invisible to four passing instrument tests:
+
+  - The live arm set `max_output` to 800 — carried over from the scripted instrument, where
+    an answer is one line of JSON — and never set `context_window`, so it kept
+    `ProviderConfig::default()`'s 4096. Against a real corpus every answer was cut off at the
+    limit (`SMY-W304`), every span degraded to opaque prose, and `comparable` was 0: the arm
+    reported *nothing was comparable* rather than a figure, and would have done so against
+    any corpus and any provider. It now configures SMYSL-2.2 §4's geometry, 32768 and 8192,
+    for every provider — the spike's own choice, made so the windows are identical whichever
+    provider a machine reaches, which is what a per-language figure needs.
+
+  - Per-window agreements were summed field by field, so the two fields added to measure the
+    corpus were silently dropped and the first run of the decomposition reported zero places
+    everywhere. Summing now lives in `Agreement::merge`, in one place that knows every field.
+
+A scripted provider could not have caught either: its answers fit any budget, and its two
+passes agree on the wording by construction.
+
+The Ollama arm is not measurable here, and that is measured rather than assumed.
+`llama3.2` and `qwen2.5:14b-instruct` both return one opaque unit per pass over this corpus
+— two spanless units, nothing comparable — while every call answers 200 and the same corpus
+against `deepseek-chat` attaches every unit it extracts. So it is the path and not the
+model's size. SMYSL-2.1 H-10 and SMYSL-2.2 O-3 both flag that mapper as unverified for want
+of an Ollama to test against; this is the first measurement of it over a real corpus, and
+diagnosing it is its own work. `SMYSL_GE_T2_MODEL` was added to find this out, and stays,
+because Ollama is tried first and a machine running it should not be stuck with the default.
+
 ### The probe set that reversed one of its own decisions
 
 **TX-P5 step 3b's exit clause is met: 0.0% asserted-as-reported, over 17 probes.** The clause has

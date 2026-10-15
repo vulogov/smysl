@@ -1,6 +1,6 @@
 # Fixtures
 
-Nine trees, with different jobs.
+Ten trees, with different jobs.
 
 | Tree | Contents | Consumed by |
 |---|---|---|
@@ -15,7 +15,7 @@ about its source, so the ids are canonical and nothing behind them is in this re
 third unit is at other bytes of the same part, and it is there so that an engine proposing every
 pair fails against the file rather than passing.
 
-Five trees hold **gate material** rather than fixtures, and the difference is who they are
+Six trees hold **gate material** rather than fixtures, and the difference is who they are
 addressed to: a fixture is an instrument, and these are the things being measured.
 
 | Tree | Contents | Consumed by |
@@ -25,11 +25,22 @@ addressed to: a fixture is an instrument, and these are the things being measure
 | `library/link/` | `planted.tsv`, fifty pairs of claims that cannot both be true, each half cited in a different book | GE-T11 (`crates/smysl-text/tests/ge_t11.rs`) |
 | `proposition/ge-t5/` | `paraphrase.tsv`, a second English expression of Ruth — forty restatements and ten near-misses; `sheet.tsv`, three scripted coders over the pool | GE-T5's within-language arm (`crates/smysl-text/tests/ge_t5.rs`) |
 | `attribution/probes/` | Mark 14-15 in two editions of scripture, and `probes.tsv`: every utterance of Mark 15 in both, with the verse, the expected mode and how the source marks it | TX-P5 step 3b's probe-set gate (`crates/smysl-ingest/tests/probe_set.rs`) |
+| `stability/corpus/` | `<lang>.txt` for de, en, es, fr and ru — the same three passages in each, 59 lines apiece | GE-T2's rerun under the consensus policy (`crates/smysl-ingest/tests/ge_t2.rs`) |
 
 `library/bibles/slice/` is 112 KiB of public-domain scripture, carried because a two-platform
 comparison that needs three megabytes mounted first is a comparison nobody runs. The whole corpus
 stays outside: `SMYSL_GE_T1=<dir>` points the harness at it, and `SMYSL_CHRONOLOGY=<file>` replaces
 the chronology with somebody else's.
+
+`stability/corpus/` is GE-T2's, and it answers the development-set objection the way the probe
+set does: the passages are **not chosen here**. They are the S0 spike's (SMYSL-2.2), fixed before
+this code existed, and the rule that takes three of its eleven is mechanical — every reference all
+five tier-1 languages carry. What that buys is a corpus identical in shape across the five:
+26 verses of narrative, 26 of law, 7 of poetry, so the only thing varying between five reported
+figures is the language. It needs a credential as well as material, so `SMYSL_INGEST_LIVE=1` is
+required and the harness reports the clause as owed without one; `SMYSL_GE_T2=<dir>` and
+`SMYSL_GE_T2_MODEL=<name>` replace the corpus and the model. See that directory's README for
+editions, URLs and hashes.
 
 `proposition/ge-t5/` is two files with opposite standing, which is why they are in one directory.
 `paraphrase.tsv` is **material**: forty rows restate one verse of the King James Ruth each in

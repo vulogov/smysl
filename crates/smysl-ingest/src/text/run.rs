@@ -451,15 +451,11 @@ impl Ingestor<'_> {
                 entities.extend(attached.entities);
             }
 
-            // GE-T2 under the consensus policy, this window's share of it. Summed rather than
-            // averaged: a window with two comparable places weighs twice a window with one, and
-            // a mean over windows would let a window that extracted a single claim outvote a
-            // chapter.
-            let window_agreement = crate::consensus::agreement(&per_pass);
-            report.agreement.passes = window_agreement.passes;
-            report.agreement.comparable += window_agreement.comparable;
-            report.agreement.agreed += window_agreement.agreed;
-            report.agreement.spanless += window_agreement.spanless;
+            // GE-T2 under the consensus policy, this window's share of it. `merge` is what
+            // decides that the shares are summed and not averaged, and says why.
+            report
+                .agreement
+                .merge(&crate::consensus::agreement(&per_pass));
             let units: Vec<UnitCore> = per_pass.into_iter().flatten().collect();
 
             report.verdicts.present += verdicts.present;

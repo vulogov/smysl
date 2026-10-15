@@ -101,6 +101,10 @@ pub struct Agreement {
     pub agreed: usize,
     /// Units no pass could compare, because they carry no span.
     pub spanless: usize,
+    /// Distinct *places* — tid and span, with the gist left out — any pass produced.
+    pub comparable_places: usize,
+    /// Places **every** pass produced, whatever words each pass described them in.
+    pub agreed_places: usize,
 }
 
 impl Agreement {
@@ -115,6 +119,42 @@ impl Agreement {
         (self.passes > 1 && self.comparable > 0)
             .then(|| self.agreed as f64 / self.comparable as f64)
     }
+
+    /// Add another window's share of a run, field by field, in **one** place.
+    ///
+    /// Per-window agreements are summed and not averaged: a window with two comparable places
+    /// weighs twice a window with one, and a mean over windows would let a window that extracted
+    /// a single claim outvote a chapter. `passes` is assigned rather than summed, because every
+    /// window of a run takes the same number of passes.
+    ///
+    /// It is a method because the alternative is a caller that adds each field itself, and that
+    /// caller silently drops any field added later — which is exactly what happened to
+    /// `comparable_places` and `agreed_places` the first time they were measured over a corpus.
+    pub fn merge(&mut self, other: &Agreement) {
+        self.passes = other.passes;
+        self.comparable += other.comparable;
+        self.agreed += other.agreed;
+        self.spanless += other.spanless;
+        self.comparable_places += other.comparable_places;
+        self.agreed_places += other.agreed_places;
+    }
+
+    /// The same question with the **gist left out**: `agreed_places / comparable_places`.
+    ///
+    /// `identical-span` includes the gist by §3.5, so [`Agreement::rate`] answers *did both
+    /// passes find this place and describe it in the same words*, and the second half of that
+    /// is prose. Two passes of a real model re-word a gist freely, so a low `rate` does not
+    /// say whether the instability is in the finding or only in the wording — and the two have
+    /// different remedies, one of them TX-P10's and the other nobody's. This figure separates
+    /// them, and it is a diagnostic rather than a redefinition: GE-T2's reported figure stays
+    /// [`Agreement::rate`].
+    ///
+    /// A scripted provider cannot tell the two apart, because it returns one string by
+    /// construction and its two passes agree on the wording for free.
+    pub fn place_rate(&self) -> Option<f64> {
+        (self.passes > 1 && self.comparable_places > 0)
+            .then(|| self.agreed_places as f64 / self.comparable_places as f64)
+    }
 }
 
 /// The `identical-span` key of a unit: tid, span, gist (§3.5).
@@ -125,13 +165,19 @@ impl Agreement {
 /// the same bytes. The **mid** is deliberately absent — a tid identifies normalised part
 /// bytes, so two manifestations of the same part text are the same text.
 fn key(u: &UnitCore) -> Option<(String, (u64, u64), String)> {
+    let (tid, span) = place(u)?;
+    Some((tid, span, u.gist.clone()))
+}
+
+/// The same key with the gist left out: the *place* alone. See [`Agreement::place_rate`].
+fn place(u: &UnitCore) -> Option<(String, (u64, u64))> {
     let s = u.source.as_ref()?;
     let span = s.span()?;
     let tid = match s.reference.split_once('#') {
         Some((tid, _)) => tid,
         None => s.reference.as_str(),
     };
-    Some((tid.to_string(), span, u.gist.clone()))
+    Some((tid.to_string(), span))
 }
 
 /// What the passes agreed about. Pure: it reads the units and writes nothing.
@@ -141,22 +187,31 @@ fn key(u: &UnitCore) -> Option<(String, (u64, u64), String)> {
 /// itself by construction.
 pub fn agreement(passes: &[Vec<UnitCore>]) -> Agreement {
     let mut seen: BTreeMap<(String, (u64, u64), String), BTreeSet<usize>> = BTreeMap::new();
+    let mut places: BTreeMap<(String, (u64, u64)), BTreeSet<usize>> = BTreeMap::new();
     let mut spanless = 0usize;
     for (i, units) in passes.iter().enumerate() {
         for u in units {
             match key(u) {
                 Some(k) => {
                     seen.entry(k).or_default().insert(i);
+                    // `place` cannot be `None` where `key` was `Some`: it is the same read of
+                    // the same source, one field shorter.
+                    if let Some(p) = place(u) {
+                        places.entry(p).or_default().insert(i);
+                    }
                 }
                 None => spanless += 1,
             }
         }
     }
+    let n = passes.len();
     Agreement {
-        passes: passes.len(),
+        passes: n,
         comparable: seen.len(),
-        agreed: seen.values().filter(|p| p.len() == passes.len()).count(),
+        agreed: seen.values().filter(|p| p.len() == n).count(),
         spanless,
+        comparable_places: places.len(),
+        agreed_places: places.values().filter(|p| p.len() == n).count(),
     }
 }
 
@@ -220,6 +275,66 @@ mod tests {
         let g = agreement(&[a, b]);
         assert_eq!((g.comparable, g.agreed), (2, 0));
         assert_eq!(g.rate(), Some(0.0));
+        // And the decomposition: it is *one place*, found by both passes. This pair is the
+        // whole reason `place_rate` exists — `rate` reports 0.0 for two passes that disagreed
+        // about nothing but a verb tense, and over a live corpus that is most of the figure.
+        assert_eq!((g.comparable_places, g.agreed_places), (1, 1));
+        assert_eq!(g.place_rate(), Some(1.0));
+    }
+
+    /// Two passes that found different bytes disagree on **both** figures.
+    ///
+    /// The control the pair above needs: `place_rate` must not be 1.0 by construction, or it
+    /// would report perfect agreement about the finding no matter what was found.
+    #[test]
+    fn two_passes_that_found_different_places_disagree_on_the_place_too() {
+        let a = vec![unit("the pool waited", Some((0, 10)), "")];
+        let b = vec![unit("the pool waited", Some((20, 30)), "")];
+        let g = agreement(&[a, b]);
+        assert_eq!((g.comparable, g.agreed), (2, 0));
+        assert_eq!((g.comparable_places, g.agreed_places), (2, 0));
+        assert_eq!(g.place_rate(), Some(0.0));
+    }
+
+    /// Summing two windows carries **every** field, including the ones added last.
+    #[test]
+    fn merging_two_windows_carries_every_field() {
+        let a = agreement(&[
+            vec![unit("the pool waited", Some((0, 10)), "")],
+            vec![unit("the pool waited", Some((0, 10)), "")],
+        ]);
+        let b = agreement(&[
+            vec![unit("one", Some((20, 30)), ""), unit("x", None, "")],
+            vec![unit("two", Some((20, 30)), "")],
+        ]);
+        let mut sum = Agreement::default();
+        sum.merge(&a);
+        sum.merge(&b);
+        assert_eq!(sum.passes, 2);
+        // The first window contributed one key agreed by both passes; the second contributed
+        // two keys agreed by neither, because its passes worded one place differently.
+        assert_eq!((sum.comparable, sum.agreed), (3, 1));
+        // One place each, both agreed — which is the second window's whole point.
+        assert_eq!((sum.comparable_places, sum.agreed_places), (2, 2));
+        assert_eq!(sum.spanless, 1);
+        // The pair the decomposition exists for, summed: both windows found their place twice,
+        // and the second window disagreed about nothing but the wording.
+        assert_eq!(sum.place_rate(), Some(1.0));
+    }
+
+    /// A spanless unit is outside both figures, not just the gist one.
+    #[test]
+    fn the_place_figure_is_none_when_nothing_carried_a_span() {
+        let g = agreement(&[vec![unit("one", None, "")], vec![unit("one", None, "")]]);
+        assert_eq!((g.comparable_places, g.agreed_places), (0, 0));
+        assert_eq!(g.place_rate(), None);
+    }
+
+    /// And one pass reports no place figure either, for `rate`'s reason.
+    #[test]
+    fn a_single_pass_reports_no_place_figure_either() {
+        let g = agreement(&[vec![unit("one", Some((0, 10)), "")]]);
+        assert_eq!(g.place_rate(), None);
     }
 
     /// An empty comparison is not perfect stability.
