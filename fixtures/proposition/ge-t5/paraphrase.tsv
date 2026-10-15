@@ -1,0 +1,76 @@
+# GE-T5's within-language material: a second English expression of Ruth, written by hand.
+#
+# SMYSL-2.4 §5.5 asks GE-T5 to measure the `lexical` engine within one language. That engine
+# exists for "two translations in one language, two editions, two extraction runs whose gists
+# are worded differently" — and the committed slice at ../../library/bibles/slice/ holds exactly
+# one edition per language, so there is no within-language pair in this repository to measure.
+#
+# A person wrote the rows below, by hand, and that is the first thing to know about any figure
+# taken from them. Each `same` row is a modern-English restatement of one verse of the King
+# James Ruth: the same claim, different wording, the proper names kept because a translation
+# keeps them. Each `not` row is placed at a locator that already carries a `same` row and is
+# deliberately close to it in vocabulary while saying something else — usually the opposite —
+# so that precision is measured against the pairs a term overlap is worst at rather than
+# against filler. Forty `same` and ten `not`.
+#
+# The gold here is of record by construction: a row's `relation` is what its author wrote it to
+# be, and nothing judged it afterwards. That is enough for draft 1's statistic (precision at
+# recall 0.7) and it is NOT enough for §5.5's restated threshold, which compares an engine's
+# agreement with a *pooled* gold against the coders' agreement with each other. Coders are what
+# this repository does not hold; see sheet.tsv beside this file, and §6 TX-P7 step 4.
+#
+# `SMYSL_GE_T5_PARAPHRASE=<file>` replaces this file with somebody else's expression, which is
+# how the figure stops being a statement about the instrument.
+#
+# Columns: id, lang, at, relation, gist.
+id	lang	at	relation	gist
+s01	en	Ruth.1.1	same	In the time of the judges a famine struck the land, and a man from Bethlehem in Judah went to live in Moab with his wife and his two sons.
+s02	en	Ruth.1.2	same	The man was called Elimelech, his wife Naomi, and his two sons Mahlon and Chilion; they were Ephrathites from Bethlehem in Judah, and they settled in Moab.
+s03	en	Ruth.1.3	same	Elimelech, the husband of Naomi, died, and she was left with her two sons.
+s04	en	Ruth.1.4	same	The sons married Moabite women, one called Orpah and the other Ruth, and they lived there about ten years.
+s05	en	Ruth.1.5	same	Then Mahlon and Chilion died as well, and the woman was left without her two sons and without her husband.
+s06	en	Ruth.1.6	same	Naomi set out with her daughters in law to go home from Moab, because she had heard there that the LORD had given his people bread.
+s07	en	Ruth.1.7	same	She left the place where she had been living, and her two daughters in law went with her on the road back to Judah.
+s08	en	Ruth.1.8	same	Naomi told her two daughters in law to go back each to her mother's house, and asked the LORD to deal kindly with them as they had dealt with the dead and with her.
+s09	en	Ruth.1.9	same	She asked the LORD to grant them rest in a husband's house; then she kissed them, and they wept aloud.
+s10	en	Ruth.1.10	same	They told her that they would go back with her to her own people.
+s11	en	Ruth.1.11	same	Naomi told her daughters to turn back, asking why they would come with her, since she had no more sons in her womb to be their husbands.
+s12	en	Ruth.1.12	same	She told them to turn back, for she was too old to have a husband, even if she had hope and a husband that very night and bore sons.
+s13	en	Ruth.1.13	same	She asked whether they would wait until those sons were grown and stay unmarried for them, and said no, for the hand of the LORD had gone out against her and it grieved her for their sakes.
+s14	en	Ruth.1.14	same	They wept aloud again, and Orpah kissed her mother in law goodbye, but Ruth held fast to her.
+s15	en	Ruth.1.15	same	Naomi said that her sister in law had gone back to her people and her gods, and told her to follow after her.
+s16	en	Ruth.1.16	same	Ruth begged her not to make her leave, saying that where Naomi went she would go, where Naomi lodged she would lodge, that Naomi's people would be her people and Naomi's God her God.
+s17	en	Ruth.1.17	same	Ruth said she would die where Naomi died and be buried there, and called on the LORD to punish her if anything but death parted them.
+s18	en	Ruth.1.18	same	When Naomi saw that Ruth was firmly set on going with her, she stopped arguing.
+s19	en	Ruth.1.19	same	The two of them travelled on until they reached Bethlehem, and when they arrived the whole city was stirred, asking whether this was Naomi.
+s20	en	Ruth.1.20	same	She told them not to call her Naomi but Mara, because the Almighty had dealt very bitterly with her.
+s21	en	Ruth.1.21	same	She said she had gone out full and the LORD had brought her home empty, and asked why they called her Naomi when the LORD had testified against her and the Almighty afflicted her.
+s22	en	Ruth.1.22	same	So Naomi came back with Ruth the Moabitess, her daughter in law, out of the country of Moab, and they reached Bethlehem as the barley harvest began.
+s23	en	Ruth.2.1	same	Naomi had a kinsman on her husband's side, a wealthy and powerful man of Elimelech's family, whose name was Boaz.
+s24	en	Ruth.2.2	same	Ruth the Moabitess asked Naomi to let her go to the field and gather ears of corn behind anyone who showed her favour, and Naomi told her to go.
+s25	en	Ruth.2.3	same	She went and gleaned in the field behind the reapers, and it happened that the part of the field was Boaz's, who was of Elimelech's kindred.
+s26	en	Ruth.2.4	same	Boaz arrived from Bethlehem and greeted the reapers with the LORD be with you, and they answered that the LORD bless him.
+s27	en	Ruth.2.5	same	Boaz asked the servant set over the reapers whose young woman this was.
+s28	en	Ruth.2.6	same	The servant in charge of the reapers answered that she was the Moabite woman who had come back with Naomi from the country of Moab.
+s29	en	Ruth.2.7	same	She had asked to glean and gather after the reapers among the sheaves, and had kept at it from the morning until then, resting only a little in the house.
+s30	en	Ruth.2.8	same	Boaz told Ruth to listen to him, not to glean in any other field nor to leave his, but to stay close by his maidens.
+s31	en	Ruth.2.9	same	He told her to keep her eyes on the field they were reaping and to follow the women, said he had charged the young men not to touch her, and told her to drink from the vessels when she was thirsty.
+s32	en	Ruth.2.10	same	She fell on her face and bowed to the ground, asking him why she had found such favour that he took notice of her, a stranger.
+s33	en	Ruth.2.11	same	Boaz answered that he had been told everything she had done for her mother in law since her husband's death, and how she had left her father, her mother and the land of her birth to come to a people she had not known.
+s34	en	Ruth.2.12	same	He asked the LORD to repay her work and to give her a full reward, the God of Israel under whose wings she had come to trust.
+s35	en	Ruth.2.13	same	She asked to keep finding favour in his sight, since he had comforted her and spoken kindly to his handmaid, though she was not the equal of one of his handmaidens.
+s36	en	Ruth.2.14	same	Boaz told her to come at mealtime and eat bread and dip her morsel in the vinegar; she sat beside the reapers, he handed her parched corn, and she ate her fill and had some left.
+s37	en	Ruth.2.15	same	When she got up to glean, Boaz ordered his young men to let her gather even among the sheaves and not to shame her.
+s38	en	Ruth.2.16	same	He told them to drop handfuls on purpose for her and to leave them for her to glean, and not to rebuke her.
+s39	en	Ruth.2.17	same	She gleaned in the field until evening and beat out what she had gathered, and it came to about an ephah of barley.
+s40	en	Ruth.2.18	same	She carried it into the city, her mother in law saw what she had gleaned, and she brought out and gave her what she had kept back after eating her fill.
+n01	en	Ruth.1.1	not	In the days when the judges ruled there was bread enough in the land, and a man of Bethlehem in Judah stayed where he was with his wife and his two sons.
+n02	en	Ruth.1.4	not	The two sons took wives of the women of Judah, Orpah and Ruth, and they lived in Bethlehem about ten years.
+n03	en	Ruth.1.5	not	Mahlon and Chilion outlived their father, and the woman was left with her two sons and without her husband.
+n04	en	Ruth.1.14	not	They wept aloud again, and Ruth kissed her mother in law goodbye and went back, but Orpah held fast to her.
+n05	en	Ruth.1.22	not	So Naomi came back alone out of the country of Moab, and reached Bethlehem at the end of the wheat harvest.
+n06	en	Ruth.2.1	not	Naomi had a kinsman of her husband's, a poor man of no family at all, whose name was Boaz.
+n07	en	Ruth.2.3	not	She gleaned in the field behind the reapers, and the part of the field was Elimelech's, who was no kin of Boaz.
+n08	en	Ruth.2.9	not	He told her to keep away from the field they were reaping, warned that the young men would touch her, and told her to draw water for them.
+n09	en	Ruth.2.14	not	At mealtime Boaz sent her away from the bread and the vinegar, and she sat apart from the reapers and ate nothing.
+n10	en	Ruth.2.17	not	She gleaned in the field until evening and beat out what she had gathered, and it came to about ten ephahs of wheat.

@@ -58,6 +58,65 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### Recall was free and precision was the whole problem, which is the opposite of what the bar assumed
+
+**TX-P7 step 4, the phase exit: GE-T5's within-language arm.** The instrument is met and the
+sheet is owed — GE-T2's shape in TX-P5 step 5, and for GE-T2's reason, which is that what is
+missing is material and not code. `crates/smysl-text/tests/ge_t5.rs`, pure, on every `make test`.
+
+**There was nothing within one language to measure, so a second expression was written.** The
+`lexical` engine exists for two editions, two translations, two extraction runs whose gists are
+worded differently — and the committed bibles slice holds exactly one edition per language. So
+`fixtures/proposition/ge-t5/paraphrase.tsv`: forty rows restating one verse of the King James Ruth
+each in modern English, and ten more placed at a locator one of those forty already uses, close to
+it in vocabulary and saying something else, usually the opposite. The gold is of record by
+construction, the hand that wrote it is the figure's limit exactly as in GE-T11, and
+`SMYSL_GE_T5_PARAPHRASE` replaces the whole file.
+
+**The measurement, and the finding.** Over 135 units — Ruth's 85 verses and the 50 planted —
+**precision 0.6724 at recall 0.9750** with a neighbour count of one, against no bar, because §0.1
+retired the 0.9. Draft 1 expected precision to be the cheap half and recall the hard one. It is
+the other way round here and the reason is structural: a restatement sits at the *same locator*
+and keeps the proper names, so adjacency and term overlap both point straight at it, and recall
+is 0.975 at the shallowest depth the engine has. Precision is what fails, and it fails
+completely — from a neighbour count of two upward the engine proposes **all ten** near-misses,
+every one. A sentence at the same locator, with the same names, saying the opposite thing is a
+sentence a term overlap has no access to the difference of. That is not a defect to fix in
+`lexical`; it is the clearest argument this repository holds for TX-P10's S1 embeddings and for
+`attested:2` until they land.
+
+**The restated clause, built whole.** α (nominal, missing-tolerant, coincidence-matrix form) over
+a reliability matrix; the pooled gold by majority with ties **dropped and counted** rather than
+broken; the engine scored as one more coder against that pool; and a **paired bootstrap** on
+`δ = α(coders) − α(gold, engine)`, 2,000 resamples, both α recomputed on each resample so the
+interval is about the difference and not about either figure. One-sided: an engine that agrees
+with the gold better than three coders agree with each other has joined the pool, which is all
+§5.5 asks.
+
+**The pool is built by rule, and the first version of it was wrong.** Each planted row against the
+verse at its own locator, and against the verse next to it — a hundred pairs at a base rate of
+0.40. The first harness used the fifty planted pairs alone, four-fifths of them positive, and
+scored the engine at **α −0.1124**: on a pool that lopsided an engine that says `same` to
+everything gets 80% of the pairs right and α correctly calls it worthless. A pool drawn from the
+engine's own proposals would have been worse still — a measurement of how the pool was drawn — so
+both halves are a rule, and the base rate is printed beside the figure.
+
+**What is owed is three coders.** `sheet.tsv` is three *scripted* columns: the constructed truth
+with disagreement written in at fixed intervals, chosen so that α over the three columns comes out
+at **0.600** — what S0's three model coders actually reached. Over it: α(coders) 0.6000,
+α(gold, engine) 0.5594, δ 95% **[−0.1278, 0.2189]**. An interval that straddles zero is what
+`Met` looks like, and the harness reports **owed** instead, because an α over a file one hand wrote
+in one pass is a fact about that file. `SMYSL_GE_T5_SHEET=<file>` decides the clause with no code
+change, and S0's own sheet would do it.
+
+**α is validated against arithmetic, not against a remembered number.** SMYSL-2.6 §5.2 asks its
+own α to reproduce Krippendorff's published worked example and admits the value is "to be
+transcribed; unverified here". Transcribing it from memory would be worse than having no check, so
+the test derives a four-unit case and spells out every term — coincidences, marginals, observed
+and expected disagreement — and asserts the result to 1e-12. The three places the formula has no
+answer return `None` rather than 1.0: one coder, one value in the whole matrix, nothing pairable.
+A sheet that agrees perfectly because it says only one thing is not a reliable sheet.
+
 ### A generator that has to lose the budget to be worth anything, and the sixteen pairs it loses
 
 TX-P7 step 3: the linker and the summary tree. Two passes, and the honest part of both is what

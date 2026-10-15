@@ -1,6 +1,6 @@
 # Fixtures
 
-Seven trees, with different jobs.
+Eight trees, with different jobs.
 
 | Tree | Contents | Consumed by |
 |---|---|---|
@@ -23,14 +23,28 @@ addressed to: a fixture is an instrument, and these are the things being measure
 | `chronology/` | 45 pairs of public dates whose order is a matter of record, `earlier`/`later`/relation/note | GE-T13's fourth clause (`crates/smysl-text/tests/ge_t13.rs`) |
 | `library/bibles/` | `expected.tsv` and `slice.tsv`, the identities five scripture libraries build to; `slice/`, Ruth and Jude in five editions; `wire/`, one expression the three ports recompute | GE-T1's corpus clause (`crates/smysl-text/tests/ge_t1_bibles.rs`, `gen_bible_wire.rs`, and the three ports' library suites) |
 | `library/link/` | `planted.tsv`, fifty pairs of claims that cannot both be true, each half cited in a different book | GE-T11 (`crates/smysl-text/tests/ge_t11.rs`) |
+| `proposition/ge-t5/` | `paraphrase.tsv`, a second English expression of Ruth — forty restatements and ten near-misses; `sheet.tsv`, three scripted coders over the pool | GE-T5's within-language arm (`crates/smysl-text/tests/ge_t5.rs`) |
 
 `library/bibles/slice/` is 112 KiB of public-domain scripture, carried because a two-platform
 comparison that needs three megabytes mounted first is a comparison nobody runs. The whole corpus
 stays outside: `SMYSL_GE_T1=<dir>` points the harness at it, and `SMYSL_CHRONOLOGY=<file>` replaces
 the chronology with somebody else's.
 
-`library/link/planted.tsv` is the one file here a person wrote from nothing, and its header says
-so before it says anything else. GE-T11 asks for fifty *far* contradictions, which no corpus
+`proposition/ge-t5/` is two files with opposite standing, which is why they are in one directory.
+`paraphrase.tsv` is **material**: forty rows restate one verse of the King James Ruth each in
+modern English and ten sit at a locator one of those forty already uses, saying something else in
+much the same words. The `lexical` engine exists for two expressions of one language and the
+bibles slice holds one edition per language, so without this file there is no within-language pair
+in this repository to measure. Its gold is of record by construction — a row's `relation` is what
+its author wrote it to be — and `SMYSL_GE_T5_PARAPHRASE=<file>` replaces it.
+`sheet.tsv` is **not** material: it is three scripted coder columns, the pool's constructed truth
+with disagreement written in at fixed intervals chosen so that α comes out at S0's own 0.600. It
+exists so the instrument runs on every `make test`, and the harness reports GE-T5's clause as
+*owed* rather than met whenever it is the sheet in use. Three coders judging independently is what
+is owed; `SMYSL_GE_T5_SHEET=<file>` is how somebody else's sheet decides the clause.
+
+`library/link/planted.tsv` is the other file here a person wrote from nothing, and its header
+says so before it says anything else. GE-T11 asks for fifty *far* contradictions, which no corpus
 supplies ready-made — a text that contradicts itself two books later does so by accident and not
 on request — so they are planted, in the idiom of `library/bibles/slice/eng-kjv/` and at locators
 in two different books. A recall measured over a set its own author wrote is a statement about the

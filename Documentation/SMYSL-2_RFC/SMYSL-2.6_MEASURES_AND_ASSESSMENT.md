@@ -769,7 +769,15 @@ Generated in-test from a fixed seed with the crate's own generator, so fixtures 
 - K4: a class whose id moves when a smaller member joins between two states; the diff reports it
   as kept.
 - α: the worked example in Krippendorff (2011, "Computing Krippendorff's Alpha-Reliability")
-  reproduces its published value (value to be transcribed; unverified here).
+  reproduces its published value (value to be transcribed; unverified here). A second,
+  already-written check to agree with: TX-P7 step 4's GE-T5 harness
+  (`crates/smysl-text/tests/ge_t5.rs`) needed α before this crate existed and implements the
+  nominal, missing-tolerant coincidence-matrix form, validated against arithmetic spelled out in
+  full in the test rather than against a recalled figure, with `None` for each of the three cases
+  the formula has no answer in — one coder, one value, nothing pairable. `assess::agreement::alpha`
+  should reproduce that case too, and when it lands the harness's copy should call it instead:
+  two implementations of one formula are one implementation too many, and the only reason there
+  are two is that the gate came first.
 
 ### 5.3 Determinism
 
