@@ -766,7 +766,11 @@ that *added* a holder paragraph to the prompt did no better (23.8% and 16.7%, T9
 while introducing `E022` degradations into a configuration that had none (MS-9, MS-11). So the
 paragraph stays out of the prompt, `text:holder` and `text:mode` are written by the converter from
 structure — reported-speech spans the reader marks, not the model's self-report — and TX-P5's exit
-gains a probe-set gate (§6).
+gains a probe-set gate (§6). The readers mark them from TX-P5 step 3b's reader work: `\wj … \wj*`
+in USFM and `<q who="…">` in OSIS, both into reading **key 9**, a list of `{start, end, who?}` on
+the row whose range holds them. A mark establishes `reported` and no holder even when it carries a
+`who`, because the mark says somebody else is speaking and not that this corpus asserts the
+edition's attribution of it.
 
 **Absent quotes (behaviour change).** For `ingest --text` only: repair is attempted first, within
 the existing budget. If the quote is still `Absent`, the unit is staged with no span and its status
@@ -3268,18 +3272,55 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    structural evidence about its mode is a different record from one asserted by a known holder,
    and §3.4 says `asserted` must not be a default.
 
-   **The finding: no reader in this build marks reported speech.** §3.4 says "reported-speech
-   spans the reader marks". The two markers real sources carry are USFM's `\wj … \wj*` and
-   OSIS's `<q who="…">`, and neither reader reads them; chat readers mark a *speaker* per
-   message, which is the holder and not the mode. So the marks are an **input** to windowing
-   (`Pane::with_reported`) and `attribution::quoted_spans` — paired quotation marks — is the one
-   supplier that works on any text. A modern edition that punctuates its quotations is handled;
-   a 1769 Bible is not, because Psalm 14:1 marks its reported clause with a comma and a capital
-   letter and nothing else. The harness asserts exactly that pair: the same claim comes out
-   `reported` with punctuation, nothing without it, and `reported` again as soon as a mark is
-   supplied — which locates the gap in the **reader** rather than in the converter. Closing it
-   is a reader change with identity consequences (a reading's `rdid`, a part's structure hash)
-   and belongs with the readers, not here.
+   **The finding was: no reader in this build marks reported speech.** §3.4 says
+   "reported-speech spans the reader marks". The two markers real sources carry are USFM's
+   `\wj … \wj*` and OSIS's `<q who="…">`, and neither reader read them; chat readers mark a
+   *speaker* per message, which is the holder and not the mode. So the marks were an **input**
+   to windowing (`Pane::with_reported`) and `attribution::quoted_spans` — paired quotation
+   marks — was the one supplier that works on any text. A modern edition that punctuates its
+   quotations was handled; a 1769 Bible was not. The harness asserts exactly that pair: the same
+   claim comes out `reported` with punctuation, nothing without it, and `reported` again as soon
+   as a mark is supplied — which located the gap in the **reader** rather than in the converter.
+
+   **Closed 2026-10-15, in the readers, where it was.** `usfm/1` reads `\wj … \wj*` and
+   `osis/1` reads `<q who="…">`, in both the container and the milestone form, and both write
+   `reading` **key 9**: a list of marks on the row whose range holds them, each a start, an end
+   and the source's own `who` where it gave one. `smysl_ingest::text::marks_of` takes them off
+   the rows, and `crates/smysl-ingest/tests/reported_speech.rs` asserts the whole path with no
+   model in it — a claim drawn from inside `\wj` comes out `reported`, the narration beside it
+   comes out with **no mode at all**, and the same verse with the marker removed comes out with
+   none either, which is the control the finding needs.
+
+   Five decisions the sentence "read `\wj`" turned out to contain.
+
+   1. **A new row key, not a new level and not the `speaker` field.** Both markers name a *span
+      inside a node*, so a row of its own would need a locator nothing addresses, and the row's
+      `speaker` means the node's speaker — a verse row whose speaker was Jesus would make the
+      surrounding narration `asserted` by him, which is the opposite of what the mark says.
+   2. **The mark carries `who`, and nothing reads it.** OSIS has an attribution and USFM has
+      none. §3.4 is explicit that a mark establishes `reported` and *no holder*, so the field is
+      recorded for a later phase rather than wired to anything — the chat readers' `ids`
+      decision, for the same reason: the source said it, and dropping it is irreversible.
+   3. **`who` is not pseudonymised.** It is a label an editor put on a public text, not a
+      platform's identifier for a living person, and keying it would destroy its only use while
+      protecting nobody. A transcript whose speakers *are* people belongs in a chat reader,
+      where `speaker` is keyed.
+   4. **The reader's marks replace the punctuation scan rather than joining it.** Per part: an
+      edition that marks its reported speech has said which clauses are reported, and adding the
+      scan on top would re-admit the heuristic the marks replace. A part whose reader marked
+      nothing still gets the scan, because an empty list means "nothing is marked".
+   5. **Marks merge across a separator and not across a word.** One clause arrives in as many
+      fragments as its source divides it into — an XML entity, a `\nd` inside a `\wj`, a
+      quotation reopened after a line break — so two marks with only whitespace between them and
+      the same `who` become one. With a *word* between them they stay two: that word is
+      narration, and a mark covering it would say somebody said something they did not.
+
+   The identity consequences are real and, on this corpus, nil: a part with no marks encodes
+   exactly as it did before key 9 existed, so every expectation in `fixtures/library/readers/`
+   and all five editions of GE-T1's bibles are byte-identical. Two new samples
+   (`matt4-wj.usfm`, `matt5-q.osis`) pin the marked case, and the three ports name key 9 — their
+   identities never depended on the name, since a structure hash is taken over the table's
+   bytes and rule X keeps what a port does not know.
 
    **The probe set is owed for GE-T13's reason.** Attribution-bearing passages with known
    reported speech are material this repository does not hold, and authoring them here would
@@ -3359,7 +3400,7 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    | resume loses ≤ one batch | **met.** 8 windows, the journal truncated mid-append, **1** window re-sent, and the store unchanged afterwards |
    | ≥ 95% carry a span | **met, 1.000**, against a control at **0.857** |
    | entity duplication < 2% | **met, 0.000.** 3 entity records for 3 speakers across 9 windows |
-   | probe-set gate (3b) | **owed.** No reader marks reported speech; the gap is the readers' (`\wj`, `<q who>`) |
+   | probe-set gate (3b) | **owed on material, and the readers no longer owe anything.** `usfm/1` reads `\wj … \wj*` and `osis/1` reads `<q who="…">`, both into reading key 9 (2026-10-15); what is left owed is a probe set, for GE-T13's reason |
    | GE-T2 rerun | **instrument met, corpus owed.** 1.000 scripted in en and ru, 0.500 on a drifting pass, `None` on one pass |
    | cost report | **built and measured.** Per language, from the journal, with the retry rate as its own term |
 

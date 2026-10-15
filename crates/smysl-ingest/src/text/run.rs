@@ -241,7 +241,7 @@ impl Ingestor<'_> {
         }
         let marks: Vec<Vec<std::ops::Range<u64>>> = panes
             .iter()
-            .map(|p| super::attribution::quoted_spans(&p.text))
+            .map(|p| super::attribution::marks_of(&p.rows, &p.text))
             .collect();
         let views: Vec<Pane<'_>> = panes
             .iter()

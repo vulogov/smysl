@@ -29,17 +29,27 @@
 //!   its mode is a unit nobody has asked the right question about yet, and that is a different
 //!   record from one asserted by a known holder.
 //!
-//! # What this build can actually see, which is less than §3.4 assumes
+//! # Where the marks come from
 //!
-//! §3.4 says "reported-speech spans the reader marks". **No reader in this build marks one.** The
-//! two markers real sources carry are USFM's `\wj ... \wj*` and OSIS's `<q who="...">`, and
-//! neither the USFM nor the OSIS reader reads them; chat readers mark a speaker per message, which
-//! is the holder and not the mode. So the marks are an **input** here
-//! ([`crate::text::window::Pane::with_reported`]) rather than something this module discovers, and
-//! [`quoted_spans`] is the one supplier that works on any text: paired quotation marks, which is
-//! what a modern edition uses and what a 1769 Bible does not have. Psalm 14:1 marks its reported
-//! clause with a comma and a capital letter and nothing else, so the probe-set gate in §6 TX-P5
-//! step 3b measures exactly the gap between those two facts.
+//! §3.4 says "reported-speech spans the reader marks", and from TX-P5 step 3b's reader work the
+//! readers do: USFM's `\wj ... \wj*` and OSIS's `<q who="...">` become
+//! [`smysl_text::reading::Mark`]s on the row that holds them (reading key 9), and
+//! [`marks_of`] takes them off the rows for one part. The marks remain an **input** to this
+//! module ([`crate::text::window::Pane::with_reported`]) rather than something it discovers,
+//! because a mark is a fact about a *source* and this module only reads structure.
+//!
+//! [`quoted_spans`] — paired quotation marks — is still the supplier for everything else, and
+//! still the supplier of last resort: a part whose reader marked nothing gets the scan, because
+//! an empty mark list means "nothing is marked" and not "nothing is reported". What has changed
+//! is which texts need it. A punctuating edition was always handled; an edition that marks the
+//! words of Jesus is now handled by its own markup; and a 1769 Bible with neither is still not,
+//! because Psalm 14:1 marks its reported clause with a comma and a capital letter and nothing
+//! else. The probe-set gate in §6 TX-P5 step 3b measures what is left of that gap.
+//!
+//! A mark's `who` is **not** read here, and §3.4 is the reason: a mark establishes `reported`
+//! and *no holder*, because the mark says somebody else is speaking and not that the edition's
+//! attribution of it is a fact this corpus asserts. The field is carried in the reading for a
+//! later phase.
 
 use std::collections::BTreeSet;
 use std::ops::Range;
@@ -125,6 +135,34 @@ pub fn attribution(
         },
         None => Attribution::default(),
     }
+}
+
+/// The reported-speech marks of one part: the reader's own, or the punctuation scan.
+///
+/// **The reader's marks win, and the scan is not added to them.** An edition that marks its
+/// reported speech has said which clauses are reported; running [`quoted_spans`] over it as
+/// well would re-admit exactly the heuristic the marks replace, and on a Bible that both marks
+/// the words of Jesus and punctuates its narrative quotations the two suppliers disagree about
+/// every verse of dialogue. So the choice is per part and it is a choice, not a union.
+///
+/// Which means a part whose reader marked *nothing* still gets the scan, and that is right for
+/// the reason §3.4 gives: an empty mark list means "nothing is marked", not "nothing is
+/// reported", and the scan is the supplier of last resort rather than a second opinion.
+///
+/// The marks come off the rows, where [`smysl_text::reading::Mark`] put them (key 9), and are
+/// sorted into part order here: a row's marks are sorted within the row, and the rows of a
+/// reading are in document order, so the concatenation is already sorted — sorting again costs
+/// nothing and does not depend on that remaining true.
+pub fn marks_of(rows: &[smysl_text::reading::Segment], text: &str) -> Vec<Range<u64>> {
+    let mut out: Vec<Range<u64>> = rows
+        .iter()
+        .flat_map(|r| r.reported.iter().map(|m| m.start..m.end))
+        .collect();
+    if out.is_empty() {
+        return quoted_spans(text);
+    }
+    out.sort_by_key(|a| (a.start, a.end));
+    out
 }
 
 /// The spans of `text` that lie inside paired quotation marks.
@@ -321,5 +359,42 @@ mod tests {
         let marks = [5..40, 60..70, 200..210];
         let got = clip(&marks, &(10..65));
         assert_eq!(got, vec![10..40, 60..65]);
+    }
+
+    /// A reader's own marks are used, and the punctuation scan is not added to them.
+    #[test]
+    fn a_readers_marks_replace_the_punctuation_scan_rather_than_joining_it() {
+        use smysl_text::reading::{Level, Mark, Segment};
+        let text = "And Boaz said, \u{201c}The LORD be with you.\u{201d} And he answered.";
+        let quoted = quoted_spans(text);
+        assert_eq!(quoted.len(), 1, "the scan finds the punctuated clause");
+
+        let row = Segment::new(
+            0,
+            text.len() as u64,
+            Level::new("verse").expect("a level"),
+            "Ruth.2.4".parse().expect("a locator"),
+        )
+        .with_mark(Mark::new(0, 13));
+        let marks = marks_of(&[row], text);
+        assert_eq!(
+            marks,
+            vec![0..13],
+            "the reader marked one span, so that is the answer and the scan is not consulted"
+        );
+    }
+
+    /// A part whose reader marked nothing still gets the scan.
+    #[test]
+    fn a_part_with_no_marks_falls_back_to_the_punctuation() {
+        use smysl_text::reading::{Level, Segment};
+        let text = "And Boaz said, \u{201c}The LORD be with you.\u{201d}";
+        let row = Segment::new(
+            0,
+            text.len() as u64,
+            Level::new("verse").expect("a level"),
+            "Ruth.2.4".parse().expect("a locator"),
+        );
+        assert_eq!(marks_of(&[row], text), quoted_spans(text));
     }
 }

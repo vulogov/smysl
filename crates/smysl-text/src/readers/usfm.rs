@@ -25,6 +25,27 @@
 //! and sets `lossy`, and an unknown character marker keeps what is inside it. Refusing those
 //! would mean refusing most real Bibles over one unusual marker, and the information that
 //! something was dropped is already carried — once, honestly — by `lossy`.
+//!
+//! # `\wj`, the one character marker whose *position* is kept
+//!
+//! Every other character marker here is typesetting: `\add` is a supplied word, `\nd` is a
+//! divine name in small capitals, and the reading keeps the words and forgets which. `\wj …
+//! \wj*` is different in kind — it says the enclosed words are **reported speech**, which
+//! §3.4 writes into `text:mode` and which decides whether a unit asserts a claim or records
+//! that somebody made one. "The fool hath said in his heart, There is no God" is a claim the
+//! psalm reports, and a corpus that lost the distinction holds a false record drawn from a
+//! true text.
+//!
+//! So the words of Jesus are written as their own fragment and the range they land in becomes
+//! a [`crate::reading::Mark`] on the verse row (key 9). USFM carries no attribution with the
+//! marker — the mark has no `who`, and §3.4 wants none, since the mark says somebody else is
+//! speaking and not who.
+//!
+//! Two limits worth stating. A `\wj` that is never closed marks to the end of its line, which
+//! is what the stripper already does with an unclosed marker's body, and `lossy` is set either
+//! way. And the mark is per line, so words of Jesus spanning two verses must carry `\wj` in
+//! each — which is what the USFM style guide asks for and what the editions that use the
+//! marker do.
 
 use crate::limits::Budget;
 use crate::locator::Locator;
@@ -43,6 +64,9 @@ pub const LEVEL: &str = "chapter";
 /// Dropped entirely, content and all. A footnote is not part of the verse — including it would
 /// put an editor's cross-reference inside the span a quotation is matched against.
 const NOTES: &[&str] = &["f", "fe", "x", "ef", "ex"];
+
+/// The character marker that means *the words of Jesus* — reported speech, in §3.4's sense.
+const WJ: &str = "wj";
 
 pub struct Usfm;
 
@@ -123,7 +147,11 @@ impl Parse {
             // span, and no quotation of the book is a quotation of its header.
             "h" | "mt" | "mt1" => {
                 if self.title.is_none() && !value.trim().is_empty() {
-                    self.title = Some(strip_inline(value, &mut self.lossy).trim().to_string());
+                    // A title is one string: nothing marks the words of Jesus in a running
+                    // header, and a title is metadata rather than a range of the text.
+                    let pieces = strip_inline(value, &mut self.lossy);
+                    let joined: String = pieces.iter().map(|p| p.text.as_str()).collect();
+                    self.title = Some(joined.trim().to_string());
                 }
                 Ok(())
             }
@@ -215,10 +243,21 @@ impl Parse {
 
     /// Text from one line or one marker: a separator is owed before it, because USFM's
     /// line breaks are where its words are separated.
+    ///
+    /// Written in pieces rather than as one string, because a `\wj` body has to be written on
+    /// its own for the builder to say where it landed. A line with no `\wj` is one piece, and
+    /// the text it produces is the same either way: [`super::build::Doc::write`] collapses
+    /// whitespace runs and treats a fragment's edges as owed separators, so a sentence split
+    /// at a marker boundary joins back up exactly as it did when the stripper concatenated it.
     fn text(&mut self, raw: &str) {
-        let text = strip_inline(raw, &mut self.lossy);
+        let pieces = strip_inline(raw, &mut self.lossy);
         self.doc.gap();
-        self.doc.write(text.trim());
+        for piece in &pieces {
+            let at = self.doc.write(&piece.text);
+            if let (true, Some(at)) = (piece.reported, at) {
+                self.doc.mark_speech(at, None);
+            }
+        }
     }
 }
 
@@ -308,11 +347,12 @@ fn is_known_paragraph(marker: &str) -> bool {
 /// `\add he\add*` keeps `he`; `\w word|strong="H1"\w*` keeps `word`; `\f + note\f*` keeps
 /// nothing. An unclosed marker takes the rest of the line, which is what a typesetter's
 /// mistake looks like and is still better than printing a backslash into a corpus.
-fn strip_inline(raw: &str, lossy: &mut bool) -> String {
-    let mut out = String::with_capacity(raw.len());
+fn strip_inline(raw: &str, lossy: &mut bool) -> Vec<Piece> {
+    let mut out: Vec<Piece> = Vec::new();
+    let mut plain = String::with_capacity(raw.len());
     let mut rest = raw;
     while let Some(i) = rest.find('\\') {
-        out.push_str(&rest[..i]);
+        plain.push_str(&rest[..i]);
         let after = &rest[i + 1..];
         let (marker, _) = split_marker(after);
         let name = marker.trim_end_matches('*');
@@ -330,16 +370,44 @@ fn strip_inline(raw: &str, lossy: &mut bool) -> String {
             Some(j) => (&body[..j], &body[j + close.len()..]),
             None => (body, ""),
         };
-        if !NOTES.contains(&name) {
+        if name == WJ {
+            // The one marker whose position survives. Its body may hold markers of its own —
+            // `\wj ... \nd LORD\nd* ...\wj*` is ordinary — so it is stripped in turn, and
+            // every piece that comes back is reported whether or not the inner marker kept it.
+            Piece::flush(&mut out, &mut plain);
+            for mut piece in strip_inline(inner, lossy) {
+                piece.reported = true;
+                out.push(piece);
+            }
+        } else if !NOTES.contains(&name) {
             // `\w word|strong="H1"\w*`: everything after the pipe is an attribute list, not
             // text. Keeping it would put markup inside a verse's span.
             let kept = inner.split('|').next().unwrap_or("");
-            out.push_str(kept.trim_start());
+            plain.push_str(kept.trim_start());
         }
         rest = tail;
     }
-    out.push_str(rest);
+    plain.push_str(rest);
+    Piece::flush(&mut out, &mut plain);
     out
+}
+
+/// A run of one line's text, and whether the source marked it as reported speech.
+struct Piece {
+    text: String,
+    reported: bool,
+}
+
+impl Piece {
+    /// Move whatever plain text has accumulated into a piece of its own.
+    fn flush(out: &mut Vec<Piece>, plain: &mut String) {
+        if !plain.is_empty() {
+            out.push(Piece {
+                text: std::mem::take(plain),
+                reported: false,
+            });
+        }
+    }
 }
 
 #[cfg(test)]
@@ -350,7 +418,7 @@ mod tests {
     use crate::reading::Segment;
     use crate::structure::Structure;
 
-    const GENESIS: &str = "\\id GEN The Book of Genesis\n\\h Genesis\n\\mt1 Genesis\n\\c 1\n\\p\n\\v 1 In the beginning God created the heaven and the earth.\n\\v 2 And the earth was without form.\n\\c 2\n\\p\n\\v 1 Thus the heavens were finished.\n";
+    pub(super) const GENESIS: &str = "\\id GEN The Book of Genesis\n\\h Genesis\n\\mt1 Genesis\n\\c 1\n\\p\n\\v 1 In the beginning God created the heaven and the earth.\n\\v 2 And the earth was without form.\n\\c 2\n\\p\n\\v 1 Thus the heavens were finished.\n";
 
     fn read(source: &str) -> ReadOutput {
         let mut budget = Budget::new(Caps::DEFAULT, source.len() as u64).expect("budget");
@@ -380,7 +448,7 @@ mod tests {
 
     #[test]
     fn a_book_two_chapters_and_three_verses_nest_by_containment() {
-        let out = read(GENESIS);
+        let out = read(super::tests::GENESIS);
         assert_eq!(
             locators(&out),
             vec!["Gen", "Gen.1", "Gen.1.1", "Gen.1.2", "Gen.2", "Gen.2.1"]
@@ -396,7 +464,7 @@ mod tests {
     /// Every verse's range holds that verse's words and no neighbour's.
     #[test]
     fn each_verse_range_is_its_own_text() {
-        let out = read(GENESIS);
+        let out = read(super::tests::GENESIS);
         let text = out.text.as_str();
         let verse = |l: &str| {
             let row = out
@@ -423,7 +491,7 @@ mod tests {
     /// test that compares one expected string passes while the second verse is wrong.
     #[test]
     fn no_row_range_holds_a_separator() {
-        let out = read(GENESIS);
+        let out = read(super::tests::GENESIS);
         let text = out.text.as_str();
         for row in &out.rows {
             let slice = &text[row.start as usize..row.end as usize];
@@ -444,7 +512,7 @@ mod tests {
     /// The text holds exactly the separators the rows do not: one space per join.
     #[test]
     fn the_separators_are_outside_every_verse() {
-        let out = read(GENESIS);
+        let out = read(super::tests::GENESIS);
         let verses: Vec<&Segment> = out
             .rows
             .iter()
@@ -461,7 +529,7 @@ mod tests {
 
     #[test]
     fn the_running_header_becomes_the_title_and_is_not_in_the_text() {
-        let out = read(GENESIS);
+        let out = read(super::tests::GENESIS);
         assert_eq!(out.title.as_deref(), Some("Genesis"));
         assert!(
             !out.text.as_str().contains("Genesis"),
@@ -473,7 +541,7 @@ mod tests {
     /// A chapter's range is the hull of its verses, so a locator resolves to the whole chapter.
     #[test]
     fn a_chapter_resolves_to_all_of_its_verses() {
-        let out = read(GENESIS);
+        let out = read(super::tests::GENESIS);
         let mut budget = Budget::new(Caps::DEFAULT, 1 << 16).expect("budget");
         let structure =
             Structure::build(&out.rows, out.text.len() as u64, &mut budget).expect("a valid table");
@@ -644,5 +712,121 @@ mod tests {
         let out = read("\\id GEN\r\n\\c 1\r\n\\v 1 In the beginning.\r\n");
         assert_eq!(out.text.as_str(), "In the beginning.");
         assert_eq!(out.text.tid(), out.text.tid(), "a tid over the output");
+    }
+}
+
+#[cfg(test)]
+mod speech_tests {
+    use super::*;
+    use crate::limits::Caps;
+    use crate::readers::{read_with, Params};
+
+    fn read(source: &str) -> ReadOutput {
+        let mut budget = Budget::new(Caps::DEFAULT, source.len() as u64).expect("budget");
+        read_with(
+            &Usfm,
+            &Input::new(source.as_bytes()),
+            &Params::new(),
+            &mut budget,
+        )
+        .expect("read")
+    }
+
+    /// What each mark covers, as text, so a test says what it means.
+    fn marked(out: &ReadOutput) -> Vec<(String, Option<String>)> {
+        let text = out.text.as_str();
+        out.rows
+            .iter()
+            .flat_map(|row| {
+                row.reported.iter().map(|m| {
+                    (
+                        text[m.start as usize..m.end as usize].to_string(),
+                        m.who.clone(),
+                    )
+                })
+            })
+            .collect()
+    }
+
+    /// The words of Jesus are marked; the narration around them is not.
+    #[test]
+    fn wj_marks_its_words_and_carries_no_attribution() {
+        let out = read(
+            "\\id MAT\n\\c 4\n\\p\n\\v 4 But he answered and said, \
+             \\wj It is written, Man shall not live by bread alone.\\wj*\n",
+        );
+        assert_eq!(
+            marked(&out),
+            vec![(
+                "It is written, Man shall not live by bread alone.".to_string(),
+                // USFM says that somebody else is speaking and not who, which is exactly what
+                // §3.4 reads a mark for.
+                None
+            )]
+        );
+        assert!(out.text.as_str().starts_with("But he answered and said,"));
+    }
+
+    /// A marker inside the quotation does not break it into two quotations.
+    #[test]
+    fn a_marker_inside_wj_is_one_clause_and_not_three() {
+        let out = read(
+            "\\id MAT\n\\c 22\n\\p\n\\v 37 \\wj Thou shalt love the \\nd Lord\\nd* thy God.\\wj*\n",
+        );
+        assert_eq!(
+            marked(&out),
+            vec![("Thou shalt love the Lord thy God.".to_string(), None)]
+        );
+    }
+
+    /// Two quotations with narration between them are two marks, which is the case the
+    /// whitespace-only merge has to leave alone.
+    #[test]
+    fn narration_between_two_quotations_keeps_them_apart() {
+        let out = read(
+            "\\id MAT\n\\c 9\n\\p\n\\v 2 \\wj Be of good cheer.\\wj* And he said, \
+             \\wj Thy sins be forgiven thee.\\wj*\n",
+        );
+        assert_eq!(
+            marked(&out),
+            vec![
+                ("Be of good cheer.".to_string(), None),
+                ("Thy sins be forgiven thee.".to_string(), None),
+            ]
+        );
+    }
+
+    /// An unclosed marker marks to the end of its line, and no further.
+    #[test]
+    fn an_unclosed_wj_stops_at_the_end_of_the_line() {
+        let out = read(
+            "\\id MAT\n\\c 5\n\\p\n\\v 3 \\wj Blessed are the poor in spirit\n\
+             \\v 4 And the narrator speaks again.\n",
+        );
+        let found = marked(&out);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].0, "Blessed are the poor in spirit");
+        assert!(out.text.as_str().contains("And the narrator speaks again."));
+    }
+
+    /// A mark lands on the verse row, not on the chapter or the book.
+    #[test]
+    fn the_mark_is_on_the_row_whose_range_contains_it() {
+        let out = read("\\id MAT\n\\c 4\n\\p\n\\v 4 \\wj It is written.\\wj*\n");
+        let levels: Vec<&str> = out
+            .rows
+            .iter()
+            .filter(|r| !r.reported.is_empty())
+            .map(|r| r.level.as_str())
+            .collect();
+        assert_eq!(levels, vec!["verse"]);
+    }
+
+    /// Text with no `\wj` reads exactly as it did before the marker was understood — which the
+    /// bibles fixtures assert over five editions, and this asserts in one line.
+    #[test]
+    fn a_file_with_no_wj_is_marked_nowhere() {
+        let out = read(super::tests::GENESIS);
+        assert!(out.rows.iter().all(|r| r.reported.is_empty()));
     }
 }

@@ -58,6 +58,62 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### The marker whose position survives, and the four things that follow from keeping it
+
+**Reading key 9: reported-speech marks, and two readers that write them.** TX-P5 step 3b built
+`text:mode` from structure and then reported a finding it could not act on: §3.4 says
+"reported-speech spans the reader marks" and no reader in this build marked one. `usfm/1` now
+reads `\wj … \wj*` and `osis/1` reads `<q who="…">`, in both the container and the milestone
+form. `crates/smysl-ingest/tests/reported_speech.rs` asserts the whole path with no model in it:
+a claim drawn from inside the marker comes out `reported`, the narration beside it comes out with
+**no mode at all**, and the same verse with the marker stripped comes out with none either —
+which is the control, because `asserted` is not a default and a USFM verse has no speaker.
+
+**A row key, not a row and not the `speaker` field.** Both markers name a span *inside* a node.
+A row of its own would need a locator nothing addresses; the row's `speaker` means the node's
+speaker, so a verse whose speaker was Jesus would make the narration around the quotation
+`asserted` by him — the exact inversion of what the mark says. Key 9 is a list of
+`{start, end, who?}` on the innermost row whose range holds the mark, sorted and
+non-overlapping, and a decoder refuses a list that is neither.
+
+**The `who` is carried and nothing reads it.** OSIS attributes its quotations and USFM does not.
+§3.4 is explicit that a mark establishes `reported` and *no holder* — the mark says somebody else
+is speaking, not that this corpus asserts the edition's attribution — so the field is recorded
+for a later phase and wired to nothing. Same decision as the chat readers' `ids`, same reason:
+the source said it and dropping it is irreversible. It is **not** pseudonymised, which is also a
+decision: `#jesus` is a label an editor put on a public text, not a platform's identifier for a
+living person, and keying it would destroy its only use while protecting nobody.
+
+**Reader marks replace the punctuation scan; they do not join it.** Per part. An edition that
+marks its reported speech has said which clauses are reported, and running `quoted_spans` over it
+as well re-admits exactly the heuristic the marks replace — on a Bible that marks the words of
+Jesus *and* punctuates its narrative dialogue the two suppliers disagree about every verse of it.
+A part whose reader marked nothing still gets the scan, because an empty list means "nothing is
+marked" and not "nothing is reported".
+
+**Marks merge across a separator and not across a word.** One clause arrives in as many fragments
+as its source divides it into: an XML entity mid-sentence, a `\nd` inside a `\wj`, a quotation
+reopened after a line break. Two marks with only whitespace between them and the same `who`
+become one, so a verse holds the one quotation it holds rather than nine. With a *word* between
+them they stay two — that word is narration, and a mark spanning it would say somebody said
+something they did not.
+
+**The identity cost is real and, on this corpus, nil.** A reading with no marks writes no key 9,
+so it is byte-identical to the same reading written before the key existed: every expectation in
+`fixtures/library/readers/` is untouched and all five editions of GE-T1's bibles still build to
+their recorded digests. Two new samples pin the marked case — `matt4-wj.usfm`, with a `\nd`
+inside one `\wj`, and `matt5-q.osis`, whose milestone quotation opens before one verse and closes
+after the next so the mark lands on two rows. The three ports name key 9; their identities never
+depended on the name, since a structure hash is taken over the table's bytes and rule X keeps
+what a port does not understand — which is also why an unknown key *inside* a mark is kept rather
+than refused.
+
+**What the probe-set gate still owes is a probe set.** Its finding has changed shape: a
+punctuating edition was always handled, a marking edition is now handled by its own markup, and a
+1769 Bible is still not handled at all, because Psalm 14:1 marks its reported clause with a comma
+and a capital letter and no reader support reaches that. The gap is typography now, not this
+build's readers.
+
 ### Recall was free and precision was the whole problem, which is the opposite of what the bar assumed
 
 **TX-P7 step 4, the phase exit: GE-T5's within-language arm.** The instrument is met and the

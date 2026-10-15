@@ -11,6 +11,7 @@
 //! the separator between two rows belongs to neither.
 
 use std::collections::BTreeSet;
+use std::ops::Range;
 
 use crate::limits::Budget;
 use crate::locator::Locator;
@@ -178,15 +179,15 @@ impl Doc {
     /// handled the only way that works for both kinds of source — runs of it collapse to one
     /// space, and whitespace at a fragment's edge becomes an *owed* separator rather than a
     /// written one.
-    pub(crate) fn write(&mut self, fragment: &str) {
+    pub(crate) fn write(&mut self, fragment: &str) -> Option<Range<u64>> {
         if fragment.is_empty() {
-            return;
+            return None;
         }
         if fragment.chars().all(char::is_whitespace) {
             // Indentation between two elements, or a blank line between two paragraphs. It
             // separates; it is not content.
             self.gap();
-            return;
+            return None;
         }
         if fragment.starts_with(char::is_whitespace) {
             self.gap();
@@ -218,7 +219,7 @@ impl Doc {
             self.gap();
         }
         if end == begin {
-            return;
+            return None;
         }
         for open in &mut self.stack {
             if !open.started {
@@ -226,6 +227,58 @@ impl Doc {
                 open.started = true;
             }
             self.rows[open.row].end = end;
+        }
+        Some(begin..end)
+    }
+
+    /// Mark a range of the text as reported speech on the innermost open row.
+    ///
+    /// The range is one [`Doc::write`] returned, which is why that method returns one: a
+    /// reader knows a fragment is the words of somebody being quoted *before* it writes it,
+    /// and only the builder knows where the fragment landed once whitespace has been
+    /// collapsed. A reader computing the offset itself would be a second implementation of
+    /// that collapsing.
+    ///
+    /// The mark goes on the innermost row — the verse, not the chapter — because that is the
+    /// row whose range contains it. `smysl_ingest` unions the rows' marks into the part-wide
+    /// list windowing takes, and a mark repeated on every ancestor would be the same statement
+    /// three times in the bytes a structure hash is taken over.
+    #[cfg(any(feature = "reader-usfm", feature = "reader-osis"))]
+    pub(crate) fn mark_speech(&mut self, range: Range<u64>, who: Option<&str>) {
+        let Some(open) = self.stack.last() else {
+            return;
+        };
+        let mut mark = crate::reading::Mark::new(range.start, range.end);
+        if let Some(who) = who {
+            mark = mark.with_who(who);
+        }
+        let row = &mut self.rows[open.row];
+        // Merge with the previous mark when only a separator lies between them. One clause
+        // arrives in as many fragments as the source divides it into — an XML entity, a `\nd`
+        // inside a `\wj`, a quotation reopened after a line break — and a mark per fragment
+        // would say that a verse holds nine quotations where it holds one. The text between
+        // has to be whitespace, because a word between two quotations is narration and the
+        // range would then cover text nobody said. And the `who` has to agree: two
+        // attributions are two statements, whatever the gap.
+        //
+        // `dec_marks` refuses overlapping marks, so this is also what keeps the encoder from
+        // writing a table it cannot read back.
+        let joinable = match row.reported.last() {
+            Some(last) => {
+                last.who == mark.who
+                    && last.end <= mark.start
+                    && self
+                        .out
+                        .get(last.end as usize..mark.start as usize)
+                        .is_some_and(|between| between.chars().all(char::is_whitespace))
+            }
+            None => false,
+        };
+        if joinable {
+            let last = row.reported.last_mut().expect("joinable implies one");
+            last.end = last.end.max(mark.end);
+        } else {
+            row.reported.push(mark);
         }
     }
 

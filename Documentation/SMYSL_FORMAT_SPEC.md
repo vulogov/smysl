@@ -650,8 +650,19 @@ It has no surface form: text is not written in surface syntax.
 | 3 | raw | map, the reader's raw metadata for this part, verbatim | optional |
 
 A segment row is `{0: start, 1: end, 2: level (text), 3: locator (text), 4: lang?, 5: speaker?,
-6: observed?, 7: ids? (map text → text), 8: tz offset in minutes?}`. An empty table is an empty
-**array**, not an absent value. Record 18 has no surface form either.
+6: observed?, 7: ids? (map text → text), 8: tz offset in minutes?, 9: reported-speech marks?}`.
+An empty table is an empty **array**, not an absent value. Record 18 has no surface form either.
+
+**Reported-speech marks (key 9)** are an array of `{0: start, 1: end, 2: who? (text)}`, in part
+coordinates like the row's own range, **sorted** by start and then end and **non-overlapping**; a
+decoder MUST refuse a list that is not. The array MUST be absent rather than empty. A mark says
+that the enclosed words are speech the text reports rather than asserts — USFM's `\wj … \wj*`,
+OSIS's `<q who="…">` — and belongs on the innermost row whose range contains it. `who` is the
+source's own label for the speaker, carried verbatim and not pseudonymised: it is a label an
+editor put on a public text, not a platform's identifier for a person. A mark key a consumer does not know is
+**kept verbatim**, as rule X requires of every other map in this format: the structure hash is
+taken over these bytes, so a consumer that dropped one would change a corpus's identity by
+reading it.
 
 **Dating (17)** — a statement about when something happened.
 

@@ -20,18 +20,24 @@
 //!
 //! The directory holds `probes.tsv` — `file<TAB>quote<TAB>expected mode`, one probe per line,
 //! `#` comments ignored — and the passage files it names. A passage may bring its own marks in
-//! `<file>.marks`, one `start-end` byte range per line, which is what a reader that read USFM's
-//! `\wj` or OSIS's `<q who>` would supply; without one, the marks are
-//! [`smysl_ingest::text::quoted_spans`] over the passage's own punctuation.
+//! `<file>.marks`, one `start-end` byte range per line, which is what a passage drawn from a
+//! *marked* source arrives with; without one, the marks are
+//! [`smysl_ingest::text::quoted_spans`] over the passage's own punctuation. A probe set taken
+//! from a library needs no `.marks` file at all now: the readers put the marks in the reading
+//! and [`smysl_ingest::text::marks_of`] takes them off it.
 //!
 //! # What the measurement will say, and it is worth knowing before it runs
 //!
-//! For a modern edition that punctuates its quotations, the scan finds them and the rate should
-//! be near zero. For a 1769 Bible it finds nothing at all — Psalm 14:1 marks its reported clause
-//! with a comma and a capital letter — and **no reader in this build marks one either**. On such
-//! a probe set this gate fails, and that is the finding rather than a bug in the gate: the fix is
-//! reader support for the two markers real sources carry, and that is a reader change with
-//! identity consequences (a reading's `rdid`, a part's structure hash), not an ingest change.
+//! Three cases, and the middle one is the one that moved. For a modern edition that punctuates
+//! its quotations the scan finds them and the rate should be near zero. For an edition that
+//! *marks* its reported speech — USFM's `\wj`, OSIS's `<q who>` — the reader now supplies the
+//! marks exactly, which is what TX-P5 step 3b's reader work landed and what
+//! `crates/smysl-ingest/tests/reported_speech.rs` asserts end to end. For a 1769 Bible with
+//! neither, nothing finds anything: Psalm 14:1 marks its reported clause with a comma and a
+//! capital letter, and no amount of reader support reaches that. On a probe set drawn from such
+//! an edition this gate still fails, and that remains the finding rather than a bug in the
+//! gate — what has changed is that the finding is now about punctuation and typography alone,
+//! and no longer about a gap in this build's readers.
 
 use std::collections::BTreeMap;
 use std::ops::Range;

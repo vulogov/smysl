@@ -45,7 +45,7 @@ pub mod run;
 pub mod window;
 
 pub use attach::{attach, Attached, Attachment, Opts};
-pub use attribution::{attribution, quoted_spans, Attribution};
+pub use attribution::{attribution, marks_of, quoted_spans, Attribution};
 pub use cost::{cost, CostReport};
 pub use digest::{digest, Digest};
 pub use journal::Journal;

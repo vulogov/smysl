@@ -156,6 +156,10 @@ export const SEGMENT_KEYS = new Map([
   [6, "observed"],
   [7, "ids"],
   [8, "tz_offset"],
+  // TX-P5 step 3b: the reported-speech marks a reader found, each `{0: start, 1: end,
+  // 2: who?}`. Named rather than decoded further: a port's job here is to recompute an
+  // identity over the row, and the marks are part of the bytes that identity covers.
+  [9, "reported"],
 ]);
 
 /** §3.1, a manifest's key 5. */

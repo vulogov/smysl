@@ -48,6 +48,30 @@ const SAMPLES: &[Sample] = &[
         licence: "public-domain",
         params: &[],
     },
+    // The words of Jesus, which USFM marks with `\wj` and nothing else in the file does. Here
+    // because the marker is the one character marker whose *position* survives the read
+    // (reading key 9, TX-P5 step 3b): a reading that lost it would be a reading that cannot
+    // tell a claim the text makes from one it reports. The second marked verse holds a `\nd`
+    // inside the `\wj`, which is the case where one clause arrives in three fragments.
+    Sample {
+        file: "matt4-wj.usfm",
+        reader: "usfm/1",
+        alias: "kjv1769-matthew",
+        lang: "en",
+        licence: "public-domain",
+        params: &[],
+    },
+    // The same distinction in OSIS, which spells it `<q who="…">` — and in the milestone form,
+    // where one quotation opens before a verse and closes after the next, so the mark lands on
+    // two rows and carries the attribution the source gave.
+    Sample {
+        file: "matt5-q.osis",
+        reader: "osis/1",
+        alias: "kjv1769-matthew-osis",
+        lang: "en",
+        licence: "public-domain",
+        params: &[],
+    },
     // A verse bridge, which is the only place a reader emits a *range* locator. It is here
     // because a bridge is a node whose own address is a range, and the resolver used to
     // decompose every range into its ends — so no bridge could be found by the address it was
@@ -358,6 +382,16 @@ fn describe(sample: &Sample, out: &ReadOutput) -> String {
         }
         for (key, value) in &row.ids {
             write!(extra, " {key}={value}").expect("write");
+        }
+        // Reported-speech marks (key 9), each as its range and its `who` where the source gave
+        // one. Printed only where a reader found one, so the eight expectations written before
+        // the readers could see `\wj` and `<q who>` are unchanged by its arrival.
+        for m in &row.reported {
+            match &m.who {
+                Some(who) => write!(extra, " speech={}-{}@{who}", m.start, m.end),
+                None => write!(extra, " speech={}-{}", m.start, m.end),
+            }
+            .expect("write");
         }
         writeln!(
             rendered,

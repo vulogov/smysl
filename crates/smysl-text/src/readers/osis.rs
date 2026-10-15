@@ -13,6 +13,23 @@
 //! the Bibles in circulation — silently, because the file is well-formed XML and the chapters
 //! still come out.
 //!
+//! # `<q who="…">`, and the one thing a quotation element says that typesetting does not
+//!
+//! OSIS marks a quotation with `<q>`, in either form — a container, or a milestone pair
+//! `<q sID="…"/> … <q eID="…"/>` — and may attribute it with `who="#jesus"`. That is
+//! **reported speech** in §3.4's sense, the distinction that decides whether a unit asserts a
+//! claim or records that somebody made one, so the range each `<q>` covers becomes a
+//! [`crate::reading::Mark`] on the row it lands in (key 9) and the `who` is carried verbatim.
+//!
+//! Every `<q>` marks, with or without a `who`: a narrative quotation is still somebody else
+//! speaking, and the attribute says *whom* rather than *whether*. §3.4 reads only the span —
+//! a mark establishes `reported` and no holder — so the `who` is recorded for a later phase
+//! and nothing depends on it today.
+//!
+//! A quotation that spans verses marks each of them, because the mark lands on whatever row is
+//! open when the text arrives. That is the form OSIS Bibles actually use, and the reason this
+//! reader has no per-line limit where the USFM one does.
+//!
 //! # What it refuses
 //!
 //! A document type declaration, and any entity that is not one of XML's five predefined ones
@@ -81,6 +98,46 @@ fn locator(text: &str, at: u64) -> Result<Locator, LibError> {
         .map_err(|e| unreadable(at, format!("a canonical locator, not `{text}` ({e})")))
 }
 
+/// One open `<q>`: whom the source attributes it to, and the `sID` that will close it.
+struct Quote {
+    who: Option<String>,
+    sid: Option<String>,
+}
+
+/// Close a quotation: the one `eid` names, or the innermost when an end tag closed it.
+///
+/// A milestone `eID` that matches nothing open closes nothing. OSIS files in the wild do carry
+/// stray ends, and popping the innermost quotation on one would leave every following verse
+/// marked as reported speech — a wrong mark is worse than a missing one here, because `reported`
+/// is what keeps a claim out of the corpus as an assertion.
+fn close_quote(speech: &mut Vec<Quote>, eid: Option<&str>) {
+    match eid {
+        None => {
+            speech.pop();
+        }
+        Some(eid) => {
+            if let Some(i) = speech.iter().rposition(|q| q.sid.as_deref() == Some(eid)) {
+                speech.remove(i);
+            }
+        }
+    }
+}
+
+/// Mark what a write landed in as reported speech, when a quotation is open.
+///
+/// The attribution is the innermost one that has a `who`: `<q who="#jesus">` holding a plain
+/// `<q>` is still Jesus speaking, and the inner element says only that he quoted somebody.
+fn mark(doc: &mut Doc, placed: Option<std::ops::Range<u64>>, speech: &[Quote]) {
+    let Some(range) = placed else {
+        return;
+    };
+    if speech.is_empty() {
+        return;
+    }
+    let who = speech.iter().rev().find_map(|q| q.who.as_deref());
+    doc.mark_speech(range, who);
+}
+
 fn read_xml(source: &str, limits: &mut Budget) -> Result<ReadOutput, LibError> {
     let mut reader = xml::reader(source);
 
@@ -90,6 +147,11 @@ fn read_xml(source: &str, limits: &mut Budget) -> Result<ReadOutput, LibError> {
     let mut in_header = false;
     let mut capture_title = false;
     let mut captured = String::new();
+    // The open quotations, innermost last: each one's `who`, and the `sID` that will close it
+    // when the source uses the milestone form. A stack because `<q>` nests — a speech inside a
+    // speech is ordinary in a narrative — and a flag would end the outer one at the inner's
+    // close tag.
+    let mut speech: Vec<Quote> = Vec::new();
     // Depth of the aside being skipped, 0 when text is being kept. A counter and not a flag:
     // asides nest, and a flag would end the skip at the first inner close tag.
     let mut skip: u32 = 0;
@@ -179,6 +241,24 @@ fn read_xml(source: &str, limits: &mut Budget) -> Result<ReadOutput, LibError> {
                             doc.open("verse", loc, at_usize(at), limits)?;
                         }
                     }
+                    b"q" => {
+                        // The milestone form closes by `eID`, so an `eID` here is an end and
+                        // not a beginning. A `<q/>` with neither is an empty quotation, which
+                        // marks nothing: there is no text between its two halves.
+                        if let Some(eid) = attr(&e, b"eID", at)? {
+                            close_quote(&mut speech, Some(&eid));
+                        } else if !empty {
+                            speech.push(Quote {
+                                who: attr(&e, b"who", at)?,
+                                sid: None,
+                            });
+                        } else if let Some(sid) = attr(&e, b"sID", at)? {
+                            speech.push(Quote {
+                                who: attr(&e, b"who", at)?,
+                                sid: Some(sid),
+                            });
+                        }
+                    }
                     _ if ASIDES.contains(&name) => {
                         lossy = true;
                         // Dropped, but still a boundary: `<milestone type="line"/>` is a line
@@ -209,6 +289,7 @@ fn read_xml(source: &str, limits: &mut Budget) -> Result<ReadOutput, LibError> {
                             title = Some(text.to_string());
                         }
                     }
+                    b"q" => close_quote(&mut speech, None),
                     b"verse" => doc.close_level("verse"),
                     b"chapter" => doc.close_level("chapter"),
                     b"div" => {}
@@ -225,7 +306,8 @@ fn read_xml(source: &str, limits: &mut Budget) -> Result<ReadOutput, LibError> {
                 if capture_title {
                     captured.push_str(&text);
                 } else if !in_header {
-                    doc.write(&text);
+                    let placed = doc.write(&text);
+                    mark(&mut doc, placed, &speech);
                 }
             }
             Event::CData(t) => {
@@ -235,7 +317,8 @@ fn read_xml(source: &str, limits: &mut Budget) -> Result<ReadOutput, LibError> {
                 let text = t
                     .decode()
                     .map_err(|e| unreadable(at, format!("CDATA in the declared encoding ({e})")))?;
-                doc.write(&text);
+                let placed = doc.write(&text);
+                mark(&mut doc, placed, &speech);
             }
             Event::GeneralRef(r) => {
                 if skip > 0 {
@@ -249,8 +332,10 @@ fn read_xml(source: &str, limits: &mut Budget) -> Result<ReadOutput, LibError> {
                     captured.push_str(&resolved);
                 } else if !in_header {
                     // Appended through the same path as text, so an entity inside a verse is
-                    // inside that verse's range rather than between two of them.
-                    doc.write(&resolved);
+                    // inside that verse's range rather than between two of them — and inside
+                    // the quotation, if one is open, for the same reason.
+                    let placed = doc.write(&resolved);
+                    mark(&mut doc, placed, &speech);
                 }
             }
             Event::Decl(_) | Event::Comment(_) | Event::PI(_) => {}
@@ -502,5 +587,150 @@ mod tests {
     fn the_reader_answers_to_its_id() {
         assert_eq!(Osis.id(), "osis/1");
         assert!(Osis.params().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod speech_tests {
+    use super::*;
+    use crate::limits::Caps;
+    use crate::readers::{read_with, Params};
+
+    fn read(source: &str) -> ReadOutput {
+        let mut budget = Budget::new(Caps::DEFAULT, source.len() as u64).expect("budget");
+        read_with(
+            &Osis,
+            &Input::new(source.as_bytes()),
+            &Params::new(),
+            &mut budget,
+        )
+        .expect("read")
+    }
+
+    /// The text a mark covers, so a test says what it means rather than counting bytes.
+    fn marked(out: &ReadOutput) -> Vec<(String, Option<String>)> {
+        let text = out.text.as_str();
+        let mut found = Vec::new();
+        for row in &out.rows {
+            for m in &row.reported {
+                found.push((
+                    text[m.start as usize..m.end as usize].to_string(),
+                    m.who.clone(),
+                ));
+            }
+        }
+        found
+    }
+
+    /// The container form, attributed.
+    #[test]
+    fn a_quotation_element_marks_its_words_and_keeps_its_who() {
+        let out = read(
+            r##"<osis><osisText xml:lang="en"><div type="book" osisID="Matt">
+            <chapter osisID="Matt.4"><verse osisID="Matt.4.4">But he answered,
+            <q who="#Jesus">It is written, Man shall not live by bread alone.</q></verse>
+            </chapter></div></osisText></osis>"##,
+        );
+        assert_eq!(
+            marked(&out),
+            vec![(
+                "It is written, Man shall not live by bread alone.".to_string(),
+                Some("#Jesus".to_string())
+            )]
+        );
+        // The narration is not in the mark, which is the whole point of carrying a range
+        // rather than a flag on the verse.
+        assert!(out.text.as_str().starts_with("But he answered,"));
+    }
+
+    /// The milestone form, closed by its own `sID`.
+    #[test]
+    fn a_milestone_quotation_closes_on_the_id_it_opened_with() {
+        let out = read(
+            r##"<osis><osisText xml:lang="en"><div type="book" osisID="Matt">
+            <chapter sID="Matt.4" osisID="Matt.4"/>
+            <verse sID="Matt.4.4" osisID="Matt.4.4"/>But he answered,
+            <q sID="q1" who="#Jesus"/>It is written.<q eID="q1"/> And he left.
+            <verse eID="Matt.4.4"/><chapter eID="Matt.4"/></div></osisText></osis>"##,
+        );
+        assert_eq!(
+            marked(&out),
+            vec![("It is written.".to_string(), Some("#Jesus".to_string()))]
+        );
+        assert!(out.text.as_str().ends_with("And he left."));
+    }
+
+    /// A quotation that runs across two verses marks both, each over its own words.
+    #[test]
+    fn a_quotation_across_two_verses_marks_each_of_them() {
+        let out = read(
+            r##"<osis><osisText xml:lang="en"><div type="book" osisID="Matt">
+            <chapter sID="Matt.5" osisID="Matt.5"/>
+            <q sID="q1" who="#Jesus"/>
+            <verse sID="Matt.5.3" osisID="Matt.5.3"/>Blessed are the poor in spirit.<verse eID="Matt.5.3"/>
+            <verse sID="Matt.5.4" osisID="Matt.5.4"/>Blessed are they that mourn.<verse eID="Matt.5.4"/>
+            <q eID="q1"/><chapter eID="Matt.5"/></div></osisText></osis>"##,
+        );
+        assert_eq!(
+            marked(&out),
+            vec![
+                (
+                    "Blessed are the poor in spirit.".to_string(),
+                    Some("#Jesus".to_string())
+                ),
+                (
+                    "Blessed are they that mourn.".to_string(),
+                    Some("#Jesus".to_string())
+                ),
+            ]
+        );
+    }
+
+    /// An unattributed quotation still marks: the attribute says whom, not whether.
+    #[test]
+    fn a_quotation_with_no_who_is_still_reported_speech() {
+        let out = read(
+            r##"<osis><osisText xml:lang="en"><div type="book" osisID="Ruth">
+            <chapter osisID="Ruth.2"><verse osisID="Ruth.2.4">And Boaz said,
+            <q>The LORD be with you.</q></verse></chapter></div></osisText></osis>"##,
+        );
+        assert_eq!(
+            marked(&out),
+            vec![("The LORD be with you.".to_string(), None)]
+        );
+    }
+
+    /// A stray `eID` closes nothing, and the verse after it is not reported speech.
+    #[test]
+    fn a_milestone_end_that_matches_nothing_leaves_the_open_quotation_alone() {
+        let out = read(
+            r##"<osis><osisText xml:lang="en"><div type="book" osisID="Ruth">
+            <chapter sID="Ruth.1" osisID="Ruth.1"/>
+            <verse sID="Ruth.1.1" osisID="Ruth.1.1"/><q eID="nothing"/>Now it came to pass.
+            <verse eID="Ruth.1.1"/><chapter eID="Ruth.1"/></div></osisText></osis>"##,
+        );
+        assert!(marked(&out).is_empty(), "nothing was ever opened");
+    }
+
+    /// The inner element says he quoted somebody; the outer says who is speaking.
+    #[test]
+    fn a_quotation_inside_a_quotation_is_attributed_to_the_outer_speaker() {
+        let out = read(
+            r##"<osis><osisText xml:lang="en"><div type="book" osisID="Ps">
+            <chapter osisID="Ps.14"><verse osisID="Ps.14.1">
+            <q who="#David">The fool hath said in his heart, <q>There is no God.</q></q>
+            </verse></chapter></div></osisText></osis>"##,
+        );
+        let found = marked(&out);
+        assert_eq!(
+            found.len(),
+            1,
+            "one clause, written in two fragments: {found:?}"
+        );
+        assert_eq!(
+            found[0].0,
+            "The fool hath said in his heart, There is no God."
+        );
+        assert_eq!(found[0].1, Some("#David".to_string()));
     }
 }

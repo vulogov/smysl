@@ -1,0 +1,29 @@
+file      matt4-wj.usfm
+reader    usfm/1
+alias     kjv1769-matthew
+licence   public-domain
+reader-field usfm/1
+policy    smysl/parts/1 level=chapter min=1024 max=4194304
+top-level chapter
+lossy     true
+title     Matthew
+lang      -
+text      382 bytes
+nodes     5
+parts     1
+
+part 0
+  range     0..382
+  tid       t3:wbaukxjekklr5bejebxgcw7inn4assbtbvwsrcbvqggzi5u5qgnq
+  structure 451e4aa7f66540e0bf169535e0830dbaf3e955c7aae9171d73f60de0b4e0b7a4
+  rdid      r3:psbviwy6l7cmifmr5vjsdx3m6oujhwvzsl25kr3nwtljq7z2etja
+  segments  5
+
+mid       m3:k3j5urvruftdycaa2ygo2nqg4fgg3amtqtqbviamratoz3f2ynia
+
+locators
+  book      Matt 0..382
+  chapter   Matt.4 0..382
+  verse     Matt.4.3 0..110
+  verse     Matt.4.4 111..245 speech=137-245
+  verse     Matt.4.10 246..382 speech=273-382

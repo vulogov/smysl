@@ -74,6 +74,12 @@ required-features = ["model"]
 name              = "probe_set"
 required-features = ["text"]
 
+# The reader half of step 3b: `\wj` and `<q who>` into a `text:mode`, with no provider in the
+# path at all — a reader marked it or it did not, and that is arithmetic over a reading.
+[[test]]
+name              = "reported_speech"
+required-features = ["text"]
+
 # Text ingest end to end, offline. Needs both features and a reader, which the dev-dependency
 # below supplies: a library has to hold a text before anything can window one.
 [[test]]

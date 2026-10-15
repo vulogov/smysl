@@ -32,6 +32,6 @@ smysl-render     907
 smysl-retrieve   323
 smysl-embed      62
 smysl-provider   726
-smysl-ingest     1722
+smysl-ingest     1724
 smysl-tui        216
-smysl-text       3757
+smysl-text       3797

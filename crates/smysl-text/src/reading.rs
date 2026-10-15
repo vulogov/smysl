@@ -20,10 +20,31 @@
 //! # Row keys (A-5)
 //!
 //! `{0: start, 1: end, 2: level, 3: locator, 4: lang?, 5: speaker?, 6: observed?, 7: ids?,
-//! 8: tz offset in minutes?}`. Unknown keys are kept verbatim, as everywhere else in this
-//! format (rule X): a reader from a later release may write a tenth key, and a corpus that
-//! round-trips through this build must come out as it went in — including the hash, which is
-//! why the keys are kept rather than merely tolerated.
+//! 8: tz offset in minutes?, 9: reported-speech marks?}`. Unknown keys are kept verbatim, as
+//! everywhere else in this format (rule X): a reader from a later release may write an
+//! eleventh key, and a corpus that round-trips through this build must come out as it went in
+//! — including the hash, which is why the keys are kept rather than merely tolerated.
+//!
+//! # Key 9, and why a reader needs it (TX-P5 step 3b)
+//!
+//! §3.4 writes `text:mode` from structure, "reported-speech spans the reader marks" — and
+//! until this key there was nowhere for a reader to mark one. The two markers real sources
+//! carry are USFM's `\wj … \wj*` and OSIS's `<q who="…">`, both of which name a *span inside
+//! a node* rather than a node, so neither the row's `speaker` nor a row of its own would say
+//! what they say. Key 9 is therefore a list of [`Mark`]s on the row that contains them, in
+//! part coordinates, sorted and non-overlapping.
+//!
+//! A mark may carry a `who`, because OSIS has one and USFM does not. Nothing reads it yet:
+//! §3.4 is explicit that a mark establishes `reported` **and no holder**, since the mark says
+//! that someone else is speaking and not that the edition's attribution is a fact. Carrying it
+//! anyway is the same decision the chat readers' `ids` recorded — the source said it, dropping
+//! it is irreversible, and the field is where a later phase will find it.
+//!
+//! It is **not** pseudonymised, and that is a decision rather than an omission. A `who` is a
+//! label an editor put on a public text — `#jesus`, `#peter` — and not a platform's identifier
+//! for a living person, which is what [`crate::speaker`] exists to hide; keying it would
+//! destroy the only use it has while protecting nobody. A transcript whose speakers *are*
+//! people belongs in a chat reader, where the `speaker` field is keyed.
 
 use std::collections::BTreeMap;
 
@@ -47,11 +68,15 @@ pub mod keys {
     pub const OBSERVED: u16 = 6;
     pub const IDS: u16 = 7;
     pub const TZ: u16 = 8;
+    /// Reported-speech marks: an array of `{0: start, 1: end, 2: who?}` (TX-P5 step 3b).
+    pub const REPORTED: u16 = 9;
 
     /// The keys this build understands, for the contiguity test. The table lives beside the
     /// constants rather than being derived from them, for the reason `smysl-core`'s key tables
     /// do: a derived list cannot notice a gap.
-    pub const ALL: &[u16] = &[START, END, LEVEL, LOCATOR, LANG, SPEAKER, OBSERVED, IDS, TZ];
+    pub const ALL: &[u16] = &[
+        START, END, LEVEL, LOCATOR, LANG, SPEAKER, OBSERVED, IDS, TZ, REPORTED,
+    ];
 }
 
 /// What a reader calls the kind of a node: `book`, `chapter`, `verse`, `message`, `line`.
@@ -132,7 +157,61 @@ pub struct Segment {
     pub ids: BTreeMap<String, String>,
     /// The timezone the segment's own timestamp was written in, in minutes east of UTC.
     pub tz_offset: Option<i32>,
+    /// Spans of this segment that the source marks as **reported speech**, in part
+    /// coordinates, sorted and non-overlapping.
+    ///
+    /// Empty is the honest default and means *nothing is marked* — not that nothing is
+    /// reported. A 1769 Bible marks Psalm 14:1's reported clause with a comma and a capital
+    /// letter, and no reader can see that.
+    pub reported: Vec<Mark>,
     pub extra: Extra,
+}
+
+/// One span a source marks as reported speech, and whom it attributes it to.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Mark {
+    /// Part coordinates, as the row's own range is.
+    pub start: u64,
+    pub end: u64,
+    /// The source's own label for the speaker — OSIS's `who`, with its leading `#` kept as
+    /// written — or `None`, which is every `\wj` in USFM.
+    ///
+    /// Not a [`crate::speaker`] pseudonym and not an agent: a string the edition chose. See
+    /// the module docs for why it is carried and why it is not keyed.
+    pub who: Option<String>,
+    /// Mark keys this build does not know, kept verbatim.
+    ///
+    /// Rule X reaches inside a mark for the reason it reaches everywhere else: a producer from
+    /// a later release may write a fourth key, and a corpus that round-trips through this
+    /// build has to come out as it went in — including the structure hash, which is taken over
+    /// these bytes. Refusing the row instead would make a forward-compatible addition a
+    /// corpus this build cannot open.
+    pub extra: Extra,
+}
+
+impl Mark {
+    pub fn new(start: u64, end: u64) -> Mark {
+        Mark {
+            start,
+            end,
+            who: None,
+            extra: Extra::new(),
+        }
+    }
+
+    pub fn with_who(mut self, who: impl Into<String>) -> Mark {
+        self.who = Some(who.into());
+        self
+    }
+
+    /// Whether `span` lies wholly inside this mark.
+    ///
+    /// Containment and not intersection, for the reason
+    /// `smysl_ingest::text::attribution` gives: a span that merely touches a reported clause
+    /// is partly about the reporting.
+    pub fn holds(&self, start: u64, end: u64) -> bool {
+        self.start <= start && end <= self.end
+    }
 }
 
 impl Segment {
@@ -147,6 +226,7 @@ impl Segment {
             observed: None,
             ids: BTreeMap::new(),
             tz_offset: None,
+            reported: Vec::new(),
             extra: Extra::new(),
         }
     }
@@ -164,6 +244,17 @@ impl Segment {
     pub fn with_observed(mut self, ms: u64, tz_offset: Option<i32>) -> Segment {
         self.observed = Some(ms);
         self.tz_offset = tz_offset;
+        self
+    }
+
+    /// Add a reported-speech mark, keeping the list sorted.
+    ///
+    /// Sorted here rather than at encoding time: the wire order is the list order, and a
+    /// caller that built the list in source order already has it right. A reader that marks
+    /// two spans out of order is a reader whose spans do not describe its own text.
+    pub fn with_mark(mut self, mark: Mark) -> Segment {
+        self.reported.push(mark);
+        self.reported.sort();
         self
     }
 
@@ -225,6 +316,88 @@ fn enc_text_map<'a>(e: &mut Enc, entries: impl Iterator<Item = (&'a str, &'a str
     }
 }
 
+/// Encode a row's marks: an array of `{0: start, 1: end, 2: who?}`, in the list's order.
+///
+/// The order is the wire's, so it has to be the sorted one — [`Segment::with_mark`] keeps it
+/// that way and [`dec_marks`] refuses anything else. An array whose order carried no meaning
+/// would be two encodings of one table and therefore two structure hashes.
+fn enc_marks(e: &mut Enc, marks: &[Mark]) {
+    e.array(
+        marks
+            .iter()
+            .map(|m| {
+                let mut row = MapBuilder::new();
+                row.put(mark_keys::START, |e| e.uint(m.start));
+                row.put(mark_keys::END, |e| e.uint(m.end));
+                if let Some(who) = &m.who {
+                    row.put(mark_keys::WHO, |e| e.text(who));
+                }
+                row.put_extra(&m.extra);
+                row.into_bytes()
+            })
+            .collect(),
+    );
+}
+
+/// Mark keys, inside a row's key 9.
+pub mod mark_keys {
+    pub const START: u16 = 0;
+    pub const END: u16 = 1;
+    pub const WHO: u16 = 2;
+
+    pub const ALL: &[u16] = &[START, END, WHO];
+}
+
+fn dec_marks(d: &mut Dec<'_>) -> Result<Vec<Mark>, CodecError> {
+    let at = d.position();
+    let bad = || CodecError::MalformedEnvelope { at };
+    let marks = d.array(|d| {
+        let n = d.map_head()?;
+        let mut start = None;
+        let mut end = None;
+        let mut who = None;
+        let mut extra = Extra::new();
+        let mut prev = None;
+        for _ in 0..n {
+            let k = d.map_key(prev)?;
+            prev = Some(k);
+            d.reject_null()?;
+            match k {
+                mark_keys::START => start = Some(d.uint()?),
+                mark_keys::END => end = Some(d.uint()?),
+                mark_keys::WHO => who = Some(d.text()?.to_string()),
+                // Kept verbatim, as a row's own unknown keys are (rule X): the structure
+                // hash is taken over these bytes, so a mark key this build dropped would be a
+                // corpus that changed identity by being read.
+                _ => {
+                    extra.insert(k, d.skip_item()?.to_vec());
+                }
+            }
+        }
+        let (start, end) = (start.ok_or_else(bad)?, end.ok_or_else(bad)?);
+        if end < start {
+            return Err(CodecError::MalformedEnvelope { at });
+        }
+        Ok(Mark {
+            start,
+            end,
+            who,
+            extra,
+        })
+    })?;
+    // Sorted and non-overlapping, checked rather than assumed. Two marks that overlap are two
+    // statements about one clause, and `Mark::holds` would answer for whichever came first.
+    for w in marks.windows(2) {
+        if w[0] >= w[1] || w[0].end > w[1].start {
+            return Err(CodecError::NonDeterministic {
+                at,
+                reason: smysl_core::error::NonDetReason::UnsortedSet,
+            });
+        }
+    }
+    Ok(marks)
+}
+
 fn dec_text_map(d: &mut Dec<'_>) -> Result<BTreeMap<String, String>, CodecError> {
     let at = d.position();
     let n = d.map_head()?;
@@ -273,6 +446,9 @@ fn enc_segment(s: &Segment) -> Vec<u8> {
     if let Some(tz) = s.tz_offset {
         m.put(keys::TZ, |e| enc_int(e, i64::from(tz)));
     }
+    if !s.reported.is_empty() {
+        m.put(keys::REPORTED, |e| enc_marks(e, &s.reported));
+    }
     m.put_extra(&s.extra);
     m.into_bytes()
 }
@@ -290,6 +466,7 @@ fn dec_segment(d: &mut Dec<'_>) -> Result<Segment, CodecError> {
     let mut observed = None;
     let mut ids = BTreeMap::new();
     let mut tz = None;
+    let mut reported = Vec::new();
     let mut extra = Extra::new();
     let mut prev = None;
     for _ in 0..n {
@@ -306,6 +483,7 @@ fn dec_segment(d: &mut Dec<'_>) -> Result<Segment, CodecError> {
             keys::OBSERVED => observed = Some(d.uint()?),
             keys::IDS => ids = dec_text_map(d)?,
             keys::TZ => tz = Some(i32::try_from(dec_int(d)?).map_err(|_| bad())?),
+            keys::REPORTED => reported = dec_marks(d)?,
             _ => {
                 extra.insert(k, d.skip_item()?.to_vec());
             }
@@ -322,6 +500,7 @@ fn dec_segment(d: &mut Dec<'_>) -> Result<Segment, CodecError> {
     s.observed = observed;
     s.ids = ids;
     s.tz_offset = tz;
+    s.reported = reported;
     s.extra = extra;
     Ok(s)
 }
@@ -436,6 +615,76 @@ impl Reading {
 
 #[cfg(test)]
 mod tests {
+    /// Key 9 round-trips, and the order it is written in is the order it is read back.
+    #[test]
+    fn a_rows_reported_speech_marks_survive_the_wire() {
+        let row = Segment::new(
+            0,
+            60,
+            Level::new("verse").expect("a level"),
+            "Matt.4.4".parse().expect("a locator"),
+        )
+        .with_mark(Mark::new(30, 58).with_who("#Jesus"))
+        .with_mark(Mark::new(10, 20));
+        assert_eq!(
+            row.reported.iter().map(|m| m.start).collect::<Vec<_>>(),
+            vec![10, 30],
+            "`with_mark` keeps the list sorted"
+        );
+        let bytes = encode_table(std::slice::from_ref(&row));
+        let back = decode_table(&bytes).expect("a table");
+        assert_eq!(back, vec![row]);
+    }
+
+    /// A mark list that is not sorted, or that overlaps, is not canonical.
+    #[test]
+    fn an_unsorted_or_overlapping_mark_list_is_refused() {
+        let sorted = Segment::new(
+            0,
+            60,
+            Level::new("verse").expect("a level"),
+            "Matt.4.4".parse().expect("a locator"),
+        )
+        .with_mark(Mark::new(10, 20))
+        .with_mark(Mark::new(30, 40));
+        let good = encode_table(std::slice::from_ref(&sorted));
+        assert!(decode_table(&good).is_ok());
+
+        let mut backwards = sorted.clone();
+        backwards.reported.reverse();
+        let bad = encode_table(std::slice::from_ref(&backwards));
+        assert!(
+            matches!(decode_table(&bad), Err(CodecError::NonDeterministic { .. })),
+            "the wire order is the list order, so an unsorted list is two encodings of one table"
+        );
+
+        let mut overlapping = sorted.clone();
+        overlapping.reported[1].start = 15;
+        let bad = encode_table(std::slice::from_ref(&overlapping));
+        assert!(matches!(
+            decode_table(&bad),
+            Err(CodecError::NonDeterministic { .. })
+        ));
+    }
+
+    /// A mark with no marks on it costs nothing on the wire.
+    #[test]
+    fn a_row_with_no_marks_writes_no_key_nine() {
+        let plain = Segment::new(
+            0,
+            60,
+            Level::new("verse").expect("a level"),
+            "Matt.4.4".parse().expect("a locator"),
+        );
+        let bytes = encode_table(std::slice::from_ref(&plain));
+        // The key is absent rather than an empty array, so every reading written before key 9
+        // existed is byte-identical to the same reading written now.
+        assert!(
+            !bytes.contains(&0x09),
+            "key 9 is not in the bytes: {bytes:02x?}"
+        );
+    }
+
     use super::*;
     use crate::norm::Normalised;
 

@@ -221,7 +221,9 @@ fn read_xml(source: &str, limits: &mut Budget) -> Result<ReadOutput, LibError> {
                 })?;
                 match capture {
                     Some(_) => captured.push_str(&text),
-                    None if !in_information => doc.write(&text),
+                    None if !in_information => {
+                        doc.write(&text);
+                    }
                     None => {}
                 }
             }
@@ -234,7 +236,9 @@ fn read_xml(source: &str, limits: &mut Budget) -> Result<ReadOutput, LibError> {
                 })?;
                 match capture {
                     Some(_) => captured.push_str(&text),
-                    None if !in_information => doc.write(&text),
+                    None if !in_information => {
+                        doc.write(&text);
+                    }
                     None => {}
                 }
             }
@@ -248,7 +252,9 @@ fn read_xml(source: &str, limits: &mut Budget) -> Result<ReadOutput, LibError> {
                 let resolved = xml::entity(ID, &name, at)?;
                 match capture {
                     Some(_) => captured.push_str(&resolved),
-                    None if !in_information => doc.write(&resolved),
+                    None if !in_information => {
+                        doc.write(&resolved);
+                    }
                     None => {}
                 }
             }
