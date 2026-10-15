@@ -1,6 +1,6 @@
 # Fixtures
 
-Six trees, with different jobs.
+Seven trees, with different jobs.
 
 | Tree | Contents | Consumed by |
 |---|---|---|
@@ -22,11 +22,20 @@ addressed to: a fixture is an instrument, and these are the things being measure
 |---|---|---|
 | `chronology/` | 45 pairs of public dates whose order is a matter of record, `earlier`/`later`/relation/note | GE-T13's fourth clause (`crates/smysl-text/tests/ge_t13.rs`) |
 | `library/bibles/` | `expected.tsv` and `slice.tsv`, the identities five scripture libraries build to; `slice/`, Ruth and Jude in five editions; `wire/`, one expression the three ports recompute | GE-T1's corpus clause (`crates/smysl-text/tests/ge_t1_bibles.rs`, `gen_bible_wire.rs`, and the three ports' library suites) |
+| `library/link/` | `planted.tsv`, fifty pairs of claims that cannot both be true, each half cited in a different book | GE-T11 (`crates/smysl-text/tests/ge_t11.rs`) |
 
 `library/bibles/slice/` is 112 KiB of public-domain scripture, carried because a two-platform
 comparison that needs three megabytes mounted first is a comparison nobody runs. The whole corpus
 stays outside: `SMYSL_GE_T1=<dir>` points the harness at it, and `SMYSL_CHRONOLOGY=<file>` replaces
 the chronology with somebody else's.
+
+`library/link/planted.tsv` is the one file here a person wrote from nothing, and its header says
+so before it says anything else. GE-T11 asks for fifty *far* contradictions, which no corpus
+supplies ready-made — a text that contradicts itself two books later does so by accident and not
+on request — so they are planted, in the idiom of `library/bibles/slice/eng-kjv/` and at locators
+in two different books. A recall measured over a set its own author wrote is a statement about the
+instrument; `SMYSL_GE_T11_PLANTED=<file>` and `SMYSL_GE_T11_CORPUS=<dir>` are how it becomes a
+statement about the linker.
 
 The conformance tree is deliberately **external** — fixture files plus expected
 diagnostics, no Rust — so a second implementation in another language validates against

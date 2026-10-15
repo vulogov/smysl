@@ -79,6 +79,9 @@ fn reproducible(cmd: &Cmd, sub: &ArgMatches) -> Option<bool> {
             // `pack` reads `--engine` only inside its `--query` branch, so a pack with no query
             // cannot reach an embedding however the engine is set.
             "pack" => Some(!(sub.get_one::<String>("query").is_some() && embeds(sub))),
+            // `link --candidates` lists what the generator chose and stops there, which is a
+            // function of the store. Every other invocation asks a model about those pairs.
+            "link" => Some(sub.get_flag("candidates")),
             _ => None,
         },
     }
@@ -153,6 +156,8 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "text",      about: "Library: add, append, list and show texts",           purity: Purity::Pure,  phase: "TX-P1"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "date",      about: "Write datings; show effective time and why",          purity: Purity::Pure,  phase: "TX-P3"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "same-as",    about: "Propose same-as edges; derive classes",               purity: Purity::Pure,  phase: "TX-P7"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "link",      about: "Judge candidate pairs; stage entails and contradicts", purity: Purity::Mixed, phase: "TX-P7"  , impure_when: Some("every action but --candidates, which only lists them") , forms: NO_DOCUMENT },
+    Cmd { name: "summarise", about: "Grounded summary tree over a scope; staged",           purity: Purity::Model, phase: "TX-P7"  , impure_when: None , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -682,6 +687,94 @@ fn cli() -> Command {
                     Arg::new("dry-run")
                         .long("dry-run")
                         .help("Report what would be staged, and write nothing")
+                        .action(ArgAction::SetTrue),
+                ),
+            "link" => sub
+                .arg(
+                    Arg::new("scope")
+                        .long("scope")
+                        .value_name("WHO")
+                        .num_args(1..)
+                        .help("Restrict to the units drawn from these aliases or mids"),
+                )
+                .arg(
+                    Arg::new("candidates")
+                        .long("candidates")
+                        .help("List the pairs the generator chose and stop; calls no model")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("per-unit")
+                        .long("per-unit")
+                        .value_name("N")
+                        .default_value("16")
+                        .value_parser(clap::value_parser!(usize))
+                        .help("Candidates one unit may contribute; this is what spends"),
+                )
+                .arg(
+                    Arg::new("neighbours")
+                        .long("neighbours")
+                        .short('n')
+                        .value_name("K")
+                        .default_value("32")
+                        .value_parser(clap::value_parser!(usize))
+                        .help("BM25 neighbours retrieved per unit, before the budget"),
+                )
+                .arg(
+                    Arg::new("hub")
+                        .long("hub")
+                        .value_name("N")
+                        .default_value("32")
+                        .value_parser(clap::value_parser!(usize))
+                        .help("Above this many mentions an entity confirms but does not raise"),
+                )
+                .arg(
+                    Arg::new("pairs")
+                        .long("pairs")
+                        .value_name("N")
+                        .default_value("10")
+                        .value_parser(clap::value_parser!(usize))
+                        .help("Pairs per model turn"),
+                )
+                .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .value_name("MS")
+                        .help("Wall clock for the attestations, in milliseconds")
+                        .value_parser(clap::value_parser!(u64)),
+                )
+                .arg(
+                    Arg::new("yes")
+                        .long("yes")
+                        .help("Commit the staged edges instead of leaving them for review")
+                        .action(ArgAction::SetTrue),
+                ),
+            "summarise" => sub
+                .arg(
+                    Arg::new("scope")
+                        .long("scope")
+                        .required(true)
+                        .value_name("ALIAS")
+                        .help("The expression to summarise, by alias or `m3:` id"),
+                )
+                .arg(
+                    Arg::new("levels")
+                        .long("levels")
+                        .value_name("L,...")
+                        .default_value("chapter")
+                        .help("Structure levels, lowest first; each is grounded on the one below"),
+                )
+                .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .value_name("MS")
+                        .help("Wall clock for the attestations, in milliseconds")
+                        .value_parser(clap::value_parser!(u64)),
+                )
+                .arg(
+                    Arg::new("yes")
+                        .long("yes")
+                        .help("Commit the staged summaries instead of leaving them for review")
                         .action(ArgAction::SetTrue),
                 ),
             "view" => sub
@@ -6966,6 +7059,8 @@ fn main() -> ProcExitCode {
         "text" => cmd_text(sub, &matches),
         "date" => cmd_date(sub, &matches),
         "same-as" => cmd_same_as(sub, &matches),
+        "link" => cmd_link(sub, &matches),
+        "summarise" => cmd_summarise(sub, &matches),
         _ => {
             // Unreachable while every command in `COMMANDS` has an arm above, which
             // `command_table_matches_section_23` enforces. Kept as the honest answer if one
@@ -8341,6 +8436,11 @@ fn cmd_same_as(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
 /// alignment, which only a library has. The difference is reported where it bites rather than
 /// refused up front.
 #[cfg(feature = "text")]
+// The labels are read only where a batch is committed, which is `ingest`'s. A build with
+// `text` and no `ingest` answers the pure half of `same-as` and `link` and never commits, so
+// the field is carried and unread there — which is the right shape: one `Corpus` for both
+// builds, rather than two that could drift.
+#[cfg_attr(not(feature = "ingest"), allow(dead_code))]
 enum Corpus {
     Library(Box<smysl::text::library::Library>),
     // Both boxed, and the store for the reason clippy gives: a `Store` is some 2.6 KiB of
@@ -8646,6 +8746,353 @@ fn same_as_classes(m: &ArgMatches, path: &str) -> ExitCode {
     ExitCode::Success
 }
 
+/// The versification alignment, where the corpus is a library that has one.
+///
+/// Cloned out of the index rather than borrowed, so the table outlives the borrow of the
+/// library it came from — `link` hands it to a generator and then hands the library itself to
+/// the staging step, and a borrow would make those two the same lifetime.
+#[cfg(feature = "text")]
+impl Corpus {
+    fn alignment(&self) -> Option<smysl::text::index::align::Table> {
+        match self {
+            Corpus::Library(l) => Some(l.index().align.clone()),
+            Corpus::Store(..) => None,
+        }
+    }
+}
+
+/// Rule S, the same way for every command that stages: write, or write and commit on `--yes`.
+///
+/// Extracted from `same-as propose` when `link` and `summarise` needed the identical sequence.
+/// Three commands spelling out "append to a library, discard the sidecar; or write the sidecar
+/// and commit a store" would be three chances to get the library branch's `discard` wrong, and
+/// forgetting it leaves a staged file that the next `merge --staged` applies twice.
+#[cfg(all(feature = "text", feature = "ingest"))]
+fn stage_or_commit(
+    cmd: &str,
+    path: &str,
+    mut corpus: Corpus,
+    staged: &smysl::stage::Staged,
+    yes: bool,
+) -> ExitCode {
+    if staged.has_errors() {
+        eprintln!("smysl {cmd}: the batch did not check clean");
+        for d in &staged.report.diagnostics {
+            eprintln!("  {d}");
+        }
+        return ExitCode::Failure;
+    }
+    let root = std::path::PathBuf::from(".");
+    let n = staged.len();
+    if yes {
+        let records = staged.records();
+        match &mut corpus {
+            Corpus::Library(l) => {
+                if let Err(e) = l.append_records(&records) {
+                    eprintln!("smysl {cmd}: {e}");
+                    return ExitCode::Failure;
+                }
+                let _ = smysl::stage::discard(&root);
+            }
+            Corpus::Store(store, labels) => {
+                if let Err(e) = smysl::stage::write(&root, staged) {
+                    eprintln!("smysl {cmd}: {e}");
+                    return ExitCode::Failure;
+                }
+                let store = &**store;
+                if let Err(code) = commit_staged(cmd, path, &root, &records, store, labels) {
+                    return code;
+                }
+            }
+        }
+        println!("{n} record(s) committed");
+        return ExitCode::Success;
+    }
+    if let Err(e) = smysl::stage::write(&root, staged) {
+        eprintln!("smysl {cmd}: {e}");
+        return ExitCode::Failure;
+    }
+    println!(
+        "{n} record(s) staged in {}; review, then `smysl merge --staged`",
+        root.join(smysl::stage::PATH).display()
+    );
+    // Rule S: exit 10 is how a pipeline is told that nothing is committed yet.
+    ExitCode::Staged
+}
+
+/// The options a model-backed TX-P7 pass runs under.
+///
+/// The agent is `tool:smysl-<pass>` and the rung is `model`, which is the pair `ingest` uses
+/// and says the right two things: this tool wrote the record, and a model's reading is the
+/// evidence for it. The clock is supplied and never read (guarantee A2).
+#[cfg(all(feature = "text", feature = "ingest", feature = "providers"))]
+fn model_options(m: &ArgMatches, pass: &str) -> Result<smysl::IngestOptions, ExitCode> {
+    let agent = match AgentId::new(format!("tool:smysl-{pass}")) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl {pass}: {e}");
+            return Err(ExitCode::Failure);
+        }
+    };
+    let at = m.get_one::<u64>("at").copied().unwrap_or_else(now_millis);
+    Ok(smysl::IngestOptions::at_rung(smysl::Rung::Model)
+        .with_agent(agent.clone())
+        .with_now(smysl::Hlc::new(at, 0, agent)))
+}
+
+/// `smysl link` — judge the candidate pairs and stage what the model says (§3.5, TX-P7).
+///
+/// Two commands in one, and the flag that separates them is `--candidates`: the generator is
+/// pure and the judge is not, so a reader who wants to see what would be asked can see it
+/// without paying for an answer. That is also what makes the command registrable in the
+/// determinism matrix, where `--candidates` is the operation checked.
+#[cfg(feature = "text")]
+fn cmd_link(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use smysl::text::link::Budget;
+
+    let path = match store_path(m, global, "link") {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+    warn_output_is_a_report(global, "link");
+
+    let corpus = match Corpus::open(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("smysl link: {path}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let scope = match same_as_scope(m, &corpus) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    let mut budget = Budget::DEFAULT;
+    budget.per_unit = *m.get_one::<usize>("per-unit").unwrap_or(&budget.per_unit);
+    budget.neighbours = *m
+        .get_one::<usize>("neighbours")
+        .unwrap_or(&budget.neighbours);
+    budget.hub = *m.get_one::<usize>("hub").unwrap_or(&budget.hub);
+    if budget.per_unit == 0 {
+        eprintln!("smysl link: --per-unit 0 asks about nothing");
+        return ExitCode::Usage;
+    }
+    // The alignment, where the corpus is a library that has one. A plain store has no
+    // versification to anchor against, and the anchored source is simply silent there — it is
+    // one of four, and the other three do not need a library.
+    let table = corpus.alignment();
+
+    if m.get_flag("candidates") {
+        let found =
+            smysl::text::link::candidates(corpus.store(), scope.as_ref(), table.as_ref(), budget);
+        for c in &found {
+            let sources: Vec<&str> = c.sources.iter().map(|s| s.as_str()).collect();
+            println!(
+                "  {} {} — {} ({})",
+                c.a.short(),
+                c.b.short(),
+                c.why,
+                sources.join("+")
+            );
+        }
+        println!(
+            "{} candidate(s) at {} per unit, {} neighbour(s), hub {}",
+            found.len(),
+            budget.per_unit,
+            budget.neighbours,
+            budget.hub
+        );
+        return ExitCode::Success;
+    }
+
+    link_judge(m, global, &path, corpus, scope, table, budget)
+}
+
+#[cfg(not(feature = "text"))]
+fn cmd_link(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl link: needs the library layer (build with --features text)");
+    ExitCode::Usage
+}
+
+/// The impure half: a provider, a turn per batch of pairs, and rule S.
+#[cfg(all(feature = "text", feature = "ingest", feature = "providers"))]
+#[allow(clippy::too_many_arguments)]
+fn link_judge(
+    m: &ArgMatches,
+    global: &ArgMatches,
+    path: &str,
+    corpus: Corpus,
+    scope: Option<std::collections::BTreeSet<Uid>>,
+    table: Option<smysl::text::index::align::Table>,
+    budget: smysl::text::link::Budget,
+) -> ExitCode {
+    let registry = match load_registry(global) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl link: {}", e.message);
+            return e.code;
+        }
+    };
+    let opts = match model_options(m, "link") {
+        Ok(o) => o,
+        Err(code) => return code,
+    };
+    let pairs = *m.get_one::<usize>("pairs").unwrap_or(&10);
+    let report = match smysl::Ingestor::new(&registry, opts).link(
+        corpus.store(),
+        scope.as_ref(),
+        table.as_ref(),
+        budget,
+        pairs,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl link: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    for d in &report.diagnostics {
+        eprintln!("  {}", d.code.as_str());
+        eprintln!("    {}", d.message);
+    }
+    println!(
+        "{} candidate(s), {} asked in {} turn(s); {} contradicts, {} entails, {} unrelated, \
+         {} unanswered",
+        report.candidates,
+        report.asked,
+        report.turns,
+        report.contradicts,
+        report.entails,
+        report.unrelated,
+        report.unanswered
+    );
+    if report.already > 0 {
+        println!(
+            "  {} pair(s) the store already relates, which were not asked again",
+            report.already
+        );
+    }
+    let Some(staged) = report.staged else {
+        println!("nothing to stage");
+        return ExitCode::Success;
+    };
+    stage_or_commit("link", path, corpus, &staged, m.get_flag("yes"))
+}
+
+#[cfg(all(feature = "text", not(all(feature = "ingest", feature = "providers"))))]
+#[allow(clippy::too_many_arguments)]
+fn link_judge(
+    _m: &ArgMatches,
+    _global: &ArgMatches,
+    _path: &str,
+    _corpus: Corpus,
+    _scope: Option<std::collections::BTreeSet<Uid>>,
+    _table: Option<smysl::text::index::align::Table>,
+    _budget: smysl::text::link::Budget,
+) -> ExitCode {
+    eprintln!(
+        "smysl link: judging needs a provider and the staging layer (build with --features \
+         ingest); `link --candidates` is pure and works in this build"
+    );
+    ExitCode::Usage
+}
+
+/// `smysl summarise` — a grounded summary tree over one expression (§3.5, TX-P7).
+#[cfg(all(feature = "text", feature = "ingest", feature = "providers"))]
+fn cmd_summarise(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use smysl::text::library::Library;
+    use smysl::text::reading::Level;
+
+    let path = match store_path(m, global, "summarise") {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+    warn_output_is_a_report(global, "summarise");
+
+    let lib = match Library::open(std::path::Path::new(&path)) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl summarise: {path}: {e}");
+            eprintln!("  a summary tree takes its levels from a reading, which only a library has");
+            return ExitCode::Failure;
+        }
+    };
+    let alias = m.get_one::<String>("scope").expect("required by clap");
+    let named = m
+        .get_one::<String>("levels")
+        .map(String::as_str)
+        .unwrap_or("chapter");
+    let mut levels = Vec::new();
+    for name in named.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        match Level::new(name) {
+            Some(l) => levels.push(l),
+            None => {
+                eprintln!("smysl summarise: --levels `{name}` is not a level name");
+                eprintln!(
+                    "  a level is lowercase letters, as a reader writes them: {}",
+                    smysl::text::reading::LEVELS.join(", ")
+                );
+                return ExitCode::Usage;
+            }
+        }
+    }
+    if levels.is_empty() {
+        eprintln!("smysl summarise: --levels names no level");
+        return ExitCode::Usage;
+    }
+
+    let registry = match load_registry(global) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl summarise: {}", e.message);
+            return e.code;
+        }
+    };
+    let opts = match model_options(m, "summarise") {
+        Ok(o) => o,
+        Err(code) => return code,
+    };
+    let report = match smysl::Ingestor::new(&registry, opts).summarise(&lib, alias, &levels, None) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl summarise: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    for d in &report.diagnostics {
+        eprintln!("  {}", d.code.as_str());
+        eprintln!("    {}", d.message);
+    }
+    for (level, n) in &report.levels {
+        println!("  {level}: {n} summary(ies)");
+    }
+    println!(
+        "{} summary(ies) in {} turn(s); {} capped by rule M, {} node(s) too thin to summarise",
+        report.summaries, report.turns, report.capped, report.thin
+    );
+    let Some(staged) = report.staged else {
+        println!("nothing to stage");
+        return ExitCode::Success;
+    };
+    stage_or_commit(
+        "summarise",
+        &path,
+        Corpus::Library(Box::new(lib)),
+        &staged,
+        m.get_flag("yes"),
+    )
+}
+
+#[cfg(not(all(feature = "text", feature = "ingest", feature = "providers")))]
+fn cmd_summarise(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!(
+        "smysl summarise: needs the library layer and a provider (build with --features \
+         text,ingest)"
+    );
+    ExitCode::Usage
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -8776,7 +9223,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 29);
+        assert_eq!(COMMANDS.len(), 31);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -8809,7 +9256,9 @@ mod tests {
                 "ui",
                 "text",
                 "date",
-                "same-as"
+                "same-as",
+                "link",
+                "summarise"
             ]
         );
     }
@@ -8824,13 +9273,17 @@ mod tests {
     /// reader cannot pass, which is what 1.9 briefly shipped; `impure_when` now says the flag
     /// is not yet wired, and `--seed-check` lets every `thread` invocation run.
     #[test]
-    fn only_ingest_and_attest_are_model_dependent() {
+    fn only_ingest_attest_and_summarise_are_model_dependent() {
         let model: Vec<&str> = COMMANDS
             .iter()
             .filter(|c| c.purity == Purity::Model)
             .map(|c| c.name)
             .collect();
-        assert_eq!(model, ["ingest", "attest"]);
+        assert_eq!(
+            model,
+            ["ingest", "attest", "summarise"],
+            "a summary is a model's sentence; there is no pure invocation of it"
+        );
 
         let mixed: Vec<&str> = COMMANDS
             .iter()
@@ -8839,7 +9292,7 @@ mod tests {
             .collect();
         assert_eq!(
             mixed,
-            ["pack", "thread", "find"],
+            ["pack", "thread", "find", "link"],
             "a command is mixed when some invocation of it calls a model"
         );
 
@@ -8871,7 +9324,7 @@ mod tests {
     /// this test rather than shipping a flag that answers "I cannot say".
     #[test]
     fn seed_check_can_judge_every_mixed_command() {
-        let judged = ["find", "pack", "thread"];
+        let judged = ["find", "pack", "thread", "link"];
         for c in COMMANDS.iter().filter(|c| c.purity == Purity::Mixed) {
             assert!(
                 judged.contains(&c.name),

@@ -453,6 +453,29 @@ const OPS: &[Op] = &[
         ],
         setup: None,
     },
+    Op {
+        name: "link_candidates",
+        // The pure half of the linker: which pairs the generator chose, at a stated budget.
+        // Registered because the budget is the thing a reader has to be able to reproduce —
+        // GE-T11's figure is a recall *at a budget*, and a generator whose output drifted
+        // between runs would make that figure unrepeatable while every test still passed.
+        // `--candidates` calls no model and writes nothing, which is what lets it run here at
+        // all; every other invocation of `link` is a model turn and is out of rule D's reach.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli,text",
+            "--",
+            "link",
+            "--candidates",
+            "-s",
+            "fixtures/library/same-as/anthology.smy",
+        ],
+        setup: None,
+    },
 ];
 
 /// Two-stage operations, run as a shell pipeline. `render` needs a thread, and the only
@@ -481,9 +504,9 @@ pub fn run(root: &Path) -> Result<(), String> {
         println!("  no operations registered yet");
         return Ok(());
     }
-    // Rule D names five. `text add`, `text show`, `date show` and the two `same-as`
-    // operations are SMYSL-2.4's and are not in §25's list because they did not exist when it
-    // was written; they are here because they are pure operations whose output must be a
+    // Rule D names five. `text add`, `text show`, `date show`, the two `same-as` operations
+    // and `link --candidates` are SMYSL-2.4's and are not in §25's list because they did not
+    // exist when it was written; they are here because they are pure operations whose output must be a
     // function of their input, which is all rule D says.
     let registered = OPS.len() + PIPELINES.len();
     println!(

@@ -806,6 +806,50 @@ shape.
 - **Chats.** Windows follow reply threads (substrate edges in the segment table), not wall-clock
   order.
 
+**Built in TX-P7 step 3**, as `smysl_text::link` (the candidate generator, pure),
+`smysl_ingest::link` (the judgement and the staging) and `smysl_ingest::summarise`. Five things
+the two bullets above leave implicit and the implementation had to decide:
+
+1. **Adjacency is off in the linker, and that is the whole difference from §3.6's engines.**
+   `proposition::Lexical` filters its neighbours to the same or a neighbouring verse because S0
+   measured that filter carrying precision from 0.789 to 0.835. A linker that did the same could
+   not find what it is for: GE-T11's word is *far*, and the pairs the filter removes are exactly
+   the ones a reader cannot find by reading forwards. The precision the filter was buying is
+   bought here by the judge instead, which is the thing the linker has and the engines do not.
+
+2. **A hub entity confirms and does not raise.** The first cut dropped entities that too many
+   units mention — the inverse-document-frequency argument, and right as far as it goes. It also
+   dropped the *conjunction*: a pair that another source already found and that also shares a
+   name is a pair two independent kinds of evidence point at. Over a corpus that is one story
+   about four people that is every pair worth having; in Ruth, everything mentions Naomi.
+   Measured, the cutoff then moves neither the recall nor the candidate count between 4 and ten
+   thousand, which is how one knows it was the wrong lever and the conjunction was the right one.
+
+3. **The candidate budget is three numbers, and all three are in the recipe.** `per_unit` spends
+   model turns, `neighbours` spends arithmetic, `hub` bounds what one name may cost. §3.5 says
+   the budget is a recipe field and the reason is corroboration — two runs at different budgets
+   were shown different pairs — so all three are hashed, not only the one that spends.
+
+4. **`unrelated` is a verdict and the prompt spends its length on it.** At sixteen candidates per
+   unit most pairs are merely near each other. A judge that felt it had to find something would
+   turn every near pair into an entailment, and that — not misreading a contradiction — is the
+   failure a pairwise judge actually has.
+
+5. **The summary tree is the reading's tree.** A pass that split locators on dots would agree
+   with the reading for USFM and disagree with it for every other reader, silently. So
+   `summarise` takes the library and the expression as well as the levels, which §4.2's
+   `summarise(&self, levels, scope)` has no way to do, and each level after the first is grounded
+   on the level below rather than on the verses again: four sentences in and one out, with the
+   chain of grounds reaching the text through the tree.
+
+Rule M is **not** implemented in the summariser. `stage::prepare_under` applies it, exactly as
+for an ingest batch, and that is the whole reason the cap can be trusted — a second
+implementation of rule M, in the one pass whose output is likeliest to overclaim, is the one
+that would be wrong. The visible consequence is that a summary's uid is not known until it is
+staged: weakening moves the core, and `prepare_under` re-points the `x.text/summarises` edges
+onto the new uids. `SummaryReport::capped` counts it, because a tree where every node was
+lowered is a tree built over material that does not support it.
+
 **Landed 2026-10-12** (§6 TX-P5 step 4), for the digest and the journal: `text::digest` packs
 `smysl_pack` over what the expression already holds, ranked by salience then reading order, and
 returns the text, the digest-local labels, the allowed uid set and a hash over what was sent. The
@@ -1186,6 +1230,7 @@ crates/smysl-text/
       identical.rs  identical-span engine
       lexical.rs    lexical engine (BM25 via smysl-retrieve)
       anchored.rs   anchored engine (align table)
+    link.rs         the linker's candidate generator: four sources, one budget (TX-P7 step 3)
     index/          feature substrate-redb
       mod.rs        Index handle, table definitions (§14.2 subset), rebuild, on_append
       postings.rs   persistent postings; implements smysl_retrieve::Postings
@@ -1222,7 +1267,7 @@ keeps `retrieve` below `text`.
 | `smysl-graph` | `src/store/library.rs` (by-part maps, manifests and heads, datings, redaction filter) |
 | `smysl-check` | `src/passes/library.rs`, `src/passes/time.rs` |
 | `smysl-retrieve` | `src/analyze.rs` (seam), `src/postings.rs` (seam + in-memory impl) |
-| `smysl-ingest` | `src/text/mod.rs`, `src/text/window.rs`, `src/text/attach.rs`, `src/text/digest.rs`, `src/text/journal.rs`, `src/link.rs`, `src/summarise.rs`, `src/same_as.rs` (staging of proposals) |
+| `smysl-ingest` | `src/text/mod.rs`, `src/text/window.rs`, `src/text/attach.rs`, `src/text/digest.rs`, `src/text/journal.rs`, `src/link.rs` (built, step 3), `src/summarise.rs` (built, step 3), `src/same_as.rs` (staging of proposals) |
 
 ### 4.2 Public API (sketch level)
 
@@ -1372,6 +1417,18 @@ impl Ingestor { pub fn ingest_text(&self, t: &TextIngest<'_>, attest: &dyn Attes
 pub mod text { pub fn windows(s: &Structure, level: Level, budget: u32, est: &dyn Estimate) -> Vec<TextWindow>; }
 pub fn link(&self, scope: &BTreeSet<Uid>, budget: LinkBudget) -> Result<Staged, ProviderError>;     // on Ingestor
 pub fn summarise(&self, levels: &[Level], scope: &BTreeSet<Uid>) -> Result<Staged, ProviderError>;
+// As built (TX-P7 step 3), and three departures, each because the sketch cannot say something:
+//   the candidate generator is `smysl_text::link` and is pure, so GE-T11 is measured without
+//     buying a model turn — a measurement that cost money is a measurement nobody runs;
+//   both return a *report* rather than a `Staged`, because the counts are the thing a caller
+//     reads (how many were asked, how many came back `unrelated`, how many rule M lowered) and
+//     a batch cannot answer any of them — it holds only what survived;
+//   `summarise` takes the library and the expression as well, because `chapter` is a fact about
+//     a reading and there is no way to turn it into a set of units from a scope alone.
+pub fn link(&self, store: &Store, scope: Option<&BTreeSet<Uid>>, table: Option<&align::Table>,
+            budget: link::Budget, pairs_per_turn: usize) -> Result<LinkReport, ProviderError>;
+pub fn summarise(&self, lib: &Library, alias: &str, levels: &[Level],
+                 scope: Option<&BTreeSet<Uid>>) -> Result<SummaryReport, ProviderError>;
 ```
 
 ### 4.3 Changes to existing crates, file by file
@@ -1622,8 +1679,8 @@ Cmd { name: "same-as",   about: "Propose same-as edges; derive classes",        
 | `date order <a> before <b>` | `[--basis UID]` (sugar for a relative `date set`) | pure | P3 |
 | `date show <target>` | `[--axis A] [--why]` | pure | P3 |
 | `ingest --text <alias\|mid>[#range]` | `--lang-policy source\|pivot:L [--reextract] [--digest-budget N] [--window-level L] [--single-pass] [--cost]` | model | P5 |
-| `link` | `--scope <alias\|mid…> [--budget N]` (an `sq` scope once SMYSL-2.5 lands) | model | P7 |
-| `summarise` | `--scope … --levels chapter,book` | model | P7 |
+| `link` | `--scope <alias\|mid…> [--candidates] [--per-unit N] [-n K] [--hub N] [--pairs N] [--at MS] [--yes]` (an `sq` scope once SMYSL-2.5 lands) | mixed (built, step 3): pure under `--candidates` | P7 |
+| `summarise` | `--scope <alias\|mid> [--levels chapter,book] [--at MS] [--yes]` | model (built, step 3) | P7 |
 | `same-as propose` | `--engine identical-span\|lexical\|anchored [--scope …] [-n K] [--no-adjacent] [--at MS] [--yes] [--dry-run]` (`semantic` reserved for SMYSL-2.5) | pure (built, step 2) | P7 |
 | `same-as classes` | `--policy strict\|component\|attested:N [--scope …]` | pure (built, step 2) | P7 |
 | `find` | `--lang L --analyzer A` added | pure | P4 |
@@ -1649,12 +1706,23 @@ Cmd { name: "same-as",   about: "Propose same-as edges; derive classes",        
   and an `m3:` does not, and a plain store says so. `--dry-run` is the determinism matrix's,
   and `--yes` over a surface store is refused because an attestation has no surface form.
 
+- **`link` and `summarise`** (P7, built in step 3). `link` is **mixed** rather than the draft's
+  `model`, because `--candidates` lists the pairs the generator chose and calls nothing: the
+  budget is the thing a reader has to be able to reproduce — GE-T11's figure is a recall *at a
+  budget* — and a flag that shows the questions without buying the answers is what makes that
+  checkable and what puts the operation in the determinism matrix. `--budget N` became three
+  numbers, `--per-unit`, `--neighbours` and `--hub`, because they buy different things: one
+  spends model turns and the other two spend arithmetic, and a single figure would have tied
+  them together. `summarise` stays `model`: there is no pure invocation of a sentence.
+  `--scope` on `summarise` names **one expression** and not a set of units, because the levels
+  come from that expression's reading.
+
 - **Gates touched.** `tests/cli-surface.txt` regenerated (`make cli-surface`, after adding the
   names to the Makefile's `COMMAND_NAMES`);
   `command_table_matches_section_23` and `tests/dispatch.rs::every_command_dispatches` gain the
   rows; `xtask determinism` registers `text add` (reader output bytes), `text show`, `date show`,
-  `same-as propose --engine identical-span`, `same-as classes` — the `ru_RU.UTF-8` locale in its
-  matrix is exactly the one case folding would betray.
+  `same-as propose --engine identical-span`, `same-as classes` and `link --candidates` — the
+  `ru_RU.UTF-8` locale in its matrix is exactly the one case folding would betray.
 - **Exit codes** reuse today's (`Staged`, `StagedWithCorrections` for staging commands).
 
 ### 4.5 Features, dependencies, purity gate, C toolchain
@@ -1875,7 +1943,7 @@ The `.expected` format is the existing one (`fixtures/README.md`): exact code se
 | **GE-T13** (effective time) | TX-P3 | synthetic chats with planted skews plus a public chronology with known relative orders; P-E4/P-E5 on real data; any planted skew undetected, or any false contested interval on consistent data, blocks TX-P4. **Ran in TX-P3 step 5** (`crates/smysl-text/tests/ge_t13.rs`), and three of its four clauses are met. *Synthetic chats with planted skews:* 64 generated chats, each a chain of messages quoting the one before it with one instant moved — every skew that contradicts an ordering is detected and every skew that leaves every ordering true is **not** reported, which is the half that matters equally: a detector that flagged everything would pass the first clause and fail the gate. *No false contested interval on consistent data:* the three chat fixtures, unmodified, report nothing. *P-E4/P-E5 on real data:* the same fixtures, with the real timestamps and the real reply graph — `telegram/1`'s `reply` and `slack/1`'s `thread` give five orderings between them, `whatsapp.txt` gives none because the export format records no reply — every interval contains the instant the export recorded, every planted skew is found, and one window dating with a `cited` basis puts the message back. The **units are synthesised**, and that is stated in the harness: a chat reaches a unit only through ingest, which is TX-P5, so there is no store of units from a chat for a gate that blocks TX-P4 to read. One row per message at its recorded instant and an `x.text/quotes` edge per reply is what ingest will build minus the model, which makes the *data* real and the units this harness's. *A public chronology with known relative orders* was **owed** and is **paid in 1.10.0**: `fixtures/chronology/public.tsv`, 45 pairs of public dates with a note naming the events on every line, so the order is checkable against what a reader already knows and the only authored part is which pairs were picked. They were picked to be awkward rather than to pass — approximate and uncertain values, unspecified digits, seasons, intervals, open ends, a negative year and a `Y`-year — and the file carries two relations, because one of them cannot fail. `before` (the published two-column form) says the earlier value's extent may not start after the later one's ends, which is all a pair of overlapping extents can claim and is also satisfied by an engine that widened everything to a century. `disjoint`, claimed by 39 of the 43 decidable pairs, says the extents may not overlap at all, and a widened extent fails it. A pair open on the side compared is **not decidable** and is counted and reported rather than passed, with most of the file required to be decidable — a run of satisfied-by-vacuity pairs reads exactly like a run of passing ones. It bit twice while being written: spring and autumn of 1918 are *not* ordered here, which is OQ-71(b) working as decided (a season is its year, EDTF fixing no hemisphere), and a `Y`-year of 13.8 billion is refused outright, this build bounding that year to 32 bits. `SMYSL_CHRONOLOGY=<file>` still replaces the material with somebody else's and needs no code change. |
 | ~~**GE-T14** (part size)~~ | ~~end of TX-P2~~ | **Ran in TX-P2 step 6; the curve is in §3.1 and the default is fixed at 1 KiB / 4 MiB.** Three of the four axes are independent of the size — growth costs at most two parts, a same-length correction one, a re-length every part after it — so the only trade is object count and catalog size against redaction granularity, and 64 KiB made one redaction remove sixteen days of a conversation. The measurement is synthetic and says so: every axis is a function of the structure alone, so the material still owed is only whether the node-size distributions match real corpora. `crates/smysl-text/tests/part_size.rs` asserts the curve rather than printing it. |
 | **GE-T2** (extraction stability) | rerun at TX-P5 | under the consensus policy (§3.4), not the single-pass policy draft 3 assumed. Stability is measured as `identical-span` agreement between the two passes — computed, not judged — and reported per language. The judged `J_class` form of GE-T2 waits for GE-T9 with GE-T5, for the reason in the row below. S0's pilot: `J_class` 1.000 local, 0.327 hosted, against a 0.6 threshold. **Ran in TX-P5 step 5** (`crates/smysl-ingest/tests/ge_t2.rs`): the **instrument** is met and the **corpus is owed**. `TextReport::agreement` records the figure per run and `TextReport::lang` carries the language it is reported under, so the grouping is data rather than a caller's memory. Measured scripted: 1.000 in English and in Russian where both passes found the same places, 0.500 where the second pass drifted, `None` for a single pass — and that last one was a defect, since one pass agrees with itself by construction and `Agreement::rate` used to divide anyway. The two-language arm earned its keep: it found that the ingest **path** was chosen in bytes, so the Russian corpus was being extracted through the surface parser and the English one through json-ast, which would have made a per-language figure a figure about two pipelines. What is **owed** is the measurement itself, for GE-T13's reason — a corpus is material this repository does not hold, and it is the phase precondition GE-T4's own 200 hand-checked units per tier-1 language. `SMYSL_GE_T2=<dir>` with `SMYSL_INGEST_LIVE=1` measures it with no code change, against whichever provider the machine can reach; without them the harness says the clause is owed rather than passing quietly. The figure is **reported, not thresholded**: the computed form has no bar, because the bar it had (0.6) belongs to the judged form and that waits for GE-T9's human α. |
-| GE-T5 within-language arm, GE-T11 | TX-P7 | as draft 3 §23, **except the threshold** (§1.1 item 5, argued in §0.1). Draft 3's "precision ≥ 0.9 at recall 0.7" is measured against a gold, and S0's gold is three model coders whose binary α is 0.600 [0.550, 0.646] — so 0.9 is above what that gold can support, and the pilot's 0.835 and 0.712 measure the gold rather than the engines. Restated: an engine passes when its agreement with the pooled gold, scored on the coders' own scale, is **not distinguishable from the coders' agreement with each other** — it joins the pool rather than beating it. The absolute bar returns when **GE-T9** supplies a human α, which is still owed; until then every class figure is reported against the model-model ceiling, and `attested:2` is the default (§3.6). The cross-lingual arm of GE-T5 is SMYSL-2.5 and waits for TX-P10's S1 embeddings. |
+| GE-T5 within-language arm, GE-T11 | TX-P7 | **GE-T11 ran and passed 2026-10-14** (`crates/smysl-text/tests/ge_t11.rs`): recall **0.6800**, 34 of 50 planted far contradictions, at the default candidate budget of 16 per unit over 32 retrieved neighbours. It is measured without a model, because the clause is about the *generator* — if the true pair is not in the candidate set, no judge however good will find the contradiction — so it runs on every `make test` rather than when somebody pays for it. The figure's limits are in §6 step 3 and in the harness: a planted set this repository wrote, over a distractor pool of 210 units, with two of the four sources contributing nothing for want of extracted themes and an alignment. `SMYSL_GE_T11_CORPUS` and `SMYSL_GE_T11_PLANTED` replace either without a code change. GE-T5 below is unchanged and still owed. **GE-T5:** as draft 3 §23, **except the threshold** (§1.1 item 5, argued in §0.1). Draft 3's "precision ≥ 0.9 at recall 0.7" is measured against a gold, and S0's gold is three model coders whose binary α is 0.600 [0.550, 0.646] — so 0.9 is above what that gold can support, and the pilot's 0.835 and 0.712 measure the gold rather than the engines. Restated: an engine passes when its agreement with the pooled gold, scored on the coders' own scale, is **not distinguishable from the coders' agreement with each other** — it joins the pool rather than beating it. The absolute bar returns when **GE-T9** supplies a human α, which is still owed; until then every class figure is reported against the model-model ceiling, and `attested:2` is the default (§3.6). The cross-lingual arm of GE-T5 is SMYSL-2.5 and waits for TX-P10's S1 embeddings. |
 
 ### 5.6 Cross-implementation (C-Read additions, D-8)
 
@@ -3434,6 +3502,47 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    What TX-P7 still owes: **step 3** (`link`, `summarise`) and **step 4** (GE-T5).
 3. Linker and summary tree. *Exit:* GE-T11 (recall ≥ 0.6 on 50 planted far contradictions at the
    default candidate budget); summary nodes capped by rule M (asserted).
+
+   **Built 2026-10-14, and both clauses are met.** GE-T11 reports **0.6800, 34 of 50**, at the
+   default budget; the rule M clause is asserted in `crates/smysl-ingest/tests/link.rs`. §3.5
+   above carries the five decisions the two sentences did not contain. What follows is what the
+   measurement cost and what it is worth.
+
+   **The figure's two limits, stated before the figure.** The fifty pairs in
+   `fixtures/library/link/planted.tsv` were written by hand, by the same hand that wrote the
+   generator, so their difficulty is a difficulty that hand chose. And the distractor pool is
+   Ruth and Jude — 110 verses, 210 units with the plants in — which is small enough that a pair
+   has little to be lost among. Both are one environment variable away from being fixed:
+   `SMYSL_GE_T11_CORPUS` takes a directory of `*.smy` and `SMYSL_GE_T11_PLANTED` a set somebody
+   else wrote. The harness prints the corpus size beside the recall for exactly this reason: a
+   recall without a denominator is not a measurement.
+
+   **The defaults were chosen from the measurement, after it, and the measurement is also the
+   gate.** That is worth saying plainly rather than leaving in a constant. What was *not* done is
+   taking the smallest numbers that cleared the bar: `per_unit` is 16, giving 0.68, where 12
+   gives 0.62 — a default sitting exactly on a threshold is a default that fails on the next
+   corpus. `neighbours` is 32 because 24 → 32 moved recall from 0.52 to 0.58 and 32 → 48 moved
+   it not at all, and because retrieval depth is arithmetic while turns are money. The curve
+   through `per_unit` is shallow — 0.48, 0.62, 0.68, 0.78 at 8, 12, 16, 24 — and that shallowness
+   is the honest shape of a lexical generator hunting contradictions.
+
+   **Two things the measurement found that no amount of reading would have.** A BM25 score is not
+   comparable between two queries, so sorting every pair in a corpus by raw score spends the
+   budget on long units' neighbourhoods and never reaches a short unit's best match; reciprocal
+   rank fusion replaced it, and a pair found in both directions sums both, which is how
+   mutuality earns its place without being a special case. And the harness's own stand-in for an
+   extractor had to be calibrated on usage rather than on punctuation: taking every capitalised
+   token except the sentence-initial one loses the *subject*, which in this corpus is the name,
+   and the entity source then found nothing on precisely the pairs it exists for. Counting a
+   token as a name when it is capitalised more often than not moved recall from 0.34 to 0.48.
+
+   **What the committed run does not measure.** Of the four sources, `theme` contributes nothing
+   (no extractor has named a theme in this corpus) and `anchored` nothing (one edition, no
+   alignment). Three of the sixteen misses are *not generated at all* at unlimited depth, and
+   several more sit at BM25 ranks beyond 80 — pairs that share a subject and almost no
+   vocabulary, which no lexical method reaches. Those are TX-P10's S1 embeddings, and the gate
+   passing without them says the other three sources carry the corpus, not that the fourth is
+   unnecessary.
 4. *Exit for the phase:* **GE-T5** within-language arm under §5.5's restated threshold — the
    engine's agreement with the pooled gold is not distinguishable from the coders' agreement with
    each other. Draft 1's "precision ≥ 0.9 at recall 0.7, else class measures ship as exploration

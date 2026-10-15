@@ -50,6 +50,15 @@ pub mod prompt;
 #[doc(hidden)]
 pub use smysl_core::lang;
 pub use smysl_core::quote;
+/// The linker: judging the pairs [`smysl_text::link`] chose, and staging the edges (TX-P7
+/// step 3).
+///
+/// Behind `text` for the reason the module below it is: the candidate generator lives in
+/// `smysl-text`, and a default build of this crate links no library layer. Behind `model` as
+/// well, which `same_as` is not: proposing a same-as is an engine's job and judging a pair is
+/// a model's, so this module has no form that compiles without a provider.
+#[cfg(all(feature = "text", feature = "model"))]
+pub mod link;
 pub mod recipe;
 /// Reachable for `tests/gate.rs`, which drives `check_local` and the degradation path
 /// directly. No consumer runs the re-ask loop itself — `IngestOptions::repair_attempts` is
@@ -67,6 +76,13 @@ pub mod same_as;
 #[doc(hidden)]
 pub mod schema;
 pub mod stage;
+/// The grounded summary tree (TX-P7 step 3).
+///
+/// Behind `text` like the two modules above it: the levels come from a reading, and a reading
+/// is the library layer's. Behind `model` too, like [`link`] and for the same reason — a
+/// summary is a sentence a model writes.
+#[cfg(all(feature = "text", feature = "model"))]
+pub mod summarise;
 /// Text ingest: windows over a reading, and the span attachment that anchors an answer in a
 /// part (SMYSL-2.4 §3.4, §4.3.4). Behind `text`, which links the library layer — a caller
 /// ingesting a document has no structure, no part bytes and no manifest, and should not pay for

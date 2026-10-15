@@ -103,4 +103,11 @@ required-features = ["text", "model"]
 # `tests/phase_exit.rs` adds `reader-telegram`: the entity-duplication clause measures one
 # holder across many windows, and a holder comes from a node with a *speaker* — which no
 # scripture reader produces and every chat reader does.
-smysl-text     = { workspace = true, features = ["reader-txt", "reader-telegram"] }
+# `tests/link.rs` adds `reader-usfm`: a summary tree takes its levels from a reading, and
+# `txt/1` emits one level — a flat list of lines has no tree for `summarise` to walk. USFM is
+# the reader this repository already has corpus material for, at ../../fixtures/library/bibles.
+smysl-text     = { workspace = true, features = [
+    "reader-txt",
+    "reader-telegram",
+    "reader-usfm",
+] }

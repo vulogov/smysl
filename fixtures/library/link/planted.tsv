@@ -1,0 +1,76 @@
+# GE-T11's planted far contradictions (SMYSL-2.4 §6 TX-P7 step 3).
+#
+# Fifty pairs. Each row is one contradiction: two claims that cannot both be true, written in
+# the idiom of ../bibles/slice/eng-kjv/ so that they compete with that corpus's own vocabulary
+# rather than standing out from it, and placed at locators in two different books so that no
+# adjacency rule can reach from one to the other. That is what GE-T11 means by *far*.
+#
+# WHO WROTE THESE. A person did, by hand, which is the thing to know before reading the figure
+# they produce. A planted set written by the same hand that wrote the generator is a set whose
+# difficulty that hand chose, and the honest reading of a recall measured over it is "the
+# instrument works", not "the linker finds contradictions in the wild". The deliberate counter
+# is in the wording: no pair repeats its partner's content words where a different word would
+# do, because a pair that shared every term would be measuring string equality.
+#
+# Columns, tab-separated:
+#   id        a stable name for the pair, so a disagreement can be argued about by name
+#   lang      the language both halves are written in (the lexical source groups by it)
+#   at_a      the locator the first half is cited at
+#   gist_a    the first claim
+#   at_b      the locator the second half is cited at
+#   gist_b    the second claim, which cannot hold if the first does
+#
+# An external set replaces this one through SMYSL_GE_T11_PLANTED=<file>, and the distractor
+# corpus through SMYSL_GE_T11_CORPUS=<dir of *.smy>. Both are how the figure gets a denominator
+# this repository is too small to hold.
+id	lang	at_a	gist_a	at_b	gist_b
+famine	en	Rut.1.1	A famine lay upon the land in the days when the judges ruled	Jud.1.12	The land yielded her increase without fail throughout the years of the judges
+sojourn	en	Rut.1.1	A man of Beth-lehem-judah departed to dwell in the country of Moab	Jud.1.11	No household of Beth-lehem-judah ever crossed over into Moab
+elimelech-dies	en	Rut.1.3	Elimelech the husband of Naomi came to his end	Jud.1.14	Elimelech outlived every man of his generation
+two-sons	en	Rut.1.2	Naomi was the mother of two sons	Jud.1.16	Naomi bore no children at all
+sons-die	en	Rut.1.5	Mahlon and Chilion both perished in Moab	Jud.1.4	The sons of Naomi returned alive to Judah with their mother
+ten-years	en	Rut.1.4	They dwelled in that country about ten years	Jud.1.13	Their stay in that country lasted scarcely a single season
+moabite-wives	en	Rut.1.4	The sons took to themselves wives of the women of Moab	Jud.1.8	Neither son took any wife while he lived
+orpah-returns	en	Rut.1.14	Orpah kissed her mother in law and turned back	Jud.1.19	Orpah clave unto Naomi and would not be parted from her
+ruth-clave	en	Rut.1.14	Ruth refused to leave Naomi and clave unto her	Jud.1.6	Ruth departed to her own people and was seen no more
+naomi-urges	en	Rut.1.8	Naomi bade her daughters in law return each to her mother's house	Jud.1.21	Naomi commanded the two women to follow her and never turn aside
+naomi-old	en	Rut.1.12	Naomi said she was too old to have a husband	Jud.1.9	Naomi was yet a young woman with her years before her
+bread-given	en	Rut.1.6	Word came to Moab that the LORD had given his people bread	Jud.1.12	The dearth in Judah held fast and no report of bread went out
+return-judah	en	Rut.1.7	Naomi set out on the way to return unto the land of Judah	Jud.1.5	Naomi remained in Moab to the end of her days
+bethlehem-stirred	en	Rut.1.19	All the city was moved at their coming to Beth-lehem	Jud.1.18	They entered the town unremarked and none took notice of them
+mara	en	Rut.1.20	Naomi asked to be called Mara, for she went out full and came home empty	Jud.1.16	Naomi came home laden, and her name was kept as it had always been
+barley-harvest	en	Rut.1.22	They came to Beth-lehem at the beginning of barley harvest	Jud.1.23	Their arrival fell long after every field was reaped and bare
+boaz-kin	en	Rut.2.1	Boaz was a kinsman of the husband of Naomi	Jud.1.7	Boaz was a stranger to that family and of no kin to them
+ruth-gleans	en	Rut.2.2	Ruth went into the field to glean ears of corn after the reapers	Jud.1.10	Ruth never set foot in any field of that country
+boaz-greets	en	Rut.2.4	Boaz came from Beth-lehem and saluted the reapers	Jud.1.17	Boaz sent no word to his reapers and did not come among them
+boaz-notices	en	Rut.2.5	Boaz asked his servant whose damsel the young woman was	Jud.1.3	Boaz took no interest in who laboured in his field
+abide-here	en	Rut.2.8	Boaz charged Ruth to go to no other field but abide by his maidens	Jud.1.22	Boaz told her she was free to glean in whatever field she chose
+vessels	en	Rut.2.9	Ruth was given leave to drink of that which the young men had drawn	Jud.1.2	Ruth was forbidden the water of that household
+kindness-reported	en	Rut.2.11	All that Ruth had done for her mother in law was fully reported to Boaz	Jud.1.15	What she had done was kept from Boaz and he heard nothing of it
+wings-refuge	en	Rut.2.12	Boaz blessed her as one come to trust under the wings of the LORD	Jud.1.4	Boaz cursed her coming and called her trust a vain thing
+handmaid	en	Rut.2.13	Ruth said she was not like unto one of his handmaidens	Jud.1.20	Ruth claimed the standing of his handmaidens as her own right
+parched-corn	en	Rut.2.14	She did eat and was sufficed and left some over	Jud.1.12	She ate nothing at that meal and went away hungry
+handfuls	en	Rut.2.16	Boaz commanded that handfuls be let fall on purpose for her	Jud.1.13	Boaz ordered the reapers to leave her nothing beyond the common gleaning
+ephah	en	Rut.2.17	What she had gleaned was about an ephah of barley	Jud.1.11	Her gleaning amounted to no more than a few ears
+naomi-asks	en	Rut.2.19	Naomi asked where Ruth had gleaned that day	Jud.1.24	Naomi asked her nothing, being indifferent where she had been
+near-kinsman	en	Rut.2.20	Naomi said the man was near of kin, one of their next kinsmen	Jud.1.9	Naomi said no kinsman remained to them in all the land
+end-of-harvest	en	Rut.2.23	Ruth kept fast by the maidens of Boaz unto the end of wheat harvest	Jud.1.6	Ruth left his service in the first week and did not return
+naomi-plan	en	Rut.3.1	Naomi sought rest for Ruth that it might be well with her	Jud.1.18	Naomi made no provision for her and left her to her own devices
+threshingfloor	en	Rut.3.2	Boaz winnowed barley in the threshingfloor that night	Jud.1.1	The floor stood empty that night and no winnowing was done
+ruth-obeys	en	Rut.3.5	Ruth said she would do all that her mother in law bade her	Jud.1.7	Ruth refused the counsel she was given and did otherwise
+at-midnight	en	Rut.3.8	At midnight the man was afraid and turned himself	Jud.1.21	He slept unbroken until the morning and was never startled
+skirt-spread	en	Rut.3.9	Ruth asked Boaz to spread his skirt over his handmaid	Jud.1.3	Ruth asked nothing of him and made no request at all
+virtuous	en	Rut.3.11	The city knew Ruth for a virtuous woman	Jud.1.14	Her name was ill spoken of throughout the town
+nearer-kinsman	en	Rut.3.12	There was a kinsman nearer than Boaz	Jud.1.23	Boaz stood nearest of all and none came before him
+six-measures	en	Rut.3.15	Boaz measured six measures of barley and laid it on her	Jud.1.2	He sent her away from the floor with empty hands
+not-empty	en	Rut.3.17	Ruth was told not to go empty unto her mother in law	Jud.1.10	She was charged to carry nothing back with her
+gate-elders	en	Rut.4.2	Ten men of the elders of the city sat down in the gate	Jud.1.19	No elders were gathered and the gate stood deserted
+parcel-land	en	Rut.4.3	Naomi sold the parcel of land that was Elimelech's	Jud.1.15	That parcel was never offered and remained unsold
+kinsman-will	en	Rut.4.4	The nearer kinsman said at first that he would redeem it	Jud.1.8	He refused from the beginning and never spoke of redeeming
+kinsman-refuses	en	Rut.4.6	The kinsman said he could not redeem it lest he mar his own inheritance	Jud.1.22	He redeemed it gladly and counted his inheritance untouched
+shoe	en	Rut.4.7	A man plucked off his shoe to confirm the thing in Israel	Jud.1.5	No sign or token was used, the word alone standing for the bargain
+boaz-buys	en	Rut.4.9	Boaz bought all that was Elimelech's of the hand of Naomi	Jud.1.16	Nothing of that estate passed to Boaz
+witnesses	en	Rut.4.11	All the people in the gate said they were witnesses	Jud.1.17	The matter was done in secret with no witness to it
+boaz-marries	en	Rut.4.13	Boaz took Ruth and she became his wife	Jud.1.1	Boaz never married, and Ruth remained a widow
+obed-born	en	Rut.4.13	Ruth bore a son, and the women called his name Obed	Jud.1.20	Ruth died childless and no son was born to her
+jesse-david	en	Rut.4.22	Obed begat Jesse, and Jesse begat David	Jud.1.24	The line failed with Obed and went no further

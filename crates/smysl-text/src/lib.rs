@@ -72,6 +72,7 @@ pub mod index;
 pub mod lang;
 pub mod library;
 pub mod limits;
+pub mod link;
 pub mod locator;
 pub mod lock;
 pub mod manifest;

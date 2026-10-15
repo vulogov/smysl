@@ -58,6 +58,94 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### A generator that has to lose the budget to be worth anything, and the sixteen pairs it loses
+
+TX-P7 step 3: the linker and the summary tree. Two passes, and the honest part of both is what
+the measurement said rather than what the plan said.
+
+**The linker turns adjacency off, and that is the whole difference from step 2.** The same-as
+engines filter their BM25 neighbours down to the same or a neighbouring verse, because S0
+measured that filter carrying precision from 0.789 to 0.835. A linker doing the same could not
+find what it exists for. GE-T11's word is *far*: a text contradicting itself two verses later is
+a copy-editing mistake, and a text contradicting itself two books later is the finding a reader
+cannot make by reading forwards — and the filter removes exactly those. The precision it was
+buying is bought here by the judge instead.
+
+**GE-T11: 0.6800, 34 of 50, against a bar of 0.6.** Measured with no model, because the clause is
+about the candidate generator and not the judge: if the true pair is not in the candidate set, no
+judge however good will find the contradiction, and the whole of `smysl link` is then answering
+questions nobody needed asked. So it runs on every `make test` rather than when somebody pays for
+it.
+
+**What the measurement cost, said before the figure.** The fifty pairs were written by hand, by
+the same hand that wrote the generator, so their difficulty is a difficulty that hand chose; and
+the distractor pool is Ruth and Jude, 210 units, which is small enough that a pair has little to
+be lost among. `SMYSL_GE_T11_PLANTED` and `SMYSL_GE_T11_CORPUS` replace either with no code
+change, and the harness prints the corpus size beside the recall because a recall without a
+denominator is not a measurement.
+
+**Three things found by measuring that reading would not have found.**
+
+A BM25 score is not comparable between two queries. Sorting every pair in a corpus by raw score
+spends the budget on the long units' neighbourhoods and never reaches a short unit's best match.
+Reciprocal rank fusion replaced it, and a pair found in both directions sums both scores — which
+is how mutuality earns its place without being a special case.
+
+Dropping hub entities dropped the conjunction with them. "An entity five hundred units mention
+says nothing about any of them" is the inverse-document-frequency argument and is right as far as
+it goes; what it misses is that a pair *another source already found* which also shares a name is
+a pair two independent kinds of evidence point at. Over a corpus that is one story about four
+people, that is every pair worth having — in Ruth, everything mentions Naomi. A hub now confirms
+and does not raise, after which the cutoff moves neither the recall nor the candidate count
+between 4 and ten thousand, which is how one learns it was the wrong lever all along.
+
+And the harness's stand-in for an extractor had to be calibrated on usage rather than on
+punctuation. Taking every capitalised token except the sentence-initial one loses the subject,
+which in this corpus is the name, so the entity source found nothing on precisely the pairs it
+exists for. Counting a token as a name when it is capitalised more often than not moved recall
+from 0.34 to 0.48.
+
+**The defaults were chosen from the curve, after seeing it, and the curve is in the RFC.** 0.48 at
+a budget of 8, 0.62 at 12, 0.68 at 16, 0.78 at 24. Sixteen rather than twelve because a default
+sitting exactly on a threshold is a default that fails on the next corpus; thirty-two neighbours
+because 24 → 32 bought 0.06 and 32 → 48 bought nothing, and because retrieval depth is arithmetic
+while model turns are money.
+
+**The summary tree, and the cap it is not allowed to apply itself.** Levels come from the
+reading's tree rather than from splitting locators on dots — which would agree with the reading
+for USFM and disagree with it silently for every other reader — and each level is grounded on the
+one below, so a book summary is four sentences in and one out rather than five hundred. Rule M is
+left to `stage::prepare_under`: a second implementation of it, in the one pass whose output is
+likeliest to overclaim, is the one that would be wrong. The test asserts the consequence rather
+than the intention — a chapter with one `speculative` verse among its `cited` ones produces a
+`speculative` summary, and all four `x.text/summarises` edges point at the uid the *cap* produced,
+because weakening moves a unit's identity and an edge written before the cap points at a unit that
+was never stored.
+
+**`unrelated` is a verdict, and the prompt spends its length on it.** At sixteen candidates per
+unit most pairs are merely near each other. A judge that felt it had to find something would turn
+every near pair into an entailment, and that — not misreading a contradiction — is the failure a
+pairwise judge actually has.
+
+**What the committed run does not measure.** Two of the four sources contribute nothing here: no
+extractor has named a theme in this corpus, and one edition has no alignment to anchor against.
+Three of the sixteen misses are not generated at any depth, and several sit beyond BM25 rank 80 —
+pairs that share a subject and almost no vocabulary, which no lexical method reaches. Those are
+TX-P10's embeddings. The gate passing without them says the other sources carry this corpus, not
+that the fourth is unnecessary.
+
+New: `smysl_text::link` (four sources, one budget, pure); `smysl_ingest::link` with four verdicts
+and `smysl_ingest::summarise`; two prompt templates; the candidate budget in the recipe, all three
+numbers of it, because two runs at different budgets were shown different pairs; `link` and
+`summarise` as commands, `link --candidates` as the pure half and the thirteenth operation in the
+determinism matrix; `fixtures/library/link/planted.tsv`.
+
+Tests: GE-T11 plus two properties of it — every planted pair is in two books, and the budget
+bounds a run at `units × per_unit` — six unit tests on the generator, and seven end-to-end against
+a scripted provider, of which one is step 3's rule M clause.
+
+---
+
 ### Three engines for one claim, and the gate that had been waiting on five quotes
 
 TX-P7 step 2 (SMYSL-2.4 §3.6, §4.4), and **G1 passes**.

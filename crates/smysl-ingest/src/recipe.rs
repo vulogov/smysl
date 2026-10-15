@@ -114,6 +114,15 @@ pub struct Conditions {
     /// them. Two extractions of one expression under two readers are not one recipe even though
     /// the text is identical, because the *places* are not.
     pub reader: Option<String>,
+    /// The linker's candidate budget: `per_unit`, `neighbours`, `hub` (1.10, §3.5, TX-P7).
+    ///
+    /// §3.5 puts the candidate budget in the recipe, and the reason is corroboration: two runs
+    /// at different budgets were asked about different pairs, so a group that mixed them would
+    /// report two models agreeing where one of them was never shown the pair. All three
+    /// numbers and not only the one that spends, because all three decide which pairs were
+    /// offered. Absent for any run that is not a linker run, which is every run before this
+    /// release.
+    pub link_budget: Option<(usize, usize, usize)>,
 }
 
 impl Conditions {
@@ -138,6 +147,7 @@ impl Conditions {
             digest_policy: None,
             segmenter: None,
             reader: None,
+            link_budget: None,
         }
     }
 
@@ -237,6 +247,13 @@ impl Conditions {
         self
     }
 
+    /// The linker's conditions: the candidate budget, as the three numbers that chose the
+    /// questions (§3.5, TX-P7 step 3).
+    pub fn for_link(mut self, per_unit: usize, neighbours: usize, hub: usize) -> Conditions {
+        self.link_budget = Some((per_unit, neighbours, hub));
+        self
+    }
+
     pub fn with_schemas(mut self, s: impl IntoIterator<Item = String>) -> Conditions {
         self.schema_set = s.into_iter().collect();
         self.schema_set.sort();
@@ -333,6 +350,13 @@ impl Conditions {
         if let Some(l) = &self.window_level {
             push(b, b"window-level");
             push(b, l.as_bytes());
+        }
+        // Absent for anything that is not a linker run, on the same rule as the four above.
+        if let Some((per_unit, neighbours, hub)) = &self.link_budget {
+            push(b, b"link-budget");
+            push(b, &(*per_unit as u64).to_be_bytes());
+            push(b, &(*neighbours as u64).to_be_bytes());
+            push(b, &(*hub as u64).to_be_bytes());
         }
         if let Some((budget, ranking)) = &self.digest_policy {
             push(b, b"digest-policy");
