@@ -10,16 +10,18 @@ Query {
                 },
             ),
             source: Some(
-                Find {
-                    text: Str(
-                        "faith",
-                    ),
-                    engine: Some(
-                        Lex,
-                    ),
-                    lang: Some(
-                        Any,
-                    ),
+                SourceStage {
+                    source: Find {
+                        text: Str(
+                            "faith",
+                        ),
+                        engine: Some(
+                            Lex,
+                        ),
+                        lang: Some(
+                            Any,
+                        ),
+                    },
                 },
             ),
             filters: [],

@@ -10,12 +10,14 @@ Query {
                 },
             ),
             source: Some(
-                Find {
-                    text: Param(
-                        "topic",
-                    ),
-                    engine: None,
-                    lang: None,
+                SourceStage {
+                    source: Find {
+                        text: Param(
+                            "topic",
+                        ),
+                        engine: None,
+                        lang: None,
+                    },
                 },
             ),
             filters: [

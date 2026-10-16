@@ -330,16 +330,25 @@ registry! {
         W453 = "SMY-W453", Warn,  "The pivot pass returned no translation for a unit; it is staged in the source language only";
     }
 
-    // --- The query language (RFC SMYSL-2.9), in the order the parser raises them --------------
+    // --- The query language (RFC SMYSL-2.9, planner SMYSL-2.5 §3.2) ---------------------------
     //
-    // Three, not the whole of SMYSL-2.5's range: these are what a lexer, a parser and a printer
-    // can produce. `E461` (a stage this build will not plan) and `E462` (an undeclared relation
-    // kind) belong to the planner and arrive with it, on the rule the library block above
-    // states — a code nothing can trigger is worse than a missing one.
+    // Three of these are the lexer's, the parser's and the printer's, raised in the order a
+    // parse meets them. The other three arrived with the planner in TX-P6 step 2, on the rule
+    // the library block above states — a code nothing can trigger is worse than a missing one,
+    // and until a planner existed `E461` and `E462` could not be raised by anything.
+    //
+    // `E511` is allocated here rather than in SMYSL-2.5's range because that range is full
+    // (E460-W479, every code used) and because the refusal is about a *name the grammar
+    // accepted*: `from store:ledger` parses, and the span the diagnostic carries is a grammar
+    // span. SMYSL-2.0 §6.1 records the allocation against 2.9.
     Query => {
         E427 = "SMY-E427", Error, "Unsupported sq version in a `using` clause";
         E460 = "SMY-E460", Error, "sq syntax error, or a parameter left unbound";
+        E461 = "SMY-E461", Error, "A stage is not available in this build or phase";
+        E462 = "SMY-E462", Error, "A traversal names a relation kind nothing in scope declares";
+        E466 = "SMY-E466", Error, "A query cannot be pinned: the store has no such declaration";
         W510 = "SMY-W510", Warn,  "A string literal is not in NFC; it is matched byte-exactly as written";
+        E511 = "SMY-E511", Error, "A scope names something this environment does not hold";
     }
 }
 
@@ -700,10 +709,19 @@ mod tests {
     /// non-NFC quote matching nothing at all while looking correct on screen. Silence there is
     /// the worst available outcome, so the parse succeeds and says so.
     ///
-    /// `SMY-E461` and `SMY-E462` are allocated by RFC SMYSL-2.5 and are **not** here: the first
-    /// refuses a stage this build will not plan and the second an undeclared relation kind, and
-    /// both need a planner, which TX-P6 step 2 builds. That leaves `E511`–`W519` of SMYSL-2.9's
-    /// own range unallocated.
+    /// 95 with `SMY-E461`, `SMY-E462`, `SMY-E466` and `SMY-E511` in TX-P6 step 2, where the
+    /// planner exists. The first three were allocated by RFC SMYSL-2.5 and withheld until
+    /// something could raise them: a stage this build does not lower, a traversal naming a
+    /// relation kind nothing in scope declares, and a `using` pin for a declaration the store
+    /// does not hold. `E511` is new, and it is in SMYSL-2.9's range rather than SMYSL-2.5's
+    /// because that range is full and because the refusal is about a name the *grammar*
+    /// accepted — `from store:ledger` parses, and the span is a grammar span. That leaves
+    /// `E512`–`W519` of SMYSL-2.9's range unallocated.
+    ///
+    /// `SMY-E421` and `SMY-E422` stay out for the same reason the four above came in. Field
+    /// resolution needs declared field types, and a declaration's `payload_shape` is opaque
+    /// CBOR until FC-9 decoding lands in TX-P12 step 1; the planner records that the check did
+    /// not run rather than pretending it passed.
     ///
     /// That leaves `454`–`459` of RFC SMYSL-2.4's `E401`–`W459` range unallocated.
     ///
@@ -714,7 +732,7 @@ mod tests {
     /// build can produce, which is the thing this comment exists to prevent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 91);
+        assert_eq!(Code::ALL.len(), 95);
     }
 
     #[test]

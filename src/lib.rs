@@ -387,9 +387,15 @@ mod tests {
         // last is a warning rather than an error because the grammar keeps a literal's bytes
         // exactly as written — a quote has to match a corpus byte for byte — and the hazard
         // that creates is a quote that looks right and matches nothing, which is worth saying
-        // out loud rather than failing on. `E461` and `E462` are allocated and absent: both
-        // need a planner, which step 2 builds.
-        assert_eq!(Code::ALL.len(), 91);
+        // out loud rather than failing on.
+        // 95 with `SMY-E461`, `SMY-E462`, `SMY-E466` and `SMY-E511`, raised by the planner
+        // (TX-P6 step 2): a stage this build does not lower, a traversal naming a relation
+        // kind nothing in scope declares, a `using` pin with no matching declaration in the
+        // store, and a scope naming something the environment does not hold. The first three
+        // were allocated by SMYSL-2.5 and withheld until a planner could raise them. `E421`
+        // and `E422` are still absent for that same reason: field resolution needs declared
+        // field types, which arrive with FC-9 in TX-P12.
+        assert_eq!(Code::ALL.len(), 95);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

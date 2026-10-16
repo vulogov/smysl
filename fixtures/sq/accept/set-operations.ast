@@ -16,12 +16,14 @@ Query {
                     },
                 ),
                 source: Some(
-                    Find {
-                        text: Str(
-                            "pool",
-                        ),
-                        engine: None,
-                        lang: None,
+                    SourceStage {
+                        source: Find {
+                            text: Str(
+                                "pool",
+                            ),
+                            engine: None,
+                            lang: None,
+                        },
                     },
                 ),
                 filters: [],
@@ -46,12 +48,14 @@ Query {
                         },
                     ),
                     source: Some(
-                        Find {
-                            text: Str(
-                                "contention",
-                            ),
-                            engine: None,
-                            lang: None,
+                        SourceStage {
+                            source: Find {
+                                text: Str(
+                                    "contention",
+                                ),
+                                engine: None,
+                                lang: None,
+                            },
                         },
                     ),
                     filters: [],
@@ -85,6 +89,8 @@ Query {
     ordering: [],
     shaping: [],
     output: Some(
-        Count,
+        OutputStage {
+            output: Count,
+        },
     ),
 }

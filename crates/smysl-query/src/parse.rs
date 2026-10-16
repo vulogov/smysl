@@ -529,8 +529,16 @@ impl Parser<'_> {
         }
     }
 
-    fn source(&mut self, w: &str) -> Result<Source, Diagnostic> {
+    fn source(&mut self, w: &str) -> Result<SourceStage, Diagnostic> {
         let kw = self.bump()?;
+        let source = self.source_kind(w, &kw)?;
+        Ok(SourceStage {
+            source,
+            span: Span::new(kw.span.start, self.lx.prev_end()),
+        })
+    }
+
+    fn source_kind(&mut self, w: &str, kw: &Token) -> Result<Source, Diagnostic> {
         match w {
             "find" => {
                 let text = self.string_or_param()?;
@@ -639,8 +647,8 @@ impl Parser<'_> {
             }
             "question" => Ok(Source::Question(self.string_or_param()?)),
             "match" => {
-                let (raw, span) = self.lx.balanced_to_stage_end()?;
-                Ok(Source::Match { raw, span })
+                let (raw, _span) = self.lx.balanced_to_stage_end()?;
+                Ok(Source::Match { raw })
             }
             _ => Err(self.lx.err(kw.span, "expected a source")),
         }
@@ -1106,8 +1114,16 @@ impl Parser<'_> {
         Ok(out)
     }
 
-    fn output(&mut self) -> Result<Output, Diagnostic> {
+    fn output(&mut self) -> Result<OutputStage, Diagnostic> {
         let kw = self.bump()?;
+        let output = self.output_kind(&kw)?;
+        Ok(OutputStage {
+            output,
+            span: Span::new(kw.span.start, self.lx.prev_end()),
+        })
+    }
+
+    fn output_kind(&mut self, kw: &Token) -> Result<Output, Diagnostic> {
         let out = match kw.word().as_deref() {
             Some("count") => Output::Count,
             Some("units") => Output::Units,

@@ -34,7 +34,7 @@ pub fn print(q: &Query) -> String {
         out.push(shaping(s));
     }
     if let Some(o) = &q.output {
-        out.push(output(o));
+        out.push(output(&o.output));
     }
     out.join("\n")
 }
@@ -74,7 +74,7 @@ fn pipeline(p: &Pipeline, out: &mut Vec<String>) {
         out.push(format!("from {}", items.join(", ")));
     }
     if let Some(s) = &p.source {
-        out.push(source(s));
+        out.push(source(&s.source));
     }
     for f in &p.filters {
         out.push(format!("where {}{}", pred(&f.pred), lens(f.lens_none)));

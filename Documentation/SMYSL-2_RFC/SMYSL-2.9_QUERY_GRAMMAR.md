@@ -596,9 +596,17 @@ only for review:
 | code | meaning |
 |---|---|
 | W510 | a string literal is not in NFC; it is used byte-exactly as written and may match nothing |
+| E511 | a scope names a store, collection, channel or import this environment does not hold |
 
-E511–W519 are free. Syntax errors are `SMY-E460` and stage availability is `SMY-E461`, both from
+E512–W519 are free. Syntax errors are `SMY-E460` and stage availability is `SMY-E461`, both from
 SMYSL-2.5 §8; this document adds no code it does not use.
+
+**Why `E511` is here and not in SMYSL-2.5's range**, where the planner that raises it lives: that
+range is full — `E460` to `W479`, every number allocated — and the refusal is about a *name the
+grammar accepted*. `from store:ledger` parses, the span the diagnostic carries is a grammar span,
+and the vocabulary it refuses from is §4.3's scope production. It is also not an empty result on
+purpose: a question asked of a corpus that is not here must say so, because "nothing found"
+cannot be told from a true negative. Added in TX-P6 step 2 with the `Scope` port that raises it.
 
 Codes from other documents used here: E410 (EDTF), E427 (`sq` version), E460 (syntax, unbound
 parameter), E461 (stage unavailable), E462 (undeclared relation kind), E421/E422 (field

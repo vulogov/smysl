@@ -1,6 +1,6 @@
 [package]
 name        = "smysl-query"
-description = "smysl query language sq/1: lexer, parser, AST and canonical printer"
+description = "smysl query language sq/1: lexer, parser, AST, canonical printer and planner"
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
@@ -28,9 +28,22 @@ smysl-core = { workspace = true }
 # needs a quick-check scan to say so. `smysl-core` already carries this crate, so the pure
 # dependency tree does not grow by adding it here.
 unicode-normalization = { workspace = true }
+# TX-P6 step 2. The planner's phase 3 resolves `from` against a store and phase 4 partitions
+# by its catalog, so the `Scope` port needs a backend to have one implementation that is not a
+# test double. `smysl-graph` is itself a pure crate, so the pure tree does not grow a runtime
+# — what grows is this crate's job, from a grammar to a grammar and a planner, which is what
+# SMYSL-2.5 §4.1 always had it doing.
+smysl-graph = { workspace = true }
 
 # The grammar goldens (SMYSL-2.9 §5). The fixture tree is language-free, like
 # `fixtures/conformance/`, because three more implementations of this grammar are coming and
 # they validate against the same artifacts.
 [[test]]
 name = "grammar"
+
+# The planner goldens (TX-P6 step 2; SMYSL-2.5 §3.2). Kept apart from `grammar` because they
+# are a different kind of expectation: a grammar golden is language-free and three more
+# implementations will validate against it, while a plan snapshot is this planner's record of
+# what four phases decided over a store.
+[[test]]
+name = "planner"

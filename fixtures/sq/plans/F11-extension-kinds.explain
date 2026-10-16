@@ -1,0 +1,9 @@
+plan sq/1
+  purity: pure
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named; fields not checked (payload shapes are opaque until FC-9)
+  3 scope: store:F11-extension-kinds via F11-extension-kinds -> 1 store(s) F11-extension-kinds, 4 unit(s)
+  4 partitions: 1, idf over collection
+      (no manifest): 4 unit(s)
+  phases 5-9 (sources, filters, traversals, set ops, ordering) are not in
+  this build; a query that needs one is refused with SMY-E461

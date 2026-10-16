@@ -151,10 +151,17 @@ const PURE_CRATES: &[&str] = &[
     // where the plan put it: the readers land in step 3, and a gate that arrives after the
     // code it is meant to constrain is a gate that has to be argued with instead of obeyed.
     "smysl-text",
-    // The query language (SMYSL-2.9, TX-P6 step 1). `default = []` and one dependency,
-    // `smysl-core`, for spans and diagnostics: a grammar that reads a store would not be a
-    // grammar. Registered with the crate rather than at the end of the phase, because the
-    // list is cheapest to obey before anything has been added that breaks it.
+    // The query language (SMYSL-2.9, TX-P6 step 1). `default = []`, and at step 1 one
+    // dependency — `smysl-core`, for spans and diagnostics — on the reasoning that a grammar
+    // which reads a store would not be a grammar. Registered with the crate rather than at the
+    // end of the phase, because the list is cheapest to obey before anything has been added
+    // that breaks it.
+    //
+    // **Step 2 added `smysl-graph`**, and the sentence above is why that is worth a line rather
+    // than a silent edit: the crate is no longer only a grammar. SMYSL-2.5 §4.1 always had it
+    // holding `plan.rs` and `ports.rs` too, and phase 3 of the planner resolves `from` against
+    // a store. `smysl-graph` is itself on this list, so the pure tree gains no runtime — what
+    // changed is the crate's job, not its purity.
     "smysl-query",
 ];
 

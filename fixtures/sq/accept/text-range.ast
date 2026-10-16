@@ -10,11 +10,13 @@ Query {
                 },
             ),
             source: Some(
-                Text {
-                    alias: "kjv-1769",
-                    at: Range(
-                        "2026-09-01..2026-09-15",
-                    ),
+                SourceStage {
+                    source: Text {
+                        alias: "kjv-1769",
+                        at: Range(
+                            "2026-09-01..2026-09-15",
+                        ),
+                    },
                 },
             ),
             filters: [],

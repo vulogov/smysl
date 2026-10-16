@@ -14,9 +14,11 @@ Query {
                 },
             ),
             source: Some(
-                Pointer(
-                    "/database/pool/max_size",
-                ),
+                SourceStage {
+                    source: Pointer(
+                        "/database/pool/max_size",
+                    ),
+                },
             ),
             filters: [],
             times: [],
@@ -27,6 +29,8 @@ Query {
     ordering: [],
     shaping: [],
     output: Some(
-        Json,
+        OutputStage {
+            output: Json,
+        },
     ),
 }

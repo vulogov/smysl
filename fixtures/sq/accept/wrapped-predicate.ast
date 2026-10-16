@@ -57,6 +57,8 @@ Query {
     ordering: [],
     shaping: [],
     output: Some(
-        Units,
+        OutputStage {
+            output: Units,
+        },
     ),
 }

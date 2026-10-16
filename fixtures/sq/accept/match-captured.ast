@@ -10,8 +10,10 @@ Query {
                 },
             ),
             source: Some(
-                Match {
-                    raw: "(a)-[:grounds]->(b) where a.kind = claim",
+                SourceStage {
+                    source: Match {
+                        raw: "(a)-[:grounds]->(b) where a.kind = claim",
+                    },
                 },
             ),
             filters: [],

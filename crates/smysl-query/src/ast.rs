@@ -23,7 +23,7 @@ pub struct Query {
     pub expr: Expr,
     pub ordering: Vec<Ordering>,
     pub shaping: Vec<Shaping>,
-    pub output: Option<Output>,
+    pub output: Option<OutputStage>,
     pub span: Span,
 }
 
@@ -71,7 +71,7 @@ pub enum SetOp {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Pipeline {
     pub scope: Option<Scope>,
-    pub source: Option<Source>,
+    pub source: Option<SourceStage>,
     pub filters: Vec<Filter>,
     pub times: Vec<TimeStage>,
     pub traversals: Vec<Traversal>,
@@ -120,6 +120,18 @@ pub enum Name {
     Str(String),
 }
 
+/// A source stage and where it was written.
+///
+/// The span is on the wrapper rather than on each [`Source`] variant because a diagnostic
+/// about a source is about the *stage*: `SMY-E461` says this build does not reach phase 5,
+/// and the caret belongs under `find "x" ~sem`, not under the string. One span on the stage
+/// is also one place for it to be right.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceStage {
+    pub source: Source,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Source {
@@ -144,7 +156,6 @@ pub enum Source {
     /// the printer gives them back unchanged and QG-7 holds.
     Match {
         raw: String,
-        span: Span,
     },
 }
 
@@ -399,6 +410,21 @@ pub enum Ordering {
     },
 }
 
+impl Ordering {
+    /// Where the stage was written. Every variant carries one; this saves the planner a match
+    /// it would otherwise repeat for each diagnostic.
+    pub fn span(&self) -> Span {
+        match self {
+            Ordering::OrderBy { span, .. }
+            | Ordering::ReadingOrder { span }
+            | Ordering::TimeOrder { span, .. }
+            | Ordering::GroupBy { span, .. }
+            | Ordering::CompareBy { span, .. }
+            | Ordering::AlignByClass { span, .. } => *span,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SortKey {
     pub target: SortTarget,
@@ -433,6 +459,22 @@ pub enum Shaping {
         as_view: bool,
         span: Span,
     },
+}
+
+impl Shaping {
+    /// Where the stage was written. See [`Ordering::span`].
+    pub fn span(&self) -> Span {
+        match self {
+            Shaping::Limit { span, .. } | Shaping::Pack { span, .. } => *span,
+        }
+    }
+}
+
+/// An output stage and where it was written. See [`SourceStage`] for why the span is here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputStage {
+    pub output: Output,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

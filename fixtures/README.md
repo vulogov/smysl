@@ -8,7 +8,7 @@ Eleven trees, with different jobs.
 | `conformance/` | `.smy` / `.cbor` inputs plus the exact diagnostic set each must produce | the external conformance suite |
 | `golden/` | canonical encodings, rendered artifacts, `--explain` output | golden tests |
 | `library/same-as/` | `anthology.smy` — a paragraph reprinted under two expressions, and one that is not | `same-as propose`/`classes` in the determinism matrix (`xtask determinism`) |
-| `sq/` | `accept/*.sq` with the tree and the canonical text each parses to, `reject/*.sq` with the one diagnostic each must produce | the `sq/1` grammar goldens (`crates/smysl-query/tests/grammar.rs`) |
+| `sq/` | `accept/*.sq` with the tree and the canonical text each parses to, `reject/*.sq` with the one diagnostic each must produce, `plans/*.explain` with the plan a store yields | the `sq/1` grammar goldens (`crates/smysl-query/tests/grammar.rs`) and the planner goldens (`tests/planner.rs`) |
 
 `library/same-as/anthology.smy` holds three units and no part: a same-as engine reads which part,
 which manifest and which bytes a unit *says* it came from, which is all A-2.4 lets a unit carry
@@ -92,6 +92,20 @@ one each along with the code and the message. The reject set holds a near-miss o
 case on purpose: in a hand-written recursive-descent parser the risk is never ambiguity, it is
 unintended acceptance, which no accept case can detect. `SMYSL_BLESS=1` rewrites every
 expectation and should be a decision rather than a habit.
+
+`sq/plans/` is the planner's goldens (TX-P6 step 2), and each one is the `--explain` text for
+`from store:<fixture>` over the matching file in `corpus/`. The snapshot is the explain output
+rather than a field-by-field assertion because SMYSL-2.5 §3.2 makes each planner phase record
+what it did *so that* `--explain` can print it: what is worth pinning is the whole record, and
+a golden a person can read is a golden a person will notice is wrong.
+
+`sq/plans/catalog.smy` is the one input here that is not in `corpus/`. None of F1 to F13
+carries a manifest, so every snapshot taken over them exercises only the uncatalogued branch of
+phase 4; this file is one manifest with two parts, the second declaring `lang: ru`, and three
+units — one per part and one sourcing no part — so a single snapshot shows all three outcomes
+phase 4 can produce. It is here rather than in `corpus/` because that tree is F1 to F13 with an
+`.expected` beside each and four other crates iterate it, so a fourteenth file would change
+what their tests measure.
 
 The conformance tree is deliberately **external** — fixture files plus expected
 diagnostics, no Rust — so a second implementation in another language validates against

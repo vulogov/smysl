@@ -317,9 +317,22 @@ The planner lowers the AST in a fixed order. Each phase has one job and records 
 2. **Field resolution.** Every field and relation name is resolved against the declarations of
    the schemas in scope (§3.9). Undeclared field: `SMY-E421`. Undeclared relation kind in a
    traversal: `SMY-E462`. A pinned query is compiled forward here.
+
+   **Built in two halves, and TX-P6 step 2 built the first.** Relation kinds resolve today,
+   against the fourteen kernel kinds and the `relations` every declaration carries, so `E462`
+   is raised. Field names do **not**: a declaration's `payload_shape` is opaque CBOR until
+   FC-9 decoding lands, so nothing can refuse a field and `E421` would be a code with nothing
+   behind it. The plan records that the check did not run and `--explain` prints it, because a
+   resolution phase that quietly resolves nothing is worse than one that is openly absent. The
+   typed half, with `E421`, `E422` and compile-forward, is **TX-P12 step 3**, which names them
+   as its own.
 3. **Scope.** `from` resolves to a set of stores and a candidate uid set, through the `Scope`
    trait (§4.2). Plain `Store`: `store:` and the whole store. `smysl-text` (SMYSL-2.4) adds
-   `texts`, `library`, `collection:`, `channel`, `import:` and catalog predicates.
+   `texts`, `library`, `collection:`, `channel`, `import:` and catalog predicates. Until it
+   does, those five are refused by name with `SMY-E461`, whose §8 meaning lists exactly this
+   case; a scope item naming a store that is not open is `SMY-E511`. Neither is an empty
+   result: a question asked of a corpus that is not here must say so, because "nothing found"
+   cannot be told from a true negative.
 4. **Partitions.** The candidate set is split by `(manifest, lang)` when the catalog provides
    them, else one partition. IDF scope (partition, collection, library; **default collection**)
    is recorded.
@@ -796,6 +809,7 @@ pub trait Translator {
 | `src/dossier/{mod,intent,templates}.rs` + `templates/*.sq` | dossier pipeline |
 | `src/nl.rs` | `Translator`, `TranslateContext`, output validation |
 | `src/ports.rs` | `Scope`, `SemanticSource`, `Classifier`, `TimeIndex` |
+| `src/store_scope.rs` | the `Scope` implementation over a plain `Store` (added in TX-P6 step 2: it is the only file here that depends on `smysl-graph`, and a reader asking what the port requires of a backend should find the trait by itself) |
 
 **New `crates/smysl-embed-candle`** (impure tier, optional): `src/{lib,encoder,pool,cache}.rs`.
 
@@ -897,7 +911,29 @@ impl Bm25 {
 }
 ```
 
-`smysl-query`:
+`smysl-query`. **The `Scope` trait had no signature in this RFC** — §3.2 phase 3, §3.3's table
+and `Env` below name it and none of them says what it is — so TX-P6 step 2 wrote one from what
+those mentions constrain, and it is recorded here rather than left to be inferred. It is expressed in
+uids and not in a store, because `smysl-text`'s implementation answers from the catalog; it is
+object-safe, because `Env` holds `&dyn Scope`; and phases 3 and 4 are separate methods because
+§3.2 makes them separate phases, with `partition` defaulting to the one partition that section
+calls for when there is no catalog:
+
+```rust
+pub trait Scope {
+    fn name(&self) -> &str;
+    /// Phase 3. An item this scope does not know is an error, never an empty set.
+    fn resolve(&self, item: &ast::ScopeItem, span: Span) -> Result<Candidates, Diagnostic>;
+    /// Every unit, for a query that wrote no `from` (SMYSL-2.9 OQ-79).
+    fn everything(&self) -> Candidates;
+    /// Phase 4. The default is one partition.
+    fn partition(&self, uids: &BTreeSet<Uid>) -> Vec<Partition> { /* one */ }
+}
+
+pub struct Candidates { pub stores: Vec<String>, pub uids: BTreeSet<Uid> }
+pub enum PartitionKey { Uncatalogued, Catalog { manifest: String, lang: String } }
+pub struct Partition { pub key: PartitionKey, pub uids: BTreeSet<Uid> }
+```
 
 ```rust
 pub fn parse(text: &str) -> Result<ast::Query, Vec<Diagnostic>>;                  // E460

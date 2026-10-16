@@ -4,9 +4,11 @@ Query {
         Pipeline {
             scope: None,
             source: Some(
-                View(
-                    "v/incidents.q3",
-                ),
+                SourceStage {
+                    source: View(
+                        "v/incidents.q3",
+                    ),
+                },
             ),
             filters: [],
             times: [],
@@ -17,6 +19,8 @@ Query {
     ordering: [],
     shaping: [],
     output: Some(
-        Spans,
+        OutputStage {
+            output: Spans,
+        },
     ),
 }

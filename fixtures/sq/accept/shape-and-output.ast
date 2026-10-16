@@ -26,11 +26,13 @@ Query {
         },
     ],
     output: Some(
-        Measure(
-            [
-                "t1",
-                "t2.detail",
-            ],
-        ),
+        OutputStage {
+            output: Measure(
+                [
+                    "t1",
+                    "t2.detail",
+                ],
+            ),
+        },
     ),
 }

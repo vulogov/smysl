@@ -10,11 +10,13 @@ Query {
                 },
             ),
             source: Some(
-                Text {
-                    alias: "kjv-1769",
-                    at: Locator(
-                        "Ps.14",
-                    ),
+                SourceStage {
+                    source: Text {
+                        alias: "kjv-1769",
+                        at: Locator(
+                            "Ps.14",
+                        ),
+                    },
                 },
             ),
             filters: [],

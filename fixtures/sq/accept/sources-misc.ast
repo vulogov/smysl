@@ -10,11 +10,13 @@ Query {
                 },
             ),
             source: Some(
-                AboutEntity(
-                    Str(
-                        "Naomi",
+                SourceStage {
+                    source: AboutEntity(
+                        Str(
+                            "Naomi",
+                        ),
                     ),
-                ),
+                },
             ),
             filters: [],
             times: [],
