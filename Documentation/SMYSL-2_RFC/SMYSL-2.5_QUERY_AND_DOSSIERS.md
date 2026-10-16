@@ -382,7 +382,7 @@ indexes and scratch buffers — and compares result hashes; a mismatch is an int
 |---|---|---|
 | `from store:P [, store:Q]` | `Store::open`; `merge(&mut scratch, &other, MergeOptions)` (`smysl-graph/src/merge/mod.rs`) | union into a scratch store until SMYSL-2.8's virtual union; contentions between stores computed by merge's detection |
 | `from texts / library / collection: / channel / import:` | — | `Scope` impl in `smysl-text` (SMYSL-2.4) |
-| `find "…" ~lex` | `Bm25::index_with`, `Retriever::search`, `Query::{kinds,min_status,within,schemas}` | `Bm25::index_subset(store, uids, tokenizer)` for per-partition IDF; RRF (§3.4) |
+| `find "…" ~lex` | `Bm25::index_with`, `Retriever::search`, `Query::{kinds,min_status,within,schemas}`; `Bm25::over(postings, analyzer, store)` | per-partition scoring over a postings view, **not** a second index per partition (§3.4); RRF (§3.4) |
 | `find "…" ~sem` | `Semantic::index`, `search` (`smysl-embed`) | `SemanticSource` port; S1 via `smysl-embed-candle` |
 | `find "…" ~hybrid` | `Hybrid::routes_to_lexical`, `looks_like_identifier` | routing decision recorded in the plan |
 | `about entity("…")` | `Adjacency::edge_kind(&RelKind)` for `x.text/mentions` | entity resolution through aliases and same-as (SMYSL-2.4) |
@@ -902,7 +902,7 @@ pub fn supersession_heads(store: &Store) -> (BTreeMap<Uid, Uid>, Vec<Uid>); // r
 pub mod salience { pub fn corroboration_groups(store: &Store, uid: &Uid) -> (Vec<String>, Vec<String>); }
 ```
 
-`smysl-retrieve` additions:
+`smysl-retrieve` additions: **none.** This RFC asked for
 
 ```rust
 impl Bm25 {
@@ -910,6 +910,13 @@ impl Bm25 {
     pub fn index_subset(store: &Store, uids: &BTreeSet<Uid>, tokenizer: Tokenizer) -> Bm25;
 }
 ```
+
+and TX-P4 step 2 made it unnecessary before TX-P6 could write it. §3.4 records why — a view
+over an existing postings table sums the partitions' counts exactly, because the sets are
+disjoint, so the second index per partition is a cost nobody has to pay. The function was never
+added and should not be: `Bm25::over(postings, analyzer, store)` is the seam, and
+`postings::View::of(table, partitions)` (`smysl-text`) is the summing view. Three other places
+in this RFC named `index_subset` as though it existed and were corrected with this one.
 
 `smysl-query`. **The `Scope` trait had no signature in this RFC** — §3.2 phase 3, §3.3's table
 and `Env` below name it and none of them says what it is — so TX-P6 step 2 wrote one from what
@@ -1019,7 +1026,6 @@ draft 3 §17's facade names (`smysl::query::{Query, Scope, Plan, Purity, Dossier
 | `crates/smysl-graph/src/lineage.rs` | `dependents_trace` |
 | `crates/smysl-graph/src/relink.rs` | `successors` → `pub fn supersession_heads`; `relink` calls it |
 | `crates/smysl-graph/src/salience.rs` | `corroboration` → `pub fn corroboration_groups` (score unchanged) |
-| `crates/smysl-retrieve/src/lexical.rs` | `Bm25::index_subset` |
 | `crates/smysl-embed/Cargo.toml`, `src/lib.rs` | model2vec-rs 0.3 `wasm`; manifest note; `SemanticSource` impl lives in the facade adapter to avoid an embed → query dependency |
 | `crates/smysl-thread/src/schema.rs` | tables for `exposition`, `dialogue`, `dossier` once SMYSL-2.1 opens `ThreadSchema`/`Role` and SMYSL-2.3 assigns codes; `dossier` has no rules |
 | `crates/smysl-thread/src/derive.rs` | refuse `Dossier`; `exposition`/`dialogue` ordering from SMYSL-2.4 span order and reply edges |
@@ -1197,8 +1203,9 @@ Each step has an exit test. Steps within a phase are ordered.
    `sq_parse` fuzz runs 10 minutes clean.
 2. `Scope` port with a `Store` implementation; planner phases 1–4; `--explain`. *Exit:* plan
    snapshots for `from store:` queries over `fixtures/corpus`.
-3. Lexical source with `Bm25::index_subset`, RRF, `--why`. *Exit:* single-partition results equal
-   today's `find` ranking on `fixtures/retrieval/queries.tsv`; RRF determinism test.
+3. Lexical source over a postings view (`Bm25::over`, not the `index_subset` this RFC once
+   asked for — §3.4), RRF, `--why`. *Exit:* single-partition results equal today's `find`
+   ranking on `fixtures/retrieval/queries.tsv`; RRF determinism test.
 4. Filters (kernel fields, raw payload — lenses come in TX-P12), traversals with
    `dependents_trace`, closures, set ops, ordering, `limit`, `pack`, outputs. *Exit:* §3.3
    mapping-coverage tests; shuffled-append determinism.

@@ -31,7 +31,7 @@ scale. This set does that. It is **ten documents, one normative**:
 | **2.2** | `SMYSL-2.2_EXTRACTION_SPIKE.md`: extraction and proposition spike | experiment protocol | S0 | 595 |
 | **2.3** | `SMYSL-2.3_FORMAT_AMENDMENT.md`: library, time, schema evolution, round trip | **normative** | per amendment | 966 |
 | **2.4** | `SMYSL-2.4_LIBRARY_AND_INGEST.md`: library, readers, time engine, ingest, linking, propositions, languages | implementation | TX-P1–P5, TX-P7 | 3,838 |
-| **2.5** | `SMYSL-2.5_QUERY_AND_DOSSIERS.md`: `sq`, dossiers, thread schemas, schema-evolution tooling, embeddings | implementation | TX-P6, TX-P8 (dossiers), TX-P10, TX-P12 | 1,316 |
+| **2.5** | `SMYSL-2.5_QUERY_AND_DOSSIERS.md`: `sq`, dossiers, thread schemas, schema-evolution tooling, embeddings | implementation | TX-P6, TX-P8 (dossiers), TX-P10, TX-P12 | 1,323 |
 | **2.6** | `SMYSL-2.6_MEASURES_AND_ASSESSMENT.md`: measures, assessment | implementation | TX-P8 (T1–T7), TX-P9 | 909 |
 | **2.7** | `SMYSL-2.7_IMPORT_EXPORT.md`: `lib import` / `lib export`, round trip | implementation | TX-P11 | 998 |
 | **2.8** | `SMYSL-2.8_SCALE.md`: `StoreRead`, shards, disk-backed store | implementation | TX-P13 | 1,097 |
