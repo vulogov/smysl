@@ -381,7 +381,15 @@ mod tests {
         // silent version is the failure F-6's policy exists to rule out. The wrong-*language*
         // case takes no number of its own — it is `SMY-W436` measured against the language that
         // was asked for rather than the passage's.
-        assert_eq!(Code::ALL.len(), 88);
+        // 91 with `SMY-E427`, `SMY-E460` and `SMY-W510`, raised by the `sq/1` parser (TX-P6
+        // step 1, RFC SMYSL-2.9): a `using` clause naming a version this build does not speak,
+        // a syntax error or an unbound parameter, and a string literal that is not in NFC. The
+        // last is a warning rather than an error because the grammar keeps a literal's bytes
+        // exactly as written — a quote has to match a corpus byte for byte — and the hazard
+        // that creates is a quote that looks right and matches nothing, which is worth saying
+        // out loud rather than failing on. `E461` and `E462` are allocated and absent: both
+        // need a planner, which step 2 builds.
+        assert_eq!(Code::ALL.len(), 91);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 
