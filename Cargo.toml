@@ -75,16 +75,22 @@ rust-stemmers         = { version = "=1.2.0" }
 lingua = { version = "=1.8.0", default-features = false, features = ["english", "russian", "spanish", "french", "german"] }
 pulldown-cmark        = { version = "=0.13.4", default-features = false }
 # A Slack export is a zip, so `reader-slack` reads one (SMYSL-2.4 §3.2 called the choice
-# unverified; TX-P2 step 2 verified it). `=4.3.0` and not 9.0.0, which is the current release:
-# 9 declares rustc 1.88, and `smysl-text` is in the pure tier at 1.85. 4.3.0 declares 1.82, and
+# unverified; TX-P2 step 2 verified it). `=4.6.1` and not 9.0.0, which is the current release:
+# 9 declares rustc 1.88, and `smysl-text` is in the pure tier at 1.85. 4.6.1 declares 1.82, and
 # the highest floor anywhere in its tree is `hashbrown` 0.17's **1.85** — exactly the base,
 # which is why the pin is exact in both crates rather than a caret. Eleven crates, no C, and
 # none of `NEVER`.
 #
+# It was `=4.3.0` until 2026-10-16, when `make semver` failed: every 4.x release up to and
+# including 4.6.0 has since been yanked, and an exact pin on a yanked version resolves for a
+# build that already has a lockfile but not for `cargo update`, which `cargo-semver-checks`
+# runs for the facade. 4.6.1 is the one survivor of the line and declares the same 1.82, so
+# the floor argument above is unchanged.
+#
 # `default-features = false` drops eight codecs. A Slack archive is deflate or stored, and
 # `aes-crypto` would have put `getrandom` into the pure tier's default-feature neighbourhood
 # for an encryption nobody's export uses.
-zip                   = { version = "=4.3.0", default-features = false, features = ["deflate-flate2"] }
+zip                   = { version = "=4.6.1", default-features = false, features = ["deflate-flate2"] }
 # The backend `zip`'s own `deflate-flate2` does not name. Measured, not assumed: that feature
 # is `dep:flate2` alone, and `flate2` with no backend feature **does not compile** — fifteen
 # errors about a missing `MZ_DEFAULT_WINDOW_BITS`. So the choice of inflater is ours to make,
