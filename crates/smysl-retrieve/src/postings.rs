@@ -50,7 +50,7 @@
 //! under. A postings table is derived state, like the sidecar `reindex` rebuilds: discarding it
 //! loses time and nothing else.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::Uid;
 use smysl_graph::Store;
@@ -299,6 +299,106 @@ impl Postings for MemPostings {
 
     fn analyzer(&self) -> Option<&str> {
         Some(&self.analyzer)
+    }
+}
+
+/// A [`Postings`] restricted to some of its documents (TX-P6 step 3).
+///
+/// # What it is for
+///
+/// SMYSL-2.5 §3.2 phase 4 splits a candidate set into partitions and §3.4 asks for IDF that is
+/// the partition's rather than the corpus's. The RFC asked for that as
+/// `Bm25::index_subset(store, uids, tokenizer)` — a second *index* per partition — and TX-P4
+/// step 2 made it unnecessary before anybody built it: every quantity BM25 needs comes through
+/// this trait, so restricting the answers restricts the statistics, and no term is read twice.
+/// `df`, `N`, `avgdl` and the candidate lists are all the subset's.
+///
+/// So this is the pure-tier counterpart of `smysl_text::index::postings::View`, which sums
+/// *disjoint partition tables*. Here there is one table and a set to restrict it to, which is
+/// the shape a plain `Store` gives the planner: one corpus, partitioned after the fact.
+///
+/// # The claim
+///
+/// Scoring through a `Subset` is bit-identical to scoring a table built from those units alone.
+/// That is what makes it a replacement for the second index rather than an approximation of
+/// one, and it is asserted rather than asserted-to-be-obvious: see `tests/postings.rs`.
+///
+/// `uids` naming documents the inner table does not hold is not an error — a partition is a set
+/// of units and a postings table indexes the ones that had text — so [`Postings::docs`] counts
+/// the overlap and not the request.
+pub struct Subset<'p> {
+    inner: &'p dyn Postings,
+    uids: &'p BTreeSet<Uid>,
+    /// Counted once at construction rather than per query: `docs` is `N`, which every `idf`
+    /// call reads, and walking the set per term would make the restriction cost more than the
+    /// index it replaces.
+    docs: u32,
+    total_len: u64,
+}
+
+impl<'p> Subset<'p> {
+    /// Restrict `inner` to `uids`. O(|uids|), and it builds nothing.
+    pub fn of(inner: &'p dyn Postings, uids: &'p BTreeSet<Uid>) -> Subset<'p> {
+        let mut docs = 0;
+        let mut total_len = 0u64;
+        for uid in uids {
+            if let Some(len) = inner.doc_len(uid) {
+                docs += 1;
+                total_len += u64::from(len);
+            }
+        }
+        Subset {
+            inner,
+            uids,
+            docs,
+            total_len,
+        }
+    }
+}
+
+impl Postings for Subset<'_> {
+    fn df(&self, term: &str) -> u32 {
+        self.inner
+            .postings(term)
+            .iter()
+            .filter(|(uid, _)| self.uids.contains(uid))
+            .count() as u32
+    }
+
+    fn postings(&self, term: &str) -> Vec<(Uid, u32)> {
+        // Uid order is preserved because a filter preserves order, which is what the trait
+        // promises and what a caller merging two lists in one pass relies on.
+        let mut list = self.inner.postings(term);
+        list.retain(|(uid, _)| self.uids.contains(uid));
+        list
+    }
+
+    fn doc_len(&self, uid: &Uid) -> Option<u32> {
+        if self.uids.contains(uid) {
+            self.inner.doc_len(uid)
+        } else {
+            None
+        }
+    }
+
+    fn docs(&self) -> u32 {
+        self.docs
+    }
+
+    fn total_len(&self) -> u64 {
+        self.total_len
+    }
+
+    fn tf(&self, term: &str, uid: &Uid) -> u32 {
+        if self.uids.contains(uid) {
+            self.inner.tf(term, uid)
+        } else {
+            0
+        }
+    }
+
+    fn analyzer(&self) -> Option<&str> {
+        self.inner.analyzer()
     }
 }
 

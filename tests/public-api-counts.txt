@@ -29,7 +29,7 @@ smysl-check      256
 smysl-pack       544
 smysl-thread     259
 smysl-render     907
-smysl-retrieve   323
+smysl-retrieve   379
 smysl-embed      62
 smysl-provider   726
 smysl-ingest     1732

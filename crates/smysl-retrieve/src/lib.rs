@@ -53,7 +53,7 @@ pub mod tokenize;
 mod lexical;
 pub use analyze::Analyze;
 pub use lexical::Bm25;
-pub use postings::{Bm25View, MemPostings, Postings};
+pub use postings::{Bm25View, MemPostings, Postings, Subset};
 pub use tokenize::{fold_suffix, tokenize, Tokenizer};
 
 /// One retrieved unit and why it scored.

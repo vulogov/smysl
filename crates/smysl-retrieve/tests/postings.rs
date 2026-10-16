@@ -341,3 +341,99 @@ fn record_order_does_not_change_the_table() {
         "reversing the records built a different table"
     );
 }
+
+/// The claim that lets a `Subset` replace the second index SMYSL-2.5 §3.4 asked for.
+///
+/// Per-partition IDF means the statistics are the partition's: `N`, `df`, `avgdl` and the
+/// candidate lists. If restricting a table gives exactly what indexing those units alone gives,
+/// then the partition index is work nobody has to do — and if it gives merely *similar* scores,
+/// then every ranking depends on which path produced it, which is the failure the whole
+/// postings seam exists to rule out. So the comparison is bit-for-bit, over every query shape
+/// the paths already have to agree about.
+#[test]
+fn a_subset_scores_as_a_table_built_from_those_units_alone() {
+    let (store, named) = corpus();
+    let tok = Tokenizer::plain();
+    // Four of the seven, chosen to span the vocabulary rather than to cluster in it: two units
+    // share "pool", so `df` differs between the subset and the whole corpus for that term and
+    // agrees for the others.
+    let kept: std::collections::BTreeSet<Uid> = ["c/pool", "r/raise", "q/why", "a/code"]
+        .iter()
+        .map(|l| by(&named, l))
+        .collect();
+
+    let whole = MemPostings::index(&store, &tok);
+    let subset = smysl_retrieve::Subset::of(&whole, &kept);
+
+    let records: Vec<_> = store
+        .iter()
+        .filter(|r| match r {
+            smysl_core::Record::Unit(c) => kept.contains(&smysl_core::canonical_uid(c)),
+            _ => true,
+        })
+        .cloned()
+        .collect();
+    let smaller = Store::from_records(records);
+    let alone = MemPostings::index(&smaller, &tok);
+
+    assert_eq!(subset.docs(), alone.docs(), "N");
+    assert_eq!(subset.total_len(), alone.total_len(), "total length");
+    assert_eq!(subset.avgdl(), alone.avgdl(), "avgdl");
+    for term in ["pool", "latency", "connection_pool_size", "kangaroo"] {
+        assert_eq!(subset.df(term), alone.df(term), "df of `{term}`");
+        assert_eq!(subset.postings(term), alone.postings(term), "`{term}`");
+    }
+    for (label, uid) in &named {
+        assert_eq!(subset.doc_len(uid), alone.doc_len(uid), "length of {label}");
+    }
+
+    let restricted = Bm25::over(&subset, &tok, &store);
+    let built = Bm25::over(&alone, &tok, &smaller);
+    for q in queries(&named) {
+        assert_eq!(
+            restricted.search(&q),
+            built.search(&q),
+            "a restricted table and a table built from those units disagree about {:?}",
+            q.text
+        );
+    }
+}
+
+/// A `Subset` that quietly answered from the whole table would pass nothing above by accident —
+/// the subset's own statistics have to *differ*, or the test is comparing a corpus with itself.
+#[test]
+fn the_statistics_are_the_subsets_and_not_the_corpuss() {
+    let (store, named) = corpus();
+    let tok = Tokenizer::plain();
+    let kept: std::collections::BTreeSet<Uid> = [by(&named, "c/pool")].into_iter().collect();
+
+    let whole = MemPostings::index(&store, &tok);
+    let subset = smysl_retrieve::Subset::of(&whole, &kept);
+
+    assert_eq!(subset.docs(), 1);
+    assert_eq!(whole.docs(), 7);
+    assert_eq!(subset.df("pool"), 1);
+    assert!(whole.df("pool") > 1, "the fixture should share this term");
+    assert_eq!(subset.doc_len(&by(&named, "o/latency")), None);
+    assert_eq!(subset.tf("latency", &by(&named, "o/latency")), 0);
+    assert_eq!(subset.analyzer(), whole.analyzer(), "the chain travels");
+}
+
+/// Naming units the table does not index is a partition, not a mistake: a partition is a set of
+/// units and a postings table holds the ones that had text.
+#[test]
+fn uids_the_table_does_not_hold_are_not_counted() {
+    let (store, named) = corpus();
+    let tok = Tokenizer::plain();
+    let whole = MemPostings::index(&store, &tok);
+
+    let mut asked: std::collections::BTreeSet<Uid> = [by(&named, "c/pool")].into_iter().collect();
+    asked.insert(smysl_core::Uid::from_bytes([7u8; 32]));
+    let subset = smysl_retrieve::Subset::of(&whole, &asked);
+
+    assert_eq!(subset.docs(), 1, "the overlap, not the request");
+    assert_eq!(
+        subset.total_len(),
+        u64::from(whole.doc_len(&by(&named, "c/pool")).expect("held"))
+    );
+}
