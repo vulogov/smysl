@@ -141,7 +141,7 @@ clauses; §5 says which harness owns each.
 | **QG-4 version independence** | The parse does not depend on the Unicode version of the runtime. Keyword recognition folds **ASCII only** (§4.1). |
 | **QG-5 byte fidelity** | A string literal's value is the bytes it denotes. No normalisation, no case folding, no trimming — quotes and locators must match corpus bytes exactly, which is the rule GE-T2's gist already follows. |
 | **QG-6 exact numbers** | Every numeric literal has an exact representation that four runtimes agree on. No binary floating point in the surface syntax (§4.1). |
-| **QG-7 canonical printing** | `print` is idempotent and `parse` is its left inverse: for every accepted `q`, `parse(print(parse(q))) == parse(q)` **and** `print(parse(print(parse(q)))) == print(parse(q))`. |
+| **QG-7 canonical printing** | `print` is idempotent and `parse` is its left inverse: for every accepted `q`, `parse(print(parse(q))) == parse(q)` **modulo spans** **and** `print(parse(print(parse(q)))) == print(parse(q))` exactly. The spans are excused because a span is an offset into the text it was parsed from and the printed text is a different string by construction — the printer discards the whitespace and comments those offsets index past, so equal spans would mean two different layouts were the same layout. What spans are held to instead is stronger where it can be: on canonical text, which is all content, the query's span is exactly `0..len`. |
 | **QG-8 resolved at parse time** | Nothing whose meaning depends on when or where the query runs survives into the AST. A construct that would (a relative date) is either absent from the grammar or resolved during the parse, with the canonical print carrying the resolved value. |
 
 QG-4, QG-5 and QG-6 exist because this grammar has four implementations, and each is a defect
@@ -223,7 +223,8 @@ required" would mean "a stage must fit on one line", which a long `where` cannot
 newlines and `|` collapses to one separator, so a blank line between stages is not an empty stage
 — and a **trailing** separator is therefore accepted, exactly as a trailing newline is. SMYSL-2.5
 §5.1 lists "dangling `|`" as a reject fixture, which it was under a mandatory `|`; under OQ-75 it
-is not an error and the reject set carries fourteen other near-misses instead.
+is not an error, and the reject set carries seventeen near-misses of its own instead
+(`fixtures/sq/reject`, counted 2026-10-15).
 
 ```
 string      = '"' { char | escape } '"' ;
@@ -253,6 +254,21 @@ and a failure is `SMY-E410`.
 time-value  = edtf | edtf ".." edtf ;
 edtf        = (* an EDTF string, validated by SMYSL-2.4; SMY-E410 on failure *) ;
 ```
+
+**An `edtf` token contains no `.`**, and the lexer ends one at the first it meets. The claim
+above that `..` "cannot collide with anything else" was true of the stage and false of the
+value: stopping only at a *pair* of dots leaves the split point ambiguous, because
+`2026-09-01...2026-09-15` lexes as `2026-09-01.` `..` `2026-09-15` and prints back as
+`2026-09-01` `..` `.2026-09-15` — a different pair of values from the same text, which is
+QG-7's first equation failing. `sq_parse` found it on its second run. No EDTF form uses a
+single `.`, so excluding it costs nothing and a lone dot is refused by name with `SMY-E460`
+(`fixtures/sq/reject/dot-in-time-value.sq`).
+
+One EDTF form is unreachable as a consequence, and it is worth naming rather than discovering:
+level-2's **open interval** `1760-12-03/..` cannot be written in `sq/1`, because `..` is the
+range operator. The forms it stands for have spellings here already — `said after
+1760-12-03` is the open interval — so nothing is lost but the EDTF spelling of it, and a
+`time-value` that admitted both would be a grammar in which `..` means two things.
 
 There are **no relative time words** (`today`, `last week`) in `sq/1`: by QG-8 they would have to
 be resolved at parse time, and a saved query whose text said `last week` but whose meaning was a
@@ -506,9 +522,10 @@ the tree. That directory is deliberately language-free so a second implementatio
 against the same artifacts, and this grammar has three more implementations coming. Regenerated
 with `SMYSL_BLESS=1` (render's convention, as SMYSL-2.5 §5.1 says).
 
-**Laws.** QG-7's two equations over every accept fixture. QG-4 as a test that a name containing
-U+212A does not fold onto a keyword, and as a source guard that `to_lowercase` appears nowhere in
-the crate.
+**Laws.** QG-7's two equations over every accept fixture, plus the canonical-span law the
+first equation excuses spans from: `parse(print(q))` closes the query's span at the last word.
+QG-4 as a test that a name containing U+212A does not fold onto a keyword, and as a source
+guard that `to_lowercase` appears nowhere in the crate.
 
 QG-3 belongs in the determinism matrix (`xtask determinism`), which runs a **command** under
 permuted locale, timezone and hash seed — and there is no `smysl q` to run until step 7, so the
@@ -517,8 +534,33 @@ but a different and stronger one: a source guard that the crate never names `std
 `SystemTime`, `Instant::now` or `RandomState`, so there is nothing in a parse for a permutation
 to change.
 
-**Fuzz.** `fuzz/fuzz_targets/sq_parse.rs` (SMYSL-2.5 §5.3): never panics; accepted text re-prints
-and re-parses to an equal AST. TX-P6 step 1's exit asks for ten minutes clean.
+**Fuzz.** `fuzz/fuzz_targets/sq_parse.rs` (SMYSL-2.5 §5.3): never panics; accepted text
+re-prints and re-parses to an equal AST, modulo spans; the canonical text is exactly the span
+of the query parsed from it. TX-P6 step 1's exit asks for ten minutes clean. It is seeded from
+`fixtures/sq` — the accept cases are valid seeds and the reject cases are one mutation from
+valid — and registered in the Makefile's `FUZZ_TARGETS`, without which `make fuzz` would
+compile it and never run it, which is the defect `readers` already supplied once.
+
+**It took four runs to get a clean ten minutes, and each of the three findings was real.** All
+three are worth recording, because none was reachable from a fixture and each is a different
+kind:
+
+1. **A span that swallowed a trailing newline.** `from library\n` closed the query at 13 in a
+   text whose last word ends at 12, because the span was closed at the lexer's position and
+   peeking had already moved it past the separator. A caret a line below the word it is about.
+   The fix is a separate `prev_end` — the end of the last *consumed* token, with separators and
+   end-of-input excluded — and the law in §5 that pins it.
+2. **An ambiguous split in a time range**, §4.1 above: fixed by ending an `edtf` token at any
+   `.`.
+3. **A panic**, which is guarantee A1 itself: `near("x", N)` for an integer `N` near `i64`'s
+   ceiling multiplied by the scale unchecked. The lexer's own decimal path had the guard; the
+   integer path in the parser did not. Both now answer `SMY-E460 number out of range`.
+
+The first two are the parse goldens' blind spot stated plainly: a fixture compares a tree
+against a committed dump, and the dump leaves spans out so it does not churn on a whitespace
+edit. That is the right trade for a golden and it means the fixtures cannot see a span defect
+at all. The third is the blind spot of any hand-written corpus — nobody writes
+`near("x", 9223372036854775807)` as an example of anything.
 
 ## 6. Delivery steps
 
@@ -530,8 +572,9 @@ only for review:
 2. `src/parse.rs`: recursive descent over §4. *Exit:* `fixtures/sq/accept` parse, `fixtures/sq/reject`
    produce the expected code, span and message.
 3. The canonical printer. *Exit:* QG-7's two equations over every accept fixture.
-4. `sq_parse` fuzz target and the QG-3/QG-4 source guards. *Exit:* ten minutes clean. The
-   determinism-matrix entry moves to step 7, where the command it would run exists.
+4. `sq_parse` fuzz target and the QG-3/QG-4 source guards. *Exit:* ten minutes clean — reached
+   on the fourth run, after the three defects §5 lists. The determinism-matrix entry moves to
+   step 7, where the command it would run exists.
 
 ## 7. Risks and mitigations
 

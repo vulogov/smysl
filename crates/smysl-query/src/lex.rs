@@ -76,6 +76,13 @@ pub struct Lexer<'a> {
     src: &'a str,
     pos: usize,
     peeked: Option<Token>,
+    /// Where the last *consumed* token ended. `pos` is not that number: peeking scans ahead,
+    /// so after one `peek` the position is past trivia the construct does not own. A span
+    /// closed at `pos` would swallow the whitespace, the comment or the newline that happens
+    /// to follow, and a diagnostic's caret would land a line below the word it is about. The
+    /// fuzzer found exactly that on its first run, on `from library` with a trailing newline:
+    /// the query closed at 13 in a text whose last word ends at 12.
+    last_end: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -84,11 +91,20 @@ impl<'a> Lexer<'a> {
             src,
             pos: 0,
             peeked: None,
+            last_end: 0,
         }
     }
 
+    /// Where the parser is: the next token's start if one is peeked, else the position. This
+    /// is the right answer for a diagnostic that points at what comes next and the wrong one
+    /// for closing a span — use [`Lexer::prev_end`] for that.
     pub fn here(&self) -> usize {
         self.peeked.as_ref().map_or(self.pos, |t| t.span.start)
+    }
+
+    /// Where the last consumed token ended, which is where a construct's span closes.
+    pub fn prev_end(&self) -> usize {
+        self.last_end
     }
 
     pub fn peek(&mut self) -> Result<Token, Diagnostic> {
@@ -101,10 +117,16 @@ impl<'a> Lexer<'a> {
     /// Named `advance` rather than `next`: this is not an iterator, and a `next` that
     /// returns a `Result` and never ends would read like one.
     pub fn advance(&mut self) -> Result<Token, Diagnostic> {
-        match self.peeked.take() {
-            Some(t) => Ok(t),
-            None => self.scan(),
+        let t = match self.peeked.take() {
+            Some(t) => t,
+            None => self.scan()?,
+        };
+        // A separator and the end of input are not content: a construct's span never ends at
+        // the newline, the `|` or the nothing that follows it.
+        if !matches!(t.tok, Tok::Break | Tok::Eof) {
+            self.last_end = t.span.end;
         }
+        Ok(t)
     }
 
     /// Un-peek, so a raw-mode scan starts where the parser actually is. Every mode method
@@ -133,16 +155,34 @@ impl<'a> Lexer<'a> {
             self.skip_blanks();
             let second = self.raw_until_range_or_space();
             if second.is_empty() {
+                // A third `.` is the likely typo, and saying which character is wrong beats
+                // saying what is missing: `2026-09-01...2026-09-15` is a range with a stray
+                // dot, not a range with no end.
+                if self.src[self.pos..].starts_with('.') {
+                    return Err(self.err(
+                        Span::new(self.pos, self.pos + 1),
+                        "a time value has no `.` in it; `..` is what separates a range",
+                    ));
+                }
                 return Err(self.err(
                     Span::new(self.pos, self.pos),
                     "expected the second half of a time range after `..`",
                 ));
             }
             let span = Span::new(start, self.pos);
+            self.last_end = span.end;
             return Ok((first, Some(second), span));
         }
+        if self.src[self.pos..].starts_with('.') {
+            return Err(self.err(
+                Span::new(self.pos, self.pos + 1),
+                "a time value has no `.` in it; `..` is what separates a range",
+            ));
+        }
         self.pos = save;
-        Ok((first, None, Span::new(start, self.pos)))
+        let span = Span::new(start, self.pos);
+        self.last_end = span.end;
+        Ok((first, None, span))
     }
 
     /// Everything to the matching `)`, kept verbatim. This is why `text(kjv-1769#Ps.14)` keeps
@@ -156,8 +196,14 @@ impl<'a> Lexer<'a> {
             match bytes[self.pos] {
                 b'(' => depth += 1,
                 b')' if depth == 0 => {
-                    let text = self.src[start..self.pos].trim().to_string();
-                    return Ok((text, Span::new(start, self.pos)));
+                    // The span covers the locator, not the blanks around it: a span closed at
+                    // `self.pos` would reach the `)`, and the printer writes neither.
+                    let raw = &self.src[start..self.pos];
+                    let lead = raw.len() - raw.trim_start().len();
+                    let text = raw.trim().to_string();
+                    let span = Span::new(start + lead, start + lead + text.len());
+                    self.last_end = span.end;
+                    return Ok((text, span));
                 }
                 b')' => depth -= 1,
                 b'\n' => break,
@@ -214,6 +260,7 @@ impl<'a> Lexer<'a> {
             ));
         }
         let span = Span::new(start, start + text.len());
+        self.last_end = span.end;
         Ok((text, span))
     }
 
@@ -444,7 +491,12 @@ impl<'a> Lexer<'a> {
             if b.is_ascii_whitespace() || b == b'|' || b == b')' {
                 break;
             }
-            if b == b'.' && bytes.get(self.pos + 1) == Some(&b'.') {
+            // Any `.`, not only a `..`. An EDTF value has no `.` in it, and stopping only at
+            // the pair makes the split point ambiguous: `X...Y` lexes as `X.` `..` `Y` and
+            // prints back as `X` `..` `.Y`, which is a different pair of values. The fuzzer
+            // found that one. Stopping here leaves a lone `.` for `time_value` to refuse by
+            // name.
+            if b == b'.' {
                 break;
             }
             self.pos += 1;

@@ -109,7 +109,7 @@ unknown source kind asserting the uid is unchanged.
 `dev/1.9.0`'s changelog currently promises five items carried from 1.8: a staleness check, rival
 explanations (`contrasts`), a `timeline` thread schema, corroboration, and an incremental
 retrieval index. None of the five appears anywhere in the RFC set — `contrasts` has zero hits
-across all nine documents.
+across all ten documents (re-checked 2026-10-15, with 2.9 in the set).
 
 They are not in conflict. They are the same work, and the RFC says so without knowing it:
 

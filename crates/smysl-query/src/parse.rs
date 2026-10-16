@@ -44,7 +44,7 @@ pub fn parse(src: &str) -> Result<Parsed, Diagnostic> {
         lx: Lexer::new(src),
         warnings: Vec::new(),
     };
-    let query = p.query(src.len())?;
+    let query = p.query()?;
     Ok(Parsed {
         query,
         warnings: p.warnings,
@@ -257,7 +257,7 @@ impl Parser<'_> {
 
     // ---- query -----------------------------------------------------------------------------
 
-    fn query(&mut self, len: usize) -> Result<Query, Diagnostic> {
+    fn query(&mut self) -> Result<Query, Diagnostic> {
         let mut header = Vec::new();
         loop {
             self.soft_break()?;
@@ -322,7 +322,10 @@ impl Parser<'_> {
             ordering,
             shaping,
             output,
-            span: Span::new(0, len),
+            // Closed where the last token ended, not at `len`: a trailing newline, a trailing
+            // separator or a trailing comment is not part of the query, and the printer emits
+            // none of them.
+            span: Span::new(0, self.lx.prev_end()),
         })
     }
 
@@ -487,7 +490,7 @@ impl Parser<'_> {
             }
             break;
         }
-        let end = self.lx.here();
+        let end = self.lx.prev_end();
         Ok(Scope {
             items,
             span: Span::new(kw.span.start, end),
@@ -649,7 +652,7 @@ impl Parser<'_> {
         let kw = self.expect_word("where")?;
         let pred = self.pred()?;
         let lens_none = self.lens_modifier()?;
-        let end = self.lx.here();
+        let end = self.lx.prev_end();
         Ok(Filter {
             pred,
             lens_none,
@@ -744,7 +747,16 @@ impl Parser<'_> {
                 let d = self.bump()?;
                 let threshold = match d.tok {
                     Tok::Dec(s) => Decimal::from_scaled(s),
-                    Tok::Int(n) => Decimal::from_scaled(n * Decimal::SCALE),
+                    // Checked, like the lexer's own decimal path and with the same message: an
+                    // integer that fits in `i64` need not fit once scaled, and `near("x", N)`
+                    // for a large `N` was a panic rather than a diagnostic. Guarantee A1 is
+                    // the whole point of this crate's fuzz target, which is what found it.
+                    Tok::Int(n) => {
+                        let scaled = n
+                            .checked_mul(Decimal::SCALE)
+                            .ok_or_else(|| self.lx.err(d.span, "number out of range"))?;
+                        Decimal::from_scaled(scaled)
+                    }
                     _ => return Err(self.lx.err(d.span, "expected a decimal threshold")),
                 };
                 self.expect(")")?;
@@ -894,7 +906,7 @@ impl Parser<'_> {
         } else {
             None
         };
-        let end = self.lx.here();
+        let end = self.lx.prev_end();
         Ok(Traversal {
             edge,
             depth,
@@ -936,7 +948,7 @@ impl Parser<'_> {
             }
             break;
         }
-        let end = self.lx.here();
+        let end = self.lx.prev_end();
         Ok(Closure {
             items,
             span: Span::new(kw.span.start, end),
@@ -994,7 +1006,7 @@ impl Parser<'_> {
                 Ordering::OrderBy {
                     keys,
                     lens_none,
-                    span: Span::new(kw.span.start, self.lx.here()),
+                    span: Span::new(kw.span.start, self.lx.prev_end()),
                 }
             }
             Some("in") => {
@@ -1003,7 +1015,7 @@ impl Parser<'_> {
                     Some("reading") => {
                         self.expect_word("order")?;
                         Ordering::ReadingOrder {
-                            span: Span::new(kw.span.start, self.lx.here()),
+                            span: Span::new(kw.span.start, self.lx.prev_end()),
                         }
                     }
                     Some("time") => {
@@ -1017,7 +1029,7 @@ impl Parser<'_> {
                         };
                         Ordering::TimeOrder {
                             as_recorded,
-                            span: Span::new(kw.span.start, self.lx.here()),
+                            span: Span::new(kw.span.start, self.lx.prev_end()),
                         }
                     }
                     _ => {
@@ -1032,7 +1044,7 @@ impl Parser<'_> {
                 self.expect_word("by")?;
                 let field = self.field_ref()?;
                 let lens_none = self.lens_modifier()?;
-                let span = Span::new(kw.span.start, self.lx.here());
+                let span = Span::new(kw.span.start, self.lx.prev_end());
                 if is_group {
                     Ordering::GroupBy {
                         field,
@@ -1056,7 +1068,7 @@ impl Parser<'_> {
                 };
                 Ordering::AlignByClass {
                     policy,
-                    span: Span::new(kw.span.start, self.lx.here()),
+                    span: Span::new(kw.span.start, self.lx.prev_end()),
                 }
             }
             _ => return Err(self.lx.err(kw.span, "expected an ordering stage")),
@@ -1070,7 +1082,7 @@ impl Parser<'_> {
         let out = match kw.word().as_deref() {
             Some("limit") => Shaping::Limit {
                 count: self.count()?,
-                span: Span::new(kw.span.start, self.lx.here()),
+                span: Span::new(kw.span.start, self.lx.prev_end()),
             },
             Some("pack") => {
                 let tokens = self.count()?;
@@ -1085,7 +1097,7 @@ impl Parser<'_> {
                 Shaping::Pack {
                     tokens,
                     as_view,
-                    span: Span::new(kw.span.start, self.lx.here()),
+                    span: Span::new(kw.span.start, self.lx.prev_end()),
                 }
             }
             _ => return Err(self.lx.err(kw.span, "expected `limit` or `pack`")),

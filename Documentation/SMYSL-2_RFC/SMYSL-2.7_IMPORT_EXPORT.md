@@ -226,8 +226,11 @@ and never calls `emit`.
   **There is no F10 in `corpus`.** `fixtures/wire` holds `F10-lifecycle.cbor` with F1, F4, F5,
   F9, F12-reserved-pack and F13-commitment as CBOR. F6 is "supposed to fail" (`SMY-E030`).
 - `fuzz/`: cargo-fuzz targets `surface`, `cbor`, `merge_algebra`, `pack_constraints`,
-  `pipeline`, `pack_exact`, and a shared generator `smysl_fuzz::generate(&mut Choices, max)`
-  (`fuzz/src/lib.rs`). There is **no `proptest`** in the workspace. Property tests use seeded
+  `pipeline`, `pack_exact`, `readers`, `redaction_merge`, `edtf`, `time_engine`, `sq_parse`,
+  and a shared generator `smysl_fuzz::generate(&mut Choices, max)` (`fuzz/src/lib.rs`). The
+  list is the Makefile's `FUZZ_TARGETS`, which is what `make fuzz` runs; five of the eleven
+  arrived after this inventory was written and were added to it on 2026-10-15. There is **no
+  `proptest`** in the workspace. Property tests use seeded
   xorshift generators (`crates/smysl-graph/tests/merge_algebra.rs`, `smysl-pack`,
   `smysl-thread`, `smysl-core` tests). D-11 is met here in the same two forms.
 - `python/` (`smysl/records.py`: `decode_store`, `Record{code, body, raw}`, `encode_store`),

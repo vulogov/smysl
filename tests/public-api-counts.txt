@@ -35,4 +35,4 @@ smysl-provider   726
 smysl-ingest     1732
 smysl-tui        216
 smysl-text       3797
-smysl-query      903
+smysl-query      904

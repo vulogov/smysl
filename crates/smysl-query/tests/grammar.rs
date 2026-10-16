@@ -127,6 +127,24 @@ fn printing_then_parsing_gives_the_same_tree() {
     }
 }
 
+/// What QG-7 excuses spans from, asserted separately: canonical text is all content, so the
+/// query parsed from it covers the whole of it. A span that reaches past the last word — into
+/// a trailing newline, a trailing `|` or a comment — puts a diagnostic's caret somewhere the
+/// reader is not looking. `sq_parse` found one of those on the first run it was given.
+#[test]
+fn a_canonical_text_is_exactly_the_span_of_its_query() {
+    for (name, src, _) in cases("accept") {
+        let once = smysl_query::parse(&src).unwrap_or_else(|d| panic!("{name}: {}", d.message));
+        let text = smysl_query::print(&once.query);
+        let again = smysl_query::parse(&text).expect("canonical text parses");
+        assert_eq!(
+            (again.query.span.start, again.query.span.end),
+            (0, text.len()),
+            "{name}: the canonical text is not exactly the span of the query parsed from it"
+        );
+    }
+}
+
 /// QG-7, second equation: printing is idempotent, so a query has one canonical text.
 #[test]
 fn printing_is_idempotent() {

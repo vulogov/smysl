@@ -504,8 +504,13 @@ live-hosted: ## Live ingest gate against whichever hosted providers have keys se
 # the target has existed since TX-P1 step 3, `make fuzz-build` compiled it, `make seed-fuzz`
 # seeds it, and `make fuzz` never ran it. A target nothing runs is the same defect as a gate
 # nothing runs, found the same way — by reading the list rather than by a failure.
+#
+# `sq_parse` was added with the list in front of me, for the same reason. It is the one target
+# whose corpus the repo can seed exactly: `fixtures/sq` holds the accept and reject cases as
+# the text a person would type, so the fuzzer starts from every form the grammar has rather
+# than from the minutes a cold run spends discovering that `find` is a word.
 FUZZ_TARGETS := surface cbor merge_algebra pack_constraints pipeline pack_exact readers \
-                redaction_merge edtf time_engine
+                redaction_merge edtf time_engine sq_parse
 
 # Seeds, not a corpus. The repo already holds inputs worth starting from — the corpus
 # fixtures are real `.smy` documents, and `fuzz/artifacts/` holds every input that has ever
@@ -544,7 +549,14 @@ seed-fuzz: ## Copy the repo's own inputs into each fuzz corpus
 	@# unreachable — random bytes are not a zip, so the target would be refused at the magic
 	@# on every execution and the archive path would never run.
 	@set -e; mkdir -p fuzz/corpus/readers; 	for f in fixtures/library/readers/*; do 		case "$$f" in *.expected|*README*) continue;; esac; 		for i in 0 1 2 3 4 5 6 7; do 			printf "$$(printf '\\%03o' $$i)" > fuzz/corpus/readers/$$i-$$(basename $$f); 			cat "$$f" >> fuzz/corpus/readers/$$i-$$(basename $$f); 		done; 	done
-	@echo "seeded from fixtures/corpus, fixtures/library/readers and fuzz/artifacts"
+	@# The query fixtures go in as they stand: `sq_parse` takes the whole input as query text,
+	@# so an accept case is a valid seed and a reject case is a seed one mutation away from
+	@# valid, which is where the interesting inputs are.
+	@set -e; mkdir -p fuzz/corpus/sq_parse; \
+		for f in fixtures/sq/accept/*.sq fixtures/sq/reject/*.sq; do \
+			cp -f "$$f" fuzz/corpus/sq_parse/ 2>/dev/null || true; \
+		done
+	@echo "seeded from fixtures/corpus, fixtures/library/readers, fixtures/sq and fuzz/artifacts"
 
 fuzz: seed-fuzz ## Fuzz every target for 60s each, as CI does (nightly)
 	@echo "The parser targets existed from the start and nothing ran them, which is how two"

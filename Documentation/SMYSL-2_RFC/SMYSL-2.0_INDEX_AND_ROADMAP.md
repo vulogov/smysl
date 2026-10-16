@@ -22,20 +22,24 @@ Draft 3 described using smysl as an instrument for text research:
 
 It was one 2,700-line document. The evaluation of draft 3 recommended splitting it, running the
 riskiest experiment first, and settling the decisions that fix identity before writing units at
-scale. This set does that. It is **nine documents, one normative**:
+scale. This set does that. It is **ten documents, one normative**:
 
 | id | document | kind | phases | lines |
 |---|---|---|---|---:|
 | **2.0** | `SMYSL-2.0_INDEX_AND_ROADMAP.md` (this) | index | all | — |
-| **2.1** | `SMYSL-2.1_HARDENING.md`: fixes to today's tree | implementation | TX-P0 | 954 |
-| **2.2** | `SMYSL-2.2_EXTRACTION_SPIKE.md`: extraction and proposition spike | experiment protocol | S0 | 587 |
-| **2.3** | `SMYSL-2.3_FORMAT_AMENDMENT.md`: library, time, schema evolution, round trip | **normative** | per amendment | 827 |
-| **2.4** | `SMYSL-2.4_LIBRARY_AND_INGEST.md`: library, readers, time engine, ingest, linking, propositions, languages | implementation | TX-P1–P5, TX-P7 | 1,199 |
-| **2.5** | `SMYSL-2.5_QUERY_AND_DOSSIERS.md`: `sq`, dossiers, thread schemas, schema-evolution tooling, embeddings | implementation | TX-P6, TX-P8 (dossiers), TX-P10, TX-P12 | 1,216 |
-| **2.6** | `SMYSL-2.6_MEASURES_AND_ASSESSMENT.md`: measures, assessment | implementation | TX-P8 (T1–T7), TX-P9 | 901 |
-| **2.7** | `SMYSL-2.7_IMPORT_EXPORT.md`: `lib import` / `lib export`, round trip | implementation | TX-P11 | 993 |
-| **2.8** | `SMYSL-2.8_SCALE.md`: `StoreRead`, shards, disk-backed store | implementation | TX-P13 | 1,080 |
-| **2.9** | `SMYSL-2.9_QUERY_GRAMMAR.md`: the `sq/1` grammar — lexer, productions, determinism clauses, canonical printing | implementation | TX-P6 (step 1) | 541 |
+| **2.1** | `SMYSL-2.1_HARDENING.md`: fixes to today's tree | implementation | TX-P0 | 1,149 |
+| **2.2** | `SMYSL-2.2_EXTRACTION_SPIKE.md`: extraction and proposition spike | experiment protocol | S0 | 595 |
+| **2.3** | `SMYSL-2.3_FORMAT_AMENDMENT.md`: library, time, schema evolution, round trip | **normative** | per amendment | 966 |
+| **2.4** | `SMYSL-2.4_LIBRARY_AND_INGEST.md`: library, readers, time engine, ingest, linking, propositions, languages | implementation | TX-P1–P5, TX-P7 | 3,838 |
+| **2.5** | `SMYSL-2.5_QUERY_AND_DOSSIERS.md`: `sq`, dossiers, thread schemas, schema-evolution tooling, embeddings | implementation | TX-P6, TX-P8 (dossiers), TX-P10, TX-P12 | 1,253 |
+| **2.6** | `SMYSL-2.6_MEASURES_AND_ASSESSMENT.md`: measures, assessment | implementation | TX-P8 (T1–T7), TX-P9 | 909 |
+| **2.7** | `SMYSL-2.7_IMPORT_EXPORT.md`: `lib import` / `lib export`, round trip | implementation | TX-P11 | 998 |
+| **2.8** | `SMYSL-2.8_SCALE.md`: `StoreRead`, shards, disk-backed store | implementation | TX-P13 | 1,097 |
+| **2.9** | `SMYSL-2.9_QUERY_GRAMMAR.md`: the `sq/1` grammar — lexer, productions, determinism clauses, canonical printing | implementation | TX-P6 (step 1) | 619 |
+
+The line counts are as of 2026-10-15 and are a sense of weight, not a checked figure —
+nothing reads them, and every one of them was stale before that date, because a count recorded
+when a document is written is wrong by its next edit.
 
 **Rules of the set:**
 - **Only 2.3 is normative.** Implementation RFCs refer to it and do not redefine records, keys,
