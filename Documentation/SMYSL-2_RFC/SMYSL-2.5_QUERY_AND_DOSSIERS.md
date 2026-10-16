@@ -435,6 +435,20 @@ the existing private `relink::successors` made public so query and relink cannot
     disjoint; `Bm25::over` scores it. `Bm25::index_subset` is therefore not needed and was not
     added — a second index per partition is the cost F-10 measured, and the whole point of the
     table is that it is paid once.
+  - **What TX-P6 step 3 built, for a plain store.** `postings::View::of` sums *disjoint
+    partition tables* and lives in `smysl-text`, which the pure tier cannot reach until step 6.
+    A plain `Store` gives the planner the other shape — one corpus, partitioned after the fact
+    — so step 3 added `smysl_retrieve::Subset`, a `Postings` restricted to a uid set. Every
+    statistic BM25 reads comes through that trait, so restricting the answers restricts `N`,
+    `df`, `avgdl` and the candidate lists exactly; `crates/smysl-retrieve/tests/postings.rs`
+    asserts bit-for-bit that scoring through a `Subset` equals scoring a table built from
+    those units alone. It is still not a second index: one table is built per store, and a
+    view of it costs one pass over the partition.
+  - **The partition and the IDF scope are different restrictions.** A partition decides which
+    units may be *returned*; the IDF scope decides what the term statistics are counted
+    *over*. They coincide only at `idf_scope = partition`. `smysl-retrieve` already separates
+    them — `Query::within` restricts candidates and leaves IDF to the index — so the `Subset`
+    sets the universe and `within` sets the partition.
 - Each partition is searched with its own analyzer (SMYSL-2.4 chain id, recorded).
 - **RRF.** `score(u) = Σ_p 1 / (k + rank_p(u))`, `k = 60`, ranks 1-based, partitions summed in
   sorted partition-key order, f64, ties by uid. The fused list is a function of integer ranks
@@ -902,7 +916,7 @@ pub fn supersession_heads(store: &Store) -> (BTreeMap<Uid, Uid>, Vec<Uid>); // r
 pub mod salience { pub fn corroboration_groups(store: &Store, uid: &Uid) -> (Vec<String>, Vec<String>); }
 ```
 
-`smysl-retrieve` additions: **none.** This RFC asked for
+`smysl-retrieve` additions: **one, and not this one.** This RFC asked for
 
 ```rust
 impl Bm25 {
@@ -917,6 +931,17 @@ disjoint, so the second index per partition is a cost nobody has to pay. The fun
 added and should not be: `Bm25::over(postings, analyzer, store)` is the seam, and
 `postings::View::of(table, partitions)` (`smysl-text`) is the summing view. Three other places
 in this RFC named `index_subset` as though it existed and were corrected with this one.
+
+What TX-P6 step 3 added instead is a *view*, in the pure tier, where the summing one cannot
+reach:
+
+```rust
+pub struct Subset<'p> { /* a `Postings` restricted to a uid set */ }
+impl<'p> Subset<'p> {
+    /// O(|uids|), and it builds nothing.
+    pub fn of(inner: &'p dyn Postings, uids: &'p BTreeSet<Uid>) -> Subset<'p>;
+}
+```
 
 `smysl-query`. **The `Scope` trait had no signature in this RFC** — §3.2 phase 3, §3.3's table
 and `Env` below name it and none of them says what it is — so TX-P6 step 2 wrote one from what

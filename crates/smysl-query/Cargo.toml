@@ -34,6 +34,11 @@ unicode-normalization = { workspace = true }
 # — what grows is this crate's job, from a grammar to a grammar and a planner, which is what
 # SMYSL-2.5 §4.1 always had it doing.
 smysl-graph = { workspace = true }
+# TX-P6 step 3. The lexical source scores through `Bm25::over` on a `Subset` view of one
+# postings table — SMYSL-2.5 §3.4's per-partition IDF without the per-partition index it
+# originally asked for. `smysl-retrieve` is a pure crate, so the pure tree does not grow a
+# runtime, and §4.5 has listed it among this crate's dependencies since draft 1.
+smysl-retrieve = { workspace = true }
 
 # The grammar goldens (SMYSL-2.9 §5). The fixture tree is language-free, like
 # `fixtures/conformance/`, because three more implementations of this grammar are coming and

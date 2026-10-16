@@ -163,14 +163,16 @@ fn the_library_scopes_need_smysl_text() {
     }
 }
 
-/// Phases 5 to 9 are refused by name, with the phase that will lower them.
+/// Phases 6 to 9 are refused by name, with the phase that will lower them.
+///
+/// `find` left this list in TX-P6 step 3, which is what phase 5 is; the sources phase 5 still
+/// cannot lower are refused in `tests/lexical.rs`, beside the one it can.
 #[test]
-fn a_stage_past_phase_four_is_refused_by_name() {
+fn a_stage_past_phase_five_is_refused_by_name() {
     let (name, store) = corpora().remove(0);
     let scope = StoreScope::new(name.clone(), &store);
     let env = Env::new(&store, &scope);
     for (text, expect) in [
-        ("from store:NAME\nfind \"x\" ~lex", "a source"),
         (
             "from store:NAME\nwhere status = measured",
             "a `where` filter",

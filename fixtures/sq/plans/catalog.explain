@@ -7,5 +7,5 @@ plan sq/1
       (no manifest): 1 unit(s)
       m3:2v53cmcjs5kldvkadfsojminnjjeyqxeatpallrlh2s5dwg3htfq [en]: 1 unit(s)
       m3:2v53cmcjs5kldvkadfsojminnjjeyqxeatpallrlh2s5dwg3htfq [ru]: 1 unit(s)
-  phases 5-9 (sources, filters, traversals, set ops, ordering) are not in
-  this build; a query that needs one is refused with SMY-E461
+  phases 6-9 (filters, traversals, set ops, ordering) are not in this
+  build; a query that needs one is refused with SMY-E461

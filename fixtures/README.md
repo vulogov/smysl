@@ -8,7 +8,7 @@ Eleven trees, with different jobs.
 | `conformance/` | `.smy` / `.cbor` inputs plus the exact diagnostic set each must produce | the external conformance suite |
 | `golden/` | canonical encodings, rendered artifacts, `--explain` output | golden tests |
 | `library/same-as/` | `anthology.smy` — a paragraph reprinted under two expressions, and one that is not | `same-as propose`/`classes` in the determinism matrix (`xtask determinism`) |
-| `sq/` | `accept/*.sq` with the tree and the canonical text each parses to, `reject/*.sq` with the one diagnostic each must produce, `plans/*.explain` with the plan a store yields | the `sq/1` grammar goldens (`crates/smysl-query/tests/grammar.rs`) and the planner goldens (`tests/planner.rs`) |
+| `sq/` | `accept/*.sq` with the tree and the canonical text each parses to, `reject/*.sq` with the one diagnostic each must produce, `plans/*.explain` with the plan a store yields, `plans/*.why` with the plan and the fused ranking together | the `sq/1` grammar goldens (`crates/smysl-query/tests/grammar.rs`) and the planner goldens (`tests/planner.rs`) |
 
 `library/same-as/anthology.smy` holds three units and no part: a same-as engine reads which part,
 which manifest and which bytes a unit *says* it came from, which is all A-2.4 lets a unit carry
@@ -93,11 +93,19 @@ case on purpose: in a hand-written recursive-descent parser the risk is never am
 unintended acceptance, which no accept case can detect. `SMYSL_BLESS=1` rewrites every
 expectation and should be a decision rather than a habit.
 
-`sq/plans/` is the planner's goldens (TX-P6 step 2), and each one is the `--explain` text for
+`sq/plans/` is the planner's goldens (TX-P6 steps 2 and 3), and each `.explain` is the text for
 `from store:<fixture>` over the matching file in `corpus/`. The snapshot is the explain output
 rather than a field-by-field assertion because SMYSL-2.5 §3.2 makes each planner phase record
 what it did *so that* `--explain` can print it: what is worth pinning is the whole record, and
 a golden a person can read is a golden a person will notice is wrong.
+
+`sq/plans/find-lexical.why` is the one golden here that is not a plan alone. Step 3's
+`--explain` gains a phase-5 line, and none of the `.explain` snapshots can show it: they are
+`from store:<fixture>` with no source, so there is nothing for phase 5 to lower. This one is
+`find "connection pool" ~lex` over F1, and it pins the `--why` text beside the plan — the
+partition ranks, the fused score and the per-term contributions behind each — because those
+numbers are what makes a ranking auditable and a change in any of them is a change in the
+answer.
 
 `sq/plans/catalog.smy` is the one input here that is not in `corpus/`. None of F1 to F13
 carries a manifest, so every snapshot taken over them exercises only the uncatalogued branch of

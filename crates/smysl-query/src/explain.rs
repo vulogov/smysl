@@ -8,6 +8,7 @@
 //! The output is a plain text block, one line per phase, stable enough to be a golden. That
 //! is the exit TX-P6 step 2 asks for: plan snapshots over `fixtures/corpus`.
 
+use crate::fuse::Fused;
 use crate::plan::{Plan, PlanStep, Purity};
 use crate::ports::PartitionKey;
 
@@ -92,12 +93,62 @@ pub fn explain(plan: &Plan) -> String {
                     out.push_str(&format!("      {name}: {n} unit(s)\n"));
                 }
             }
+            PlanStep::Source {
+                engine,
+                text,
+                limit,
+                rrf_k,
+            } => {
+                out.push_str(&format!(
+                    "  5 source: {engine} {text}, {limit} per partition, rrf k={rrf_k}\n"
+                ));
+            }
         }
     }
 
-    // The honest end of a four-phase planner. A plan that stopped at phase 4 and did not say
-    // so would read like a plan that finished.
-    out.push_str("  phases 5-9 (sources, filters, traversals, set ops, ordering) are not in\n");
-    out.push_str("  this build; a query that needs one is refused with SMY-E461\n");
+    // The honest end of a planner that reaches phase 5. A plan that stopped early and did not
+    // say so would read like a plan that finished.
+    out.push_str("  phases 6-9 (filters, traversals, set ops, ordering) are not in this\n");
+    out.push_str("  build; a query that needs one is refused with SMY-E461\n");
+    out
+}
+
+/// `--why` for a fused result (SMYSL-2.5 §3.4).
+///
+/// §3.4 says exactly what it prints: *"per hit, the partition ranks and the per-term
+/// contributions inside each partition"*. Both halves matter and for different reasons. The
+/// ranks are the fusion's own arithmetic — a unit's fused score is a sum over partitions and
+/// nothing else, so printing the ranks makes the score checkable by hand. The contributions
+/// are the retrieval's, from `Hit::terms`, and they answer the question a rank cannot: *which
+/// words put it here*. A result that can name them is auditable; one that cannot is a number.
+///
+/// Contributions are advisory in `smysl-retrieve` — a `Retriever` is a public trait and not
+/// every implementation computes them — so an empty list prints as nothing rather than as
+/// "no terms matched", which would be a different and false claim.
+pub fn why(fused: &[Fused]) -> String {
+    let mut out = String::new();
+    if fused.is_empty() {
+        out.push_str("no hits\n");
+        return out;
+    }
+    for (at, hit) in fused.iter().enumerate() {
+        out.push_str(&format!(
+            "{:>3}. {} rrf {:.6}\n",
+            at + 1,
+            hit.uid,
+            hit.score
+        ));
+        for p in &hit.placements {
+            out.push_str(&format!(
+                "       {} rank {} score {:.6}\n",
+                partition_name(&p.key),
+                p.rank,
+                p.score
+            ));
+            for (term, contribution) in &p.terms {
+                out.push_str(&format!("         {term} {contribution:.6}\n"));
+            }
+        }
+    }
     out
 }

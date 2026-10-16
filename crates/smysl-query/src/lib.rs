@@ -31,7 +31,9 @@
 #![forbid(unsafe_code)]
 
 pub mod ast;
+pub mod exec;
 pub mod explain;
+pub mod fuse;
 pub mod lex;
 pub mod parse;
 pub mod plan;
@@ -40,9 +42,12 @@ pub mod print;
 pub mod store_scope;
 
 pub use ast::Query;
+pub use exec::{run, Answer};
 pub use explain::explain;
+pub use explain::why;
+pub use fuse::{Fused, Placement, Ranked, RRF_K};
 pub use parse::{parse, Parsed};
-pub use plan::{plan, Env, Plan, PlanOptions, PlanStep, Purity};
+pub use plan::{plan, Env, Lexical, Plan, PlanOptions, PlanStep, Purity, Source};
 pub use ports::{Candidates, IdfScope, Partition, PartitionKey, Scope};
 pub use print::print;
 pub use store_scope::StoreScope;

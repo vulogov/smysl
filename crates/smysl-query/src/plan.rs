@@ -24,14 +24,16 @@
 //!   resolves nothing is worse than one that is absent. The typed path is TX-P12 step 3, which
 //!   names `E421`/`E422` as its own.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::diag::{Code, Diagnostic, Span};
 use smysl_core::ids::Uid;
 use smysl_core::types::{Record, RelKind};
 use smysl_graph::Store;
 
-use crate::ast::{EdgeSpec, Expr, Pipeline, Query, Using};
+use crate::ast::{
+    Atom, EdgeSpec, Engine, Expr, LangSel, Pipeline, Query, Source as AstSource, Using,
+};
 use crate::ports::{item_text, Candidates, IdfScope, Partition, Scope};
 
 /// What the planner reads the world through (SMYSL-2.5 §4.2).
@@ -53,14 +55,33 @@ impl<'a> Env<'a> {
 }
 
 /// Options a caller sets before planning (SMYSL-2.5 §4.2).
-///
-/// `params` is absent until the executor can bind one: SMYSL-2.9 §4.10 refuses an unbound
-/// `$parameter` at execution, where the bindings are, and this build does not execute.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct PlanOptions {
     pub idf_scope: IdfScope,
     pub all_versions: bool,
+    /// Bindings for `$name` (SMYSL-2.9 §4.10). An unbound parameter is `SMY-E460` at
+    /// execution and not at planning, because binding is what a caller does between the two —
+    /// a plan is reusable across bindings and that is most of why parameters exist.
+    pub params: BTreeMap<String, String>,
+    /// How many hits a source may return, per partition, before fusion.
+    ///
+    /// Here rather than in the query because `limit` is a shaping stage, shaping is phase 9,
+    /// and step 4 lowers it; this is the number until a query can say one. The default is 10
+    /// because that is `find --limit`'s default and TX-P6 step 3's exit is that the two
+    /// rankings agree.
+    pub limit: usize,
+}
+
+impl Default for PlanOptions {
+    fn default() -> PlanOptions {
+        PlanOptions {
+            idf_scope: IdfScope::default(),
+            all_versions: false,
+            params: BTreeMap::new(),
+            limit: 10,
+        }
+    }
 }
 
 /// Whether running this plan can reach a model (SMYSL-2.5 §3.2).
@@ -76,6 +97,33 @@ pub enum Purity {
     ModelDependent(Vec<&'static str>),
 }
 
+/// A lowered source (SMYSL-2.5 §3.2 phase 5).
+///
+/// One variant, because one source lowers in a pure build with no library: `~sem` needs a
+/// model (TX-P10), `~hybrid` needs the routing decision that chooses between them, and the
+/// other six sources are the library layer's or a later phase's. Each is refused by name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Source {
+    Lexical(Lexical),
+}
+
+/// `find "…" ~lex` (SMYSL-2.5 §3.3, §3.4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Lexical {
+    /// The query text, or the parameter standing in for it. Unresolved on purpose: a plan is
+    /// a function of the query and not of one caller's bindings.
+    pub text: Atom,
+    /// Whether the query wrote `~lex` or left the engine out.
+    ///
+    /// Recorded because the two are different queries that plan the same way, and a saved
+    /// query has to give back what was written. Which they mean is settled in SMYSL-2.9 §9
+    /// (OQ-83): an absent engine is lexical.
+    pub explicit: bool,
+    pub span: Span,
+}
+
 /// A schema pinned by a `using` clause, with the revision it resolved to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pin {
@@ -85,7 +133,12 @@ pub struct Pin {
 
 /// What one phase did. `--explain` prints these in order (SMYSL-2.5 §3.2: each phase "records
 /// what it did, so `--explain` prints the plan rather than reconstructing it").
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Not `Eq`: phase 5 records RRF's `k`, which is an `f64`. Recording it is deliberate — §3.6
+/// hashes `k` with seven other inputs into a saved query's identity, and a plan that used a
+/// constant without saying which is a plan nobody can check against the recipe it was saved
+/// under.
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum PlanStep {
     /// Phase 1.
@@ -107,6 +160,18 @@ pub enum PlanStep {
         partitions: Vec<(String, usize)>,
         idf_scope: IdfScope,
     },
+    /// Phase 5.
+    Source {
+        engine: &'static str,
+        /// The text as written — a quoted string or a `$name` — because a plan prints what
+        /// the query said and not what some binding made of it.
+        text: String,
+        /// Per partition, before fusion.
+        limit: usize,
+        /// `k`, from §3.4. Printed because it is one of the eight recipe inputs and the only
+        /// one this build fixes.
+        rrf_k: f64,
+    },
 }
 
 /// A lowered query (SMYSL-2.5 §4.2).
@@ -116,7 +181,7 @@ pub enum PlanStep {
 /// parameters — of which this build has two. A hash over a subset would be a saved query's
 /// identity changing silently when the other six arrive, which is the one thing a recipe hash
 /// exists to prevent. It lands with TX-P8, where saving does.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct Plan {
     pub sq: u32,
@@ -125,6 +190,8 @@ pub struct Plan {
     pub pins: Vec<Pin>,
     pub partitions: Vec<Partition>,
     pub candidates: BTreeSet<Uid>,
+    /// Phase 5, or `None` for a query that named a scope and nothing to rank it by.
+    pub source: Option<Source>,
 }
 
 /// Lower a query through phases 1 to 4.
@@ -195,7 +262,16 @@ pub fn plan(q: &Query, env: &Env<'_>, opts: &PlanOptions) -> Result<Plan, Vec<Di
     // --- phase 4: partitions -----------------------------------------------------------------
     let partitions = env.scope.partition(&candidates.uids);
 
-    let steps = vec![
+    // --- phase 5: sources --------------------------------------------------------------------
+    let source = match &pipeline.source {
+        Some(stage) => match lower_source(stage, &mut diags) {
+            Some(s) => Some(s),
+            None => return Err(diags),
+        },
+        None => None,
+    };
+
+    let mut steps = vec![
         PlanStep::Header {
             sq,
             pins: pins.clone(),
@@ -219,6 +295,18 @@ pub fn plan(q: &Query, env: &Env<'_>, opts: &PlanOptions) -> Result<Plan, Vec<Di
         },
     ];
 
+    if let Some(Source::Lexical(lex)) = &source {
+        steps.push(PlanStep::Source {
+            engine: "lexical",
+            text: match &lex.text {
+                Atom::Str(s) => format!("{s:?}"),
+                Atom::Param(n) => format!("${n}"),
+            },
+            limit: opts.limit,
+            rrf_k: crate::fuse::RRF_K,
+        });
+    }
+
     Ok(Plan {
         sq,
         purity: Purity::Pure,
@@ -226,7 +314,80 @@ pub fn plan(q: &Query, env: &Env<'_>, opts: &PlanOptions) -> Result<Plan, Vec<Di
         pins,
         partitions,
         candidates: candidates.uids,
+        source,
     })
+}
+
+/// Phase 5. One source lowers; the rest are refused by name, with what each is waiting for.
+///
+/// `~sem` and `~hybrid` are not "later phases" — they are a different tier. A semantic source
+/// consults a model, which is what SMYSL-2.5 §4.1 keeps behind the `SemanticSource` port so
+/// this crate stays pure, and `~hybrid` routes between the two and so needs both. Saying so is
+/// the point: `SMY-E461`'s meaning is "not available in this build", and a reader who is told
+/// *which build would have it* can go and get one.
+fn lower_source(stage: &crate::ast::SourceStage, diags: &mut Vec<Diagnostic>) -> Option<Source> {
+    let span = stage.span;
+    match &stage.source {
+        AstSource::Find { text, engine, lang } => {
+            // A language selector is the library layer's: `lang:<code>` asks which language a
+            // unit is in, and nothing in a plain store records that — the catalog does
+            // (SMYSL-2.4), which is step 6. `lang:any` asks for more still, a bridge per pair
+            // of partitions (§3.5), which is TX-P10's. Refused rather than ignored, because a
+            // query that asked for one language and silently got all of them is answered
+            // wrongly and says nothing about it.
+            if let Some(sel) = lang {
+                let what = match sel {
+                    LangSel::Any => "`lang:any` needs a language bridge per pair of partitions",
+                    LangSel::One(_) => "`lang:<code>` needs the catalog's language facts",
+                };
+                diags.push(Diagnostic::at(Code::E461, span).with_message(format!(
+                    "{what}, which this build has no source for: it ranks lexically over a                      plain store"
+                )));
+                return None;
+            }
+            match engine {
+                Some(Engine::Sem) => {
+                    diags.push(Diagnostic::at(Code::E461, span).with_message(
+                        "`~sem` consults an embedding model, which this pure build has no                          port bound for"
+                            .to_string(),
+                    ));
+                    None
+                }
+                Some(Engine::Hybrid) => {
+                    diags.push(Diagnostic::at(Code::E461, span).with_message(
+                        "`~hybrid` routes between the lexical and semantic engines, so it                          needs the semantic one this pure build has no port bound for"
+                            .to_string(),
+                    ));
+                    None
+                }
+                // SMYSL-2.9 OQ-83: an absent engine is `~lex`.
+                engine => Some(Source::Lexical(Lexical {
+                    text: text.clone(),
+                    explicit: engine.is_some(),
+                    span,
+                })),
+            }
+        }
+        other => {
+            let what = match other {
+                AstSource::AboutEntity(_) => "`about entity(…)` needs entity resolution",
+                AstSource::AboutClass(_) => "`about class(…)` needs class membership",
+                AstSource::Text { .. } => "`text(…)` needs the library layer's locators",
+                AstSource::Uid(_) => "`uid` is phase 5 for a store this build can reach, and                                       is not lowered yet",
+                AstSource::View(_) => "`view` needs a saved view",
+                AstSource::Pointer(_) => "`pointer` needs the pointer registry",
+                AstSource::Metric(_) => "`metric` dispatches to the measures of SMYSL-2.6",
+                AstSource::Question(_) => "`question` is the interpretive source of OQ-47",
+                AstSource::Match { .. } => "`match` is refused by SMYSL-2.5 §3.3 in this RFC",
+                AstSource::Find { .. } => unreachable!("handled above"),
+            };
+            diags.push(
+                Diagnostic::at(Code::E461, span)
+                    .with_message(format!("{what}, which this build does not have")),
+            );
+            None
+        }
+    }
 }
 
 /// `SMY-E461`, with the phase that will lower the stage named.
@@ -242,9 +403,6 @@ fn not_yet(span: Span, what: &str, phase: &str) -> Diagnostic {
 
 /// Every stage phases 5 to 9 own, refused by name.
 fn unlowered(q: &Query, p: &Pipeline, diags: &mut Vec<Diagnostic>) {
-    if let Some(source) = &p.source {
-        diags.push(not_yet(source.span, "a source", "phase 5"));
-    }
     for f in &p.filters {
         diags.push(not_yet(f.span, "a `where` filter", "phase 6"));
     }

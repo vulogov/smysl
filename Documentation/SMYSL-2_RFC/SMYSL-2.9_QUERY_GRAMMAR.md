@@ -329,7 +329,7 @@ source      = find | about | text-src | uid-src | view-src
             | pointer-src | metric-src | question-src | match-stage ;
 
 find        = "find" ( string | param ) [ engine ] [ "lang" ":" lang-sel ] ;
-engine      = "~lex" | "~sem" | "~hybrid" ;
+engine      = "~lex" | "~sem" | "~hybrid" ;   (* absent = "~lex", OQ-83 *)
 lang-sel    = "any" | ident ;                          (* a source option, not a field *)
 
 about       = "about" ( "entity" "(" ( string | param ) ")"
@@ -614,8 +614,9 @@ resolution and retired fields, SMYSL-2.5 §3.9).
 
 ## 9. Open questions
 
-All eight were **decided 2026-10-15**, and each row keeps what was rejected, because a decision
-without its alternative is not reviewable. Three of them changed the draft; they are marked.
+The first eight were **decided 2026-10-15** and OQ-83 on 2026-10-16, and each row keeps what
+was rejected, because a decision without its alternative is not reviewable. Three of them
+changed the draft; they are marked.
 
 | id | decision |
 |---|---|
@@ -627,6 +628,8 @@ without its alternative is not reviewable. Three of them changed the draft; they
 | OQ-80 | **Decided: no synonyms** (§3.2, §4.11). *Changed the draft.* The cost is not determinism, it is that four implementations must carry an identical table or QG-7 breaks between ports. The benefit disappears once the one spelling is chosen for a reader rather than copied from a function name: `rests on` is the sole spelling and `rests_on` is not admitted. *Rejected:* the three-row table; an open table |
 | OQ-81 | **Decided: `ascending`/`descending` in full, default ascending for every key** (§4.8). *Changed the draft.* Determinism does not turn on it, so this is a reading decision and the abbreviation buys nothing. *Rejected:* `asc`/`desc`; and a per-key default — which reads better in the common case and was rejected because an ordering whose direction depends on which field was named is the kind of surprise that makes people stop trusting the order |
 | OQ-82 | **Decided: keep the balanced-delimiter capture** (§4.9). It buys one real thing — a user who read about `match` gets `SMY-E461` "not available in this build or phase" rather than `SMY-E460` "unexpected word". The objection, that raw text is not normalised so two queries differing only in `match` whitespace hash differently, is unreachable **provided saving a query requires a successful plan**, since planning always refuses `match`; **That precondition is now confirmed in SMYSL-2.5 §3.6** (2026-10-15), and as something stronger than a plan: a query is saved only after it has planned *and run*, which three of §3.6's seven payload keys and its result edges already required. If a later phase makes `match` plannable, that phase owes a normalisation of the captured text. *Rejected:* deciding the Cypher subset now (OQ-50 is not ready); removing `match` from `sq/1` (safe under QG-9, but loses the diagnostic) |
+
+| OQ-83 | **Decided: an absent engine is `~lex`** (§4.4). Raised by TX-P6 step 3, which had to lower `find "…"` and found that neither RFC says what a bare `find` means: §4.4's grammar makes the engine optional and SMYSL-2.5 §3.3's table lists only the three written forms. Lexical, for two reasons that agree. The CLI already decided it — `find`'s own summary is *"Rank units against a query, lexically"* and `--engine` defaults to lexical — and a query language whose default differed from the command of the same name would be a trap rather than a choice. And it is the only default that keeps a bare `find` **pure**: `~sem` and `~hybrid` consult a model, so a semantic default would make the commonest query in the language fail TX-P6 step 7's `--seed-check` purity gate. The plan records which was written, because a saved query must give back the text it was saved from. *Rejected:* requiring the engine always (boilerplate on the one stage every query has, and it breaks every example in §2 and SMYSL-2.5 §11); defaulting to `~hybrid`, which is the best answer on average and is impure, unavailable in the pure tier, and silently different between two builds of the same binary |
 
 Open elsewhere, raised here: **OQ-50** (`match`'s pattern language, SMYSL-2.5). The §3.1/§3.9
 contradiction OQ-77 raised against SMYSL-2.5, and the §3.6 precondition OQ-82 depended on, were
