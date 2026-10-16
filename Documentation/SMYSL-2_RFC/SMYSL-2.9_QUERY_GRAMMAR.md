@@ -404,12 +404,17 @@ the thing it modifies and the grammar gains one production rather than a general
 lens-mod    = "with" "lens" "none" ;
 ```
 
-**This resolution has a prerequisite in SMYSL-2.5, not here.** §3.1 says the modifier "disables
-lensing for qualified access only", while §3.9 says a qualified `x.text/v1@1:text:mode` "reads
-revision 1 raw, no lens" unconditionally. If §3.9 is right the modifier does nothing, so either
-qualified access is normally lensed forward from the named revision and this modifier makes it
-raw, or §3.1's sentence is stale. That is a question about meaning rather than syntax, and
-OQ-77 records it against SMYSL-2.5.
+**The prerequisite in SMYSL-2.5 is settled** (2026-10-15, OQ-77). §3.1 said the modifier
+"disables lensing for qualified access only" and §3.9 said a qualified `x.text/v1@1:text:mode`
+"reads revision 1 raw, no lens", which would have left the modifier nothing to do. §3.9's
+sentence was the stale one, and what settles it is a third sentence in the same section that
+neither side cited: **lenses never run backwards for a query.** "Raw at revision 1" would mean
+lensing newer units back to it, which that rule forbids and `retire` makes impossible
+(`SMY-E422`), so over a mixed-revision corpus the phrase has no meaning except as a filter. A
+qualified reference therefore names the field **as the named revision named it** and is
+compiled forward from there — §3.9's pinned compile-forward scoped to one reference instead of
+the whole query — and `with lens none` turns that compile-forward off, leaving the reference
+literal and any unit at another revision unmappable on that field (`SMY-W420`).
 
 ### 4.8 Ordering, shape and output
 
@@ -608,12 +613,13 @@ without its alternative is not reviewable. Three of them changed the draft; they
 |---|---|
 | OQ-75 | **Decided: a separator is required, either a newline or `|`; the printer emits a newline.** It is the only form serving both a shell one-liner and a multi-line template, where trailing pipes are the dangling-`|` error SMYSL-2.5 §5.1 already names. *Rejected:* `|` mandatory (noisy in files); newline only (breaks one-liners); and **no separator at all**, which parses unambiguously — stage heads are reserved at stage-head position — and was rejected because a required separator is what lets a diagnostic say *"`where` may not follow `order by`"* instead of guessing where the previous stage ended, and because it widens QG-9's blast radius for every future keyword |
 | OQ-76 | **Decided: `channels` bare for all, `channel:name` for one** (§4.3). *Changed the draft.* SMYSL-2.5 §3.3 writes bare `channel`, the only member of its list not following the plural-bare/singular-colon rule its four neighbours follow. *Rejected:* bare-only (cannot name one); colon-only (no way to ask about all) |
-| OQ-77 | **Decided: the modifier attaches to `where`, `order by`, `group by` and `compare by`** — the four stages that can hold a qualified field reference (§4.7). *Rejected:* any stage (too broad); a header clause (not local to what it modifies); per-field (noisy). **Carried back to SMYSL-2.5:** its §3.1 and §3.9 disagree about whether qualified access is lensed at all, and until that is settled the modifier's *meaning* is open even though its placement is not |
+| OQ-77 | **Decided: the modifier attaches to `where`, `order by`, `group by` and `compare by`** — the four stages that can hold a qualified field reference (§4.7). *Rejected:* any stage (too broad); a header clause (not local to what it modifies); per-field (noisy). **Its meaning was carried back to SMYSL-2.5 and is now settled there** (2026-10-15, §3.1 and §3.9): §3.9's "reads revision 1 raw, no lens" was the stale sentence, because "raw at an old revision" would require the backward lensing §3.9 itself forbids. A qualified reference is the field as the named revision named it, compiled forward; the modifier turns that off. *Rejected there:* deleting the modifier and keeping "raw" (does not define "raw" over a mixed-revision corpus, only hides it in the planner); making the modifier disable lensing for unqualified access too (lets one stage compare fields across revisions silently, which is what rule N exists to prevent) |
 | OQ-78 | **Decided: `as recorded` modifies `in time order`** (§4.8); `in time order` alone reads SMYSL-2.4's effective time. *Rejected:* attaching it to the time predicate, which already carries its axis in `said`/`observed` and so would make the modifier redundant; a query-level clause, which would act at a distance |
 | OQ-79 | **Decided: `from` is optional, and a saved query's canonical print records the scope resolved when it was saved** (§3.4, §4.3). This is QG-8 applied to scope. *Rejected:* always required (boilerplate on every CLI call, and it can disagree with the positional store argument); optional with nothing recorded (leaves a saved question ambiguous and two reruns incomparable) |
 | OQ-80 | **Decided: no synonyms** (§3.2, §4.11). *Changed the draft.* The cost is not determinism, it is that four implementations must carry an identical table or QG-7 breaks between ports. The benefit disappears once the one spelling is chosen for a reader rather than copied from a function name: `rests on` is the sole spelling and `rests_on` is not admitted. *Rejected:* the three-row table; an open table |
 | OQ-81 | **Decided: `ascending`/`descending` in full, default ascending for every key** (§4.8). *Changed the draft.* Determinism does not turn on it, so this is a reading decision and the abbreviation buys nothing. *Rejected:* `asc`/`desc`; and a per-key default — which reads better in the common case and was rejected because an ordering whose direction depends on which field was named is the kind of surprise that makes people stop trusting the order |
-| OQ-82 | **Decided: keep the balanced-delimiter capture** (§4.9). It buys one real thing — a user who read about `match` gets `SMY-E461` "not available in this build or phase" rather than `SMY-E460` "unexpected word". The objection, that raw text is not normalised so two queries differing only in `match` whitespace hash differently, is unreachable **provided saving a query requires a successful plan**, since planning always refuses `match`; that precondition should be confirmed in SMYSL-2.5 §3.6. *Rejected:* deciding the Cypher subset now (OQ-50 is not ready); removing `match` from `sq/1` (safe under QG-9, but loses the diagnostic) |
+| OQ-82 | **Decided: keep the balanced-delimiter capture** (§4.9). It buys one real thing — a user who read about `match` gets `SMY-E461` "not available in this build or phase" rather than `SMY-E460` "unexpected word". The objection, that raw text is not normalised so two queries differing only in `match` whitespace hash differently, is unreachable **provided saving a query requires a successful plan**, since planning always refuses `match`; **That precondition is now confirmed in SMYSL-2.5 §3.6** (2026-10-15), and as something stronger than a plan: a query is saved only after it has planned *and run*, which three of §3.6's seven payload keys and its result edges already required. If a later phase makes `match` plannable, that phase owes a normalisation of the captured text. *Rejected:* deciding the Cypher subset now (OQ-50 is not ready); removing `match` from `sq/1` (safe under QG-9, but loses the diagnostic) |
 
-Open elsewhere, raised here: **OQ-50** (`match`'s pattern language, SMYSL-2.5) and the §3.1/§3.9
-contradiction OQ-77 records against SMYSL-2.5 §3.9.
+Open elsewhere, raised here: **OQ-50** (`match`'s pattern language, SMYSL-2.5). The §3.1/§3.9
+contradiction OQ-77 raised against SMYSL-2.5, and the §3.6 precondition OQ-82 depended on, were
+both settled in SMYSL-2.5 on 2026-10-15; neither is open.

@@ -286,11 +286,11 @@ are normative over it and are what the implementation fixes that the sketch left
     templates. An unbound parameter is `SMY-E460`.
   - `explain` and `why` are CLI flags, not stages.
   - `with lens none` on a stage disables lensing for qualified access only; unqualified access
-    is always lensed (§3.9). **This sentence and §3.9 disagree** and SMYSL-2.9 OQ-77 records it:
-    §3.9 says a qualified `x.text/v1@1:text:mode` reads raw unconditionally, which would leave
-    this modifier with nothing to do. Either qualified access is normally lensed forward from
-    the named revision, or this sentence is stale. SMYSL-2.9 §4.7 fixes the modifier's
-    *placement* and leaves its meaning to this question.
+    is always lensed. **Settled 2026-10-15** (SMYSL-2.9 OQ-77): this sentence stands and §3.9's
+    "reads revision 1 raw, no lens" was the stale one. A qualified reference names the field as
+    the named revision named it and is compiled forward from there, so the modifier turns that
+    compile-forward off. SMYSL-2.9 §4.7 fixes the placement: `where`, `order by`, `group by`,
+    `compare by`.
 - **`match`** (Cypher-like patterns) is parsed into an AST node and refused by the planner with
   `SMY-E461` until a later phase (OQ-50). Every other stage in SMYSL-2.9 §4 is planned.
 
@@ -462,6 +462,22 @@ A saved query is one unit of type `x.query/saved` (FC-5, SMYSL-2.3) with payload
 | `query:schemas` | `id@revision` list in force |
 | `query:lens-chain` | hash of every lens chain the plan applied (§3.10) |
 
+**A query is saved only after it has planned and run to completion.** *Settled 2026-10-15
+(SMYSL-2.9 OQ-82).* The table above already requires it and this makes it normative rather
+than incidental: `query:result-hash` is taken over the result uids, `query:lens-chain` over the
+chains the plan applied, `query:schemas` over the revisions in force, and the result set is
+written as `RESULT_EDGE` edges — none of which exists before a run. So a query that fails to
+plan is never saved: `SMY-E461` for `match`, `SMY-E462` for an undeclared edge kind,
+`SMY-E422` for a predicate on a retired key. A run that succeeds and finds nothing is still a
+run; §3.13's empty slot keeps its role `gap` and hashes an empty result list.
+
+One consequence is load-bearing elsewhere. `match` is captured as raw text and the canonical
+printer does not normalise it (SMYSL-2.9 §4.9), so two queries differing only in the
+whitespace inside a `match` would hash differently — and that cannot happen, because planning
+refuses `match` and an unplanned query is never saved. If a later phase makes `match`
+plannable, that phase owes a normalisation of the captured text before this guarantee holds
+again.
+
 Status `cited`, `source { kind: doc, ref: "sq:<recipe-hash-short>" }`: the unit cites the query
 text it carries. That matches how `@question` units are authored in `fixtures/corpus/F4-qa.smy`
 (`status: cited` with a `doc` source).
@@ -571,7 +587,18 @@ reports as a rule N violation (`SMY-E426`).
 - Unqualified names resolve against the current revision of each schema in scope. If two schemas
   in scope both declare the name, the field is ambiguous and must be qualified (`SMY-E421` with
   the candidates listed).
-- Qualified `x.text/v1@1:text:mode` reads revision 1 raw, no lens.
+- Qualified `x.text/v1@1:text:mode` names the field **as revision 1 named it**, and the
+  predicate is compiled forward 1 → current by the pinned compile-forward rule below. It is
+  that rule scoped to one reference instead of to the whole query, and it is the only reading
+  available: "raw at revision 1" would require lensing newer units backwards, which the last
+  line of this section forbids and which `retire` makes impossible (`SMY-E422`). *Settled
+  2026-10-15 (SMYSL-2.9 OQ-77); the earlier text here said "reads revision 1 raw, no lens",
+  which left `with lens none` nothing to do.*
+- **`with lens none`** on a stage (SMYSL-2.9 §4.7) turns that compile-forward off for the
+  qualified references in that stage: they are read literally at the revision they name, so a
+  unit whose inferred revision is not that one is unmappable on that field and counted
+  (`SMY-W420`), exactly as an unmappable value is. Unqualified access is always lensed (§3.1)
+  and the modifier does not reach it.
 - **Pinned compile-forward.** For `using x.text/v1@1`, every predicate is rewritten through the
   chain 1 → current:
   - renames rename the field or value;
