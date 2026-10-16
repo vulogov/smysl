@@ -59,10 +59,11 @@ Three things it fixes beyond transcription:
 
 - No `smysl-query` crate, no `.sq` file and no BNF anywhere in the repository; nothing matching a
   draft-3 appendix was ever committed and later deleted. Verified 2026-10-15.
-- **SMYSL-2.5 §2's probe is stale.** It records `--seed-check` as "declared as a global flag and
-  read nowhere". It is read: `src/main.rs` declares it and the dispatcher decides per invocation.
-  Part of TX-P6 step 7's exit is therefore already met, and §2 of that document should be
-  corrected when it is next touched.
+- **SMYSL-2.5 §2's probe was stale and is corrected** (2026-10-16). It recorded `--seed-check`
+  as "declared as a global flag and read nowhere". It is read: `src/main.rs` declares it and the
+  dispatcher decides per invocation, so part of TX-P6 step 7's exit is already met. The probe
+  that concluded otherwise ran it on a pure invocation, where an inert flag and a working one
+  print the same thing.
 - The house parser idiom this grammar is written for is `smysl-core`'s `surface/lex.rs` and
   `surface/parse.rs`: hand-written, `Code`-tagged, span-carrying. SMYSL-2.5 §3.1 gives four
   reasons for matching it, and the fourth — that the grammar ports to Python, Go and JavaScript

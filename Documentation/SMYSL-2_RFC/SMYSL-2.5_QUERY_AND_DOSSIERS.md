@@ -221,9 +221,16 @@ Everything below was read at `d25ec9e` in `/tmp/smysl`. "(unverified)" marks wha
 - `cmd_thread` (≈ line 3849): `--derive [S] | --schema S` with a hard-coded `value_parser(["analysis",
   "narrative", "brief", "qa", "plan"])`, `--scope UID` (repeatable), `--arity ROLE=N`,
   `--explain`; `Hlc::new(0, 0, owner)` keeps derivation pure.
-- **`--seed-check` is declared as a global flag (line 149) and read nowhere.** Probe:
-  `smysl --seed-check find --why -n 3 pool fixtures/corpus/F1-incident.smy` exits 0 and prints
-  the ranking with `matched: pool 0.9139` lines; the flag has no effect.
+- **`--seed-check` is declared as a global flag and is read.** This entry said "read nowhere"
+  until 2026-10-16, on the strength of a probe
+  (`smysl --seed-check find --why -n 3 pool fixtures/corpus/F1-incident.smy`) that exits 0 and
+  prints the ranking — which is what a *pure* invocation under a working flag also does, so the
+  probe could not tell the two apart. `src/main.rs` declares it and the dispatcher reads it per
+  invocation, refusing an invocation whose purity it cannot assert. **Part of TX-P6 step 7's
+  exit is therefore already met**, which is why the correction matters rather than being
+  housekeeping: the step is smaller than its line suggests. What is genuinely absent is the
+  stronger assertion — running twice and comparing bytes — which belongs to `sq` (`SMY-E416`).
+  Noted in SMYSL-2.9 §2 on 2026-10-15 and corrected here.
 - Rule A (`xtask/src/purity.rs`): nothing under `src/` except `lib.rs` may name a sibling crate;
   every CLI capability must be reachable through the facade `src/lib.rs`.
 
@@ -1128,8 +1135,15 @@ output:    pack 2000 tokens  estimator smysl/script-aware/1
 
 ### 5.1 Grammar golden tests (`crates/smysl-query/tests/grammar.rs`)
 
-- `fixtures/sq/accept/*.sq` with `*.ast` (pretty-printed AST): every SMYSL-2.9 §4 production, the
-  §11.1 and §11.5 examples, comments and `#` in locators, multi-word keywords, parameters.
+- `fixtures/sq/accept/*.sq` with `*.ast` (pretty-printed AST): every SMYSL-2.9 §4 production,
+  comments and `#` in locators, multi-word keywords, parameters.
+  - This clause asked for "the §11.1 and §11.5 examples" until 2026-10-16. **There is no §11**
+    — those are sections of RFC SMYSL-2 draft 3, which is not in this repository, the same gap
+    that sent TX-P6 step 1 to write SMYSL-2.9 before writing a parser. The clause was therefore
+    unsatisfiable from the day the goldens were built, and step 1 covered §4's productions
+    instead. Dropped rather than reconstructed: the productions are the enumeration that
+    matters for a grammar golden, and an example set numbered to match sections nobody can read
+    would be invention wearing a citation.
 - `fixtures/sq/reject/*.sq` with `*.diag`: one expected `SMY-E460` (span, message) per file:
   unterminated string, dangling `|`, `depth` without number, `using sq/2` (`E427`), unbound `$x`.
 - Regenerated with `SMYSL_BLESS=1` (render's convention; the pack golden uses another spelling,
@@ -1237,7 +1251,32 @@ Each step has an exit test. Steps within a phase are ordered.
 5. Supersession pass with `supersession_heads`; `relink` refactored onto it. *Exit:* existing
    relink tests unchanged; `W464` on a fork fixture.
 6. `smysl-text` scope, partitions, time stages, entity bridge (needs SMYSL-2.4 TX-P1–P5).
-   *Exit:* §11.1 and §11.5 examples run on the Bible and chat fixtures; `W415` counts match.
+   *Exit:* a query for each capability this step newly enables runs on the Bible
+   (`fixtures/library/bibles/slice/eng-kjv`) and chat (`fixtures/library/chat-wire`) fixtures,
+   committed as `fixtures/sq/` goldens, and `W415` counts match. The capabilities, from §3.3's
+   table and §3.4:
+   - **scope** — `texts`, `library`, `collection:<name>`, `channels`, `channel:<name>`,
+     `import:<name>`: the six items `StoreScope` refuses with `SMY-E461` today, each answered
+     by the `Scope` implementation in `smysl-text`;
+   - **partitions** — a catalogued store partitioned by `(manifest, lang)` from the library
+     catalog rather than from the log, with each partition searched under its own analyzer
+     (§3.4) and the chain id recorded;
+   - **the `lang:` source option** — `lang:<code>` becomes lowerable here, because it needs the
+     catalog's language facts. `lang:any` does **not**: it asks for the strongest bridge per
+     pair of partitions (§3.5), which is TX-P10's. Step 3 refuses both and names which is
+     waiting for what;
+   - **time stages** — `said` and `observed` across `during`, `overlaps`, `before` and `after`,
+     over SMYSL-2.4's effective-time engine, with undated units excluded and counted
+     (`SMY-W415`), which is the half of this exit that was always checkable;
+   - **the entity bridge** — `about entity("…")` resolved through aliases and same-as.
+
+   *This exit read "§11.1 and §11.5 examples run on the Bible and chat fixtures" until
+   2026-10-16.* There is no §11 in this document; they are RFC SMYSL-2 draft 3's, absent here.
+   The examples were only ever a way of naming the set above, so the set is named directly and
+   the examples arrive as fixtures during the step — which is where every other example in this
+   repository lives, is executable, and is what the Python, Go and JavaScript ports validate
+   against. Writing them as prose now, ahead of the scope that gives them meaning, would be
+   guessing at queries nothing can yet run.
 7. CLI `q`, `--seed-check`; purity gate. *Exit:* draft 3 TX-P6 exit — every pure query passes
    `--seed-check`, plans stable; `xtask check-purity` green with `smysl-query` listed.
 
