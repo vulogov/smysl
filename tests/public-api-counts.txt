@@ -24,7 +24,7 @@
 #
 # Regenerate with `make api`. Check with `make api-check`.
 smysl-core       9579
-smysl-graph      2564
+smysl-graph      2568
 smysl-check      256
 smysl-pack       544
 smysl-thread     259

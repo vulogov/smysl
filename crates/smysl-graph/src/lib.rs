@@ -29,9 +29,9 @@ pub mod traverse;
 pub use adjacency::{Adjacency, Edge, EdgeKind, EdgeSet, NodeId};
 pub use labels::{label_bindings, label_index, labels_of, resolve_label, LabelError};
 pub use lineage::{
-    dependents, dependents_via, diff, hop_diff, membership, rests_on, trace, trace_via,
-    AgentActivity, HopDiff, Lineage, LineageNode, RecipeChange, RecipeChangeKind, StoreDiff,
-    TraceKind, Via,
+    dependents, dependents_trace, dependents_via, diff, hop_diff, membership, rests_on, trace,
+    trace_both, trace_via, AgentActivity, HopDiff, Lineage, LineageNode, RecipeChange,
+    RecipeChangeKind, StoreDiff, TraceKind, Via,
 };
 // The function only: `merge::review` also names the module, and re-exporting both put `review`
 // in the facade twice.
