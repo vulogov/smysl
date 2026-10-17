@@ -53,7 +53,9 @@ fn through_sq(store: &Store, name: &str, text: &str, opts: &PlanOptions) -> Answ
     let parsed = smysl_query::parse(&q).unwrap_or_else(|d| panic!("{q}: {}", d.message));
     let plan = plan(&parsed.query, &env, opts)
         .unwrap_or_else(|d| panic!("{q}: {} {}", d[0].code, d[0].message));
-    run(&plan, &env, opts).unwrap_or_else(|d| panic!("{q}: {} {}", d[0].code, d[0].message))
+    run(&plan, &env, opts)
+        .unwrap_or_else(|d| panic!("{q}: {} {}", d[0].code, d[0].message))
+        .answer
 }
 
 /// The exit clause's first half.
@@ -219,7 +221,7 @@ fn the_explain_and_why_text_for_a_ranked_query() {
     let parsed = smysl_query::parse("from store:F1-incident\nfind \"connection pool\" ~lex")
         .expect("it parses");
     let plan = plan(&parsed.query, &env, &opts).expect("it plans");
-    let Answer::Ranked(fused) = run(&plan, &env, &opts).expect("it runs") else {
+    let Answer::Ranked(fused) = run(&plan, &env, &opts).expect("it runs").answer else {
         panic!("a `find` should rank");
     };
 
@@ -288,16 +290,16 @@ fn an_absent_engine_is_lexical() {
     let b = plan(&said.query, &env, &opts).expect("plans");
 
     assert_eq!(
-        run(&a, &env, &opts).expect("runs"),
-        run(&b, &env, &opts).expect("runs"),
+        run(&a, &env, &opts).expect("runs").answer,
+        run(&b, &env, &opts).expect("runs").answer,
         "a bare `find` and `~lex` must answer the same question"
     );
     // The plans differ in exactly one place: whether the query wrote the engine down. A saved
     // query has to give back what was written, so the two are not the same plan.
-    let smysl_query::Source::Lexical(bare) = a.source.as_ref().expect("a source") else {
+    let smysl_query::Source::Lexical(bare) = a.source().expect("a source") else {
         panic!("lexical")
     };
-    let smysl_query::Source::Lexical(said) = b.source.as_ref().expect("a source") else {
+    let smysl_query::Source::Lexical(said) = b.source().expect("a source") else {
         panic!("lexical")
     };
     assert!(!bare.explicit && said.explicit);
@@ -322,7 +324,7 @@ fn an_unbound_parameter_is_refused_when_it_is_run() {
 
     opts.params
         .insert("q".to_string(), "connection pool".to_string());
-    let bound = run(&plan, &env, &opts).expect("bound, it runs");
+    let bound = run(&plan, &env, &opts).expect("bound, it runs").answer;
     let direct = through_sq(&store, "F1-incident", "connection pool", &opts);
     assert_eq!(bound, direct, "the same plan, bound, is the literal query");
 }

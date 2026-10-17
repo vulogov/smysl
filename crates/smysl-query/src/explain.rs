@@ -103,13 +103,45 @@ pub fn explain(plan: &Plan) -> String {
                     "  5 source: {engine} {text}, {limit} per partition, rrf k={rrf_k}\n"
                 ));
             }
+            PlanStep::Filter { stages } => {
+                out.push_str(&format!("  6 filters: {stages} stage(s), all must hold\n"));
+            }
+            PlanStep::Expand {
+                traversals,
+                closures,
+            } => {
+                out.push_str("  7 expand:");
+                if !traversals.is_empty() {
+                    out.push_str(&format!(" {}", traversals.join(", ")));
+                }
+                if !closures.is_empty() {
+                    out.push_str(&format!(" with {}", closures.join(", ")));
+                }
+                out.push('\n');
+            }
+            PlanStep::SetOp { op, .. } => {
+                out.push_str(&format!("  8 set: {op}\n"));
+            }
+            PlanStep::Shape {
+                ordering,
+                shaping,
+                output,
+            } => {
+                out.push_str("  9 shape:");
+                if !ordering.is_empty() {
+                    out.push_str(&format!(" {}", ordering.join(", ")));
+                }
+                if !shaping.is_empty() {
+                    out.push_str(&format!(" | {}", shaping.join(", ")));
+                }
+                match output {
+                    Some(o) => out.push_str(&format!(" -> {o}\n")),
+                    None => out.push('\n'),
+                }
+            }
         }
     }
 
-    // The honest end of a planner that reaches phase 5. A plan that stopped early and did not
-    // say so would read like a plan that finished.
-    out.push_str("  phases 6-9 (filters, traversals, set ops, ordering) are not in this\n");
-    out.push_str("  build; a query that needs one is refused with SMY-E461\n");
     out
 }
 

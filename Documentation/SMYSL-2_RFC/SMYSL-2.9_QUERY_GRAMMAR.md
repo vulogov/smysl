@@ -598,8 +598,9 @@ only for review:
 |---|---|
 | W510 | a string literal is not in NFC; it is used byte-exactly as written and may match nothing |
 | E511 | a scope names a store, collection, channel or import this environment does not hold |
+| E512 | an operator does not apply to the type of the field it names |
 
-E512–W519 are free. Syntax errors are `SMY-E460` and stage availability is `SMY-E461`, both from
+W513–W519 are free. Syntax errors are `SMY-E460` and stage availability is `SMY-E461`, both from
 SMYSL-2.5 §8; this document adds no code it does not use.
 
 **Why `E511` is here and not in SMYSL-2.5's range**, where the planner that raises it lives: that
@@ -609,9 +610,23 @@ and the vocabulary it refuses from is §4.3's scope production. It is also not a
 purpose: a question asked of a corpus that is not here must say so, because "nothing found"
 cannot be told from a true negative. Added in TX-P6 step 2 with the `Scope` port that raises it.
 
+**`E512` is here for the same reason and one of its own.** The grammar admits `<` after any
+field, because §4.5's `comparison` production cannot know a field's type — `where status < cited`
+and `where kind < claim` are the same production. So the refusal is about what the grammar
+accepted, and it belongs beside `E511`. It is deliberately **not** `E421` or `E422`: those are a
+field no schema declares and a key retired without a mapping, and a field this code refuses is
+declared and readable. What is wrong is the question asked of it.
+
+Two fields are ordered — `status` and `commitment`, each by the ladder its kernel enum fixes —
+and `kind`, `schema` and `lang` are names. A raw payload key is refused for a third reason: its
+type is not declared to the build at all until FC-9 decoding lands, so ordering it would be
+ordering text whose meaning nobody has stated. Added in TX-P6 step 4 with the filters that raise
+it; the alternative was lexicographic order on a name, which answers a question nobody asked and
+says nothing about having done so.
+
 Codes from other documents used here: E410 (EDTF), E427 (`sq` version), E460 (syntax, unbound
-parameter), E461 (stage unavailable), E462 (undeclared relation kind), E421/E422 (field
-resolution and retired fields, SMYSL-2.5 §3.9).
+parameter), E461 (stage unavailable), E462 (undeclared relation kind), W463 (a traversal stopped
+at its depth), E421/E422 (field resolution and retired fields, SMYSL-2.5 §3.9).
 
 ## 9. Open questions
 

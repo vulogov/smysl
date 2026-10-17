@@ -29,12 +29,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use smysl_core::diag::{Code, Diagnostic, Span};
 use smysl_core::ids::Uid;
 use smysl_core::types::{Record, RelKind};
-use smysl_graph::Store;
+use smysl_graph::{EdgeKind, EdgeSet, Store};
 
 use crate::ast::{
-    Atom, EdgeSpec, Engine, Expr, LangSel, Pipeline, Query, Source as AstSource, Using,
+    Atom, ClosureItem, Count, Dir, EdgeSpec, Engine, Expr, LangSel, NamedEdge, Ordering, Output,
+    OutputStage, Pipeline, Query, SetOp, Shaping, SortTarget, Source as AstSource, Using,
 };
 use crate::ports::{item_text, Candidates, IdfScope, Partition, Scope};
+use crate::pred::Field;
 
 /// What the planner reads the world through (SMYSL-2.5 §4.2).
 ///
@@ -160,6 +162,21 @@ pub enum PlanStep {
         partitions: Vec<(String, usize)>,
         idf_scope: IdfScope,
     },
+    /// Phase 6.
+    Filter { stages: usize },
+    /// Phase 7.
+    Expand {
+        traversals: Vec<String>,
+        closures: Vec<&'static str>,
+    },
+    /// Phase 8.
+    SetOp { op: &'static str, span: Span },
+    /// Phase 9.
+    Shape {
+        ordering: Vec<String>,
+        shaping: Vec<String>,
+        output: Option<&'static str>,
+    },
     /// Phase 5.
     Source {
         engine: &'static str,
@@ -172,6 +189,149 @@ pub enum PlanStep {
         /// one this build fixes.
         rrf_k: f64,
     },
+}
+
+/// One traversal, lowered (SMYSL-2.5 §3.3, phase 7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TraversalPlan {
+    /// How it was written, for `--explain`.
+    pub label: String,
+    pub edges: EdgeSet,
+    pub direction: Direction,
+    /// Unresolved: a `$parameter` depth is bound between planning and running, like a
+    /// parameter anywhere else.
+    pub depth: Option<Count>,
+    pub span: Span,
+}
+
+/// Which way a traversal walks.
+///
+/// Three directions and three graph walks, which is why `smysl-graph` grew two functions in
+/// this step rather than one: `trace_via` existed, `dependents_trace` is its mirror with a
+/// depth, and `trace_both` is the walk that may change direction mid-path — strictly more than
+/// the union of the other two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Direction {
+    /// `expand ->k`: what the unit rests on.
+    Out,
+    /// `expand <-k`: what rests on the unit.
+    In,
+    /// `expand -[k]-`: either way.
+    Both,
+}
+
+/// One closure item, lowered (phase 7).
+///
+/// Two of the six. `holders` and `speakers` read payload uid keys *through lenses* (§3.3,
+/// §3.9), which is TX-P12's, and `spans` and `datings` are SMYSL-2.4's — so four are refused by
+/// name. The two here need nothing this build does not have: a rebuttal is an edge the store
+/// already answers for, and grounds are a kernel field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ClosurePlan {
+    Rebuttals,
+    Grounds,
+}
+
+/// One pipeline, lowered: phases 3 to 7 for one branch of a set expression.
+///
+/// This is what `Plan` was before TX-P6 step 4. A set expression has a pipeline per branch,
+/// each with its own scope, partitions and source, so the per-pipeline record had to become a
+/// type of its own — `from store:a | find "x" union from store:b | find "y"` resolves two
+/// scopes and two rankings before anything is combined.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct PipelinePlan {
+    pub scope: String,
+    pub items: Vec<String>,
+    pub stores: Vec<String>,
+    pub candidates: BTreeSet<Uid>,
+    pub partitions: Vec<Partition>,
+    pub source: Option<Source>,
+    /// Phase 6, in written order. Conjunctive: a pipeline's `where` stages all have to hold,
+    /// which is what writing two of them means (SMYSL-2.9 §4.2).
+    pub filters: Vec<crate::pred::Lowered>,
+    /// Phase 7, in written order.
+    pub traversals: Vec<TraversalPlan>,
+    pub closures: Vec<ClosurePlan>,
+}
+
+/// A set expression over pipelines (phase 8).
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum PlanExpr {
+    /// Boxed because a `PipelinePlan` is far larger than a pair of branches, and an unboxed
+    /// pair of variants that differ by an order of magnitude makes every `PlanExpr` the size
+    /// of the biggest. A set expression is the rare shape; the pipeline is the common one.
+    Pipeline(Box<PipelinePlan>),
+    Set {
+        op: SetOp,
+        left: Box<PlanExpr>,
+        right: Box<PlanExpr>,
+    },
+}
+
+impl PlanExpr {
+    /// The one pipeline, for a query that is not a set expression.
+    ///
+    /// Most queries are not, and a caller that wants the candidate set of a simple query
+    /// should not have to walk a tree of one node to get it.
+    pub fn sole(&self) -> Option<&PipelinePlan> {
+        match self {
+            PlanExpr::Pipeline(p) => Some(p),
+            PlanExpr::Set { .. } => None,
+        }
+    }
+}
+
+/// An ordering stage, lowered (phase 9).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OrderPlan {
+    /// `order by salience`, through `smysl-graph`'s salience seeded with the result and
+    /// renormalised over it — the existing function §3.3 names, not a second scorer.
+    Salience {
+        dir: Dir,
+    },
+    Field {
+        field: Field,
+        dir: Dir,
+    },
+    /// `group by <field>`: the result becomes groups, one per distinct value.
+    GroupBy {
+        field: Field,
+    },
+    /// `compare by <field>`: the same partition of the result, presented side by side. The
+    /// shape is a group list because that is what the data is; what differs is how a writer
+    /// lays it out, and writers are step 7's.
+    CompareBy {
+        field: Field,
+    },
+}
+
+/// A shaping stage, lowered (phase 9).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ShapePlan {
+    Limit { count: Count },
+    Pack { tokens: Count },
+}
+
+/// An output stage, lowered (phase 9).
+///
+/// An output selects a *writer*, and writers are the CLI's — step 7's `q`. What differs here is
+/// only whether the answer is a number or a list, so `Units`, `Json` and `Show` lower to the
+/// same computation and differ in the tag a caller reads to decide how to print it. Saying that
+/// out loud is better than three identical arms pretending to be three behaviours.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OutputPlan {
+    Count,
+    Units,
+    Json,
+    Show,
 }
 
 /// A lowered query (SMYSL-2.5 §4.2).
@@ -188,13 +348,36 @@ pub struct Plan {
     pub purity: Purity,
     pub steps: Vec<PlanStep>,
     pub pins: Vec<Pin>,
-    pub partitions: Vec<Partition>,
-    pub candidates: BTreeSet<Uid>,
-    /// Phase 5, or `None` for a query that named a scope and nothing to rank it by.
-    pub source: Option<Source>,
+    /// Phases 3 to 8: a pipeline, or a tree of them joined by set operators.
+    pub expr: PlanExpr,
+    /// Phase 9, in written order.
+    pub ordering: Vec<OrderPlan>,
+    pub shaping: Vec<ShapePlan>,
+    pub output: Option<OutputPlan>,
 }
 
-/// Lower a query through phases 1 to 4.
+impl Plan {
+    /// The candidate set of a query that is not a set expression.
+    ///
+    /// Kept as a method after TX-P6 step 4 moved the field onto [`PipelinePlan`]: it is what
+    /// most callers of a simple query's plan actually wanted, and a set expression has no one
+    /// candidate set to return — hence the `Option` rather than a union nobody asked for.
+    pub fn candidates(&self) -> Option<&BTreeSet<Uid>> {
+        self.expr.sole().map(|p| &p.candidates)
+    }
+
+    /// The source of a query that is not a set expression. See [`Plan::candidates`].
+    pub fn source(&self) -> Option<&Source> {
+        self.expr.sole().and_then(|p| p.source.as_ref())
+    }
+
+    /// The partitions of a query that is not a set expression. See [`Plan::candidates`].
+    pub fn partitions(&self) -> &[Partition] {
+        self.expr.sole().map(|p| &p.partitions[..]).unwrap_or(&[])
+    }
+}
+
+/// Lower a query through phases 1 to 9.
 pub fn plan(q: &Query, env: &Env<'_>, opts: &PlanOptions) -> Result<Plan, Vec<Diagnostic>> {
     let mut diags = Vec::new();
 
@@ -220,20 +403,107 @@ pub fn plan(q: &Query, env: &Env<'_>, opts: &PlanOptions) -> Result<Plan, Vec<Di
         }
     }
 
-    // A set expression is phase 8. Refusing here rather than at the first pipeline keeps the
-    // message about the operator the reader wrote.
-    let pipeline = match &q.expr {
-        Expr::Pipeline(p) => p,
-        Expr::Set { span, .. } => {
-            diags.push(not_yet(*span, "a set operation", "phase 8"));
-            return Err(diags);
+    // --- phases 2 to 8 -----------------------------------------------------------------------
+    let mut steps = vec![PlanStep::Header {
+        sq,
+        pins: pins.clone(),
+    }];
+    let expr = lower_expr(&q.expr, env, opts, &mut steps, &mut diags);
+
+    // --- phase 9: ordering, shaping, output --------------------------------------------------
+    let mut ordering = Vec::new();
+    for o in &q.ordering {
+        if let Some(lowered) = lower_ordering(o, &mut diags) {
+            ordering.push(lowered);
         }
+    }
+    let mut shaping = Vec::new();
+    for sh in &q.shaping {
+        if let Some(lowered) = lower_shaping(sh, &mut diags) {
+            shaping.push(lowered);
+        }
+    }
+    let output = match &q.output {
+        Some(stage) => lower_output(stage, &mut diags),
+        None => None,
     };
 
-    unlowered(q, pipeline, &mut diags);
+    if !diags.is_empty() {
+        return Err(diags);
+    }
+    let expr = expr.expect("no diagnostics means the expression lowered");
 
+    if !ordering.is_empty() || !shaping.is_empty() || output.is_some() {
+        steps.push(PlanStep::Shape {
+            ordering: ordering.iter().map(order_name).collect(),
+            shaping: shaping.iter().map(shape_name).collect(),
+            output: output.map(output_name),
+        });
+    }
+
+    Ok(Plan {
+        sq,
+        purity: Purity::Pure,
+        steps,
+        pins,
+        expr,
+        ordering,
+        shaping,
+        output,
+    })
+}
+
+/// Phases 2 to 8 over a set expression, which is a tree of pipelines.
+///
+/// Phase 8 is the recursion itself: §3.2 makes set operations a phase, and the only thing that
+/// phase does is join what two branches resolved. Each branch is planned whole — its own scope,
+/// its own partitions, its own source — because that is what `union` of two queries means.
+fn lower_expr(
+    expr: &Expr,
+    env: &Env<'_>,
+    opts: &PlanOptions,
+    steps: &mut Vec<PlanStep>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<PlanExpr> {
+    match expr {
+        Expr::Pipeline(p) => {
+            lower_pipeline(p, env, opts, steps, diags).map(|p| PlanExpr::Pipeline(Box::new(p)))
+        }
+        Expr::Set {
+            op,
+            left,
+            right,
+            span,
+        } => {
+            let a = lower_expr(left, env, opts, steps, diags);
+            let b = lower_expr(right, env, opts, steps, diags);
+            steps.push(PlanStep::SetOp {
+                op: set_name(*op),
+                span: *span,
+            });
+            Some(PlanExpr::Set {
+                op: *op,
+                left: Box::new(a?),
+                right: Box::new(b?),
+            })
+        }
+    }
+}
+
+/// Phases 2 to 7 for one pipeline.
+fn lower_pipeline(
+    pipeline: &Pipeline,
+    env: &Env<'_>,
+    opts: &PlanOptions,
+    steps: &mut Vec<PlanStep>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<PipelinePlan> {
     // --- phase 2: resolution -----------------------------------------------------------------
-    let relations = resolve_relations(env.store, pipeline, &mut diags);
+    let relations = resolve_relations(env.store, pipeline, diags);
+    steps.push(PlanStep::Resolve {
+        relations,
+        fields_checked: false,
+    });
 
     // --- phase 3: scope ----------------------------------------------------------------------
     let mut items: Vec<String> = Vec::new();
@@ -254,47 +524,28 @@ pub fn plan(q: &Query, env: &Env<'_>, opts: &PlanOptions) -> Result<Plan, Vec<Di
         // absent and being re-resolved somewhere else later.
         None => env.scope.everything(),
     };
-
-    if !diags.is_empty() {
-        return Err(diags);
-    }
+    steps.push(PlanStep::Scope {
+        scope: env.scope.name().to_string(),
+        items,
+        stores: candidates.stores.clone(),
+        candidates: candidates.uids.len(),
+    });
 
     // --- phase 4: partitions -----------------------------------------------------------------
     let partitions = env.scope.partition(&candidates.uids);
+    steps.push(PlanStep::Partition {
+        partitions: partitions
+            .iter()
+            .map(|p| (crate::explain::partition_name(&p.key), p.uids.len()))
+            .collect(),
+        idf_scope: opts.idf_scope,
+    });
 
     // --- phase 5: sources --------------------------------------------------------------------
     let source = match &pipeline.source {
-        Some(stage) => match lower_source(stage, &mut diags) {
-            Some(s) => Some(s),
-            None => return Err(diags),
-        },
+        Some(stage) => lower_source(stage, diags),
         None => None,
     };
-
-    let mut steps = vec![
-        PlanStep::Header {
-            sq,
-            pins: pins.clone(),
-        },
-        PlanStep::Resolve {
-            relations,
-            fields_checked: false,
-        },
-        PlanStep::Scope {
-            scope: env.scope.name().to_string(),
-            items,
-            stores: candidates.stores.clone(),
-            candidates: candidates.uids.len(),
-        },
-        PlanStep::Partition {
-            partitions: partitions
-                .iter()
-                .map(|p| (crate::explain::partition_name(&p.key), p.uids.len()))
-                .collect(),
-            idf_scope: opts.idf_scope,
-        },
-    ];
-
     if let Some(Source::Lexical(lex)) = &source {
         steps.push(PlanStep::Source {
             engine: "lexical",
@@ -307,15 +558,358 @@ pub fn plan(q: &Query, env: &Env<'_>, opts: &PlanOptions) -> Result<Plan, Vec<Di
         });
     }
 
-    Ok(Plan {
-        sq,
-        purity: Purity::Pure,
-        steps,
-        pins,
-        partitions,
+    // --- phase 6: filters --------------------------------------------------------------------
+    //
+    // Time stages are phase 6 too and are **not** lowered here: `said` and `observed` need
+    // SMYSL-2.4's effective-time engine and its range index, which is TX-P6 step 6. The
+    // observed axis alone is answerable from `Store::observed_at` today, and lowering half an
+    // axis pair would make `said during …` and `observed during …` differ in whether they were
+    // honoured rather than in what they asked.
+    let mut filters = Vec::new();
+    for f in &pipeline.filters {
+        if f.lens_none {
+            // `with lens none` turns off compile-forward for the stage (SMYSL-2.9 §4.7,
+            // OQ-77). This build refuses every qualified reference anyway, so the modifier has
+            // nothing to turn off — but it is not an error, and silently accepting it is right:
+            // a query written for a later build must mean the same thing here or nothing.
+        }
+        if let Some(lowered) = crate::pred::lower(&f.pred, diags) {
+            filters.push(lowered);
+        }
+    }
+    for t in &pipeline.times {
+        diags.push(
+            Diagnostic::at(Code::E461, t.span).with_message(
+                "a time stage reads effective time, which needs the library layer's time index \
+             (SMYSL-2.4); this build has a plain store"
+                    .to_string(),
+            ),
+        );
+    }
+    if !filters.is_empty() {
+        steps.push(PlanStep::Filter {
+            stages: filters.len(),
+        });
+    }
+
+    // --- phase 7: traversals and closures ----------------------------------------------------
+    let mut traversals = Vec::new();
+    for t in &pipeline.traversals {
+        if let Some(lowered) = lower_traversal(env.store, t, diags) {
+            traversals.push(lowered);
+        }
+    }
+    let mut closures = Vec::new();
+    for c in &pipeline.closures {
+        for item in &c.items {
+            match item {
+                ClosureItem::Rebuttals => closures.push(ClosurePlan::Rebuttals),
+                ClosureItem::Grounds => closures.push(ClosurePlan::Grounds),
+                ClosureItem::Holders | ClosureItem::Speakers => {
+                    diags.push(
+                        Diagnostic::at(Code::E461, c.span).with_message(
+                            "`with holders` and `with speakers` read payload uid keys through \
+                         lenses (SMYSL-2.5 §3.9), and this build has no lens engine: that is \
+                         TX-P12's"
+                                .to_string(),
+                        ),
+                    );
+                }
+                ClosureItem::Spans | ClosureItem::Datings => {
+                    diags.push(
+                        Diagnostic::at(Code::E461, c.span).with_message(
+                            "`with spans` and `with datings` are the library layer's (SMYSL-2.4); \
+                         a plain store records neither"
+                                .to_string(),
+                        ),
+                    );
+                }
+            }
+        }
+    }
+    if !traversals.is_empty() || !closures.is_empty() {
+        steps.push(PlanStep::Expand {
+            traversals: traversals.iter().map(|t| t.label.clone()).collect(),
+            closures: closures
+                .iter()
+                .map(|c| match c {
+                    ClosurePlan::Rebuttals => "rebuttals",
+                    ClosurePlan::Grounds => "grounds",
+                })
+                .collect(),
+        });
+    }
+
+    Some(PipelinePlan {
+        scope: env.scope.name().to_string(),
+        items: Vec::new(),
+        stores: candidates.stores,
         candidates: candidates.uids,
+        partitions,
         source,
+        filters,
+        traversals,
+        closures,
     })
+}
+
+/// Phase 7 for one traversal: which edges, which way, how far.
+fn lower_traversal(
+    store: &Store,
+    t: &crate::ast::Traversal,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<TraversalPlan> {
+    let (label, edges, direction) =
+        match &t.edge {
+            EdgeSpec::Out(k) => (
+                format!("->{k}"),
+                edge_set(store, k, t.span, diags)?,
+                Direction::Out,
+            ),
+            EdgeSpec::In(k) => (
+                format!("<-{k}"),
+                edge_set(store, k, t.span, diags)?,
+                Direction::In,
+            ),
+            EdgeSpec::Both(k) => (
+                format!("-[{k}]-"),
+                edge_set(store, k, t.span, diags)?,
+                Direction::Both,
+            ),
+            EdgeSpec::Named(named) => match named {
+                // The spelled traversals are graph operations, and §3.3 gives each one an existing
+                // function with an edge preset. `rests on` and `dependents` are the two that §3.3
+                // says gain a depth through the new BFS, which is what this step added.
+                NamedEdge::Grounds => ("grounds".to_string(), EdgeSet::support(), Direction::Out),
+                NamedEdge::Deps => ("deps".to_string(), EdgeSet::support(), Direction::Out),
+                NamedEdge::RestsOn => ("rests on".to_string(), EdgeSet::premises(), Direction::Out),
+                NamedEdge::Dependents => (
+                    "dependents".to_string(),
+                    EdgeSet::dependency(),
+                    Direction::In,
+                ),
+                NamedEdge::Lineage => ("lineage".to_string(), EdgeSet::support(), Direction::Both),
+                NamedEdge::Mentions => {
+                    let kind = RelKind::parse("x.text/mentions")
+                        .ok()
+                        .or_else(|| RelKind::parse("mentions").ok());
+                    match kind.and_then(|k| store.adjacency().edge_kind(&k)) {
+                        Some(k) => ("mentions".to_string(), EdgeSet::one(k), Direction::Out),
+                        None => {
+                            // Not `SMY-E462`: the kind is not undeclared in general, it is absent
+                            // from *this* store, which is a different fact and a different fix.
+                            diags.push(Diagnostic::at(Code::E511, t.span).with_message(
+                            "`expand mentions` needs an `x.text/mentions` relation, and no \
+                             record in this store declares or uses one"
+                                .to_string(),
+                        ));
+                            return None;
+                        }
+                    }
+                }
+            },
+        };
+    Some(TraversalPlan {
+        label,
+        edges,
+        direction,
+        depth: t.depth.clone(),
+        span: t.span,
+    })
+}
+
+/// The edge set for a relation kind named in a traversal.
+///
+/// Phase 2 already refused a kind nothing declares with `SMY-E462`, so reaching here with an
+/// unknown name means the kind is declared but this store interned no edge for it — an empty
+/// set, which walks nowhere and is the right answer rather than an error.
+fn edge_set(store: &Store, kind: &str, span: Span, diags: &mut Vec<Diagnostic>) -> Option<EdgeSet> {
+    match kind {
+        "grounds" => return Some(EdgeSet::one(EdgeKind::Grounds)),
+        "deps" => return Some(EdgeSet::one(EdgeKind::Deps)),
+        _ => {}
+    }
+    let parsed = match RelKind::parse(kind) {
+        Ok(k) => k,
+        Err(_) => {
+            diags.push(
+                Diagnostic::at(Code::E462, span)
+                    .with_message(format!("`{kind}` is not a well-formed relation kind")),
+            );
+            return None;
+        }
+    };
+    Some(match store.adjacency().edge_kind(&parsed) {
+        Some(k) => EdgeSet::one(k),
+        None => EdgeSet::of([]),
+    })
+}
+
+/// Phase 9 for one ordering stage.
+fn lower_ordering(o: &Ordering, diags: &mut Vec<Diagnostic>) -> Option<OrderPlan> {
+    match o {
+        Ordering::OrderBy { keys, .. } => {
+            // One key per stage in this build. A multi-key sort is a lexicographic comparator
+            // over several typed fields, and the second key only ever breaks a tie in the
+            // first — which `order by` already breaks by uid. Refusing the rest by name is
+            // better than silently honouring one of them.
+            let first = keys.first()?;
+            let dir = first.dir.unwrap_or(Dir::Ascending);
+            if keys.len() > 1 {
+                diags.push(
+                    Diagnostic::at(Code::E461, o.span()).with_message(
+                        "`order by` with more than one key needs a lexicographic comparator over \
+                     typed fields; this build sorts by one key and breaks ties by uid"
+                            .to_string(),
+                    ),
+                );
+                return None;
+            }
+            match &first.target {
+                SortTarget::Salience => Some(OrderPlan::Salience { dir }),
+                SortTarget::Field(f) => Some(OrderPlan::Field {
+                    field: crate::pred::resolve(f, diags)?,
+                    dir,
+                }),
+            }
+        }
+        Ordering::ReadingOrder { span } => {
+            diags.push(
+                Diagnostic::at(Code::E461, *span).with_message(
+                    "`in reading order` is span order, and a unit in a plain store carries no \
+                 span: spans are the library layer's (SMYSL-2.4)"
+                        .to_string(),
+                ),
+            );
+            None
+        }
+        Ordering::TimeOrder { span, .. } => {
+            diags.push(
+                Diagnostic::at(Code::E461, *span).with_message(
+                    "`in time order` reads effective time, which needs the library layer's time \
+                 index (SMYSL-2.4)"
+                        .to_string(),
+                ),
+            );
+            None
+        }
+        Ordering::GroupBy { field, .. } => Some(OrderPlan::GroupBy {
+            field: crate::pred::resolve(field, diags)?,
+        }),
+        Ordering::CompareBy { field, .. } => Some(OrderPlan::CompareBy {
+            field: crate::pred::resolve(field, diags)?,
+        }),
+        Ordering::AlignByClass { span, .. } => {
+            diags.push(
+                Diagnostic::at(Code::E461, *span).with_message(
+                    "`align by class` needs the class matrix of SMYSL-2.4's classes, which TX-P7 \
+                 proposes and this build cannot read"
+                        .to_string(),
+                ),
+            );
+            None
+        }
+    }
+}
+
+/// Phase 9 for one shaping stage.
+fn lower_shaping(sh: &Shaping, diags: &mut Vec<Diagnostic>) -> Option<ShapePlan> {
+    match sh {
+        Shaping::Limit { count, .. } => Some(ShapePlan::Limit {
+            count: count.clone(),
+        }),
+        Shaping::Pack {
+            tokens,
+            as_view,
+            span,
+        } => {
+            if *as_view {
+                // A query that writes. Not refused because packing is hard — it is not — but
+                // because emitting a `View` record appends to a store, and this crate is pure:
+                // nothing here may write. The CLI is what writes, and the CLI is step 7.
+                diags.push(
+                    Diagnostic::at(Code::E461, *span).with_message(
+                        "`as view` appends a `View` record to the store, and this crate is pure: \
+                     writing is the CLI's, which is TX-P6 step 7"
+                            .to_string(),
+                    ),
+                );
+                return None;
+            }
+            Some(ShapePlan::Pack {
+                tokens: tokens.clone(),
+            })
+        }
+    }
+}
+
+/// Phase 9 for the output stage.
+fn lower_output(stage: &OutputStage, diags: &mut Vec<Diagnostic>) -> Option<OutputPlan> {
+    match &stage.output {
+        Output::Count => Some(OutputPlan::Count),
+        Output::Units => Some(OutputPlan::Units),
+        Output::Json => Some(OutputPlan::Json),
+        Output::Show => Some(OutputPlan::Show),
+        Output::Spans => {
+            diags.push(
+                Diagnostic::at(Code::E461, stage.span).with_message(
+                    "`spans` reports where each unit sits in a text, which is the library layer's \
+                 (SMYSL-2.4)"
+                        .to_string(),
+                ),
+            );
+            None
+        }
+        Output::Measure(ids) => {
+            diags.push(Diagnostic::at(Code::E461, stage.span).with_message(format!(
+                "`measure` dispatches to the measures of SMYSL-2.6, which this build does not \
+                 carry: {}",
+                ids.join(", ")
+            )));
+            None
+        }
+    }
+}
+
+fn set_name(op: SetOp) -> &'static str {
+    match op {
+        SetOp::Union => "union",
+        SetOp::Intersect => "intersect",
+        SetOp::Except => "except",
+    }
+}
+
+fn order_name(o: &OrderPlan) -> String {
+    let dir = |d: &Dir| match d {
+        Dir::Ascending => "ascending",
+        Dir::Descending => "descending",
+    };
+    match o {
+        OrderPlan::Salience { dir: d } => format!("salience {}", dir(d)),
+        OrderPlan::Field { field, dir: d } => format!("{} {}", field.name(), dir(d)),
+        OrderPlan::GroupBy { field } => format!("group by {}", field.name()),
+        OrderPlan::CompareBy { field } => format!("compare by {}", field.name()),
+    }
+}
+
+fn shape_name(sh: &ShapePlan) -> String {
+    let count = |c: &Count| match c {
+        Count::Int(n) => n.to_string(),
+        Count::Param(p) => format!("${p}"),
+    };
+    match sh {
+        ShapePlan::Limit { count: c } => format!("limit {}", count(c)),
+        ShapePlan::Pack { tokens } => format!("pack {} tokens", count(tokens)),
+    }
+}
+
+fn output_name(o: OutputPlan) -> &'static str {
+    match o {
+        OutputPlan::Count => "count",
+        OutputPlan::Units => "units",
+        OutputPlan::Json => "json",
+        OutputPlan::Show => "show",
+    }
 }
 
 /// Phase 5. One source lowers; the rest are refused by name, with what each is waiting for.
@@ -323,8 +917,8 @@ pub fn plan(q: &Query, env: &Env<'_>, opts: &PlanOptions) -> Result<Plan, Vec<Di
 /// `~sem` and `~hybrid` are not "later phases" — they are a different tier. A semantic source
 /// consults a model, which is what SMYSL-2.5 §4.1 keeps behind the `SemanticSource` port so
 /// this crate stays pure, and `~hybrid` routes between the two and so needs both. Saying so is
-/// the point: `SMY-E461`'s meaning is "not available in this build", and a reader who is told
-/// *which build would have it* can go and get one.
+/// the point: `SMY-E461`'s meaning is "not available in this build", and a reader told *which
+/// build would have it* can go and get one.
 fn lower_source(stage: &crate::ast::SourceStage, diags: &mut Vec<Diagnostic>) -> Option<Source> {
     let span = stage.span;
     match &stage.source {
@@ -341,23 +935,30 @@ fn lower_source(stage: &crate::ast::SourceStage, diags: &mut Vec<Diagnostic>) ->
                     LangSel::One(_) => "`lang:<code>` needs the catalog's language facts",
                 };
                 diags.push(Diagnostic::at(Code::E461, span).with_message(format!(
-                    "{what}, which this build has no source for: it ranks lexically over a                      plain store"
+                    "{what}, which this build has no source for: it ranks lexically over a \
+                     plain store"
                 )));
                 return None;
             }
             match engine {
                 Some(Engine::Sem) => {
-                    diags.push(Diagnostic::at(Code::E461, span).with_message(
-                        "`~sem` consults an embedding model, which this pure build has no                          port bound for"
-                            .to_string(),
-                    ));
+                    diags.push(
+                        Diagnostic::at(Code::E461, span).with_message(
+                            "`~sem` consults an embedding model, which this pure build has no \
+                         port bound for"
+                                .to_string(),
+                        ),
+                    );
                     None
                 }
                 Some(Engine::Hybrid) => {
-                    diags.push(Diagnostic::at(Code::E461, span).with_message(
-                        "`~hybrid` routes between the lexical and semantic engines, so it                          needs the semantic one this pure build has no port bound for"
-                            .to_string(),
-                    ));
+                    diags.push(
+                        Diagnostic::at(Code::E461, span).with_message(
+                            "`~hybrid` routes between the lexical and semantic engines, so it \
+                         needs the semantic one this pure build has no port bound for"
+                                .to_string(),
+                        ),
+                    );
                     None
                 }
                 // SMYSL-2.9 OQ-83: an absent engine is `~lex`.
@@ -373,7 +974,10 @@ fn lower_source(stage: &crate::ast::SourceStage, diags: &mut Vec<Diagnostic>) ->
                 AstSource::AboutEntity(_) => "`about entity(…)` needs entity resolution",
                 AstSource::AboutClass(_) => "`about class(…)` needs class membership",
                 AstSource::Text { .. } => "`text(…)` needs the library layer's locators",
-                AstSource::Uid(_) => "`uid` is phase 5 for a store this build can reach, and                                       is not lowered yet",
+                AstSource::Uid(_) => {
+                    "`uid` is phase 5 for a store this build can reach, and \
+                                      is not lowered yet"
+                }
                 AstSource::View(_) => "`view` needs a saved view",
                 AstSource::Pointer(_) => "`pointer` needs the pointer registry",
                 AstSource::Metric(_) => "`metric` dispatches to the measures of SMYSL-2.6",
@@ -387,42 +991,6 @@ fn lower_source(stage: &crate::ast::SourceStage, diags: &mut Vec<Diagnostic>) ->
             );
             None
         }
-    }
-}
-
-/// `SMY-E461`, with the phase that will lower the stage named.
-///
-/// Naming the phase is the difference between "this build will not do that" and "this build
-/// does not do that yet", and only the second is true.
-fn not_yet(span: Span, what: &str, phase: &str) -> Diagnostic {
-    Diagnostic::at(Code::E461, span).with_message(format!(
-        "{what} is {phase} of the planner, which this build does not reach: it plans the \
-         header, resolution, scope and partitions"
-    ))
-}
-
-/// Every stage phases 5 to 9 own, refused by name.
-fn unlowered(q: &Query, p: &Pipeline, diags: &mut Vec<Diagnostic>) {
-    for f in &p.filters {
-        diags.push(not_yet(f.span, "a `where` filter", "phase 6"));
-    }
-    for t in &p.times {
-        diags.push(not_yet(t.span, "a time stage", "phase 6"));
-    }
-    for t in &p.traversals {
-        diags.push(not_yet(t.span, "an `expand` traversal", "phase 7"));
-    }
-    for c in &p.closures {
-        diags.push(not_yet(c.span, "a `with` closure", "phase 7"));
-    }
-    for o in &q.ordering {
-        diags.push(not_yet(o.span(), "an ordering stage", "phase 9"));
-    }
-    for s in &q.shaping {
-        diags.push(not_yet(s.span(), "a shaping stage", "phase 9"));
-    }
-    if let Some(out) = &q.output {
-        diags.push(not_yet(out.span, "an output stage", "phase 9"));
     }
 }
 
@@ -441,6 +1009,16 @@ fn resolve_relations(store: &Store, p: &Pipeline, diags: &mut Vec<Diagnostic>) -
     let mut used = Vec::new();
     for t in &p.traversals {
         let kind = match &t.edge {
+            // `grounds` and `deps` are spellable as arrow traversals (`expand ->grounds`, §3.3)
+            // and are **not** relation kinds: they are the two kernel support fields, so no
+            // schema declares them and `SMY-E462` would be wrong. TX-P6 step 4 found this by
+            // trying to walk one — until traversals were lowered, nothing reached the walk, so
+            // the refusal was invisible.
+            EdgeSpec::Out(k) | EdgeSpec::In(k) | EdgeSpec::Both(k)
+                if k == "grounds" || k == "deps" =>
+            {
+                continue
+            }
             EdgeSpec::Out(k) | EdgeSpec::In(k) | EdgeSpec::Both(k) => k,
             // The spelled traversals are graph operations rather than relation kinds, so
             // there is nothing here to declare (SMYSL-2.9 §4.7).

@@ -1,18 +1,26 @@
-//! The executor (SMYSL-2.5 §4.1 `src/exec.rs`, TX-P6 step 3).
+//! The executor (SMYSL-2.5 §4.1 `src/exec.rs`, TX-P6 steps 3 and 4).
 //!
-//! Step 2 planned and stopped. This runs what it planned, for the one source phase 5 can lower
-//! in a pure build: `find "…" ~lex`.
+//! Step 2 planned and stopped. Step 3 ran one source. Step 4 runs the rest of what a pure
+//! build can run: filters, traversals, closures, set operations, ordering, shaping and the
+//! output stage's choice of writer.
+//!
+//! # The order is the written order, and that is not an accident
+//!
+//! SMYSL-2.9 §4.2 fixes the stage order in the *type* — a `where` after an `expand` has
+//! nowhere to live in `Pipeline` — so the planner's phase order and the executor's loop are the
+//! same order, and neither has to validate it. That is why a filter runs before a traversal
+//! here: it is what the query said, and a traversal over a filtered set is a different question
+//! from a filter over a traversed one.
 //!
 //! # Why there is no second index
 //!
 //! SMYSL-2.5 §3.4 asks for IDF that is the partition's, and asked for it as
 //! `Bm25::index_subset` — one BM25 index per partition. TX-P4 step 2 made that unnecessary
 //! before anybody wrote it, and TX-P6's reading of §3.4 is the one this file implements: one
-//! postings table over the store, and a [`Subset`] view of it per
-//! partition. Every statistic BM25 reads — `N`, `df`, `avgdl`, the candidate lists — comes
-//! through the `Postings` trait, so restricting the answers restricts the statistics exactly,
-//! which `smysl-retrieve`'s own `tests/postings.rs` asserts bit for bit against a table built
-//! from those units alone.
+//! postings table over the store, and a [`Subset`] view of it per partition. Every statistic
+//! BM25 reads — `N`, `df`, `avgdl`, the candidate lists — comes through the `Postings` trait,
+//! so restricting the answers restricts the statistics exactly, which `smysl-retrieve`'s own
+//! `tests/postings.rs` asserts bit for bit against a table built from those units alone.
 //!
 //! # Two restrictions that are not the same restriction
 //!
@@ -27,22 +35,26 @@
 //!
 //! # What limits the hits
 //!
-//! `limit` is a shaping stage and shaping is phase 9, which step 4 lowers — so a query cannot
-//! yet say how many hits it wants. [`PlanOptions::limit`] is that number until it can, and its
-//! default is 10 because that is `find --limit`'s default and this step's exit is that the two
-//! agree. It is applied per partition before fusion, which is how RRF is ordinarily run and
-//! which for a single partition is the same list either way.
+//! `limit` is a shaping stage, and step 4 lowers it — so a query can now say how many hits it
+//! wants, and [`PlanOptions::limit`] is what a source returns *per partition before fusion*,
+//! which is a different number. The default is 10 because that is `find --limit`'s default and
+//! step 3's exit is that the two agree.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::diag::{Code, Diagnostic};
 use smysl_core::ids::Uid;
+use smysl_graph::{SalienceRequest, Store};
 use smysl_retrieve::{Bm25, MemPostings, Query as RQuery, Retriever, Subset, Tokenizer};
 
-use crate::ast::Atom;
+use crate::ast::{Atom, Count, Dir};
 use crate::fuse::{rrf, Fused, Ranked};
-use crate::plan::{Env, Lexical, Plan, PlanOptions, Source};
+use crate::plan::{
+    ClosurePlan, Direction, Env, Lexical, OrderPlan, OutputPlan, PipelinePlan, Plan, PlanExpr,
+    PlanOptions, ShapePlan, Source,
+};
 use crate::ports::IdfScope;
+use crate::pred::{holds, Field};
 
 /// What running a plan produced.
 ///
@@ -52,36 +64,259 @@ use crate::ports::IdfScope;
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Answer {
-    /// No source: the candidate set, in uid order.
+    /// No source: the units, in uid order.
     Scope(Vec<Uid>),
     /// A source: fused, highest first.
     Ranked(Vec<Fused>),
+    /// `count`.
+    Count(usize),
+    /// `group by` or `compare by`: one group per distinct value, in value order, with the units
+    /// of each in the order they had before grouping.
+    Groups(Vec<(String, Vec<Uid>)>),
+    /// `pack N tokens`: the selection, in the order the packer chose.
+    Packed(Vec<Uid>),
 }
 
 impl Answer {
     /// The units this answer names, in the order it names them.
+    ///
+    /// `Count` names none: it is a number *about* units, and returning the units it counted
+    /// would make `count` and `units` the same answer with different labels.
     pub fn uids(&self) -> Vec<Uid> {
         match self {
-            Answer::Scope(uids) => uids.clone(),
+            Answer::Scope(uids) | Answer::Packed(uids) => uids.clone(),
             Answer::Ranked(fused) => fused.iter().map(|f| f.uid).collect(),
+            Answer::Groups(groups) => groups.iter().flat_map(|(_, u)| u.clone()).collect(),
+            Answer::Count(_) => Vec::new(),
         }
     }
 }
 
+/// An answer and what was worth saying about how it was reached.
+///
+/// Warnings travel beside the answer rather than in it. SMYSL-2.5 §8 allocates `W463` for a
+/// traversal that stopped at `depth` with an unexplored frontier, and that is information about
+/// a *successful* run: the result is correct for the depth asked, and the caller should know
+/// the graph continued. A type that could only report diagnostics by failing would have to
+/// choose between saying nothing and refusing a good answer.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct Run {
+    pub answer: Answer,
+    pub warnings: Vec<Diagnostic>,
+}
+
 /// Run a plan.
-pub fn run(plan: &Plan, env: &Env<'_>, opts: &PlanOptions) -> Result<Answer, Vec<Diagnostic>> {
-    let Some(source) = &plan.source else {
-        return Ok(Answer::Scope(plan.candidates.iter().copied().collect()));
+pub fn run(plan: &Plan, env: &Env<'_>, opts: &PlanOptions) -> Result<Run, Vec<Diagnostic>> {
+    let mut warnings = Vec::new();
+    let result = run_expr(&plan.expr, env, opts, &mut warnings)?;
+
+    // --- phase 9 -----------------------------------------------------------------------------
+    let mut answer = result;
+    for stage in &plan.ordering {
+        answer = order(answer, stage, env)?;
+    }
+    for stage in &plan.shaping {
+        answer = shape(answer, stage, env, opts)?;
+    }
+    if let Some(OutputPlan::Count) = plan.output {
+        // The one output that changes the answer rather than the writer. `units`, `json` and
+        // `show` are three layouts of the same list, and laying it out is step 7's.
+        answer = Answer::Count(count_of(&answer));
+    }
+    Ok(Run { answer, warnings })
+}
+
+/// How many units an answer is about, which is not always how many it names.
+fn count_of(answer: &Answer) -> usize {
+    match answer {
+        Answer::Count(n) => *n,
+        Answer::Groups(groups) => groups.iter().map(|(_, u)| u.len()).sum(),
+        other => other.uids().len(),
+    }
+}
+
+/// Phases 3 to 8 for an expression.
+fn run_expr(
+    expr: &PlanExpr,
+    env: &Env<'_>,
+    opts: &PlanOptions,
+    warnings: &mut Vec<Diagnostic>,
+) -> Result<Answer, Vec<Diagnostic>> {
+    match expr {
+        PlanExpr::Pipeline(p) => run_pipeline(p, env, opts, warnings),
+        PlanExpr::Set { op, left, right } => {
+            let a = run_expr(left, env, opts, warnings)?;
+            let b = run_expr(right, env, opts, warnings)?;
+            Ok(Answer::Scope(set_op(*op, &a, &b)))
+        }
+    }
+}
+
+/// Phase 8. `BTreeSet` operations, which is what §3.3 asks for — and what it does *not* ask
+/// for is a fused ranking.
+///
+/// A set operation discards the operands' order. Two rankings produced over two scopes are
+/// scored against two different corpora, so combining their positions would be the mistake RRF
+/// exists to avoid making within one query — and §3.4 is explicit that RRF is for partitions,
+/// never for fusing two things that were ranked separately. So the result is a set, in uid
+/// order, and a query that wants it ordered says `order by`.
+fn set_op(op: crate::ast::SetOp, a: &Answer, b: &Answer) -> Vec<Uid> {
+    let left: BTreeSet<Uid> = a.uids().into_iter().collect();
+    let right: BTreeSet<Uid> = b.uids().into_iter().collect();
+    match op {
+        crate::ast::SetOp::Union => left.union(&right).copied().collect(),
+        crate::ast::SetOp::Intersect => left.intersection(&right).copied().collect(),
+        crate::ast::SetOp::Except => left.difference(&right).copied().collect(),
+    }
+}
+
+/// Phases 5 to 7 for one pipeline.
+fn run_pipeline(
+    p: &PipelinePlan,
+    env: &Env<'_>,
+    opts: &PlanOptions,
+    warnings: &mut Vec<Diagnostic>,
+) -> Result<Answer, Vec<Diagnostic>> {
+    // --- phase 5 -----------------------------------------------------------------------------
+    let mut answer = match &p.source {
+        Some(Source::Lexical(lex)) => lexical(p, lex, env, opts)?,
+        None => Answer::Scope(p.candidates.iter().copied().collect()),
     };
 
-    match source {
-        Source::Lexical(lex) => lexical(plan, lex, env, opts),
+    // --- phase 6 -----------------------------------------------------------------------------
+    //
+    // Filtering keeps the order it was given, which for a ranked answer is the ranking. A
+    // filter that re-sorted would silently discard what the source computed.
+    if !p.filters.is_empty() {
+        answer = match answer {
+            Answer::Ranked(fused) => Answer::Ranked(
+                fused
+                    .into_iter()
+                    .filter(|f| {
+                        p.filters
+                            .iter()
+                            .all(|pred| holds(env.store, &f.uid, pred, &opts.params))
+                    })
+                    .collect(),
+            ),
+            other => Answer::Scope(
+                other
+                    .uids()
+                    .into_iter()
+                    .filter(|uid| {
+                        p.filters
+                            .iter()
+                            .all(|pred| holds(env.store, uid, pred, &opts.params))
+                    })
+                    .collect(),
+            ),
+        };
     }
+
+    // --- phase 7 -----------------------------------------------------------------------------
+    //
+    // A traversal and a closure both *add* to the set they were given — `expand ->grounds` asks
+    // for the result and what it rests on, not for the grounds alone. So the ranking of a
+    // ranked answer no longer covers every unit in it, and the honest shape for the result is a
+    // set. A query that wants the enlarged set ordered says so.
+    if !p.traversals.is_empty() || !p.closures.is_empty() {
+        let mut reached: BTreeSet<Uid> = answer.uids().into_iter().collect();
+        let seeds: Vec<Uid> = reached.iter().copied().collect();
+
+        for t in &p.traversals {
+            let depth = match &t.depth {
+                Some(Count::Int(n)) => Some(u32::try_from(*n).unwrap_or(u32::MAX)),
+                Some(Count::Param(name)) => match opts.params.get(name) {
+                    Some(bound) => Some(bound.parse::<u32>().map_err(|_| {
+                        vec![Diagnostic::at(Code::E460, t.span).with_message(format!(
+                            "`${name}` is bound to `{bound}`, which is not a depth"
+                        ))]
+                    })?),
+                    None => {
+                        return Err(vec![Diagnostic::at(Code::E460, t.span).with_message(
+                            format!("`${name}` is not bound, so there is no depth"),
+                        )])
+                    }
+                },
+                None => None,
+            };
+            let mut stopped = 0usize;
+            for seed in &seeds {
+                let walk = match t.direction {
+                    Direction::Out => smysl_graph::trace_via(env.store, *seed, &t.edges, depth),
+                    Direction::In => {
+                        smysl_graph::dependents_trace(env.store, *seed, &t.edges, depth)
+                    }
+                    Direction::Both => smysl_graph::trace_both(env.store, *seed, &t.edges, depth),
+                };
+                for node in &walk.nodes {
+                    reached.insert(node.uid);
+                }
+                if let Some(limit) = depth {
+                    // `W463`: the walk stopped at `depth` and the graph went on. Detected by
+                    // asking whether any unit at the limit has a neighbour the walk did not
+                    // report — which is the only way to know, because a `Lineage` records what
+                    // was reached and not what was left.
+                    let at_limit: Vec<Uid> = walk
+                        .nodes
+                        .iter()
+                        .filter(|n| n.depth == limit)
+                        .map(|n| n.uid)
+                        .collect();
+                    let seen: BTreeSet<Uid> = walk.nodes.iter().map(|n| n.uid).collect();
+                    for uid in at_limit {
+                        let onward = match t.direction {
+                            Direction::In => {
+                                smysl_graph::dependents_trace(env.store, uid, &t.edges, Some(1))
+                            }
+                            Direction::Both => {
+                                smysl_graph::trace_both(env.store, uid, &t.edges, Some(1))
+                            }
+                            Direction::Out => {
+                                smysl_graph::trace_via(env.store, uid, &t.edges, Some(1))
+                            }
+                        };
+                        stopped += onward
+                            .nodes
+                            .iter()
+                            .filter(|n| n.depth == 1 && !seen.contains(&n.uid))
+                            .count();
+                    }
+                }
+            }
+            if stopped > 0 {
+                warnings.push(Diagnostic::at(Code::W463, t.span).with_message(format!(
+                    "`expand {}` stopped at the depth asked; {stopped} unit(s) beyond the \
+                     frontier were not explored",
+                    t.label
+                )));
+            }
+        }
+
+        for c in &p.closures {
+            for seed in &seeds {
+                match c {
+                    ClosurePlan::Rebuttals => {
+                        reached.extend(env.store.rebuttals_of(seed));
+                    }
+                    ClosurePlan::Grounds => {
+                        if let Some(unit) = env.store.get(seed) {
+                            reached.extend(unit.core.grounds.iter().copied());
+                        }
+                    }
+                }
+            }
+        }
+        answer = Answer::Scope(reached.into_iter().collect());
+    }
+
+    Ok(answer)
 }
 
 /// Phase 5 for `~lex`, then §3.4's fusion.
 fn lexical(
-    plan: &Plan,
+    p: &PipelinePlan,
     lex: &Lexical,
     env: &Env<'_>,
     opts: &PlanOptions,
@@ -108,10 +343,10 @@ fn lexical(
     let whole = MemPostings::index(env.store, &analyzer);
 
     let mut lists: Vec<Ranked> = Vec::new();
-    for partition in &plan.partitions {
+    for partition in &p.partitions {
         let universe: BTreeSet<Uid> = match opts.idf_scope {
             IdfScope::Partition => partition.uids.clone(),
-            IdfScope::Collection => plan.candidates.clone(),
+            IdfScope::Collection => p.candidates.clone(),
             // `Library` is a wider corpus than the query's scope by definition, and until
             // `smysl-text` supplies a library the widest corpus here is the store.
             IdfScope::Library => env.store.units().map(|(uid, _)| *uid).collect(),
@@ -127,4 +362,168 @@ fn lexical(
     }
 
     Ok(Answer::Ranked(rrf(&lists)))
+}
+
+/// Phase 9: one ordering stage.
+fn order(answer: Answer, stage: &OrderPlan, env: &Env<'_>) -> Result<Answer, Vec<Diagnostic>> {
+    let uids = answer.uids();
+    Ok(match stage {
+        OrderPlan::Salience { dir } => {
+            // The existing function, seeded with the result and renormalised over it, which is
+            // exactly what §3.3 names. A second salience scorer would be a second answer to a
+            // question the store already answers.
+            let report = smysl_graph::salience(
+                env.store,
+                &SalienceRequest::default().seeded(uids.iter().copied()),
+            );
+            let scores = report.renormalise(&uids);
+            let mut sorted = uids.clone();
+            sorted.sort_by(|a, b| {
+                let (x, y) = (
+                    scores.get(a).copied().unwrap_or(0.0),
+                    scores.get(b).copied().unwrap_or(0.0),
+                );
+                // Descending by score for `ascending`? No: `order by salience` ascending means
+                // least salient first, as written. The default is ascending for every key
+                // uniformly (SMYSL-2.9 OQ-81), and a reader who wants the salient ones first
+                // says `descending`.
+                let cmp = x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal);
+                match dir {
+                    Dir::Ascending => cmp.then_with(|| a.cmp(b)),
+                    Dir::Descending => cmp.reverse().then_with(|| a.cmp(b)),
+                }
+            });
+            Answer::Scope(sorted)
+        }
+        OrderPlan::Field { field, dir } => {
+            let mut sorted = uids.clone();
+            sorted.sort_by(|a, b| {
+                let cmp = key_of(env.store, a, field).cmp(&key_of(env.store, b, field));
+                match dir {
+                    Dir::Ascending => cmp.then_with(|| a.cmp(b)),
+                    Dir::Descending => cmp.reverse().then_with(|| a.cmp(b)),
+                }
+            });
+            Answer::Scope(sorted)
+        }
+        OrderPlan::GroupBy { field } | OrderPlan::CompareBy { field } => {
+            let mut groups: BTreeMap<String, Vec<Uid>> = BTreeMap::new();
+            for uid in uids {
+                groups
+                    .entry(group_key(env.store, &uid, field))
+                    .or_default()
+                    .push(uid);
+            }
+            Answer::Groups(groups.into_iter().collect())
+        }
+    })
+}
+
+/// A sort key for a field: ordered fields sort on their ladder, the rest on their text.
+///
+/// The pair is `(rank, text)` so one comparator serves both: an ordered field fills the rank
+/// and leaves the text empty, an unordered one the reverse. A unit without the field sorts
+/// first under `ascending`, which is where "nothing" belongs on a ladder that starts at
+/// something.
+fn key_of(store: &Store, uid: &Uid, field: &Field) -> (Option<u8>, String) {
+    crate::pred::sort_key(store, uid, field).unwrap_or_default()
+}
+
+/// The value a unit is grouped under, with a name for having none.
+fn group_key(store: &Store, uid: &Uid, field: &Field) -> String {
+    crate::pred::field_text(store, uid, field).unwrap_or_else(|| "(none)".to_string())
+}
+
+/// Phase 9: one shaping stage.
+fn shape(
+    answer: Answer,
+    stage: &ShapePlan,
+    env: &Env<'_>,
+    opts: &PlanOptions,
+) -> Result<Answer, Vec<Diagnostic>> {
+    match stage {
+        ShapePlan::Limit { count } => {
+            let n = resolve_count(count, opts)?;
+            Ok(match answer {
+                // Truncation respects whatever order the answer is in, which is `Vec::truncate`
+                // and is what §3.3 names. A `limit` before an `order by` is impossible: the
+                // grammar puts ordering before shaping (SMYSL-2.9 §4.2).
+                Answer::Ranked(mut fused) => {
+                    fused.truncate(n);
+                    Answer::Ranked(fused)
+                }
+                Answer::Groups(mut groups) => {
+                    // Per group, because a limit after a grouping is about the groups' members:
+                    // truncating the group list instead would drop whole values from a
+                    // comparison, which is the one thing `compare by` exists to show.
+                    for (_, members) in &mut groups {
+                        members.truncate(n);
+                    }
+                    Answer::Groups(groups)
+                }
+                other => {
+                    let mut uids = other.uids();
+                    uids.truncate(n);
+                    Answer::Scope(uids)
+                }
+            })
+        }
+        ShapePlan::Pack { tokens } => {
+            let budget = u64::try_from(resolve_count(tokens, opts)?).unwrap_or(u64::MAX);
+            let scope: Vec<Uid> = answer.uids();
+            let report = smysl_graph::salience(
+                env.store,
+                &SalienceRequest::default().seeded(scope.iter().copied()),
+            );
+            let request = smysl_pack::PackRequest::budget(budget)
+                .scoped(scope.iter().copied())
+                .focusing(scope.iter().copied());
+            // A pack can be infeasible — a budget smaller than the closure a unit obliges.
+            // `SMY-E461` would be wrong (the stage *is* available); the packer's own error is
+            // the honest one, carried through as a diagnostic so a query says what `pack` says.
+            let packed = smysl_pack::pack(env.store, &report, &request).map_err(|e| {
+                vec![
+                    Diagnostic::at(Code::E460, smysl_core::diag::Span::new(0, 0))
+                        .with_message(format!("`pack` cannot satisfy this budget: {e}")),
+                ]
+            })?;
+            // `Selection` is `uid -> level of detail`, which is a map and therefore in uid
+            // order. The packer's own ordering of a selection is the salience it was given, so
+            // the units come back sorted by that and ties by uid — a function of the store and
+            // the budget, which is what rule D asks of a stage.
+            let mut chosen: Vec<Uid> = packed.selection.keys().copied().collect();
+            let scores = report.renormalise(&chosen);
+            chosen.sort_by(|a, b| {
+                let (x, y) = (
+                    scores.get(a).copied().unwrap_or(0.0),
+                    scores.get(b).copied().unwrap_or(0.0),
+                );
+                y.partial_cmp(&x)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.cmp(b))
+            });
+            Ok(Answer::Packed(chosen))
+        }
+    }
+}
+
+/// A `Count`, with `$name` bound.
+fn resolve_count(count: &Count, opts: &PlanOptions) -> Result<usize, Vec<Diagnostic>> {
+    match count {
+        Count::Int(n) => Ok(usize::try_from(*n).unwrap_or(0)),
+        Count::Param(name) => match opts.params.get(name) {
+            Some(bound) => bound.parse::<usize>().map_err(|_| {
+                vec![
+                    Diagnostic::at(Code::E460, smysl_core::diag::Span::new(0, 0)).with_message(
+                        format!("`${name}` is bound to `{bound}`, which is not a count"),
+                    ),
+                ]
+            }),
+            None => Err(vec![Diagnostic::at(
+                Code::E460,
+                smysl_core::diag::Span::new(0, 0),
+            )
+            .with_message(format!("`${name}` is not bound, so there is no count"))]),
+        },
+    }
 }

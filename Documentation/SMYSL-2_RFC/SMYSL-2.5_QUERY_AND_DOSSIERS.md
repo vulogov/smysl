@@ -830,6 +830,7 @@ pub trait Translator {
 | `src/dossier/{mod,intent,templates}.rs` + `templates/*.sq` | dossier pipeline |
 | `src/nl.rs` | `Translator`, `TranslateContext`, output validation |
 | `src/ports.rs` | `Scope`, `SemanticSource`, `Classifier`, `TimeIndex` |
+| `src/pred.rs` | predicate resolution and evaluation (added in TX-P6 step 4). `src/resolve.rs` above is this file's eventual other half: it is named for "field and relation resolution, `using` pins, compile-forward", and compile-forward is TX-P12's, while relation kinds and `using` pins resolve in `plan.rs` beside the phases that own them. What is left is one concern — resolving the fields a predicate names and then evaluating it — and splitting a resolver from an evaluator that is its only caller would be two files agreeing about a type |
 | `src/store_scope.rs` | the `Scope` implementation over a plain `Store` (added in TX-P6 step 2: it is the only file here that depends on `smysl-graph`, and a reader asking what the port requires of a backend should find the trait by itself) |
 
 **New `crates/smysl-embed-candle`** (impure tier, optional): `src/{lib,encoder,pool,cache}.rs`.
@@ -919,6 +920,7 @@ pub enum Mapped { Whole, Partial { unmappable: BTreeSet<String> } }
 ```rust
 impl Store { pub fn schema_decls(&self) -> impl Iterator<Item = &SchemaDecl>; }
 pub fn dependents_trace(store: &Store, root: Uid, edges: &EdgeSet, depth: Option<u32>) -> Lineage;
+pub fn trace_both(store: &Store, root: Uid, edges: &EdgeSet, depth: Option<u32>) -> Lineage;
 pub fn supersession_heads(store: &Store) -> (BTreeMap<Uid, Uid>, Vec<Uid>); // relink::successors, public
 pub mod salience { pub fn corroboration_groups(store: &Store, uid: &Uid) -> (Vec<String>, Vec<String>); }
 ```

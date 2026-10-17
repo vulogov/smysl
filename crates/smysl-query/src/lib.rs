@@ -38,16 +38,20 @@ pub mod lex;
 pub mod parse;
 pub mod plan;
 pub mod ports;
+pub mod pred;
 pub mod print;
 pub mod store_scope;
 
 pub use ast::Query;
-pub use exec::{run, Answer};
+pub use exec::{run, Answer, Run};
 pub use explain::explain;
 pub use explain::why;
 pub use fuse::{Fused, Placement, Ranked, RRF_K};
 pub use parse::{parse, Parsed};
-pub use plan::{plan, Env, Lexical, Plan, PlanOptions, PlanStep, Purity, Source};
+pub use plan::{
+    plan, ClosurePlan, Direction, Env, Lexical, OrderPlan, OutputPlan, PipelinePlan, Plan,
+    PlanExpr, PlanOptions, PlanStep, Purity, ShapePlan, Source, TraversalPlan,
+};
 pub use ports::{Candidates, IdfScope, Partition, PartitionKey, Scope};
 pub use print::print;
 pub use store_scope::StoreScope;

@@ -388,6 +388,11 @@ mod tests {
         // exactly as written — a quote has to match a corpus byte for byte — and the hazard
         // that creates is a quote that looks right and matches nothing, which is worth saying
         // out loud rather than failing on.
+        // 97 with `SMY-W463` and `SMY-E512` (TX-P6 step 4). `W463` is SMYSL-2.5's, withheld
+        // until something walked a graph with a depth: a traversal that stopped at the depth
+        // asked while the graph went on. `E512` is new: an operator that does not apply to the type of
+        // the field it names, such as `>` on `kind`, which the grammar cannot refuse because a
+        // grammar does not know a field's type.
         // 95 with `SMY-E461`, `SMY-E462`, `SMY-E466` and `SMY-E511`, raised by the planner
         // (TX-P6 step 2): a stage this build does not lower, a traversal naming a relation
         // kind nothing in scope declares, a `using` pin with no matching declaration in the
@@ -395,7 +400,7 @@ mod tests {
         // were allocated by SMYSL-2.5 and withheld until a planner could raise them. `E421`
         // and `E422` are still absent for that same reason: field resolution needs declared
         // field types, which arrive with FC-9 in TX-P12.
-        assert_eq!(Code::ALL.len(), 95);
+        assert_eq!(Code::ALL.len(), 97);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

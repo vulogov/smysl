@@ -39,6 +39,10 @@ smysl-graph = { workspace = true }
 # originally asked for. `smysl-retrieve` is a pure crate, so the pure tree does not grow a
 # runtime, and §4.5 has listed it among this crate's dependencies since draft 1.
 smysl-retrieve = { workspace = true }
+# TX-P6 step 4. `pack N tokens` is SMYSL-2.5 §3.3's row, and the function it names is
+# `smysl_pack::pack` — the same packer the CLI `pack` command uses, so a query and a command
+# cannot disagree about a budget. `smysl-pack` is a pure crate, like the other three.
+smysl-pack = { workspace = true }
 
 # The grammar goldens (SMYSL-2.9 §5). The fixture tree is language-free, like
 # `fixtures/conformance/`, because three more implementations of this grammar are coming and
@@ -52,3 +56,9 @@ name = "grammar"
 # what four phases decided over a store.
 [[test]]
 name = "planner"
+
+# The stage goldens (TX-P6 step 4; SMYSL-2.5 §3.3). A third test target rather than more cases
+# in `planner`, because this one asserts a different kind of thing: not what a plan recorded
+# but what running it answered, and over a shuffled log as well as a sorted one.
+[[test]]
+name = "stages"

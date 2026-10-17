@@ -5,5 +5,3 @@ plan sq/1
   3 scope: store:F6-adversarial via F6-adversarial -> 1 store(s) F6-adversarial, 5 unit(s)
   4 partitions: 1, idf over collection
       (no manifest): 5 unit(s)
-  phases 6-9 (filters, traversals, set ops, ordering) are not in this
-  build; a query that needs one is refused with SMY-E461

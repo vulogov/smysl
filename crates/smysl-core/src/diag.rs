@@ -346,9 +346,11 @@ registry! {
         E460 = "SMY-E460", Error, "sq syntax error, or a parameter left unbound";
         E461 = "SMY-E461", Error, "A stage is not available in this build or phase";
         E462 = "SMY-E462", Error, "A traversal names a relation kind nothing in scope declares";
+        W463 = "SMY-W463", Warn,  "A traversal stopped at its depth with an unexplored frontier";
         E466 = "SMY-E466", Error, "A query cannot be pinned: the store has no such declaration";
         W510 = "SMY-W510", Warn,  "A string literal is not in NFC; it is matched byte-exactly as written";
         E511 = "SMY-E511", Error, "A scope names something this environment does not hold";
+        E512 = "SMY-E512", Error, "An operator does not apply to the type of the field it names";
     }
 }
 
@@ -715,8 +717,21 @@ mod tests {
     /// relation kind nothing in scope declares, and a `using` pin for a declaration the store
     /// does not hold. `E511` is new, and it is in SMYSL-2.9's range rather than SMYSL-2.5's
     /// because that range is full and because the refusal is about a name the *grammar*
-    /// accepted — `from store:ledger` parses, and the span is a grammar span. That leaves
-    /// `E512`–`W519` of SMYSL-2.9's range unallocated.
+    /// accepted — `from store:ledger` parses, and the span is a grammar span.
+    ///
+    /// 97 with `SMY-W463` and `SMY-E512` in TX-P6 step 4, where traversals and filters exist.
+    /// `W463` was allocated by SMYSL-2.5 and withheld on the same rule as `E461`: a traversal
+    /// that stopped at its depth with the graph still going is worth saying, and nothing could
+    /// say it until something walked a graph with a depth.
+    ///
+    /// `SMY-E512` is new: an operator that does not apply
+    /// to the type of the field it names, such as `>` on `kind`. Also SMYSL-2.9's range, for
+    /// SMYSL-2.5's reason and one of its own — the grammar admits `<` after any field, because
+    /// a grammar cannot know a field's type, so this refusal belongs to the document that
+    /// defines what the grammar accepted. It is **not** `E421`/`E422`: those are about a field
+    /// nothing declares and a key retired without a mapping, and this field is declared and
+    /// readable; what is wrong is the question asked of it. That leaves `W513`–`W519`
+    /// unallocated.
     ///
     /// `SMY-E421` and `SMY-E422` stay out for the same reason the four above came in. Field
     /// resolution needs declared field types, and a declaration's `payload_shape` is opaque
@@ -732,7 +747,7 @@ mod tests {
     /// build can produce, which is the thing this comment exists to prevent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 95);
+        assert_eq!(Code::ALL.len(), 97);
     }
 
     #[test]

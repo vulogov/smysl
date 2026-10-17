@@ -230,7 +230,7 @@ fn value_of(v: &Value) -> String {
 
 /// Trailing zeros dropped, one fractional digit always kept, so `0.8000` and `0.8` are one
 /// value and one spelling (QG-6).
-fn decimal(d: Decimal) -> String {
+pub(crate) fn decimal(d: Decimal) -> String {
     let neg = d.scaled < 0;
     let n = d.scaled.unsigned_abs();
     let whole = n / Decimal::SCALE as u64;

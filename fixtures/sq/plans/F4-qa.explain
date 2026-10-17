@@ -5,5 +5,3 @@ plan sq/1
   3 scope: store:F4-qa via F4-qa -> 1 store(s) F4-qa, 9 unit(s)
   4 partitions: 1, idf over collection
       (no manifest): 9 unit(s)
-  phases 6-9 (filters, traversals, set ops, ordering) are not in this
-  build; a query that needs one is refused with SMY-E461

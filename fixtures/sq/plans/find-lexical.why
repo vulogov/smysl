@@ -6,8 +6,6 @@ plan sq/1
   4 partitions: 1, idf over collection
       (no manifest): 8 unit(s)
   5 source: lexical "connection pool", 10 per partition, rrf k=60
-  phases 6-9 (filters, traversals, set ops, ordering) are not in this
-  build; a query that needs one is refused with SMY-E461
 
   1. b3:cvhirtgs2mpvli2ethhyeo32uf rrf 0.016393
        (no manifest) rank 1 score 4.238785

@@ -126,7 +126,7 @@ fn an_absent_from_is_the_whole_scope() {
         // `Scope::everything`, so that is what the equality is asserted against, and the
         // end-to-end case arrives with the first source, in step 3.
         let b = smysl_query::Scope::everything(&scope);
-        assert_eq!(a.candidates, b.uids, "{name}");
+        assert_eq!(*a.candidates().expect("one pipeline"), b.uids, "{name}");
     }
 }
 
@@ -163,33 +163,55 @@ fn the_library_scopes_need_smysl_text() {
     }
 }
 
-/// Phases 6 to 9 are refused by name, with the phase that will lower them.
+/// The stages that are still refused by name, with what each is waiting for.
 ///
-/// `find` left this list in TX-P6 step 3, which is what phase 5 is; the sources phase 5 still
-/// cannot lower are refused in `tests/lexical.rs`, beside the one it can.
+/// TX-P6 step 4 emptied most of this list: filters, traversals, closures, set operations,
+/// ordering, shaping and outputs all lower now, and `tests/stages.rs` asserts that they do.
+/// What is left is what no amount of planner work can supply — the library layer's time index
+/// and span order, TX-P7's classes, the lens engine, and a write, which a pure crate may not
+/// perform. The messages name those, not a phase number, because "phase 6" would be a lie
+/// about where the missing thing lives.
 #[test]
-fn a_stage_past_phase_five_is_refused_by_name() {
+fn the_stages_that_remain_unavailable_say_what_they_need() {
     let (name, store) = corpora().remove(0);
     let scope = StoreScope::new(name.clone(), &store);
     let env = Env::new(&store, &scope);
     for (text, expect) in [
         (
-            "from store:NAME\nwhere status = measured",
-            "a `where` filter",
+            "said during 2026-09-01",
+            "a time stage reads effective time",
         ),
-        ("from store:NAME\nsaid during 2026-09-01", "a time stage"),
-        ("from store:NAME\nexpand ->grounds", "an `expand` traversal"),
-        ("from store:NAME\nwith rebuttals", "a `with` closure"),
-        ("from store:NAME\nlimit 10", "a shaping stage"),
-        ("from store:NAME\nin reading order", "an ordering stage"),
-        ("from store:NAME\ncount", "an output stage"),
+        (
+            "observed during 2026-09-01",
+            "a time stage reads effective time",
+        ),
+        (
+            "where near(\"x\", 0.8)",
+            "`near(…)` compares against an embedding",
+        ),
+        (
+            "where x.text/v1@1:mode = quoted",
+            "`x.text/v1@1:mode` is the field as",
+        ),
+        ("with holders", "`with holders` and `with speakers`"),
+        ("with spans", "`with spans` and `with datings`"),
+        ("in reading order", "`in reading order` is span order"),
+        ("in time order", "`in time order` reads effective time"),
+        ("align by class", "`align by class` needs the class matrix"),
+        (
+            "pack 500 tokens as view",
+            "`as view` appends a `View` record",
+        ),
+        ("spans", "`spans` reports where each unit sits"),
+        ("measure T1", "`measure` dispatches to the measures"),
     ] {
-        let q = smysl_query::parse(&text.replace("NAME", &name)).expect("parses");
-        let diags = plan(&q.query, &env, &PlanOptions::default()).expect_err("refused");
-        assert_eq!(diags[0].code.as_str(), "SMY-E461", "{text}");
+        let q = format!("from store:{name}\n{text}");
+        let parsed = smysl_query::parse(&q).unwrap_or_else(|d| panic!("{q}: {}", d.message));
+        let diags = plan(&parsed.query, &env, &PlanOptions::default()).expect_err("refused");
         assert!(
             diags[0].message.starts_with(expect),
-            "{text}: {}",
+            "{text}: {} {}",
+            diags[0].code,
             diags[0].message
         );
     }
@@ -207,11 +229,13 @@ fn an_undeclared_relation_kind_is_refused() {
     let codes: Vec<&str> = diags.iter().map(|d| d.code.as_str()).collect();
     assert!(codes.contains(&"SMY-E462"), "{codes:?}");
 
-    // `causes` is a kernel kind, so the only complaint left is that traversals are phase 7.
+    // `causes` is a kernel kind, so there is nothing left to complain about: since TX-P6
+    // step 4 lowers traversals, this plans.
     let q = smysl_query::parse(&format!("from store:{name}\nexpand ->causes")).expect("parses");
-    let diags = plan(&q.query, &env, &PlanOptions::default()).expect_err("refused");
-    let codes: Vec<&str> = diags.iter().map(|d| d.code.as_str()).collect();
-    assert!(!codes.contains(&"SMY-E462"), "{codes:?}");
+    let plan = plan(&q.query, &env, &PlanOptions::default()).expect("a kernel kind plans");
+    let traversals = &plan.expr.sole().expect("one pipeline").traversals;
+    assert_eq!(traversals.len(), 1);
+    assert_eq!(traversals[0].label, "->causes");
 }
 
 /// A `using` pin for a declaration the store does not hold is `SMY-E466`.

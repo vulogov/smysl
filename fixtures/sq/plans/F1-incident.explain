@@ -5,5 +5,3 @@ plan sq/1
   3 scope: store:F1-incident via F1-incident -> 1 store(s) F1-incident, 8 unit(s)
   4 partitions: 1, idf over collection
       (no manifest): 8 unit(s)
-  phases 6-9 (filters, traversals, set ops, ordering) are not in this
-  build; a query that needs one is refused with SMY-E461

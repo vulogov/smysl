@@ -5,5 +5,3 @@ plan sq/1
   3 scope: store:F5-dataset via F5-dataset -> 1 store(s) F5-dataset, 12 unit(s)
   4 partitions: 1, idf over collection
       (no manifest): 12 unit(s)
-  phases 6-9 (filters, traversals, set ops, ordering) are not in this
-  build; a query that needs one is refused with SMY-E461
