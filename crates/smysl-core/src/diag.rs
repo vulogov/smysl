@@ -347,6 +347,7 @@ registry! {
         E461 = "SMY-E461", Error, "A stage is not available in this build or phase";
         E462 = "SMY-E462", Error, "A traversal names a relation kind nothing in scope declares";
         W463 = "SMY-W463", Warn,  "A traversal stopped at its depth with an unexplored frontier";
+        W464 = "SMY-W464", Warn,  "A supersession fork in scope: no single head, every successor kept";
         E466 = "SMY-E466", Error, "A query cannot be pinned: the store has no such declaration";
         W510 = "SMY-W510", Warn,  "A string literal is not in NFC; it is matched byte-exactly as written";
         E511 = "SMY-E511", Error, "A scope names something this environment does not hold";
@@ -719,6 +720,11 @@ mod tests {
     /// because that range is full and because the refusal is about a name the *grammar*
     /// accepted — `from store:ledger` parses, and the span is a grammar span.
     ///
+    /// 98 with `SMY-W464` in TX-P6 step 5, where the supersession pass exists. Allocated by
+    /// SMYSL-2.5 and withheld on the same rule as the rest: a fork is two units superseding
+    /// one target with nothing ordering them, and until a pass chose heads there was nothing
+    /// to decline to choose.
+    ///
     /// 97 with `SMY-W463` and `SMY-E512` in TX-P6 step 4, where traversals and filters exist.
     /// `W463` was allocated by SMYSL-2.5 and withheld on the same rule as `E461`: a traversal
     /// that stopped at its depth with the graph still going is worth saying, and nothing could
@@ -747,7 +753,7 @@ mod tests {
     /// build can produce, which is the thing this comment exists to prevent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 97);
+        assert_eq!(Code::ALL.len(), 98);
     }
 
     #[test]

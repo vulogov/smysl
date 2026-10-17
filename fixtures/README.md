@@ -99,6 +99,13 @@ rather than a field-by-field assertion because SMYSL-2.5 §3.2 makes each planne
 what it did *so that* `--explain` can print it: what is worth pinning is the whole record, and
 a golden a person can read is a golden a person will notice is wrong.
 
+`sq/plans/supersession.smy` is the second input here that is not in `corpus/`, and for the
+same reason: none of F1 to F13 supersedes anything, so the supersession pass of SMYSL-2.5 §3.2
+had nothing to act on. This file is the smallest store that exercises both of its arms at once
+— a chain of three, a fork where two units revise one target with nothing ordering them, and a
+claim nobody revised, so the pass can be seen to resolve, to decline to resolve (`SMY-W464`),
+and to leave alone.
+
 `sq/plans/find-lexical.why` is the one golden here that is not a plan alone. Step 3's
 `--explain` gains a phase-5 line, and none of the `.explain` snapshots can show it: they are
 `from store:<fixture>` with no source, so there is nothing for phase 5 to lower. This one is

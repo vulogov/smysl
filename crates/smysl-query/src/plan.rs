@@ -169,6 +169,12 @@ pub enum PlanStep {
         traversals: Vec<String>,
         closures: Vec<&'static str>,
     },
+    /// The supersession pass, which runs after sources and traversals (SMYSL-2.5 §3.2).
+    ///
+    /// Recorded even when it is off, because "this reader asked for every version" is a fact
+    /// about the answer and a plan that stayed silent would read like one where the pass found
+    /// nothing to do.
+    Supersede { enabled: bool },
     /// Phase 8.
     SetOp { op: &'static str, span: Span },
     /// Phase 9.
@@ -639,6 +645,10 @@ fn lower_pipeline(
                 .collect(),
         });
     }
+
+    steps.push(PlanStep::Supersede {
+        enabled: !opts.all_versions,
+    });
 
     Some(PipelinePlan {
         scope: env.scope.name().to_string(),

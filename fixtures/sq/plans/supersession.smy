@@ -1,0 +1,41 @@
+# A supersession fork and a plain chain, side by side (TX-P6 step 5).
+#
+# `fixtures/corpus` has no supersession at all, so the pass of SMYSL-2.5 §3.2 had nothing to
+# act on there. This file is the smallest store that exercises both of its arms at once:
+#
+#   c/first    is superseded once, by c/second, which is superseded by c/third
+#              -> a chain, and the pass resolves c/first all the way to c/third
+#   c/disputed is superseded by two units that nothing orders
+#              -> a fork: no single head, both successors kept, `SMY-W464`
+#   c/settled  is superseded by nobody
+#              -> untouched, so the pass can be seen to leave alone what it should
+#
+# It lives here and not in `fixtures/corpus` for the reason `catalog.smy` does: that tree is
+# F1 to F13 with an `.expected` beside each, iterated by four other crates' tests, and a
+# fourteenth file would change what those tests measure.
+
+@claim c/first { status: speculative }
+~ The first reading of the pool regression.
+
+@claim c/second { status: speculative }
+~ The second reading, which corrects the first.
+
+@claim c/third { status: speculative }
+~ The third reading, which corrects the second.
+
+@claim c/disputed { status: speculative }
+~ A claim two people revised at once.
+
+@claim c/revision-a { status: speculative }
+~ One revision of the disputed claim.
+
+@claim c/revision-b { status: speculative }
+~ Another revision of the disputed claim, written without seeing the first.
+
+@claim c/settled { status: speculative }
+~ A claim nobody revised.
+
+@rel c/second --supersedes--> c/first
+@rel c/third --supersedes--> c/second
+@rel c/revision-a --supersedes--> c/disputed
+@rel c/revision-b --supersedes--> c/disputed

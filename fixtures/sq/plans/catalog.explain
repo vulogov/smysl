@@ -7,3 +7,4 @@ plan sq/1
       (no manifest): 1 unit(s)
       m3:2v53cmcjs5kldvkadfsojminnjjeyqxeatpallrlh2s5dwg3htfq [en]: 1 unit(s)
       m3:2v53cmcjs5kldvkadfsojminnjjeyqxeatpallrlh2s5dwg3htfq [ru]: 1 unit(s)
+  - supersession: superseded units give way to their newest head

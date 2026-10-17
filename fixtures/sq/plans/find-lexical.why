@@ -6,6 +6,7 @@ plan sq/1
   4 partitions: 1, idf over collection
       (no manifest): 8 unit(s)
   5 source: lexical "connection pool", 10 per partition, rrf k=60
+  - supersession: superseded units give way to their newest head
 
   1. b3:cvhirtgs2mpvli2ethhyeo32uf rrf 0.016393
        (no manifest) rank 1 score 4.238785

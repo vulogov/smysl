@@ -311,7 +311,98 @@ fn run_pipeline(
         answer = Answer::Scope(reached.into_iter().collect());
     }
 
+    // --- the supersession pass (SMYSL-2.5 §3.2, §3.3) ----------------------------------------
+    //
+    // "After sources and traversals", which is here and not in phase 9: a traversal that
+    // reaches a superseded unit should hand the pass its replacement, and an ordering should
+    // sort what the pass left rather than what it removed.
+    if !opts.all_versions {
+        answer = supersede(answer, env, warnings);
+    }
+
     Ok(answer)
+}
+
+/// Replace superseded units by their newest head; keep every successor of a fork.
+///
+/// §3.2: *"units with a single newest successor are replaced by it, as relink resolves chains;
+/// a fork keeps every successor and raises `SMY-W464`"*. The head computation is
+/// `smysl-graph`'s `supersession_heads` — the function `relink` uses, made public in this step
+/// for the reason SMYSL-2.5 §4.2 gives: a query and a repair must not disagree about which
+/// unit is current.
+///
+/// # What a fork does, and why it is not "keep the old one"
+///
+/// A fork is two units superseding one target with nothing ordering them. The single case
+/// *replaces*, so the parallel reading replaces too — with all of the successors rather than
+/// one, because choosing would be adjudicating a contention that the store has recorded and
+/// not settled. The superseded unit goes, as it does in the single case; what the reader gets
+/// is both of its replacements and a warning saying so, which is the honest shape of "this was
+/// revised twice and the revisions disagree".
+///
+/// `--all-versions` turns the whole pass off, which is the escape hatch for a reader who wants
+/// the history rather than the current reading.
+fn supersede(answer: Answer, env: &Env<'_>, warnings: &mut Vec<Diagnostic>) -> Answer {
+    let (newest, forked) = smysl_graph::relink::supersession_heads(env.store);
+    if newest.is_empty() && forked.is_empty() {
+        return answer;
+    }
+    let forked: BTreeSet<Uid> = forked.into_iter().collect();
+
+    let mut forks_seen = 0usize;
+    let mut map = |uid: Uid, out: &mut Vec<Uid>| {
+        if let Some(head) = newest.get(&uid) {
+            out.push(*head);
+        } else if forked.contains(&uid) {
+            forks_seen += 1;
+            out.extend(direct_successors(env.store, &uid));
+        } else {
+            out.push(uid);
+        }
+    };
+
+    let replaced = match &answer {
+        // A ranked answer loses its ranking here, and has to: a head that replaced two
+        // different hits has no one score, and inventing one would be inventing a ranking.
+        // The set is what survives, which is what an ordering stage sorts.
+        Answer::Ranked(_) | Answer::Scope(_) | Answer::Packed(_) => {
+            let mut out = Vec::new();
+            for uid in answer.uids() {
+                map(uid, &mut out);
+            }
+            let deduped: BTreeSet<Uid> = out.into_iter().collect();
+            Some(Answer::Scope(deduped.into_iter().collect()))
+        }
+        // A count or a grouping is produced in phase 9, after this pass; reaching here with
+        // one would mean the pipeline ran out of order.
+        Answer::Count(_) | Answer::Groups(_) => None,
+    };
+
+    if forks_seen > 0 {
+        warnings.push(
+            Diagnostic::at(Code::W464, smysl_core::diag::Span::new(0, 0)).with_message(format!(
+                "{forks_seen} unit(s) in scope are superseded by two or more units that nothing                  orders; no single head exists, so every successor is kept"
+            )),
+        );
+    }
+    replaced.unwrap_or(answer)
+}
+
+/// The units that directly supersede this one.
+///
+/// Read from the store rather than returned by `supersession_heads`, which answers "what is
+/// the newest" and has nothing to say for a unit whose answer is "two things". Asking the
+/// store directly here keeps the contentious computation — which unit wins — in one place.
+fn direct_successors(store: &Store, uid: &Uid) -> Vec<Uid> {
+    let mut out: Vec<Uid> = store
+        .relations_of_kind(&smysl_core::types::RelKind::Supersedes)
+        .into_iter()
+        .filter(|r| r.to == *uid)
+        .map(|r| r.from)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Phase 5 for `~lex`, then §3.4's fusion.

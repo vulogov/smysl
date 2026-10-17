@@ -5,3 +5,4 @@ plan sq/1
   3 scope: store:F12-extension-types via F12-extension-types -> 1 store(s) F12-extension-types, 3 unit(s)
   4 partitions: 1, idf over collection
       (no manifest): 3 unit(s)
+  - supersession: superseded units give way to their newest head

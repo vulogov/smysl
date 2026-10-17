@@ -5,3 +5,4 @@ plan sq/1
   3 scope: store:F7-mixed-granularity via F7-mixed-granularity -> 1 store(s) F7-mixed-granularity, 9 unit(s)
   4 partitions: 1, idf over collection
       (no manifest): 9 unit(s)
+  - supersession: superseded units give way to their newest head

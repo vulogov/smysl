@@ -119,6 +119,12 @@ pub fn explain(plan: &Plan) -> String {
                 }
                 out.push('\n');
             }
+            PlanStep::Supersede { enabled } => {
+                out.push_str(match enabled {
+                    true => "  - supersession: superseded units give way to their newest head\n",
+                    false => "  - supersession: off (--all-versions), every version kept\n",
+                });
+            }
             PlanStep::SetOp { op, .. } => {
                 out.push_str(&format!("  8 set: {op}\n"));
             }

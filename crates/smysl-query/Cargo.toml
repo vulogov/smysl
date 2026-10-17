@@ -62,3 +62,9 @@ name = "planner"
 # but what running it answered, and over a shuffled log as well as a sorted one.
 [[test]]
 name = "stages"
+
+# The supersession pass (TX-P6 step 5; SMYSL-2.5 §3.2). Its own target because its fixture is
+# its own: `fixtures/corpus` holds no supersession at all, so the pass had nothing to act on
+# there and `fixtures/sq/plans/supersession.smy` is the store that gives it something.
+[[test]]
+name = "supersession"
