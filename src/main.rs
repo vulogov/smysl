@@ -1429,14 +1429,32 @@ fn cli() -> Command {
                         .long("derive")
                         .value_name("SCHEMA")
                         .num_args(0..=1)
-                        .value_parser(["analysis", "narrative", "brief", "qa", "plan"])
+                        .value_parser([
+                            "analysis",
+                            "narrative",
+                            "brief",
+                            "qa",
+                            "plan",
+                            "exposition",
+                            "dialogue",
+                            "dossier",
+                        ])
                         .help("Derive a thread from the graph; the schema may follow here or in --schema"),
                 )
                 .arg(
                     Arg::new("schema")
                         .long("schema")
                         .value_name("S")
-                        .value_parser(["analysis", "narrative", "brief", "qa", "plan"])
+                        .value_parser([
+                            "analysis",
+                            "narrative",
+                            "brief",
+                            "qa",
+                            "plan",
+                            "exposition",
+                            "dialogue",
+                            "dossier",
+                        ])
                         .help("Schema to derive under (§23 spells it this way)"),
                 )
                 .arg(
@@ -5671,6 +5689,16 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eprintln!("smysl thread: `{raw}` is not a schema");
         return ExitCode::Usage;
     };
+    // A dossier has no matcher rules: its steps are slots a template filled, and only `ask`
+    // fills them (SMYSL-2.5 §3.13). Deriving one from the graph would return an empty thread
+    // — correct and useless — so it is refused here, with the command that does produce one.
+    if !smysl::derivable(schema) {
+        eprintln!(
+            "smysl thread: `{raw}` cannot be derived from the graph; a {raw} thread is produced \
+             by `ask` (TX-P8 step 3)"
+        );
+        return ExitCode::Usage;
+    }
 
     let id = match m.get_one::<String>("id") {
         Some(s) => match smysl::ThreadId::new(s) {

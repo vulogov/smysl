@@ -21,6 +21,15 @@ pub enum ThreadSchema {
     Brief = 2,
     Qa = 3,
     Plan = 4,
+    // 5 is `timeline`, allocated by SMYSL-2.3 A-8.2 to the 1.9 timeline work and not yet
+    // assigned a definition; a build that decodes 5 reads `Unknown`, which is what A-8.2 says
+    // of a code it has reserved and nobody has defined.
+    /// A text explained in its own order (SMYSL-2.5; TX-P8 step 2).
+    Exposition = 6,
+    /// A conversation, ordered by its replies (SMYSL-2.5; TX-P8 step 2).
+    Dialogue = 7,
+    /// A question answered slot by slot. Produced only by `ask`, never derived (SMYSL-2.5 §3.13).
+    Dossier = 8,
     /// A schema this build does not know (1.9).
     ///
     /// Open from 1.9, like `Role`, `SourceKind` and `DetectionKind`. A decoder keeps the code,
@@ -37,6 +46,9 @@ impl ThreadSchema {
         ThreadSchema::Brief,
         ThreadSchema::Qa,
         ThreadSchema::Plan,
+        ThreadSchema::Exposition,
+        ThreadSchema::Dialogue,
+        ThreadSchema::Dossier,
     ];
 
     pub const fn as_u8(self) -> u8 {
@@ -50,6 +62,9 @@ impl ThreadSchema {
             2 => Some(ThreadSchema::Brief),
             3 => Some(ThreadSchema::Qa),
             4 => Some(ThreadSchema::Plan),
+            6 => Some(ThreadSchema::Exposition),
+            7 => Some(ThreadSchema::Dialogue),
+            8 => Some(ThreadSchema::Dossier),
             255 => Some(ThreadSchema::Unknown),
             _ => None,
         }
@@ -62,6 +77,9 @@ impl ThreadSchema {
             ThreadSchema::Brief => "brief",
             ThreadSchema::Qa => "qa",
             ThreadSchema::Plan => "plan",
+            ThreadSchema::Exposition => "exposition",
+            ThreadSchema::Dialogue => "dialogue",
+            ThreadSchema::Dossier => "dossier",
             ThreadSchema::Unknown => "unknown",
         }
     }
@@ -98,6 +116,38 @@ impl ThreadSchema {
                 Role::Decision,
                 Role::Risk,
             ],
+            ThreadSchema::Exposition => &[
+                Role::Introduces,
+                Role::Develops,
+                Role::Exemplifies,
+                Role::Concedes,
+                Role::Concludes,
+            ],
+            ThreadSchema::Dialogue => &[Role::Utterance, Role::Reply, Role::Uptake, Role::Reversal],
+            // The dossier's slots, in SMYSL-2.5 §3.13's order, reusing `question`, `evidence`
+            // and `support` where A-8.2 says their meaning matches.
+            ThreadSchema::Dossier => &[
+                Role::Question,
+                Role::Definition,
+                Role::Introduction,
+                Role::Characteristic,
+                Role::Exemplifies,
+                Role::Evidence,
+                Role::Support,
+                Role::Counter,
+                Role::Reported,
+                Role::Contrast,
+                Role::OpenQuestion,
+                Role::Related,
+                Role::Cause,
+                Role::Hypothesis,
+                Role::Holder,
+                Role::Stance,
+                Role::Revision,
+                Role::Location,
+                Role::Dependent,
+                Role::Gap,
+            ],
             // An unknown schema defines no roles: a walk over it has nothing to
             // follow, which is the honest answer and not the same as `Analysis`.
             ThreadSchema::Unknown => &[],
@@ -115,7 +165,7 @@ impl fmt::Display for ThreadSchema {
     }
 }
 
-/// The union of roles across all five schemas. Wire codes are stable.
+/// The union of roles across the eight schemas. Wire codes are stable; SMYSL-2.3 A-8.2 assigns them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 #[non_exhaustive]
@@ -149,6 +199,37 @@ pub enum Role {
     Constraint = 21,
     Step = 22,
     Decision = 23,
+    // exposition (SMYSL-2.3 A-8.2, codes 24–28)
+    Introduces = 24,
+    Develops = 25,
+    /// Shared: exposition's example and the dossier's `example` slot.
+    Exemplifies = 26,
+    Concedes = 27,
+    Concludes = 28,
+    // dialogue (29–32)
+    Utterance = 29,
+    Reply = 30,
+    Uptake = 31,
+    Reversal = 32,
+    // dossier (33–48)
+    Definition = 33,
+    Introduction = 34,
+    Characteristic = 35,
+    Counter = 36,
+    Reported = 37,
+    Contrast = 38,
+    OpenQuestion = 39,
+    Related = 40,
+    Cause = 41,
+    Hypothesis = 42,
+    Holder = 43,
+    Stance = 44,
+    Revision = 45,
+    Location = 46,
+    Dependent = 47,
+    /// An empty dossier slot: a step whose unit is the slot's saved query (SMYSL-2.5 §3.13).
+    Gap = 48,
+    // 49–63 are reserved for `timeline` (A-8.2) and decode as `Unknown` until assigned.
     /// A role this build does not know (1.9). See `ThreadSchema::Unknown`.
     Unknown = 255,
 }
@@ -179,6 +260,31 @@ impl Role {
         Role::Constraint,
         Role::Step,
         Role::Decision,
+        Role::Introduces,
+        Role::Develops,
+        Role::Exemplifies,
+        Role::Concedes,
+        Role::Concludes,
+        Role::Utterance,
+        Role::Reply,
+        Role::Uptake,
+        Role::Reversal,
+        Role::Definition,
+        Role::Introduction,
+        Role::Characteristic,
+        Role::Counter,
+        Role::Reported,
+        Role::Contrast,
+        Role::OpenQuestion,
+        Role::Related,
+        Role::Cause,
+        Role::Hypothesis,
+        Role::Holder,
+        Role::Stance,
+        Role::Revision,
+        Role::Location,
+        Role::Dependent,
+        Role::Gap,
     ];
 
     pub const fn as_u8(self) -> u8 {
@@ -222,6 +328,31 @@ impl Role {
             Role::Constraint => "constraint",
             Role::Step => "step",
             Role::Decision => "decision",
+            Role::Introduces => "introduces",
+            Role::Develops => "develops",
+            Role::Exemplifies => "exemplifies",
+            Role::Concedes => "concedes",
+            Role::Concludes => "concludes",
+            Role::Utterance => "utterance",
+            Role::Reply => "reply",
+            Role::Uptake => "uptake",
+            Role::Reversal => "reversal",
+            Role::Definition => "definition",
+            Role::Introduction => "introduction",
+            Role::Characteristic => "characteristic",
+            Role::Counter => "counter",
+            Role::Reported => "reported",
+            Role::Contrast => "contrast",
+            Role::OpenQuestion => "open-question",
+            Role::Related => "related",
+            Role::Cause => "cause",
+            Role::Hypothesis => "hypothesis",
+            Role::Holder => "holder",
+            Role::Stance => "stance",
+            Role::Revision => "revision",
+            Role::Location => "location",
+            Role::Dependent => "dependent",
+            Role::Gap => "gap",
             Role::Unknown => "unknown",
         }
     }
@@ -385,14 +516,19 @@ mod tests {
     }
 
     #[test]
-    fn five_schemas_round_trip() {
-        assert_eq!(ThreadSchema::ALL.len(), 5);
+    fn eight_schemas_round_trip() {
+        assert_eq!(ThreadSchema::ALL.len(), 8);
         for &s in ThreadSchema::ALL {
             assert_eq!(ThreadSchema::from_u8(s.as_u8()), Some(s));
             assert_eq!(ThreadSchema::parse(s.as_str()), Some(s));
         }
+        // 5 is reserved for `timeline` and unassigned; 9 is beyond A-8.2's table.
         assert_eq!(ThreadSchema::from_u8(5), None);
+        assert_eq!(ThreadSchema::from_u8(9), None);
         assert_eq!(ThreadSchema::parse("essay"), None);
+        assert_eq!(ThreadSchema::Exposition.as_u8(), 6);
+        assert_eq!(ThreadSchema::Dialogue.as_u8(), 7);
+        assert_eq!(ThreadSchema::Dossier.as_u8(), 8);
     }
 
     #[test]
@@ -431,13 +567,18 @@ mod tests {
     }
 
     #[test]
-    fn twenty_four_roles_round_trip() {
-        assert_eq!(Role::ALL.len(), 24);
+    fn forty_nine_roles_round_trip() {
+        assert_eq!(Role::ALL.len(), 49);
         for &r in Role::ALL {
             assert_eq!(Role::from_u8(r.as_u8()), Some(r));
             assert_eq!(Role::parse(r.as_str()), Some(r));
         }
-        assert_eq!(Role::from_u8(24), None);
+        // 49–63 are reserved for `timeline` (A-8.2) and decode as nothing this build names.
+        assert_eq!(Role::from_u8(49), None);
+        assert_eq!(Role::from_u8(63), None);
+        assert_eq!(Role::Introduces.as_u8(), 24);
+        assert_eq!(Role::Reply.as_u8(), 30);
+        assert_eq!(Role::Gap.as_u8(), 48);
     }
 
     #[test]

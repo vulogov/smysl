@@ -538,8 +538,8 @@ role each one plays in it, for one named audience at a time.
 
 #term("Role")[
   A named slot in a schema's narrative order — `finding`, `risk`, `question`,
-  `step`, and twenty more across the five schemas, sharing one wire-stable
-  numbering. A role belongs to whichever schemas declare it; `risk` happens
+  `step`, and forty-five more across the eight schemas, sharing one
+  wire-stable numbering that SMYSL-2.3 A-8.2 assigns. A role belongs to whichever schemas declare it; `risk` happens
   to appear in both `brief` and `plan` as the same role, not two
   coincidentally-named ones.
 ]
@@ -868,8 +868,8 @@ writing one directly and having `thread --show` treat it identically.
 #section("Foreign roles: reported, not rejected")
 
 A schema's role table names which roles it *expects*; it is not a fence the
-parser enforces. `Role::parse` accepts any of the twenty-four roles across
-all five schemas, regardless of which schema a given thread declares — so a
+parser enforces. `Role::parse` accepts any of the forty-nine roles across
+all eight schemas, regardless of which schema a given thread declares — so a
 `brief` thread with a step in `coda` (a `narrative` role `brief` never
 lists) parses cleanly, shows cleanly, and passes `check` with zero
 diagnostics:

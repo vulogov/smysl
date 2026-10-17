@@ -1360,6 +1360,43 @@ Each step has an exit test. Steps within a phase are ordered.
 2. FC-8 tables in `smysl-thread` (after SMYSL-2.1 opens the enumerations and SMYSL-2.3 assigns
    codes); `exposition`/`dialogue` derivation; `dossier` refused by `--derive`. *Exit:* derivation
    tests on chat and book fixtures; old binaries' behaviour per F-12 documented.
+
+   *Done 2026-10-17.* Both preconditions had already held for ten days — SMYSL-2.1 F-12 opened
+   the enumerations in TX-P0 and SMYSL-2.3 A-8.2 assigned the codes — so the step was the tables
+   and the derivation. `ThreadSchema` gains `exposition` 6, `dialogue` 7 and `dossier` 8 (5 stays
+   `timeline`'s, unassigned); `Role` gains 24–48, reusing `question`, `evidence` and `support`
+   where A-8.2 says the meaning matches. `smysl-thread` has three new tables, two new matchers
+   for extension relation kinds (`SourceOfExt`, `TargetOfExt`, since a rule table is `static` and
+   an extension kind holds a `String`), and `derivable`, which the CLI reads to refuse
+   `thread --derive dossier` and name `ask` as the command that makes one. **Three findings,
+   each fixed where it was found.** *Derivation grouped steps by role*, which is an argument's
+   layout and a conversation backwards — every reply ahead of every message it answered — so
+   `SchemaDef` gained `in_order`, on for `exposition` and `dialogue`: the units' own order leads
+   (observation time, then **span order**, a new key, then the chain) and the role annotates.
+   *A text with no ordering edges had no first or last unit*, so an exposition of Ruth had no
+   introduction; when the chain is wholly absent and every unit has an order of its own, the
+   ends of that order are the first and last. *Nothing writes `x.text/replies`*: `x.text/v1`
+   declares it and rule E reads it, and the readers record `reply` ids on rows that no path turns
+   into edges; the dialogue test draws them from the ids, and **the producer is owed** — it
+   belongs with the converter that already turns rows into units. **The five existing schemas
+   derive byte for byte what they did:** the H-18 golden is now pinned to those five by name,
+   because a digest over `ThreadSchema::ALL` would have moved for the new schemas alone and hidden
+   the answer, and it holds the digest recorded before H-18. The exit's tests are
+   `crates/smysl-text/tests/thread_schemas.rs` — an exposition of Ruth from 1:1 to its last verse
+   in the text's order, and a dialogue over the Telegram fixture where both answered messages are
+   uptake, both answers are replies, and each reply follows what it answers.
+
+   **What an older binary does with these threads (F-12).** A build before this step decodes
+   schema 6, 7 or 8 as `ThreadSchema::Unknown` with the code kept, and role 24–48 as
+   `Role::Unknown` with the code kept; it re-encodes both byte for byte, so the uid of every unit
+   is unchanged and a thread passes through it intact. It does not derive, walk or render such a
+   thread — `definition_of` returns `None`, render counts it as skipped — and `check` reports
+   each code once as `SMY-W409`. Nothing is refused and nothing is lost: the store stays
+   openable, which was F-12's whole purpose. The wire fixture that pins this behaviour,
+   `fixtures/wire/F14-unknown-codes.cbor`, used schema 7 and role 30 as its "unknown" codes;
+   this step made both known, so the fixture now uses 9 and 64 and was re-blessed — the first
+   time an open enumeration's unknown code became a known one, and the case the fixture was
+   written for, shown from the other side.
 3. Intents, templates, `ask`, dossier view and thread, rendering headings. *Exit:* §5.5 unit tests.
 4. GE-T10 run. *Exit:* draft 3 TX-P8 exit (GE-T10 numbers recorded; kill criterion applied).
 

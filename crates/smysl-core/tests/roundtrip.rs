@@ -798,7 +798,8 @@ fn an_unknown_source_kind_keeps_its_code_and_the_uid() {
 /// so two peers disagreeing about whether to keep a code would never converge.
 #[test]
 fn unknown_schema_role_and_detection_codes_survive() {
-    // A thread whose schema is 7 and whose step role is 30: both unknown to this build.
+    // A thread whose schema is 9: unknown to this build. It was 7 until TX-P8 step 2 assigned
+    // 7 to `dialogue` (SMYSL-2.3 A-8.2); 9 is beyond A-8.2's table.
     let th = Thread::new(
         ThreadId::new("t/x").unwrap(),
         ThreadSchema::Analysis,
@@ -807,13 +808,13 @@ fn unknown_schema_role_and_detection_codes_survive() {
         Hlc::new(1, 0, AgentId::new("human:vu").unwrap()),
     );
     let before = to_cbor(&Record::Thread(th));
-    // schema key 1, value 0 (analysis) -> 7
+    // schema key 1, value 0 (analysis) -> 9
     let at = before
         .windows(2)
         .position(|w| w == [0x01, 0x00])
         .expect("schema is key 1");
     let mut bytes = before.clone();
-    bytes[at + 1] = 0x07;
+    bytes[at + 1] = 0x09;
 
     let (rec, _) = from_cbor(&bytes).expect("an unknown schema must decode, not fail");
     let back = match rec {
@@ -821,7 +822,7 @@ fn unknown_schema_role_and_detection_codes_survive() {
         other => panic!("expected a thread, got {other:?}"),
     };
     assert_eq!(back.schema, ThreadSchema::Unknown, "the schema is unknown");
-    assert_eq!(back.schema_code(), 7, "and its code is kept");
+    assert_eq!(back.schema_code(), 9, "and its code is kept");
     assert!(
         back.schema.roles().is_empty(),
         "an unknown schema defines no roles, rather than borrowing Analysis's"

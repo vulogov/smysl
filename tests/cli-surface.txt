@@ -192,9 +192,9 @@ bundle     --help
 thread     [PATH]
 thread     --config
 thread     --derive
-thread     [possible values: analysis, narrative, brief, qa, plan]
+thread     [possible values: analysis, narrative, brief, qa, plan, exposition, dialogue, dossier]
 thread     --schema
-thread     [possible values: analysis, narrative, brief, qa, plan]
+thread     [possible values: analysis, narrative, brief, qa, plan, exposition, dialogue, dossier]
 thread     --output
 thread     --only
 thread     --format

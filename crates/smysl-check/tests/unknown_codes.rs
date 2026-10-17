@@ -59,8 +59,9 @@ fn an_unknown_thread_schema_is_reported() {
         "a thread whose schema is from a later release",
         Hlc::new(1, 0, agent()),
     )
-    .with_unknown_schema(7)
-    .expect("7 is neither 255 nor a schema this build knows");
+    // 9, not 7: TX-P8 step 2 assigned 7 to `dialogue` (SMYSL-2.3 A-8.2).
+    .with_unknown_schema(9)
+    .expect("9 is neither 255 nor a schema this build knows");
 
     let store = Store::from_records(vec![Record::Thread(th)]);
     let report = check(&store, CheckOptions::strict());

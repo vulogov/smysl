@@ -1987,7 +1987,8 @@ fn a_record_with_no_surface_form_is_not_written() {
         "a thread whose schema is from a later release",
         smysl_core::Hlc::new(1, 0, who),
     )
-    .with_unknown_schema(7)
+    // 9, not 7: TX-P8 step 2 assigned 7 to `dialogue` (SMYSL-2.3 A-8.2).
+    .with_unknown_schema(9)
     .unwrap();
     assert!(
         !thread_has_surface_form(&th),

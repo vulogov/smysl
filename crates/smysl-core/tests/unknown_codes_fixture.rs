@@ -11,9 +11,10 @@
 //! the wire's business. The fixture is therefore assembled from known records and then has four
 //! code bytes rewritten, which is exactly the shape a future release's store would have.
 //!
-//! The codes chosen are deliberate. 9 is beyond the source kinds 1.9 defines, 7 beyond the
-//! thread schemas, 30 is inside the range A-8.2 reserves for roles, and 6 is beyond the
-//! detection kinds. None is 255, which is reserved in all five enumerations and never assigned.
+//! The codes chosen are deliberate. 9 is beyond the source kinds 1.9 defines, 9 beyond the
+//! thread schemas A-8.2 assigns (it was 7 until TX-P8 step 2 made 7 `dialogue`), 64 beyond
+//! every role code A-8.2 assigns or reserves (it was 30 until the same step made 30 `reply`),
+//! and 6 is beyond the detection kinds. None is 255, which is reserved in all five enumerations and never assigned.
 //!
 //! `SMYSL_BLESS=1` rewrites the file. That should be a decision: it changes what three other
 //! implementations are checked against.
@@ -56,12 +57,18 @@ fn build() -> Vec<u8> {
         "a thread whose schema this build cannot name",
         Hlc::new(1_726_500_000_000, 0, who.clone()),
     )
-    .with_unknown_schema(7)
-    .expect("7 is neither reserved nor a schema this build knows");
+    // 7 until TX-P8 step 2, which assigned it (`dialogue`, SMYSL-2.3 A-8.2) — the first time a
+    // code this fixture used as unknown became known, and the behaviour the fixture exists to
+    // pin was shown the other way round: a build before step 2 reads a dialogue thread as
+    // schema 7, unknown, keeps the code, and re-encodes it. 9 is beyond A-8.2's table.
+    .with_unknown_schema(9)
+    .expect("9 is neither reserved nor a schema this build knows");
     thread.steps.push(
         Step::new(Role::Context, uid)
-            .with_unknown_role(30)
-            .expect("30 is neither reserved nor a role this build knows"),
+            // 30 until TX-P8 step 2 (`reply`). 64 is past the range A-8.2 reserves for
+            // `timeline` (49–63) and assigned to nothing.
+            .with_unknown_role(64)
+            .expect("64 is neither reserved nor a role this build knows"),
     );
 
     // A contention whose detection kind is 6.
@@ -125,10 +132,10 @@ fn every_unknown_code_is_read_as_unknown_and_kept() {
             }
             Record::Thread(t) => {
                 assert_eq!(t.schema, ThreadSchema::Unknown);
-                assert_eq!(t.schema_code(), 7, "the schema code is kept verbatim");
+                assert_eq!(t.schema_code(), 9, "the schema code is kept verbatim");
                 let st = &t.steps[0];
                 assert_eq!(st.role, Role::Unknown);
-                assert_eq!(st.role_code(), 30, "the role code is kept verbatim");
+                assert_eq!(st.role_code(), 64, "the role code is kept verbatim");
             }
             Record::Contention(c) => {
                 assert_eq!(c.detected.kind, DetectionKind::Unknown);

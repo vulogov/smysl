@@ -279,6 +279,7 @@ pub use smysl::consensus
 pub use smysl::cycles
 pub use smysl::dependents
 pub use smysl::dependents_via
+pub use smysl::derivable
 pub use smysl::derive_thread
 pub use smysl::diff
 pub use smysl::edtf

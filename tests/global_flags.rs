@@ -574,3 +574,30 @@ fn seed_check_names_the_flag_that_broke_reproducibility() {
         model.stderr.trim()
     );
 }
+
+/// `thread --derive dossier` is refused before anything runs, and says which command makes one
+/// (SMYSL-2.5 §3.13; TX-P8 step 2). The two schemas step 2 made derivable derive.
+#[test]
+fn a_dossier_cannot_be_derived_and_exposition_and_dialogue_can() {
+    let out = Command::new(env!("CARGO_BIN_EXE_smysl"))
+        .args(["thread", "--derive", "dossier", F1])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary runs");
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("`ask`"), "{err}");
+    assert!(out.stdout.is_empty(), "nothing was derived");
+    for schema in ["exposition", "dialogue"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_smysl"))
+            .args(["thread", "--derive", schema, F1])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("the binary runs");
+        assert!(
+            out.status.success(),
+            "{schema}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}

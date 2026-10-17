@@ -189,9 +189,24 @@ impl Ordering {
     }
 }
 
+/// The reply edge a chat reader's `reply` id becomes (SMYSL-2.4 §3.2). It orders a dialogue the
+/// way `precedes` orders a narrative: a reply is later than what it replies to.
+const REPLIES: &str = "x.text/replies";
+
 fn ordering(store: &Store, scope: &[Uid]) -> Ordering {
     let g = store.adjacency();
-    let kinds = EdgeSet::ordering();
+    // TX-P8 step 2: a reply edge is an ordering edge in every schema, since "later than what it
+    // answers" is true of a reply whatever the thread is for. Added only when the store has the
+    // kind, because an `EdgeSet` holds kinds the adjacency has numbered.
+    let mut ordering: Vec<smysl_graph::EdgeKind> = RelKind::KERNEL
+        .iter()
+        .filter(|k| k.is_ordering())
+        .filter_map(|k| smysl_graph::EdgeKind::kernel(k.clone()))
+        .collect();
+    if let Some(k) = g.edge_kind(&RelKind::Extension(REPLIES.to_string())) {
+        ordering.push(k);
+    }
+    let kinds = EdgeSet::of(ordering);
     let t = topo(g, &kinds);
 
     let mut index = BTreeMap::new();
@@ -221,6 +236,7 @@ fn ordering(store: &Store, scope: &[Uid]) -> Ordering {
         first.remove(&u);
         last.remove(&u);
     }
+    let chained = !first.is_empty() || !last.is_empty();
 
     // Rank within the scope, by chain index then uid - a total order, so a band is a
     // function of the graph rather than of iteration.
@@ -233,7 +249,18 @@ fn ordering(store: &Store, scope: &[Uid]) -> Ordering {
     // instant keep the chain index they always had, so a corpus that carries none derives
     // exactly what it derived before.
     let mut ordered: Vec<Uid> = in_scope.iter().copied().collect();
+    // Span order sits between observation time and the chain index (TX-P8 step 2): two units
+    // drawn from one part are in the order the text has them, which is what an exposition is —
+    // and a text's units carry no `observed` and almost no ordering edges, so without this key
+    // the chain index left them in uid order, which is no order. Keyed on the manifest first
+    // so two texts do not interleave by byte offset.
+    let placed = |u: &Uid| -> Option<(String, u64)> {
+        let source = store.get(u)?.core.source.as_ref()?;
+        let (start, _) = source.span()?;
+        Some((source.manifest()?.canonical(), start))
+    };
     ordered.sort_by_key(|u| {
+        let span = placed(u);
         // `None` sorts *before* `Some` in Rust, which would put every untimed unit at the front
         // — the opposite of the intent. An untimed unit is not early; it is not on the timeline,
         // so it follows the timed ones and keeps the chain order it always had.
@@ -241,11 +268,26 @@ fn ordering(store: &Store, scope: &[Uid]) -> Ordering {
         (
             observed.is_none(),
             observed.unwrap_or(0),
+            span.is_none(),
+            span.unwrap_or_default(),
             index.get(u).copied().unwrap_or(usize::MAX),
             *u,
         )
     });
     let rank: BTreeMap<Uid, usize> = ordered.iter().enumerate().map(|(i, u)| (*u, i)).collect();
+
+    // A scope with no ordering edges at all still has a first and a last unit when its units
+    // carry an order of their own (TX-P8 step 2): a text's verses have spans and a chat's
+    // messages have instants, and "nothing precedes anything" would otherwise leave an
+    // exposition with no introduction. Only when the chain is wholly absent and every unit has
+    // such an order, so a scope whose edges say where it starts keeps the answer they give.
+    if !chained && ordered.len() > 1 {
+        let has_own_order = |u: &Uid| store.observed_at(u).is_some() || placed(u).is_some();
+        if ordered.iter().all(has_own_order) {
+            first.insert(ordered[0]);
+            last.insert(ordered[ordered.len() - 1]);
+        }
+    }
 
     Ordering {
         index,
@@ -293,6 +335,24 @@ impl RelEnds {
                             .map(|r| r.to)
                             .collect()
                     });
+                }
+                Matcher::SourceOfExt(name) => {
+                    let k = RelKind::Extension((*name).to_string());
+                    let ends: BTreeSet<Uid> = store
+                        .relations_of_kind(&k)
+                        .into_iter()
+                        .map(|r| r.from)
+                        .collect();
+                    sources.entry(k).or_insert(ends);
+                }
+                Matcher::TargetOfExt(name) => {
+                    let k = RelKind::Extension((*name).to_string());
+                    let ends: BTreeSet<Uid> = store
+                        .relations_of_kind(&k)
+                        .into_iter()
+                        .map(|r| r.to)
+                        .collect();
+                    targets.entry(k).or_insert(ends);
                 }
                 _ => {}
             }
@@ -344,6 +404,14 @@ fn matches(
         Matcher::StatusAtLeast(s) => unit.core.status >= *s,
         Matcher::SourceOf(k) => ends.sources.get(k).is_some_and(|s| s.contains(uid)),
         Matcher::TargetOf(k) => ends.targets.get(k).is_some_and(|s| s.contains(uid)),
+        Matcher::SourceOfExt(name) => ends
+            .sources
+            .get(&RelKind::Extension((*name).to_string()))
+            .is_some_and(|s| s.contains(uid)),
+        Matcher::TargetOfExt(name) => ends
+            .targets
+            .get(&RelKind::Extension((*name).to_string()))
+            .is_some_and(|s| s.contains(uid)),
         // A scan of `n`, deliberately: rule arities are small, and an index over a prefix of a
         // ranking would cost more to build than the scan it replaced.
         Matcher::SalienceTop(n) => ranked.iter().take(*n).any(|u| u == uid),
@@ -407,9 +475,19 @@ fn order_steps(
 ) -> Vec<Step> {
     let mut steps: Vec<(usize, usize, Uid, Role)> = Vec::new();
     for (role, units) in picked {
-        let role_pos = def.position_of(*role).unwrap_or(usize::MAX);
+        // `in_order`: the units' own order leads and the role annotates (see
+        // `SchemaDef::in_order`). Otherwise the role leads, as it always has.
+        let role_pos = if def.in_order {
+            0
+        } else {
+            def.position_of(*role).unwrap_or(usize::MAX)
+        };
         for uid in units {
-            let chain = order.index.get(uid).copied().unwrap_or(usize::MAX);
+            let chain = if def.in_order {
+                order.rank.get(uid).copied().unwrap_or(usize::MAX)
+            } else {
+                order.index.get(uid).copied().unwrap_or(usize::MAX)
+            };
             steps.push((role_pos, chain, *uid, *role));
         }
     }
@@ -944,6 +1022,12 @@ mod tests {
 
         for &s in ThreadSchema::ALL {
             let (t, _) = derive(&store, s);
+            if !crate::schema::derivable(s) {
+                // The dossier: no rules, so nothing is assigned — which is why the CLI
+                // refuses to derive one rather than returning this empty thread.
+                assert!(t.steps.is_empty(), "{s} has no rules and derived something");
+                continue;
+            }
             assert!(!t.steps.is_empty(), "{s} derived nothing");
             assert!(satisfies_rule_l(&store, &t).is_empty(), "{s} broke rule L");
         }

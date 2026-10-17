@@ -448,7 +448,18 @@ fn derivation_is_byte_identical_to_the_recorded_golden() {
         let n = 1 + rng.below(14);
         let (records, _) = generate(&mut rng, n);
         let store = Store::from_records(records);
-        for &schema in ThreadSchema::ALL {
+        // The five schemas this golden was recorded over, named rather than read from
+        // `ThreadSchema::ALL`: TX-P8 step 2 grew `ALL` to eight, and a digest over `ALL` would
+        // have moved for that reason alone and hidden whether the five had changed. They have
+        // not: this is the digest recorded before H-18, and it held through step 2's span-order
+        // key and reply edges.
+        for schema in [
+            ThreadSchema::Analysis,
+            ThreadSchema::Narrative,
+            ThreadSchema::Brief,
+            ThreadSchema::Qa,
+            ThreadSchema::Plan,
+        ] {
             let (thread, _) = derive_thread(&store, schema, &opts());
             acc.extend_from_slice(&smysl_core::to_cbor_seq(&[Record::Thread(thread)]));
         }

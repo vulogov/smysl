@@ -1871,6 +1871,7 @@ dependencies = [
  "smysl-graph",
  "smysl-query",
  "smysl-retrieve",
+ "smysl-thread",
  "unicode-normalization",
  "unicode-segmentation",
  "zip",

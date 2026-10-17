@@ -128,3 +128,6 @@ flate2                = { workspace = true, optional = true }
 [dev-dependencies]
 smysl-check = { workspace = true }
 smysl-graph = { workspace = true }
+# TX-P8 step 2: the exposition and dialogue derivation tests run over a library this crate
+# builds, because the fixtures that order a text and a conversation are this crate's readers'.
+smysl-thread = { workspace = true }
