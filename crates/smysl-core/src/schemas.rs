@@ -26,9 +26,9 @@
 //! the structure is agreed would put bytes in a store that a later reading would have to
 //! either honour or break.
 //!
-//! `x.query/v1` is the other schema A-11 registers, and it is *not* here for the same kind of
-//! reason: G0 accepted A-11's `x.text/v1` and left `x.query/v1` open. It arrives with the saved
-//! query, in SMYSL-2.5.
+//! `x.query/v1` is the other schema A-11 registers. It was *not* here until TX-P8 step 1 for
+//! the same kind of reason: G0 accepted A-11's `x.text/v1` and left `x.query/v1` open, and it
+//! arrived with the saved query (SMYSL-2.5 §3.6), which is the first thing that writes one.
 
 use crate::ids::SchemaId;
 use crate::types::{RelKind, SchemaDecl};
@@ -593,6 +593,168 @@ pub mod text {
             assert!(declares(&SchemaId::Extension(ENTITY.to_string())));
             assert!(!declares(&SchemaId::Extension("x.text/v1".to_string())));
             assert!(!declares(&SchemaId::from(crate::KernelType::Claim)));
+        }
+    }
+}
+
+/// `x.query/v1` — the saved query (A-11, Appendix C; SMYSL-2.5 §3.6).
+///
+/// One type and one relation kind. The type is the unit a query is saved as; the relation is
+/// the edge from it to each unit of its result, and it is an *extension* kind on purpose:
+/// SMYSL-2.5 §3.6 and OQ-49 record that kernel `answers` carries salience rank, so linking
+/// results with it would raise their salience and change every later `order by salience` —
+/// including the rerun of the query that was saved. `EdgeKind::carries_support` treats an
+/// extension kind as non-supporting, which is what makes a saved query inert.
+pub mod query {
+    use super::{Field, FieldType, RelKind, SchemaDecl, SchemaId};
+
+    /// The schema's own id.
+    pub const ID: &str = "x.query/v1";
+
+    /// The revision this build declares.
+    pub const VERSION: u32 = 1;
+
+    /// A query that has planned and run to completion, with what it found.
+    pub const SAVED: &str = "x.query/saved";
+
+    /// The one type.
+    pub const TYPES: &[&str] = &[SAVED];
+
+    /// From a saved query to one unit of its result. Inert for salience (OQ-49).
+    pub const ANSWERS: &str = "x.query/answers";
+
+    /// The one relation kind.
+    pub const RELATIONS: &[&str] = &[ANSWERS];
+
+    /// The seven payload keys, in Appendix C's order. In code and not on the wire, as
+    /// [`super::text::FIELDS`] is, and for the same reason: A-7.
+    pub const FIELDS: &[Field] = &[
+        Field {
+            key: "query:text",
+            ty: FieldType::Text,
+            values: &[],
+            literals: &[],
+        },
+        Field {
+            key: "query:recipe",
+            ty: FieldType::Text,
+            values: &[],
+            literals: &[],
+        },
+        Field {
+            key: "query:models",
+            ty: FieldType::List(&FieldType::Text),
+            values: &[],
+            literals: &[],
+        },
+        Field {
+            key: "query:result-hash",
+            ty: FieldType::Text,
+            values: &[],
+            literals: &[],
+        },
+        Field {
+            key: "query:sq",
+            ty: FieldType::Text,
+            values: &[],
+            literals: &[],
+        },
+        Field {
+            key: "query:schemas",
+            ty: FieldType::List(&FieldType::Text),
+            values: &[],
+            literals: &[],
+        },
+        Field {
+            key: "query:lens-chain",
+            ty: FieldType::Text,
+            values: &[],
+            literals: &[],
+        },
+    ];
+
+    /// The field a payload key names, if the schema declares one.
+    pub fn field(key: &str) -> Option<&'static Field> {
+        FIELDS.iter().find(|f| f.key == key)
+    }
+
+    /// The declaration, as a record a store can hold. Infallible for the reason
+    /// [`super::text::decl`] is.
+    pub fn decl() -> SchemaDecl {
+        let mut d = SchemaDecl::new(SchemaId::Extension(ID.to_string()), VERSION);
+        d.types = TYPES
+            .iter()
+            .map(|t| SchemaId::Extension((*t).to_string()))
+            .collect();
+        d.relations = RELATIONS
+            .iter()
+            .map(|r| RelKind::Extension((*r).to_string()))
+            .collect();
+        d
+    }
+
+    /// Whether this schema id is the one type this schema declares.
+    pub fn declares(id: &SchemaId) -> bool {
+        TYPES.contains(&id.as_str())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn every_name_is_well_formed_under_the_grammar() {
+            assert!(SchemaId::parse(ID).is_ok(), "{ID}");
+            for t in TYPES {
+                assert!(SchemaId::parse(t).is_ok(), "{t}");
+            }
+            for r in RELATIONS {
+                assert!(RelKind::parse(r).is_ok(), "{r}");
+            }
+        }
+
+        #[test]
+        fn the_declaration_agrees_with_the_parser() {
+            let d = decl();
+            assert_eq!(d.id, SchemaId::parse(ID).expect("a well-formed id"));
+            assert_eq!(
+                d.types,
+                vec![SchemaId::parse(SAVED).expect("a well-formed id")]
+            );
+            assert_eq!(
+                d.relations,
+                vec![RelKind::parse(ANSWERS).expect("a well-formed kind")]
+            );
+        }
+
+        /// The result edge is not the kernel's `answers`, and it does not carry support: that
+        /// is the whole of OQ-49, and it is asserted on the kind rather than argued.
+        #[test]
+        fn the_result_edge_is_not_kernel_answers_and_carries_no_support() {
+            let k = RelKind::parse(ANSWERS).expect("a well-formed kind");
+            assert!(matches!(k, RelKind::Extension(_)));
+            assert!(!k.carries_support());
+            assert!(!decl().redefines_kernel());
+        }
+
+        #[test]
+        fn the_shape_waits_for_a_7() {
+            assert!(decl().payload_shape.is_none());
+        }
+
+        #[test]
+        fn the_field_table_is_appendix_c() {
+            assert_eq!(FIELDS.len(), 7);
+            assert_eq!(field("query:text").map(|f| f.ty), Some(FieldType::Text));
+            assert_eq!(
+                field("query:models").map(|f| f.ty),
+                Some(FieldType::List(&FieldType::Text))
+            );
+            assert_eq!(
+                field("query:schemas").map(|f| f.ty),
+                Some(FieldType::List(&FieldType::Text))
+            );
+            assert!(field("x.query/saved").is_none(), "a type is not a field");
         }
     }
 }

@@ -68,3 +68,9 @@ name = "stages"
 # there and `fixtures/sq/plans/supersession.smy` is the store that gives it something.
 [[test]]
 name = "supersession"
+
+# Saved queries and reruns (TX-P8 step 1; SMYSL-2.5 §3.6, §5.4). Its own target because its
+# assertion is about a store that *changes* between two runs of one query — append data, rerun
+# pinned — and about what the save left untouched, which is every result's salience.
+[[test]]
+name = "saved"

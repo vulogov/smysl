@@ -828,7 +828,7 @@ pub trait Translator {
 | `src/bridge.rs` | bridge selection |
 | `src/witness.rs` | `Witnesses` trait, attestation default |
 | `src/explain.rs` | `--explain` and `--why` text and JSON |
-| `src/saved.rs` | `x.query/v1` encode/decode, rerun, effect split |
+| `src/saved.rs` | `x.query/v1` encode/decode, rerun, effect split (added in TX-P8 step 1: `Recipe`, `bind`, `to_records`, `load`, `rerun`, `SetDiff`; the schema effect half of the split waits for TX-P12) |
 | `src/dossier/{mod,intent,templates}.rs` + `templates/*.sq` | dossier pipeline |
 | `src/nl.rs` | `Translator`, `TranslateContext`, output validation |
 | `src/ports.rs` | `Scope`, `SemanticSource`, `Classifier`, `TimeIndex`. As built: `Scope` (step 2, with `analyzer` and `restrict_lang` added in step 6), `Times` (step 6 — `TimeIndex` by the name the trait took, since it answers *a unit's time* and *a literal's meaning* and indexes nothing) and `Entities` (step 6). Each crosses the same line: this crate owns the question and the graph walk, `smysl-text` owns the fact |
@@ -1335,6 +1335,28 @@ Each step has an exit test. Steps within a phase are ordered.
 **TX-P8 — dossiers, saved queries, thread schemas** (after TX-P7 for classes)
 1. `x.query/v1` save/load, result edges (`x.query/answers`, OQ-49 resolved), reruns with the data effect. *Exit:*
    §5.4 first and last bullets.
+
+   *Done 2026-10-17.* `smysl_core::schemas::query` declares the schema A-11 left open —
+   one type, one relation kind, seven fields — and `crates/smysl-query/src/saved.rs` writes
+   and reads it: `to_records` takes a `Plan` and a `Run` and nothing else can produce a saved
+   query, which is OQ-82 made into a signature; `bind` substitutes every `$parameter` first so
+   the text saved is the text after binding; `load` reads the seven keys back and the result
+   from the `x.query/answers` edges; `rerun` runs the saved text pinned and reports the data
+   effect. `q --save` and `q --rerun <uid>` are the CLI, with the declaration appended to a
+   store with the first saved query it receives, as `x.text/v1` goes with the first batch.
+   **Both exit bullets are asserted on scores and sets, not on labels:** the rerun over two
+   appended claims reports exactly those two, and saving changes the salience of no unit that
+   existed before — the latter asserted bit for bit over every unit, because OQ-49 was a
+   mistake about a label. Two findings, both recorded as open questions. **A saved query ranks
+   for its own terms** (OQ-85): its gist is its text, so `find "connection pool"` over the
+   store it was saved in finds the unit that says `find "connection pool"`; a rerun excludes
+   the unit a save wrote, since the record of a save is not data the query found, and a fresh
+   `find` has it in reach. **The per-partition limit is a recipe input the table omits**
+   (OQ-84): it changes a result as `k` does, so it is hashed, but the payload has no declared
+   key to carry it and a rerun under another limit is reported as not comparable. What the
+   step did not build is named by code: `--current`, the schema effect, is `SMY-E461` until
+   TX-P12's lens engine lowers a query at two revisions, and with it `--current --save`;
+   `SMY-W467` stays withheld with the model-dependent plans that would raise it.
 2. FC-8 tables in `smysl-thread` (after SMYSL-2.1 opens the enumerations and SMYSL-2.3 assigns
    codes); `exposition`/`dialogue` derivation; `dossier` refused by `--derive`. *Exit:* derivation
    tests on chat and book fixtures; old binaries' behaviour per F-12 documented.
@@ -1437,3 +1459,5 @@ New:
 | OQ-52 | Dossier slot ranking: product of quantised terms (draft 3), lexicographic, or RRF over per-criterion ranks? GE-T10 should compare at least two. |
 | OQ-53 | Lens ops address top-level payload keys. Do nested keys (`payload_strings`' dotted paths) need lenses, and if so, is the dotted path the key? |
 | OQ-54 | **Resolved by SMYSL-2.1 H-20** (TX-P0): `find` and `pack` are retagged `Mixed`. |
+| OQ-84 | **The per-partition limit is a recipe input §3.6's table omits.** Raised by TX-P8 step 1, which hashed the eight listed inputs and found a ninth that changes a result as surely as `k` does: how many hits a source keeps per partition before fusion (`PlanOptions::limit`, `q --per-partition`). It is hashed into `query:recipe` now, so two saves under two limits have two recipes and a rerun under another limit is labelled not comparable — but the payload has no declared key to carry the value, and a key the schema does not declare is a key a reader cannot trust. *Options:* add `query:per-partition` to FC-5 in a SMYSL-2.3 revision (the honest one; one more field, same rule N); or fold it into `parameters` under a reserved name (needs no schema change and misdescribes what it is). *Recommended:* the first, when SMYSL-2.3 next opens. |
+| OQ-85 | **A saved query ranks for its own terms.** Found by §5.4's first test: a saved unit's gist is its text, so `find "connection pool"` over the store it was saved in finds the unit that says `find "connection pool"`. A rerun excludes the unit a save wrote — the record of a save is not data the query found — but a fresh `find` has every saved query in reach. *Options:* exclude `x.query/saved` units from lexical sources unless the query names the schema (`where schema = x.query/saved`); exclude them from `from store:` resolution altogether; or leave them in, on the ground that a store is a log and a saved query is a record in it. *Recommended:* the first, as the default a reader expects — a question about a corpus is not a question about the questions asked of it — with the schema predicate as the way to ask the other one. Not done in step 1, which is about saving and rerunning; it is a change to phase 5. |

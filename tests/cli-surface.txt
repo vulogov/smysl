@@ -705,6 +705,9 @@ q          --per-partition
 q          --json
 q          --view
 q          --quiet
+q          --save
+q          --rerun
 q          --verbose
+q          --current
 q          --seed-check
 q          --help

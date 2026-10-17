@@ -68,14 +68,19 @@ pub fn explain(plan: &Plan) -> String {
                 items,
                 stores,
                 candidates,
+                excluded,
             } => {
                 let asked = if items.is_empty() {
                     "everything (no `from`)".to_string()
                 } else {
                     items.join(", ")
                 };
+                let left_out = match excluded {
+                    0 => String::new(),
+                    n => format!(" ({n} excluded)"),
+                };
                 out.push_str(&format!(
-                    "  3 scope: {asked} via {scope} -> {} store(s) {}, {candidates} unit(s)\n",
+                    "  3 scope: {asked} via {scope} -> {} store(s) {}, {candidates} unit(s){left_out}\n",
                     stores.len(),
                     stores.join(", ")
                 ));

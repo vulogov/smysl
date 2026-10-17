@@ -303,3 +303,99 @@ fn library_binds_the_catalogue_and_its_scope_items_resolve() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `--save` writes the query after it ran; `--rerun` runs it again and reports the data effect
+/// (SMYSL-2.5 §3.6; TX-P8 step 1). The store grows between the two by one claim the query
+/// finds, merged in through `merge` because that is the one pure way the CLI has of adding a
+/// unit, and the effect reported is exactly that claim.
+#[test]
+fn save_then_rerun_reports_the_data_effect() {
+    let dir = scratch("save-rerun");
+    let store = dir.join("save.cbor").to_string_lossy().to_string();
+    let converted = run(&["merge", &f1(), "-o", &store]);
+    assert!(converted.status.success(), "{}", stderr(&converted));
+
+    let q = "from store:save\nfind \"connection pool\"";
+    let saved = run(&["q", "--save", q, &store]);
+    assert!(saved.status.success(), "{}", stderr(&saved));
+    let err = stderr(&saved);
+    let uid = err
+        .lines()
+        .find_map(|l| l.strip_prefix("smysl q: saved "))
+        .unwrap_or_else(|| panic!("no `saved <uid>` line in:\n{err}"))
+        .trim()
+        .to_string();
+    assert!(uid.starts_with("b3:"), "{uid}");
+
+    // Nothing changed: no effect.
+    let same = run(&["q", "--rerun", &uid, &store]);
+    assert!(same.status.success(), "{}", stderr(&same));
+    assert!(
+        stderr(&same).contains("data effect: 0 added, 0 removed"),
+        "{}",
+        stderr(&same)
+    );
+    assert_eq!(
+        stdout(&same),
+        stdout(&saved),
+        "a pinned rerun over unchanged data is the run"
+    );
+
+    // One claim the query finds, merged in after the save.
+    let extra = dir.join("extra.smy");
+    std::fs::write(
+        &extra,
+        "@claim c/extra { status: speculative }\n~ The connection pool was starved by a retry storm.\n",
+    )
+    .expect("written");
+    // Under the same stem: the saved text says `from store:save`, and a store is named by
+    // the file's stem, so the grown copy keeps the name in a directory of its own.
+    std::fs::create_dir_all(dir.join("grown")).expect("a directory");
+    let grown = dir.join("grown/save.cbor").to_string_lossy().to_string();
+    let merged = run(&["merge", &store, &extra.to_string_lossy(), "-o", &grown]);
+    assert!(merged.status.success(), "{}", stderr(&merged));
+
+    let again = run(&["q", "--rerun", &uid, &grown]);
+    assert!(again.status.success(), "{}", stderr(&again));
+    let err = stderr(&again);
+    assert!(err.contains("data effect: 1 added, 0 removed"), "{err}");
+    assert!(err.lines().any(|l| l.starts_with("  + b3:")), "{err}");
+
+    // `--explain` on a rerun plans the saved text and runs nothing.
+    let explained = run(&["q", "--rerun", &uid, "--explain", &grown]);
+    assert!(explained.status.success(), "{}", stderr(&explained));
+    assert!(stdout(&explained).starts_with("plan sq/1\n"));
+
+    // The schema effect waits for the lens engine, and a rerun saved again would need it.
+    let current = run(&["q", "--rerun", &uid, "--current", &grown]);
+    assert!(!current.status.success());
+    assert!(
+        stderr(&current).contains("SMY-E461"),
+        "{}",
+        stderr(&current)
+    );
+    let resave = run(&["q", "--rerun", &uid, "--save", &grown]);
+    assert!(!resave.status.success());
+    assert!(
+        stderr(&resave).contains("supersedes"),
+        "{}",
+        stderr(&resave)
+    );
+
+    // A uid that is not a saved query is named for what it is.
+    let one = run(&["q", "from store:save\nfind \"canary\"\nlimit 1", &store]);
+    assert!(one.status.success(), "{}", stderr(&one));
+    let claim_uid = stdout(&one)
+        .split_whitespace()
+        .find(|w| w.starts_with("b3:"))
+        .expect("a hit")
+        .to_string();
+    let wrong = run(&["q", "--rerun", &claim_uid, &store]);
+    assert!(!wrong.status.success());
+    assert!(
+        stderr(&wrong).contains("x.query/saved"),
+        "{}",
+        stderr(&wrong)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

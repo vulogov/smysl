@@ -99,6 +99,15 @@ pub struct PlanOptions {
     /// because that is `find --limit`'s default and TX-P6 step 3's exit is that the two
     /// rankings agree.
     pub limit: usize,
+    /// Units left out of scope before anything scores (phase 3).
+    ///
+    /// A rerun's reason for existing (TX-P8 step 1): a saved query's gist is its own text, so
+    /// a lexical source over the store it was saved in ranks the saved unit for its own terms
+    /// — at rank 1, usually, since nothing matches a query better than the query — and
+    /// dropping it *after* fusion leaves every other hit one rank lower than the save found
+    /// it. Taken out of the candidates instead, so the rerun's scores are the save's. Empty
+    /// for every other caller; recorded in the plan's scope step when it is not.
+    pub exclude: BTreeSet<Uid>,
 }
 
 impl Default for PlanOptions {
@@ -108,6 +117,7 @@ impl Default for PlanOptions {
             all_versions: false,
             params: BTreeMap::new(),
             limit: 10,
+            exclude: BTreeSet::new(),
         }
     }
 }
@@ -216,12 +226,14 @@ pub enum PlanStep {
         relations: Vec<String>,
         fields_checked: bool,
     },
-    /// Phase 3.
+    /// Phase 3. `excluded` counts the units [`PlanOptions::exclude`] took out, and is zero
+    /// for every plan that is not a rerun.
     Scope {
         scope: String,
         items: Vec<String>,
         stores: Vec<String>,
         candidates: usize,
+        excluded: usize,
     },
     /// Phase 4. Per partition: its name, how many units it holds, and the analyzer chain it
     /// is searched under (§3.4, recorded — `None` for a scope with no catalog).
@@ -590,7 +602,7 @@ fn lower_pipeline(
 
     // --- phase 3: scope ----------------------------------------------------------------------
     let mut items: Vec<String> = Vec::new();
-    let candidates = match &pipeline.scope {
+    let mut candidates = match &pipeline.scope {
         Some(scope) => {
             let mut found = Candidates::new();
             for item in &scope.items {
@@ -607,11 +619,16 @@ fn lower_pipeline(
         // absent and being re-resolved somewhere else later.
         None => env.scope.everything(),
     };
+    let before = candidates.uids.len();
+    if !opts.exclude.is_empty() {
+        candidates.uids.retain(|u| !opts.exclude.contains(u));
+    }
     steps.push(PlanStep::Scope {
         scope: env.scope.name().to_string(),
         items,
         stores: candidates.stores.clone(),
         candidates: candidates.uids.len(),
+        excluded: before - candidates.uids.len(),
     });
 
     // --- phase 4: partitions -----------------------------------------------------------------

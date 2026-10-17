@@ -825,6 +825,33 @@ fn cli() -> Command {
                         .help("The view id `pack … as view` writes under [default: v/query]"),
                 )
                 .arg(
+                    Arg::new("save")
+                        .long("save")
+                        .help(
+                            "After the run, append the query as an x.query/saved unit with an \
+                             x.query/answers edge to each result",
+                        )
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("rerun")
+                        .long("rerun")
+                        .value_name("UID")
+                        .help(
+                            "Run a saved query again, pinned to the revisions it recorded, and \
+                             report the data effect",
+                        ),
+                )
+                .arg(
+                    Arg::new("current")
+                        .long("current")
+                        .help(
+                            "With --rerun: also run under current revisions and report the \
+                             schema effect (needs the lens engine)",
+                        )
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
                     Arg::new("store")
                         .value_name("PATH")
                         .help("Store, or library root with --library"),
@@ -5098,25 +5125,37 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     use smysl::query::ast::Shaping;
     use smysl::query::{Env, IdfScope, PlanOptions};
 
-    let text = match (m.get_one::<String>("query"), m.get_one::<String>("file")) {
-        (Some(_), Some(_)) => {
+    // `--rerun <uid>` takes no query: the text is the saved unit's. One positional then means
+    // the store, which is what a reader typing `smysl q --rerun b3:… store.smy` wrote.
+    let rerun = m.get_one::<String>("rerun").cloned();
+    let (text, positional_store) = match (
+        &rerun,
+        m.get_one::<String>("query"),
+        m.get_one::<String>("file"),
+    ) {
+        (Some(_), _, Some(_)) => {
+            eprintln!("smysl q: --rerun runs the saved query's own text; --file is not taken");
+            return ExitCode::Usage;
+        }
+        (Some(_), q, None) => (None, q.cloned()),
+        (None, Some(_), Some(_)) => {
             eprintln!("smysl q: give the query once, inline or with --file");
             return ExitCode::Usage;
         }
-        (Some(t), None) => t.clone(),
-        (None, Some(f)) => match std::fs::read_to_string(f) {
-            Ok(t) => t,
+        (None, Some(t), None) => (Some(t.clone()), None),
+        (None, None, Some(f)) => match std::fs::read_to_string(f) {
+            Ok(t) => (Some(t), None),
             Err(e) => {
                 eprintln!("smysl q: {f}: {e}");
                 return ExitCode::Failure;
             }
         },
-        (None, None) => {
+        (None, None, None) => {
             eprintln!("smysl q: no query given");
             return ExitCode::Usage;
         }
     };
-    let Some(path) = store_arg(m, global) else {
+    let Some(path) = store_arg(m, global).or(positional_store) else {
         eprintln!("smysl q: no store given");
         return ExitCode::Usage;
     };
@@ -5140,30 +5179,61 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     }
 
-    let parsed = match smysl::query::parse(&text) {
-        Ok(p) => p,
-        Err(d) => {
-            eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
-            return ExitCode::Usage;
-        }
-    };
-    for w in &parsed.warnings {
-        eprintln!("smysl q: {}: {}", w.code.as_str(), w.message);
-    }
-
-    // `pack … as view` is a query that writes, and the pure crate refuses it (`SMY-E461`,
-    // "writing is the CLI's"). This is the CLI: the stage is planned without its write, and
-    // the write happens here, after the answer, as a `View` whose roots are what was packed.
-    let mut query = parsed.query.clone();
-    let mut as_view = false;
-    for stage in &mut query.shaping {
-        if let Shaping::Pack { as_view: wants, .. } = stage {
-            if *wants {
-                as_view = true;
-                *wants = false;
+    let job = match (rerun, text) {
+        (Some(uid), _) => {
+            if m.get_flag("save") {
+                // `--current --save` writes a new saved query that supersedes the old one
+                // (SMYSL-2.5 §3.6), and `--current` is TX-P12's; a pinned rerun saved again
+                // would be the same query with the same recipe over the same text, which is
+                // what the old unit already is.
+                eprintln!(
+                    "smysl q: --rerun --save supersedes a saved query under current revisions, \
+                     which needs --current and the lens engine (TX-P12)"
+                );
+                return ExitCode::Usage;
+            }
+            Job::Rerun {
+                uid,
+                current: m.get_flag("current"),
             }
         }
-    }
+        (None, Some(text)) => {
+            let parsed = match smysl::query::parse(&text) {
+                Ok(p) => p,
+                Err(d) => {
+                    eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+                    return ExitCode::Usage;
+                }
+            };
+            for w in &parsed.warnings {
+                eprintln!("smysl q: {}: {}", w.code.as_str(), w.message);
+            }
+            if m.get_flag("current") {
+                eprintln!("smysl q: --current is a rerun's flag; give --rerun <uid>");
+                return ExitCode::Usage;
+            }
+
+            // `pack … as view` is a query that writes, and the pure crate refuses it
+            // (`SMY-E461`, "writing is the CLI's"). This is the CLI: the stage is planned
+            // without its write, and the write happens here, after the answer, as a `View`
+            // whose roots are what was packed.
+            let mut query = parsed.query.clone();
+            let mut as_view = false;
+            for stage in &mut query.shaping {
+                if let Shaping::Pack { as_view: wants, .. } = stage {
+                    if *wants {
+                        as_view = true;
+                        *wants = false;
+                    }
+                }
+            }
+            Job::Run {
+                query: Box::new(query),
+                as_view,
+            }
+        }
+        (None, None) => unreachable!("a run has text and a rerun has a uid"),
+    };
 
     // The scope's name is the file's stem, so a query written `from store:F1-incident` over
     // `F1-incident.smy` resolves, and the plan goldens in `fixtures/sq/plans/` — produced
@@ -5176,7 +5246,7 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if m.get_flag("library") {
         #[cfg(not(feature = "text"))]
         {
-            let _ = (&query, &opts, &name, as_view);
+            let _ = (&job, &opts, &name);
             eprintln!(
                 "smysl q: {path}: --library needs the library layer, and this build has no \
                  `text` feature"
@@ -5196,12 +5266,12 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             let env = Env::new(library.store(), &scope)
                 .with_times(&scope)
                 .with_entities(&scope);
-            let (code, view) = q_run(&query, &env, &opts, m, global, as_view);
-            if let Some(v) = view {
-                // Through the library, so its index is maintained; the record then lives in
+            let (code, records) = q_run(&job, &env, &opts, m, global);
+            if !records.is_empty() {
+                // Through the library, so its index is maintained; the records then live in
                 // the catalogue shard like any other.
                 let mut library = library;
-                if let Err(e) = library.append_records(&[Record::View(v)]) {
+                if let Err(e) = library.append_records(&records) {
                     eprintln!("smysl q: {path}: {e}");
                     return ExitCode::Failure;
                 }
@@ -5218,9 +5288,9 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         };
         let scope = smysl::query::StoreScope::new(name, &store);
         let env = Env::new(&store, &scope);
-        let (code, view) = q_run(&query, &env, &opts, m, global, as_view);
-        if let Some(v) = view {
-            if let Err(e) = persist(&path, &[Record::View(v)], &store, &labels) {
+        let (code, records) = q_run(&job, &env, &opts, m, global);
+        if !records.is_empty() {
+            if let Err(e) = persist(&path, &records, &store, &labels) {
                 eprintln!("smysl q: {e}");
                 return ExitCode::Failure;
             }
@@ -5229,84 +5299,233 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     }
 }
 
-/// Plan, run, and write one query over a bound environment. The `View` to append, if any, is
-/// returned rather than written, because which file it goes to is the caller's.
+/// What `q` was asked to do, once the arguments are settled.
+enum Job {
+    /// Boxed because a `Query` is a tree and a uid is a string, and an enum the size of its
+    /// largest variant would carry the tree's bytes for every rerun.
+    Run {
+        query: Box<smysl::query::Query>,
+        as_view: bool,
+    },
+    Rerun {
+        uid: String,
+        current: bool,
+    },
+}
+
+/// Whether the store already declares `x.query/v1`, so a save declares it once and not with
+/// every saved query (A-11; the same rule `ingest` applies to `x.text/v1`).
+fn declares_query(store: &Store) -> bool {
+    store
+        .iter()
+        .any(|r| matches!(r, Record::SchemaDecl(d) if d.id.as_str() == smysl::schemas::query::ID))
+}
+
+/// Plan, run, and write one query over a bound environment. The records to append — a `View`
+/// for `as view`, a saved query and its result edges for `--save` — are returned rather than
+/// written, because which file they go to is the caller's.
 fn q_run(
-    query: &smysl::query::Query,
+    job: &Job,
     env: &smysl::query::Env<'_>,
     opts: &smysl::query::PlanOptions,
     m: &ArgMatches,
     global: &ArgMatches,
-    as_view: bool,
-) -> (ExitCode, Option<View>) {
-    use smysl::query::{explain, run, why, Answer, Purity};
+) -> (ExitCode, Vec<Record>) {
+    use smysl::query::{explain, run, Purity};
 
-    let plan = match smysl::query::plan(query, env, opts) {
-        Ok(p) => p,
-        Err(diags) => {
-            for d in diags {
-                eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
-            }
-            return (ExitCode::Usage, None);
-        }
-    };
-    if m.get_flag("explain") {
-        print!("{}", explain(&plan));
-        return (ExitCode::Success, None);
-    }
-
-    let seed_check = global.get_flag("seed-check");
-    if seed_check {
-        if let Purity::ModelDependent(why) = &plan.purity {
-            // Unreachable while the planner refuses every model-dependent stage with
-            // `SMY-E461` before purity is asked (see `reproducible`). `SMY-E416` is the code
-            // allocated for this refusal and is registered when TX-P10 makes the arm reachable.
-            eprintln!(
-                "smysl q: --seed-check asserts rule D, and this plan is model-dependent ({})",
-                why.join(", ")
-            );
-            return (ExitCode::Usage, None);
-        }
-    }
-
-    let first = match run(&plan, env, opts) {
-        Ok(r) => r,
-        Err(diags) => {
-            for d in diags {
-                eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
-            }
-            return (ExitCode::Failure, None);
-        }
-    };
-    if seed_check {
-        // §3.2: a pure plan "executes twice — the second time with freshly built indexes and
-        // scratch buffers — and compares result hashes; a mismatch is an internal error". The
-        // executor builds its tables inside the run, so the second run is fresh by
-        // construction, and the comparison is of the answers themselves rather than of a hash
-        // of them — a hash would only add a way for two equal answers to look different.
-        match run(&plan, env, opts) {
-            Ok(second) if second == first => {}
-            Ok(_) => {
-                eprintln!(
-                    "smysl q: --seed-check ran the plan twice and the answers differ; this is \
-                     an internal error, not a property of the query"
-                );
-                return (ExitCode::Failure, None);
-            }
-            Err(diags) => {
-                for d in diags {
-                    eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+    let mut records: Vec<Record> = Vec::new();
+    let (plan, first, as_view, effect) = match job {
+        Job::Rerun { uid, current } => {
+            let uid = match UidPrefix::parse(uid).and_then(|p| env.store.resolve_prefix(&p)) {
+                Ok(u) => u,
+                Err(e) => {
+                    eprintln!("smysl q: --rerun {uid}: {e}");
+                    return (ExitCode::Usage, records);
                 }
-                return (ExitCode::Failure, None);
+            };
+            let saved = match smysl::query::load(env.store, &uid) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("smysl q: --rerun {uid}: {e}");
+                    return (ExitCode::Usage, records);
+                }
+            };
+            if m.get_flag("explain") {
+                // The saved text, planned today: what a rerun would do, without doing it.
+                let parsed = match smysl::query::parse(&saved.text) {
+                    Ok(p) => p,
+                    Err(d) => {
+                        eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+                        return (ExitCode::Failure, records);
+                    }
+                };
+                return match smysl::query::plan(&parsed.query, env, opts) {
+                    Ok(plan) => {
+                        print!("{}", explain(&plan));
+                        (ExitCode::Success, records)
+                    }
+                    Err(diags) => {
+                        for d in diags {
+                            eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+                        }
+                        (ExitCode::Usage, records)
+                    }
+                };
             }
+            let again = match smysl::query::rerun(&saved, env, opts, *current) {
+                Ok(r) => r,
+                Err(diags) => {
+                    for d in diags {
+                        eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+                    }
+                    return (ExitCode::Usage, records);
+                }
+            };
+            let effect = Some((again.data_effect, again.recipe_matches));
+            (again.plan, again.run, false, effect)
         }
-    }
+        Job::Run { query, as_view } => {
+            // Bound before planning, so the text a save records is the text after binding
+            // (SMYSL-2.5 §3.6) and the plan is of exactly that text. An unbound parameter
+            // is `SMY-E460` here as it would be at execution.
+            let bound = match smysl::query::bind(query, &opts.params) {
+                Ok(q) => q,
+                Err(d) => {
+                    eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+                    return (ExitCode::Usage, records);
+                }
+            };
+            let plan = match smysl::query::plan(&bound, env, opts) {
+                Ok(p) => p,
+                Err(diags) => {
+                    for d in diags {
+                        eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+                    }
+                    return (ExitCode::Usage, records);
+                }
+            };
+            if m.get_flag("explain") {
+                print!("{}", explain(&plan));
+                return (ExitCode::Success, records);
+            }
+
+            let seed_check = global.get_flag("seed-check");
+            if seed_check {
+                if let Purity::ModelDependent(why) = &plan.purity {
+                    // Unreachable while the planner refuses every model-dependent stage with
+                    // `SMY-E461` before purity is asked (see `reproducible`). `SMY-E416` is
+                    // the code allocated for this refusal and is registered when TX-P10 makes
+                    // the arm reachable.
+                    eprintln!(
+                        "smysl q: --seed-check asserts rule D, and this plan is model-dependent \
+                         ({})",
+                        why.join(", ")
+                    );
+                    return (ExitCode::Usage, records);
+                }
+            }
+
+            let first = match run(&plan, env, opts) {
+                Ok(r) => r,
+                Err(diags) => {
+                    for d in diags {
+                        eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+                    }
+                    return (ExitCode::Failure, records);
+                }
+            };
+            if seed_check {
+                // §3.2: a pure plan "executes twice — the second time with freshly built
+                // indexes and scratch buffers — and compares result hashes; a mismatch is an
+                // internal error". The executor builds its tables inside the run, so the
+                // second run is fresh by construction, and the comparison is of the answers
+                // themselves rather than of a hash of them — a hash would only add a way for
+                // two equal answers to look different.
+                match run(&plan, env, opts) {
+                    Ok(second) if second == first => {}
+                    Ok(_) => {
+                        eprintln!(
+                            "smysl q: --seed-check ran the plan twice and the answers differ; \
+                             this is an internal error, not a property of the query"
+                        );
+                        return (ExitCode::Failure, records);
+                    }
+                    Err(diags) => {
+                        for d in diags {
+                            eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+                        }
+                        return (ExitCode::Failure, records);
+                    }
+                }
+            }
+
+            if m.get_flag("save") {
+                // After the run, never before (OQ-82): three of the seven keys and every
+                // result edge are facts about a run. The declaration goes with the first
+                // saved query a store receives, as `x.text/v1` goes with the first batch.
+                match smysl::query::to_records(&bound, &plan, &first, opts) {
+                    Ok((unit, edges)) => {
+                        let uid = smysl::canonical_uid(&unit);
+                        if !declares_query(env.store) {
+                            records.push(Record::SchemaDecl(smysl::schemas::query::decl()));
+                        }
+                        records.push(Record::Unit(unit));
+                        records.extend(edges.into_iter().map(Record::Relation));
+                        eprintln!("smysl q: saved {uid}");
+                    }
+                    Err(d) => {
+                        eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+                        return (ExitCode::Failure, records);
+                    }
+                }
+            }
+            (plan, first, *as_view, None)
+        }
+    };
+    let _ = &plan;
 
     for w in &first.warnings {
         eprintln!("smysl q: {}: {}", w.code.as_str(), w.message);
     }
+    q_print(&first, env.store, m, global);
 
-    let store = env.store;
+    if let Some((diff, recipe_matches)) = effect {
+        // On stderr beside the warnings: the answer is the rerun's result, and the effect is
+        // a statement *about* it that a caller piping the result should not have to strip.
+        eprintln!(
+            "smysl q: data effect: {} added, {} removed{}",
+            diff.added.len(),
+            diff.removed.len(),
+            if recipe_matches {
+                ""
+            } else {
+                " (recipe differs from the saved one; the effect is not comparable)"
+            }
+        );
+        for u in &diff.added {
+            eprintln!("  + {u}");
+        }
+        for u in &diff.removed {
+            eprintln!("  - {u}");
+        }
+    }
+
+    if as_view {
+        let id = m
+            .get_one::<String>("view")
+            .and_then(|s| ViewId::new(s).ok())
+            .unwrap_or_else(|| ViewId::new("v/query").expect("literal"));
+        records.push(Record::View(
+            View::new(id, "query").with_roots(first.answer.uids()),
+        ));
+    }
+    (ExitCode::Success, records)
+}
+
+/// Write an answer the way `q` writes one: a table, or `--json`'s one object.
+fn q_print(first: &smysl::query::Run, store: &Store, m: &ArgMatches, global: &ArgMatches) {
+    use smysl::query::{why, Answer};
+
     let gist_of = |uid: &Uid| store.get(uid).map(|u| u.core.gist.as_str()).unwrap_or("");
     if global.get_flag("json") {
         let warnings: Vec<String> = first
@@ -5357,45 +5576,34 @@ fn q_run(
             "{{\"answer\":{answer},\"warnings\":[{}]}}",
             warnings.join(",")
         );
-    } else {
-        match &first.answer {
-            Answer::Count(n) => println!("{n}"),
-            Answer::Ranked(fused) => {
-                for f in fused {
-                    println!("{:.6}  {}  {}", f.score, f.uid, gist_of(&f.uid));
-                }
-                if m.get_flag("why") {
-                    // On stderr, as `find --why` does, so a caller piping stdout keeps the
-                    // ranking and a reader at the terminal sees what put each hit there.
-                    eprint!("{}", why(fused));
-                }
+        return;
+    }
+    match &first.answer {
+        Answer::Count(n) => println!("{n}"),
+        Answer::Ranked(fused) => {
+            for f in fused {
+                println!("{:.6}  {}  {}", f.score, f.uid, gist_of(&f.uid));
             }
-            Answer::Groups(groups) => {
-                for (value, uids) in groups {
-                    println!("{value}:");
-                    for uid in uids {
-                        println!("  {uid}  {}", gist_of(uid));
-                    }
-                }
+            if m.get_flag("why") {
+                // On stderr, as `find --why` does, so a caller piping stdout keeps the
+                // ranking and a reader at the terminal sees what put each hit there.
+                eprint!("{}", why(fused));
             }
-            other => {
-                for uid in other.uids() {
-                    println!("{uid}  {}", gist_of(&uid));
+        }
+        Answer::Groups(groups) => {
+            for (value, uids) in groups {
+                println!("{value}:");
+                for uid in uids {
+                    println!("  {uid}  {}", gist_of(uid));
                 }
             }
         }
+        other => {
+            for uid in other.uids() {
+                println!("{uid}  {}", gist_of(&uid));
+            }
+        }
     }
-
-    let view = if as_view {
-        let id = m
-            .get_one::<String>("view")
-            .and_then(|s| ViewId::new(s).ok())
-            .unwrap_or_else(|| ViewId::new("v/query").expect("literal"));
-        Some(View::new(id, "query").with_roots(first.answer.uids()))
-    } else {
-        None
-    };
-    (ExitCode::Success, view)
 }
 
 /// `smysl thread` - derive, list, or show a thread (§19, §23.1).
