@@ -390,6 +390,11 @@ mod tests {
         // out loud rather than failing on.
         // 98 with `SMY-W464` (TX-P6 step 5): a supersession fork in scope, where the pass
         // declines to choose a head and keeps every successor.
+        // 99 with `SMY-W415` (TX-P6 step 6): a unit excluded from a time-scoped result for
+        // having no time on the axis asked. Draft 3 allocated it and nothing could raise it
+        // until a query could name a time, and it is a count beside the answer rather than a
+        // refusal because an undated unit did not fail the test — A-2.4 rule 5 makes it
+        // neither early nor late, so it was never in the comparison.
         // 97 with `SMY-W463` and `SMY-E512` (TX-P6 step 4). `W463` is SMYSL-2.5's, withheld
         // until something walked a graph with a depth: a traversal that stopped at the depth
         // asked while the graph went on. `E512` is new: an operator that does not apply to the type of
@@ -402,7 +407,7 @@ mod tests {
         // were allocated by SMYSL-2.5 and withheld until a planner could raise them. `E421`
         // and `E422` are still absent for that same reason: field resolution needs declared
         // field types, which arrive with FC-9 in TX-P12.
-        assert_eq!(Code::ALL.len(), 98);
+        assert_eq!(Code::ALL.len(), 99);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

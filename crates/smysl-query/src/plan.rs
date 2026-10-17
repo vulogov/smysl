@@ -33,26 +33,52 @@ use smysl_graph::{EdgeKind, EdgeSet, Store};
 
 use crate::ast::{
     Atom, ClosureItem, Count, Dir, EdgeSpec, Engine, Expr, LangSel, NamedEdge, Ordering, Output,
-    OutputStage, Pipeline, Query, SetOp, Shaping, SortTarget, Source as AstSource, Using,
+    OutputStage, Pipeline, Query, SetOp, Shaping, SortTarget, Source as AstSource, TimeAxis,
+    TimeOp, TimeValue, Using,
 };
-use crate::ports::{item_text, Candidates, IdfScope, Partition, Scope};
+use crate::ports::{
+    item_text, Axis, Bounds, Candidates, Entities, IdfScope, Partition, Scope, Times,
+};
 use crate::pred::Field;
 
 /// What the planner reads the world through (SMYSL-2.5 §4.2).
 ///
 /// §4.2 sketches six fields. Three of them name types this build does not have — `SchemaSet`
-/// (TX-P12 step 1), `SemanticSource` (TX-P10) and `Witnesses` (TX-P8) — and `TimeIndex`
-/// belongs to the time stages of step 4. They arrive with their phases; the struct is
-/// `#[non_exhaustive]` so each is an addition rather than a break.
+/// (TX-P12 step 1), `SemanticSource` (TX-P10) and `Witnesses` (TX-P8). `TimeIndex` arrived in
+/// TX-P6 step 6 as [`Times`], with [`Entities`] beside it. They arrive with their phases; the
+/// struct is `#[non_exhaustive]` so each is an addition rather than a break.
 #[non_exhaustive]
 pub struct Env<'a> {
     pub store: &'a Store,
     pub scope: &'a dyn Scope,
+    /// §4.2's `TimeIndex`, by the name the trait took: effective time on both axes, and the
+    /// EDTF parser a query's literal needs. Absent in a build with no library layer, and the
+    /// time stages are then refused by name.
+    pub times: Option<&'a dyn Times>,
+    /// Entity resolution for `about entity(…)`, through aliases and same-as.
+    pub entities: Option<&'a dyn Entities>,
 }
 
 impl<'a> Env<'a> {
     pub fn new(store: &'a Store, scope: &'a dyn Scope) -> Env<'a> {
-        Env { store, scope }
+        Env {
+            store,
+            scope,
+            times: None,
+            entities: None,
+        }
+    }
+
+    /// Bind effective time, which lowers the `said` and `observed` stages.
+    pub fn with_times(mut self, times: &'a dyn Times) -> Env<'a> {
+        self.times = Some(times);
+        self
+    }
+
+    /// Bind entity resolution, which lowers `about entity(…)`.
+    pub fn with_entities(mut self, entities: &'a dyn Entities) -> Env<'a> {
+        self.entities = Some(entities);
+        self
     }
 }
 
@@ -101,13 +127,19 @@ pub enum Purity {
 
 /// A lowered source (SMYSL-2.5 §3.2 phase 5).
 ///
-/// One variant, because one source lowers in a pure build with no library: `~sem` needs a
-/// model (TX-P10), `~hybrid` needs the routing decision that chooses between them, and the
-/// other six sources are the library layer's or a later phase's. Each is refused by name.
+/// Two variants. `~sem` needs a model (TX-P10), `~hybrid` needs the routing decision that
+/// chooses between them, and the rest are later phases' — each refused by name. `about
+/// entity(…)` joined in TX-P6 step 6, with the [`Entities`] port that resolves a name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Source {
     Lexical(Lexical),
+    /// `about entity("…")`: the units mentioning the entity a name resolves to.
+    ///
+    /// A source that **selects rather than ranks**. There is no score to give — a unit either
+    /// mentions the entity or it does not — and inventing one, say by counting mentions, would
+    /// put a ranking in front of a reader that nothing measured.
+    Entity(EntitySource),
 }
 
 /// `find "…" ~lex` (SMYSL-2.5 §3.3, §3.4).
@@ -123,6 +155,40 @@ pub struct Lexical {
     /// query has to give back what was written. Which they mean is settled in SMYSL-2.9 §9
     /// (OQ-83): an absent engine is lexical.
     pub explicit: bool,
+    /// `lang:<code>`, lowered in TX-P6 step 6 (SMYSL-2.5 §3.4).
+    ///
+    /// The *code*, not the units it selects. A plan is a function of the query and of the
+    /// catalog's shape, never of one store's uid sets, so the restriction is re-asked of
+    /// [`Scope::restrict_lang`] when the source runs. `lang:any` never reaches here: it asks
+    /// for a bridge per pair of partitions (§3.5), which is TX-P10's.
+    pub lang: Option<String>,
+    pub span: Span,
+}
+
+/// `about entity("…")` (SMYSL-2.5 §3.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct EntitySource {
+    /// The name as written, or the parameter standing in for it.
+    pub name: Atom,
+    pub span: Span,
+}
+
+/// One time stage, lowered (SMYSL-2.5 §3.3, phase 6).
+///
+/// The *range* is resolved here and the units are not, which is the opposite way round from a
+/// filter. An EDTF literal is a property of the query — `said during 1769` means the same
+/// interval over every store — so parsing it at planning time is what makes `SMY-E410` a
+/// planning error, and a plan that carried the text instead would hand the same refusal to
+/// every run of a saved query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TimePlan {
+    pub axis: Axis,
+    pub op: TimeOp,
+    pub range: Bounds,
+    /// How it was written, for `--explain`.
+    pub label: String,
     pub span: Span,
 }
 
@@ -157,13 +223,18 @@ pub enum PlanStep {
         stores: Vec<String>,
         candidates: usize,
     },
-    /// Phase 4.
+    /// Phase 4. Per partition: its name, how many units it holds, and the analyzer chain it
+    /// is searched under (§3.4, recorded — `None` for a scope with no catalog).
     Partition {
-        partitions: Vec<(String, usize)>,
+        partitions: Vec<(String, usize, Option<String>)>,
         idf_scope: IdfScope,
     },
     /// Phase 6.
     Filter { stages: usize },
+    /// Phase 6, the time half. Separate from [`PlanStep::Filter`] because the two fail
+    /// differently: a filter a unit does not satisfy is an answer, and a unit with no time on
+    /// the axis asked is an exclusion that gets counted (`SMY-W415`).
+    Time { stages: Vec<String> },
     /// Phase 7.
     Expand {
         traversals: Vec<String>,
@@ -186,6 +257,10 @@ pub enum PlanStep {
     /// Phase 5.
     Source {
         engine: &'static str,
+        /// `lang:<code>`, when the source named one (§3.4). Its own field rather than part of
+        /// `engine` because it is not an engine: `find "x" lang:ru` and `find "x" ~lex` use the
+        /// same scorer over different units.
+        lang: Option<String>,
         /// The text as written — a quoted string or a `$name` — because a plan prints what
         /// the query said and not what some binding made of it.
         text: String,
@@ -259,6 +334,8 @@ pub struct PipelinePlan {
     /// Phase 6, in written order. Conjunctive: a pipeline's `where` stages all have to hold,
     /// which is what writing two of them means (SMYSL-2.9 §4.2).
     pub filters: Vec<crate::pred::Lowered>,
+    /// Phase 6's time stages, in written order, also conjunctive.
+    pub times: Vec<TimePlan>,
     /// Phase 7, in written order.
     pub traversals: Vec<TraversalPlan>,
     pub closures: Vec<ClosurePlan>,
@@ -542,35 +619,57 @@ fn lower_pipeline(
     steps.push(PlanStep::Partition {
         partitions: partitions
             .iter()
-            .map(|p| (crate::explain::partition_name(&p.key), p.uids.len()))
+            .map(|p| {
+                (
+                    crate::explain::partition_name(&p.key),
+                    p.uids.len(),
+                    p.chain.clone(),
+                )
+            })
             .collect(),
         idf_scope: opts.idf_scope,
     });
 
     // --- phase 5: sources --------------------------------------------------------------------
     let source = match &pipeline.source {
-        Some(stage) => lower_source(stage, diags),
+        Some(stage) => lower_source(stage, env, &candidates.uids, diags),
         None => None,
     };
-    if let Some(Source::Lexical(lex)) = &source {
-        steps.push(PlanStep::Source {
+    match &source {
+        Some(Source::Lexical(lex)) => steps.push(PlanStep::Source {
             engine: "lexical",
+            lang: lex.lang.clone(),
             text: match &lex.text {
                 Atom::Str(s) => format!("{s:?}"),
                 Atom::Param(n) => format!("${n}"),
             },
             limit: opts.limit,
             rrf_k: crate::fuse::RRF_K,
-        });
+        }),
+        Some(Source::Entity(e)) => steps.push(PlanStep::Source {
+            engine: "entity",
+            lang: None,
+            text: match &e.name {
+                Atom::Str(s) => format!("{s:?}"),
+                Atom::Param(n) => format!("${n}"),
+            },
+            // Not a ranking, so neither number is about this source. Recorded as zero rather
+            // than as the options' defaults, because a plan saying `10 per partition` over a
+            // source that returns a set would be a plan describing something that never
+            // happened.
+            limit: 0,
+            rrf_k: 0.0,
+        }),
+        None => {}
     }
 
-    // --- phase 6: filters --------------------------------------------------------------------
+    // --- phase 6: filters and time -----------------------------------------------------------
     //
-    // Time stages are phase 6 too and are **not** lowered here: `said` and `observed` need
-    // SMYSL-2.4's effective-time engine and its range index, which is TX-P6 step 6. The
-    // observed axis alone is answerable from `Store::observed_at` today, and lowering half an
-    // axis pair would make `said during …` and `observed during …` differ in whether they were
-    // honoured rather than in what they asked.
+    // Time stages are phase 6 too, and they lower when the environment carries a [`Times`]
+    // port — TX-P6 step 6's, bound by `smysl-text`. Without one they are refused, both axes
+    // together: the observed axis alone is answerable from `Store::observed_at`, and lowering
+    // half an axis pair would make `said during …` and `observed during …` differ in whether
+    // they were honoured rather than in what they asked.
     let mut filters = Vec::new();
     for f in &pipeline.filters {
         if f.lens_none {
@@ -583,18 +682,31 @@ fn lower_pipeline(
             filters.push(lowered);
         }
     }
+    let mut times = Vec::new();
     for t in &pipeline.times {
-        diags.push(
-            Diagnostic::at(Code::E461, t.span).with_message(
-                "a time stage reads effective time, which needs the library layer's time index \
-             (SMYSL-2.4); this build has a plain store"
-                    .to_string(),
+        match env.times {
+            Some(port) => {
+                if let Some(lowered) = lower_time(t, port, diags) {
+                    times.push(lowered);
+                }
+            }
+            None => diags.push(
+                Diagnostic::at(Code::E461, t.span).with_message(
+                    "a time stage reads effective time, which needs the library layer's time \
+                     engine (SMYSL-2.4); this environment binds no time port"
+                        .to_string(),
+                ),
             ),
-        );
+        }
     }
     if !filters.is_empty() {
         steps.push(PlanStep::Filter {
             stages: filters.len(),
+        });
+    }
+    if !times.is_empty() {
+        steps.push(PlanStep::Time {
+            stages: times.iter().map(|t| t.label.clone()).collect(),
         });
     }
 
@@ -658,6 +770,7 @@ fn lower_pipeline(
         partitions,
         source,
         filters,
+        times,
         traversals,
         closures,
     })
@@ -929,27 +1042,47 @@ fn output_name(o: OutputPlan) -> &'static str {
 /// this crate stays pure, and `~hybrid` routes between the two and so needs both. Saying so is
 /// the point: `SMY-E461`'s meaning is "not available in this build", and a reader told *which
 /// build would have it* can go and get one.
-fn lower_source(stage: &crate::ast::SourceStage, diags: &mut Vec<Diagnostic>) -> Option<Source> {
+fn lower_source(
+    stage: &crate::ast::SourceStage,
+    env: &Env<'_>,
+    candidates: &BTreeSet<Uid>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Source> {
     let span = stage.span;
     match &stage.source {
         AstSource::Find { text, engine, lang } => {
             // A language selector is the library layer's: `lang:<code>` asks which language a
-            // unit is in, and nothing in a plain store records that — the catalog does
-            // (SMYSL-2.4), which is step 6. `lang:any` asks for more still, a bridge per pair
-            // of partitions (§3.5), which is TX-P10's. Refused rather than ignored, because a
-            // query that asked for one language and silently got all of them is answered
-            // wrongly and says nothing about it.
-            if let Some(sel) = lang {
-                let what = match sel {
-                    LangSel::Any => "`lang:any` needs a language bridge per pair of partitions",
-                    LangSel::One(_) => "`lang:<code>` needs the catalog's language facts",
-                };
-                diags.push(Diagnostic::at(Code::E461, span).with_message(format!(
-                    "{what}, which this build has no source for: it ranks lexically over a \
-                     plain store"
-                )));
-                return None;
-            }
+            // unit is in, and only a catalog records that (SMYSL-2.4) — so it lowers when the
+            // scope can answer [`Scope::restrict_lang`] and is refused when it cannot. `lang:any`
+            // asks for more still, a bridge per pair of partitions (§3.5), which is TX-P10's
+            // and is refused in every build this RFC covers. Refused rather than ignored, both
+            // of them, because a query that asked for one language and silently got all of
+            // them is answered wrongly and says nothing about it.
+            let lang = match lang {
+                None => None,
+                Some(LangSel::Any) => {
+                    diags.push(
+                        Diagnostic::at(Code::E461, span).with_message(
+                            "`lang:any` asks for the strongest bridge per pair of partitions \
+                             (SMYSL-2.5 §3.5), which is TX-P10's; `lang:<code>` selects one \
+                             language and is available"
+                                .to_string(),
+                        ),
+                    );
+                    return None;
+                }
+                Some(LangSel::One(code)) => match env.scope.restrict_lang(code, candidates) {
+                    Some(_) => Some(code.clone()),
+                    None => {
+                        diags.push(Diagnostic::at(Code::E461, span).with_message(format!(
+                            "`lang:{code}` needs the catalog's language facts, and `{}` has no \
+                             catalog: it ranks lexically over a plain store",
+                            env.scope.name()
+                        )));
+                        return None;
+                    }
+                },
+            };
             match engine {
                 Some(Engine::Sem) => {
                     diags.push(
@@ -975,13 +1108,23 @@ fn lower_source(stage: &crate::ast::SourceStage, diags: &mut Vec<Diagnostic>) ->
                 engine => Some(Source::Lexical(Lexical {
                     text: text.clone(),
                     explicit: engine.is_some(),
+                    lang,
                     span,
                 })),
             }
         }
+        AstSource::AboutEntity(name) if env.entities.is_some() => {
+            Some(Source::Entity(EntitySource {
+                name: name.clone(),
+                span,
+            }))
+        }
         other => {
             let what = match other {
-                AstSource::AboutEntity(_) => "`about entity(…)` needs entity resolution",
+                AstSource::AboutEntity(_) => {
+                    "`about entity(…)` resolves a name through aliases and same-as, and this \
+                     environment binds no entity port"
+                }
                 AstSource::AboutClass(_) => "`about class(…)` needs class membership",
                 AstSource::Text { .. } => "`text(…)` needs the library layer's locators",
                 AstSource::Uid(_) => {
@@ -1002,6 +1145,58 @@ fn lower_source(stage: &crate::ast::SourceStage, diags: &mut Vec<Diagnostic>) ->
             None
         }
     }
+}
+
+/// Phase 6 for one time stage: parse the literal through the port, keep the operator.
+///
+/// A range `A/B` is the interval from `A`'s start to `B`'s end, which is what EDTF's own
+/// interval syntax means and what `during 1769/1771` reads as. The two halves are parsed one at
+/// a time because the port parses one value; joining their outer bounds is arithmetic this
+/// crate can do without knowing what a year is.
+fn lower_time(
+    t: &crate::ast::TimeStage,
+    port: &dyn Times,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<TimePlan> {
+    let parse = |text: &str, diags: &mut Vec<Diagnostic>| match port.parse(text) {
+        Ok(b) => Some(b),
+        Err(why) => {
+            diags.push(
+                Diagnostic::at(Code::E410, t.span)
+                    .with_message(format!("`{text}` is not an EDTF value: {why}")),
+            );
+            None
+        }
+    };
+    let (range, written) = match &t.value {
+        TimeValue::At(v) => (parse(v, diags)?, v.clone()),
+        TimeValue::Range(a, b) => {
+            let lo = parse(a, diags)?;
+            let hi = parse(b, diags)?;
+            (Bounds::of(lo.lo, hi.hi), format!("{a}/{b}"))
+        }
+    };
+    let axis = match t.axis {
+        TimeAxis::Said => Axis::Said,
+        TimeAxis::Observed => Axis::Observed,
+    };
+    let op_name = match t.op {
+        TimeOp::During => "during",
+        TimeOp::Overlaps => "overlaps",
+        TimeOp::Before => "before",
+        TimeOp::After => "after",
+    };
+    let axis_name = match axis {
+        Axis::Said => "said",
+        Axis::Observed => "observed",
+    };
+    Some(TimePlan {
+        axis,
+        op: t.op,
+        range,
+        label: format!("{axis_name} {op_name} {written}"),
+        span: t.span,
+    })
 }
 
 /// Phase 2 for relation kinds: the fourteen kernel kinds, plus whatever the declarations in

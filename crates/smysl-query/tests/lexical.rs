@@ -254,11 +254,17 @@ fn the_sources_this_build_cannot_lower_are_refused_by_name() {
     for (text, expect) in [
         ("find \"x\" ~sem", "`~sem` consults an embedding model"),
         ("find \"x\" ~hybrid", "`~hybrid` routes between"),
-        ("find \"x\" lang:any", "`lang:any` needs a language bridge"),
-        ("find \"x\" lang:ru", "`lang:<code>` needs the catalog"),
+        (
+            "find \"x\" lang:any",
+            "`lang:any` asks for the strongest bridge",
+        ),
+        (
+            "find \"x\" lang:ru",
+            "`lang:ru` needs the catalog's language facts",
+        ),
         (
             "about entity(\"Naomi\")",
-            "`about entity(…)` needs entity resolution",
+            "`about entity(…)` resolves a name through aliases and same-as",
         ),
         ("text(kjv#Ruth.1.1)", "`text(…)` needs the library layer"),
         ("view v/daily", "`view` needs a saved view"),

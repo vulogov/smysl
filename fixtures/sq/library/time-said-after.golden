@@ -1,0 +1,17 @@
+query time-said-after
+  | from channels
+  | said after 2024-01-15
+  | count
+plan sq/1
+  purity: pure
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named; fields not checked (payload shapes are opaque until FC-9)
+  3 scope: channels via library -> 1 store(s) library, 18 unit(s)
+  4 partitions: 3, idf over collection
+      m3:2exgoq4oefdluyuspom2ciyk6ybvn35c5hyslwikuoppasl5h4oq [mul]: 7 unit(s), smysl/an/1
+      m3:6omgiawbhqtaw3e6bzxialyuzlkyanb5x24fnc7zmvqtflzd7k4q [mul]: 6 unit(s), smysl/an/1
+      m3:n66m44qbb7ebkxbig4x3igebnpavm7jtain52wu3lm62hifit7pa [mul]: 5 unit(s), smysl/an/1
+  6 time: said after 2024-01-15; undated units excluded and counted (W415)
+  - supersession: superseded units give way to their newest head
+  9 shape: -> count
+count 8

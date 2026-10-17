@@ -95,6 +95,12 @@ smysl-graph           = { workspace = true }
 # base-tier, so no floor moves and there is no cycle: `smysl-retrieve` depends on core and graph
 # only.
 smysl-retrieve        = { workspace = true }
+# TX-P6 step 6. The `Scope`, `Times` and `Entities` ports a query is planned through are
+# `smysl-query`'s, and this crate implements them over a library (`src/scope.rs`) — the
+# dependency runs this way and not the other because the planner must not know what a
+# catalogue is, while a catalogue can perfectly well know what a scope is. `smysl-query` is a
+# pure crate, so the pure tree does not grow a runtime.
+smysl-query           = { workspace = true }
 unicode-normalization = { workspace = true }
 # `segment.rs`. Not behind a feature and not optional: a sentence is what ingest windows,
 # spans and propositions are counted in, so a build of this crate that could not find one

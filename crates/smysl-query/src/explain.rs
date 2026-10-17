@@ -89,22 +89,41 @@ pub fn explain(plan: &Plan) -> String {
                     partitions.len(),
                     idf_scope.as_str()
                 ));
-                for (name, n) in partitions {
-                    out.push_str(&format!("      {name}: {n} unit(s)\n"));
+                for (name, n, chain) in partitions {
+                    match chain {
+                        Some(id) => out.push_str(&format!("      {name}: {n} unit(s), {id}\n")),
+                        None => out.push_str(&format!("      {name}: {n} unit(s)\n")),
+                    }
                 }
             }
             PlanStep::Source {
                 engine,
+                lang,
                 text,
                 limit,
                 rrf_k,
             } => {
-                out.push_str(&format!(
-                    "  5 source: {engine} {text}, {limit} per partition, rrf k={rrf_k}\n"
-                ));
+                let lang = match lang {
+                    Some(code) => format!(" lang:{code}"),
+                    None => String::new(),
+                };
+                if *engine == "entity" {
+                    // A selection, not a ranking: nothing per partition and no fusion.
+                    out.push_str(&format!("  5 source: {engine} {text}, mentions walk\n"));
+                } else {
+                    out.push_str(&format!(
+                        "  5 source: {engine}{lang} {text}, {limit} per partition, rrf k={rrf_k}\n"
+                    ));
+                }
             }
             PlanStep::Filter { stages } => {
                 out.push_str(&format!("  6 filters: {stages} stage(s), all must hold\n"));
+            }
+            PlanStep::Time { stages } => {
+                out.push_str(&format!(
+                    "  6 time: {}; undated units excluded and counted (W415)\n",
+                    stages.join(", ")
+                ));
             }
             PlanStep::Expand {
                 traversals,

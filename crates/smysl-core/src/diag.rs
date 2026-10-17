@@ -311,6 +311,7 @@ registry! {
         W411 = "SMY-W411", Warn,  "The observed instant lies outside the published interval";
         W412 = "SMY-W412", Warn,  "A live dating rule E could not apply: held, outranked, or applying to nothing";
         W413 = "SMY-W413", Warn,  "Temporal inconsistency: a negative cycle or an empty interval under rule E";
+        W415 = "SMY-W415", Warn,  "Units excluded from a time-scoped result for lack of a time on the axis asked; counted";
         W418 = "SMY-W418", Warn,  "Expression fork: one alias has two manifest heads";
         E440 = "SMY-E440", Error, "Reader resource cap exceeded; nothing was written";
         E445 = "SMY-E445", Error, "The library or a shard is locked by another writer";
@@ -725,6 +726,16 @@ mod tests {
     /// one target with nothing ordering them, and until a pass chose heads there was nothing
     /// to decline to choose.
     ///
+    /// 99 with `SMY-W415` in TX-P6 step 6, where time stages exist. It is the oldest withheld
+    /// code in the registry — draft 3 allocated it in the `E401`–`W431` block and SMYSL-2.6
+    /// §4's A3 has cited it since — and it was withheld for the usual reason and one more. The
+    /// usual one: until a query could say `said during 1769`, nothing excluded a unit for
+    /// having no time. The extra one is that the exclusion is **not** a filter failing. A unit
+    /// with no date on the axis asked did not fail the test; it could not take it, and A-2.4
+    /// rule 5 says an undated interval is *not early and not late* rather than outside every
+    /// range. So the count is reported beside the answer, like `W463`, and the two are the only
+    /// warnings this crate's query path raises about a run that succeeded.
+    ///
     /// 97 with `SMY-W463` and `SMY-E512` in TX-P6 step 4, where traversals and filters exist.
     /// `W463` was allocated by SMYSL-2.5 and withheld on the same rule as `E461`: a traversal
     /// that stopped at its depth with the graph still going is worth saying, and nothing could
@@ -753,7 +764,7 @@ mod tests {
     /// build can produce, which is the thing this comment exists to prevent.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 98);
+        assert_eq!(Code::ALL.len(), 99);
     }
 
     #[test]

@@ -1,0 +1,19 @@
+query scope-channel-head
+  | from channel:general
+  | units
+plan sq/1
+  purity: pure
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named; fields not checked (payload shapes are opaque until FC-9)
+  3 scope: channel:general via library -> 1 store(s) library, 6 unit(s)
+  4 partitions: 1, idf over collection
+      m3:2exgoq4oefdluyuspom2ciyk6ybvn35c5hyslwikuoppasl5h4oq [mul]: 6 unit(s), smysl/an/1
+  - supersession: superseded units give way to their newest head
+  9 shape: -> units
+units 6
+  b3:b5rgyglej5phprj2zlqoazgcx3 Можно присоединиться? Я прочитала две главы.
+  b3:i22o2r46rfdnyvpea42nsefbnd Reading late: 3 < 5 & the index is wrong.
+  b3:oesxxz33bjd43qgjg5dwleh3bx Of course. We meet on Thursday.
+  b3:ruly4d25mmdqd75t2e3jtafpb4 I finished the first chapter last night. It is shorter than I expected.
+  b3:svbwkiqf3m5lriu5fn35ia2xla Mostly that the narrator is unreliable. See the notes first.
+  b3:5ezs7digqtx6n7rgquicezrakx And what did you make of it?

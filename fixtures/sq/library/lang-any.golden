@@ -1,0 +1,4 @@
+query lang-any
+  | from texts
+  | find "Boaz" lang:any
+refused: SMY-E461 `lang:any` asks for the strongest bridge per pair of partitions (SMYSL-2.5 §3.5), which is TX-P10's; `lang:<code>` selects one language and is available

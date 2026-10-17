@@ -388,11 +388,11 @@ indexes and scratch buffers — and compares result hashes; a mismatch is an int
 | `sq` stage | existing function (file) | new code |
 |---|---|---|
 | `from store:P [, store:Q]` | `Store::open`; `merge(&mut scratch, &other, MergeOptions)` (`smysl-graph/src/merge/mod.rs`) | union into a scratch store until SMYSL-2.8's virtual union; contentions between stores computed by merge's detection |
-| `from texts / library / collection: / channel / import:` | — | `Scope` impl in `smysl-text` (SMYSL-2.4) |
+| `from texts / library / collection: / channel / import:` | — | `Scope` impl in `smysl-text` (SMYSL-2.4). **Built in TX-P6 step 6** as `smysl_text::scope::LibraryScope`, and the six items had to be *defined* first, because this document names them and SMYSL-2.4 never says what any of them is. Each is defined by something the catalogue already records: `texts` and `library` are the whole library; **a collection is an alias namespace** — `collection:kjv` is every expression aliased `kjv` or `kjv/…`, which is what the alias grammar's `/` is for and how every library in this repository already names its editions; **`import:<name>` is the collection rule on the reserved `import:` prefix** of SMYSL-2.3 A-5 and SMYSL-2.7 §3.9; **a channel is a conversation** — `channels` is every expression a chat reader produced, and `channel:<name>` is found in the two places the readers put a name: the expression's alias for Telegram and WhatsApp, which export one conversation per file, and the `channel`-level locator head for Slack, whose archive holds many. A name is looked up both ways and unioned. An item that names nothing is `SMY-E511`, never an empty set |
 | `find "…" ~lex` | `Bm25::index_with`, `Retriever::search`, `Query::{kinds,min_status,within,schemas}`; `Bm25::over(postings, analyzer, store)` | per-partition scoring over a postings view, **not** a second index per partition (§3.4); RRF (§3.4) |
 | `find "…" ~sem` | `Semantic::index`, `search` (`smysl-embed`) | `SemanticSource` port; S1 via `smysl-embed-candle` |
 | `find "…" ~hybrid` | `Hybrid::routes_to_lexical`, `looks_like_identifier` | routing decision recorded in the plan |
-| `about entity("…")` | `Adjacency::edge_kind(&RelKind)` for `x.text/mentions` | entity resolution through aliases and same-as (SMYSL-2.4) |
+| `about entity("…")` | `Adjacency::edge_kind(&RelKind)` for `x.text/mentions` | entity resolution through aliases and same-as (SMYSL-2.4). **Built in TX-P6 step 6** across the `Entities` port (§4.2): the library resolves a name to every `x.text/entity` whose gist is that name — which is what *aliases* means under A-2.4 rule 7, an entity being its name in one expression — and then to every entity in the same `x.text/same-as` class; the query crate walks `x.text/mentions` to them and keeps the result within the pipeline's candidates. A source that **selects rather than ranks**: nothing measured a score, so none is invented |
 | `about class(<uid>)` | — | class membership (SMYSL-2.4, TX-P7) |
 | `text(alias#loc)`, `text(alias @ range)` | — | locator and part lookup (SMYSL-2.4) |
 | `uid b3:…` | `Store::resolve_prefix`, `resolve_label` | — |
@@ -405,7 +405,7 @@ indexes and scratch buffers — and compares result hashes; a mismatch is an int
 | `where commitment` | `Store::commitment_of` | — |
 | `where matches "…"` | `Tokenizer::terms`, `Bm25` contributions | term presence test |
 | `where near("…", t)` | `Semantic` cosine | model-dependent |
-| `said/observed … during/overlaps/before/after` | `Store::observed_at` (observed axis only) | effective time and range index (SMYSL-2.4) |
+| `said/observed … during/overlaps/before/after` | `Store::observed_at` (observed axis only) | effective time and range index (SMYSL-2.4). **Built in TX-P6 step 6** across the `Times` port (§4.2): `said` is rule E's effective time from `time::engine::effective`, computed once per scope and cached; `observed` is `Store::observed_at`, as the second column says. The EDTF literal is parsed through the same port, so `SMY-E410` is raised at planning by SMYSL-2.4's one parser rather than a second one here. A unit with no time on the axis asked is excluded and counted — `SMY-W415`, beside the answer — because A-2.4 rule 5 makes an undated interval neither early nor late, so it never took the comparison it would otherwise be reported as failing |
 | `expand ->grounds`, `->deps`, `->k` | `trace_via(store, root, &EdgeSet::one(k), depth)` | — |
 | `expand <-k` | `dependents_via` (no depth) | `dependents_trace(store, root, &EdgeSet, depth) -> Lineage` in `smysl-graph`, BFS mirror of `trace_via`, sorted `(depth, uid)` |
 | `expand -[k]-` | `Adjacency::out` + `incoming` | both-direction BFS, same output order |
@@ -456,7 +456,7 @@ the existing private `relink::successors` made public so query and relink cannot
     *over*. They coincide only at `idf_scope = partition`. `smysl-retrieve` already separates
     them — `Query::within` restricts candidates and leaves IDF to the index — so the `Subset`
     sets the universe and `within` sets the partition.
-- Each partition is searched with its own analyzer (SMYSL-2.4 chain id, recorded).
+- Each partition is searched with its own analyzer (SMYSL-2.4 chain id, recorded). **Built in TX-P6 step 6:** `Partition` carries the chain id, `Scope::analyzer` supplies the chain behind it, and the executor builds one postings table *per analyzer* rather than per partition — a table is a function of the analyzer that cut its terms, so a scope over three languages builds three and a plain store builds one. The plan prints the id beside each partition.
 - **RRF.** `score(u) = Σ_p 1 / (k + rank_p(u))`, `k = 60`, ranks 1-based, partitions summed in
   sorted partition-key order, f64, ties by uid. The fused list is a function of integer ranks
   and a fixed summation order, so it is bit-reproducible. `k` is recorded in the recipe (OQ-45).
@@ -829,7 +829,7 @@ pub trait Translator {
 | `src/saved.rs` | `x.query/v1` encode/decode, rerun, effect split |
 | `src/dossier/{mod,intent,templates}.rs` + `templates/*.sq` | dossier pipeline |
 | `src/nl.rs` | `Translator`, `TranslateContext`, output validation |
-| `src/ports.rs` | `Scope`, `SemanticSource`, `Classifier`, `TimeIndex` |
+| `src/ports.rs` | `Scope`, `SemanticSource`, `Classifier`, `TimeIndex`. As built: `Scope` (step 2, with `analyzer` and `restrict_lang` added in step 6), `Times` (step 6 — `TimeIndex` by the name the trait took, since it answers *a unit's time* and *a literal's meaning* and indexes nothing) and `Entities` (step 6). Each crosses the same line: this crate owns the question and the graph walk, `smysl-text` owns the fact |
 | `src/pred.rs` | predicate resolution and evaluation (added in TX-P6 step 4). `src/resolve.rs` above is this file's eventual other half: it is named for "field and relation resolution, `using` pins, compile-forward", and compile-forward is TX-P12's, while relation kinds and `using` pins resolve in `plan.rs` beside the phases that own them. What is left is one concern — resolving the fields a predicate names and then evaluating it — and splitting a resolver from an evaluator that is its only caller would be two files agreeing about a type |
 | `src/store_scope.rs` | the `Scope` implementation over a plain `Store` (added in TX-P6 step 2: it is the only file here that depends on `smysl-graph`, and a reader asking what the port requires of a backend should find the trait by itself) |
 
@@ -985,7 +985,8 @@ pub struct Env<'a> {
     pub store: &'a Store,
     pub schemas: &'a SchemaSet,
     pub scope: &'a dyn Scope,
-    pub time: Option<&'a dyn TimeIndex>,
+    pub times: Option<&'a dyn Times>,       // was `time: Option<&dyn TimeIndex>`; TX-P6 step 6
+    pub entities: Option<&'a dyn Entities>, // TX-P6 step 6
     pub semantic: Option<&'a dyn SemanticSource>,
     pub witnesses: &'a dyn Witnesses,
 }
@@ -1066,6 +1067,10 @@ draft 3 §17's facade names (`smysl::query::{Query, Scope, Plan, Purity, Dossier
 | `crates/smysl-render/src/profile.rs` | headings for new roles |
 | `src/lib.rs` | `query`, `schema` modules; adapters |
 | `src/main.rs` | §4.4 |
+| `crates/smysl-text/src/scope.rs` | new in TX-P6 step 6: `LibraryScope`, the `Scope`, `Times` and `Entities` implementations over a `Library` (§3.3's last column) |
+| `crates/smysl-text/Cargo.toml` | `smysl-query` dependency (TX-P6 step 6). This way round and not the other: the planner must not know what a catalogue is, and a catalogue can know what a scope is |
+| `crates/smysl-query/src/ports.rs` | `Times`, `Entities`, `Bounds`, `Axis`; `Scope::analyzer`, `Scope::restrict_lang`; `Partition.chain` (TX-P6 step 6) |
+| `crates/smysl-core/src/diag.rs` | `SMY-W415` registered (TX-P6 step 6), draft 3's allocation, withheld until a query could name a time |
 | `xtask/src/purity.rs` | `PURE_CRATES += "smysl-query"`; new `check-native` (below) |
 | `fuzz/fuzz_targets/{sq_parse,lens_laws}.rs`, `fuzz/Cargo.toml` | new targets |
 
@@ -1271,6 +1276,21 @@ Each step has an exit test. Steps within a phase are ordered.
      over SMYSL-2.4's effective-time engine, with undated units excluded and counted
      (`SMY-W415`), which is the half of this exit that was always checkable;
    - **the entity bridge** — `about entity("…")` resolved through aliases and same-as.
+
+   *Done 2026-10-16.* Sixteen goldens in `fixtures/sq/library/`, one or more per capability,
+   over a library the test builds from the three committed Bible slices (en, ru, de), the KJV
+   Ruth a second time under `import:gutenberg/`, and the three chat exports. The partitions
+   print their chain ids — `smysl/an-en/1`, `an-ru`, `an-de`, and `an/1` for the `mul` chats —
+   `lang:de` finds *Boas* where `lang:en` would find *Boaz*, the four time predicates run on
+   both axes over the chats' `observed` instants, `said during 1769` over the undated Bible
+   excludes all 110 units and `W415` says 110, which the test counts independently, and
+   `about entity("Naomi")` answers in Russian as well, across one `same-as` edge. Two findings.
+   **Nothing in SMYSL-2.4 or here said what the six scope items were,** so they are defined
+   above in §3.3 in terms of what the catalogue records, the way step 2 wrote the `Scope`
+   signature from its four constraints. **A part two manifests share places a unit twice**
+   unless the unit's own `source.manifest` decides, which the import fixture is there to show.
+   What the step did not build: `lang:any` (TX-P10's bridge, refused by name), a `said` time
+   on the Bible, which the fixtures do not date and the test does not pretend they do.
 
    *This exit read "§11.1 and §11.5 examples run on the Bible and chat fixtures" until
    2026-10-16.* There is no §11 in this document; they are RFC SMYSL-2 draft 3's, absent here.

@@ -8,7 +8,7 @@ Eleven trees, with different jobs.
 | `conformance/` | `.smy` / `.cbor` inputs plus the exact diagnostic set each must produce | the external conformance suite |
 | `golden/` | canonical encodings, rendered artifacts, `--explain` output | golden tests |
 | `library/same-as/` | `anthology.smy` — a paragraph reprinted under two expressions, and one that is not | `same-as propose`/`classes` in the determinism matrix (`xtask determinism`) |
-| `sq/` | `accept/*.sq` with the tree and the canonical text each parses to, `reject/*.sq` with the one diagnostic each must produce, `plans/*.explain` with the plan a store yields, `plans/*.why` with the plan and the fused ranking together | the `sq/1` grammar goldens (`crates/smysl-query/tests/grammar.rs`) and the planner goldens (`tests/planner.rs`) |
+| `sq/` | `accept/*.sq` with the tree and the canonical text each parses to, `reject/*.sq` with the one diagnostic each must produce, `plans/*.explain` with the plan a store yields, `plans/*.why` with the plan and the fused ranking together, `library/*.sq` with the `.golden` each yields over a library built from the Bible slices and chat exports | the `sq/1` grammar goldens (`crates/smysl-query/tests/grammar.rs`), the planner goldens (`tests/planner.rs`) and the library-layer goldens (`crates/smysl-text/tests/sq_library.rs`) |
 
 `library/same-as/anthology.smy` holds three units and no part: a same-as engine reads which part,
 which manifest and which bytes a unit *says* it came from, which is all A-2.4 lets a unit carry
@@ -92,6 +92,15 @@ one each along with the code and the message. The reject set holds a near-miss o
 case on purpose: in a hand-written recursive-descent parser the risk is never ambiguity, it is
 unintended acceptance, which no accept case can detect. `SMYSL_BLESS=1` rewrites every
 expectation and should be a decision rather than a habit.
+
+`sq/library/` is TX-P6 step 6's exit: one query per capability the library layer enables —
+the six scope items, catalogued partitions with their chain ids, `lang:<code>`, the four time
+predicates on both axes, and the entity bridge — each with the `.golden` it yields. There is
+no `.smy` beside them because no committed store holds units a library can place: the test
+builds the library from `library/bibles/slice/` and `library/readers/`, draws one unit per
+verse and per message with the provenance an extraction would stamp, and plants two entities
+with the `mentions` and `same-as` edges one would write. The golden is therefore a function of
+the readers, which GE-T1 pins, and `SMYSL_BLESS=1` rewrites it.
 
 `sq/plans/` is the planner's goldens (TX-P6 steps 2 and 3), and each `.explain` is the text for
 `from store:<fixture>` over the matching file in `corpus/`. The snapshot is the explain output

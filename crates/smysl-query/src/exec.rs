@@ -44,16 +44,18 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::diag::{Code, Diagnostic};
 use smysl_core::ids::Uid;
+use smysl_core::types::RelKind;
 use smysl_graph::{SalienceRequest, Store};
-use smysl_retrieve::{Bm25, MemPostings, Query as RQuery, Retriever, Subset, Tokenizer};
+use smysl_retrieve::{Analyze, Bm25, MemPostings, Query as RQuery, Retriever, Subset, Tokenizer};
 
+use crate::ast::TimeOp;
 use crate::ast::{Atom, Count, Dir};
 use crate::fuse::{rrf, Fused, Ranked};
 use crate::plan::{
-    ClosurePlan, Direction, Env, Lexical, OrderPlan, OutputPlan, PipelinePlan, Plan, PlanExpr,
-    PlanOptions, ShapePlan, Source,
+    ClosurePlan, Direction, EntitySource, Env, Lexical, OrderPlan, OutputPlan, PipelinePlan, Plan,
+    PlanExpr, PlanOptions, ShapePlan, Source, TimePlan,
 };
-use crate::ports::IdfScope;
+use crate::ports::{Bounds, IdfScope};
 use crate::pred::{holds, Field};
 
 /// What running a plan produced.
@@ -64,7 +66,8 @@ use crate::pred::{holds, Field};
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Answer {
-    /// No source: the units, in uid order.
+    /// No source, or a source that selects rather than ranks (`about entity`): the units, in
+    /// uid order.
     Scope(Vec<Uid>),
     /// A source: fused, highest first.
     Ranked(Vec<Fused>),
@@ -181,6 +184,7 @@ fn run_pipeline(
     // --- phase 5 -----------------------------------------------------------------------------
     let mut answer = match &p.source {
         Some(Source::Lexical(lex)) => lexical(p, lex, env, opts)?,
+        Some(Source::Entity(e)) => entity(p, e, env, opts)?,
         None => Answer::Scope(p.candidates.iter().copied().collect()),
     };
 
@@ -212,6 +216,52 @@ fn run_pipeline(
                     .collect(),
             ),
         };
+    }
+
+    // Time stages, after the filters and in the order written. A unit with no time on the
+    // axis asked is not a unit that failed the comparison — A-2.4 rule 5 makes an undated
+    // interval neither early nor late — so it is set aside and counted, and `SMY-W415` reports
+    // the count beside the answer rather than letting a `during` that lost half its units
+    // look like one that found half.
+    if !p.times.is_empty() {
+        let port = env
+            .times
+            .expect("a time stage lowered, so the port was bound");
+        let mut undated = 0usize;
+        let keep = |uid: &Uid| -> bool {
+            p.times.iter().all(|t| {
+                let at = port.of(uid, t.axis);
+                at.is_undated() || time_holds(&at, t)
+            })
+        };
+        let mut dated = |uid: &Uid| -> bool {
+            let any_undated = p.times.iter().any(|t| port.of(uid, t.axis).is_undated());
+            if any_undated {
+                undated += 1;
+            }
+            !any_undated
+        };
+        answer = match answer {
+            Answer::Ranked(fused) => Answer::Ranked(
+                fused
+                    .into_iter()
+                    .filter(|f| keep(&f.uid) && dated(&f.uid))
+                    .collect(),
+            ),
+            other => Answer::Scope(
+                other
+                    .uids()
+                    .into_iter()
+                    .filter(|uid| keep(uid) && dated(uid))
+                    .collect(),
+            ),
+        };
+        if undated > 0 {
+            let span = p.times[0].span;
+            warnings.push(Diagnostic::at(Code::W415, span).with_message(format!(
+                "{undated} unit(s) excluded for having no time on the axis asked"
+            )));
+        }
     }
 
     // --- phase 7 -----------------------------------------------------------------------------
@@ -427,25 +477,56 @@ fn lexical(
         },
     };
 
-    // One table for the store, built once however many partitions read it. This is the work
+    // `lang:<code>`: the units in that language, asked of the scope now rather than at
+    // planning, because a plan is a function of the query and not of one store's uid sets.
+    // `None` cannot happen here — the planner refused the option when the scope could not
+    // answer it — but a port is a port, and an answer that changed between planning and
+    // running is reported as an empty result rather than guessed around.
+    let in_lang: Option<BTreeSet<Uid>> = lex.lang.as_ref().map(|code| {
+        env.scope
+            .restrict_lang(code, &p.candidates)
+            .unwrap_or_default()
+    });
+
+    // One table per *analyzer*, built once however many partitions read it. This is the work
     // TX-P4 step 2 moved off the query path, and building it per partition is exactly the cost
-    // §3.4 declines to pay.
-    let analyzer = Tokenizer::plain();
-    let whole = MemPostings::index(env.store, &analyzer);
+    // §3.4 declines to pay. What §3.4 does ask for is that each partition be searched under
+    // its own analyzer, and a table is a function of the analyzer that cut its terms — so a
+    // catalogued scope over three languages builds three tables, keyed by chain id, and a
+    // plain store builds one. The partition's own `chain` is recorded in the plan; the scope
+    // supplies the analyzer behind it.
+    let plain = Tokenizer::plain();
+    let mut tables: BTreeMap<String, MemPostings> = BTreeMap::new();
 
     let mut lists: Vec<Ranked> = Vec::new();
     for partition in &p.partitions {
+        let analyzer: &dyn Analyze = env.scope.analyzer(&partition.key).unwrap_or(&plain);
+        let table = tables
+            .entry(analyzer.id().to_string())
+            .or_insert_with(|| MemPostings::index(env.store, analyzer));
+
         let universe: BTreeSet<Uid> = match opts.idf_scope {
             IdfScope::Partition => partition.uids.clone(),
             IdfScope::Collection => p.candidates.clone(),
-            // `Library` is a wider corpus than the query's scope by definition, and until
-            // `smysl-text` supplies a library the widest corpus here is the store.
+            // `Library` is a wider corpus than the query's scope by definition, and the widest
+            // corpus a scope here can name is the store it was opened over.
             IdfScope::Library => env.store.units().map(|(uid, _)| *uid).collect(),
         };
 
-        let view = Subset::of(&whole, &universe);
-        let scorer = Bm25::over(&view, &analyzer, env.store);
-        let query = RQuery::new(&text, opts.limit).within(partition.uids.iter().copied());
+        let within: BTreeSet<Uid> = match &in_lang {
+            Some(allowed) => partition.uids.intersection(allowed).copied().collect(),
+            None => partition.uids.clone(),
+        };
+        if within.is_empty() {
+            // A partition the language selector emptied contributes nothing to the fusion,
+            // and an empty list would still be a list — RRF sums over partitions, and one
+            // that ranked nothing has no ranks to sum.
+            continue;
+        }
+
+        let view = Subset::of(table, &universe);
+        let scorer = Bm25::over(&view, analyzer, env.store);
+        let query = RQuery::new(&text, opts.limit).within(within.iter().copied());
         lists.push(Ranked {
             key: partition.key.clone(),
             hits: scorer.search(&query),
@@ -453,6 +534,60 @@ fn lexical(
     }
 
     Ok(Answer::Ranked(rrf(&lists)))
+}
+
+/// `about entity("…")`: resolve the name through the port, then walk `x.text/mentions`.
+///
+/// The walk is the store's own relation list rather than an `Adjacency` traversal, because the
+/// question has depth one and a fixed direction — which units point *at* these entities — and
+/// a one-step reverse lookup over one relation kind is a filter over the edges, not a walk.
+/// The result stays within the pipeline's candidates: a mention from a unit outside the scope
+/// is a fact about the store and not an answer to this query.
+fn entity(
+    p: &PipelinePlan,
+    e: &EntitySource,
+    env: &Env<'_>,
+    opts: &PlanOptions,
+) -> Result<Answer, Vec<Diagnostic>> {
+    let name = match &e.name {
+        Atom::Str(s) => s.clone(),
+        Atom::Param(name) => match opts.params.get(name) {
+            Some(bound) => bound.clone(),
+            None => {
+                return Err(vec![Diagnostic::at(Code::E460, e.span).with_message(
+                    format!("`${name}` is not bound, so there is no entity to resolve"),
+                )])
+            }
+        },
+    };
+    let port = env
+        .entities
+        .expect("an entity source lowered, so the port was bound");
+    let entities: BTreeSet<Uid> = port.resolve(&name).into_iter().collect();
+    if entities.is_empty() {
+        return Ok(Answer::Scope(Vec::new()));
+    }
+    let Ok(kind) = RelKind::parse(smysl_core::schemas::text::MENTIONS) else {
+        return Ok(Answer::Scope(Vec::new()));
+    };
+    let mentioning: BTreeSet<Uid> = env
+        .store
+        .relations_of_kind(&kind)
+        .into_iter()
+        .filter(|r| entities.contains(&r.to) && p.candidates.contains(&r.from))
+        .map(|r| r.from)
+        .collect();
+    Ok(Answer::Scope(mentioning.into_iter().collect()))
+}
+
+/// One time stage against one dated interval.
+fn time_holds(at: &Bounds, t: &TimePlan) -> bool {
+    match t.op {
+        TimeOp::During => at.during(&t.range),
+        TimeOp::Overlaps => at.overlaps(&t.range),
+        TimeOp::Before => at.before(&t.range),
+        TimeOp::After => at.after(&t.range),
+    }
 }
 
 /// Phase 9: one ordering stage.

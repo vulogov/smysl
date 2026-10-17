@@ -1,17 +1,20 @@
-//! `sq/1`: the smysl query language — lexer, parser, syntax tree, canonical printer, and the
-//! first four phases of the planner.
+//! `sq/1`: the smysl query language — lexer, parser, syntax tree, canonical printer, planner
+//! and executor.
 //!
 //! The grammar is RFC SMYSL-2.9 and what each stage *means* is SMYSL-2.5 §3.3. TX-P6 step 1
-//! built everything up to the tree; step 2 added the [`ports::Scope`] port, a planner over
-//! SMYSL-2.5 §3.2's phases 1 to 4 — header, resolution, scope, partitions — and [`explain()`].
-//! There is still no executor. A stage the remaining five phases own is **refused** with
-//! `SMY-E461` and the phase that will lower it named, never ignored: a plan that quietly
-//! dropped a stage would answer a different question from the one asked, and SMYSL-2.5 §3.6
-//! only lets a query be saved after it has planned and run.
+//! built everything up to the tree; step 2 the [`ports::Scope`] port and planner phases 1 to 4
+//! with [`explain()`]; step 3 the lexical source and RRF; step 4 filters through outputs; step
+//! 5 the supersession pass; step 6 the ports the library layer binds — [`ports::Times`],
+//! [`ports::Entities`], and a scope that knows its languages. A stage this build cannot lower
+//! is **refused** with `SMY-E461` and what it is waiting for named, never ignored: a plan that
+//! quietly dropped a stage would answer a different question from the one asked, and
+//! SMYSL-2.5 §3.6 only lets a query be saved after it has planned and run.
 //!
-//! The crate stays pure. `smysl-core` gives spans and diagnostics, `smysl-graph` gives the
-//! store phase 3 resolves against, a normalisation quick-check serves `SMY-W510`, and that is
-//! the whole dependency list.
+//! The crate stays pure, and it reaches no catalogue. `smysl-core` gives spans and
+//! diagnostics, `smysl-graph` the store, `smysl-retrieve` the scorer, `smysl-pack` the packer,
+//! a normalisation quick-check serves `SMY-W510`, and that is the whole dependency list;
+//! `smysl-text` depends on *this* crate for the port traits, which is why nothing here can
+//! name a library.
 //!
 //! ```
 //! let parsed = smysl_query::parse("from library | find \"faith\" | limit 10").unwrap();
@@ -49,10 +52,12 @@ pub use explain::why;
 pub use fuse::{Fused, Placement, Ranked, RRF_K};
 pub use parse::{parse, Parsed};
 pub use plan::{
-    plan, ClosurePlan, Direction, Env, Lexical, OrderPlan, OutputPlan, PipelinePlan, Plan,
-    PlanExpr, PlanOptions, PlanStep, Purity, ShapePlan, Source, TraversalPlan,
+    plan, ClosurePlan, Direction, EntitySource, Env, Lexical, OrderPlan, OutputPlan, PipelinePlan,
+    Plan, PlanExpr, PlanOptions, PlanStep, Purity, ShapePlan, Source, TimePlan, TraversalPlan,
 };
-pub use ports::{Candidates, IdfScope, Partition, PartitionKey, Scope};
+pub use ports::{
+    Axis, Bounds, Candidates, Entities, IdfScope, Partition, PartitionKey, Scope, Times,
+};
 pub use print::print;
 pub use store_scope::StoreScope;
 

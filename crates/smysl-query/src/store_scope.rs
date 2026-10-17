@@ -127,7 +127,14 @@ impl Scope for StoreScope<'_> {
         }
 
         out.into_iter()
-            .map(|(key, uids)| Partition { key, uids })
+            .map(|(key, uids)| Partition {
+                key,
+                uids,
+                // A plain store is searched under the plain tokenizer. The chain id is left
+                // unset rather than filled with `smysl/an/1`, because the chains are
+                // `smysl-text`'s and a scope that cannot reach them should not name one.
+                chain: None,
+            })
             .collect()
     }
 }

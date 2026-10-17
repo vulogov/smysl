@@ -1,0 +1,17 @@
+query time-undated
+  | from collection:kjv
+  | said during 1769
+  | count
+plan sq/1
+  purity: pure
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named; fields not checked (payload shapes are opaque until FC-9)
+  3 scope: collection:kjv via library -> 1 store(s) library, 110 unit(s)
+  4 partitions: 2, idf over collection
+      m3:mloaugpk6nxsrb4qw4plxfzjwfhfcipikiahur6lexa4xvhkxhwa [en]: 85 unit(s), smysl/an-en/1
+      m3:yt6diyfb5xzvgj27z2xgfsgz7u7inyhgyyzegeq3wq7xvmyahvvq [en]: 25 unit(s), smysl/an-en/1
+  6 time: said during 1769; undated units excluded and counted (W415)
+  - supersession: superseded units give way to their newest head
+  9 shape: -> count
+warning: SMY-W415 110 unit(s) excluded for having no time on the axis asked
+count 0

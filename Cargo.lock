@@ -1868,6 +1868,7 @@ dependencies = [
  "smysl-check",
  "smysl-core",
  "smysl-graph",
+ "smysl-query",
  "smysl-retrieve",
  "unicode-normalization",
  "unicode-segmentation",

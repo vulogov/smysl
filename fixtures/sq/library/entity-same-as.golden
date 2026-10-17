@@ -1,0 +1,80 @@
+query entity-same-as
+  | from texts
+  | about entity("Naomi")
+  | units
+plan sq/1
+  purity: pure
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named; fields not checked (payload shapes are opaque until FC-9)
+  3 scope: texts via library -> 1 store(s) library, 435 unit(s)
+  4 partitions: 11, idf over collection
+      (no manifest): 2 unit(s)
+      m3:2exgoq4oefdluyuspom2ciyk6ybvn35c5hyslwikuoppasl5h4oq [mul]: 7 unit(s), smysl/an/1
+      m3:6omgiawbhqtaw3e6bzxialyuzlkyanb5x24fnc7zmvqtflzd7k4q [mul]: 6 unit(s), smysl/an/1
+      m3:cntrxfmobxohcdtjuk7lb4tycoqrddcdlrj3bygseqk7qznhts2a [en]: 85 unit(s), smysl/an-en/1
+      m3:dsf5ylvwm3t2a67tedo76xktnahnbveutguititnt5ujnnh7p3dq [ru]: 85 unit(s), smysl/an-ru/1
+      m3:jxx6iw35esyrly6jwe2eq3d6tozpg7ey5ozen3rgc5ec7miwxdwa [ru]: 25 unit(s), smysl/an-ru/1
+      m3:mfkfc5u6mvvzrno2ygnkjbepwayrewmpzoryzk4sjrtrhenjpuqq [de]: 85 unit(s), smysl/an-de/1
+      m3:mloaugpk6nxsrb4qw4plxfzjwfhfcipikiahur6lexa4xvhkxhwa [en]: 85 unit(s), smysl/an-en/1
+      m3:n66m44qbb7ebkxbig4x3igebnpavm7jtain52wu3lm62hifit7pa [mul]: 5 unit(s), smysl/an/1
+      m3:yiwpho3g3scm6wpf3pshc3zezvwgir3k2b36gaur576njyiu4zoa [de]: 25 unit(s), smysl/an-de/1
+      m3:yt6diyfb5xzvgj27z2xgfsgz7u7inyhgyyzegeq3wq7xvmyahvvq [en]: 25 unit(s), smysl/an-en/1
+  5 source: entity "Naomi", mentions walk
+  - supersession: superseded units give way to their newest head
+  9 shape: -> units
+units 55
+  b3:agwrk3ziyndva4o7bkdmd7y6gv я вышла отсюда с достатком, а возвратил меня Господь с пустыми руками; зачем называть меня Ноеминью, когда Господь заставил меня страдать, и Вседержитель послал мне несчастье?
+  b3:aioitpqhltzyfjp4ydnqvupsjx Ноеминь, видя, что она твердо решилась идти с нею, перестала уговаривать ее.
+  b3:awhri5pc4s7iozsf5pk7fzvtn3 And Naomi said unto her two daughters in law, Go, return each to her mother’s house: the LORD deal kindly with you, as ye have dealt with the dead, and with me.
+  b3:azpszsmi3mnke2ep5mmicfl7pp Она сказала им: не называйте меня Ноеминью, а называйте меня Марою, потому что Вседержитель послал мне великую горесть;
+  b3:bdebg3ozljw626ftjwa6nin25f Then said Boaz, What day thou buyest the field of the hand of Naomi, thou must buy [it] also of Ruth the Moabitess, the wife of the dead, to raise up the name of the dead upon his inheritance.
+  b3:ci4ecw4qly7lutjqsqsegfzurp And the women her neighbours gave it a name, saying, There is a son born to Naomi; and they called his name Obed: he [is] the father of Jesse, the father of David.
+  b3:diz4msefkagwns5wn3mjakigiv And Elimelech Naomi’s husband died; and she was left, and her two sons.
+  b3:eigjqcxt52zxgwvuhk7mnonjxv Ноеминь сказала двум снохам своим: пойдите, возвратитесь каждая в дом матери своей; да сотворит Господь с вами милость, как вы поступали с умершими и со мною!
+  b3:ejzoph2bhmmowxkmarcppvrzp5 And the servant that was set over the reapers answered and said, It [is] the Moabitish damsel that came back with Naomi out of the country of Moab:
+  b3:emi44whtv6qiqwttsu7iqny2a7 Ноеминь сказала Руфи: вот, невестка твоя возвратилась к народу своему и к своим богам; возвратись и ты вслед за невесткою твоею.
+  b3:ghhm7hb5vhstpb4vcu3sdxyktr ¶ So they two went until they came to Beth-lehem. And it came to pass, when they were come to Beth-lehem, that all the city was moved about them, and they said, [Is] this Naomi?
+  b3:gzradrhiqqabvq3uondtymvgyb Имя человека того Елимелех, имя жены его Ноеминь, а имена двух сынов его Махлон и Хилеон; они были Ефрафяне из Вифлеема Иудейского. И пришли они на поля Моавитские и остались там.
+  b3:hoa2wix4xp6hmyo5ang3kcxfgd And Naomi said unto her two daughters in law, Go, return each to her mother’s house: the LORD deal kindly with you, as ye have dealt with the dead, and with me.
+  b3:hwp3336rimdj4u5temzfedyczc Ноеминь же сказала: возвратитесь, дочери мои; зачем вам идти со мною? Разве еще есть у меня сыновья в моем чреве, которые были бы вам мужьями?
+  b3:h5wksl3qsi7dsonyusqkevfuj5 И сказала Ноеминь снохе своей Руфи: хорошо, дочь моя, что ты будешь ходить со служанками его, и не будут оскорблять тебя на другом поле.
+  b3:iajlfihangcogaf2rlrhuf2chk And he said unto the kinsman, Naomi, that is come again out of the country of Moab, selleth a parcel of land, which [was] our brother Elimelech’s:
+  b3:itwkajinqeulbqv7nn2olylskn And Elimelech Naomi’s husband died; and she was left, and her two sons.
+  b3:ja7awhmz66curicdiacbxhwxe6 And she said unto them, Call me not Naomi, call me Mara: for the Almighty hath dealt very bitterly with me.
+  b3:jypcyyv2g2o6stjypejniwxojb And the name of the man [was] Elimelech, and the name of his wife Naomi, and the name of his two sons Mahlon and Chilion, Ephrathites of Beth-lehem-judah. And they came into the country of Moab, and continued there.
+  b3:kiy6qcksr7432iynpprqgrbroo And Naomi said unto her daughter in law, Blessed [be] he of the LORD, who hath not left off his kindness to the living and to the dead. And Naomi said unto her, The man [is] near of kin unto us, one of our next kinsmen.
+  b3:kthmrcoogwggg3c6lwlznjgmfl And Naomi said unto her daughter in law, Blessed [be] he of the LORD, who hath not left off his kindness to the living and to the dead. And Naomi said unto her, The man [is] near of kin unto us, one of our next kinsmen.
+  b3:k6gelazxvqss76b5tsgsem2af6 And the women her neighbours gave it a name, saying, There is a son born to Naomi; and they called his name Obed: he [is] the father of Jesse, the father of David.
+  b3:k6iqvrfpeidvbqkbub5whombk2 And she said unto them, Call me not Naomi, call me Mara: for the Almighty hath dealt very bitterly with me.
+  b3:mio5pkhsstq6pfxxva6efeeeuh Then Naomi her mother in law said unto her, My daughter, shall I not seek rest for thee, that it may be well with thee?
+  b3:ohxixqrjwpuc5jngfsz35p5k5a And Naomi said unto Ruth her daughter in law, [It is] good, my daughter, that thou go out with his maidens, that they meet thee not in any other field.
+  b3:oq5iuig6ihyukc6fgghk6edo7q And the servant that was set over the reapers answered and said, It [is] the Moabitish damsel that came back with Naomi out of the country of Moab:
+  b3:ozayrjbi44qk7aoriq34qgqkid And Naomi said unto Ruth her daughter in law, [It is] good, my daughter, that thou go out with his maidens, that they meet thee not in any other field.
+  b3:pejosctpgwix2xy7xjvukddqua And the women said unto Naomi, Blessed [be] the LORD, which hath not left thee this day without a kinsman, that his name may be famous in Israel.
+  b3:rt57jmw4kpn4v6pik42bre6tfa Then Naomi her mother in law said unto her, My daughter, shall I not seek rest for thee, that it may be well with thee?
+  b3:s6gskoq3nrphlgwpfapdg2smsz So Naomi returned, and Ruth the Moabitess, her daughter in law, with her, which returned out of the country of Moab: and they came to Beth-lehem in the beginning of barley harvest.
+  b3:tjsgkcnablr7dyfm3eelldiukw И шли обе они, доколе не пришли в Вифлеем. Когда пришли они в Вифлеем, весь город пришел в движение от них, и говорили: это Ноеминь?
+  b3:tkr76rx7uclspdyx4jrke4egzd I went out full, and the LORD hath brought me home again empty: why [then] call ye me Naomi, seeing the LORD hath testified against me, and the Almighty hath afflicted me?
+  b3:uhnw2xt7yfaz32toqxgqmgxovi And Naomi said, Turn again, my daughters: why will ye go with me? [are] there yet [any more] sons in my womb, that they may be your husbands?
+  b3:ujzwoba5vyygyczlbdq6d2mumz And he said unto the kinsman, Naomi, that is come again out of the country of Moab, selleth a parcel of land, which [was] our brother Elimelech’s:
+  b3:u7tpeddk6hsxx5ay6t7kxipykt ¶ So they two went until they came to Beth-lehem. And it came to pass, when they were come to Beth-lehem, that all the city was moved about them, and they said, [Is] this Naomi?
+  b3:wyi5c4othz5lka4pjppaoqg6i7 И возвратилась Ноеминь, и с нею сноха ее Руфь Моавитянка, пришедшая с полей Моавитских, и пришли они в Вифлеем в начале жатвы ячменя.
+  b3:w6a573u7gre5nqa2cnz3zewrgi So Naomi returned, and Ruth the Moabitess, her daughter in law, with her, which returned out of the country of Moab: and they came to Beth-lehem in the beginning of barley harvest.
+  b3:xdfggv777x7hiqeioedrqztsw7 And Naomi took the child, and laid it in her bosom, and became nurse unto it.
+  b3:xhggxexzigt4sstook36jaklhs ¶ And Boaz said unto the elders, and [unto] all the people, Ye [are] witnesses this day, that I have bought all that [was] Elimelech’s, and all that [was] Chilion’s and Mahlon’s, of the hand of Naomi.
+  b3:xks6axenggaubiugtc7k3xnvss Then said Boaz, What day thou buyest the field of the hand of Naomi, thou must buy [it] also of Ruth the Moabitess, the wife of the dead, to raise up the name of the dead upon his inheritance.
+  b3:yrhcicfioqykpeqo3huvwqn45a And Ruth the Moabitess said unto Naomi, Let me now go to the field, and glean ears of corn after [him] in whose sight I shall find grace. And she said unto her, Go, my daughter.
+  b3:zwermud53g4ifxnzgx4cvfkbeu И сказал Вооз родственнику: Ноеминь, возвратившаяся с полей Моавитских, продает часть поля, принадлежащую брату нашему Елимелеху;
+  b3:zy7tdq2r4wgopqcgdyuedm4krp And Naomi said, Turn again, my daughters: why will ye go with me? [are] there yet [any more] sons in my womb, that they may be your husbands?
+  b3:2yfuupdfhpjzixnudvlviv3w6k И взяла Ноеминь дитя сие, и носила его в объятиях своих, и была ему нянькою.
+  b3:2yncw3exopsfox5bgnodey4t5x И сказала Ноеминь снохе своей: благословен он от Господа за то, что не лишил милости своей ни живых, ни мертвых! И сказала ей Ноеминь: человек этот близок к нам; он из наших родственников.
+  b3:3fce6rkyqicw3imxki7wwq3cn3 And the women said unto Naomi, Blessed [be] the LORD, which hath not left thee this day without a kinsman, that his name may be famous in Israel.
+  b3:3nygwhohwqthliaehytszlgrft Слуга, приставленный к жнецам, отвечал и сказал: эта молодая женщина - Моавитянка, пришедшая с Ноеминью с полей Моавитских;
+  b3:3tlgsmpuny7cfiiudhty4ma22v And Naomi took the child, and laid it in her bosom, and became nurse unto it.
+  b3:5ivtzu2jzsxjaig5md3mmwiida ¶ And Boaz said unto the elders, and [unto] all the people, Ye [are] witnesses this day, that I have bought all that [was] Elimelech’s, and all that [was] Chilion’s and Mahlon’s, of the hand of Naomi.
+  b3:6bkilbebqvwykiygywuoymrbdr I went out full, and the LORD hath brought me home again empty: why [then] call ye me Naomi, seeing the LORD hath testified against me, and the Almighty hath afflicted me?
+  b3:6kmofjet2ubjgffbbo7x3v75o3 И сказала ей Ноеминь, свекровь ее: дочь моя, не поискать ли тебе пристанища, чтобы тебе хорошо было?
+  b3:7fg6f6iriig7ofsh5dag3omlxj And the name of the man [was] Elimelech, and the name of his wife Naomi, and the name of his two sons Mahlon and Chilion, Ephrathites of Beth-lehem-judah. And they came into the country of Moab, and continued there.
+  b3:7nlljxeqdq6aorpkqrufi2lnhq And Naomi had a kinsman of her husband’s, a mighty man of wealth, of the family of Elimelech; and his name [was] Boaz.
+  b3:7ponn2geqgh62qlf4new2hasv7 And Ruth the Moabitess said unto Naomi, Let me now go to the field, and glean ears of corn after [him] in whose sight I shall find grace. And she said unto her, Go, my daughter.
+  b3:7wby3xflttw4pgz3porzeyghcw And Naomi had a kinsman of her husband’s, a mighty man of wealth, of the family of Elimelech; and his name [was] Boaz.
