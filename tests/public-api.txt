@@ -309,6 +309,7 @@ pub use smysl::payload_strings
 pub use smysl::plan_retraction
 pub use smysl::proposition
 pub use smysl::quantise
+pub use smysl::query
 pub use smysl::quote_support
 pub use smysl::quote_support_in
 pub use smysl::quote_support_in_span

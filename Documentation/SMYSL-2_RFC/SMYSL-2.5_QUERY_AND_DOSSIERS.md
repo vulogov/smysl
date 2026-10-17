@@ -221,7 +221,9 @@ Everything below was read at `d25ec9e` in `/tmp/smysl`. "(unverified)" marks wha
 - `cmd_thread` (≈ line 3849): `--derive [S] | --schema S` with a hard-coded `value_parser(["analysis",
   "narrative", "brief", "qa", "plan"])`, `--scope UID` (repeatable), `--arity ROLE=N`,
   `--explain`; `Hlc::new(0, 0, owner)` keeps derivation pure.
-- **`--seed-check` is declared as a global flag and is read.** This entry said "read nowhere"
+- **`--seed-check` is declared as a global flag and is read**, and since TX-P6 step 7
+  (2026-10-17) `q` honours it with §3.2's stronger assertion: the plan runs twice and the
+  answers are compared. This entry said "read nowhere"
   until 2026-10-16, on the strength of a probe
   (`smysl --seed-check find --why -n 3 pool fixtures/corpus/F1-incident.smy`) that exits 0 and
   prints the ranking — which is what a *pure* invocation under a working flag also does, so the
@@ -1099,6 +1101,12 @@ Flags:
   already depends on a model (OQ-54).
 - `--seed-check` (global, today inert) is honoured by `q`, `ask`, `schema` and `migrate`
   (§3.2); `SMY-E416` on a model-dependent plan.
+- **As built in TX-P6 step 7:** `q '<sq>' | --file Q.sq` · `--explain` · `--why` · `--param
+  k=v` · `--all-versions` · `--idf partition|collection|library` · `--per-partition N` ·
+  `--library` · `--view ID` (the id `pack … as view` writes under). `--save`, `--rerun` and
+  `--from-question` arrive with TX-P8 and TX-P10, as do the model flags, and `ask`, `schema`
+  and `migrate` are their own phases'. `--seed-check` runs a pure plan twice and compares; a
+  model-dependent plan cannot be produced by this build (§6 step 7 has why `E416` waits).
 
 Test updates: `command_table_matches_section_23` (30 names), `only_ingest_and_attest_are_model_dependent`
 (mixed = `thread, find, q, ask, migrate`), `tests/dispatch.rs` (30), `tests/cli-surface.txt`,
@@ -1301,6 +1309,28 @@ Each step has an exit test. Steps within a phase are ordered.
    guessing at queries nothing can yet run.
 7. CLI `q`, `--seed-check`; purity gate. *Exit:* draft 3 TX-P6 exit — every pure query passes
    `--seed-check`, plans stable; `xtask check-purity` green with `smysl-query` listed.
+
+   *Done 2026-10-17.* `smysl q` is the thirty-second command and a thin dispatcher over the
+   facade's `query` module: `'<sq>' | --file`, `--explain`, `--why`, `--param k=v`,
+   `--all-versions`, `--idf`, `--per-partition N`, `--library`, and `--view ID` for the one
+   stage the pure crate refused because it writes — `pack … as view` is planned without its
+   write and the `View` is appended here, through `persist` for a store and through the
+   library for a library. **The two halves of the exit are asserted against things that
+   already existed.** "Plans stable": `q --explain` over every corpus fixture prints the
+   planner golden step 2 blessed from the crate directly, byte for byte, which is why the
+   command names a scope after the file's stem. "Every pure query passes `--seed-check`": the
+   flag now performs §3.2's stronger assertion rather than the label check §2.6 recorded —
+   the plan runs twice and the answers are compared, the second run fresh by construction
+   because the executor builds its tables per run. The judgement in `reproducible` is
+   `Some(true)` for `q` with the reasoning recorded: the planner refuses every
+   model-dependent stage with `SMY-E461` before purity is asked, so no plan this build makes
+   can reach a model, and **`SMY-E416` stays withheld** — allocated for the refusal of a
+   model-dependent plan, registered the day TX-P10 lowers one, on the registry's own rule
+   that a code nothing can raise is worse than a missing one. The purity gate was already
+   green with `smysl-query` listed, as step 2 left it. What §4.4 lists and this step did not
+   build is each another phase's: `--save`, `--rerun` (TX-P8), `--from-question` (TX-P10),
+   `--engine-model`/`--candle-model` (TX-P10), and the `ask`, `schema` and `migrate` rows.
+   **TX-P6 is complete.**
 
 **TX-P8 — dossiers, saved queries, thread schemas** (after TX-P7 for classes)
 1. `x.query/v1` save/load, result edges (`x.query/answers`, OQ-49 resolved), reruns with the data effect. *Exit:*

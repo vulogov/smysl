@@ -122,18 +122,24 @@ smysl v1.10.0
 ├── smysl-pack v1.10.0
 │   ├── smysl-core v1.10.0 (*)
 │   └── smysl-graph v1.10.0 (*)
+├── smysl-query v1.10.0
+│   ├── smysl-core v1.10.0 (*)
+│   ├── smysl-graph v1.10.0 (*)
+│   ├── smysl-pack v1.10.0 (*)
+│   ├── smysl-retrieve v1.10.0
+│   │   ├── bm25 v2.3.2
+│   │   │   └── fxhash v0.2.1
+│   │   │       └── byteorder v1.5.0
+│   │   ├── smysl-core v1.10.0 (*)
+│   │   └── smysl-graph v1.10.0 (*)
+│   └── unicode-normalization v0.1.25 (*)
 ├── smysl-render v1.10.0
 │   ├── smysl-core v1.10.0 (*)
 │   ├── smysl-graph v1.10.0 (*)
 │   └── smysl-thread v1.10.0
 │       ├── smysl-core v1.10.0 (*)
 │       └── smysl-graph v1.10.0 (*)
-├── smysl-retrieve v1.10.0
-│   ├── bm25 v2.3.2
-│   │   └── fxhash v0.2.1
-│   │       └── byteorder v1.5.0
-│   ├── smysl-core v1.10.0 (*)
-│   └── smysl-graph v1.10.0 (*)
+├── smysl-retrieve v1.10.0 (*)
 └── smysl-thread v1.10.0 (*)
 [dev-dependencies]
 └── serde_json v1.0.151

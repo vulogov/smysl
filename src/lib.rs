@@ -283,6 +283,12 @@ pub use smysl_provider::{
 #[cfg(feature = "tui")]
 pub use smysl_tui as tui;
 
+/// The query language (RFC SMYSL-2.9) and its planner (SMYSL-2.5 §3.2), whole.
+///
+/// Rule A: `src/main.rs` reaches every crate through this file, and `q` needs the parser, the
+/// planner, the executor, both scope implementations and the explain writers — most of the
+/// crate's surface. Re-exported as a module rather than name by name for the reason `text` is.
+pub use smysl_query as query;
 /// The library layer: a catalog and an object store, the readers, and everything that
 /// *interprets* the records [`Manifest`] and friends describe (RFC SMYSL-2.4 §4.3.6).
 ///

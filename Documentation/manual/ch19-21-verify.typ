@@ -1115,7 +1115,7 @@ cannot promise anything about.
 #screen(caption: "$ cargo xtask check-purity")[
 ```
 xtask check-purity (rules A, B)
-  dependency tree (--no-default-features): 31 crates, none forbidden
+  dependency tree (--no-default-features): 37 crates, none forbidden
   pure crates: 9 checked, at default features and at --all-features
   source scan: 151 files, 7 symbols
   rule A: 2 CLI files reach only the facade

@@ -1737,6 +1737,7 @@ dependencies = [
  "smysl-ingest",
  "smysl-pack",
  "smysl-provider",
+ "smysl-query",
  "smysl-render",
  "smysl-retrieve",
  "smysl-text",

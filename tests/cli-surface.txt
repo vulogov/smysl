@@ -683,3 +683,28 @@ summarise  --quiet
 summarise  --verbose
 summarise  --seed-check
 summarise  --help
+q          [SQ]
+q          [PATH]
+q          --config
+q          --file
+q          --library
+q          --explain
+q          --output
+q          --format
+q          [possible values: surface, cbor]
+q          --why
+q          --param
+q          --strict
+q          --all-versions
+q          --offline
+q          --idf
+q          [possible values: partition, collection, library]
+q          --no-color
+q          --noprogress
+q          --per-partition
+q          --json
+q          --view
+q          --quiet
+q          --verbose
+q          --seed-check
+q          --help

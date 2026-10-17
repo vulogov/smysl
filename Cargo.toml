@@ -251,6 +251,10 @@ smysl-retrieve = { workspace = true }
 smysl-check    = { workspace = true }
 smysl-text     = { workspace = true, optional = true }
 smysl-pack     = { workspace = true }
+# TX-P6 step 7: `q` runs the query language. Unconditional, like `smysl-pack`, because the
+# crate is pure and a query over a plain store needs no feature; `q --library` additionally
+# needs `text`, and says so when the build lacks it.
+smysl-query    = { workspace = true }
 smysl-thread   = { workspace = true }
 smysl-render   = { workspace = true }
 smysl-provider = { workspace = true, optional = true }

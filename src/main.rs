@@ -82,6 +82,13 @@ fn reproducible(cmd: &Cmd, sub: &ArgMatches) -> Option<bool> {
             // `link --candidates` lists what the generator chose and stops there, which is a
             // function of the store. Every other invocation asks a model about those pairs.
             "link" => Some(sub.get_flag("candidates")),
+            // Mixed for what the language can say, pure for what this build can run. SMYSL-2.5
+            // §3.2 makes a plan model-dependent when any step is — `~sem`, `~hybrid`, `near`, a
+            // semantic bridge — and the planner refuses every one of those with `SMY-E461`
+            // before purity is asked, so no plan this build produces can reach a model. The
+            // judgement moves into `cmd_q`, onto `Plan::purity`, the day TX-P10 lowers one;
+            // `SMY-E416` is allocated for that refusal and is registered then, not now.
+            "q" => Some(true),
             _ => None,
         },
     }
@@ -158,6 +165,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "same-as",    about: "Propose same-as edges; derive classes",               purity: Purity::Pure,  phase: "TX-P7"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "link",      about: "Judge candidate pairs; stage entails and contradicts", purity: Purity::Mixed, phase: "TX-P7"  , impure_when: Some("every action but --candidates, which only lists them") , forms: NO_DOCUMENT },
     Cmd { name: "summarise", about: "Grounded summary tree over a scope; staged",           purity: Purity::Model, phase: "TX-P7"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "q",         about: "Run an sq/1 query; explain it, or seed-check it",      purity: Purity::Mixed, phase: "TX-P6"  , impure_when: Some("a model-dependent plan (~sem, ~hybrid, near), none of which this build lowers") , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -748,6 +756,78 @@ fn cli() -> Command {
                         .long("yes")
                         .help("Commit the staged edges instead of leaving them for review")
                         .action(ArgAction::SetTrue),
+                ),
+            "q" => sub
+                .arg(
+                    Arg::new("query")
+                        .value_name("SQ")
+                        .help("The query, in sq/1 (SMYSL-2.9); or --file"),
+                )
+                .arg(
+                    Arg::new("file")
+                        .long("file")
+                        .value_name("Q.sq")
+                        .help("Read the query from this file instead"),
+                )
+                .arg(
+                    Arg::new("library")
+                        .long("library")
+                        .help(
+                            "Treat the store as a library root: `texts`, `collection:`, \
+                             `channel:` and the time stages resolve against its catalogue",
+                        )
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("explain")
+                        .long("explain")
+                        .help("Print the plan instead of running it")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("why")
+                        .long("why")
+                        .help("After a ranked answer, print each hit's partition ranks and term contributions")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("param")
+                        .long("param")
+                        .value_name("K=V")
+                        .action(clap::ArgAction::Append)
+                        .help("Bind `$K` to V; repeatable"),
+                )
+                .arg(
+                    Arg::new("all-versions")
+                        .long("all-versions")
+                        .help("Keep superseded units instead of substituting their newest head")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("idf")
+                        .long("idf")
+                        .value_name("SCOPE")
+                        .value_parser(["partition", "collection", "library"])
+                        .help("What term statistics are counted over [default: collection]"),
+                )
+                .arg(
+                    Arg::new("per-partition")
+                        .long("per-partition")
+                        .value_name("N")
+                        .default_value("10")
+                        .help("Hits a source keeps per partition before fusion; `limit` is a stage")
+                        .value_parser(clap::value_parser!(usize)),
+                )
+                .arg(
+                    Arg::new("view")
+                        .long("view")
+                        .value_name("ID")
+                        .help("The view id `pack … as view` writes under [default: v/query]"),
+                )
+                .arg(
+                    Arg::new("store")
+                        .value_name("PATH")
+                        .help("Store, or library root with --library"),
                 ),
             "summarise" => sub
                 .arg(
@@ -5005,6 +5085,319 @@ fn cmd_find(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     ExitCode::Success
 }
 
+/// `smysl q` - run an `sq/1` query (SMYSL-2.5 §4.4, TX-P6 step 7).
+///
+/// The command is a thin dispatcher over `smysl::query`: parse, plan, run, write. What it
+/// adds is the three things the crate cannot do for itself because it is pure — choose which
+/// scope to bind (a plain store, or a library with its times and entities), write the `View`
+/// record `pack … as view` asks for, and perform `--seed-check`'s stronger assertion: run the
+/// plan twice and compare, as §3.2 specifies, rather than take the plan's purity label on
+/// trust. The second run builds its own postings tables and scratch, because the executor
+/// builds them per run and keeps nothing between two.
+fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use smysl::query::ast::Shaping;
+    use smysl::query::{Env, IdfScope, PlanOptions};
+
+    let text = match (m.get_one::<String>("query"), m.get_one::<String>("file")) {
+        (Some(_), Some(_)) => {
+            eprintln!("smysl q: give the query once, inline or with --file");
+            return ExitCode::Usage;
+        }
+        (Some(t), None) => t.clone(),
+        (None, Some(f)) => match std::fs::read_to_string(f) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("smysl q: {f}: {e}");
+                return ExitCode::Failure;
+            }
+        },
+        (None, None) => {
+            eprintln!("smysl q: no query given");
+            return ExitCode::Usage;
+        }
+    };
+    let Some(path) = store_arg(m, global) else {
+        eprintln!("smysl q: no store given");
+        return ExitCode::Usage;
+    };
+    warn_output_is_a_report(global, "q");
+
+    let mut opts = PlanOptions::default();
+    opts.all_versions = m.get_flag("all-versions");
+    opts.limit = m.get_one::<usize>("per-partition").copied().unwrap_or(10);
+    opts.idf_scope = match m.get_one::<String>("idf").map(String::as_str) {
+        Some("partition") => IdfScope::Partition,
+        Some("library") => IdfScope::Library,
+        _ => IdfScope::Collection,
+    };
+    if let Some(params) = m.get_many::<String>("param") {
+        for raw in params {
+            let Some((k, v)) = raw.split_once('=') else {
+                eprintln!("smysl q: --param takes K=V, not `{raw}`");
+                return ExitCode::Usage;
+            };
+            opts.params.insert(k.to_string(), v.to_string());
+        }
+    }
+
+    let parsed = match smysl::query::parse(&text) {
+        Ok(p) => p,
+        Err(d) => {
+            eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+            return ExitCode::Usage;
+        }
+    };
+    for w in &parsed.warnings {
+        eprintln!("smysl q: {}: {}", w.code.as_str(), w.message);
+    }
+
+    // `pack … as view` is a query that writes, and the pure crate refuses it (`SMY-E461`,
+    // "writing is the CLI's"). This is the CLI: the stage is planned without its write, and
+    // the write happens here, after the answer, as a `View` whose roots are what was packed.
+    let mut query = parsed.query.clone();
+    let mut as_view = false;
+    for stage in &mut query.shaping {
+        if let Shaping::Pack { as_view: wants, .. } = stage {
+            if *wants {
+                as_view = true;
+                *wants = false;
+            }
+        }
+    }
+
+    // The scope's name is the file's stem, so a query written `from store:F1-incident` over
+    // `F1-incident.smy` resolves, and the plan goldens in `fixtures/sq/plans/` — produced
+    // under that naming — are what `--explain` prints here, byte for byte.
+    let name = std::path::Path::new(&path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+
+    if m.get_flag("library") {
+        #[cfg(not(feature = "text"))]
+        {
+            let _ = (&query, &opts, &name, as_view);
+            eprintln!(
+                "smysl q: {path}: --library needs the library layer, and this build has no \
+                 `text` feature"
+            );
+            ExitCode::Usage
+        }
+        #[cfg(feature = "text")]
+        {
+            let library = match smysl::text::library::Library::open(std::path::Path::new(&path)) {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("smysl q: {path}: {e}");
+                    return ExitCode::Failure;
+                }
+            };
+            let scope = smysl::text::scope::LibraryScope::new(name, &library);
+            let env = Env::new(library.store(), &scope)
+                .with_times(&scope)
+                .with_entities(&scope);
+            let (code, view) = q_run(&query, &env, &opts, m, global, as_view);
+            if let Some(v) = view {
+                // Through the library, so its index is maintained; the record then lives in
+                // the catalogue shard like any other.
+                let mut library = library;
+                if let Err(e) = library.append_records(&[Record::View(v)]) {
+                    eprintln!("smysl q: {path}: {e}");
+                    return ExitCode::Failure;
+                }
+            }
+            code
+        }
+    } else {
+        let (store, labels) = match load_store(&path) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("smysl q: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        let scope = smysl::query::StoreScope::new(name, &store);
+        let env = Env::new(&store, &scope);
+        let (code, view) = q_run(&query, &env, &opts, m, global, as_view);
+        if let Some(v) = view {
+            if let Err(e) = persist(&path, &[Record::View(v)], &store, &labels) {
+                eprintln!("smysl q: {e}");
+                return ExitCode::Failure;
+            }
+        }
+        code
+    }
+}
+
+/// Plan, run, and write one query over a bound environment. The `View` to append, if any, is
+/// returned rather than written, because which file it goes to is the caller's.
+fn q_run(
+    query: &smysl::query::Query,
+    env: &smysl::query::Env<'_>,
+    opts: &smysl::query::PlanOptions,
+    m: &ArgMatches,
+    global: &ArgMatches,
+    as_view: bool,
+) -> (ExitCode, Option<View>) {
+    use smysl::query::{explain, run, why, Answer, Purity};
+
+    let plan = match smysl::query::plan(query, env, opts) {
+        Ok(p) => p,
+        Err(diags) => {
+            for d in diags {
+                eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+            }
+            return (ExitCode::Usage, None);
+        }
+    };
+    if m.get_flag("explain") {
+        print!("{}", explain(&plan));
+        return (ExitCode::Success, None);
+    }
+
+    let seed_check = global.get_flag("seed-check");
+    if seed_check {
+        if let Purity::ModelDependent(why) = &plan.purity {
+            // Unreachable while the planner refuses every model-dependent stage with
+            // `SMY-E461` before purity is asked (see `reproducible`). `SMY-E416` is the code
+            // allocated for this refusal and is registered when TX-P10 makes the arm reachable.
+            eprintln!(
+                "smysl q: --seed-check asserts rule D, and this plan is model-dependent ({})",
+                why.join(", ")
+            );
+            return (ExitCode::Usage, None);
+        }
+    }
+
+    let first = match run(&plan, env, opts) {
+        Ok(r) => r,
+        Err(diags) => {
+            for d in diags {
+                eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+            }
+            return (ExitCode::Failure, None);
+        }
+    };
+    if seed_check {
+        // §3.2: a pure plan "executes twice — the second time with freshly built indexes and
+        // scratch buffers — and compares result hashes; a mismatch is an internal error". The
+        // executor builds its tables inside the run, so the second run is fresh by
+        // construction, and the comparison is of the answers themselves rather than of a hash
+        // of them — a hash would only add a way for two equal answers to look different.
+        match run(&plan, env, opts) {
+            Ok(second) if second == first => {}
+            Ok(_) => {
+                eprintln!(
+                    "smysl q: --seed-check ran the plan twice and the answers differ; this is \
+                     an internal error, not a property of the query"
+                );
+                return (ExitCode::Failure, None);
+            }
+            Err(diags) => {
+                for d in diags {
+                    eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+                }
+                return (ExitCode::Failure, None);
+            }
+        }
+    }
+
+    for w in &first.warnings {
+        eprintln!("smysl q: {}: {}", w.code.as_str(), w.message);
+    }
+
+    let store = env.store;
+    let gist_of = |uid: &Uid| store.get(uid).map(|u| u.core.gist.as_str()).unwrap_or("");
+    if global.get_flag("json") {
+        let warnings: Vec<String> = first
+            .warnings
+            .iter()
+            .map(|w| {
+                format!(
+                    "{{\"code\":{},\"message\":{}}}",
+                    smysl::json_escape(w.code.as_str()),
+                    smysl::json_escape(&w.message)
+                )
+            })
+            .collect();
+        let answer = match &first.answer {
+            Answer::Count(n) => format!("{{\"kind\":\"count\",\"count\":{n}}}"),
+            Answer::Ranked(fused) => {
+                let hits: Vec<String> = fused
+                    .iter()
+                    .map(|f| {
+                        format!(
+                            "{{\"uid\":{},\"score\":{:.6}}}",
+                            smysl::json_escape(&f.uid.canonical()),
+                            f.score
+                        )
+                    })
+                    .collect();
+                format!("{{\"kind\":\"ranked\",\"hits\":[{}]}}", hits.join(","))
+            }
+            Answer::Groups(groups) => {
+                let rows: Vec<String> = groups
+                    .iter()
+                    .map(|(value, uids)| {
+                        format!(
+                            "{{\"value\":{},\"uids\":[{}]}}",
+                            smysl::json_escape(value),
+                            uid_array(uids)
+                        )
+                    })
+                    .collect();
+                format!("{{\"kind\":\"groups\",\"groups\":[{}]}}", rows.join(","))
+            }
+            other => format!(
+                "{{\"kind\":\"units\",\"uids\":[{}]}}",
+                uid_array(&other.uids())
+            ),
+        };
+        println!(
+            "{{\"answer\":{answer},\"warnings\":[{}]}}",
+            warnings.join(",")
+        );
+    } else {
+        match &first.answer {
+            Answer::Count(n) => println!("{n}"),
+            Answer::Ranked(fused) => {
+                for f in fused {
+                    println!("{:.6}  {}  {}", f.score, f.uid, gist_of(&f.uid));
+                }
+                if m.get_flag("why") {
+                    // On stderr, as `find --why` does, so a caller piping stdout keeps the
+                    // ranking and a reader at the terminal sees what put each hit there.
+                    eprint!("{}", why(fused));
+                }
+            }
+            Answer::Groups(groups) => {
+                for (value, uids) in groups {
+                    println!("{value}:");
+                    for uid in uids {
+                        println!("  {uid}  {}", gist_of(uid));
+                    }
+                }
+            }
+            other => {
+                for uid in other.uids() {
+                    println!("{uid}  {}", gist_of(&uid));
+                }
+            }
+        }
+    }
+
+    let view = if as_view {
+        let id = m
+            .get_one::<String>("view")
+            .and_then(|s| ViewId::new(s).ok())
+            .unwrap_or_else(|| ViewId::new("v/query").expect("literal"));
+        Some(View::new(id, "query").with_roots(first.answer.uids()))
+    } else {
+        None
+    };
+    (ExitCode::Success, view)
+}
+
 /// `smysl thread` - derive, list, or show a thread (§19, §23.1).
 ///
 /// Derivation is pure: no model is consulted, so the same store yields the same thread on
@@ -7061,6 +7454,7 @@ fn main() -> ProcExitCode {
         "same-as" => cmd_same_as(sub, &matches),
         "link" => cmd_link(sub, &matches),
         "summarise" => cmd_summarise(sub, &matches),
+        "q" => cmd_q(sub, &matches),
         _ => {
             // Unreachable while every command in `COMMANDS` has an arm above, which
             // `command_table_matches_section_23` enforces. Kept as the honest answer if one
@@ -9223,7 +9617,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 31);
+        assert_eq!(COMMANDS.len(), 32);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -9258,7 +9652,8 @@ mod tests {
                 "date",
                 "same-as",
                 "link",
-                "summarise"
+                "summarise",
+                "q"
             ]
         );
     }
@@ -9292,7 +9687,7 @@ mod tests {
             .collect();
         assert_eq!(
             mixed,
-            ["pack", "thread", "find", "link"],
+            ["pack", "thread", "find", "link", "q"],
             "a command is mixed when some invocation of it calls a model"
         );
 
@@ -9324,7 +9719,7 @@ mod tests {
     /// this test rather than shipping a flag that answers "I cannot say".
     #[test]
     fn seed_check_can_judge_every_mixed_command() {
-        let judged = ["find", "pack", "thread", "link"];
+        let judged = ["find", "pack", "thread", "link", "q"];
         for c in COMMANDS.iter().filter(|c| c.purity == Purity::Mixed) {
             assert!(
                 judged.contains(&c.name),
