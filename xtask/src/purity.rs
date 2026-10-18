@@ -163,7 +163,33 @@ const PURE_CRATES: &[&str] = &[
     // a store. `smysl-graph` is itself on this list, so the pure tree gains no runtime — what
     // changed is the crate's job, not its purity.
     "smysl-query",
+    // Measures (SMYSL-2.6, TX-P8 M1). A measure's result is a unit whose uid is computed from
+    // floats, so this crate's purity is a stronger claim than the others': not only no runtime
+    // and no socket, but nothing that could make two runs of one recipe differ — no clock, no
+    // environment, no unseeded randomness (§4.5). Its three external dependencies, `libm`,
+    // `rand_chacha` and `rand_core` with default features off, bring none of `NEVER`, and
+    // `CRATE_SYMBOLS` below adds the crate's own list to the source scan.
+    "smysl-measure",
 ];
+
+/// Symbols forbidden in one pure crate's source beyond [`FORBIDDEN_SYMBOLS`], each list with
+/// the reason it is that crate's.
+///
+/// `smysl-measure`: SMYSL-2.6 §4.5. A measure is a pure function of its store, scope and
+/// recipe, and a result's identity is its value, so a clock, the environment or an unseeded
+/// generator anywhere in the crate would let one recipe write two units. `rand_core` without
+/// `os_rng` already cannot draw an unseeded number; the scan is for whoever adds the feature.
+const CRATE_SYMBOLS: &[(&str, &[&str])] = &[(
+    "smysl-measure",
+    &[
+        "thread_rng",
+        "OsRng",
+        "from_entropy",
+        "SystemTime",
+        "Instant",
+        "std::env",
+    ],
+)];
 
 /// Rule A, as `src/lib.rs` states it: *"no CLI capability may be unreachable from here, and
 /// no code path may be CLI-only."*
@@ -282,12 +308,29 @@ pub fn run(root: &Path) -> Result<(), String> {
                         failures.push(format!("rule B: `{sym}` in {}:{}", file.display(), n + 1));
                     }
                 }
+                for (c, syms) in CRATE_SYMBOLS {
+                    for sym in syms.iter().filter(|_| c == krate) {
+                        if code.contains(sym) {
+                            failures.push(format!(
+                                "{krate}: `{sym}` in {}:{}",
+                                file.display(),
+                                n + 1
+                            ));
+                        }
+                    }
+                }
             }
         }
     }
     println!(
-        "  source scan: {scanned} files, {} symbols",
-        FORBIDDEN_SYMBOLS.len()
+        "  source scan: {scanned} files, {} symbols, and {} more in {}",
+        FORBIDDEN_SYMBOLS.len(),
+        CRATE_SYMBOLS.iter().map(|(_, s)| s.len()).sum::<usize>(),
+        CRATE_SYMBOLS
+            .iter()
+            .map(|(c, _)| *c)
+            .collect::<Vec<_>>()
+            .join(", ")
     );
 
     // --- 3. rule A: the CLI goes through the facade -------------------------

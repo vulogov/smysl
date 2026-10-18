@@ -1116,8 +1116,8 @@ cannot promise anything about.
 ```
 xtask check-purity (rules A, B)
   dependency tree (--no-default-features): 37 crates, none forbidden
-  pure crates: 9 checked, at default features and at --all-features
-  source scan: 156 files, 7 symbols
+  pure crates: 10 checked, at default features and at --all-features
+  source scan: 162 files, 7 symbols, and 6 more in smysl-measure
   rule A: 2 CLI files reach only the facade
 ok
 ```
@@ -1143,6 +1143,15 @@ the pure core carries no serde stack; a reader feature outside the core is
 allowed to pull it, and the gate records which one. Until 1.10 there was one
 list checked one way, which meant a runtime hidden behind a non-default
 feature would have passed.
+
+One crate carries a list of its own. `smysl-measure` writes the result of a
+computation as a unit, and that unit's id is computed from the result, so the
+same recipe over the same store must give the same bytes on every machine. Its
+source is also scanned for a clock, the environment and an unseeded random
+generator, any of which would let one recipe write two different units. That
+is the "6 more" in the transcript. The same crate forbids the platform's `ln`
+and `exp` through a clippy rule, because those differ in the last bit between
+operating systems and its own `libm` does not.
 
 #whatsnext[
   Verification is complete at this point, in the sense this Part set out to

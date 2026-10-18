@@ -28,6 +28,7 @@ addressed to: a fixture is an instrument, and these are the things being measure
 | `attribution/probes/` | Mark 14-15 in two editions of scripture, and `probes.tsv`: every utterance of Mark 15 in both, with the verse, the expected mode and how the source marks it | TX-P5 step 3b's probe-set gate (`crates/smysl-ingest/tests/probe_set.rs`) |
 | `stability/corpus/` | `<lang>.txt` for de, en, es, fr and ru — the same three passages in each, 59 lines apiece | GE-T2's rerun under the consensus policy (`crates/smysl-ingest/tests/ge_t2.rs`) |
 | `dossier/` | `subjects.smy`, people in Ruth and two women called Mary, each unit annotated with the slot that should find it; `gold/`, GE-T10's corpus (ten subjects in five languages), 150 questions and the gold for 118 (question, slot) pairs | `ask`'s unit tests (`crates/smysl-query/tests/dossier.rs`, `tests/cmd_ask.rs`) and GE-T10 (`crates/smysl-query/tests/ge_t10.rs`) |
+| `measure/` | `golden.tsv`, `name<TAB>hex`: a recipe's canonical CBOR and hash, the payload of a hand-built value holding every number shape, a whole measure unit's uid and gist, six `libm` results by bit pattern and the measure generator's first draws | the measure frame (`crates/smysl-measure/tests/payload.rs`, TX-P8 M1); language-free, for the ports |
 
 `library/bibles/slice/` is 112 KiB of public-domain scripture, carried because a two-platform
 comparison that needs three megabytes mounted first is a comparison nobody runs. The whole corpus

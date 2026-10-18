@@ -421,7 +421,9 @@ mod tests {
         // 103 with `SMY-W417`, `SMY-E468`, `SMY-E477` and `SMY-W478` (TX-P8 step 3), raised by
         // `ask`: a subject naming two entities, a question no intent rule matches, a template
         // set this build does not carry, and an answer unit grounding outside its dossier.
-        assert_eq!(Code::ALL.len(), 103);
+        // 105 with `SMY-W483` and `SMY-E489` (TX-P8 M1), raised by `smysl-measure`'s unit writer
+        // and registry, which the facade does not expose until the `measure` command (M7).
+        assert_eq!(Code::ALL.len(), 105);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

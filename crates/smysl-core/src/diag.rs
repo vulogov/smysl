@@ -180,7 +180,7 @@ macro_rules! registry {
 }
 
 registry! {
-    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library, Query }
+    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library, Query, Measure }
 
     // --- Parse and encoding ------------------------------------------------
     Parse => {
@@ -357,6 +357,19 @@ registry! {
         W510 = "SMY-W510", Warn,  "A string literal is not in NFC; it is matched byte-exactly as written";
         E511 = "SMY-E511", Error, "A scope names something this environment does not hold";
         E512 = "SMY-E512", Error, "An operator does not apply to the type of the field it names";
+    }
+
+    // --- Measures (RFC SMYSL-2.6 §8), in an eleventh group --------------------------------------
+    //
+    // Two of the ten SMYSL-2.6 allocates, on the library block's rule: registered with the code
+    // that raises them. TX-P8 M1 builds the recipe, the payload and the unit writer, and those
+    // can refuse a measure nobody registered (`E489`) and decline to persist a value whose
+    // scope has nothing to ground it on (`W483`). The refusals that need a measure — lossy
+    // texts, a missing class policy, an undated scope, a compressor window, a small sample —
+    // arrive with the measures, in M2 to M6. `E486` is withdrawn in the RFC and stays unused.
+    Measure => {
+        W483 = "SMY-W483", Warn,  "A measure was computed but not persisted: its scope has no basis to ground a derived unit";
+        E489 = "SMY-E489", Error, "Recipe incompatible: an unknown measure id or version, or inputs that cannot be compared";
     }
 }
 
@@ -773,9 +786,14 @@ mod tests {
     /// dossier it was given. `W417` sits in the query block although its number is in the
     /// library range, because the ambiguity is the dossier's: the library resolves a name, and
     /// only a question needs that name to be one thing.
+    ///
+    /// 105 with `SMY-W483` and `SMY-E489` in TX-P8 M1 (SMYSL-2.6), in an eleventh group,
+    /// `Measure`: the two of the RFC's ten that a recipe, a payload writer and a unit writer can
+    /// raise before any measure exists. The other seven are refusals a measure makes, and wait
+    /// for the measures.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 103);
+        assert_eq!(Code::ALL.len(), 105);
     }
 
     #[test]
@@ -786,7 +804,7 @@ mod tests {
                 "group {g} has no codes"
             );
         }
-        assert_eq!(Group::ALL.len(), 10);
+        assert_eq!(Group::ALL.len(), 11);
     }
 
     #[test]

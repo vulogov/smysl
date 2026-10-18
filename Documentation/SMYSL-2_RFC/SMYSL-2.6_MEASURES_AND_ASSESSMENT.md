@@ -214,6 +214,14 @@ The probes are evidence, not tests; §5 turns each into a test.
    empty. The scope itself is pinned by a digest in the payload (§3.6). Catalog units are `cited`,
    so rule M holds. A scope with no basis (a store with no manifests, such as the eval fixtures)
    gets its value printed and **not persisted** (`SMY-W483`). OQ-55 asks whether this is right.
+   *As built (TX-P8 M1):* the basis is **the scope saved as an `x.query/saved` unit**, OQ-55's
+   own alternative. The catalog units this rule names do not exist: SMYSL-2.4 keeps a manifest
+   as a record identified by a `Mid`, which is not a unit and cannot be a ground, and nothing
+   writes `x.text/meta`, so the rule as written would persist no measure at all. A scope is an
+   sq query, and TX-P8 step 1 made a query that ran into a `cited` unit with an `answers` edge
+   to each unit it answered with; `smysl_measure::resolve` runs the scope and builds it, and its
+   uid is the measure's one ground. `W483` keeps its meaning for a scope given as a set rather
+   than a query (`Resolved::of_uids`), which has a digest and nothing to ground on.
 2. **Not-run is reported, not persisted.** A unit asserts a value. A refusal is a diagnostic and a
    line in the report, never a unit with an empty value.
 3. **`T3` per manifest.** §2.9 shows the estimator is 9–23% low at n ≤ 32k symbols and converges
@@ -832,13 +840,37 @@ Requires SMYSL-2.4 TX-P1/P2 (parts, analyzers) and SMYSL-2.5 TX-P6 (`sq` scopes)
 
 | step | work | exit test |
 |---|---|---|
-| M1 | crate skeleton; `Recipe`, `Num`, `Outcome`, payload writer, scope digest, basis rule, `rng.rs`, `num.rs`; purity entry; clippy rule; diagnostics `E480`–`E489` registered | golden payload bytes for a hand-built `Value`; `cargo xtask check-purity` passes with the crate listed; registry count test updated and green |
+| M1 | crate skeleton; `Recipe`, `Num`, `Outcome`, payload writer, scope digest, basis rule, `rng.rs`, `num.rs`; purity entry; clippy rule; diagnostics `E480`–`E489` registered | golden payload bytes for a hand-built `Value`; `cargo xtask check-purity` passes with the crate listed; registry count test updated and green — **done 2026-10-18**, below |
 | M2 | T1, T4, `boot.rs` | §5.1 T1 and T4 rows; bootstrap seed tests |
 | M3 | T2, T6 with pinned brotli | §5.1 T2 and T6 rows; peak memory of one q11 lgwin 24 compression recorded |
 | M4 | T3: SA-IS, LCP, LPF, both estimator forms, calibration fixture | LPF equals naive on 10⁴ random inputs; calibration goldens |
 | M5 | T5 with exact leave-one-out | hand-computed and property tests |
 | M6 | T7 | §5.1 T7 rows |
 | M7 | `measure` command for T-ids, `--seed-check`, `--dry-run`, three CLI gates updated | cross-platform matrix job green; `measure T1,T2,T3,T4 --scope 'from texts where collection = bible'` on the 5-Bible fixture adds no unit on a second run; GE-T6 pure arm (T2, T3) reported |
+
+*M1, done 2026-10-18.* `crates/smysl-measure`: `Recipe` with every §3.4 field and its canonical
+CBOR and hash; `Num`'s three integer shapes, `Value`, `Outcome`, `Refusal` and `to_payload`;
+`num` (`libm` wrappers, `q20` as `round_ties_even(v · 2²⁰)` refusing non-finite input, decimal
+rendering in integer arithmetic for the gist); `rng` (ChaCha20 keyed as §3.5 says, the seed as
+eight little-endian bytes, `index` as `(x · n) >> 64`); `scope` (`digest`, `resolve`, `Basis`);
+the `Measure` trait, an empty `ALL`, `find`, `run_with` and `to_unit`. The exit holds:
+`tests/payload.rs` pins the recipe CBOR and hash, the payload bytes of a hand-built value
+holding every shape, a whole unit's uid, six `libm` results by bit pattern and the
+generator's first draws in `fixtures/measure/golden.tsv`, language-free for the ports;
+`check-purity` passes with ten pure crates and a crate-specific scan; the registry is 105.
+Five decisions, each recorded where it applies. **The basis is the saved scope query**
+(§3.1, OQ-55), decided when M1 found that the catalog units the rule names do not exist.
+**Two codes of ten are registered**, `W483` and `E489`, on the registry's standing rule that a
+code is registered with the code that raises it; the other seven are refusals a measure makes
+and arrive with the measures, in an eleventh group, `Measure`. **No `HashMap` at all** rather
+than a lint against iterating one: the crate has no need of one yet, and absence is a check
+that cannot be argued with; the source scan enforces it with the clock, the environment and
+unseeded generators. **Every field with a value is written to the recipe, defaults
+included**, and an absent optional is not written as a null, so a default that changes later
+changes the hash and an optional field added later does not. **`brotli` is not a dependency
+yet**: it is T2's, in M3, and a pinned dependency nothing calls would be a pin nobody tests.
+The clippy rule is `crates/smysl-measure/clippy.toml`, and a planted `f64::ln` fails `make
+lint` with it.
 
 ### TX-P9 (graph, channel, dialogue, assessment)
 
@@ -902,7 +934,7 @@ excluded), `SMY-E030`/`SMY-E033` (rules M and T; never expected on measure units
 |---|---|
 | OQ-2 (draft 3) | Cross-language lemma statistics: this RFC ships stem-level with a `stem-level` flag. |
 | OQ-7 (draft 3; D-7) | `strict` normative: assumed, so A2/C1 counts agree across implementations. |
-| OQ-55 | Status and grounds of measure units. This RFC: `derived`, grounded on the catalog units of the texts in scope, scope pinned by digest. Alternatives: ground on a saved-query unit (`x.query/v1`), or treat a measure as an instrument reading (`measured`, `Op::Imported`, source = recipe hash), which rule T permits but which says "observed in the world" about a computation. |
+| OQ-55 | Status and grounds of measure units. This RFC: `derived`, grounded on the catalog units of the texts in scope, scope pinned by digest. Alternatives: ground on a saved-query unit (`x.query/v1`), or treat a measure as an instrument reading (`measured`, `Op::Imported`, source = recipe hash), which rule T permits but which says "observed in the world" about a computation. **Decided in TX-P8 M1: the saved-query unit.** The catalog units do not exist — SMYSL-2.4 keeps manifests as records, and a record cannot be a ground — and the saved scope query is `cited`, holds the scope's text and result hash, and points at every unit in scope; `derived` and the digest are unchanged (§3.1, §6 M1). |
 | OQ-56 | Payload numbers: integers, `[num, den]` ratios and `{q20}` fixed point, under `measure:*` keys. Should the layout be declared as an extension schema (`x.measure/v1`, FC-9 fields) in SMYSL-2.3 so other implementations read it, or stay a tool convention? |
 | OQ-57 | Bootstrap generator: ChaCha20 as `rand_chacha` lays it out, or a generator specified in full in SMYSL-2.3 (SplitMix64 is ten lines in any language) so the Python, JavaScript and Go implementations reproduce intervals without porting a crate's internals? |
 | OQ-58 | Class identity across time. Class ids are smallest member uids and move when evidence grows. Membership-overlap correspondence (used for K4 and A3) can map one class to two. Report splits and merges explicitly, or pin states to a policy snapshot? |

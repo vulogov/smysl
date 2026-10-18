@@ -1,0 +1,45 @@
+[package]
+name        = "smysl-measure"
+description = "smysl measures (RFC SMYSL-2.6): recipes, exact payload numbers and derived data units"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+
+[dependencies]
+# Units, payload CBOR, hashing and the diagnostic registry.
+smysl-core = { workspace = true }
+# `Store`, which a measure reads and a result is appended to.
+smysl-graph = { workspace = true }
+# A measure's scope is an sq scope (SMYSL-2.6 §3.4), resolved by the planner, and its basis is
+# that scope saved as an `x.query/saved` unit (OQ-55, decided in TX-P8 M1). Both crates are on
+# the purity gate's list, so the pure tree gains no runtime.
+smysl-query = { workspace = true }
+# Every transcendental a result depends on goes through `libm`, never the platform's: glibc's
+# `ln` and this crate disagree in the last bit for 2% of inputs (SMYSL-2.6 §2.9), and a last bit
+# is enough to move a fixed-point payload number. Pinned exactly, with `arch` intrinsics off,
+# because an upgrade that changes one result is a new measure version, never a silent one.
+libm = { version = "=0.2.16", default-features = false }
+# The bootstrap generator (§3.5). `rand_core` without `os_rng` brings no `getrandom`, so this
+# crate has no way to draw an unseeded number — which is the property, not a side effect.
+rand_chacha = { version = "0.9", default-features = false }
+rand_core   = { version = "0.9", default-features = false }
+
+[dev-dependencies]
+# Rule M over a written result: the tests append a measure unit and its basis and check the
+# store, which is the only way to show that `SMY-E030` is never raised on one (SMYSL-2.6 §8).
+smysl-check = { workspace = true }
+
+# The M1 exit: golden payload bytes for a hand-built value, and the determinism rules the RFC
+# makes checkable without a measure — libm outputs pinned by bit pattern, a generator stream
+# pinned by value, and a source scan for what §3.5 and §4.5 forbid.
+[[test]]
+name = "payload"
