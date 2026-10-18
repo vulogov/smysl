@@ -32,6 +32,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloc-no-stdlib"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc7bb162ec39d46ab1ca8c77bf72e890535becd1751bb45f64c597edb4c8c6b3"
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -174,6 +180,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1cbd8ffdfb7b4c2ff038726178a780a94f90525ed0ad264c0afaa75dd8c18a64"
 dependencies = [
  "fxhash",
+]
+
+[[package]]
+name = "brotli"
+version = "8.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5cc91aac060a7a1e25823bdccbfb6af1875b88f17c6daac97894eed8207166b3"
+dependencies = [
+ "alloc-no-stdlib",
+ "brotli-decompressor",
+]
+
+[[package]]
+name = "brotli-decompressor"
+version = "5.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a32acac15fe1967bc3986b2a6347dffc965602354ea6f450ad07e8bfd253583"
+dependencies = [
+ "alloc-no-stdlib",
 ]
 
 [[package]]
@@ -1813,6 +1838,7 @@ dependencies = [
 name = "smysl-measure"
 version = "1.10.0"
 dependencies = [
+ "brotli",
  "libm",
  "rand_chacha",
  "rand_core",
@@ -1821,6 +1847,7 @@ dependencies = [
  "smysl-graph",
  "smysl-query",
  "smysl-text",
+ "unicode-normalization",
 ]
 
 [[package]]

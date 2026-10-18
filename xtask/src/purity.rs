@@ -168,7 +168,9 @@ const PURE_CRATES: &[&str] = &[
     // and no socket, but nothing that could make two runs of one recipe differ — no clock, no
     // environment, no unseeded randomness (§4.5). Its three external dependencies, `libm`,
     // `rand_chacha` and `rand_core` with default features off, bring none of `NEVER`, and
-    // `CRATE_SYMBOLS` below adds the crate's own list to the source scan.
+    // `CRATE_SYMBOLS` below adds the crate's own list to the source scan. M3 adds `brotli`
+    // without `std`, which brings `alloc-no-stdlib` and `brotli-decompressor` and neither a
+    // runtime nor `cc`, and `unicode-normalization`, already here through `smysl-text`.
     "smysl-measure",
 ];
 

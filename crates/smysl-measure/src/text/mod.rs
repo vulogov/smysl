@@ -36,6 +36,13 @@
 //! A type's id is its rank among the scope's types in byte order of the term, so "term-id
 //! order" (§3.5) is a property of the vocabulary and not of the order the text happened to
 //! introduce it in.
+//!
+//! # Characters
+//!
+//! T2 and T6 compress characters, not terms, so a corpus keeps each expression's segments as
+//! text too ([`Doc`]), in NFC: a library's parts are NFC, and NFC is not closed under slicing,
+//! so a verse cut out of a part is normalised again. At `window:<n>` the characters are the
+//! parts', since a window of terms has no characters of its own.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -46,10 +53,13 @@ use smysl_core::LibError;
 use smysl_query::ast::{Expr, Name, ScopeItem};
 use smysl_text::analyze::{self, Chain};
 use smysl_text::Library;
+use unicode_normalization::{is_nfc, UnicodeNormalization};
 
 use crate::recipe::Level;
 
+pub mod compress;
 pub mod entropy;
+pub mod ncd;
 pub mod zipf_heaps;
 
 /// Which of an analyzer's two streams is counted.
@@ -244,6 +254,39 @@ fn name_of(n: &Name) -> &str {
     }
 }
 
+/// One expression's characters at the recipe's level, NFC, empty segments dropped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Doc {
+    pub alias: String,
+    pub segments: Vec<String>,
+}
+
+impl Doc {
+    pub fn new(alias: impl Into<String>, segments: Vec<String>) -> Doc {
+        Doc {
+            alias: alias.into(),
+            segments: segments
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| nfc(s))
+                .collect(),
+        }
+    }
+
+    /// The text a compressor reads: the segments joined by `\n`.
+    pub fn text(&self) -> String {
+        self.segments.join("\n")
+    }
+}
+
+fn nfc(s: &str) -> String {
+    if is_nfc(s) {
+        s.to_string()
+    } else {
+        s.nfc().collect()
+    }
+}
+
 /// A text scope, read: segments of term ids under one analyzer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -264,6 +307,8 @@ pub struct Corpus {
     pub texts: Vec<String>,
     /// Whether a manifest in scope is lossy.
     pub lossy: bool,
+    /// Each expression's characters, in alias order; none for a corpus built from terms.
+    pub docs: Vec<Doc>,
 }
 
 impl Corpus {
@@ -283,9 +328,33 @@ impl Corpus {
             BTreeSet::new(),
             Vec::new(),
             false,
+            Vec::new(),
         )
     }
 
+    /// A corpus from texts already split into segments — a harness's characters, read under
+    /// the plain chain's surface stream at `part`, one segment a part. Like
+    /// [`Corpus::from_terms`] it has no parts and its digest is the digest of nothing.
+    pub fn from_docs(docs: Vec<Doc>) -> Corpus {
+        let chain = Chain::plain();
+        let segments = docs
+            .iter()
+            .flat_map(|d| d.segments.iter().map(|s| chain.surface(s)))
+            .collect();
+        let texts = docs.iter().map(|d| d.alias.clone()).collect();
+        Corpus::build(
+            analyzer_id(chain.id(), Stream::Surface),
+            Stream::Surface,
+            Level::Part,
+            segments,
+            BTreeSet::new(),
+            texts,
+            false,
+            docs,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn build(
         analyzer: String,
         stream: Stream,
@@ -294,6 +363,7 @@ impl Corpus {
         tids: BTreeSet<Tid>,
         texts: Vec<String>,
         lossy: bool,
+        docs: Vec<Doc>,
     ) -> Corpus {
         let vocab: BTreeSet<&String> = segments.iter().flatten().collect();
         let ids: BTreeMap<&String, u32> = vocab
@@ -317,6 +387,7 @@ impl Corpus {
             tids,
             texts,
             lossy,
+            docs,
         }
     }
 
@@ -383,12 +454,17 @@ impl Corpus {
         let mut tids = BTreeSet::new();
         let mut aliases: Vec<String> = Vec::new();
         let mut window: Vec<String> = Vec::new();
+        let mut docs: Vec<Doc> = Vec::new();
+        let mut chars: Vec<String> = Vec::new();
         let mut last: Option<&str> = None;
         for (t, tid, _lang) in &parts {
             if last != Some(t.alias.as_str()) {
                 // A window does not run across two expressions: they are two texts.
                 if !window.is_empty() {
                     segments.push(std::mem::take(&mut window));
+                }
+                if let Some(prev) = last {
+                    docs.push(Doc::new(prev, std::mem::take(&mut chars)));
                 }
                 aliases.push(t.alias.clone());
                 last = Some(t.alias.as_str());
@@ -399,8 +475,12 @@ impl Corpus {
                 id: tid.canonical(),
             })?;
             match level {
-                Level::Part => segments.push(split(&text)),
+                Level::Part => {
+                    segments.push(split(&text));
+                    chars.push(text);
+                }
                 Level::Window(n) => {
+                    chars.push(text.clone());
                     for term in split(&text) {
                         window.push(term);
                         if window.len() == n as usize {
@@ -418,12 +498,16 @@ impl Corpus {
                                     id: format!("{} ({}..{})", tid.canonical(), row.start, row.end),
                                 })?;
                         segments.push(split(s));
+                        chars.push(s.to_string());
                     }
                 }
             }
         }
         if !window.is_empty() {
             segments.push(window);
+        }
+        if let Some(prev) = last {
+            docs.push(Doc::new(prev, chars));
         }
         Ok(Corpus::build(
             analyzer_id(chain.id(), stream),
@@ -433,6 +517,7 @@ impl Corpus {
             tids,
             aliases,
             lossy,
+            docs,
         ))
     }
 

@@ -320,7 +320,7 @@ RFC found the measures depend on:
 | `min:n` | int | smallest sample the estimator accepts (`SMY-W485`) | per measure, §3.7 |
 | `seed` | int | bootstrap seed | 0 |
 | `boot:b` | int | bootstrap replicates | 1000 |
-| `codec` | text | encoder and version, `brotli-rs/8.0.4 q11 w24` | pinned |
+| `codec` | text | encoder and version, `brotli-rs/8.0.4 q11 w24`; *as built (M3)*, with the encoder's build, `brotli-rs/8.0.4 no-std q11 w24` (§3.7 T2) | pinned |
 | `params` | map | measure-specific (n-gram order, budgets, λ) | per measure |
 
 The **recipe hash** is `hash_bytes` of the canonical CBOR of this map. It goes into the
@@ -439,6 +439,41 @@ counts, `p̂ᵥ = cᵥ/N`. Logs are base 2 unless written `ln`.
 - `miniz_oxide` and `lz4_flex` are excluded (draft 3 §13.2: windows of 32 KiB and 64 KiB).
 - Cost: measured ~0.5 MB/s on English text (§2.9), O(window) memory, ~ 200 MB peak for q11 lgwin 24
   (unverified; measured in M3).
+- *As built (M3).* **The codec is brotli without its `std` feature**, and the build is in the
+  codec's name, `brotli-rs/8.0.4 no-std q11 w24`, because it changes the output. With `std` the
+  encoder's cost model takes `f32::log2` from the platform for every count past 255; without
+  it the same function is a table and shifts, and the encoder's remaining floating point is
+  IEEE `f32` arithmetic, which every target rounds alike. Over 29 of the repository's own files
+  the two builds disagree on 24, by −9 to +176 bytes (0.17% at most), so a platform `log2` one
+  bit off would be enough to move a T2 value — rule D (§3.5) is what rules `std` out. The
+  allocator `std` would have brought is twenty lines of safe code (`text::compress::Heap`), and
+  the input goes to the encoder whole, in one `FINISH`, so a length cannot depend on how a
+  reader chunked it (with `std`, chunked and one-shot agreed on all 29). A `brotli` with `std`
+  anywhere in a build would switch the encoder by feature unification; the codec's lengths for
+  the four slice files are pinned in `fixtures/measure/compress.tsv`, so that would fail a
+  test rather than move a value. **T2 is the codec's rate, not the source's.** Brotli codes a
+  literal with a prefix code under a context, and for UTF-8 the context is the *class* of the
+  previous two bytes — lowercase vowel, lowercase consonant, uppercase, digit, space, a few
+  punctuation classes — not the bytes. An i.i.d. source over 2, 16 and 256 symbols reads
+  1.00026, 4.00030 and 8.00048 bits/char (§5.1's row, 0.5%); a first-order chain over sixteen
+  letters, each moving to one of eight with dyadic probabilities, rate 2.75, reads 3.75, because
+  the letters are one class; and a chain of the same rate over eight characters in eight
+  classes reads 2.7517. A prefix code reaches a rate only when the probabilities are powers of
+  ½, and very skewed rows cost more even under distinct contexts, LZ copies winning the parse:
+  ½, ¼, ⅛ … at 1.98 bits reads 2.31. §5.1's Markov row
+  is therefore the chain brotli can model, which shows T2 reads a rate when the codec has the
+  model and says nothing about the gap when it has not; GE-T6 compares T2 across texts, where
+  the codec is the same for both. **`min:n` is in characters, 1**: §3.7 gives T2 none, and a
+  rate over no characters is 0/0. A corpus also keeps each expression's segments as text
+  (`text::Doc`), NFC again since NFC is not closed under slicing; at `window:<n>` the
+  characters are the parts'. Reported: `bits/char`, `bits/word`; `n` holds `chars`, `bytes`,
+  `words`, `compressed`, `texts`, `segments`, `pieces`; a text in more than one piece is
+  flagged `windowed`. **Peak memory** of one compression, measured with `examples/codec_peak`
+  under `/usr/bin/time -l`, release, this machine: **597 MB** for a full window (16 MiB − 16) of
+  words drawn from a seeded vocabulary, 110 MB at 4 MiB and 42 MB at 1 MiB, and 75 MB for 16
+  MiB of this directory's RFCs repeated — so the peak follows what the text is as well as its
+  length, and the RFC's 200 MB was low by three for the worst case. Throughput was 1.3 MB/s on
+  the words and 15 MB/s on the repeated text, both above §2.9's 0.5 MB/s.
 
 **T3 — match-length entropy rate** (Kontoyiannis, Algoet, Suhov, Wyner 1998, *IEEE Trans. IT* 44(3)).
 - `Λᵢ` = 1 + the length of the longest prefix of `x[i..]` that also starts at some `j < i`
@@ -506,6 +541,20 @@ counts, `p̂ᵥ = cᵥ/N`. Logs are base 2 unless written `ln`.
   ties broken by label order. Lengths are integers, so pairs run in parallel.
 - Cost: 66 books → 2,145 pairs × ~130 KB ≈ 280 MB compressed ≈ 9 min on one core at the measured
   rate; linear speed-up across cores.
+- *As built (M3).* **The grouping is the scope's expressions**, in alias order: a library names
+  a book as an alias (`kjv/08-rut`), so a scope of one Bible's books is a matrix over books,
+  and speakers wait for the measures over messages. `xy` is the two texts joined by `\n`, as a
+  text's own segments are. The window guard runs in `admit`, on the two longest texts, so a
+  refused pair costs no compression. NCD is a ratio of integers that can fall a little below 0
+  for a compressor that is not normal and is stored as `q20` rather than as a ratio, which is
+  unsigned. **The clustering is a series, `linkage`**: four numbers a merge, as SciPy writes
+  one — two nodes, smaller id first; the height; the size — with leaves `0..n` in alias order,
+  the order of the `ncd:<a>|<b>` value keys, and the k-th merge node `n + k`. Ties go to the
+  pair whose labels (smallest leaves) come first, by scanning in label order for the first
+  strict minimum; distances update by Lance–Williams. `min:n` is in texts, 2. Runs are
+  sequential for now; the parallelism §3.5 allows is M7's, with a worst-case 600 MB a worker
+  (T2's peak) to plan for. Over the four slice books (KJV and Synodal, Ruth and Jude) the books
+  of each Bible merge first, at 0.966 and 0.971, and every cross-language pair is above 1.
 
 **T7 — divergences and collocations.**
 - Jensen–Shannon: `JSD(P,Q) = H(M) − ½H(P) − ½H(Q)`, `M = ½(P+Q)`, bits, in [0, 1]; `√JSD` (a
@@ -754,7 +803,7 @@ smysl assess diff  <state-a> <state-b>
 smysl-core = { workspace = true }   smysl-graph = { workspace = true }
 smysl-pack = { workspace = true }   smysl-text  = { workspace = true }   # SMYSL-2.4
 smysl-query = { workspace = true }                                      # SMYSL-2.5
-brotli      = { version = "=8.0.4", default-features = false, features = ["std"] }
+brotli      = { version = "=8.0.4", default-features = false }   # as built (M3): no `std`, §3.7 T2
 libm        = { version = "=0.2.16", default-features = false }
 rand_chacha = { version = "0.9", default-features = false }
 rand_core   = { version = "0.9", default-features = false }
@@ -781,7 +830,7 @@ Generated in-test from a fixed seed with the crate's own generator, so fixtures 
 | T1 i.i.d. | uniform over k ∈ {2, 16, 256}, n = 10⁶ | `|Ĥ_MM − log₂k| < 10⁻³`; plug-in below it by ≈ (k−1)/(2n ln 2) |
 | T1 degenerate | one repeated term | Ĥ = 0 exactly; Miller–Madow 0 |
 | T2 i.i.d. | as above | within 0.5% of log₂k (measured 0.03%, §2.9) |
-| T2 Markov | first-order chain with known rate | within 2% |
+| T2 Markov | first-order chain with known rate | within 2%; *as built (M3)*, a chain brotli's literal contexts can model — eight characters in eight context classes, dyadic rows of rate 2.75 — since over letters of one class brotli does not see the chain (§3.7 T2) |
 | T3 reference | random inputs ≤ 2,000 symbols | LPF-based Λᵢ equal to the naive O(n²) definition, element by element (property test, 10⁴ cases) |
 | T3 calibration | i.i.d. H = 1, 4, 6; n = 2k, 8k, 32k | bit-exact golden payloads; values reproduce §2.9's table to 3 decimals |
 | T4 Zipf | terms drawn from a discrete power law with α = 2.0, 2.5 | α̂ within the bootstrap CI; CI covers α in ≥ 90 of 100 seeds (slow test, `--ignored`) |
@@ -873,7 +922,7 @@ Requires SMYSL-2.4 TX-P1/P2 (parts, analyzers) and SMYSL-2.5 TX-P6 (`sq` scopes)
 |---|---|---|
 | M1 | crate skeleton; `Recipe`, `Num`, `Outcome`, payload writer, scope digest, basis rule, `rng.rs`, `num.rs`; purity entry; clippy rule; diagnostics `E480`–`E489` registered | golden payload bytes for a hand-built `Value`; `cargo xtask check-purity` passes with the crate listed; registry count test updated and green — **done 2026-10-18**, below |
 | M2 | T1, T4, `boot.rs` | §5.1 T1 and T4 rows; bootstrap seed tests — **done 2026-10-18**, below |
-| M3 | T2, T6 with pinned brotli | §5.1 T2 and T6 rows; peak memory of one q11 lgwin 24 compression recorded |
+| M3 | T2, T6 with pinned brotli | §5.1 T2 and T6 rows; peak memory of one q11 lgwin 24 compression recorded — **done 2026-10-18**, below |
 | M4 | T3: SA-IS, LCP, LPF, both estimator forms, calibration fixture | LPF equals naive on 10⁴ random inputs; calibration goldens |
 | M5 | T5 with exact leave-one-out | hand-computed and property tests |
 | M6 | T7 | §5.1 T7 rows |
@@ -929,6 +978,28 @@ the estimate it was for; and **Heaps' fit starts at √N**, because §5.1's own 
 estimates — [7.510, 7.726] around Ĥ = 7.813 — which the flag `ci-off-estimate` says and OQ-89
 asks about.
 
+*M3, done 2026-10-18.* T2 and T6, the two that compress: `text::compress` (the codec, brotli
+`=8.0.4` without `std` and with the crate's own allocator; `pieces` at segment boundaries; T2) and
+`text::ncd` (T6, the window guard and average linkage), over the characters a corpus now keeps
+beside its terms (`text::Doc`). The exit holds: `tests/compress.rs` runs §5.1's T2 rows (i.i.d.
+over 2, 16 and 256 symbols within 0.5% of log₂ k — 0.03% at most — and a first-order chain
+within 2%, 0.06%), T6's (NCD(x, x) < 0.1 and NCD(x, noise) > 0.9 with one value a pair, the
+copies merging first; two 9 MiB texts refused with `SMY-E484`), a stream decoded back to its
+input, a text past the window read in two pieces, and ties in the clustering. The peak memory
+of one q11 lgwin 24 compression is recorded in §3.7 T2: 597 MB at a full window, measured with
+`examples/codec_peak`. T2 over the KJV's Ruth and Jude at verse level (2.7038 bits/char,
+14.1724 bits/word), T6 over the four slice books, and the codec's lengths for the eight slice
+files are pinned in `fixtures/measure/compress.tsv`, language-free. `SMY-E484` is registered,
+and the registry is 109. Three findings, recorded in §3.7: **the codec is brotli without
+`std`**, because with it the encoder's cost model reads the platform's `log2` and 24 of 29
+files changed length between the two builds; **T2 is the codec's rate**, since brotli's
+contexts for UTF-8 are classes of characters, so §5.1's Markov row is a chain the codec can
+model; and **the peak is three times the estimate**, and follows the text as well as its length.
+`brotli`'s dev and test profile is optimised (`[profile.dev.package.brotli]`), which changes no
+output and keeps `make test` in seconds. One thing is owed to M7: `min:n` is in each measure's
+own unit — tokens for T1 and T4, characters for T2, texts for T6 — and a base recipe sets it
+for every id in a run, so `measure` must scope it per id.
+
 ### TX-P9 (graph, channel, dialogue, assessment)
 
 Requires SMYSL-2.4 TX-P5 (ingest over text) and TX-P7 (classes); SMYSL-2.3's x.text/v1 holder,
@@ -956,7 +1027,7 @@ TX-P9's draft-3 exit tests are GE-T3 and GE-T6; both are listed above.
 | Analyzer dependence | type counts, T1, T4, T7, A1 change with the analyzer and stream; Russian is stem-level | analyzer and stream in the recipe; cross-scope comparisons refused on mismatch (`SMY-E489`); `stem-level` flag |
 | Class-policy dependence | A2, A3, C*, D2–D4, K* move with the policy and with same-as evidence; `component` chains drift | policy mandatory (`SMY-E481`); GE-T5 gates class measures as exploration-only below precision 0.9; states diffed by membership, not id |
 | Extraction instability | graph measures inherit GE-T2's run-to-run variance | GE-T2 runs first; A* reported with run spread where several runs exist |
-| Codec drift | a brotli upgrade changes compressed lengths | exact pin; `codec` in the recipe; an upgrade is a new measure version |
+| Codec drift | a brotli upgrade changes compressed lengths; so does its `std` feature, by the platform's `log2` (M3) | exact pin; `codec` in the recipe, the build included; an upgrade is a new measure version; `std` off, and the codec's lengths for the slice files pinned |
 | Platform maths | transcendentals differ (2% last-bit disagreement measured) | `libm` only, lint, cross-platform job |
 | q11 cost | ~0.5 MB/s; NCD matrices quadratic | integer results parallelise; `--param quality=` is a recipe change, never a silent default |
 | Unit growth | every run writes units | identical reruns deduplicate by uid; `--dry-run`; reports group by recipe hash |

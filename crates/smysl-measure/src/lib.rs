@@ -10,8 +10,9 @@
 //!
 //! **M2 adds the first two measures and what they read**: the text substrate ([`text`] — a
 //! scope's parts as one term stream at the recipe's level), the segment bootstrap ([`boot`]),
-//! T1 ([`text::entropy`]) and T4 ([`text::zipf_heaps`]). T2, T3 and T5 to T7 arrive in M3 to
-//! M6, each as one [`Measure`] in [`ALL`], and M7 is the `measure` command.
+//! T1 ([`text::entropy`]) and T4 ([`text::zipf_heaps`]). **M3 adds the two that compress**,
+//! T2 ([`text::compress`]) and T6 ([`text::ncd`]), over each text's characters. T3, T5 and T7
+//! arrive in M4 to M6, each as one [`Measure`] in [`ALL`], and M7 is the `measure` command.
 //!
 //! # A result as a unit (SMYSL-2.6 §3.6)
 //!
@@ -48,9 +49,11 @@ pub mod text;
 pub use outcome::{gist, to_payload, Ci, Headline, Num, Outcome, Refusal, Value};
 pub use recipe::{Axis, ClassPolicy, Level, Param, Recipe, RecipeError};
 pub use scope::{digest, resolve, Basis, Resolved};
+pub use text::compress::T2;
 pub use text::entropy::T1;
+pub use text::ncd::T6;
 pub use text::zipf_heaps::T4;
-pub use text::{Corpus, Stream, Text, TextError};
+pub use text::{Corpus, Doc, Stream, Text, TextError};
 
 /// Whether a measure calls a model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -129,7 +132,7 @@ pub trait Measure: Sync {
 }
 
 /// Every measure this build has, in report order.
-pub const ALL: &[&dyn Measure] = &[&T1, &T4];
+pub const ALL: &[&dyn Measure] = &[&T1, &T2, &T4, &T6];
 
 /// A measure by id and version, against a registry.
 ///

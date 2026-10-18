@@ -424,7 +424,8 @@ mod tests {
         // 105 with `SMY-W483` and `SMY-E489` (TX-P8 M1), raised by `smysl-measure`'s unit writer
         // and registry, which the facade does not expose until the `measure` command (M7).
         // 108 with `SMY-W408`, `SMY-E480` and `SMY-W485` (TX-P8 M2), raised by T1 and T4.
-        assert_eq!(Code::ALL.len(), 108);
+        // 109 with `SMY-E484` (TX-P8 M3), raised by T6.
+        assert_eq!(Code::ALL.len(), 109);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

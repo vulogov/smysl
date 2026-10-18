@@ -40,6 +40,18 @@ libm = { version = "=0.2.16", default-features = false }
 # crate has no way to draw an unseeded number — which is the property, not a side effect.
 rand_chacha = { version = "0.9", default-features = false }
 rand_core   = { version = "0.9", default-features = false }
+# T2's and T6's compressor (TX-P8 M3), the pure-Rust port, pinned exactly: an upgrade can change
+# a compressed length, so it is a new measure version and a new `codec`, never a silent one.
+# **Without `std`**, and that is a property of the codec rather than a size saving: with `std`
+# the encoder's cost model takes `f32::log2` from the platform for every count past 255, and
+# a cost that differs in the last bit can choose a different block split, so one text could
+# compress to two lengths on two machines. Without it the same function is a table and integer
+# shifts. The allocator `std` would have brought is twenty lines in `text::compress`, safe.
+brotli = { version = "=8.0.4", default-features = false }
+# T2 compresses each text's characters in NFC (§3.7). A library's parts are NFC already, and
+# NFC is not closed under slicing, so a verse cut out of one is normalised again; the crate is
+# already in the pure tree through `smysl-text`.
+unicode-normalization = { workspace = true }
 
 [dev-dependencies]
 # Rule M over a written result: the tests append a measure unit and its basis and check the
@@ -62,3 +74,8 @@ name = "text"
 # §5.1's coverage row for T4, 100 seeds: `--ignored`, as the RFC says, and run in release.
 [[test]]
 name = "coverage"
+
+# The M3 exit: T2 against §5.1's i.i.d. and Markov rows, T6's three rows and the window guard,
+# the stream T2 counts decoded back to its input, and both measures over a library.
+[[test]]
+name = "compress"

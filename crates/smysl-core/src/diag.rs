@@ -370,11 +370,13 @@ registry! {
     // M2 brings three with T1 and T4, the first measures that read a text: `E480` and `W408`
     // for a lossy one, refused or admitted, and `W485` for a sample below the recipe's `min:n`.
     // `W408` is SMYSL-2.0's, filed in the library range and raised only by a measure, so it
-    // sits here with the refusal it is the other half of.
+    // sits here with the refusal it is the other half of. M3 brings `E484` with T6, the pair of
+    // texts too long for the compressor to see both.
     Measure => {
         W408 = "SMY-W408", Warn,  "A measure ran over a lossy text because its recipe admits one";
         E480 = "SMY-E480", Error, "A measure refused a lossy text its recipe does not admit";
         W483 = "SMY-W483", Warn,  "A measure was computed but not persisted: its scope has no basis to ground a derived unit";
+        E484 = "SMY-E484", Error, "A compression distance was refused: the two texts together exceed the compressor's window";
         W485 = "SMY-W485", Warn,  "A measure was not run: its sample is below the recipe's min:n";
         E489 = "SMY-E489", Error, "Recipe incompatible: an unknown measure id or version, or inputs that cannot be compared";
     }
@@ -801,9 +803,12 @@ mod tests {
     ///
     /// 108 with `SMY-W408`, `SMY-E480` and `SMY-W485` in TX-P8 M2, where T1 and T4 read a text
     /// and can refuse a lossy one, admit it under a recipe that says so, or find it too short.
+    ///
+    /// 109 with `SMY-E484` in TX-P8 M3, where T6 refuses a pair of texts longer than the
+    /// compressor's window.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 108);
+        assert_eq!(Code::ALL.len(), 109);
     }
 
     #[test]

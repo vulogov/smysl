@@ -270,3 +270,12 @@ getrandom      = { workspace = true, optional = true }
 # pattern-matching it: machine-readable output that a machine cannot read is the bug
 # being guarded against, so the guard has to be a parser.
 serde_json = { workspace = true }
+
+# T2 and T6 compress at brotli's quality 11, which is about 1 MB/s optimised and some tens of
+# times slower without: §5.1's rows compress millions of characters, and unoptimised they would
+# make `make test` a matter of minutes. Optimising one dependency in the dev and test profiles
+# changes no output — the encoder's arithmetic is integer and IEEE `f32`, which rounds the same
+# at every opt-level — and `fixtures/measure/compress.tsv` pins lengths that would show it if
+# it did.
+[profile.dev.package.brotli]
+opt-level = 3
