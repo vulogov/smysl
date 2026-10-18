@@ -20,14 +20,17 @@
 //! undo that.
 //!
 //! **Which way an arrow points.** `->k` is `trace_via`: it walks what a unit *rests on*, in the
-//! orientation `smysl-graph`'s adjacency gives every kernel kind — for `causes` and `rebuts`
-//! the effect or the rebutted unit rests on the source, so `expand ->causes` from a unit about
-//! the subject reaches its causes and `expand ->rebuts` its rebuttals; for `exemplifies` and
-//! `elaborates` the source rests on the target, so an example of a subject's unit is behind
-//! `<-exemplifies`. §3.13's sketch wrote `expand <-rebuts`, the arrow a reader of the relation
-//! `A --rebuts--> B` expects; under the orientation every traversal in this build shares, that
-//! walks to what the rebutted unit itself rebuts. The slots are written for the orientation
-//! that runs, and the sketch is corrected in §3.13.
+//! orientation `smysl-graph`'s adjacency gives every kernel kind, and for an edge
+//! `A --k--> B` that is from `B` to `A` — the rebutted unit, the effect, the exemplified claim
+//! and the elaborated unit all rest on the edge's source. So `expand ->rebuts` from a unit
+//! about the subject reaches its rebuttals, `->causes` its causes and `->exemplifies` its
+//! examples, and `<-k` walks to what the unit itself rebuts, causes or exemplifies. §3.13's
+//! sketch wrote `expand <-rebuts`, the arrow a reader of `A --rebuts--> B` expects. Step 3
+//! corrected that and then wrote `<-exemplifies`, on the belief that the example kinds point
+//! the other way; nothing caught it, because the step-3 fixture's `exemplifies` slot was meant
+//! to be empty, and GE-T10's first run (step 4) found the slot empty for every question.
+//! `grounds` is not an edge but a field, and `->grounds` walks to a unit's grounds, which is
+//! the same reading: what the unit rests on.
 //!
 //! **What sq/1 cannot say, and what that costs.** A slot defined by an edge — `counter` is
 //! what rebuts the units about the subject — is written `expand ->rebuts depth 1 except

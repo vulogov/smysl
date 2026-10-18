@@ -727,8 +727,10 @@ no version marker is read without a lens and counted (`SMY-W475`). Unit conversi
    The sketch above does not parse under SMYSL-2.9 (a `where` after an `expand`, `desc`) and its
    arrow is the reverse of the one every traversal in this build walks: `->k` is `trace_via`,
    which for `rebuts` and `causes` reaches the source from the target, so a rebuttal is behind
-   `->rebuts` and `<-rebuts` walks to what the rebutted unit itself rebuts. The `except` is
-   OQ-86. The template set `smysl/dossier/1` has eighteen slots and assigns them:
+   `->rebuts` and `<-rebuts` walks to what the rebutted unit itself rebuts. That holds for every
+   edge kind — for `A --k--> B`, `->k` walks from `B` to `A` — so the example slot is
+   `->exemplifies` too; step 3 wrote `<-exemplifies`, and GE-T10's first run found that slot
+   empty for every question (§6 step 4). The `except` is OQ-86. The template set `smysl/dossier/1` has eighteen slots and assigns them:
 
    | intent | slots, in order |
    |---|---|
@@ -1109,7 +1111,7 @@ New `Cmd` rows (phase string = the release that wires them; written here as `<re
 | name | about | purity |
 |---|---|---|
 | `q` | Run an sq query; explain, save, rerun | `Mixed` |
-| `ask` | A dossier for a question; optional model answer | `Mixed` |
+| `ask` | Experimental (GE-T10, TX-P8 step 4): a dossier for a question; optional model answer | `Mixed` |
 | `schema` | Show schema revisions; check the naming rule and lens totality | `Pure` |
 | `migrate` | Re-derive units under a newer revision; staged | `Mixed` |
 
@@ -1255,6 +1257,11 @@ decode must report) and `sq_parse.rs` (never panics; accepted text re-prints and
   5 languages, expert-filled slots as uid sets in `fixtures/dossier/gold/`; reports slot
   precision and recall per intent and slot. Kill criterion from draft 3 §23: precision < 0.8 for
   *definition* or *counter-evidence* keeps `ask` out of defaults.
+  *As built (TX-P8 step 4)* the harness is **not** ignored: it is pure, needs no provider and
+  runs in under a second, so it runs on every `make test` and pins the figures §6 records, as
+  GE-T11's does. The gold is labels, not uids, because a uid is a hash of the unit and a label
+  survives an edit to a gist; it is single-hand, not expert-filled (§6 step 4), and
+  `SMYSL_GE_T10_{CORPUS,QUESTIONS,GOLD,SUBJECTS,OUT}` take somebody else's without a code change.
 
 ### 5.6 NL front end (GE-T12)
 
@@ -1490,6 +1497,93 @@ Each step has an exit test. Steps within a phase are ordered.
    with `q --rerun`, and `E477` is raised by `--templates` until a whole-dossier rerun has a set
    id to read back; and a `Classifier` port (OQ-22), which stays model-dependent and unbuilt.
 4. GE-T10 run. *Exit:* draft 3 TX-P8 exit (GE-T10 numbers recorded; kill criterion applied).
+   *Done 2026-10-17.* `crates/smysl-query/tests/ge_t10.rs` over `fixtures/dossier/gold/`: ten
+   subjects from the history of medicine and chemistry (169 units, each subject named once per
+   spelling in the five tier-1 languages), thirty questions over all eight intents each asked in
+   all five languages — 150 rows — and gold for the 118 (question, slot) pairs the intents fill.
+   **The gold is single-hand.** §5.5 asks for expert-filled slots and the project has no
+   independent coders, so one hand wrote corpus, questions and gold, after the templates, to
+   criteria stated at the head of `slots.tsv` that select by what a unit *says* rather than by
+   its kind or edges; the corpus plants the cases where those come apart and marks each. The
+   figures measure the templates against one careful reading, not against an expert's, and the
+   harness takes an expert's set through five environment variables when one exists.
+
+   The harness measures three things apart, because one pooled figure would not say where a
+   dossier went wrong. *The slots alone* — each question once, gold intent given, subject named
+   in English — micro-averaged over (question, slot) pairs:
+
+   | slot | P | R | | slot | P | R |
+   |---|---|---|---|---|---|---|
+   | definition | 1.000 | 1.000 | | introduction | 0.636 | 1.000 |
+   | characteristic | 0.554 | 1.000 | | revision | — | 0.000 |
+   | exemplifies | 1.000 | 0.800 | | location | 1.000 | 0.875 |
+   | **counter** | **0.750** | 0.750 | | related | 1.000 | 1.000 |
+   | open-question | 1.000 | 1.000 | | dependent | 1.000 | 0.833 |
+   | cause | 1.000 | 0.667 | | contrast | 1.000 | 1.000 |
+   | evidence | 0.667 | 0.889 | | reported | 0.636 | 1.000 |
+   | hypothesis | 1.000 | 1.000 | | holder | 1.000 | 1.000 |
+   | support | 1.000 | 1.000 | | stance | 1.000 | 0.667 |
+
+   All slots 0.774 / 0.890. *End to end*, as typed with no `--lang`: en 0.774 / 0.890, de
+   0.728 / 0.652, es 0.770 / 0.834, fr 0.767 / 0.818, ru 0.773 / 0.751. *The front* — intent
+   right, subject found — en 30 / 30 and 30 / 30, de 23 and 22, es 27 and 27, fr 26 and 26, ru
+   29 and 23.
+
+   **The kill criterion fires, on counter-evidence: 0.750 against 0.8.** *Definition* is 1.000.
+   Applied as the user chose: this build has no tier of commands built but not offered, so `ask`
+   is labelled *Experimental* where it is listed, and every run says so on stderr with the
+   figure (`ASK_EXPERIMENTAL` in `src/main.rs`); stdout, which a script reads, is unchanged.
+   The harness asserts the criterion still fires, so lifting the label is a recorded act. What
+   fires it is worth stating exactly, because it is not what OQ-86 predicted. Counter's
+   precision by intent is define 0.909, compare 1.000, verify 0.667, explain 0.500; of its six
+   false positives, four are **rebuttals of a claim the question did not ask about** — a verify
+   or explain slot binds `$subject` and nothing of what was asked of it, so "is scurvy cured by
+   citrus" collects the rebuttal of "scurvy strikes long voyages" (OQ-88) — and two are a
+   **rebuttal of a superseded account**, which the walk reaches from the old version before the
+   supersession pass replaces it (OQ-87). OQ-86 costs recall, not precision: the six counter
+   units it loses are each a rebuttal naming the subject, and with the cause, example and
+   dependent it also loses, eleven gold units leave their slot and seven reappear in
+   *characteristic*. So the grammar change OQ-86 weighs would not lift the criterion, and
+   binding what was asked would.
+
+   *Characteristic* is the weakest slot (0.554) and is not under the criterion: of its 29 false
+   positives, 14 are reported speech or a holder's stance (the slot takes every claim about the
+   subject, including "his colleagues said Semmelweis had gone mad"), 7 are OQ-86's, 5 are
+   passing mentions and 3 are mentions in another sense. *Revision* is structurally empty: a
+   replaced account is hidden under the current lens and, under `--all-versions`, names the
+   subject and is removed by the `except` — sq/1 has no way to select a superseded unit (OQ-87).
+   *Location* keeps twelve of fourteen visible mentions (the `limit 12`, planted) and hides the
+   superseded one. *Stance* misses a holder's claim that has no `text:mode`, since `!= reported`
+   is never true of an absent field (planted).
+
+   **The front's losses are each named in the report.** Of 150 questions the intent was right
+   for 135 and the subject found for 128, and the 22 lost fall into four kinds: a comma after the rule's verb (`wer sagte,`,
+   `wer behauptet,`, `кто утверждает,` — five), a contraction the table does not spell (`vom`,
+   `del`, `du` — eight), a plural verb (`wo werden … erwähnt`, `woher kommen` — two), and an
+   inflected subject (`холеры`, `цингой`, `цингу`, `миазмов`, `флогистона`, `Дженнера`,
+   `Jenners` — seven), which the subject finder cannot meet without morphology. None was
+   rephrased to resolve and none of the table was changed after the run: a fix measured on the
+   questions that found it is a fix measured in-sample, so they are owed to a follow-up with
+   fresh questions.
+
+   **Five findings, two fixed where found.** *The example slot walked the wrong way*: step 3
+   wrote `<-exemplifies` on the belief that the example kinds point the other way from
+   `rebuts`; they do not — for every edge kind `->k` walks from target to source — and the
+   step-3 fixture's `exemplifies` slot was meant to be empty, so nothing caught it until this run
+   found the slot empty for all ten `define` questions. Fixed (0.000 recall to 0.800); the set
+   is still `smysl/dossier/1`, whose hash changes, since 1.10.0 is unreleased and no saved
+   dossier exists outside this branch. *A star of `same-as` edges is not a class*: the corpus
+   first joined each subject's spellings to its English one, and A-12.4's strict class is a
+   greedy clique partition, so a star joins the hub to one spelling and leaves the rest alone —
+   the first run resolved a third of the Spanish, French and Russian subjects to an entity with
+   no units. The corpus now asserts every pair, which is what a careful author must do, and is
+   worth a line in the manual's entity chapter. *A plant missed*: the depth-3 dependent is two
+   hops from a unit that itself names the subject, so it probes nothing; kept, and marked so.
+   *OQ-87* and *OQ-88*, raised above. And **OQ-52 is not decided here**: a slot's membership is
+   fixed by its template's `order by salience` and `limit`, and `rank` only reorders what is
+   already in, so precision and recall cannot see the ranking; only `location`'s limit binds,
+   and it binds on salience. Comparing rankings needs graded gold (a best-first order per slot),
+   which this set does not have.
 
 **TX-P10 — embeddings and NL front end**
 1. Verify S1 dependencies: versions, XLM-R support, `cargo tree` with no `-sys`/`cc` beyond the
@@ -1589,4 +1683,6 @@ New:
 | OQ-54 | **Resolved by SMYSL-2.1 H-20** (TX-P0): `find` and `pack` are retagged `Mixed`. |
 | OQ-84 | **The per-partition limit is a recipe input §3.6's table omits.** Raised by TX-P8 step 1, which hashed the eight listed inputs and found a ninth that changes a result as surely as `k` does: how many hits a source keeps per partition before fusion (`PlanOptions::limit`, `q --per-partition`). It is hashed into `query:recipe` now, so two saves under two limits have two recipes and a rerun under another limit is labelled not comparable — but the payload has no declared key to carry the value, and a key the schema does not declare is a key a reader cannot trust. *Options:* add `query:per-partition` to FC-5 in a SMYSL-2.3 revision (the honest one; one more field, same rule N); or fold it into `parameters` under a reserved name (needs no schema change and misdescribes what it is). *Recommended:* the first, when SMYSL-2.3 next opens. |
 | OQ-85 | **A saved query ranks for its own terms.** Found by §5.4's first test: a saved unit's gist is its text, so `find "connection pool"` over the store it was saved in finds the unit that says `find "connection pool"`. A rerun excludes the unit a save wrote — the record of a save is not data the query found — but a fresh `find` has every saved query in reach. *Options:* exclude `x.query/saved` units from lexical sources unless the query names the schema (`where schema = x.query/saved`); exclude them from `from store:` resolution altogether; or leave them in, on the ground that a store is a log and a saved query is a record in it. *Recommended:* the first, as the default a reader expects — a question about a corpus is not a question about the questions asked of it — with the schema predicate as the way to ask the other one. Not done in step 1, which is about saving and rerunning; it is a change to phase 5. |
-| OQ-86 | **sq/1 cannot ask for only what a walk reached.** Raised by TX-P8 step 3: `expand` *adds* to the set it was given, so a slot defined by an edge — what rebuts, causes or exemplifies the units about a subject — is written `about entity($subject) expand ->rebuts depth 1 except about entity($subject)`, and the subtraction also removes a rebuttal that itself names the subject, which then answers `characteristic` instead. *Options:* a traversal modifier (`expand ->rebuts depth 1 only`, the frontier without the seeds), which is a grammar change and so SMYSL-2.9's and the three ports'; a `reached` source over the previous stage; or leave it, if GE-T10 shows the lost rebuttals are rare. *Recommended:* measure first — step 4's GE-T10 counts counter-evidence recall per slot, and a kill criterion on that slot is what would make the grammar change worth its cost. |
+| OQ-86 | **sq/1 cannot ask for only what a walk reached.** Raised by TX-P8 step 3: `expand` *adds* to the set it was given, so a slot defined by an edge — what rebuts, causes or exemplifies the units about a subject — is written `about entity($subject) expand ->rebuts depth 1 except about entity($subject)`, and the subtraction also removes a rebuttal that itself names the subject, which then answers `characteristic` instead. *Options:* a traversal modifier (`expand ->rebuts depth 1 only`, the frontier without the seeds), which is a grammar change and so SMYSL-2.9's and the three ports'; a `reached` source over the previous stage; or leave it, if GE-T10 shows the lost rebuttals are rare. *Recommended:* measure first — step 4's GE-T10 counts counter-evidence recall per slot, and a kill criterion on that slot is what would make the grammar change worth its cost. **Measured (TX-P8 step 4):** over GE-T10's single-hand gold it costs recall and not precision — six of 24 counter units, three of nine causes, one of five examples and one of six dependents leave their slot, and seven of them reappear in `characteristic`. The kill criterion that fired is on counter *precision*, which OQ-87 and OQ-88 account for, so this change would not lift it. Still recommended against for now; worth taking with OQ-87 if the grammar is opened for that. |
+| OQ-87 | **sq/1 cannot select a superseded unit, and a walk starts from one.** Raised by TX-P8 step 4. The supersession pass runs after sources and traversals (§3.2), so (a) `revision` — what a later account replaced — is empty for every question: the old unit is hidden under the current lens, and under `--all-versions` it names the subject and the `except` removes it; and (b) a walk from a superseded seed reaches *its* rebuttals before the pass replaces the seed, so `counter` holds a rebuttal of an account nobody now holds (two of counter's six false positives). *Options:* a `where superseded` predicate (grammar, SMYSL-2.9 and the ports); a per-slot lens setting in the template set, with the pass run before the walk for the edge slots; or drop `revision` from `trace` until one exists. *Recommended:* the predicate, taken with OQ-86's `only` if the grammar is opened, and the pass moved before the walk for edge slots now, since that is a template-set change and not a grammar one. |
+| OQ-88 | **A slot binds the subject and nothing of what was asked of it.** Raised by TX-P8 step 4. `classify` returns the question's remainder ("is cured by citrus fruit") and the slots bind only `$subject`, so a verify or explain dossier's `counter`, `evidence` and `reported` hold everything of that kind about the subject: four of counter's six false positives, which is what fires GE-T10's kill criterion (verify 0.667, explain 0.500, define 0.909). *Options:* a `$topic` parameter the verify and explain templates intersect with a lexical `find` (pure; recall falls when the remainder's words are not the corpus's); the `Classifier` port of OQ-22 extended to pick the claim the question asks about (model-dependent); or rank by the remainder without filtering, which leaves precision where it is. *Recommended:* `$topic` with `find`, measured on fresh questions rather than these, since a fix scored on the questions that found it is scored in-sample. |

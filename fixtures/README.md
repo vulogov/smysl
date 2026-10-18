@@ -27,6 +27,7 @@ addressed to: a fixture is an instrument, and these are the things being measure
 | `proposition/ge-t5/` | `paraphrase.tsv`, a second English expression of Ruth — forty restatements and ten near-misses; `sheet.tsv`, three scripted coders over the pool | GE-T5's within-language arm (`crates/smysl-text/tests/ge_t5.rs`) |
 | `attribution/probes/` | Mark 14-15 in two editions of scripture, and `probes.tsv`: every utterance of Mark 15 in both, with the verse, the expected mode and how the source marks it | TX-P5 step 3b's probe-set gate (`crates/smysl-ingest/tests/probe_set.rs`) |
 | `stability/corpus/` | `<lang>.txt` for de, en, es, fr and ru — the same three passages in each, 59 lines apiece | GE-T2's rerun under the consensus policy (`crates/smysl-ingest/tests/ge_t2.rs`) |
+| `dossier/` | `subjects.smy`, people in Ruth and two women called Mary, each unit annotated with the slot that should find it; `gold/`, GE-T10's corpus (ten subjects in five languages), 150 questions and the gold for 118 (question, slot) pairs | `ask`'s unit tests (`crates/smysl-query/tests/dossier.rs`, `tests/cmd_ask.rs`) and GE-T10 (`crates/smysl-query/tests/ge_t10.rs`) |
 
 `library/bibles/slice/` is 112 KiB of public-domain scripture, carried because a two-platform
 comparison that needs three megabytes mounted first is a comparison nobody runs. The whole corpus
@@ -79,6 +80,16 @@ on request — so they are planted, in the idiom of `library/bibles/slice/eng-kj
 in two different books. A recall measured over a set its own author wrote is a statement about the
 instrument; `SMYSL_GE_T11_PLANTED=<file>` and `SMYSL_GE_T11_CORPUS=<dir>` are how it becomes a
 statement about the linker.
+
+`dossier/gold/` is the third, and the largest. GE-T10 asks for expert-filled slots, and the
+project has none to ask, so one hand wrote the corpus, the questions and the gold, after the
+templates they measure. That is said at the head of each file, and the criteria the gold follows
+are written at the head of `slots.tsv`. Units are placed in a slot by what they *say*, not by
+the kind or edge a template selects on, and the cases where those come apart are planted and
+marked `PLANT` with the failure each probes. The questions were written as a person would ask
+them and were not rephrased after a run, so a question whose subject Russian inflects away from
+its entity's spelling stays inflected and is counted. `SMYSL_GE_T10_{CORPUS,QUESTIONS,GOLD}`
+take somebody else's set.
 
 `sq/` is the grammar's conformance suite (RFC SMYSL-2.9 §5) and it is **external** for the
 reason the conformance tree is: three more implementations of this grammar are coming — the

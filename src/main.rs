@@ -169,7 +169,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "link",      about: "Judge candidate pairs; stage entails and contradicts", purity: Purity::Mixed, phase: "TX-P7"  , impure_when: Some("every action but --candidates, which only lists them") , forms: NO_DOCUMENT },
     Cmd { name: "summarise", about: "Grounded summary tree over a scope; staged",           purity: Purity::Model, phase: "TX-P7"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "q",         about: "Run an sq/1 query; explain it, or seed-check it",      purity: Purity::Mixed, phase: "TX-P6"  , impure_when: Some("a model-dependent plan (~sem, ~hybrid, near), none of which this build lowers") , forms: NO_DOCUMENT },
-    Cmd { name: "ask",       about: "A dossier for a question; optionally a model's grounded answer", purity: Purity::Mixed, phase: "TX-P8"  , impure_when: Some("--answer, which asks a model to answer from the dossier") , forms: NO_DOCUMENT },
+    Cmd { name: "ask",       about: "Experimental: a dossier for a question; optionally a model's grounded answer", purity: Purity::Mixed, phase: "TX-P8"  , impure_when: Some("--answer, which asks a model to answer from the dossier") , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -5413,6 +5413,20 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     }
 }
 
+/// What every `ask` says first, on stderr: GE-T10's kill criterion, applied (SMYSL-2.5 §6 TX-P8
+/// step 4).
+///
+/// Draft 3 §23 keeps `ask` out of defaults when *definition* or *counter-evidence* precision
+/// is below 0.8, and counter-evidence measured 0.750. This build has no tier of commands that
+/// are built but not offered, so "out of defaults" is this: the command is labelled
+/// experimental where it is listed and every run says so, with the figure and where it was
+/// measured, and nothing a script reads on stdout changes. The note goes when a gold run puts
+/// the slot over the bar.
+#[cfg(feature = "text")]
+const ASK_EXPERIMENTAL: &str = "smysl ask: experimental — GE-T10 measured counter-evidence \
+     precision at 0.750, below draft 3's 0.8 (SMYSL-2.5 §6 TX-P8 step 4); a counter slot can \
+     hold a rebuttal of a claim the question did not ask about";
+
 /// `smysl ask` — a dossier for a question (SMYSL-2.5 §3.13, TX-P8 step 3).
 ///
 /// Pure unless `--answer`: the intent comes from a rule table, the slots from a template set
@@ -5435,6 +5449,7 @@ fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Usage;
     };
     warn_output_is_a_report(global, "ask");
+    eprintln!("{ASK_EXPERIMENTAL}");
     if m.get_flag("answer") && !m.get_flag("save") {
         eprintln!(
             "smysl ask: --answer grounds the model's units on the dossier, so the dossier is \

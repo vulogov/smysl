@@ -1,0 +1,164 @@
+# GE-T10's questions (SMYSL-2.5 §5.5; TX-P8 step 4): thirty, each asked in the five tier-1
+# languages, a hundred and fifty rows.
+#
+# Written by the same hand as corpus.smy and slots.tsv, and written as a person would ask them
+# rather than as the intent table spells them. Where that person inflects the subject — Russian
+# above all, where "what depends on miasma" puts it in the genitive — the question keeps the
+# inflection, and the harness counts the subject it then fails to find (PLANT morph). Nothing
+# was rephrased after a run to make a question resolve.
+#
+# Columns, tab-separated:
+#   qid       the question, the same in every language; slots.tsv is keyed by it
+#   intent    the intent the question asks, which the classifier is scored against
+#   lang      the language of the question
+#   question  the text
+ch-define	define	en	What is cholera?
+ch-define	define	de	Was ist Cholera?
+ch-define	define	es	¿Qué es el cólera?
+ch-define	define	fr	Qu'est-ce que le choléra ?
+ch-define	define	ru	Что такое холера?
+ch-explain	explain	en	Why does cholera spread so quickly?
+ch-explain	explain	de	Warum breitet sich die Cholera so schnell aus?
+ch-explain	explain	es	¿Por qué el cólera se propaga tan rápido?
+ch-explain	explain	fr	Pourquoi le choléra se propage-t-il si vite ?
+ch-explain	explain	ru	Почему холера распространяется так быстро?
+ch-trace	trace	en	What is the history of cholera?
+ch-trace	trace	de	Geschichte der Cholera
+ch-trace	trace	es	Historia del cólera
+ch-trace	trace	fr	Histoire du choléra
+ch-trace	trace	ru	История холеры
+sc-define	define	en	What is scurvy?
+sc-define	define	de	Was ist Skorbut?
+sc-define	define	es	¿Qué es el escorbuto?
+sc-define	define	fr	Qu'est-ce que le scorbut ?
+sc-define	define	ru	Что такое цинга?
+sc-explain	explain	en	Why did sailors get scurvy?
+sc-explain	explain	de	Warum bekamen Seeleute Skorbut?
+sc-explain	explain	es	¿Por qué los marineros sufrían escorbuto?
+sc-explain	explain	fr	Pourquoi les marins attrapaient-ils le scorbut ?
+sc-explain	explain	ru	Почему моряки болели цингой?
+sc-verify	verify	en	Is it true that scurvy is cured by citrus fruit?
+sc-verify	verify	de	Stimmt es, dass Skorbut durch Zitrusfrüchte geheilt wird?
+sc-verify	verify	es	¿Es cierto que el escorbuto se cura con cítricos?
+sc-verify	verify	fr	Est-il vrai que le scorbut se guérit avec des agrumes ?
+sc-verify	verify	ru	Правда ли, что цингу лечат цитрусовыми?
+mi-define	define	en	What is miasma?
+mi-define	define	de	Was ist ein Miasma?
+mi-define	define	es	¿Qué es el miasma?
+mi-define	define	fr	Qu'est-ce que le miasme ?
+mi-define	define	ru	Что такое миазмы?
+mi-verify	verify	en	Is it true that miasma causes disease?
+mi-verify	verify	de	Stimmt es, dass Miasma Krankheiten verursacht?
+mi-verify	verify	es	¿Es verdad que el miasma causa enfermedades?
+mi-verify	verify	fr	Est-il vrai que le miasme cause des maladies ?
+mi-verify	verify	ru	Правда ли, что миазмы вызывают болезни?
+mi-depend	depend	en	What depends on miasma?
+mi-depend	depend	de	Was hängt vom Miasma ab?
+mi-depend	depend	es	¿Qué depende del miasma?
+mi-depend	depend	fr	Qu'est-ce qui dépend du miasme ?
+mi-depend	depend	ru	Что зависит от миазмов?
+sp-define	define	en	What was smallpox?
+sp-define	define	de	Was sind die Pocken?
+sp-define	define	es	¿Qué es la viruela?
+sp-define	define	fr	Qu'est-ce que la variole ?
+sp-define	define	ru	Что такое оспа?
+sp-trace	trace	en	Where did smallpox come from?
+sp-trace	trace	de	Woher kommen die Pocken?
+sp-trace	trace	es	¿De dónde viene la viruela?
+sp-trace	trace	fr	D'où vient la variole ?
+sp-trace	trace	ru	Откуда пришла оспа?
+sp-locate	locate	en	Where is smallpox mentioned?
+sp-locate	locate	de	Wo werden die Pocken erwähnt?
+sp-locate	locate	es	¿Dónde aparece la viruela?
+sp-locate	locate	fr	Où apparaît la variole ?
+sp-locate	locate	ru	Где упоминается оспа?
+se-define	define	en	Who was Semmelweis?
+se-define	define	de	Wer war Semmelweis?
+se-define	define	es	¿Quién era Semmelweis?
+se-define	define	fr	Qui était Semmelweis ?
+se-define	define	ru	Кто такой Земмельвейс?
+se-attribute	attribute	en	Who said Semmelweis was mad?
+se-attribute	attribute	de	Wer sagte, Semmelweis sei verrückt?
+se-attribute	attribute	es	¿Quién dijo que Semmelweis estaba loco?
+se-attribute	attribute	fr	Qui a dit que Semmelweis était fou ?
+se-attribute	attribute	ru	Кто сказал, что Земмельвейс сошёл с ума?
+se-verify	verify	en	Is it true that Semmelweis cut deaths by handwashing?
+se-verify	verify	de	Stimmt es, dass Semmelweis durch Händewaschen die Todesfälle senkte?
+se-verify	verify	es	¿Es cierto que Semmelweis redujo las muertes con el lavado de manos?
+se-verify	verify	fr	Est-il vrai que Semmelweis a réduit les décès par le lavage des mains ?
+se-verify	verify	ru	Правда ли, что Земмельвейс снизил смертность мытьём рук?
+sn-define	define	en	Who was John Snow?
+sn-define	define	de	Wer war John Snow?
+sn-define	define	es	¿Quién era John Snow?
+sn-define	define	fr	Qui était John Snow ?
+sn-define	define	ru	Кто такой Джон Сноу?
+sn-attribute	attribute	en	Who said John Snow was wrong?
+sn-attribute	attribute	de	Wer behauptet, John Snow habe sich geirrt?
+sn-attribute	attribute	es	¿Quién dijo que John Snow estaba equivocado?
+sn-attribute	attribute	fr	Qui a dit que John Snow avait tort ?
+sn-attribute	attribute	ru	Кто сказал, что Джон Сноу ошибался?
+sn-explain	explain	en	Why did John Snow remove the pump handle?
+sn-explain	explain	de	Warum entfernte John Snow den Pumpenschwengel?
+sn-explain	explain	es	¿Por qué John Snow quitó la manivela de la bomba?
+sn-explain	explain	fr	Pourquoi John Snow a-t-il retiré la poignée de la pompe ?
+sn-explain	explain	ru	Почему Джон Сноу снял ручку насоса?
+je-define	define	en	Who was Jenner?
+je-define	define	de	Wer war Jenner?
+je-define	define	es	¿Quién era Jenner?
+je-define	define	fr	Qui était Jenner ?
+je-define	define	ru	Кто такой Дженнер?
+je-attribute	attribute	en	Who claimed Jenner invented vaccination?
+je-attribute	attribute	de	Wer behauptet, Jenner habe die Impfung erfunden?
+je-attribute	attribute	es	¿Quién afirma que Jenner inventó la vacuna?
+je-attribute	attribute	fr	Qui affirme que Jenner a inventé la vaccination ?
+je-attribute	attribute	ru	Кто утверждает, что Дженнер изобрёл прививку?
+je-trace	trace	en	How did Jenner's vaccine develop?
+je-trace	trace	de	Woher stammt Jenners Impfstoff?
+je-trace	trace	es	Origen de la vacuna de Jenner
+je-trace	trace	fr	Origine du vaccin de Jenner
+je-trace	trace	ru	Откуда взялась вакцина Дженнера?
+li-define	define	en	Who was James Lind?
+li-define	define	de	Wer war James Lind?
+li-define	define	es	¿Quién era James Lind?
+li-define	define	fr	Qui était James Lind ?
+li-define	define	ru	Кто такой Джеймс Линд?
+li-verify	verify	en	Is it true that James Lind ran the first controlled trial?
+li-verify	verify	de	Ist es wahr, dass James Lind die erste kontrollierte Studie durchführte?
+li-verify	verify	es	¿Es verdad que James Lind hizo el primer ensayo controlado?
+li-verify	verify	fr	Est-il vrai que James Lind a mené le premier essai contrôlé ?
+li-verify	verify	ru	Верно ли, что Джеймс Линд провёл первое контролируемое испытание?
+li-attribute	attribute	en	Who said James Lind proved the cure?
+li-attribute	attribute	de	Wer sagte, James Lind habe das Heilmittel bewiesen?
+li-attribute	attribute	es	¿Quién dijo que James Lind probó la cura?
+li-attribute	attribute	fr	Qui a dit que James Lind avait prouvé le remède ?
+li-attribute	attribute	ru	Кто сказал, что Джеймс Линд доказал средство?
+ls-define	define	en	Who was Joseph Lister?
+ls-define	define	de	Wer war Joseph Lister?
+ls-define	define	es	¿Quién era Joseph Lister?
+ls-define	define	fr	Qui était Joseph Lister ?
+ls-define	define	ru	Кто такой Джозеф Листер?
+ls-explain	explain	en	Why did Joseph Lister use carbolic acid?
+ls-explain	explain	de	Warum verwendete Joseph Lister Karbolsäure?
+ls-explain	explain	es	¿Por qué Joseph Lister usó ácido carbólico?
+ls-explain	explain	fr	Pourquoi Joseph Lister utilisait-il l'acide phénique ?
+ls-explain	explain	ru	Почему Джозеф Листер применял карболовую кислоту?
+ls-locate	locate	en	Where is Joseph Lister mentioned?
+ls-locate	locate	de	Wo wird Joseph Lister erwähnt?
+ls-locate	locate	es	¿Dónde aparece Joseph Lister?
+ls-locate	locate	fr	Où apparaît Joseph Lister ?
+ls-locate	locate	ru	Где упоминается Джозеф Листер?
+ph-define	define	en	What was phlogiston?
+ph-define	define	de	Was ist Phlogiston?
+ph-define	define	es	¿Qué es el flogisto?
+ph-define	define	fr	Qu'est-ce que le phlogistique ?
+ph-define	define	ru	Что такое флогистон?
+ph-compare	compare	en	What is the difference between phlogiston and oxygen?
+ph-compare	compare	de	Was ist der Unterschied zwischen Phlogiston und Sauerstoff?
+ph-compare	compare	es	¿Cuál es la diferencia entre el flogisto y el oxígeno?
+ph-compare	compare	fr	Quelle est la différence entre le phlogistique et l'oxygène ?
+ph-compare	compare	ru	Чем отличается флогистон от кислорода?
+ph-depend	depend	en	What follows from phlogiston?
+ph-depend	depend	de	Was folgt aus dem Phlogiston?
+ph-depend	depend	es	¿Qué se sigue del flogisto?
+ph-depend	depend	fr	Qu'est-ce qui dépend du phlogistique ?
+ph-depend	depend	ru	Что следует из флогистона?

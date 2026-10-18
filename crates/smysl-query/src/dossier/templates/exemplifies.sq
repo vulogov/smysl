@@ -1,5 +1,5 @@
 about entity($subject)
-expand <-exemplifies depth 1
+expand ->exemplifies depth 1
 except
 about entity($subject)
 order by salience descending

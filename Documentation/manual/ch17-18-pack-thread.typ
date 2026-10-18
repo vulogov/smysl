@@ -620,6 +620,27 @@ the dossier's units. A record grounding anywhere else is dropped and counted
 (`SMY-W478`), what survives is capped by rule M at its weakest ground
 (`SMY-W036`), and all of it is staged for review like any model output.
 
+*`ask` is experimental*, and says so on stderr every time it runs. Its slots
+were measured against a gold set (GE-T10: thirty questions, each in all five
+languages) and the counter-evidence slot came in at 0.750 precision, under the
+0.8 that keeps a dossier command out of the defaults. The cause is specific,
+and it tells you how to read a dossier: a slot is bound to the question's
+*subject* and to nothing else the question asked. "Is scurvy cured by citrus
+fruit?" gets every rebuttal of every claim about scurvy, including the one
+disputing how long a voyage had to be before it struck. Read a `verify` or
+`explain` dossier's counter-evidence as everything disputed about the subject,
+and check each item against what you asked. A definition slot measured 1.000.
+The gold was written by one person, not by independent experts, so treat
+both figures as a careful reading, not a benchmark.
+
+One thing to know when you write entities for `ask` to find: `same-as` makes a
+class only where every pair is asserted. Five spellings of one disease, each
+joined to the English one and to nothing else, form a class of two: the
+English spelling and one other. A question asked in any of the remaining three
+languages finds only the units that use its own spelling. Assert every pair. A class is
+a clique by design: one wrong edge shouldn't merge two things nobody said
+were the same.
+
 #section("Deriving all five, one worked example each")
 
 Derivation is a pure function of the graph — no model is consulted, so the

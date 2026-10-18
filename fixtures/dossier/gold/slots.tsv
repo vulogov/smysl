@@ -1,0 +1,153 @@
+# GE-T10's gold (SMYSL-2.5 §5.5; TX-P8 step 4): for each question in questions.tsv, each slot
+# its intent fills under `smysl/dossier/1`, and the units of corpus.smy a reader asking that
+# question would want there, by label.
+#
+# WHO WROTE THIS. The hand that wrote the templates, after writing them — see corpus.smy. GE-T10
+# asks for expert-filled slots and this is not that: no second person has read it, and none is
+# available to (the project has no independent coders). It is written to the criteria below
+# and not to the templates, and was not changed after a run except to correct a label that
+# did not match the corpus's own comment on the unit; every such correction is the comment
+# winning, never the engine.
+#
+# CRITERIA, per slot. A unit belongs to a slot by what it says, not by its kind or its edges:
+#   definition     says what the subject is
+#   characteristic states a current property of the subject — not a superseded account, not a
+#                  rebuttal (that is counter), not a passing mention of the name
+#   exemplifies    is a case or instance of a claim about the subject
+#   counter        disputes a current claim about the subject; for explain and verify, only a
+#                  claim bearing on what the question asked of the subject
+#   open-question  is a question about the subject
+#   cause          brings about something about the subject, bearing on what was asked
+#   evidence       an observation or datum bearing on what the question asked
+#   hypothesis     a conjecture about the subject bearing on the why that was asked
+#   support        a ground of the claim the question asks to verify
+#   reported       reported speech of the proposition the question asks about
+#   holder         names who holds a position on the subject
+#   stance         a position on the subject asserted by a named holder
+#   introduction   records the subject's first appearance or origin
+#   revision       an account of the subject that a later one replaced
+#   location       mentions the subject, in any language — every one of them
+#   related        elaborates a unit about the subject
+#   dependent      rests on a unit about the subject, at any depth
+#   contrast       is set against a unit about the subject
+#
+# Columns, tab-separated: qid, slot, the labels separated by spaces (`-` for an empty slot,
+# which the gold then expects to be a `gap`).
+ch-define	definition	ch/def ch/def-ru
+ch-define	characteristic	ch/fast ch/water ch/vibrio
+ch-define	exemplifies	ch/case ch/case-named
+ch-define	counter	ch/counter ch/counter-named
+ch-define	open-question	ch/oq
+ch-explain	cause	ch/cause ch/cause-named
+ch-explain	evidence	ch/outbreak
+ch-explain	hypothesis	ch/hyp
+ch-explain	counter	ch/counter
+ch-explain	open-question	ch/oq
+ch-trace	introduction	ch/intro ch/intro-ru
+ch-trace	revision	ch/air
+ch-trace	cause	ch/cause ch/cause-named
+sc-define	definition	sc/def
+sc-define	characteristic	sc/gums sc/citrus sc/voyage sc/citrus-derived sc/gums-ru
+sc-define	exemplifies	-
+sc-define	counter	sc/counter sc/counter-voyage
+sc-define	open-question	sc/oq
+sc-explain	cause	-
+sc-explain	evidence	sc/anson sc/siege
+sc-explain	hypothesis	sc/hyp
+sc-explain	counter	sc/counter-voyage
+sc-explain	open-question	sc/oq
+sc-verify	support	sc/rations
+sc-verify	evidence	sc/rations
+sc-verify	counter	sc/counter
+sc-verify	reported	sc/reported
+mi-define	definition	mi/def mi/def-fr
+mi-define	characteristic	mi/causes mi/smell mi/causes-derived
+mi-define	exemplifies	-
+mi-define	counter	mi/counter mi/counter-named
+mi-define	open-question	mi/oq
+mi-verify	support	mi/marsh
+mi-verify	evidence	mi/stench
+mi-verify	counter	mi/counter mi/counter-named
+mi-verify	reported	mi/reported
+mi-depend	dependent	mi/causes-derived mi/drain mi/levy mi/sewer
+mi-depend	related	mi/related
+sp-define	definition	sp/def
+sp-define	characteristic	sp/deadly sp/immunity sp/eradicated sp/origin-new
+sp-define	exemplifies	sp/example
+sp-define	counter	-
+sp-define	open-question	sp/oq
+sp-trace	introduction	sp/egypt sp/china sp/americas
+sp-trace	revision	sp/origin-old
+sp-trace	cause	sp/cause
+sp-locate	location	sp/def sp/deadly sp/immunity sp/eradicated sp/egypt sp/china sp/origin-old sp/origin-new sp/americas sp/variolation sp/montagu sp/de sp/es sp/ru sp/oq
+sp-locate	related	sp/related
+se-define	definition	se/def
+se-define	characteristic	se/washing se/washing-derived se/asylum se/ru
+se-define	exemplifies	se/example
+se-define	counter	se/counter
+se-define	open-question	-
+se-attribute	reported	se/mad
+se-attribute	holder	se/mad se/reported se/stance se/stance-nomode
+se-attribute	stance	se/stance se/stance-nomode
+se-verify	support	se/rates
+se-verify	evidence	se/clinics
+se-verify	counter	se/counter
+se-verify	reported	se/reported
+sn-define	definition	sn/def
+sn-define	characteristic	sn/map sn/handle sn/anaesthesia sn/ru
+sn-define	exemplifies	-
+sn-define	counter	sn/counter
+sn-define	open-question	-
+sn-attribute	reported	sn/wrong
+sn-attribute	holder	sn/wrong sn/stance sn/lancet
+sn-attribute	stance	sn/stance sn/lancet
+sn-explain	cause	sn/cause
+sn-explain	evidence	sn/workhouse
+sn-explain	hypothesis	sn/hyp
+sn-explain	counter	sn/counter
+sn-explain	open-question	-
+je-define	definition	je/def
+je-define	characteristic	je/phipps je/first-new
+je-define	exemplifies	je/example
+je-define	counter	je/counter-named
+je-define	open-question	-
+je-attribute	reported	je/invented
+je-attribute	holder	je/invented je/stance
+je-attribute	stance	je/stance
+je-trace	introduction	je/milkmaids je/ru
+je-trace	revision	je/first-old
+je-trace	cause	je/cause
+li-define	definition	li/def
+li-define	characteristic	li/trial li/trial-derived li/ru
+li-define	exemplifies	-
+li-define	counter	li/counter li/counter-cure
+li-define	open-question	-
+li-verify	support	li/arms
+li-verify	evidence	li/salisbury
+li-verify	counter	li/counter
+li-verify	reported	-
+li-attribute	reported	li/proved
+li-attribute	holder	li/proved li/stance
+li-attribute	stance	li/stance
+ls-define	definition	ls/def
+ls-define	characteristic	ls/carbolic ls/mortality
+ls-define	exemplifies	-
+ls-define	counter	ls/counter
+ls-define	open-question	ls/oq
+ls-explain	cause	ls/cause ls/cause-named
+ls-explain	evidence	ls/ward
+ls-explain	hypothesis	ls/hyp
+ls-explain	counter	-
+ls-explain	open-question	ls/oq
+ls-locate	location	ls/def ls/carbolic ls/cause-named ls/mortality ls/ward ls/hyp ls/oq ls/ru ls/passing
+ls-locate	related	ls/related
+ph-define	definition	ph/def
+ph-define	characteristic	ph/release ph/negative ph/ru
+ph-define	exemplifies	-
+ph-define	counter	ph/counter ph/counter-named
+ph-define	open-question	ph/oq
+ph-compare	characteristic	ph/release ph/negative ph/ru
+ph-compare	contrast	ph/contrast
+ph-compare	counter	ph/counter ph/counter-named
+ph-depend	dependent	ph/dep1 ph/dep2
+ph-depend	related	ph/related

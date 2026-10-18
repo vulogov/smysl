@@ -1,0 +1,942 @@
+# GE-T10's corpus (SMYSL-2.5 §5.5; TX-P8 step 4). Ten subjects from the history of medicine and
+# chemistry, each named in the five tier-1 languages — one `x.text/entity` per spelling, every
+# pair of spellings joined by `same-as` — and a dozen or so units about each. Every pair, because
+# a strict class is A-12.4's greedy clique partition: a star of edges from one spelling joins it
+# to one other and leaves the rest alone, which is what the first run of this harness did.
+#
+# WHO WROTE THIS. One person, by hand, together with the gold in `slots.tsv` and the questions
+# in `questions.tsv`, and after the templates the harness measures had been written. That is
+# the figure's first limit and it is not a small one: GE-T10 asks for *expert-filled* slots,
+# and a gold set written by the hand that wrote the templates is a set whose difficulty that
+# hand chose. What the gold can still do honestly is say what a reader asking the question
+# would want in each slot, by the criteria written at the top of `slots.tsv`, without looking
+# at what a template selects; where the two disagree the disagreement is the measurement.
+# The facts are compressed and some are simplified; the corpus is a fixture, not a history.
+#
+# Each unit carries a comment naming the slots the gold puts it in, or `gold: none` with the
+# reason. The cases a template is expected to get wrong are planted on purpose and marked
+# PLANT, each with the failure it probes:
+#
+#   OQ-86    a rebuttal (or a cause, or an example) that itself names the subject, which the
+#            edge slots' `except` removes and the kind slots then pick up
+#   passing  a unit that names the subject in passing and is about something else
+#   remainder a unit about the subject but not about what the question asked of it, which a
+#            slot bound only to `$subject` cannot tell apart
+#   depth    a dependent three `grounds` hops away, past `dependent`'s depth 2 (it missed: see mi/levy)
+#   mode     a unit with a holder and no `text:mode`, which `!= reported` never matches
+#   limit    a subject mentioned by more units than a slot's `limit 12`
+#   morph    a question whose subject is inflected away from its entity's spelling (in
+#            `questions.tsv`, not here)
+
+@schema x.text/v1 { version: 1, types: ["x.text/entity"], relations: [x.text/mentions, x.text/same-as] }
+
+# ============================================================================================
+# 1. cholera — define, explain ("why does it spread so quickly"), trace
+# ============================================================================================
+
+@x.text/entity e/cholera { status: speculative, source: { kind: doc, ref: "alias:en" } }
+~ cholera
+
+@x.text/entity e/cholera-es { status: speculative, lang: es, source: { kind: doc, ref: "alias:es" } }
+~ cólera
+
+@x.text/entity e/cholera-fr { status: speculative, lang: fr, source: { kind: doc, ref: "alias:fr" } }
+~ choléra
+
+@x.text/entity e/cholera-ru { status: speculative, lang: ru, source: { kind: doc, ref: "alias:ru" } }
+~ холера
+
+# gold: definition
+@definition ch/def { status: cited, source: { kind: doc, ref: "hist:cholera/1" } }
+~ Cholera is an acute intestinal infection that causes profuse watery diarrhoea.
+
+# gold: definition (in Russian, through same-as)
+@definition ch/def-ru { status: cited, lang: ru, source: { kind: doc, ref: "hist:cholera/1r" } }
+~ Холера — острая кишечная инфекция с сильной диареей.
+
+# gold: characteristic
+@claim ch/fast { status: cited, source: { kind: doc, ref: "hist:cholera/2" } }
+~ Cholera can kill within hours of the first symptoms.
+
+# gold: characteristic, and the unit the explain question is about
+@claim ch/water { status: cited, source: { kind: doc, ref: "hist:cholera/3" } }
+~ Cholera spreads through drinking water fouled with sewage.
+
+# gold: revision (trace) — superseded by ch/water; a reader asking what cholera is wants the
+# current account, so not characteristic
+@claim ch/air { status: cited, source: { kind: doc, ref: "hist:cholera/4" } }
+~ Cholera spreads through foul air rising from filth and marshes.
+
+# gold: characteristic
+@finding ch/vibrio { status: cited, source: { kind: doc, ref: "hist:cholera/5" } }
+~ Koch isolated the comma bacillus from cholera patients in 1884.
+
+# gold: exemplifies (define) — a case that does not name the disease
+@observation ch/case { status: cited, source: { kind: doc, ref: "hist:cholera/6" } }
+~ A coal-heaver on Broad Street fell ill at dawn on 31 August and was dead by nightfall.
+
+# PLANT OQ-86 (exemplifies). gold: exemplifies (define)
+@observation ch/case-named { status: cited, source: { kind: doc, ref: "hist:cholera/7" } }
+~ A cholera patient in Soho died eleven hours after the first cramps.
+
+# gold: counter (define, explain) — rebuts ch/water, does not name cholera
+@claim ch/counter { status: speculative }
+~ Many who drank from the Broad Street pump never fell ill at all.
+
+# PLANT OQ-86 (counter). gold: counter (define) — rebuts ch/vibrio and names cholera
+@claim ch/counter-named { status: cited, source: { kind: doc, ref: "hist:cholera/8" } }
+~ Pettenkofer drank a broth of cholera bacilli in 1892 and suffered only a mild diarrhoea.
+
+# gold: none — rebuts the superseded ch/air, which is not counter-evidence about cholera now
+@claim ch/counter-air { status: cited, source: { kind: doc, ref: "hist:cholera/9" } }
+~ The houses nearest the sewer vents were spared, so foul air was not the vehicle.
+
+# gold: evidence (explain); PLANT remainder: also an observation the trace introduction slot
+# will take, and it is not how the disease entered the record
+@observation ch/outbreak { status: cited, source: { kind: doc, ref: "hist:cholera/10" } }
+~ The Soho outbreak of cholera in 1854 killed 616 people within a few streets of one pump.
+
+# gold: cause (explain, trace) — causes ch/outbreak, does not name cholera
+@claim ch/cause { status: cited, source: { kind: doc, ref: "hist:cholera/11" } }
+~ A cesspit leaking into the Broad Street well contaminated the water.
+
+# PLANT OQ-86 (cause). gold: cause (explain, trace) — causes ch/intro and names cholera
+@claim ch/cause-named { status: cited, source: { kind: doc, ref: "hist:cholera/12" } }
+~ Troops and pilgrims moving along the trade routes carried cholera out of Bengal.
+
+# gold: introduction (trace)
+@observation ch/intro { status: cited, source: { kind: doc, ref: "hist:cholera/13" } }
+~ Cholera first spread beyond the Ganges delta in 1817.
+
+# gold: introduction (trace), in Russian
+@prose ch/intro-ru { status: cited, lang: ru, source: { kind: doc, ref: "hist:cholera/14" } }
+~ Холера впервые пришла в Россию в 1823 году через Астрахань.
+
+# gold: hypothesis (explain)
+@hypothesis ch/hyp { status: speculative }
+~ Cholera may be carried by a living animalcule that multiplies in water.
+
+# gold: open-question (define, explain)
+@question ch/oq { status: speculative }
+~ Why did some cholera epidemics burn out before the water was ever cleaned?
+
+# PLANT passing. gold: none — about the Board, not the disease
+@claim ch/passing { status: cited, source: { kind: doc, ref: "hist:cholera/15" } }
+~ The Board of Health met weekly through the cholera year of 1849.
+
+@rel ch/water --supersedes--> ch/air
+@rel ch/case --exemplifies--> ch/fast
+@rel ch/case-named --exemplifies--> ch/fast
+@rel ch/counter --rebuts--> ch/water
+@rel ch/counter-named --rebuts--> ch/vibrio
+@rel ch/counter-air --rebuts--> ch/air
+@rel ch/cause --causes--> ch/outbreak
+@rel ch/cause-named --causes--> ch/intro
+
+# A clique, not a star: a strict class (A-12.4) is a clique, so every pair is asserted.
+@rel e/cholera --x.text/same-as--> e/cholera-es
+@rel e/cholera --x.text/same-as--> e/cholera-fr
+@rel e/cholera --x.text/same-as--> e/cholera-ru
+@rel e/cholera-es --x.text/same-as--> e/cholera-fr
+@rel e/cholera-es --x.text/same-as--> e/cholera-ru
+@rel e/cholera-fr --x.text/same-as--> e/cholera-ru
+
+@rel ch/def --x.text/mentions--> e/cholera
+@rel ch/def-ru --x.text/mentions--> e/cholera-ru
+@rel ch/fast --x.text/mentions--> e/cholera
+@rel ch/water --x.text/mentions--> e/cholera
+@rel ch/air --x.text/mentions--> e/cholera
+@rel ch/vibrio --x.text/mentions--> e/cholera
+@rel ch/case-named --x.text/mentions--> e/cholera
+@rel ch/counter-named --x.text/mentions--> e/cholera
+@rel ch/outbreak --x.text/mentions--> e/cholera
+@rel ch/cause-named --x.text/mentions--> e/cholera
+@rel ch/intro --x.text/mentions--> e/cholera
+@rel ch/intro-ru --x.text/mentions--> e/cholera-ru
+@rel ch/hyp --x.text/mentions--> e/cholera
+@rel ch/oq --x.text/mentions--> e/cholera
+@rel ch/passing --x.text/mentions--> e/cholera
+
+# ============================================================================================
+# 2. scurvy — define, explain ("why do sailors get it"), verify ("cured by citrus fruit")
+# ============================================================================================
+
+@x.text/entity e/scurvy { status: speculative, source: { kind: doc, ref: "alias:en" } }
+~ scurvy
+
+@x.text/entity e/scurvy-de { status: speculative, lang: de, source: { kind: doc, ref: "alias:de" } }
+~ Skorbut
+
+@x.text/entity e/scurvy-es { status: speculative, lang: es, source: { kind: doc, ref: "alias:es" } }
+~ escorbuto
+
+@x.text/entity e/scurvy-fr { status: speculative, lang: fr, source: { kind: doc, ref: "alias:fr" } }
+~ scorbut
+
+@x.text/entity e/scurvy-ru { status: speculative, lang: ru, source: { kind: doc, ref: "alias:ru" } }
+~ цинга
+
+# gold: definition
+@definition sc/def { status: cited, source: { kind: doc, ref: "hist:scurvy/1" } }
+~ Scurvy is a disease of long deprivation of fresh food, marked by bleeding gums and old wounds reopening.
+
+# gold: characteristic
+@claim sc/gums { status: cited, source: { kind: doc, ref: "hist:scurvy/2" } }
+~ Scurvy loosens the teeth and makes the gums swell and bleed.
+
+# gold: characteristic; the claim the verify question asks about
+@claim sc/citrus { status: cited, source: { kind: doc, ref: "hist:scurvy/3" } }
+~ Scurvy is cured by oranges and lemons.
+
+# gold: characteristic; cause-relevant to explain
+@claim sc/voyage { status: cited, source: { kind: doc, ref: "hist:scurvy/4" } }
+~ Scurvy struck crews on voyages longer than about ten weeks without fresh stores.
+
+# gold: support, evidence (verify) — grounds sc/citrus-derived, does not name scurvy
+@data sc/rations { status: cited, source: { kind: doc, ref: "hist:scurvy/5" } }
+~ The Salisbury's sick men given two oranges and a lemon a day were fit for duty within six days.
+
+# gold: characteristic; rests on sc/rations
+@claim sc/citrus-derived { status: inferred, grounds: [sc/rations] }
+~ Citrus fruit reverses scurvy within a week.
+
+# gold: evidence (explain); not verify, which asks about citrus
+@observation sc/anson { status: cited, source: { kind: doc, ref: "hist:scurvy/6" } }
+~ Anson lost most of his men to scurvy on the voyage round the world of 1740 to 1744.
+
+# PLANT remainder (evidence). gold: evidence (explain) only — about where scurvy struck, not
+# about citrus
+@observation sc/siege { status: cited, source: { kind: doc, ref: "hist:scurvy/7" } }
+~ Scurvy broke out among the defenders in the winter of the siege.
+
+# gold: counter (define, verify) — rebuts sc/citrus, does not name scurvy; not explain, which
+# asks why sailors fell ill and not what cures them
+@claim sc/counter { status: cited, source: { kind: doc, ref: "hist:scurvy/8" } }
+~ Lime juice boiled in copper pans saved nobody on the Arctic expeditions of the 1870s.
+
+# PLANT remainder (counter). gold: counter (define, explain); not verify — it rebuts the
+# voyage claim, not the citrus cure
+@claim sc/counter-voyage { status: speculative }
+~ Some crews went sixteen weeks at sea on salt meat alone and stayed healthy.
+
+# gold: hypothesis (explain)
+@hypothesis sc/hyp { status: speculative }
+~ Scurvy may come from the sea air itself rather than from what sailors eat.
+
+# PLANT mode (reported, verify). gold: reported (verify)
+@claim sc/reported { status: cited, source: { kind: doc, ref: "hist:scurvy/9" }, "text:mode": "reported", "text:holder": "Lind" }
+~ Lind wrote that oranges and lemons were the most effective remedy for scurvy at sea.
+
+# PLANT remainder (reported). gold: none for verify — reported, but not about citrus
+@claim sc/reported-air { status: cited, source: { kind: doc, ref: "hist:scurvy/10" }, "text:mode": "reported", "text:holder": "the ship's surgeon" }
+~ The ship's surgeon reported that scurvy came from the damp below decks.
+
+# gold: open-question (define, explain)
+@question sc/oq { status: speculative }
+~ Why did scurvy return to the navy after 1860 when lime juice was still issued?
+
+# gold: characteristic (in Russian)
+@claim sc/gums-ru { status: cited, lang: ru, source: { kind: doc, ref: "hist:scurvy/11" } }
+~ При цинге кровоточат дёсны и расшатываются зубы.
+
+@rel sc/counter --rebuts--> sc/citrus
+@rel sc/counter-voyage --rebuts--> sc/voyage
+
+# A clique, not a star: a strict class (A-12.4) is a clique, so every pair is asserted.
+@rel e/scurvy --x.text/same-as--> e/scurvy-de
+@rel e/scurvy --x.text/same-as--> e/scurvy-es
+@rel e/scurvy --x.text/same-as--> e/scurvy-fr
+@rel e/scurvy --x.text/same-as--> e/scurvy-ru
+@rel e/scurvy-de --x.text/same-as--> e/scurvy-es
+@rel e/scurvy-de --x.text/same-as--> e/scurvy-fr
+@rel e/scurvy-de --x.text/same-as--> e/scurvy-ru
+@rel e/scurvy-es --x.text/same-as--> e/scurvy-fr
+@rel e/scurvy-es --x.text/same-as--> e/scurvy-ru
+@rel e/scurvy-fr --x.text/same-as--> e/scurvy-ru
+
+@rel sc/def --x.text/mentions--> e/scurvy
+@rel sc/gums --x.text/mentions--> e/scurvy
+@rel sc/citrus --x.text/mentions--> e/scurvy
+@rel sc/voyage --x.text/mentions--> e/scurvy
+@rel sc/citrus-derived --x.text/mentions--> e/scurvy
+@rel sc/anson --x.text/mentions--> e/scurvy
+@rel sc/siege --x.text/mentions--> e/scurvy
+@rel sc/hyp --x.text/mentions--> e/scurvy
+@rel sc/reported --x.text/mentions--> e/scurvy
+@rel sc/reported-air --x.text/mentions--> e/scurvy
+@rel sc/oq --x.text/mentions--> e/scurvy
+@rel sc/gums-ru --x.text/mentions--> e/scurvy-ru
+
+# ============================================================================================
+# 3. miasma — define, verify ("causes disease"), depend
+# ============================================================================================
+
+@x.text/entity e/miasma { status: speculative, source: { kind: doc, ref: "alias:en" } }
+~ miasma
+
+@x.text/entity e/miasma-fr { status: speculative, lang: fr, source: { kind: doc, ref: "alias:fr" } }
+~ miasme
+
+@x.text/entity e/miasma-ru { status: speculative, lang: ru, source: { kind: doc, ref: "alias:ru" } }
+~ миазмы
+
+# gold: definition
+@definition mi/def { status: cited, source: { kind: doc, ref: "hist:miasma/1" } }
+~ Miasma is bad air arising from rotting matter, once held to be the cause of epidemic disease.
+
+# gold: characteristic; the claim verify asks about
+@claim mi/causes { status: cited, source: { kind: doc, ref: "hist:miasma/2" } }
+~ Miasma causes cholera, plague and fever.
+
+# gold: characteristic
+@claim mi/smell { status: cited, source: { kind: doc, ref: "hist:miasma/3" } }
+~ Miasma is known by its stench.
+
+# gold: support (verify) — grounds mi/causes-derived, does not name miasma
+@observation mi/marsh { status: cited, source: { kind: doc, ref: "hist:miasma/4" } }
+~ Fevers were commonest in the low marshy districts by the river.
+
+# gold: characteristic; dependent (depend, depth 1)
+@claim mi/causes-derived { status: inferred, grounds: [mi/marsh, mi/smell] }
+~ The miasma of the marshes breeds intermittent fever.
+
+# gold: dependent (depend, depth 2) — rests on mi/causes-derived, does not name miasma
+@decision mi/drain { status: inferred, grounds: [mi/causes-derived] }
+~ The parish resolved to drain the river meadows.
+
+# gold: dependent (depend). Meant as PLANT depth — three `grounds` hops from mi/smell, past
+# `dependent`'s depth 2 — and it probes nothing: the walk starts from every unit about the subject,
+# mi/causes-derived among them, and from there this is two hops. Kept, and recorded as a plant that
+# missed; a dependent past depth 2 needs a chain whose middle names nothing
+@decision mi/levy { status: inferred, grounds: [mi/drain] }
+~ A rate of a penny in the pound was levied to pay for the drains.
+
+# gold: dependent (depend, depth 1) — rests on mi/smell, does not name miasma
+@decision mi/sewer { status: inferred, grounds: [mi/smell] }
+~ The Metropolitan Board built the intercepting sewers to carry the stench away from the Thames.
+
+# gold: counter (define, verify) — rebuts mi/causes, does not name miasma
+@claim mi/counter { status: cited, source: { kind: doc, ref: "hist:miasma/5" } }
+~ The workers at the sewage farms were no sicker than anybody else.
+
+# PLANT OQ-86 (counter). gold: counter (define, verify) — rebuts mi/causes and names miasma
+@claim mi/counter-named { status: cited, source: { kind: doc, ref: "hist:miasma/6" } }
+~ Snow argued that miasma could not explain why one household fell ill and its neighbour did not.
+
+# gold: evidence (verify)
+@observation mi/stench { status: cited, source: { kind: doc, ref: "hist:miasma/7" } }
+~ In the Great Stink of 1858 the miasma over the Thames brought no rise in deaths.
+
+# gold: reported (verify)
+@claim mi/reported { status: cited, source: { kind: doc, ref: "hist:miasma/8" }, "text:mode": "reported", "text:holder": "Chadwick" }
+~ Chadwick told the commission that all smell is disease, meaning the miasma of the slums.
+
+# gold: related (depend) — elaborates mi/def, does not name miasma
+@prose mi/related { status: cited, source: { kind: doc, ref: "hist:miasma/9" } }
+~ The word comes from the Greek for pollution.
+
+# gold: definition (French)
+@definition mi/def-fr { status: cited, lang: fr, source: { kind: doc, ref: "hist:miasma/10" } }
+~ Le miasme est une émanation malsaine des matières en putréfaction.
+
+# gold: open-question (define)
+@question mi/oq { status: speculative }
+~ Why was miasma believed for so long after the evidence turned against it?
+
+@rel mi/counter --rebuts--> mi/causes
+@rel mi/counter-named --rebuts--> mi/causes
+@rel mi/related --elaborates--> mi/def
+
+# A clique, not a star: a strict class (A-12.4) is a clique, so every pair is asserted.
+@rel e/miasma --x.text/same-as--> e/miasma-fr
+@rel e/miasma --x.text/same-as--> e/miasma-ru
+@rel e/miasma-fr --x.text/same-as--> e/miasma-ru
+
+@rel mi/def --x.text/mentions--> e/miasma
+@rel mi/causes --x.text/mentions--> e/miasma
+@rel mi/smell --x.text/mentions--> e/miasma
+@rel mi/causes-derived --x.text/mentions--> e/miasma
+@rel mi/counter-named --x.text/mentions--> e/miasma
+@rel mi/stench --x.text/mentions--> e/miasma
+@rel mi/reported --x.text/mentions--> e/miasma
+@rel mi/def-fr --x.text/mentions--> e/miasma-fr
+@rel mi/oq --x.text/mentions--> e/miasma
+
+# ============================================================================================
+# 4. smallpox — define, trace ("where did it come from"), locate
+# ============================================================================================
+
+@x.text/entity e/smallpox { status: speculative, source: { kind: doc, ref: "alias:en" } }
+~ smallpox
+
+@x.text/entity e/smallpox-de { status: speculative, lang: de, source: { kind: doc, ref: "alias:de" } }
+~ Pocken
+
+@x.text/entity e/smallpox-es { status: speculative, lang: es, source: { kind: doc, ref: "alias:es" } }
+~ viruela
+
+@x.text/entity e/smallpox-fr { status: speculative, lang: fr, source: { kind: doc, ref: "alias:fr" } }
+~ variole
+
+@x.text/entity e/smallpox-ru { status: speculative, lang: ru, source: { kind: doc, ref: "alias:ru" } }
+~ оспа
+
+# PLANT limit: smallpox is mentioned by fifteen units, and `location` keeps twelve. Every
+# mentioning unit is gold for location, because "where is it mentioned" asks for all of them.
+
+# gold: definition; location
+@definition sp/def { status: cited, source: { kind: doc, ref: "hist:smallpox/1" } }
+~ Smallpox is a contagious viral disease marked by fever and a pustular rash that scars.
+
+# gold: characteristic; location
+@claim sp/deadly { status: cited, source: { kind: doc, ref: "hist:smallpox/2" } }
+~ Smallpox killed about three in ten of those it infected.
+
+# gold: characteristic; location
+@claim sp/immunity { status: cited, source: { kind: doc, ref: "hist:smallpox/3" } }
+~ A survivor of smallpox never caught it again.
+
+# gold: characteristic; location
+@finding sp/eradicated { status: cited, source: { kind: doc, ref: "hist:smallpox/4" } }
+~ Smallpox was declared eradicated in 1980.
+
+# gold: introduction (trace); location
+@observation sp/egypt { status: cited, source: { kind: doc, ref: "hist:smallpox/5" } }
+~ The mummy of Ramesses V bears the scars of smallpox.
+
+# gold: introduction (trace); location
+@observation sp/china { status: cited, source: { kind: doc, ref: "hist:smallpox/6" } }
+~ A Chinese text of the fourth century describes smallpox for the first time in writing.
+
+# gold: revision (trace); location — superseded by sp/origin-new
+@claim sp/origin-old { status: cited, source: { kind: doc, ref: "hist:smallpox/7" } }
+~ Smallpox reached Europe with the returning Crusaders.
+
+# gold: characteristic; location
+@claim sp/origin-new { status: cited, source: { kind: doc, ref: "hist:smallpox/8" } }
+~ Smallpox was in Europe centuries before the Crusades.
+
+# gold: cause (trace) — causes sp/americas, does not name smallpox
+@claim sp/cause { status: cited, source: { kind: doc, ref: "hist:smallpox/9" } }
+~ The ships of the conquest carried sick sailors across the Atlantic.
+
+# gold: introduction (trace); location
+@observation sp/americas { status: cited, source: { kind: doc, ref: "hist:smallpox/10" } }
+~ Smallpox reached the Americas in 1518 and emptied whole cities.
+
+# gold: location
+@observation sp/variolation { status: cited, source: { kind: doc, ref: "hist:smallpox/11" } }
+~ Variolation against smallpox was practised in Constantinople before 1717.
+
+# gold: location
+@claim sp/montagu { status: cited, source: { kind: doc, ref: "hist:smallpox/12" }, "text:holder": "Lady Mary Wortley Montagu" }
+~ Lady Mary Wortley Montagu had her son inoculated against smallpox.
+
+# gold: location (German)
+@claim sp/de { status: cited, lang: de, source: { kind: doc, ref: "hist:smallpox/13" } }
+~ Die Pocken wurden in Deutschland 1874 durch die Impfpflicht zurückgedrängt.
+
+# gold: location (Spanish)
+@claim sp/es { status: cited, lang: es, source: { kind: doc, ref: "hist:smallpox/14" } }
+~ La expedición Balmis llevó la vacuna contra la viruela a América en 1803.
+
+# gold: location (Russian)
+@prose sp/ru { status: cited, lang: ru, source: { kind: doc, ref: "hist:smallpox/15" } }
+~ Екатерина II привилась от оспы в 1768 году.
+
+# gold: location; open-question (define)
+@question sp/oq { status: speculative }
+~ Could smallpox return from a laboratory stock?
+
+# gold: related (locate) — elaborates sp/eradicated, does not name smallpox
+@prose sp/related { status: cited, source: { kind: doc, ref: "hist:smallpox/16" } }
+~ The last natural case was a hospital cook in Merca, Somalia, in 1977.
+
+# gold: exemplifies (define) — exemplifies sp/deadly
+@data sp/example { status: cited, source: { kind: doc, ref: "hist:smallpox/17" } }
+~ Of the 6,000 sick in Boston in 1721, 844 died.
+
+@rel sp/origin-new --supersedes--> sp/origin-old
+@rel sp/cause --causes--> sp/americas
+@rel sp/related --elaborates--> sp/eradicated
+@rel sp/example --exemplifies--> sp/deadly
+
+# A clique, not a star: a strict class (A-12.4) is a clique, so every pair is asserted.
+@rel e/smallpox --x.text/same-as--> e/smallpox-de
+@rel e/smallpox --x.text/same-as--> e/smallpox-es
+@rel e/smallpox --x.text/same-as--> e/smallpox-fr
+@rel e/smallpox --x.text/same-as--> e/smallpox-ru
+@rel e/smallpox-de --x.text/same-as--> e/smallpox-es
+@rel e/smallpox-de --x.text/same-as--> e/smallpox-fr
+@rel e/smallpox-de --x.text/same-as--> e/smallpox-ru
+@rel e/smallpox-es --x.text/same-as--> e/smallpox-fr
+@rel e/smallpox-es --x.text/same-as--> e/smallpox-ru
+@rel e/smallpox-fr --x.text/same-as--> e/smallpox-ru
+
+@rel sp/def --x.text/mentions--> e/smallpox
+@rel sp/deadly --x.text/mentions--> e/smallpox
+@rel sp/immunity --x.text/mentions--> e/smallpox
+@rel sp/eradicated --x.text/mentions--> e/smallpox
+@rel sp/egypt --x.text/mentions--> e/smallpox
+@rel sp/china --x.text/mentions--> e/smallpox
+@rel sp/origin-old --x.text/mentions--> e/smallpox
+@rel sp/origin-new --x.text/mentions--> e/smallpox
+@rel sp/americas --x.text/mentions--> e/smallpox
+@rel sp/variolation --x.text/mentions--> e/smallpox
+@rel sp/montagu --x.text/mentions--> e/smallpox
+@rel sp/de --x.text/mentions--> e/smallpox-de
+@rel sp/es --x.text/mentions--> e/smallpox-es
+@rel sp/ru --x.text/mentions--> e/smallpox-ru
+@rel sp/oq --x.text/mentions--> e/smallpox
+
+# ============================================================================================
+# 5. Semmelweis — define, attribute ("who said he was mad"), verify ("cut deaths by washing")
+# ============================================================================================
+
+@x.text/entity e/semmelweis { status: speculative, source: { kind: doc, ref: "alias:en" } }
+~ Semmelweis
+
+@x.text/entity e/semmelweis-ru { status: speculative, lang: ru, source: { kind: doc, ref: "alias:ru" } }
+~ Земмельвейс
+
+# gold: definition
+@definition se/def { status: cited, source: { kind: doc, ref: "hist:semmelweis/1" } }
+~ Semmelweis was a Hungarian obstetrician at the Vienna General Hospital in the 1840s.
+
+# gold: characteristic; the claim verify asks about
+@claim se/washing { status: cited, source: { kind: doc, ref: "hist:semmelweis/2" } }
+~ Semmelweis cut deaths from childbed fever by having students wash in chlorinated lime.
+
+# gold: support (verify) — grounds se/washing-derived, does not name Semmelweis
+@data se/rates { status: cited, source: { kind: doc, ref: "hist:semmelweis/3" } }
+~ Mortality in the first clinic fell from about ten per cent to under two after May 1847.
+
+# gold: characteristic; rests on se/rates
+@claim se/washing-derived { status: inferred, grounds: [se/rates] }
+~ The fall in deaths at Semmelweis's clinic followed the handwashing order.
+
+# gold: characteristic
+@claim se/asylum { status: cited, source: { kind: doc, ref: "hist:semmelweis/4" } }
+~ Semmelweis died in an asylum in 1865.
+
+# gold: reported (attribute); holder (attribute) — the claim the attribute question asks about
+@claim se/mad { status: cited, source: { kind: doc, ref: "hist:semmelweis/5" }, "text:mode": "reported", "text:holder": "his colleagues" }
+~ His colleagues said Semmelweis had gone mad.
+
+# gold: reported (verify), holder (attribute) — reported; about the handwashing
+@claim se/reported { status: cited, source: { kind: doc, ref: "hist:semmelweis/6" }, "text:mode": "reported", "text:holder": "Skoda" }
+~ Skoda told the Academy that Semmelweis's washing had halved the deaths.
+
+# gold: holder, stance (attribute) — asserted by a named holder
+@claim se/stance { status: cited, source: { kind: doc, ref: "hist:semmelweis/7" }, "text:mode": "asserted", "text:holder": "Semmelweis" }
+~ Semmelweis wrote that the doctors themselves carried the particles to the women.
+
+# PLANT mode. gold: holder, stance (attribute) — a holder and no mode
+@claim se/stance-nomode { status: cited, source: { kind: doc, ref: "hist:semmelweis/8" }, "text:holder": "Scanzoni" }
+~ Scanzoni declared Semmelweis's doctrine of no use to obstetrics.
+
+# gold: counter (define, verify) — rebuts se/washing, does not name Semmelweis
+@claim se/counter { status: speculative }
+~ Deaths fell in the Prague clinic in the same years without any washing order.
+
+# gold: evidence (verify)
+@observation se/clinics { status: cited, source: { kind: doc, ref: "hist:semmelweis/9" } }
+~ Semmelweis saw that the midwives' clinic lost far fewer mothers than the doctors' clinic.
+
+# gold: exemplifies (define) — exemplifies se/washing
+@observation se/example { status: cited, source: { kind: doc, ref: "hist:semmelweis/10" } }
+~ In April 1847 the first clinic lost 57 mothers; in August, after the order, it lost 6.
+
+# gold: characteristic (Russian)
+@claim se/ru { status: cited, lang: ru, source: { kind: doc, ref: "hist:semmelweis/11" } }
+~ Земмельвейс ввёл мытьё рук хлорной известью в 1847 году.
+
+@rel se/counter --rebuts--> se/washing
+@rel se/example --exemplifies--> se/washing
+
+@rel e/semmelweis --x.text/same-as--> e/semmelweis-ru
+
+@rel se/def --x.text/mentions--> e/semmelweis
+@rel se/washing --x.text/mentions--> e/semmelweis
+@rel se/washing-derived --x.text/mentions--> e/semmelweis
+@rel se/asylum --x.text/mentions--> e/semmelweis
+@rel se/mad --x.text/mentions--> e/semmelweis
+@rel se/reported --x.text/mentions--> e/semmelweis
+@rel se/stance --x.text/mentions--> e/semmelweis
+@rel se/stance-nomode --x.text/mentions--> e/semmelweis
+@rel se/clinics --x.text/mentions--> e/semmelweis
+@rel se/ru --x.text/mentions--> e/semmelweis-ru
+
+# ============================================================================================
+# 6. John Snow — define, attribute ("who said he was wrong"), explain ("why the pump handle")
+# ============================================================================================
+
+@x.text/entity e/snow { status: speculative, source: { kind: doc, ref: "alias:en" } }
+~ John Snow
+
+@x.text/entity e/snow-ru { status: speculative, lang: ru, source: { kind: doc, ref: "alias:ru" } }
+~ Джон Сноу
+
+# gold: definition
+@definition sn/def { status: cited, source: { kind: doc, ref: "hist:snow/1" } }
+~ John Snow was a London physician, a pioneer of anaesthesia and of epidemiology.
+
+# gold: characteristic
+@claim sn/map { status: cited, source: { kind: doc, ref: "hist:snow/2" } }
+~ John Snow mapped the cholera deaths of 1854 around the Broad Street pump.
+
+# gold: characteristic; the act the explain question asks about
+@claim sn/handle { status: cited, source: { kind: doc, ref: "hist:snow/3" } }
+~ John Snow persuaded the parish to take the handle off the Broad Street pump.
+
+# gold: cause (explain) — causes sn/handle, does not name Snow
+@claim sn/cause { status: cited, source: { kind: doc, ref: "hist:snow/4" } }
+~ Nearly every death that week was in a household that drew water from the one pump.
+
+# gold: characteristic
+@claim sn/anaesthesia { status: cited, source: { kind: doc, ref: "hist:snow/5" } }
+~ John Snow gave chloroform to Queen Victoria at the birth of Prince Leopold.
+
+# gold: reported, holder (attribute) — the claim the attribute question asks about
+@claim sn/wrong { status: cited, source: { kind: doc, ref: "hist:snow/6" }, "text:mode": "reported", "text:holder": "the Board of Health" }
+~ The Board of Health reported that John Snow's water theory was wrong.
+
+# gold: holder, stance (attribute)
+@claim sn/stance { status: cited, source: { kind: doc, ref: "hist:snow/7" }, "text:mode": "asserted", "text:holder": "John Snow" }
+~ John Snow held that cholera is swallowed, not breathed.
+
+# PLANT mode. gold: holder, stance (attribute) — a holder and no mode
+@claim sn/lancet { status: cited, source: { kind: doc, ref: "hist:snow/8" }, "text:holder": "The Lancet" }
+~ The Lancet dismissed John Snow's sewer theory as a fallacy.
+
+# gold: evidence (explain)
+@observation sn/workhouse { status: cited, source: { kind: doc, ref: "hist:snow/9" } }
+~ John Snow found that the workhouse with its own well had almost no deaths.
+
+# gold: counter (define, explain) — rebuts sn/handle, does not name Snow
+@claim sn/counter { status: speculative }
+~ The outbreak was already waning before the handle came off.
+
+# gold: hypothesis (explain)
+@hypothesis sn/hyp { status: speculative }
+~ John Snow may have acted on the brewery workers who drank only beer and stayed well.
+
+# PLANT passing. gold: none — about the pub, not the man
+@claim sn/passing { status: cited, source: { kind: doc, ref: "hist:snow/10" } }
+~ A public house on Broadwick Street is now named after John Snow.
+
+# gold: characteristic (Russian)
+@claim sn/ru { status: cited, lang: ru, source: { kind: doc, ref: "hist:snow/11" } }
+~ Джон Сноу доказал, что холера передаётся через воду.
+
+@rel sn/cause --causes--> sn/handle
+@rel sn/counter --rebuts--> sn/handle
+
+@rel e/snow --x.text/same-as--> e/snow-ru
+
+@rel sn/def --x.text/mentions--> e/snow
+@rel sn/map --x.text/mentions--> e/snow
+@rel sn/handle --x.text/mentions--> e/snow
+@rel sn/anaesthesia --x.text/mentions--> e/snow
+@rel sn/wrong --x.text/mentions--> e/snow
+@rel sn/stance --x.text/mentions--> e/snow
+@rel sn/lancet --x.text/mentions--> e/snow
+@rel sn/workhouse --x.text/mentions--> e/snow
+@rel sn/hyp --x.text/mentions--> e/snow
+@rel sn/passing --x.text/mentions--> e/snow
+@rel sn/ru --x.text/mentions--> e/snow-ru
+
+# ============================================================================================
+# 7. Jenner — define, attribute ("who claimed he invented vaccination"), trace
+# ============================================================================================
+
+@x.text/entity e/jenner { status: speculative, source: { kind: doc, ref: "alias:en" } }
+~ Jenner
+
+@x.text/entity e/jenner-ru { status: speculative, lang: ru, source: { kind: doc, ref: "alias:ru" } }
+~ Дженнер
+
+# gold: definition
+@definition je/def { status: cited, source: { kind: doc, ref: "hist:jenner/1" } }
+~ Jenner was an English country doctor who introduced vaccination with cowpox.
+
+# gold: characteristic
+@claim je/phipps { status: cited, source: { kind: doc, ref: "hist:jenner/2" } }
+~ Jenner inoculated James Phipps with cowpox in May 1796.
+
+# gold: introduction (trace)
+@observation je/milkmaids { status: cited, source: { kind: doc, ref: "hist:jenner/3" } }
+~ Jenner heard that milkmaids who had caught cowpox did not take smallpox.
+
+# gold: revision (trace) — superseded by je/first-new
+@claim je/first-old { status: cited, source: { kind: doc, ref: "hist:jenner/4" } }
+~ Jenner was the first to protect anyone with cowpox.
+
+# gold: characteristic
+@claim je/first-new { status: cited, source: { kind: doc, ref: "hist:jenner/5" } }
+~ Jenner was not the first to use cowpox, but the first to test it and publish.
+
+# gold: cause (trace) — causes je/milkmaids, does not name Jenner
+@claim je/cause { status: cited, source: { kind: doc, ref: "hist:jenner/6" } }
+~ Country lore in Gloucestershire held that cowpox kept the pox away.
+
+# gold: reported, holder (attribute) — the claim the attribute question asks about
+@claim je/invented { status: cited, source: { kind: doc, ref: "hist:jenner/7" }, "text:mode": "reported", "text:holder": "his biographer" }
+~ His biographer claimed that Jenner invented vaccination alone.
+
+# gold: holder, stance (attribute)
+@claim je/stance { status: cited, source: { kind: doc, ref: "hist:jenner/8" }, "text:mode": "asserted", "text:holder": "Jenner" }
+~ Jenner maintained that cowpox gave lifelong protection.
+
+# PLANT OQ-86 (counter). gold: counter (define) — rebuts je/stance and names Jenner
+@claim je/counter-named { status: cited, source: { kind: doc, ref: "hist:jenner/9" } }
+~ Jenner's own patients were later found to need revaccination.
+
+# gold: exemplifies (define) — exemplifies je/phipps
+@observation je/example { status: cited, source: { kind: doc, ref: "hist:jenner/10" } }
+~ The boy was exposed to smallpox six weeks later and did not fall ill.
+
+# gold: introduction (trace), Russian
+@prose je/ru { status: cited, lang: ru, source: { kind: doc, ref: "hist:jenner/11" } }
+~ Дженнер опубликовал свои наблюдения в 1798 году.
+
+@rel je/first-new --supersedes--> je/first-old
+@rel je/cause --causes--> je/milkmaids
+@rel je/counter-named --rebuts--> je/stance
+@rel je/example --exemplifies--> je/phipps
+
+@rel e/jenner --x.text/same-as--> e/jenner-ru
+
+@rel je/def --x.text/mentions--> e/jenner
+@rel je/phipps --x.text/mentions--> e/jenner
+@rel je/milkmaids --x.text/mentions--> e/jenner
+@rel je/first-old --x.text/mentions--> e/jenner
+@rel je/first-new --x.text/mentions--> e/jenner
+@rel je/invented --x.text/mentions--> e/jenner
+@rel je/stance --x.text/mentions--> e/jenner
+@rel je/counter-named --x.text/mentions--> e/jenner
+@rel je/ru --x.text/mentions--> e/jenner-ru
+
+# ============================================================================================
+# 8. James Lind — define, verify ("ran the first controlled trial"), attribute ("proved the cure")
+# ============================================================================================
+
+@x.text/entity e/lind { status: speculative, source: { kind: doc, ref: "alias:en" } }
+~ James Lind
+
+@x.text/entity e/lind-ru { status: speculative, lang: ru, source: { kind: doc, ref: "alias:ru" } }
+~ Джеймс Линд
+
+# gold: definition
+@definition li/def { status: cited, source: { kind: doc, ref: "hist:lind/1" } }
+~ James Lind was a Scottish naval surgeon who wrote A Treatise of the Scurvy in 1753.
+
+# gold: characteristic; the claim verify asks about
+@claim li/trial { status: cited, source: { kind: doc, ref: "hist:lind/2" } }
+~ James Lind ran the first controlled trial in medicine aboard the Salisbury in 1747.
+
+# gold: support (verify) — grounds li/trial-derived, does not name Lind
+@data li/arms { status: cited, source: { kind: doc, ref: "hist:lind/3" } }
+~ Twelve sick sailors were divided into six pairs, each pair given a different remedy.
+
+# gold: characteristic
+@claim li/trial-derived { status: inferred, grounds: [li/arms] }
+~ James Lind's comparison of six remedies had the shape of a controlled trial.
+
+# gold: counter (define, verify) — rebuts li/trial, does not name Lind
+@claim li/counter { status: cited, source: { kind: doc, ref: "hist:lind/4" } }
+~ Daniel's trial of pulse and water in the Book of Daniel compared two groups long before.
+
+# PLANT remainder (counter). gold: counter (define); not verify — rebuts the cure, not the trial
+@claim li/counter-cure { status: cited, source: { kind: doc, ref: "hist:lind/5" } }
+~ The treatise recommended a boiled concentrate that had lost its power.
+
+# gold: reported, holder (attribute) — the claim the attribute question asks about
+@claim li/proved { status: cited, source: { kind: doc, ref: "hist:lind/6" }, "text:mode": "reported", "text:holder": "Blane" }
+~ Blane said that James Lind had proved the cure for scurvy.
+
+# gold: holder, stance (attribute)
+@claim li/stance { status: cited, source: { kind: doc, ref: "hist:lind/7" }, "text:mode": "asserted", "text:holder": "James Lind" }
+~ James Lind held that scurvy came from moist air as much as from diet.
+
+# gold: evidence (verify)
+@observation li/salisbury { status: cited, source: { kind: doc, ref: "hist:lind/8" } }
+~ James Lind recorded that the two given oranges and lemons were fit for duty after six days.
+
+# gold: characteristic (Russian)
+@claim li/ru { status: cited, lang: ru, source: { kind: doc, ref: "hist:lind/9" } }
+~ Джеймс Линд сравнил шесть средств от цинги.
+
+@rel li/counter --rebuts--> li/trial
+@rel li/counter-cure --rebuts--> li/stance
+
+@rel e/lind --x.text/same-as--> e/lind-ru
+
+@rel li/def --x.text/mentions--> e/lind
+@rel li/trial --x.text/mentions--> e/lind
+@rel li/trial-derived --x.text/mentions--> e/lind
+@rel li/proved --x.text/mentions--> e/lind
+@rel li/stance --x.text/mentions--> e/lind
+@rel li/salisbury --x.text/mentions--> e/lind
+@rel li/ru --x.text/mentions--> e/lind-ru
+
+# ============================================================================================
+# 9. Joseph Lister — define, explain ("why carbolic acid"), locate
+# ============================================================================================
+
+@x.text/entity e/lister { status: speculative, source: { kind: doc, ref: "alias:en" } }
+~ Joseph Lister
+
+@x.text/entity e/lister-ru { status: speculative, lang: ru, source: { kind: doc, ref: "alias:ru" } }
+~ Джозеф Листер
+
+# gold: definition; location
+@definition ls/def { status: cited, source: { kind: doc, ref: "hist:lister/1" } }
+~ Joseph Lister was a British surgeon who introduced antiseptic surgery.
+
+# gold: characteristic; location — the act the explain question asks about
+@claim ls/carbolic { status: cited, source: { kind: doc, ref: "hist:lister/2" } }
+~ Joseph Lister dressed wounds with carbolic acid from 1865.
+
+# gold: cause (explain) — causes ls/carbolic, does not name Lister
+@claim ls/cause { status: cited, source: { kind: doc, ref: "hist:lister/3" } }
+~ Carbolic acid had been used to stop the stench of the Carlisle sewage fields.
+
+# PLANT OQ-86 (cause). gold: cause (explain) — causes ls/carbolic and names Lister
+@claim ls/cause-named { status: cited, source: { kind: doc, ref: "hist:lister/4" } }
+~ Joseph Lister read Pasteur's papers on fermentation and took germs to cause putrefaction.
+
+# gold: characteristic; location
+@claim ls/mortality { status: cited, source: { kind: doc, ref: "hist:lister/5" } }
+~ Joseph Lister's amputation deaths fell from about 45 to 15 in a hundred.
+
+# gold: evidence (explain); location
+@observation ls/ward { status: cited, source: { kind: doc, ref: "hist:lister/6" } }
+~ Joseph Lister saw that compound fractures festered where simple fractures healed.
+
+# gold: hypothesis (explain); location
+@hypothesis ls/hyp { status: speculative }
+~ Joseph Lister may have chosen carbolic because it was cheap and already to hand.
+
+# gold: counter (define) — rebuts ls/mortality, does not name Lister; not explain, which asks why
+# carbolic and not whether it worked
+@claim ls/counter { status: speculative }
+~ The fall in deaths owed as much to cleaner wards as to the spray.
+
+# gold: open-question (define, explain); location
+@question ls/oq { status: speculative }
+~ Why did Joseph Lister give up the carbolic spray in 1890?
+
+# gold: related (locate) — elaborates ls/carbolic, does not name Lister
+@prose ls/related { status: cited, source: { kind: doc, ref: "hist:lister/7" } }
+~ Carbolic acid is phenol, distilled from coal tar.
+
+# gold: location (Russian)
+@prose ls/ru { status: cited, lang: ru, source: { kind: doc, ref: "hist:lister/8" } }
+~ Джозеф Листер стал основоположником антисептики.
+
+# PLANT passing. gold: location only — it is a mention, which is what locate asks for
+@claim ls/passing { status: cited, source: { kind: doc, ref: "hist:lister/9" } }
+~ A brand of mouthwash was named after Joseph Lister in 1879.
+
+@rel ls/cause --causes--> ls/carbolic
+@rel ls/cause-named --causes--> ls/carbolic
+@rel ls/counter --rebuts--> ls/mortality
+@rel ls/related --elaborates--> ls/carbolic
+
+@rel e/lister --x.text/same-as--> e/lister-ru
+
+@rel ls/def --x.text/mentions--> e/lister
+@rel ls/carbolic --x.text/mentions--> e/lister
+@rel ls/cause-named --x.text/mentions--> e/lister
+@rel ls/mortality --x.text/mentions--> e/lister
+@rel ls/ward --x.text/mentions--> e/lister
+@rel ls/hyp --x.text/mentions--> e/lister
+@rel ls/oq --x.text/mentions--> e/lister
+@rel ls/ru --x.text/mentions--> e/lister-ru
+@rel ls/passing --x.text/mentions--> e/lister
+
+# ============================================================================================
+# 10. phlogiston — define, compare ("difference from oxygen"), depend
+# ============================================================================================
+
+@x.text/entity e/phlogiston { status: speculative, source: { kind: doc, ref: "alias:en" } }
+~ phlogiston
+
+@x.text/entity e/phlogiston-es { status: speculative, lang: es, source: { kind: doc, ref: "alias:es" } }
+~ flogisto
+
+@x.text/entity e/phlogiston-fr { status: speculative, lang: fr, source: { kind: doc, ref: "alias:fr" } }
+~ phlogistique
+
+@x.text/entity e/phlogiston-ru { status: speculative, lang: ru, source: { kind: doc, ref: "alias:ru" } }
+~ флогистон
+
+# gold: definition
+@definition ph/def { status: cited, source: { kind: doc, ref: "hist:phlogiston/1" } }
+~ Phlogiston was the principle of fire, thought to be released by every burning body.
+
+# gold: characteristic
+@claim ph/release { status: cited, source: { kind: doc, ref: "hist:phlogiston/2" } }
+~ A metal heated in air gives up its phlogiston and leaves a calx.
+
+# gold: characteristic
+@claim ph/negative { status: speculative }
+~ Phlogiston was sometimes said to have negative weight.
+
+# gold: contrast (compare) — contrasts ph/release, does not name phlogiston
+@claim ph/contrast { status: cited, source: { kind: doc, ref: "hist:phlogiston/3" } }
+~ Lavoisier showed that a burning metal takes oxygen from the air and grows heavier.
+
+# gold: counter (define, compare) — rebuts ph/release, does not name phlogiston
+@data ph/counter { status: cited, source: { kind: doc, ref: "hist:phlogiston/4" } }
+~ Mercury calx weighs more than the mercury it was made from.
+
+# PLANT OQ-86 (counter). gold: counter (define, compare) — rebuts ph/negative, names phlogiston
+@claim ph/counter-named { status: cited, source: { kind: doc, ref: "hist:phlogiston/5" } }
+~ No one ever weighed phlogiston, so its weight was never negative or anything else.
+
+# gold: dependent (depend, depth 1) — rests on ph/release, does not name phlogiston
+@claim ph/dep1 { status: inferred, grounds: [ph/release] }
+~ Dephlogisticated air is air that has taken up nothing from the flame.
+
+# gold: dependent (depend, depth 2) — rests on ph/dep1
+@claim ph/dep2 { status: inferred, grounds: [ph/dep1] }
+~ Priestley named the gas he made from mercury calx dephlogisticated air.
+
+# gold: open-question (define)
+@question ph/oq { status: speculative }
+~ Why did Priestley keep to phlogiston to the end of his life?
+
+# gold: related (depend) — elaborates ph/def, does not name phlogiston
+@prose ph/related { status: cited, source: { kind: doc, ref: "hist:phlogiston/6" } }
+~ Stahl took the theory from Becher's terra pinguis.
+
+# gold: characteristic (Russian)
+@claim ph/ru { status: cited, lang: ru, source: { kind: doc, ref: "hist:phlogiston/7" } }
+~ Флогистон считали невесомой огненной материей.
+
+# PLANT passing. gold: none — a history of the word, not of the substance
+@claim ph/passing { status: cited, source: { kind: doc, ref: "hist:phlogiston/8" } }
+~ The word phlogiston appears in a hundred and forty chemistry textbooks before 1800.
+
+@rel ph/contrast --contrasts--> ph/release
+@rel ph/counter --rebuts--> ph/release
+@rel ph/counter-named --rebuts--> ph/negative
+@rel ph/related --elaborates--> ph/def
+
+# A clique, not a star: a strict class (A-12.4) is a clique, so every pair is asserted.
+@rel e/phlogiston --x.text/same-as--> e/phlogiston-es
+@rel e/phlogiston --x.text/same-as--> e/phlogiston-fr
+@rel e/phlogiston --x.text/same-as--> e/phlogiston-ru
+@rel e/phlogiston-es --x.text/same-as--> e/phlogiston-fr
+@rel e/phlogiston-es --x.text/same-as--> e/phlogiston-ru
+@rel e/phlogiston-fr --x.text/same-as--> e/phlogiston-ru
+
+@rel ph/def --x.text/mentions--> e/phlogiston
+@rel ph/release --x.text/mentions--> e/phlogiston
+@rel ph/negative --x.text/mentions--> e/phlogiston
+@rel ph/counter-named --x.text/mentions--> e/phlogiston
+@rel ph/oq --x.text/mentions--> e/phlogiston
+@rel ph/ru --x.text/mentions--> e/phlogiston-ru
+@rel ph/passing --x.text/mentions--> e/phlogiston
