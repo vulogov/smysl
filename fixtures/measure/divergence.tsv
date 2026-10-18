@@ -1,0 +1,91 @@
+# TX-P8 M6: T7 over the four slice books at part level, plain chain, min:n 2
+# key	value
+recipe.hash	998bee48559f123a42dd6df0462a0caf4f8386107946e1fdc2aa54ebc9a82b7d
+n.pair:a kinsman	6
+n.pair:and she	22
+n.pair:beth lehem	7
+n.pair:her mother	8
+n.pair:i am	5
+n.pair:i will	6
+n.pair:in law	19
+n.pair:in the	19
+n.pair:jesus christ	5
+n.pair:mother in	10
+n.pair:my daughter	8
+n.pair:of moab	8
+n.pair:of the	33
+n.pair:redeem it	7
+n.pair:said unto	20
+n.pair:she had	5
+n.pair:the lord	21
+n.pair:thou hast	6
+n.pair:unto her	15
+n.pair:young men	5
+n.pair:доколе не	5
+n.pair:дочь моя	8
+n.pair:и сказал	17
+n.pair:иисуса христа	5
+n.pair:полей моавитских	4
+n.pair:свекрови своей	6
+n.pair:сказал вооз	5
+n.pair:сказала ей	7
+n.pair:что ты	7
+n.pairs	5539
+n.pairs:distinct	4282
+n.texts	4
+n.tokens	5549
+n.types	1669
+value.g2:and she	80.6398
+value.g2:beth lehem	107.4224
+value.g2:her mother	63.1379
+value.g2:in law	176.4521
+value.g2:in the	55.5074
+value.g2:jesus christ	80.0968
+value.g2:mother in	84.5066
+value.g2:my daughter	76.5332
+value.g2:of moab	61.9859
+value.g2:of the	92.6400
+value.g2:redeem it	67.7825
+value.g2:said unto	130.1251
+value.g2:the lord	118.6016
+value.g2:unto her	80.9098
+value.g2:young men	64.1061
+value.g2:дочь моя	120.6305
+value.g2:и сказал	92.7340
+value.g2:иисуса христа	80.0968
+value.g2:полей моавитских	58.2251
+value.g2:свекрови своей	78.7690
+value.jsd:kjv/08-rut|kjv/65-jud	0.4921
+value.jsd:kjv/08-rut|synodal/08-rut	1.0000
+value.jsd:kjv/08-rut|synodal/65-jud	1.0000
+value.jsd:kjv/65-jud|synodal/08-rut	1.0000
+value.jsd:kjv/65-jud|synodal/65-jud	1.0000
+value.jsd:sqrt:kjv/08-rut|kjv/65-jud	0.7015
+value.jsd:sqrt:kjv/08-rut|synodal/08-rut	1.0000
+value.jsd:sqrt:kjv/08-rut|synodal/65-jud	1.0000
+value.jsd:sqrt:kjv/65-jud|synodal/08-rut	1.0000
+value.jsd:sqrt:kjv/65-jud|synodal/65-jud	1.0000
+value.jsd:sqrt:synodal/08-rut|synodal/65-jud	0.8338
+value.jsd:synodal/08-rut|synodal/65-jud	0.6952
+value.pmi:a kinsman	6.5774
+value.pmi:beth lehem	9.6281
+value.pmi:her mother	6.2755
+value.pmi:i am	7.3479
+value.pmi:i will	5.9329
+value.pmi:in law	6.4581
+value.pmi:jesus christ	10.1135
+value.pmi:mother in	6.3206
+value.pmi:my daughter	7.3910
+value.pmi:redeem it	7.2428
+value.pmi:she had	6.0024
+value.pmi:thou hast	6.8911
+value.pmi:young men	9.1724
+value.pmi:доколе не	7.2260
+value.pmi:дочь моя	9.4354
+value.pmi:иисуса христа	10.1135
+value.pmi:свекрови своей	8.9760
+value.pmi:сказал вооз	5.9056
+value.pmi:сказала ей	6.3510
+value.pmi:что ты	6.0188
+gist	T7 over from texts
+unit.uid	b3:mpb7t4viqi5yzkigcwbku6pwhdp5qxxvnabmalgor7c6b76pt3ia

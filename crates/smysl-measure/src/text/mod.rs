@@ -58,6 +58,7 @@ use unicode_normalization::{is_nfc, UnicodeNormalization};
 use crate::recipe::Level;
 
 pub mod compress;
+pub mod divergence;
 pub mod entropy;
 pub mod kneser_ney;
 pub mod lz_match;

@@ -89,3 +89,8 @@ name = "lz_match"
 # against retraining from scratch on random corpora, and T5 over a library.
 [[test]]
 name = "kneser_ney"
+
+# The M6 exit: T7's JSD at its two exact ends, G² by hand and against the Python harness's own
+# computation (`fixtures/measure/g2.tsv`), PMI and the pairs it counts, and T7 over a library.
+[[test]]
+name = "divergence"

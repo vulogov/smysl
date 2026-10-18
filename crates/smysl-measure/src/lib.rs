@@ -14,7 +14,8 @@
 //! T2 ([`text::compress`]) and T6 ([`text::ncd`]), over each text's characters. **M4 adds T3**
 //! ([`text::lz_match`]), the match-length rate, over a suffix array, and **M5 adds T5**
 //! ([`text::kneser_ney`]), n-gram surprisal with each segment scored by a model of the others.
-//! T7 arrives in M6 as one more [`Measure`] in [`ALL`], and M7 is the `measure` command.
+//! **M6 adds T7** ([`text::divergence`]), Jensen–Shannon between texts and collocations by G²
+//! and PMI, which completes the text-level measures; M7 is the `measure` command.
 //!
 //! # A result as a unit (SMYSL-2.6 §3.6)
 //!
@@ -52,6 +53,7 @@ pub use outcome::{gist, to_payload, Ci, Headline, Num, Outcome, Refusal, Value};
 pub use recipe::{Axis, ClassPolicy, Level, Param, Recipe, RecipeError};
 pub use scope::{digest, resolve, Basis, Resolved};
 pub use text::compress::T2;
+pub use text::divergence::T7;
 pub use text::entropy::T1;
 pub use text::kneser_ney::T5;
 pub use text::lz_match::T3;
@@ -136,7 +138,7 @@ pub trait Measure: Sync {
 }
 
 /// Every measure this build has, in report order.
-pub const ALL: &[&dyn Measure] = &[&T1, &T2, &T3, &T4, &T5, &T6];
+pub const ALL: &[&dyn Measure] = &[&T1, &T2, &T3, &T4, &T5, &T6, &T7];
 
 /// A measure by id and version, against a registry.
 ///

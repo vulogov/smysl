@@ -609,6 +609,22 @@ counts, `p̂ᵥ = cᵥ/N`. Logs are base 2 unless written `ln`.
 - PMI: `log₂ (c(xy)·N / (c(x)·c(y)))` over adjacent pairs with `c(xy) ≥ params.min_pair` (default 5).
 - Log-likelihood G² (Dunning 1993, *Computational Linguistics* 19(1)): `2 Σᵢⱼ Oᵢⱼ ln(Oᵢⱼ/Eᵢⱼ)` on
   the 2×2 contingency table, `0·ln 0 = 0`. Top-k by G², ties by term order.
+- *As built (M6).* `text::divergence`. **JSD is between every two texts in scope**, keyed
+  `jsd:<a>|<b>` and `jsd:sqrt:<a>|<b>` as T6 keys its pairs: a measure has one scope, and a
+  scope's texts are read under one analyzer and stream by construction, so the `SMY-E489` above
+  is the corpus loader's refusal of texts that choose two chains. It is computed as `½ (1/N_P) Σ
+  c_P log₂(2 c_P N_Q / (c_P N_Q + c_Q N_P)) + ½ (1/N_Q) Σ c_Q log₂(…)` over integer products,
+  which makes **both of §5.1's ends exact** rather than three rounded entropies subtracted:
+  equal distributions give `log₂ 1` = 0 in every term, and disjoint supports give `log₂ 2` = 1
+  in every term and `N/N` after the sum. Over the four slice books, every pair across the two
+  languages is 1 exactly. **Collocations** are adjacent pairs within a segment, never across
+  two, with the 2×2 table taken from the pair table's own margins (`N` pairs, `R` pairs
+  starting with x, `C` ending with y), so G² and PMI read one table. **G² ranks attraction
+  only** — `O₁₁ > E₁₁`, compared in integers — since G² is as large for a pair seen less often
+  than chance and that is not a collocation. PMI's threshold is `params.min:pair` (default 5,
+  spelt as the crate's other parameters are); `params.top:k` (default 20) for each list.
+  Stored by terms, `g2:<x> <y>` and `pmi:<x> <y>`, with the pair's count as `pair:<x> <y>` in
+  `measure:n`. `min:n` is 10,000 tokens, T1's. No headline: like T6, a result of many values.
 
 **T8 — neural surprisal.** Declared, `ModelDependent`, always `NotRun("deferred: needs a candle LM")`.
 
@@ -886,8 +902,8 @@ Generated in-test from a fixed seed with the crate's own generator, so fixtures 
 | T5 leave-one-out | random small corpora | subtraction equals retraining from scratch (property test); *as built (M5)*, 2,000 corpora at orders 1–5, every segment: the model with it removed equal to the retrained one as integers, its surprisal equal to the bit, and the full model restored |
 | T6 | x vs x; x vs i.i.d. noise | NCD(x,x) < 0.1; NCD(x, noise) > 0.9; symmetric by construction |
 | T6 window | two 9 MiB texts | `SMY-E484` |
-| T7 | P = Q; disjoint supports | JSD = 0 exactly; JSD = 1 exactly |
-| T7 G² | a 2×2 table | equals an independent computation in the Python implementation's test harness (`python/`) |
+| T7 | P = Q; disjoint supports | JSD = 0 exactly; JSD = 1 exactly; *as built (M6)*, as `f64` equality and as the payload integers 0 and 2²⁰, a text twice another's length in the same proportions included |
+| T7 G² | a 2×2 table | equals an independent computation in the Python implementation's test harness (`python/`); *as built (M6)*, eight tables in `fixtures/measure/g2.tsv` with this crate's G² and its q20, recomputed by `python/tests/test_measure_g2.py` from the cells with Python's own `math.log` (expectations from the margins, then `O ln(O/E)`): equal to a relative 10⁻¹² and the q20 to the unit — not to the bit, since the platform's `log` is not `libm` |
 
 ### 5.2 Graph, channel, dialogue, assessment
 
@@ -972,7 +988,7 @@ Requires SMYSL-2.4 TX-P1/P2 (parts, analyzers) and SMYSL-2.5 TX-P6 (`sq` scopes)
 | M3 | T2, T6 with pinned brotli | §5.1 T2 and T6 rows; peak memory of one q11 lgwin 24 compression recorded — **done 2026-10-18**, below |
 | M4 | T3: SA-IS, LCP, LPF, both estimator forms, calibration fixture | LPF equals naive on 10⁴ random inputs; calibration goldens — **done 2026-10-18**, below |
 | M5 | T5 with exact leave-one-out | hand-computed and property tests — **done 2026-10-18**, below |
-| M6 | T7 | §5.1 T7 rows |
+| M6 | T7 | §5.1 T7 rows — **done 2026-10-18**, below |
 | M7 | `measure` command for T-ids, `--seed-check`, `--dry-run`, three CLI gates updated | cross-platform matrix job green; `measure T1,T2,T3,T4 --scope 'from texts where collection = bible'` on the 5-Bible fixture adds no unit on a second run; GE-T6 pure arm (T2, T3) reported |
 
 *M1, done 2026-10-18.* `crates/smysl-measure`: `Recipe` with every §3.4 field and its canonical
@@ -1080,6 +1096,20 @@ model maintains rather than frozen at the full model's; and **a payload series h
 not locators**, so the top-k are keyed by locator and the series carries their rank order. The
 peak is 155 MB for 800,000 tokens: half again §3.7's 100 MB, with fewer distinct n-grams than it
 assumed.
+
+*M6, done 2026-10-18.* T7, divergences and collocations: `text::divergence` (`jsd`, `g2`,
+`Pairs`, and the measure). The exit holds: `tests/divergence.rs` gives JSD 0 and 1 exactly at
+§5.1's two ends, as floats and as payload integers; G² by hand (`40 ln 2` for a perfect
+association, 0 exactly for independence); pairs that never cross a segment; G²'s ranking of
+attraction only and PMI's threshold; and the parameters' refusals. The G² tables are
+`fixtures/measure/g2.tsv`, recomputed by the Python harness's new `test_measure_g2.py`, and T7
+over the four slice books at part level is pinned in `fixtures/measure/divergence.tsv`: Ruth
+and Jude of the KJV at 0.4921, every cross-language pair 1 exactly, and the collocations of
+both Bibles (`in law`, `said unto`, `beth lehem`; `дочь моя`, `и сказал`). No code is new and the
+registry is 109. Two findings, recorded in §3.7 T7: **JSD's form decides whether §5.1's ends are
+exact**, so it is computed over integer products rather than as three entropies; and **G² alone
+does not say which way a pair leans**, so collocations are ranked among the pairs seen more often
+than chance. This completes the text-level measures T1–T7; M7 is the `measure` command.
 
 ### TX-P9 (graph, channel, dialogue, assessment)
 
