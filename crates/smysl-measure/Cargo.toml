@@ -84,3 +84,8 @@ name = "compress"
 # (the rows past 10⁵ symbols `--ignored`, in release), and T3 over a library.
 [[test]]
 name = "lz_match"
+
+# The M5 exit: T5's probabilities against a 30-token corpus worked by hand, leave-one-out
+# against retraining from scratch on random corpora, and T5 over a library.
+[[test]]
+name = "kneser_ney"

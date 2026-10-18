@@ -59,6 +59,7 @@ use crate::recipe::Level;
 
 pub mod compress;
 pub mod entropy;
+pub mod kneser_ney;
 pub mod lz_match;
 pub mod ncd;
 pub mod zipf_heaps;
@@ -313,6 +314,10 @@ pub struct Corpus {
     /// The index in `segments` of each expression's first segment, in alias order — one, at
     /// 0, for a corpus built from terms, which is one unnamed text.
     pub starts: Vec<usize>,
+    /// Each segment's locator, beside [`Corpus::segments`]: `<alias>#<locator>` at a named
+    /// level (`kjv/08-rut#Ruth.1.3`), `<alias>#part:<k>` and `<alias>#window:<k>`, counted from 1
+    /// within the text, at `part` and `window:<n>`, and `#<k>` for a corpus built from terms.
+    pub locators: Vec<String>,
 }
 
 impl Corpus {
@@ -324,6 +329,7 @@ impl Corpus {
         level: Level,
         segments: Vec<Vec<String>>,
     ) -> Corpus {
+        let locators = (1..=segments.len()).map(|k| format!("#{k}")).collect();
         Corpus::build(
             analyzer.into(),
             stream,
@@ -334,6 +340,7 @@ impl Corpus {
             false,
             Vec::new(),
             vec![0],
+            locators,
         )
     }
 
@@ -344,9 +351,11 @@ impl Corpus {
         let chain = Chain::plain();
         let mut starts = Vec::with_capacity(docs.len());
         let mut segments = Vec::new();
+        let mut locators = Vec::new();
         for d in &docs {
             starts.push(segments.len());
             segments.extend(d.segments.iter().map(|s| chain.surface(s)));
+            locators.extend((1..=d.segments.len()).map(|k| format!("{}#part:{k}", d.alias)));
         }
         let texts = docs.iter().map(|d| d.alias.clone()).collect();
         Corpus::build(
@@ -359,6 +368,7 @@ impl Corpus {
             false,
             docs,
             starts,
+            locators,
         )
     }
 
@@ -373,7 +383,15 @@ impl Corpus {
         lossy: bool,
         docs: Vec<Doc>,
         starts: Vec<usize>,
+        locators: Vec<String>,
     ) -> Corpus {
+        debug_assert_eq!(locators.len(), segments.len());
+        let locators = locators
+            .into_iter()
+            .zip(&segments)
+            .filter(|(_, s)| !s.is_empty())
+            .map(|(l, _)| l)
+            .collect();
         // The starts count the segments kept: an empty segment is dropped below.
         let starts = starts
             .iter()
@@ -403,6 +421,7 @@ impl Corpus {
             lossy,
             docs,
             starts,
+            locators,
         }
     }
 
@@ -472,21 +491,27 @@ impl Corpus {
         let mut docs: Vec<Doc> = Vec::new();
         let mut chars: Vec<String> = Vec::new();
         let mut starts: Vec<usize> = Vec::new();
+        let mut locators: Vec<String> = Vec::new();
+        let (mut part_no, mut window_no) = (0u64, 0u64);
         let mut last: Option<&str> = None;
         for (t, tid, _lang) in &parts {
             if last != Some(t.alias.as_str()) {
                 // A window does not run across two expressions: they are two texts.
-                if !window.is_empty() {
-                    segments.push(std::mem::take(&mut window));
-                }
                 if let Some(prev) = last {
+                    if !window.is_empty() {
+                        window_no += 1;
+                        segments.push(std::mem::take(&mut window));
+                        locators.push(format!("{prev}#window:{window_no}"));
+                    }
                     docs.push(Doc::new(prev, std::mem::take(&mut chars)));
                 }
+                (part_no, window_no) = (0, 0);
                 starts.push(segments.len());
                 aliases.push(t.alias.clone());
                 last = Some(t.alias.as_str());
             }
             tids.insert(*tid);
+            part_no += 1;
             let part = library.part(tid)?;
             let text = String::from_utf8(part.text).map_err(|_| LibError::ObjectCorrupt {
                 id: tid.canonical(),
@@ -494,6 +519,7 @@ impl Corpus {
             match level {
                 Level::Part => {
                     segments.push(split(&text));
+                    locators.push(format!("{}#part:{part_no}", t.alias));
                     chars.push(text);
                 }
                 Level::Window(n) => {
@@ -501,7 +527,9 @@ impl Corpus {
                     for term in split(&text) {
                         window.push(term);
                         if window.len() == n as usize {
+                            window_no += 1;
                             segments.push(std::mem::take(&mut window));
+                            locators.push(format!("{}#window:{window_no}", t.alias));
                         }
                     }
                 }
@@ -515,15 +543,17 @@ impl Corpus {
                                     id: format!("{} ({}..{})", tid.canonical(), row.start, row.end),
                                 })?;
                         segments.push(split(s));
+                        locators.push(format!("{}#{}", t.alias, row.locator));
                         chars.push(s.to_string());
                     }
                 }
             }
         }
-        if !window.is_empty() {
-            segments.push(window);
-        }
         if let Some(prev) = last {
+            if !window.is_empty() {
+                segments.push(window);
+                locators.push(format!("{prev}#window:{}", window_no + 1));
+            }
             docs.push(Doc::new(prev, chars));
         }
         Ok(Corpus::build(
@@ -536,6 +566,7 @@ impl Corpus {
             lossy,
             docs,
             starts,
+            locators,
         ))
     }
 

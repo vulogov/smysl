@@ -557,6 +557,27 @@ counts, `p̂ᵥ = cᵥ/N`. Logs are base 2 unless written `ln`.
 - Per segment: mean surprisal `−(1/|s|) Σ log₂ P(wᵢ | wᵢ₋₂ wᵢ₋₁)` in bits/token. The top-k segments
   by surprisal go into `measure:series` with their locators.
 - Memory: about 1.5 M distinct n-grams for a Bible-sized text at order 3 (estimate), ~100 MB.
+- *As built (M5).* `text::kneser_ney`. A segment is padded on the left with `order − 1`
+  beginning marks, which are context and never predicted; the top order counts n-grams and each
+  lower order counts **continuations, `N₁₊(• g)`, as the number of distinct left extensions
+  one order up**, so every order follows from the top order's counts and a count that appears or
+  vanishes moves exactly one continuation below it. `Model` holds each order's counts, each
+  context's total and type count, and each order's n₁ and n₂ as integers; removing a segment
+  subtracts its top-order n-grams through that cascade, so the model without it is the same
+  integers as the model never given it — **the discounts and V included, recomputed and not
+  frozen** — and every probability is the same to the bit. An order with neither ones nor twos
+  has D = 0, and a word it then gives probability 0 makes the result not run rather than
+  infinite. `params.order` (1–5, default 3) and `params.top:k` (default 10). `H` is `Σ bits /
+  Σ tokens` over every segment scored by the others; `min:n` is 10,000 tokens and a scope needs
+  two segments (`SMY-W485`). **Locators**: a payload series holds numbers only, so the top-k are
+  stored by locator as `top:<locator>` (mean surprisal in `measure:value`, tokens in
+  `measure:n`), and the series `top` is the rank order, `[ordinal, tokens, mean]` each, ties to
+  the earlier segment; a corpus now keeps each segment's locator — `<alias>#<locator>` at a
+  named level (`kjv/65-jud#Jude.1.20`), `<alias>#part:<k>` and `<alias>#window:<k>` otherwise.
+  The full model's discounts are stored as `D:<k>`. **Peak memory**, `examples/t5_peak` under
+  `/usr/bin/time -l`, release, this machine: **155 MB and 2.0 s** for 800,000 tokens of a seeded
+  Zipf vocabulary of 12,000 types in 25-word segments (700k distinct trigrams), the corpus
+  included; 27 MB at 100,000.
 
 **T6 — normalised compression distance** (Cilibrasi, Vitányi 2005, *IEEE Trans. IT* 51(4)).
 - `NCD(x,y) = (min(C(xy), C(yx)) − min(C(x), C(y))) / max(C(x), C(y))`, C = T2's codec. The
@@ -861,8 +882,8 @@ Generated in-test from a fixed seed with the crate's own generator, so fixtures 
 | T3 calibration | i.i.d. H = 1, 4, 6; n = 2k, 8k, 32k | bit-exact golden payloads; values reproduce §2.9's table to 3 decimals; *as built (M4)*, every row of the calibration table to 10⁵ symbols bit for bit (values and payload hash), the rest `--ignored` in release, and §2.9's numbers checked as draws of the same estimator — each within three single-draw standard deviations of the mean over 20 seeds, plus its printed rounding — since §2.9's probe drew from another generator and no generator reproduces one draw to the digit |
 | T4 Zipf | terms drawn from a discrete power law with α = 2.0, 2.5 | α̂ within the bootstrap CI; CI covers α in ≥ 90 of 100 seeds (slow test, `--ignored`) |
 | T4 Heaps | synthetic V(n) = 10·n^0.6 by construction | β̂ = 0.6 ± 0.01 |
-| T5 | a 30-token corpus, KN probabilities computed by hand in the test's comments | exact to 10⁻¹² before quantisation |
-| T5 leave-one-out | random small corpora | subtraction equals retraining from scratch (property test) |
+| T5 | a 30-token corpus, KN probabilities computed by hand in the test's comments | exact to 10⁻¹² before quantisation; *as built (M5)*, three segments at order 3, the three discounts exactly and six probabilities against fractions worked in the comments (a seen trigram, a seen context with an unseen word, the beginning marks, an unknown word, an unseen context) |
+| T5 leave-one-out | random small corpora | subtraction equals retraining from scratch (property test); *as built (M5)*, 2,000 corpora at orders 1–5, every segment: the model with it removed equal to the retrained one as integers, its surprisal equal to the bit, and the full model restored |
 | T6 | x vs x; x vs i.i.d. noise | NCD(x,x) < 0.1; NCD(x, noise) > 0.9; symmetric by construction |
 | T6 window | two 9 MiB texts | `SMY-E484` |
 | T7 | P = Q; disjoint supports | JSD = 0 exactly; JSD = 1 exactly |
@@ -950,7 +971,7 @@ Requires SMYSL-2.4 TX-P1/P2 (parts, analyzers) and SMYSL-2.5 TX-P6 (`sq` scopes)
 | M2 | T1, T4, `boot.rs` | §5.1 T1 and T4 rows; bootstrap seed tests — **done 2026-10-18**, below |
 | M3 | T2, T6 with pinned brotli | §5.1 T2 and T6 rows; peak memory of one q11 lgwin 24 compression recorded — **done 2026-10-18**, below |
 | M4 | T3: SA-IS, LCP, LPF, both estimator forms, calibration fixture | LPF equals naive on 10⁴ random inputs; calibration goldens — **done 2026-10-18**, below |
-| M5 | T5 with exact leave-one-out | hand-computed and property tests |
+| M5 | T5 with exact leave-one-out | hand-computed and property tests — **done 2026-10-18**, below |
 | M6 | T7 | §5.1 T7 rows |
 | M7 | `measure` command for T-ids, `--seed-check`, `--dry-run`, three CLI gates updated | cross-platform matrix job green; `measure T1,T2,T3,T4 --scope 'from texts where collection = bible'` on the 5-Bible fixture adds no unit on a second run; GE-T6 pure arm (T2, T3) reported |
 
@@ -1043,6 +1064,22 @@ decimals" is checked as agreement in distribution, which holds (within 0.021, an
 32k); **the estimator steps in n on large alphabets**, which bears on OQ-59, since a
 correction read off the table between its rows would be wrong; and **the peak is 23–29
 bytes a symbol**, not 16 — about 100 MB for a 4.3 M-character Bible.
+
+*M5, done 2026-10-18.* T5, n-gram surprisal: `text::kneser_ney` (`Model`, interpolated
+Kneser–Ney over integer counts that a segment is added to and removed from, and the measure,
+each segment scored by the model of the others). The exit holds: `tests/kneser_ney.rs` checks
+a 30-token corpus worked by hand — D₁ = 3/13, D₂ = 7/12, D₃ = 3/5 exactly, and six probabilities
+within 10⁻¹² of their fractions — and removal against retraining from scratch on 2,000 random
+corpora at orders 1 to 5, as integers and to the bit. T5 over the KJV's Ruth and Jude at verse
+level (7.0742 bits/token, `min:n` 2 since the default refuses 3,191 tokens) is pinned in
+`fixtures/measure/kneser_ney.tsv`; its ten most surprising verses are all Jude's, which is what a
+model of mostly Ruth should say about them. A corpus now carries a locator per segment. No code
+is new and the registry is 109. Two findings, recorded in §3.7 T5: **leave-one-out is exact
+only if the discounts and V move with the counts**, so they are recomputed from integers the
+model maintains rather than frozen at the full model's; and **a payload series holds numbers,
+not locators**, so the top-k are keyed by locator and the series carries their rank order. The
+peak is 155 MB for 800,000 tokens: half again §3.7's 100 MB, with fewer distinct n-grams than it
+assumed.
 
 ### TX-P9 (graph, channel, dialogue, assessment)
 
