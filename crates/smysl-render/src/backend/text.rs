@@ -28,7 +28,7 @@ impl Backend for Text {
         out.push_str("\n\n");
 
         for block in &ir.blocks {
-            out.push_str(&format!("{} [{}]\n", block.role, block.uid.short()));
+            out.push_str(&format!("{} [{}]\n", block.heading, block.uid.short()));
             let line = block.joined();
             for l in line.lines() {
                 // A marker on a blank separator line is trailing whitespace pretending to

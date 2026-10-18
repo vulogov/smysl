@@ -24,6 +24,9 @@ use crate::profile::{Connectives, Contentions, Profile, Provenance, StatusDispla
 #[non_exhaustive]
 pub struct Block {
     pub role: Role,
+    /// The section heading the profile gives `role`: its own name unless the profile says
+    /// otherwise ([`Profile::heading`]).
+    pub heading: String,
     pub uid: Uid,
     pub level: Lod,
     pub text: String,
@@ -52,6 +55,9 @@ pub enum NoteKind {
     Contention,
     /// A ground or dep the artifact does not itself render.
     Elsewhere,
+    /// What the thread says about this step: a dossier's `gap` names its slot here (TX-P8
+    /// step 3). Last, so the variants before it keep their order and discriminants.
+    Step,
 }
 
 /// What the artifact must say about itself.
@@ -223,6 +229,13 @@ pub fn build(store: &Store, thread: &Thread, profile: &Profile, opts: &BuildOpti
         };
 
         let mut notes = Vec::new();
+        // First, so a tight profile's one note is the thread's own word on the step.
+        if let Some(n) = step.note.as_deref().filter(|n| !n.trim().is_empty()) {
+            notes.push(Note {
+                kind: NoteKind::Step,
+                text: n.to_string(),
+            });
+        }
         if profile.show.provenance != Provenance::None {
             if let Some(s) = &unit.core.source {
                 notes.push(Note {
@@ -267,6 +280,7 @@ pub fn build(store: &Store, thread: &Thread, profile: &Profile, opts: &BuildOpti
 
         blocks.push(Block {
             role: step.role,
+            heading: profile.heading(step.role),
             uid: step.unit,
             level,
             text: text_at(&unit.core, level),
@@ -891,11 +905,57 @@ mod tests {
         assert_eq!(ir(&store, &t, &p), ir(&store, &t, &p));
     }
 
+    // -- headings and step notes --------------------------------------------
+
+    /// TX-P8 step 3: a dossier's roles are headed by the profile, its older roles by their
+    /// names as before, and a gap's note travels with its block.
+    #[test]
+    fn new_roles_take_the_profile_s_heading_and_a_step_s_note_travels() {
+        let p = Profile::plain();
+        assert_eq!(p.heading(Role::Counter), "Counter-evidence");
+        assert_eq!(p.heading(Role::Gap), "Gaps");
+        assert_eq!(
+            p.heading(Role::Question),
+            "question",
+            "an older role keeps its name"
+        );
+        assert_eq!(p.heading(Role::Support), "support");
+
+        let custom = Profile::load(
+            r#"profile x { headings: { question: "The question", counter: "Against" } }"#,
+        )
+        .expect("loads");
+        assert_eq!(custom.heading(Role::Question), "The question");
+        assert_eq!(custom.heading(Role::Counter), "Against");
+        assert!(Profile::load(r#"profile x { headings: { nonsense: "x" } }"#).is_err());
+
+        let gap = UnitCoreBuilder::new(KernelType::Claim, "find nothing", Status::Speculative)
+            .build()
+            .unwrap();
+        let uid = smysl_core::canonical_uid(&gap);
+        let store = Store::from_records(vec![smysl_core::Record::Unit(gap)]);
+        let mut thread = Thread::new(
+            smysl_core::ThreadId::new("dossier/t").unwrap(),
+            smysl_core::ThreadSchema::Dossier,
+            smysl_core::AgentId::new("tool:test").unwrap(),
+            "a dossier",
+            smysl_core::Hlc::new(0, 0, smysl_core::AgentId::new("tool:test").unwrap()),
+        );
+        thread
+            .steps
+            .push(smysl_core::Step::new(Role::Gap, uid).with_note("exemplifies: nothing"));
+        let ir = build(&store, &thread, &p, &BuildOptions::default());
+        assert_eq!(ir.blocks[0].heading, "Gaps");
+        assert_eq!(ir.blocks[0].notes[0].kind, NoteKind::Step);
+        assert_eq!(ir.blocks[0].notes[0].text, "exemplifies: nothing");
+    }
+
     // -- joining -------------------------------------------------------------
 
     fn block_with(connective: Option<&'static str>, text: &str) -> Block {
         Block {
             role: Role::Support,
+            heading: "support".into(),
             uid: Uid::from_bytes([1; 32]),
             level: Lod::L0,
             text: text.into(),

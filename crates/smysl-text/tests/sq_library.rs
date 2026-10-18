@@ -435,3 +435,33 @@ fn the_six_scope_items_resolve_and_store_still_does() {
         assert_eq!(diags[0].code.as_str(), "SMY-E511", "{item}");
     }
 }
+
+/// TX-P8 step 3 over a library: `ask` resolves its subject through `LibraryScope`, and one
+/// candidate joined by `same-as` answers in both languages.
+#[test]
+fn a_dossier_over_the_library_crosses_same_as_and_its_slots_are_saved_queries() {
+    use smysl_query::{ask, AskOptions};
+    let built = build();
+    let scope = LibraryScope::new("library", &built.library);
+    let env = Env::new(built.library.store(), &scope)
+        .with_times(&scope)
+        .with_entities(&scope);
+    let owner = smysl_core::ids::AgentId::new("tool:test").expect("an agent");
+    let d = ask("Who is Naomi?", &env, &AskOptions::new(owner.clone())).expect("a dossier");
+    assert_eq!(d.subject, "Naomi");
+    assert_eq!(d.entities.len(), 2, "Naomi and Ноеминь are one candidate");
+    let characteristic = d
+        .slots
+        .iter()
+        .find(|s| s.name == "characteristic")
+        .expect("the slot");
+    // Every drawn unit is a claim, so `characteristic` holds the mentions, capped at twelve by
+    // the template; and the slot reached them across the same-as edge, since the candidate it
+    // was asked under is the pair.
+    assert_eq!(characteristic.units.len(), 12);
+    assert!(characteristic.text.contains("about entity(\"Naomi\")"));
+    // Lowercase works, because a question is typed by a person.
+    let lower = ask("who is naomi", &env, &AskOptions::new(owner)).expect("a dossier");
+    assert_eq!(lower.entities, d.entities);
+    assert_eq!(lower.subject, "naomi");
+}

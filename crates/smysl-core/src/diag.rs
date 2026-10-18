@@ -350,6 +350,10 @@ registry! {
         W463 = "SMY-W463", Warn,  "A traversal stopped at its depth with an unexplored frontier";
         W464 = "SMY-W464", Warn,  "A supersession fork in scope: no single head, every successor kept";
         E466 = "SMY-E466", Error, "A query cannot be pinned: the store has no such declaration";
+        W417 = "SMY-W417", Warn,  "A dossier subject names more than one entity; the candidates are listed and nothing ran";
+        E468 = "SMY-E468", Error, "A question matches no intent rule; name the intent";
+        E477 = "SMY-E477", Error, "Unknown dossier template set";
+        W478 = "SMY-W478", Warn,  "An answer unit grounds outside its dossier and was dropped";
         W510 = "SMY-W510", Warn,  "A string literal is not in NFC; it is matched byte-exactly as written";
         E511 = "SMY-E511", Error, "A scope names something this environment does not hold";
         E512 = "SMY-E512", Error, "An operator does not apply to the type of the field it names";
@@ -762,9 +766,16 @@ mod tests {
     /// `SourceRef.span`, which SMYSL-2.4 §4.3.1 gives to TX-P5. Registering them with the pass
     /// that will one day raise them would put two codes in the registry that nothing in this
     /// build can produce, which is the thing this comment exists to prevent.
+    /// 103 with `SMY-W417`, `SMY-E468`, `SMY-E477` and `SMY-W478` in TX-P8 step 3, where `ask`
+    /// exists. Three are SMYSL-2.5's and one is draft 3's, and each was withheld until something
+    /// could raise it: a subject that names two entities, a question no intent rule matches, a
+    /// template set this build does not carry, and a model answer grounding outside the
+    /// dossier it was given. `W417` sits in the query block although its number is in the
+    /// library range, because the ambiguity is the dossier's: the library resolves a name, and
+    /// only a question needs that name to be one thing.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 99);
+        assert_eq!(Code::ALL.len(), 103);
     }
 
     #[test]

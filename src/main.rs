@@ -89,6 +89,9 @@ fn reproducible(cmd: &Cmd, sub: &ArgMatches) -> Option<bool> {
             // judgement moves into `cmd_q`, onto `Plan::purity`, the day TX-P10 lowers one;
             // `SMY-E416` is allocated for that refusal and is registered then, not now.
             "q" => Some(true),
+            // The dossier is a function of the question and the store: a rule table, a fixed
+            // template set and pure plans. `--answer` is the one invocation that asks a model.
+            "ask" => Some(!sub.get_flag("answer")),
             _ => None,
         },
     }
@@ -166,6 +169,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "link",      about: "Judge candidate pairs; stage entails and contradicts", purity: Purity::Mixed, phase: "TX-P7"  , impure_when: Some("every action but --candidates, which only lists them") , forms: NO_DOCUMENT },
     Cmd { name: "summarise", about: "Grounded summary tree over a scope; staged",           purity: Purity::Model, phase: "TX-P7"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "q",         about: "Run an sq/1 query; explain it, or seed-check it",      purity: Purity::Mixed, phase: "TX-P6"  , impure_when: Some("a model-dependent plan (~sem, ~hybrid, near), none of which this build lowers") , forms: NO_DOCUMENT },
+    Cmd { name: "ask",       about: "A dossier for a question; optionally a model's grounded answer", purity: Purity::Mixed, phase: "TX-P8"  , impure_when: Some("--answer, which asks a model to answer from the dossier") , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -855,6 +859,95 @@ fn cli() -> Command {
                     Arg::new("store")
                         .value_name("PATH")
                         .help("Store, or library root with --library"),
+                ),
+            "ask" => sub
+                .arg(
+                    Arg::new("question")
+                        .value_name("QUESTION")
+                        .required(true)
+                        .help("The question, in any tier-1 language (en, de, es, fr, ru)"),
+                )
+                .arg(
+                    Arg::new("scope")
+                        .long("scope")
+                        .value_name("ITEMS")
+                        .help("sq scope items every slot is asked over, e.g. `texts` [default: the whole store]"),
+                )
+                .arg(
+                    Arg::new("intent")
+                        .long("intent")
+                        .value_name("INTENT")
+                        .value_parser([
+                            "define", "explain", "verify", "attribute", "trace", "locate",
+                            "depend", "compare",
+                        ])
+                        .help("The intent, when no rule recognises the question"),
+                )
+                .arg(
+                    Arg::new("lang")
+                        .long("lang")
+                        .value_name("LANG")
+                        .value_parser(["en", "de", "es", "fr", "ru"])
+                        .help("Read the question by this language's rules only"),
+                )
+                .arg(
+                    Arg::new("subject")
+                        .long("subject")
+                        .value_name("UID")
+                        .help("The entity to take when the subject names more than one (SMY-W417)"),
+                )
+                .arg(
+                    Arg::new("templates")
+                        .long("templates")
+                        .value_name("ID")
+                        .default_value("smysl/dossier/1")
+                        .help("The dossier template set"),
+                )
+                .arg(
+                    Arg::new("budget")
+                        .long("budget")
+                        .value_name("TOKENS")
+                        .value_parser(clap::value_parser!(u64))
+                        .help("Pack the dossier to this many tokens; rule R keeps live rebuttals"),
+                )
+                .arg(
+                    Arg::new("target")
+                        .long("target")
+                        .value_name("TARGET")
+                        .help("Render the dossier as this target [default: markdown]"),
+                )
+                .arg(
+                    Arg::new("save")
+                        .long("save")
+                        .help("Append the dossier: its question, slot queries, thread and view")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("answer")
+                        .long("answer")
+                        .help(
+                            "Ask a model to answer from the dossier; its units are grounded on the \
+                             dossier only, capped by rule M and staged (needs --save)",
+                        )
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .value_name("MS")
+                        .help("Wall clock for the answer's attestations, in milliseconds")
+                        .value_parser(clap::value_parser!(u64)),
+                )
+                .arg(
+                    Arg::new("yes")
+                        .long("yes")
+                        .help("With --answer: commit the staged answer instead of leaving it for review")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("store")
+                        .value_name("PATH")
+                        .help("Store, or library root"),
                 ),
             "summarise" => sub
                 .arg(
@@ -5305,7 +5398,10 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             }
         };
         let scope = smysl::query::StoreScope::new(name, &store);
-        let env = Env::new(&store, &scope);
+        // The entity port too (TX-P8 step 3): a plain store answers `about entity(…)` from its
+        // own `x.text/entity` units and `same-as` classes, which is what lets a dossier slot
+        // saved over it be rerun here.
+        let env = Env::new(&store, &scope).with_entities(&scope);
         let (code, records) = q_run(&job, &env, &opts, m, global);
         if !records.is_empty() {
             if let Err(e) = persist(&path, &records, &store, &labels) {
@@ -5315,6 +5411,332 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
         code
     }
+}
+
+/// `smysl ask` — a dossier for a question (SMYSL-2.5 §3.13, TX-P8 step 3).
+///
+/// Pure unless `--answer`: the intent comes from a rule table, the slots from a template set
+/// compiled into the binary, and every slot is a pure plan, so the same question over the same
+/// store is the same dossier byte for byte. The store is a library when its root holds one and a
+/// plain store otherwise — `ask` resolves its subject through `x.text/entity` units, which both
+/// can hold, so there is no `--library` to forget. The dossier is rendered to stdout through the
+/// same profile and backends `render` uses; `--save` appends it, and `--answer` asks a model to
+/// answer from it and stages what comes back (rule S), which is why `--answer` needs `--save`:
+/// the answer's grounds are the dossier's units, and a staged unit grounded on a question the
+/// store does not hold is a batch that cannot be committed.
+#[cfg(feature = "text")]
+fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use smysl::query::dossier::Intent;
+    use smysl::query::{ask, AskError, AskOptions, Env};
+
+    let question = m.get_one::<String>("question").expect("required by clap");
+    let Some(path) = store_arg(m, global).or(m.get_one::<String>("store").cloned()) else {
+        eprintln!("smysl ask: no store given");
+        return ExitCode::Usage;
+    };
+    warn_output_is_a_report(global, "ask");
+    if m.get_flag("answer") && !m.get_flag("save") {
+        eprintln!(
+            "smysl ask: --answer grounds the model's units on the dossier, so the dossier is \
+             appended first; add --save"
+        );
+        return ExitCode::Usage;
+    }
+    if m.get_flag("yes") && !m.get_flag("answer") {
+        eprintln!("smysl ask: --yes commits a staged answer; there is none without --answer");
+        return ExitCode::Usage;
+    }
+
+    let owner = match AgentId::new("tool:smysl-ask") {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl ask: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let mut opts = AskOptions::new(owner.clone()).with_templates(
+        m.get_one::<String>("templates")
+            .cloned()
+            .unwrap_or_default(),
+    );
+    opts = opts.with_ts(Hlc::new(0, 0, owner));
+    if let Some(i) = m.get_one::<String>("intent") {
+        opts = opts.with_intent(Intent::parse(i).expect("checked by clap"));
+    }
+    if let Some(l) = m.get_one::<String>("lang") {
+        opts = opts.with_lang(l.clone());
+    }
+    if let Some(sc) = m.get_one::<String>("scope") {
+        opts = opts.with_scope(sc.clone());
+    }
+    if let Some(b) = m.get_one::<u64>("budget") {
+        opts = opts.with_budget(*b);
+    }
+    let target = match m.get_one::<String>("target") {
+        Some(t) => match Target::parse(t) {
+            Some(t) => t,
+            None => {
+                eprintln!("smysl ask: `{t}` is not a target");
+                return ExitCode::Usage;
+            }
+        },
+        None => Target::Markdown,
+    };
+
+    let mut corpus = match Corpus::open(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("smysl ask: {path}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    if let Some(raw) = m.get_one::<String>("subject") {
+        match UidPrefix::parse(raw).and_then(|p| corpus.store().resolve_prefix(&p)) {
+            Ok(u) => opts = opts.with_subject(u),
+            Err(e) => {
+                eprintln!("smysl ask: --subject {raw}: {e}");
+                return ExitCode::Usage;
+            }
+        }
+    }
+    let name = std::path::Path::new(&path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+
+    let run = || match &corpus {
+        Corpus::Library(library) => {
+            let scope = smysl::text::scope::LibraryScope::new(name.clone(), library);
+            let env = Env::new(library.store(), &scope)
+                .with_times(&scope)
+                .with_entities(&scope);
+            ask(question, &env, &opts)
+        }
+        Corpus::Store(store, _) => {
+            let scope = smysl::query::StoreScope::new(name.clone(), store);
+            let env = Env::new(store, &scope).with_entities(&scope);
+            ask(question, &env, &opts)
+        }
+    };
+    let asked = run();
+    // `--seed-check`: §3.2's assertion, as `q` makes it — the whole pipeline twice, the second
+    // time with every table rebuilt, and the dossiers compared record for record.
+    if global.get_flag("seed-check") {
+        if let (Ok(a), Ok(b)) = (&asked, &run()) {
+            if a.records != b.records {
+                eprintln!(
+                    "smysl ask: --seed-check asked twice and the dossiers differ; this is an \
+                     internal error, not a property of the question"
+                );
+                return ExitCode::Failure;
+            }
+        }
+    }
+    let dossier = match asked {
+        Ok(d) => d,
+        Err(AskError::Ambiguous {
+            name,
+            candidates,
+            diagnostic,
+        }) => {
+            eprintln!(
+                "smysl ask: {}: {}",
+                diagnostic.code.as_str(),
+                diagnostic.message
+            );
+            for (i, group) in candidates.iter().enumerate() {
+                let label = group
+                    .iter()
+                    .filter_map(|u| corpus.store().get(u))
+                    .map(|u| match u.core.source.as_ref() {
+                        Some(s) => format!("{} ({})", u.core.gist, s.reference),
+                        None => u.core.gist.clone(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" = ");
+                eprintln!("  {}. --subject {}  {label}", i + 1, group[0].canonical());
+            }
+            let _ = name;
+            return ExitCode::Usage;
+        }
+        Err(e @ (AskError::Refused(_) | AskError::NotACandidate { .. })) => {
+            eprintln!("smysl ask: {e}");
+            return ExitCode::Usage;
+        }
+        Err(e) => {
+            eprintln!("smysl ask: {e}");
+            return ExitCode::Failure;
+        }
+    };
+
+    let gaps = dossier
+        .thread
+        .steps
+        .iter()
+        .filter(|s| s.role == Role::Gap)
+        .count();
+    let recipe: String = dossier.recipe[..6]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    eprintln!(
+        "smysl ask: {} — {} ({}), subject `{}` ({} entit{}), {} slot(s), {} gap(s), recipe {recipe}",
+        dossier.thread.id,
+        dossier.classified.intent,
+        dossier.classified.rule,
+        dossier.subject,
+        dossier.entities.len(),
+        if dossier.entities.len() == 1 { "y" } else { "ies" },
+        dossier.slots.len(),
+        gaps,
+    );
+    for w in &dossier.warnings {
+        eprintln!("smysl ask: {}: {}", w.code.as_str(), w.message);
+    }
+
+    // The records a save appends: the declaration with the first saved query a store receives,
+    // then the dossier.
+    let mut records: Vec<Record> = Vec::new();
+    if !declares_query(corpus.store()) {
+        records.push(Record::SchemaDecl(smysl::schemas::query::decl()));
+    }
+    records.extend(dossier.records.iter().cloned());
+
+    // Rendered over the store with the dossier in it, saved or not, so every step resolves.
+    let mut scratch = corpus.store().clone();
+    if let Err(e) = scratch.append(&records) {
+        eprintln!("smysl ask: the dossier does not append: {e}");
+        return ExitCode::Failure;
+    }
+    let profile = Profile::builtin("plain").expect("the plain profile loads");
+    let ir = smysl::build_ir(
+        &scratch,
+        &dossier.thread,
+        &profile,
+        &BuildOptions::default(),
+    );
+    match smysl::emit_artifact(target, &ir, &profile) {
+        Ok(a) => print!("{}", a.text),
+        Err(e) => {
+            eprintln!("smysl ask: {e}");
+            return ExitCode::Failure;
+        }
+    }
+
+    if !m.get_flag("save") {
+        return ExitCode::Success;
+    }
+    match &mut corpus {
+        Corpus::Library(library) => {
+            if let Err(e) = library.append_records(&records) {
+                eprintln!("smysl ask: {path}: {e}");
+                return ExitCode::Failure;
+            }
+        }
+        Corpus::Store(store, labels) => {
+            if let Err(e) = persist(&path, &records, store, labels) {
+                eprintln!("smysl ask: {e}");
+                return ExitCode::Failure;
+            }
+        }
+    }
+    eprintln!(
+        "smysl ask: saved {} record(s): question {}, view {}",
+        records.len(),
+        dossier.question,
+        dossier.view.id
+    );
+    if !m.get_flag("answer") {
+        return ExitCode::Success;
+    }
+    ask_answer(m, global, &path, corpus, scratch, &dossier)
+}
+
+#[cfg(not(feature = "text"))]
+fn cmd_ask(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl ask: needs the library layer (build with --features text)");
+    ExitCode::Usage
+}
+
+/// `ask --answer`: the model's turn, after the dossier is in the store.
+///
+/// The members are the thread's steps less its gaps — a gap's unit is a saved query, whose gist
+/// is query text and not anything the corpus said.
+#[cfg(all(feature = "text", feature = "ingest", feature = "providers"))]
+fn ask_answer(
+    m: &ArgMatches,
+    global: &ArgMatches,
+    path: &str,
+    corpus: Corpus,
+    scratch: Store,
+    dossier: &smysl::query::Dossier,
+) -> ExitCode {
+    let members: Vec<smysl::answer::Member> = dossier
+        .thread
+        .steps
+        .iter()
+        .filter(|s| s.role != Role::Gap)
+        .filter_map(|s| {
+            scratch.get(&s.unit).map(|u| smysl::answer::Member {
+                role: s.role.to_string(),
+                uid: s.unit,
+                status: u.core.status,
+                gist: u.core.gist.clone(),
+            })
+        })
+        .collect();
+    let registry = match load_registry(global) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl ask: {}", e.message);
+            return e.code;
+        }
+    };
+    let opts = match model_options(m, "ask") {
+        Ok(o) => o,
+        Err(code) => return code,
+    };
+    let report = match smysl::Ingestor::new(&registry, opts).answer(&scratch, &members) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl ask: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    for d in &report.diagnostics {
+        eprintln!("  {}", d.code.as_str());
+        eprintln!("    {}", d.message);
+    }
+    eprintln!(
+        "smysl ask: answer: {} proposed, {} dropped for grounding outside the dossier (SMY-W478), \
+         {} lowered by rule M (SMY-W036)",
+        report.proposed, report.dropped, report.lowered
+    );
+    let Some(staged) = report.staged else {
+        eprintln!("smysl ask: nothing to stage");
+        return ExitCode::Success;
+    };
+    let corpus = match corpus {
+        Corpus::Store(_, labels) => Corpus::Store(Box::new(scratch), labels),
+        library => library,
+    };
+    stage_or_commit("ask", path, corpus, &staged, m.get_flag("yes"))
+}
+
+#[cfg(all(feature = "text", not(all(feature = "ingest", feature = "providers"))))]
+fn ask_answer(
+    _m: &ArgMatches,
+    _global: &ArgMatches,
+    _path: &str,
+    _corpus: Corpus,
+    _scratch: Store,
+    _dossier: &smysl::query::Dossier,
+) -> ExitCode {
+    eprintln!(
+        "smysl ask: --answer asks a model, and this build has no provider (build with --features \
+         ingest,providers); the dossier was saved"
+    );
+    ExitCode::Usage
 }
 
 /// What `q` was asked to do, once the arguments are settled.
@@ -7691,6 +8113,7 @@ fn main() -> ProcExitCode {
         "link" => cmd_link(sub, &matches),
         "summarise" => cmd_summarise(sub, &matches),
         "q" => cmd_q(sub, &matches),
+        "ask" => cmd_ask(sub, &matches),
         _ => {
             // Unreachable while every command in `COMMANDS` has an arm above, which
             // `command_table_matches_section_23` enforces. Kept as the honest answer if one
@@ -9853,7 +10276,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 32);
+        assert_eq!(COMMANDS.len(), 33);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -9889,7 +10312,8 @@ mod tests {
                 "same-as",
                 "link",
                 "summarise",
-                "q"
+                "q",
+                "ask"
             ]
         );
     }
@@ -9923,7 +10347,7 @@ mod tests {
             .collect();
         assert_eq!(
             mixed,
-            ["pack", "thread", "find", "link", "q"],
+            ["pack", "thread", "find", "link", "q", "ask"],
             "a command is mixed when some invocation of it calls a model"
         );
 
@@ -9955,7 +10379,7 @@ mod tests {
     /// this test rather than shipping a flag that answers "I cannot say".
     #[test]
     fn seed_check_can_judge_every_mixed_command() {
-        let judged = ["find", "pack", "thread", "link", "q"];
+        let judged = ["find", "pack", "thread", "link", "q", "ask"];
         for c in COMMANDS.iter().filter(|c| c.purity == Purity::Mixed) {
             assert!(
                 judged.contains(&c.name),

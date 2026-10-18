@@ -1,0 +1,4 @@
+about entity($subject)
+where kind = hypothesis
+order by salience descending
+limit 12

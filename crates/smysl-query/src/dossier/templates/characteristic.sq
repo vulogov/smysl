@@ -1,0 +1,4 @@
+about entity($subject)
+where kind in [claim, finding]
+order by salience descending
+limit 12

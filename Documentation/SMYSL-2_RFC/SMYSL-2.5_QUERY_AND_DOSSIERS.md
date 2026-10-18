@@ -714,6 +714,32 @@ no version marker is read without a lens and counted (`SMY-W475`). Unit conversi
    | expand <-rebuts depth 1 | union (about entity($subject) | with rebuttals)
    | where status >= inferred | order by salience desc | limit 12
    ```
+   *As built (TX-P8 step 3)* the slot is `templates/counter.sq`, one file shared by every intent
+   with a counter slot, and it reads
+   ```
+   about entity($subject)
+   expand ->rebuts depth 1
+   except
+   about entity($subject)
+   order by salience descending
+   limit 12
+   ```
+   The sketch above does not parse under SMYSL-2.9 (a `where` after an `expand`, `desc`) and its
+   arrow is the reverse of the one every traversal in this build walks: `->k` is `trace_via`,
+   which for `rebuts` and `causes` reaches the source from the target, so a rebuttal is behind
+   `->rebuts` and `<-rebuts` walks to what the rebutted unit itself rebuts. The `except` is
+   OQ-86. The template set `smysl/dossier/1` has eighteen slots and assigns them:
+
+   | intent | slots, in order |
+   |---|---|
+   | define | definition, characteristic, exemplifies, counter, open-question |
+   | explain | cause, evidence, hypothesis, counter, open-question |
+   | verify | support, evidence, counter, reported |
+   | attribute | reported, holder, stance |
+   | trace | introduction, revision, cause |
+   | locate | location, related |
+   | depend | dependent, related |
+   | compare | characteristic, contrast, counter |
 4. **Rank within a slot** by the product of retrieval score (RRF-normalised), derived salience
    (`renormalise` over the slot), status rank and independent-witness count, each quantised
    with `smysl_core::quantise`; ties by uid. Multiplying incomparable scales is a choice to
@@ -829,7 +855,7 @@ pub trait Translator {
 | `src/witness.rs` | `Witnesses` trait, attestation default |
 | `src/explain.rs` | `--explain` and `--why` text and JSON |
 | `src/saved.rs` | `x.query/v1` encode/decode, rerun, effect split (added in TX-P8 step 1: `Recipe`, `bind`, `to_records`, `load`, `rerun`, `SetDiff`; the schema effect half of the split waits for TX-P12) |
-| `src/dossier/{mod,intent,templates}.rs` + `templates/*.sq` | dossier pipeline |
+| `src/dossier/{mod,intent,templates}.rs` + `templates/*.sq` | dossier pipeline (TX-P8 step 3: `ask`, `AskOptions`, `Dossier`, `SlotResult`, `AskError`; `intent::classify` over a 169-rule table for en, de, es, fr and ru; `templates::{SET, SLOTS, slots, hash, set}`; one `.sq` file per slot, eighteen, shared across intents; `fold.rs`, the pinned case fold for subjects and rules) |
 | `src/nl.rs` | `Translator`, `TranslateContext`, output validation |
 | `src/ports.rs` | `Scope`, `SemanticSource`, `Classifier`, `TimeIndex`. As built: `Scope` (step 2, with `analyzer` and `restrict_lang` added in step 6), `Times` (step 6 — `TimeIndex` by the name the trait took, since it answers *a unit's time* and *a literal's meaning* and indexes nothing) and `Entities` (step 6). Each crosses the same line: this crate owns the question and the graph walk, `smysl-text` owns the fact |
 | `src/pred.rs` | predicate resolution and evaluation (added in TX-P6 step 4). `src/resolve.rs` above is this file's eventual other half: it is named for "field and relation resolution, `using` pins, compile-forward", and compile-forward is TX-P12's, while relation kinds and `using` pins resolve in `plan.rs` beside the phases that own them. What is left is one concern — resolving the fields a predicate names and then evaluating it — and splitting a resolver from an evaluator that is its only caller would be two files agreeing about a type |
@@ -1107,6 +1133,17 @@ Flags:
   `--from-question` arrive with TX-P8 and TX-P10, as do the model flags, and `ask`, `schema`
   and `migrate` are their own phases'. `--seed-check` runs a pure plan twice and compares; a
   model-dependent plan cannot be produced by this build (§6 step 7 has why `E416` waits).
+- **As built in TX-P8 step 3:** `ask "…" [STORE] [--scope ITEMS] [--intent I] [--lang L]
+  [--subject UID] [--templates ID] [--budget N] [--target T] [--save] [--answer [--at MS]
+  [--yes]]`. The store is a library when its root holds one, as for `link` and `summarise`, so
+  there is no `--library`. The dossier is rendered to stdout through the plain profile (`--target`
+  as `render` takes it); a summary line and the slots' warnings go to stderr. `--answer` needs
+  `--save`, because the model's units ground on the dossier's and a staged unit grounded on a
+  question the store does not hold cannot be committed; it routes as `content-ingest`, like
+  `summarise`, so any configured provider — local or hosted — answers it. `--provider` is not a
+  flag: routing is the configuration's, as for every model-backed command. `--seed-check` asks
+  twice and compares the dossiers record for record, and refuses `--answer`. `q` over a plain
+  store now binds the entity port as well, so a dossier slot saved there can be rerun.
 
 Test updates: `command_table_matches_section_23` (30 names), `only_ingest_and_attest_are_model_dependent`
 (mixed = `thread, find, q, ask, migrate`), `tests/dispatch.rs` (30), `tests/cli-surface.txt`,
@@ -1398,6 +1435,60 @@ Each step has an exit test. Steps within a phase are ordered.
    time an open enumeration's unknown code became a known one, and the case the fixture was
    written for, shown from the other side.
 3. Intents, templates, `ask`, dossier view and thread, rendering headings. *Exit:* §5.5 unit tests.
+
+   *Done 2026-10-17.* `smysl_query::dossier` is §3.13's pipeline, pure: `intent::classify` reads
+   the question against a closed table of prefix, infix and suffix rules for the five tier-1
+   languages, **longest match winning**, so `what is the difference between` is a comparison
+   because it is longer than `what is` and not because somebody listed it first; the subject is
+   the longest run of the topic's words the entity port has candidates for, so `why did Naomi
+   return` finds `Naomi` without the rule knowing where a name ends; each slot is planned, run and
+   saved through `saved::to_records` with the template set in its recipe
+   (`PlanOptions::template_set`, the input §3.6 listed and step 1 hashed as empty); ranking is the
+   product of retrieval score, salience renormalised over the slot and status rank, quantised;
+   and a budget packs the slots' units with each slot's best in focus, so rule R pins the
+   rebuttals of what is packed. The port gained `Entities::candidates`, one group per thing a
+   name means, with a default that cannot report an ambiguity it cannot see; `StoreScope` and
+   `LibraryScope` both answer it from the same two functions in `store_scope.rs`, since what
+   resolution reads is the store's own records. `smysl-render` profiles gained `headings` and
+   blocks a `heading`, with defaults for roles 24–48 only — a default renaming `question` would
+   change every `qa` render — and a step's note now travels as `NoteKind::Step`, which is how a
+   `gap` shows which slot it is. `smysl_ingest::answer` is the answer step: the dossier one line
+   per unit, fenced, markers neutralised; what grounds outside it dropped as `SMY-W478`; what
+   survives staged through `prepare_under`, so rule M is the one implementation it always was.
+   The four codes — `W417`, `E468`, `E477`, `W478` — take the registry to 103. The exit's tests
+   are `crates/smysl-query/tests/dossier.rs` over `fixtures/dossier/subjects.smy` (every intent
+   recognised in every tier-1 language and claimed by no other, six questions no rule matches,
+   two Marys and `--subject`, each slot of `define` finding exactly the unit the fixture marks
+   for it, the `gap`, the view's membership, rule R in the pack, rule D),
+   `crates/smysl-ingest/tests/answer.rs` against a scripted provider (an answer proposing four
+   records keeps one, and rule M lowers it from `cited` to `speculative`; SMYSL-2.1's canary
+   reaches the model only inside a derived fence with its forged marker neutralised; an
+   unparseable answer stages nothing in one turn), and `tests/cmd_ask.rs`.
+
+   **Six findings, each fixed where it was found.** *The sketch's arrow was backwards*
+   (§3.13 above): `->k` walks what a unit rests on, and a rebuttal is the source of `rebuts`, so
+   the counter slot is `->rebuts`; the first run of the fixture test had every edge-defined slot
+   empty and is how this was found. *`Target::Text` abbreviates a uid*, and the surface parser
+   refuses an abbreviated reference — rightly — so a model shown the text rendering could cite
+   nothing it was shown; the answer step renders a line per unit with the canonical uid, and
+   the test that found it had every grounded record dropped. *A slot saved over a plain store
+   could not be rerun*, because `q` bound no entity port there; it does now. *A dossier saved to
+   a surface store is refused*, as `q --save` is: the `x.query/v1` declaration carries fields
+   `@schema` cannot spell until TX-P12 step 7, so a dossier is saved to a CBOR store or a
+   library. *A slot whose every unit an earlier slot placed* would otherwise vanish from the
+   thread; it is a `gap` whose note says so, which keeps "found nothing" and "found nothing new"
+   apart. *A subject and an intent rule fold case, and QG-4 forbids Unicode's fold*: the gate
+   that enforces it scanned only the crate's top directory and so had not seen `dossier/`; it
+   recurses now, and `smysl_query::fold` is a pinned one-char-to-one-char table over the scripts
+   the five languages use (ASCII, Latin-1, Latin Extended-A, Greek, Cyrillic), leaving every other
+   char as it is. One question is open, **OQ-86**. What the step did not build is named: the
+   independent-witness term of §3.13 step 4 (`Witnesses`, §3.7, is not built, and counting
+   attestations would be `W479`'s fallback presented as the thing itself; salience is floored at
+   one quantum instead, so a slot nothing points at is ordered by status); `$lang`, bound and read
+   by no slot, because a slot filtered on the question's language would undo the `same-as` that
+   makes a dossier answer in more than one; a rerun of a dossier as a whole — each slot reruns
+   with `q --rerun`, and `E477` is raised by `--templates` until a whole-dossier rerun has a set
+   id to read back; and a `Classifier` port (OQ-22), which stays model-dependent and unbuilt.
 4. GE-T10 run. *Exit:* draft 3 TX-P8 exit (GE-T10 numbers recorded; kill criterion applied).
 
 **TX-P10 — embeddings and NL front end**
@@ -1498,3 +1589,4 @@ New:
 | OQ-54 | **Resolved by SMYSL-2.1 H-20** (TX-P0): `find` and `pack` are retagged `Mixed`. |
 | OQ-84 | **The per-partition limit is a recipe input §3.6's table omits.** Raised by TX-P8 step 1, which hashed the eight listed inputs and found a ninth that changes a result as surely as `k` does: how many hits a source keeps per partition before fusion (`PlanOptions::limit`, `q --per-partition`). It is hashed into `query:recipe` now, so two saves under two limits have two recipes and a rerun under another limit is labelled not comparable — but the payload has no declared key to carry the value, and a key the schema does not declare is a key a reader cannot trust. *Options:* add `query:per-partition` to FC-5 in a SMYSL-2.3 revision (the honest one; one more field, same rule N); or fold it into `parameters` under a reserved name (needs no schema change and misdescribes what it is). *Recommended:* the first, when SMYSL-2.3 next opens. |
 | OQ-85 | **A saved query ranks for its own terms.** Found by §5.4's first test: a saved unit's gist is its text, so `find "connection pool"` over the store it was saved in finds the unit that says `find "connection pool"`. A rerun excludes the unit a save wrote — the record of a save is not data the query found — but a fresh `find` has every saved query in reach. *Options:* exclude `x.query/saved` units from lexical sources unless the query names the schema (`where schema = x.query/saved`); exclude them from `from store:` resolution altogether; or leave them in, on the ground that a store is a log and a saved query is a record in it. *Recommended:* the first, as the default a reader expects — a question about a corpus is not a question about the questions asked of it — with the schema predicate as the way to ask the other one. Not done in step 1, which is about saving and rerunning; it is a change to phase 5. |
+| OQ-86 | **sq/1 cannot ask for only what a walk reached.** Raised by TX-P8 step 3: `expand` *adds* to the set it was given, so a slot defined by an edge — what rebuts, causes or exemplifies the units about a subject — is written `about entity($subject) expand ->rebuts depth 1 except about entity($subject)`, and the subtraction also removes a rebuttal that itself names the subject, which then answers `characteristic` instead. *Options:* a traversal modifier (`expand ->rebuts depth 1 only`, the frontier without the seeds), which is a grammar change and so SMYSL-2.9's and the three ports'; a `reached` source over the previous stage; or leave it, if GE-T10 shows the lost rebuttals are rare. *Recommended:* measure first — step 4's GE-T10 counts counter-evidence recall per slot, and a kill criterion on that slot is what would make the grammar change worth its cost. |

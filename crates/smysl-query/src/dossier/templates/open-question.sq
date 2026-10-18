@@ -1,0 +1,4 @@
+about entity($subject)
+where kind = question
+order by salience descending
+limit 12

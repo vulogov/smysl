@@ -263,6 +263,7 @@ pub use smysl::Violation
 pub use smysl::What
 pub use smysl::Withdrawal
 pub use smysl::WriteContext
+pub use smysl::answer
 pub use smysl::attest
 pub use smysl::attest
 pub use smysl::build_ir

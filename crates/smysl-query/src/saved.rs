@@ -31,7 +31,9 @@
 //! `k`, class policy, template-set id, parameters. Two of them have nothing to record in this
 //! build — no class policy enters a plan before TX-P7's classes do, and no template set
 //! before step 3 — and they are hashed as empty rather than left out, so the framing does not
-//! change when they arrive. One input the list omits is the **per-partition limit** a source
+//! change when they arrive. Step 3's `ask` sets the template set for every slot it plans
+//! ([`PlanOptions::template_set`]); a query a person wrote still hashes it as empty.
+//! One input the list omits is the **per-partition limit** a source
 //! keeps before fusion ([`PlanOptions::limit`]), which changes a result as surely as `k` does;
 //! it is hashed here and raised as OQ-84, because the payload has no declared key to carry it
 //! and a key the schema does not declare is a key a reader cannot trust.
@@ -106,7 +108,7 @@ impl Recipe {
             rrf_k: crate::fuse::RRF_K,
             per_partition: opts.limit,
             class_policy: String::new(),
-            template_set: String::new(),
+            template_set: opts.template_set.clone(),
             params: opts
                 .params
                 .iter()

@@ -253,15 +253,21 @@ fn case_folding_is_ascii_only_in_the_source_too() {
 fn sources() -> Vec<(String, String)> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut out = Vec::new();
-    for entry in std::fs::read_dir(&dir).expect("src is readable") {
-        let p = entry.expect("entry").path();
-        if p.extension().and_then(|e| e.to_str()) == Some("rs") {
-            let name = p
-                .file_name()
-                .and_then(|s| s.to_str())
-                .expect("utf-8")
-                .to_string();
-            out.push((name, std::fs::read_to_string(&p).expect("readable")));
+    let mut todo = vec![dir.clone()];
+    while let Some(d) = todo.pop() {
+        for entry in std::fs::read_dir(&d).expect("src is readable") {
+            let p = entry.expect("entry").path();
+            if p.is_dir() {
+                todo.push(p);
+            } else if p.extension().and_then(|e| e.to_str()) == Some("rs") {
+                let name = p
+                    .strip_prefix(&dir)
+                    .expect("under src")
+                    .to_str()
+                    .expect("utf-8")
+                    .to_string();
+                out.push((name, std::fs::read_to_string(&p).expect("readable")));
+            }
         }
     }
     out.sort();

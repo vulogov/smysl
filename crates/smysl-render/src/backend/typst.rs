@@ -56,7 +56,7 @@ impl Backend for Typst {
         }
 
         for b in &ir.blocks {
-            out.push_str(&format!("== {}\n\n", escape(&b.role.to_string())));
+            out.push_str(&format!("== {}\n\n", escape(&b.heading)));
             let line = b.joined();
             out.push_str(&format!(
                 "#strong[{}] {}\n\n",

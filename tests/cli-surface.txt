@@ -711,3 +711,31 @@ q          --verbose
 q          --current
 q          --seed-check
 q          --help
+ask        <QUESTION>
+ask        [PATH]
+ask        --config
+ask        --scope
+ask        --intent
+ask        [possible values: define, explain, verify, attribute, trace, locate, depend, compare]
+ask        --lang
+ask        [possible values: en, de, es, fr, ru]
+ask        --output
+ask        --format
+ask        [possible values: surface, cbor]
+ask        --subject
+ask        --strict
+ask        --templates
+ask        --budget
+ask        --offline
+ask        --no-color
+ask        --target
+ask        --noprogress
+ask        --save
+ask        --answer
+ask        --json
+ask        --at
+ask        --quiet
+ask        --verbose
+ask        --yes
+ask        --seed-check
+ask        --help

@@ -37,7 +37,7 @@ const BIN: &str = env!("CARGO_BIN_EXE_smysl");
 ///
 /// Hardcoding it costs one thing — the list can go stale when a command is added — and
 /// `the_help_lists_exactly_these_commands` below is what covers that, in both directions.
-const COMMANDS: [&str; 32] = [
+const COMMANDS: [&str; 33] = [
     "fmt",
     "check",
     "pack",
@@ -70,6 +70,7 @@ const COMMANDS: [&str; 32] = [
     "link",
     "summarise",
     "q",
+    "ask",
 ];
 
 /// Clap's answer when `cli()` never registered the subcommand.
@@ -109,6 +110,7 @@ fn minimal_args(command: &str) -> Vec<&'static str> {
             "human:x",
         ],
         "find" => vec!["a-query-matching-nothing"],
+        "ask" => vec!["What is nothing?"],
         "import" => vec!["no-such-file.json"],
         // `ls` rather than `add`: the action is required, and `ls` is the one that needs
         // nothing else. The point of this test is that the router is reached.

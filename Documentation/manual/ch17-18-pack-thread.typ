@@ -587,6 +587,39 @@ its status, or which edges point at or from it, first match wins.
 ordering chain (`--sequences-->` edges), because a narrative is about
 sequence, not about what kind of thing each beat is.
 
+The table above is the five schemas `--derive` has always produced. Three more
+arrived in 1.10.0 with the library layer, and they are different in kind.
+`exposition` (code 6) is a text in its own order — span order within a part —
+with an introduction and a conclusion at its ends; `dialogue` (7) is ordered by
+its replies, a message somebody answered taking `uptake` and the answer `reply`.
+Both derive like the original five. `dossier` (8) does not: it has roles and no
+rules, and `thread --derive dossier` refuses and names `ask`, because a dossier's
+steps are slots a template filled and a derivation that guessed them from the
+graph would be a dossier nobody asked for.
+
+`smysl ask "What is Naomi?" store` makes one. A closed rule table per tier-1
+language reads the question's intent — `define`, `explain`, `verify`,
+`attribute`, `trace`, `locate`, `depend` or `compare`, and `SMY-E468` with
+`--intent` to name one when no rule matches — and its subject, which is
+resolved to the store's `x.text/entity` units across `x.text/same-as`. A name
+that means two things, two women called Mary, is `SMY-W417`: the candidates
+are listed and nothing runs until `--subject` picks one. Each of the intent's
+slots is then an ordinary `sq/1` query, from the template set `smysl/dossier/1`
+compiled into the binary, planned, run and kept as a saved query — so every
+slot can be rerun with `q --rerun` like any other — and the dossier is a
+`question` unit, those saved queries, a `dossier` thread and a view over them.
+**An empty slot is a step**, role `gap`, on the slot's saved query, with a note
+naming the slot: an absence is a finding, and one that reruns. The thread
+renders through the same profiles as any other, which gained headings for the
+roles the three new schemas introduced — `Counter-evidence`, `Open questions`,
+`Gaps` — while every older role is headed by its own name as before.
+
+`ask --save --answer` is the one invocation that asks a model: it reads the
+dossier, fenced as data, and answers in surface records that may ground only on
+the dossier's units. A record grounding anywhere else is dropped and counted
+(`SMY-W478`), what survives is capped by rule M at its weakest ground
+(`SMY-W036`), and all of it is staged for review like any model output.
+
 #section("Deriving all five, one worked example each")
 
 Derivation is a pure function of the graph — no model is consulted, so the

@@ -7,7 +7,9 @@
 //! 5 the supersession pass; step 6 the ports the library layer binds — [`ports::Times`],
 //! [`ports::Entities`], and a scope that knows its languages. TX-P8 step 1 added [`saved`]:
 //! a query saved as an `x.query/saved` unit after it has run, and run again with the data
-//! effect reported. A stage this build cannot lower
+//! effect reported. Step 3 added [`dossier`]: a question classified by a rule table, its
+//! subject resolved, and a fixed set of slot queries run and saved, as a `dossier` thread and
+//! a view. A stage this build cannot lower
 //! is **refused** with `SMY-E461` and what it is waiting for named, never ignored: a plan that
 //! quietly dropped a stage would answer a different question from the one asked, and
 //! SMYSL-2.5 §3.6 only lets a query be saved after it has planned and run.
@@ -36,8 +38,10 @@
 #![forbid(unsafe_code)]
 
 pub mod ast;
+pub mod dossier;
 pub mod exec;
 pub mod explain;
+pub mod fold;
 pub mod fuse;
 pub mod lex;
 pub mod parse;
@@ -49,6 +53,7 @@ pub mod saved;
 pub mod store_scope;
 
 pub use ast::Query;
+pub use dossier::{ask, AskError, AskOptions, Dossier, Intent, SlotResult};
 pub use exec::{run, Answer, Run};
 pub use explain::explain;
 pub use explain::why;

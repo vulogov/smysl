@@ -1,0 +1,4 @@
+about entity($subject)
+where text:mode = reported
+order by salience descending
+limit 12

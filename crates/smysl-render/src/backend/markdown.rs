@@ -37,7 +37,7 @@ impl Backend for Markdown {
         let mut footnotes: Vec<(usize, String)> = Vec::new();
 
         for block in &ir.blocks {
-            out.push_str(&format!("## {}\n\n", block.role));
+            out.push_str(&format!("## {}\n\n", block.heading));
 
             let line = block.joined();
             out.push_str(&format!("{} {}\n", block.marker, line.trim_start()));

@@ -656,6 +656,51 @@ pub fn summarise_children() -> Template {
     }
 }
 
+/// The answer to a dossier's question (SMYSL-2.5 §3.13, `ask --answer`; TX-P8 step 3).
+///
+/// Version 1. The dossier is the only material: a line per unit, `role`, tab, uid, tab, status,
+/// tab, gist, with the question first. The model answers in surface records and grounds each on
+/// uids from those lines, which is what lets the caller check the answer mechanically — a ground
+/// outside the dossier is dropped (`SMY-W478`), and rule M caps every unit at its weakest ground
+/// when it is staged. So the instruction that matters is not "be careful" but "cite the line":
+/// an answer that cannot say which lines it rests on is not one this command can keep.
+///
+/// The dossier's gists are **untrusted input** (§3.9.2) — they are what a corpus said and what
+/// an extraction made of it — and are fenced; the question is the first line inside the fence
+/// rather than outside it, because it is a unit of the dossier like the rest and a person's
+/// question is no more an instruction to the model than a verse is.
+pub fn answer_dossier() -> Template {
+    Template {
+        id: "ingest.ask.answer".to_string(),
+        version: 1,
+        system: format!(
+            "You answer a question from a dossier, and from nothing else. {UNTRUSTED}\n\n\
+             Between the markers is one line per unit: a role, a tab, the unit's uid (`b3:` and \
+             52 letters and digits), a tab, its status, a tab, and what it says. The first line \
+             is the question; the others are what was found about its subject, under the role \
+             each answers — `definition`, `counter`, `evidence` and so on.\n\
+             Answer with surface records and nothing else: no commentary, no code fence. Write \
+             each record as a header line and a gist line, exactly like this:\n\n\
+             {ANSWER_EXAMPLE}\n\n\
+             Each record is `@claim` with a label of your choosing, `status: derived` and \
+             `grounds:` listing the uids of the lines it rests on, copied in full. Ground every \
+             record on at least one line, and only on lines you were given: a record grounded on \
+             anything else is discarded. Say nothing the lines do not say, because each record \
+             is kept as derived from its grounds alone. Where the lines disagree, say that they \
+             disagree and ground the record on both sides. Where they do not answer the \
+             question, write one record saying so, grounded on the question's line. Three to \
+             six records is enough.\n\
+             {LANG_RULE}"
+        ),
+        user: format!("{FENCE}\n{{input}}\n{FENCE}"),
+    }
+}
+
+/// The shape every answer record is copied from. A constant so a test can parse it.
+pub const ANSWER_EXAMPLE: &str = "\
+@claim a/returned-empty { status: derived, grounds: [b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa] }
+~ The dossier says she came back with nothing.";
+
 /// The marker around the previous answer in a repair turn.
 ///
 /// Distinct from [`FENCE`], which marks untrusted *input*. The repair turn used to fence the

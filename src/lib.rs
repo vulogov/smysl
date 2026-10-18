@@ -231,6 +231,11 @@ pub use smysl_ingest::text::{Target as TextTarget, TextIngest, TextReport};
 pub use smysl_ingest::same_as;
 #[cfg(feature = "stage")]
 pub use smysl_ingest::{stage, Attesting, Staged};
+// The answer step of `ask --answer` (TX-P8 step 3). The module, for `Member`, `render` and
+// `admit` beside `Ingestor::answer`: a caller builds the lines from its own dossier, and rule A
+// says the CLI may not reach past the facade to do it.
+#[cfg(feature = "ingest")]
+pub use smysl_ingest::answer;
 // `smysl import` is the only producer of `measured` units and the only unit-producing command
 // that consults no model. Until 0.13 `cmd_import` reached into `smysl_ingest::import` directly
 // and none of these three names was re-exported, so a consumer holding the facade could not do
@@ -413,7 +418,10 @@ mod tests {
         // were allocated by SMYSL-2.5 and withheld until a planner could raise them. `E421`
         // and `E422` are still absent for that same reason: field resolution needs declared
         // field types, which arrive with FC-9 in TX-P12.
-        assert_eq!(Code::ALL.len(), 99);
+        // 103 with `SMY-W417`, `SMY-E468`, `SMY-E477` and `SMY-W478` (TX-P8 step 3), raised by
+        // `ask`: a subject naming two entities, a question no intent rule matches, a template
+        // set this build does not carry, and an answer unit grounding outside its dossier.
+        assert_eq!(Code::ALL.len(), 103);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

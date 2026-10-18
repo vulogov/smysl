@@ -19,7 +19,7 @@ use smysl_core::ids::Uid;
 use smysl_graph::Store;
 
 use crate::ast::{Name, ScopeItem};
-use crate::ports::{item_text, unresolvable, Candidates, Partition, PartitionKey, Scope};
+use crate::ports::{item_text, unresolvable, Candidates, Entities, Partition, PartitionKey, Scope};
 
 /// A scope over one open store.
 ///
@@ -137,4 +137,90 @@ impl Scope for StoreScope<'_> {
             })
             .collect()
     }
+}
+
+/// The entity port over a plain store (TX-P8 step 3): what a store's own records say, which is
+/// everything entity resolution reads — `x.text/entity` units and the strict classes
+/// `x.text/same-as` joins them into. A library adds a catalogue to a store and nothing to this,
+/// so `smysl_text::scope::LibraryScope` answers the port with the same two functions.
+impl Entities for StoreScope<'_> {
+    fn resolve(&self, name: &str) -> Vec<Uid> {
+        resolve_entity(self.store, name)
+    }
+
+    fn candidates(&self, name: &str) -> Vec<Vec<Uid>> {
+        entity_candidates(self.store, name)
+    }
+}
+
+fn is_entity(store: &Store, uid: &Uid) -> bool {
+    store
+        .get(uid)
+        .is_some_and(|u| u.core.schema.as_str() == smysl_core::schemas::text::ENTITY)
+}
+
+/// `about entity(name)`: the entities spelled `name` exactly, and every entity their strict
+/// classes hold (SMYSL-2.5 §3.3).
+pub fn resolve_entity(store: &Store, name: &str) -> Vec<Uid> {
+    use smysl_graph::proposition::{classes, Policy};
+    let entity = smysl_core::schemas::text::ENTITY;
+    let named: BTreeSet<Uid> = store
+        .units()
+        .filter(|(_, u)| u.core.schema.as_str() == entity && u.core.gist == name)
+        .map(|(uid, _)| *uid)
+        .collect();
+    if named.is_empty() {
+        return Vec::new();
+    }
+    let mut out = named.clone();
+    for class in classes(store, Policy::Strict, None) {
+        if class.members.iter().any(|m| named.contains(m)) {
+            out.extend(class.members.iter().filter(|m| is_entity(store, m)));
+        }
+    }
+    out.into_iter().collect()
+}
+
+/// What a dossier subject could mean: one group per thing (SMYSL-2.5 §3.13 step 1).
+///
+/// Each entity spelled `name` — case-insensitively by the pinned [`crate::fold`], since a question is typed by a person —
+/// with every entity its strict class joins it to; groups that share a member are one thing and
+/// are merged, so a same-as chain is never reported as two candidates.
+pub fn entity_candidates(store: &Store, name: &str) -> Vec<Vec<Uid>> {
+    use smysl_graph::proposition::{classes, Policy};
+    let entity = smysl_core::schemas::text::ENTITY;
+    let want = crate::fold::fold(name);
+    let named: Vec<Uid> = store
+        .units()
+        .filter(|(_, u)| {
+            u.core.schema.as_str() == entity && crate::fold::fold(&u.core.gist) == want
+        })
+        .map(|(uid, _)| *uid)
+        .collect();
+    if named.is_empty() {
+        return Vec::new();
+    }
+    let strict = classes(store, Policy::Strict, None);
+    let mut groups: Vec<BTreeSet<Uid>> = Vec::new();
+    for uid in named {
+        let mut group: BTreeSet<Uid> = BTreeSet::from([uid]);
+        for class in &strict {
+            if class.members.contains(&uid) {
+                group.extend(class.members.iter().filter(|m| is_entity(store, m)));
+            }
+        }
+        let (touching, mut rest): (Vec<_>, Vec<_>) =
+            groups.into_iter().partition(|g| !g.is_disjoint(&group));
+        for g in touching {
+            group.extend(g);
+        }
+        rest.push(group);
+        groups = rest;
+    }
+    let mut out: Vec<Vec<Uid>> = groups
+        .into_iter()
+        .map(|g| g.into_iter().collect())
+        .collect();
+    out.sort();
+    out
 }

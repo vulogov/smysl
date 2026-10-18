@@ -1,0 +1,6 @@
+about entity($subject)
+expand -[supersedes]- depth 1
+except
+about entity($subject)
+order by salience descending
+limit 12

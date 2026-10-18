@@ -326,6 +326,24 @@ pub enum Axis {
 /// that has to be unambiguous, not a source.
 pub trait Entities {
     fn resolve(&self, name: &str) -> Vec<Uid>;
+
+    /// The entities a name could mean, one group per *thing*: the members of one group are
+    /// joined by `x.text/same-as`, and two groups are two things that share a spelling.
+    ///
+    /// This is the question a dossier has to ask and a source does not (TX-P8 step 3): two
+    /// groups for one subject is `SMY-W417`. The default is the honest answer for a port
+    /// that cannot tell — everything [`Entities::resolve`] returns, as one thing — so an
+    /// implementation that knows no classes never reports an ambiguity it cannot see.
+    /// [`Entities::candidates`] may also match more loosely than `resolve` (case, for one),
+    /// because a question is typed by a person and a query is written by one.
+    fn candidates(&self, name: &str) -> Vec<Vec<Uid>> {
+        let all = self.resolve(name);
+        if all.is_empty() {
+            Vec::new()
+        } else {
+            vec![all]
+        }
+    }
 }
 
 /// The spelling of a scope item, for a diagnostic and for `--explain`.

@@ -65,7 +65,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use smysl_core::diag::{Diagnostic, Span};
 use smysl_core::ids::{LangTag, Uid};
 use smysl_core::types::Axis as CoreAxis;
-use smysl_graph::proposition::{classes, Policy as ClassPolicy};
 use smysl_query::ast::{Name, ScopeItem};
 use smysl_query::ports::{
     unresolvable, Axis, Bounds, Candidates, Entities, Partition, PartitionKey, Scope, Times,
@@ -419,27 +418,13 @@ impl Times for LibraryScope<'_> {
 
 impl Entities for LibraryScope<'_> {
     fn resolve(&self, name: &str) -> Vec<Uid> {
-        let store = self.library.store();
-        let entity = smysl_core::schemas::text::ENTITY;
-        let named: BTreeSet<Uid> = store
-            .units()
-            .filter(|(_, u)| u.core.schema.as_str() == entity && u.core.gist == name)
-            .map(|(uid, _)| *uid)
-            .collect();
-        if named.is_empty() {
-            return Vec::new();
-        }
-        let mut out = named.clone();
-        for class in classes(store, ClassPolicy::Strict, None) {
-            if class.members.iter().any(|m| named.contains(m)) {
-                out.extend(class.members.iter().filter(|m| {
-                    store
-                        .get(m)
-                        .is_some_and(|u| u.core.schema.as_str() == entity)
-                }));
-            }
-        }
-        out.into_iter().collect()
+        smysl_query::store_scope::resolve_entity(self.library.store(), name)
+    }
+
+    /// One group per thing the name could mean, case-insensitively and merged across
+    /// `same-as` — the store's records answer it, so the library answers it as a store does.
+    fn candidates(&self, name: &str) -> Vec<Vec<Uid>> {
+        smysl_query::store_scope::entity_candidates(self.library.store(), name)
     }
 }
 

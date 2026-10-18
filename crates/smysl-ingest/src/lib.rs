@@ -50,6 +50,12 @@ pub mod prompt;
 #[doc(hidden)]
 pub use smysl_core::lang;
 pub use smysl_core::quote;
+/// The answer step of `ask --answer` (SMYSL-2.5 §3.13, TX-P8 step 3): a model reads a dossier
+/// and answers its question, grounded only on the dossier and capped by rule M. Behind `model`,
+/// since an answer is something a model writes; it takes the dossier as lines rather than as
+/// `smysl-query`'s type, so this crate does not link the query layer to say what a line is.
+#[cfg(feature = "model")]
+pub mod answer;
 /// The linker: judging the pairs [`smysl_text::link`] chose, and staging the edges (TX-P7
 /// step 3).
 ///

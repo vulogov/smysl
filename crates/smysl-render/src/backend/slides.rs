@@ -42,7 +42,7 @@ impl Backend for Slides {
                 "// slide {}: {}\n#text(size: 14pt)[{}]\n\n",
                 i + 1,
                 escape(&b.uid.short()),
-                escape(&b.role.to_string())
+                escape(&b.heading)
             ));
             let line = b.joined();
             out.push_str(&format!(

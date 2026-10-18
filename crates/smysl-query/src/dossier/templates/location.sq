@@ -1,0 +1,3 @@
+about entity($subject)
+order by salience descending
+limit 12

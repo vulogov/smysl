@@ -108,6 +108,13 @@ pub struct PlanOptions {
     /// it. Taken out of the candidates instead, so the rerun's scores are the save's. Empty
     /// for every other caller; recorded in the plan's scope step when it is not.
     pub exclude: BTreeSet<Uid>,
+    /// The dossier template set a plan was instantiated from, empty for a query a person wrote.
+    ///
+    /// A recipe input since TX-P8 step 1 (§3.6), hashed as empty until something set it. `ask`
+    /// sets it for every slot (step 3), so a slot's saved query names the set its text came
+    /// from, and the same text typed by hand is a different recipe — which it is: the person
+    /// chose it, and nobody chose the template's text but the template.
+    pub template_set: String,
 }
 
 impl Default for PlanOptions {
@@ -118,6 +125,7 @@ impl Default for PlanOptions {
             params: BTreeMap::new(),
             limit: 10,
             exclude: BTreeSet::new(),
+            template_set: String::new(),
         }
     }
 }
