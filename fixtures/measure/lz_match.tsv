@@ -1,0 +1,29 @@
+# TX-P8 M4: T3 over the KJV's Ruth and Jude at part level, characters and terms,
+# min:n 2
+# symbols	key	value
+chars	recipe.hash	98ab7b0386f88d5ee39701affe7d6eb2f1d0cc5cb664aa03275eaaf68bb7c1a6
+chars	n.symbols	16729
+chars	n.symbols:kjv/08-rut	13189
+chars	n.symbols:kjv/65-jud	3540
+chars	n.texts	2
+chars	value.H	1.8090
+chars	value.H:kjv/08-rut	1.7316
+chars	value.H:kjv/65-jud	2.1699
+chars	value.H:mr	2.3926
+chars	value.H:mr:kjv/08-rut	2.3126
+chars	value.H:mr:kjv/65-jud	2.6904
+chars	gist	T3 match-length entropy rate 1.8090 bits/char, over from collection:kjv
+chars	unit.uid	b3:qxlftpwsjpxcugg2mmbjqrz2gex7yrytngrwfsy2zrdqfiqwc5ea
+terms	recipe.hash	7142908821ad9aca41e1774f1759b21351353bd89b79f3a361f9c32883fc47b1
+terms	n.symbols	3191
+terms	n.symbols:kjv/08-rut	2583
+terms	n.symbols:kjv/65-jud	608
+terms	n.texts	2
+terms	value.H	4.2854
+terms	value.H:kjv/08-rut	4.2117
+terms	value.H:kjv/65-jud	4.6298
+terms	value.H:mr	5.2850
+terms	value.H:mr:kjv/08-rut	5.2147
+terms	value.H:mr:kjv/65-jud	5.5836
+terms	gist	T3 match-length entropy rate 4.2854 bits/token, over from collection:kjv
+terms	unit.uid	b3:oadq4ikavpz5xq4s5hnp7x6snl2p5krmslxecsjdt37j7aih4xmq

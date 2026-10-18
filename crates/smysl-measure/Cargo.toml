@@ -79,3 +79,8 @@ name = "coverage"
 # the stream T2 counts decoded back to its input, and both measures over a library.
 [[test]]
 name = "compress"
+
+# The M4 exit: T3's Λ against its definition on 10⁴ random inputs, the calibration goldens
+# (the rows past 10⁵ symbols `--ignored`, in release), and T3 over a library.
+[[test]]
+name = "lz_match"

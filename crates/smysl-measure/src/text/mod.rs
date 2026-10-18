@@ -59,6 +59,7 @@ use crate::recipe::Level;
 
 pub mod compress;
 pub mod entropy;
+pub mod lz_match;
 pub mod ncd;
 pub mod zipf_heaps;
 
@@ -309,6 +310,9 @@ pub struct Corpus {
     pub lossy: bool,
     /// Each expression's characters, in alias order; none for a corpus built from terms.
     pub docs: Vec<Doc>,
+    /// The index in `segments` of each expression's first segment, in alias order — one, at
+    /// 0, for a corpus built from terms, which is one unnamed text.
+    pub starts: Vec<usize>,
 }
 
 impl Corpus {
@@ -329,6 +333,7 @@ impl Corpus {
             Vec::new(),
             false,
             Vec::new(),
+            vec![0],
         )
     }
 
@@ -337,10 +342,12 @@ impl Corpus {
     /// [`Corpus::from_terms`] it has no parts and its digest is the digest of nothing.
     pub fn from_docs(docs: Vec<Doc>) -> Corpus {
         let chain = Chain::plain();
-        let segments = docs
-            .iter()
-            .flat_map(|d| d.segments.iter().map(|s| chain.surface(s)))
-            .collect();
+        let mut starts = Vec::with_capacity(docs.len());
+        let mut segments = Vec::new();
+        for d in &docs {
+            starts.push(segments.len());
+            segments.extend(d.segments.iter().map(|s| chain.surface(s)));
+        }
         let texts = docs.iter().map(|d| d.alias.clone()).collect();
         Corpus::build(
             analyzer_id(chain.id(), Stream::Surface),
@@ -351,6 +358,7 @@ impl Corpus {
             texts,
             false,
             docs,
+            starts,
         )
     }
 
@@ -364,7 +372,13 @@ impl Corpus {
         texts: Vec<String>,
         lossy: bool,
         docs: Vec<Doc>,
+        starts: Vec<usize>,
     ) -> Corpus {
+        // The starts count the segments kept: an empty segment is dropped below.
+        let starts = starts
+            .iter()
+            .map(|&s| segments[..s].iter().filter(|x| !x.is_empty()).count())
+            .collect();
         let vocab: BTreeSet<&String> = segments.iter().flatten().collect();
         let ids: BTreeMap<&String, u32> = vocab
             .iter()
@@ -388,6 +402,7 @@ impl Corpus {
             texts,
             lossy,
             docs,
+            starts,
         }
     }
 
@@ -456,6 +471,7 @@ impl Corpus {
         let mut window: Vec<String> = Vec::new();
         let mut docs: Vec<Doc> = Vec::new();
         let mut chars: Vec<String> = Vec::new();
+        let mut starts: Vec<usize> = Vec::new();
         let mut last: Option<&str> = None;
         for (t, tid, _lang) in &parts {
             if last != Some(t.alias.as_str()) {
@@ -466,6 +482,7 @@ impl Corpus {
                 if let Some(prev) = last {
                     docs.push(Doc::new(prev, std::mem::take(&mut chars)));
                 }
+                starts.push(segments.len());
                 aliases.push(t.alias.clone());
                 last = Some(t.alias.as_str());
             }
@@ -518,7 +535,18 @@ impl Corpus {
             aliases,
             lossy,
             docs,
+            starts,
         ))
+    }
+
+    /// The segments of expression `k`, as a range of [`Corpus::segments`].
+    pub fn text_range(&self, k: usize) -> (usize, usize) {
+        let to = self
+            .starts
+            .get(k + 1)
+            .copied()
+            .unwrap_or(self.segments.len());
+        (self.starts[k], to)
     }
 
     /// Tokens in scope.

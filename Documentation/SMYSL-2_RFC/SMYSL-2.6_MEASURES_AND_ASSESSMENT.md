@@ -489,6 +489,32 @@ counts, `p̂ᵥ = cᵥ/N`. Logs are base 2 unless written `ln`.
   can see the bias at their n; whether to publish a corrected value is OQ-59.
 - Memory: text (4n for `u32` symbols) + SA (4n) + LCP (4n) + inverse SA (4n) = 16n bytes. Peak per
   manifest; a Bible at 4.3 M chars (unverified size) is about 70 MB.
+- *As built (M4).* `text::lz_match`: SA-IS over `u32` symbols, Kasai's LCP, and LPF in one pass
+  with a stack (a suffix's longest previous factor is shared with the nearest suffix on either
+  side of it in suffix order that starts earlier, and the stack holds exactly those). **The
+  symbols are `params.symbols`**, `chars` by default — scalar values after NFC, a text's
+  segments joined by `\n` as T2 reads them — or `terms`, the analyzer stream; a symbol's id is
+  its rank in the text's alphabet, which Λ cannot see. **Per text, not per manifest**: a text
+  is a scope's expression, `Doc` in M3's corpus, which has one head manifest (two are refused
+  already), so the two are the same. `H` is the increasing-window form and `H:mr` the
+  mean-ratio form; `H` aggregates harmonically as above, and `H:mr`, a mean of per-symbol
+  rates, as the mean over every symbol, `Σ nᵢ H:mrᵢ / Σ nᵢ`. A scope of more than one text stores
+  each text's values beside them (`H:<alias>`, `H:mr:<alias>`, `symbols:<alias>`). **`min:n`
+  holds for every text**, not for the scope's sum: the bias is a function of a text's own n, so
+  a short text is a biased term in the aggregate whatever the total; the refusal names the
+  shortest. **The calibration table** is `fixtures/measure/t3-calibration.tsv`: H = 1…8 bits at
+  n = 10³, 2k, 8k, 10⁴, 32k, 10⁵, 10⁶, 10⁷, seed 0, both forms and the payload's hash, written by
+  `examples/t3_calibration` (9 s in release). At 10⁷ symbols the estimator is still 6% low at
+  H = 1 (0.942) and 16% low at H = 8 (6.718). **It is not monotone in n on large alphabets**:
+  Λᵢ is an integer near `log₂ i / H`, so the sum moves in steps as `log₂ i` crosses multiples of
+  H — H = 6 reads 4.601 at 32k and 4.827 at 10⁵; H = 8 reads 6.107 at 32k and 6.091 at 10⁵; H = 7
+  reads 5.780 at 10⁶ and 5.727 at 10⁷ — and the spread over seeds is a few thousandths, so the
+  steps are the estimator's and not noise. A correction interpolated in n (OQ-59) would be
+  wrong between steps. **Peak memory**, measured with `examples/t3_calibration <bits> <n>`
+  under `/usr/bin/time -l`, release, this machine, less the harness's corpus measured the same
+  way: about **100 MB at 4.3 M characters** (H = 1; 122 MB at H = 8) and 238–289 MB at 10⁷,
+  23–29 bytes a symbol rather than 16, because SA-IS's top level holds the text, its type bits,
+  the LMS map, the suffix array and the LMS names at once. Time is 0.3–0.4 s at 4.3 M.
 
 **T4 — Zipf and Heaps.**
 - Zipf: fit a discrete power law `P(f) = f^{−α} / ζ(α, f_min)` to the term **frequencies**
@@ -832,7 +858,7 @@ Generated in-test from a fixed seed with the crate's own generator, so fixtures 
 | T2 i.i.d. | as above | within 0.5% of log₂k (measured 0.03%, §2.9) |
 | T2 Markov | first-order chain with known rate | within 2%; *as built (M3)*, a chain brotli's literal contexts can model — eight characters in eight context classes, dyadic rows of rate 2.75 — since over letters of one class brotli does not see the chain (§3.7 T2) |
 | T3 reference | random inputs ≤ 2,000 symbols | LPF-based Λᵢ equal to the naive O(n²) definition, element by element (property test, 10⁴ cases) |
-| T3 calibration | i.i.d. H = 1, 4, 6; n = 2k, 8k, 32k | bit-exact golden payloads; values reproduce §2.9's table to 3 decimals |
+| T3 calibration | i.i.d. H = 1, 4, 6; n = 2k, 8k, 32k | bit-exact golden payloads; values reproduce §2.9's table to 3 decimals; *as built (M4)*, every row of the calibration table to 10⁵ symbols bit for bit (values and payload hash), the rest `--ignored` in release, and §2.9's numbers checked as draws of the same estimator — each within three single-draw standard deviations of the mean over 20 seeds, plus its printed rounding — since §2.9's probe drew from another generator and no generator reproduces one draw to the digit |
 | T4 Zipf | terms drawn from a discrete power law with α = 2.0, 2.5 | α̂ within the bootstrap CI; CI covers α in ≥ 90 of 100 seeds (slow test, `--ignored`) |
 | T4 Heaps | synthetic V(n) = 10·n^0.6 by construction | β̂ = 0.6 ± 0.01 |
 | T5 | a 30-token corpus, KN probabilities computed by hand in the test's comments | exact to 10⁻¹² before quantisation |
@@ -923,7 +949,7 @@ Requires SMYSL-2.4 TX-P1/P2 (parts, analyzers) and SMYSL-2.5 TX-P6 (`sq` scopes)
 | M1 | crate skeleton; `Recipe`, `Num`, `Outcome`, payload writer, scope digest, basis rule, `rng.rs`, `num.rs`; purity entry; clippy rule; diagnostics `E480`–`E489` registered | golden payload bytes for a hand-built `Value`; `cargo xtask check-purity` passes with the crate listed; registry count test updated and green — **done 2026-10-18**, below |
 | M2 | T1, T4, `boot.rs` | §5.1 T1 and T4 rows; bootstrap seed tests — **done 2026-10-18**, below |
 | M3 | T2, T6 with pinned brotli | §5.1 T2 and T6 rows; peak memory of one q11 lgwin 24 compression recorded — **done 2026-10-18**, below |
-| M4 | T3: SA-IS, LCP, LPF, both estimator forms, calibration fixture | LPF equals naive on 10⁴ random inputs; calibration goldens |
+| M4 | T3: SA-IS, LCP, LPF, both estimator forms, calibration fixture | LPF equals naive on 10⁴ random inputs; calibration goldens — **done 2026-10-18**, below |
 | M5 | T5 with exact leave-one-out | hand-computed and property tests |
 | M6 | T7 | §5.1 T7 rows |
 | M7 | `measure` command for T-ids, `--seed-check`, `--dry-run`, three CLI gates updated | cross-platform matrix job green; `measure T1,T2,T3,T4 --scope 'from texts where collection = bible'` on the 5-Bible fixture adds no unit on a second run; GE-T6 pure arm (T2, T3) reported |
@@ -988,7 +1014,7 @@ copies merging first; two 9 MiB texts refused with `SMY-E484`), a stream decoded
 input, a text past the window read in two pieces, and ties in the clustering. The peak memory
 of one q11 lgwin 24 compression is recorded in §3.7 T2: 597 MB at a full window, measured with
 `examples/codec_peak`. T2 over the KJV's Ruth and Jude at verse level (2.7038 bits/char,
-14.1724 bits/word), T6 over the four slice books, and the codec's lengths for the eight slice
+14.1724 bits/word), T6 over the four slice books, and the codec's lengths for the four slice
 files are pinned in `fixtures/measure/compress.tsv`, language-free. `SMY-E484` is registered,
 and the registry is 109. Three findings, recorded in §3.7: **the codec is brotli without
 `std`**, because with it the encoder's cost model reads the platform's `log2` and 24 of 29
@@ -999,6 +1025,24 @@ model; and **the peak is three times the estimate**, and follows the text as wel
 output and keeps `make test` in seconds. One thing is owed to M7: `min:n` is in each measure's
 own unit — tokens for T1 and T4, characters for T2, texts for T6 — and a base recipe sets it
 for every id in a run, so `measure` must scope it per id.
+
+*M4, done 2026-10-18.* T3, the match-length rate: `text::lz_match` (SA-IS, Kasai's LCP, LPF from
+both, the two estimator forms, the harmonic aggregate), over each text's characters or its
+terms (`params.symbols`), one text at a time. The exit holds: `tests/lz_match.rs` checks LPF
+against its O(n²) definition on 10⁴ random inputs of at most 2,000 symbols — i.i.d. over 1 to
+256 symbols, repeated blocks with errors and Fibonacci words, lengths log-uniform — with the
+suffix array against a comparison sort and the LCP against a direct count up to 300; every row
+of the calibration table up to 10⁵ symbols bit for bit, and the rest under `--ignored`;
+§2.9's probe as a draw of the same estimator; the aggregate and the per-text values; and the
+recipe's defaults and refusals. T3 over the KJV's Ruth and Jude at part level, characters (H
+1.8090, H:mr 2.3926 bits/char) and terms (4.2854, 5.2850 bits/token), is pinned in
+`fixtures/measure/lz_match.tsv` with `min:n` set to 2, since the default refuses books of 13k
+and 4k characters (`SMY-W485`). No code is new and the registry is 109. Three findings,
+recorded in §3.7 T3: **§2.9's table is one draw of another generator**, so §5.1's "to 3
+decimals" is checked as agreement in distribution, which holds (within 0.021, and 0.003 at
+32k); **the estimator steps in n on large alphabets**, which bears on OQ-59, since a
+correction read off the table between its rows would be wrong; and **the peak is 23–29
+bytes a symbol**, not 16 — about 100 MB for a 4.3 M-character Bible.
 
 ### TX-P9 (graph, channel, dialogue, assessment)
 
@@ -1066,5 +1110,5 @@ excluded), `SMY-E030`/`SMY-E033` (rules M and T; never expected on measure units
 | OQ-56 | Payload numbers: integers, `[num, den]` ratios and `{q20}` fixed point, under `measure:*` keys. Should the layout be declared as an extension schema (`x.measure/v1`, FC-9 fields) in SMYSL-2.3 so other implementations read it, or stay a tool convention? |
 | OQ-57 | Bootstrap generator: ChaCha20 as `rand_chacha` lays it out, or a generator specified in full in SMYSL-2.3 (SplitMix64 is ten lines in any language) so the Python, JavaScript and Go implementations reproduce intervals without porting a crate's internals? |
 | OQ-58 | Class identity across time. Class ids are smallest member uids and move when evidence grows. Membership-overlap correspondence (used for K4 and A3) can map one class to two. Report splits and merges explicitly, or pin states to a policy snapshot? |
-| OQ-59 | T3 bias: publish the raw estimator only (this RFC), or also a value corrected from the i.i.d. calibration table, knowing that natural text is not i.i.d. and the correction may be wrong in either direction? |
+| OQ-59 | T3 bias: publish the raw estimator only (this RFC), or also a value corrected from the i.i.d. calibration table, knowing that natural text is not i.i.d. and the correction may be wrong in either direction? *M4 adds:* the table is not smooth in n on large alphabets (Λᵢ is an integer near log₂ i / H, so the estimator steps — §3.7 T3), so a correction would have to be computed at the text's own n and alphabet rather than interpolated between rows. |
 | OQ-89 | **The segment bootstrap is biased for a statistic of rare types.** Raised by TX-P8 M2. A segment drawn twice adds no new type, so a replicate has fewer rare types than the text, and T1's entropy and Heaps' β run low in every replicate: over the KJV's Ruth and Jude (3,191 tokens, 703 types) T1's 95% interval is [7.510, 7.726] around Ĥ = 7.813, and β's [0.591, 0.700] around 0.745. M2 stores the percentile interval as §3.7 says, flags a result whose interval excludes its estimate (`ci-off-estimate`), and resamples types for α, where Clauset et al.'s bootstrap applies. Options for T1 and β: the basic (reverse-percentile) interval, which corrects by the bootstrap's shift and so assumes the shift mirrors the estimator's own bias — true for plug-in entropy and not for a duplication artifact; m-out-of-n subsampling without replacement, which has no duplicates and changes n, which a vocabulary statistic depends on; or no interval below a V/N threshold. The bias shrinks with V/N, so at a Bible's length it may be inside the interval's width, which M7's 5-Bible run can measure. |
