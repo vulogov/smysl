@@ -308,7 +308,7 @@ RFC found the measures depend on:
 | `scope` | text | the `sq` scope as written, `using` pins included (SMYSL-2.5) | required |
 | `scope:digest` | text `b3:` | BLAKE3 of `"smysl/measure-scope/1\0"` ‖ sorted tids (text measures) or sorted uids (graph measures) | computed |
 | `lenses` | text `b3:` | lens-chain hash the scope resolved under (draft 3 §15.3) | computed |
-| `analyzer` | text | analyzer chain id and stream: `en/1:surface`, `ru/1:stem` | per `lang`; refused on `mul` without one |
+| `analyzer` | text | analyzer chain id and stream: `en/1:surface`, `ru/1:stem`; *as built (M2)*, the full SMYSL-2.4 chain id, `smysl/an-en/1:surface` | per `lang`; refused when the scope's texts choose two chains (`SMY-E489`) |
 | `estimator` | text | pack estimator id (A1 profile, A8) | `smysl/utf8-div4` |
 | `profile` | text | granularity profile (A1) | required for A1 |
 | `policy` | text | class policy `strict`, `component`, `attested:n` | required for class measures (`SMY-E481`) |
@@ -416,6 +416,19 @@ counts, `p̂ᵥ = cᵥ/N`. Logs are base 2 unless written `ln`.
 - Both stored; the report states the stream (`surface`/`stem`) because Russian and German statistics
   are stem-level until a lemmatiser exists (draft 3 OQ-2). Bootstrap CI over segments.
 - `min:n` default 10,000 tokens. Cost O(N) time, O(V) memory.
+- *As built (M2).* **A text scope is the `from` of an sq query.** An sq scope answers with units,
+  and a text has none until something is extracted from it, so a text measure reads the query's
+  `from` items, resolved to manifest heads by SMYSL-2.5 §3.3's own definitions (`texts`,
+  `library`, `store:`, `collection:`, `import:`), and refuses every stage after it (`SMY-E461`):
+  `where book = Ps` is a filter on units, and reading it as one on text would give sq/1 a meaning it
+  does not have. A narrower text is named by its alias, `from collection:"kjv/19-ps"`. A forked
+  alias is refused (`SMY-E489`) rather than counted twice; `channel:` waits for the measures over
+  messages. The basis is the whole query, saved, as §3.1 has it. **The streams are
+  `smysl_text::Chain::surface` and `::stems`**, one term per word each, added in M2: §2.7's
+  separate streams did not exist, and `Chain::terms` interleaves a stem with its surface form only
+  when they differ. A type's id is its rank in byte order of the term, so term-id order is a
+  property of the vocabulary. Segments with no terms are dropped; `window:<n>` does not run
+  across two expressions.
 
 **T2 — compression rate.**
 - `brotli` quality 11, `lgwin` 24, NFC UTF-8 of each manifest's in-scope text, segments joined by
@@ -454,6 +467,24 @@ counts, `p̂ᵥ = cᵥ/N`. Logs are base 2 unless written `ln`.
 - CI: segment bootstrap (resample segments with replacement, concatenate in drawn order, refit),
   `boot:b` replicates, 2.5/97.5 percentiles. Cost O(B·N) with B = 1000: about 10⁹ term visits for a
   Bible, minutes on one core (estimate); B is a recipe field.
+- *As built (M2).* **α's interval resamples types, not segments** — Clauset et al.'s own
+  bootstrap, over the measurements the fit is of. The segment bootstrap is biased for it: a
+  segment drawn twice adds its tokens twice and no new type, so a replicate's rare types are fewer
+  and more frequent than the text's, and α\* runs high. On this section's own synthetic text at
+  α = 2.5 the segment interval was [2.502, 2.831] around α̂ = 2.484; resampling types, §5.1's
+  coverage row holds at 96 and 95 seeds of 100 for α = 2.0 and 2.5. **β keeps the segment
+  bootstrap**, since a vocabulary curve is about reading order, and has the same bias, which no
+  resampling of a text avoids; a result whose stored interval excludes its estimate carries the
+  flag `ci-off-estimate`, and OQ-89 asks what the interval should be. **Heaps' checkpoints run
+  from ⌈√N⌉, not from 1**: `V(n) ≤ n` binds before Heaps' law does, below n = 10^2.5 for §5.1's
+  `10·n^0.6`, and checkpoints from 1 put 42% of the fit at slope 1 (β̂ ≈ 0.8 for a text built to
+  have 0.6). **A candidate `f_min` must leave a tail of `params.tail:min` types**, default 50,
+  recorded in the recipe; without a floor the search fits the three most frequent words. The KS
+  distance is evaluated at each observed frequency `uⱼ` and at `uⱼ₊₁ − 1`, which is the supremum
+  over every integer. Hurwitz ζ's first neglected term, B₁₀'s, is at most 3·10⁻¹³ relative over
+  [1.01, 6]. `min:n` is T1's, 10,000 tokens, since §3.7 gives T4 none and the two read one count
+  table. Reported: `alpha`, `s`, `ks`, `f:min`, `heaps:beta`, `heaps:K`; `n` holds `tokens`,
+  `types`, `tail`, `segments`.
 
 **T5 — n-gram surprisal.**
 - Interpolated Kneser–Ney (Chen, Goodman 1998, TR-10-98, §3), order 3 default, one absolute
@@ -841,7 +872,7 @@ Requires SMYSL-2.4 TX-P1/P2 (parts, analyzers) and SMYSL-2.5 TX-P6 (`sq` scopes)
 | step | work | exit test |
 |---|---|---|
 | M1 | crate skeleton; `Recipe`, `Num`, `Outcome`, payload writer, scope digest, basis rule, `rng.rs`, `num.rs`; purity entry; clippy rule; diagnostics `E480`–`E489` registered | golden payload bytes for a hand-built `Value`; `cargo xtask check-purity` passes with the crate listed; registry count test updated and green — **done 2026-10-18**, below |
-| M2 | T1, T4, `boot.rs` | §5.1 T1 and T4 rows; bootstrap seed tests |
+| M2 | T1, T4, `boot.rs` | §5.1 T1 and T4 rows; bootstrap seed tests — **done 2026-10-18**, below |
 | M3 | T2, T6 with pinned brotli | §5.1 T2 and T6 rows; peak memory of one q11 lgwin 24 compression recorded |
 | M4 | T3: SA-IS, LCP, LPF, both estimator forms, calibration fixture | LPF equals naive on 10⁴ random inputs; calibration goldens |
 | M5 | T5 with exact leave-one-out | hand-computed and property tests |
@@ -871,6 +902,32 @@ changes the hash and an optional field added later does not. **`brotli` is not a
 yet**: it is T2's, in M3, and a pinned dependency nothing calls would be a pin nobody tests.
 The clippy rule is `crates/smysl-measure/clippy.toml`, and a planted `f64::ln` fails `make
 lint` with it.
+
+*M2, done 2026-10-18.* T1 and T4, the first measures, and what they read: `smysl_measure::text`
+(a scope's `from` resolved to texts, the parts read through `Library` at the recipe's level into
+one term stream, `Corpus`), `boot` (segment draws, nearest-rank percentiles with integer ranks,
+⌈B·(den∓num)/(2·den)⌉), `text::entropy` and `text::zipf_heaps`. `smysl_text::Chain` gained
+`surface` and `stems`. `Measure::complete` writes a measure's defaults — `min:n`, `tail:min` —
+into its recipe, and `run` stamps a text measure's recipe with the analyzer it was read under and
+the digest over tids (§3.4), and refuses a recipe naming another analyzer or level (`SMY-E489`)
+and a lossy text it does not admit (`SMY-E480`); an admitted one is flagged and reported
+(`SMY-W408`), and a stem stream is flagged `stem-level`. The exit holds: `tests/text.rs` runs
+§5.1's T1 rows (Ĥ_MM within 10⁻³ of log₂ k for k = 2, 16, 256 at n = 10⁶, Ĥ_MM − Ĥ equal to
+(k−1)/(2n ln 2) to two quanta; one repeated term gives 0 and 0 exactly), its T4 rows (α̂ within its
+interval and within 0.2 of α = 2.0 and 2.5; β̂ = 0.6 ± 0.01 on a text built to `⌊10·n^0.6⌋`), and
+§5.3's seed rules (one seed, one payload; seeds 0 and 1 give two intervals within twice each
+other's width; `boot:b` moves the hash and the uid). `tests/coverage.rs` is §5.1's slow row,
+`--ignored`: 96 and 95 of 100. Both measures over the KJV's Ruth and Jude at verse level are
+pinned in `fixtures/measure/text.tsv`, language-free; the two books are 3,191 tokens, so the
+default recipe reports both not run (`SMY-W485`) and the pinned run lowers `min:n` to 1,000.
+Three of the RFC's codes are registered, `W408`, `E480` and `W485`, and the registry is 108.
+Three findings, each recorded where it applies (§3.7): **a text scope is the query's `from`**,
+because an sq scope answers with units and an unextracted text has none; **α's interval resamples
+types**, because the segment bootstrap's duplicated segments add no types and its interval missed
+the estimate it was for; and **Heaps' fit starts at √N**, because §5.1's own synthetic text is
+`V(n) = n` below 316 tokens. On the KJV the segment intervals of T1 and of β exclude their own
+estimates — [7.510, 7.726] around Ĥ = 7.813 — which the flag `ci-off-estimate` says and OQ-89
+asks about.
 
 ### TX-P9 (graph, channel, dialogue, assessment)
 
@@ -939,3 +996,4 @@ excluded), `SMY-E030`/`SMY-E033` (rules M and T; never expected on measure units
 | OQ-57 | Bootstrap generator: ChaCha20 as `rand_chacha` lays it out, or a generator specified in full in SMYSL-2.3 (SplitMix64 is ten lines in any language) so the Python, JavaScript and Go implementations reproduce intervals without porting a crate's internals? |
 | OQ-58 | Class identity across time. Class ids are smallest member uids and move when evidence grows. Membership-overlap correspondence (used for K4 and A3) can map one class to two. Report splits and merges explicitly, or pin states to a policy snapshot? |
 | OQ-59 | T3 bias: publish the raw estimator only (this RFC), or also a value corrected from the i.i.d. calibration table, knowing that natural text is not i.i.d. and the correction may be wrong in either direction? |
+| OQ-89 | **The segment bootstrap is biased for a statistic of rare types.** Raised by TX-P8 M2. A segment drawn twice adds no new type, so a replicate has fewer rare types than the text, and T1's entropy and Heaps' β run low in every replicate: over the KJV's Ruth and Jude (3,191 tokens, 703 types) T1's 95% interval is [7.510, 7.726] around Ĥ = 7.813, and β's [0.591, 0.700] around 0.745. M2 stores the percentile interval as §3.7 says, flags a result whose interval excludes its estimate (`ci-off-estimate`), and resamples types for α, where Clauset et al.'s bootstrap applies. Options for T1 and β: the basic (reverse-percentile) interval, which corrects by the bootstrap's shift and so assumes the shift mirrors the estimator's own bias — true for plug-in entropy and not for a duplication artifact; m-out-of-n subsampling without replacement, which has no duplicates and changes n, which a vocabulary statistic depends on; or no interval below a V/N threshold. The bias shrinks with V/N, so at a Bible's length it may be inside the interval's width, which M7's 5-Bible run can measure. |

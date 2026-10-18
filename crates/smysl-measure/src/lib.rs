@@ -1,13 +1,17 @@
 //! smysl measures (RFC SMYSL-2.6): a measure is a pure function of a store, a scope and a
 //! recipe, and its result is a `@data` unit whose identity is that function's output.
 //!
-//! **TX-P8 M1 is the frame, and it holds no measure.** What is here is everything a measure
-//! needs in order to have a result worth writing down: a [`Recipe`] that names every input
-//! and hashes to the same 32 bytes on every machine; payload numbers that are integers
-//! ([`Num`]), because a payload float is binary32 to 1/1024; transcendentals through `libm`
-//! ([`num`]); a seeded generator ([`rng`]); a scope resolved by sq and saved as the result's
-//! ground ([`scope`]); and the unit writer ([`to_unit`]). T1 to T7 arrive in M2 to M6, each as
-//! one [`Measure`] in [`ALL`], and M7 is the `measure` command.
+//! **TX-P8 M1 is the frame.** What is there is everything a measure needs in order to have a
+//! result worth writing down: a [`Recipe`] that names every input and hashes to the same 32
+//! bytes on every machine; payload numbers that are integers ([`Num`]), because a payload
+//! float is binary32 to 1/1024; transcendentals through `libm` ([`num`]); a seeded generator
+//! ([`rng`]); a scope resolved by sq and saved as the result's ground ([`scope`]); and the unit
+//! writer ([`to_unit`]).
+//!
+//! **M2 adds the first two measures and what they read**: the text substrate ([`text`] — a
+//! scope's parts as one term stream at the recipe's level), the segment bootstrap ([`boot`]),
+//! T1 ([`text::entropy`]) and T4 ([`text::zipf_heaps`]). T2, T3 and T5 to T7 arrive in M3 to
+//! M6, each as one [`Measure`] in [`ALL`], and M7 is the `measure` command.
 //!
 //! # A result as a unit (SMYSL-2.6 §3.6)
 //!
@@ -33,15 +37,20 @@ use smysl_core::diag::{Code, Diagnostic};
 use smysl_core::{KernelType, Status, UnitCore, UnitCoreBuilder};
 use smysl_graph::Store;
 
+pub mod boot;
 pub mod num;
 pub mod outcome;
 pub mod recipe;
 pub mod rng;
 pub mod scope;
+pub mod text;
 
-pub use outcome::{gist, to_payload, Ci, Num, Outcome, Refusal, Value};
+pub use outcome::{gist, to_payload, Ci, Headline, Num, Outcome, Refusal, Value};
 pub use recipe::{Axis, ClassPolicy, Level, Param, Recipe, RecipeError};
 pub use scope::{digest, resolve, Basis, Resolved};
+pub use text::entropy::T1;
+pub use text::zipf_heaps::T4;
+pub use text::{Corpus, Stream, Text, TextError};
 
 /// Whether a measure calls a model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -74,18 +83,29 @@ impl Needs {
     }
 }
 
-/// What a measure is given. The text substrate, classes and the time index join it with the
-/// measures that read them (M2 onward); constructed through [`Input::new`] so adding them
-/// breaks no caller.
+/// What a measure is given. Classes and the time index join it with the measures that read
+/// them (TX-P9); constructed through [`Input::new`] so adding them breaks no caller.
 #[non_exhaustive]
 pub struct Input<'a> {
     pub store: &'a Store,
     pub scope: &'a Resolved,
+    /// The scope's text, read once for every text measure in a run (M2).
+    pub text: Option<&'a Corpus>,
 }
 
 impl<'a> Input<'a> {
     pub fn new(store: &'a Store, scope: &'a Resolved) -> Input<'a> {
-        Input { store, scope }
+        Input {
+            store,
+            scope,
+            text: None,
+        }
+    }
+
+    /// Give the measures that need [`Needs::TEXT`] the text they read.
+    pub fn with_text(mut self, text: &'a Corpus) -> Input<'a> {
+        self.text = Some(text);
+        self
     }
 }
 
@@ -98,14 +118,18 @@ pub trait Measure: Sync {
     fn version(&self) -> u16;
     fn purity(&self) -> Purity;
     fn needs(&self) -> Needs;
+    /// Write this measure's defaults into a recipe that leaves them unset — `min:n`, its own
+    /// `params` — so that the recipe a result carries states every value it was computed
+    /// under, the defaults included (§3.4, and [`recipe`]'s first rule).
+    fn complete(&self, _recipe: &mut Recipe) {}
     /// The refusals that need no computation — a lossy text, a missing policy, an undated
     /// scope. Pure and cheap; runs before [`Measure::run`].
     fn admit(&self, recipe: &Recipe, input: &Input<'_>) -> Result<(), Refusal>;
     fn run(&self, recipe: &Recipe, input: &Input<'_>) -> Outcome;
 }
 
-/// Every measure this build has, in report order. Empty in M1: the frame comes first.
-pub const ALL: &[&dyn Measure] = &[];
+/// Every measure this build has, in report order.
+pub const ALL: &[&dyn Measure] = &[&T1, &T4];
 
 /// A measure by id and version, against a registry.
 ///
@@ -150,9 +174,16 @@ pub fn run(ids: &[&str], base: &Recipe, input: &Input<'_>) -> Vec<MeasureResult>
     run_with(ALL, ids, base, input)
 }
 
-/// Run `ids` in the order given, each under `base` with its own id and version and the
-/// scope's digest. An unknown id is a result too — not run, `SMY-E489` — so the report lists
-/// every id asked for and a typo is visible beside the measures that ran.
+/// Run `ids` in the order given, each under `base` with its own id and version, its defaults
+/// ([`Measure::complete`]) and the scope's digest. An unknown id is a result too — not run,
+/// `SMY-E489` — so the report lists every id asked for and a typo is visible beside the
+/// measures that ran.
+///
+/// A text measure's recipe is stamped from the text it read: the digest over the parts' tids
+/// (§3.4), and the analyzer the text was read under, which a recipe naming another refuses
+/// (`SMY-E489`). A lossy text is refused (`SMY-E480`) unless the recipe admits one, and an
+/// admitted one is flagged `lossy-admitted` and reported (`SMY-W408`); a stem stream is
+/// flagged `stem-level`.
 pub fn run_with(
     registry: &[&dyn Measure],
     ids: &[&str],
@@ -172,21 +203,111 @@ pub fn run_with(
             Ok(m) => {
                 let mut recipe = base.for_measure(m.id(), m.version());
                 recipe.scope_digest = input.scope.digest;
-                match m.admit(&recipe, input) {
-                    Err(r) => MeasureResult {
-                        diagnostics: vec![r.diagnostic()],
-                        outcome: Outcome::refused(r),
-                        recipe,
-                    },
-                    Ok(()) => MeasureResult {
-                        outcome: m.run(&recipe, input),
-                        diagnostics: Vec::new(),
-                        recipe,
-                    },
+                m.complete(&mut recipe);
+                let text = if m.needs().contains(Needs::TEXT) {
+                    match stamp_text(&mut recipe, input) {
+                        Ok(c) => Some(c),
+                        Err(r) => return refused(recipe, r),
+                    }
+                } else {
+                    None
+                };
+                if let Err(r) = m.admit(&recipe, input) {
+                    return refused(recipe, r);
+                }
+                let mut outcome = m.run(&recipe, input);
+                let mut diagnostics = Vec::new();
+                if let Outcome::Value(v) = &mut outcome {
+                    if v.ci.iter().any(|(k, ci)| {
+                        v.values
+                            .get(k)
+                            .is_some_and(|x| *x < ci.lo.min(ci.hi) || *x > ci.hi.max(ci.lo))
+                    }) {
+                        v.flags.push(CI_OFF_ESTIMATE.to_string());
+                    }
+                }
+                if let (Outcome::Value(v), Some(c)) = (&mut outcome, text) {
+                    if c.stream == Stream::Stem {
+                        v.flags.push(text::STEM_LEVEL.to_string());
+                    }
+                    if c.lossy {
+                        v.flags.push(text::LOSSY_ADMITTED.to_string());
+                        diagnostics.push(Diagnostic::new(Code::W408).with_message(format!(
+                            "{} ran over a lossy text in `{}`, as its recipe admits",
+                            recipe.id,
+                            recipe.scope.trim()
+                        )));
+                    }
+                }
+                MeasureResult {
+                    recipe,
+                    outcome,
+                    diagnostics,
                 }
             }
         })
         .collect()
+}
+
+/// The flag a result carries when an interval it stores does not contain its own estimate —
+/// which a bootstrap over segments does to a statistic of rare types on a short text, because
+/// a duplicated segment adds no new type (SMYSL-2.6 OQ-89). Said rather than hidden.
+pub const CI_OFF_ESTIMATE: &str = "ci-off-estimate";
+
+fn refused(recipe: Recipe, r: Refusal) -> MeasureResult {
+    MeasureResult {
+        diagnostics: vec![r.diagnostic()],
+        outcome: Outcome::refused(r),
+        recipe,
+    }
+}
+
+/// What a text measure's recipe takes from the text it reads, and the refusals that need
+/// nothing else.
+fn stamp_text<'a>(recipe: &mut Recipe, input: &Input<'a>) -> Result<&'a Corpus, Refusal> {
+    let Some(c) = input.text else {
+        return Err(Refusal::new(
+            Code::E489,
+            format!(
+                "{} reads a text, and none was given for its scope",
+                recipe.id
+            ),
+        ));
+    };
+    match &recipe.analyzer {
+        Some(a) if *a != c.analyzer => {
+            return Err(Refusal::new(
+                Code::E489,
+                format!(
+                    "the recipe names analyzer `{a}` and the text was read under `{}`",
+                    c.analyzer
+                ),
+            ))
+        }
+        Some(_) => {}
+        None => recipe.analyzer = Some(c.analyzer.clone()),
+    }
+    if recipe.level != c.level {
+        return Err(Refusal::new(
+            Code::E489,
+            format!(
+                "the recipe's level is `{}` and the text was cut at `{}`",
+                recipe.level, c.level
+            ),
+        ));
+    }
+    if c.lossy && !recipe.lossy {
+        return Err(Refusal::new(
+            Code::E480,
+            format!(
+                "`{}` holds a lossy text, which {} does not count unless its recipe admits one",
+                recipe.scope.trim(),
+                recipe.id
+            ),
+        ));
+    }
+    recipe.scope_digest = c.digest;
+    Ok(c)
 }
 
 /// Why a result is not a unit.

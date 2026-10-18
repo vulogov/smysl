@@ -13,6 +13,10 @@ all-features = true
 
 [features]
 default = []
+# Snowball stems for the stem stream (`<chain>:stem`). Without it every chain is `smysl/an/1`
+# and its stem stream is its surface stream, which the analyzer id in the recipe records — so
+# a result computed without the stemmer can never be mistaken for one computed with it.
+stem = ["smysl-text/stem"]
 
 [dependencies]
 # Units, payload CBOR, hashing and the diagnostic registry.
@@ -23,6 +27,10 @@ smysl-graph = { workspace = true }
 # that scope saved as an `x.query/saved` unit (OQ-55, decided in TX-P8 M1). Both crates are on
 # the purity gate's list, so the pure tree gains no runtime.
 smysl-query = { workspace = true }
+# The text a text-level measure reads (TX-P8 M2): manifests and parts through `Library`, and
+# the analyzer chains whose surface and stem streams are what T1 and T4 count. Default
+# features only, which is the pure tier's own tree; stems are `stem` above.
+smysl-text = { workspace = true }
 # Every transcendental a result depends on goes through `libm`, never the platform's: glibc's
 # `ln` and this crate disagree in the last bit for 2% of inputs (SMYSL-2.6 §2.9), and a last bit
 # is enough to move a fixed-point payload number. Pinned exactly, with `arch` intrinsics off,
@@ -37,9 +45,20 @@ rand_core   = { version = "0.9", default-features = false }
 # Rule M over a written result: the tests append a measure unit and its basis and check the
 # store, which is the only way to show that `SMY-E030` is never raised on one (SMYSL-2.6 §8).
 smysl-check = { workspace = true }
+# A library built from the committed Bible slices, for the measures over a real text.
+smysl-text = { workspace = true, features = ["reader-usfm"] }
 
 # The M1 exit: golden payload bytes for a hand-built value, and the determinism rules the RFC
 # makes checkable without a measure — libm outputs pinned by bit pattern, a generator stream
 # pinned by value, and a source scan for what §3.5 and §4.5 forbid.
 [[test]]
 name = "payload"
+
+# The M2 exit: T1 and T4 against the §5.1 rows on synthetic texts generated in-test from the
+# crate's own generator, the bootstrap seed rules of §5.3, and both measures over a library.
+[[test]]
+name = "text"
+
+# §5.1's coverage row for T4, 100 seeds: `--ignored`, as the RFC says, and run in release.
+[[test]]
+name = "coverage"

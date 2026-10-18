@@ -228,6 +228,32 @@ impl Chain {
         }
         out
     }
+
+    /// The surface stream: one folded term per word, in order, and no stems (1.10, TX-P8 M2).
+    ///
+    /// What a statistic counts. [`Chain::terms`] puts a stem beside its surface form because
+    /// retrieval wants both to match; a measure counting both would see one word as two
+    /// tokens of two types, half the time, depending on whether the stemmer changed it.
+    /// SMYSL-2.6 §2.7 asks for two streams of one token per word each, and this is the first.
+    pub fn surface(&self, text: &str) -> Vec<String> {
+        text.unicode_words().map(|w| self.fold(w)).collect()
+    }
+
+    /// The stem stream: one term per word, the stem of its folded form, in order.
+    ///
+    /// The same length as [`Chain::surface`] over the same text, word for word. A chain with
+    /// no stemmer — [`Chain::plain`], or any chain in a build without feature `stem` — has no
+    /// stem to give, and its stem stream is its surface stream; the chain id is what says so.
+    pub fn stems(&self, text: &str) -> Vec<String> {
+        #[cfg(feature = "stem")]
+        if let Some(st) = &self.stemmer {
+            return text
+                .unicode_words()
+                .map(|w| st.stem(&self.fold(w)).into_owned())
+                .collect();
+        }
+        self.surface(text)
+    }
 }
 
 /// The chains, through the seam `smysl-retrieve` scores and stores terms over (1.10, TX-P4 step 2).
@@ -279,6 +305,25 @@ mod tests {
         // Every surface form is present, in order.
         assert!(t.contains(&"книгами".to_string()));
         assert!(t.contains(&"книга".to_string()));
+    }
+
+    /// The two streams a statistic counts: one term per word each, aligned word for word,
+    /// and their interleaving is not [`Chain::terms`]'s, which keeps a stem only when it
+    /// differs.
+    #[test]
+    fn the_surface_and_stem_streams_have_one_term_per_word() {
+        let ru = chain("ru");
+        assert_eq!(ru.surface("Книгами и книга"), ["книгами", "и", "книга"]);
+        #[cfg(feature = "stem")]
+        assert_eq!(ru.stems("Книгами и книга"), ["книг", "и", "книг"]);
+        #[cfg(not(feature = "stem"))]
+        assert_eq!(ru.stems("Книгами и книга"), ru.surface("Книгами и книга"));
+        let plain = Chain::plain();
+        assert_eq!(plain.stems("Häuser"), plain.surface("Häuser"));
+        for c in [chain("en"), chain("de"), chain("fr"), plain] {
+            let text = "The houses, die Häuser — les maisons continuellement.";
+            assert_eq!(c.surface(text).len(), c.stems(text).len(), "{}", c.id());
+        }
     }
 
     /// A word that stems to itself yields one term, not the same term twice.

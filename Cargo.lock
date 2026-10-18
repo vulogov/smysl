@@ -1820,6 +1820,7 @@ dependencies = [
  "smysl-core",
  "smysl-graph",
  "smysl-query",
+ "smysl-text",
 ]
 
 [[package]]

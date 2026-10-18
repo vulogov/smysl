@@ -94,8 +94,19 @@ pub struct Value {
     /// `lossy-admitted`, `low-n`, `stem-level`. Written sorted, so the order a measure raised
     /// them in does not reach the uid.
     pub flags: Vec<String>,
-    /// Which of `values` the gist names, and the label it is written with.
-    pub headline: Option<(String, String)>,
+    /// Which of `values` the gist names, and how it is written.
+    pub headline: Option<Headline>,
+}
+
+/// The value a gist names: `T1 unigram entropy, Miller–Madow 9.1234 bits/token`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Headline {
+    /// One of [`Value::values`].
+    pub key: String,
+    /// The phrase in front of the number.
+    pub label: String,
+    /// The phrase after it; empty for a number with no unit, such as an exponent.
+    pub unit: String,
 }
 
 impl Value {
@@ -128,10 +139,25 @@ impl Value {
         self
     }
 
-    /// The result the gist names: `key` must be one of `values`, and `label` is the phrase in
-    /// front of it, `brotli rate`.
-    pub fn with_headline(mut self, key: impl Into<String>, label: impl Into<String>) -> Value {
-        self.headline = Some((key.into(), label.into()));
+    /// The result the gist names: `key` must be one of `values`, `label` is the phrase in
+    /// front of it, `brotli rate`, and the key itself is its unit, `bits/char`.
+    pub fn with_headline(self, key: impl Into<String>, label: impl Into<String>) -> Value {
+        let key = key.into();
+        self.with_headline_in(key.clone(), label, key)
+    }
+
+    /// [`Value::with_headline`] with a unit that is not the key; `""` for none.
+    pub fn with_headline_in(
+        mut self,
+        key: impl Into<String>,
+        label: impl Into<String>,
+        unit: impl Into<String>,
+    ) -> Value {
+        self.headline = Some(Headline {
+            key: key.into(),
+            label: label.into(),
+            unit: unit.into(),
+        });
         self
     }
 }
@@ -243,10 +269,15 @@ pub fn to_payload(recipe: &Recipe, value: &Value) -> Result<Vec<u8>, RecipeError
 /// integer, and the scope — in that order, so that a long scope is what the gist bound cuts
 /// and the number is what survives.
 pub fn gist(recipe: &Recipe, value: &Value) -> String {
-    let head = value
-        .headline
-        .as_ref()
-        .and_then(|(k, label)| value.values.get(k).map(|v| format!("{label} {v} {k}")));
+    let head = value.headline.as_ref().and_then(|h| {
+        value.values.get(&h.key).map(|v| {
+            if h.unit.is_empty() {
+                format!("{} {v}", h.label)
+            } else {
+                format!("{} {v} {}", h.label, h.unit)
+            }
+        })
+    });
     let scope = recipe
         .scope
         .split_whitespace()

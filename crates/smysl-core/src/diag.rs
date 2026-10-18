@@ -367,8 +367,15 @@ registry! {
     // scope has nothing to ground it on (`W483`). The refusals that need a measure — lossy
     // texts, a missing class policy, an undated scope, a compressor window, a small sample —
     // arrive with the measures, in M2 to M6. `E486` is withdrawn in the RFC and stays unused.
+    // M2 brings three with T1 and T4, the first measures that read a text: `E480` and `W408`
+    // for a lossy one, refused or admitted, and `W485` for a sample below the recipe's `min:n`.
+    // `W408` is SMYSL-2.0's, filed in the library range and raised only by a measure, so it
+    // sits here with the refusal it is the other half of.
     Measure => {
+        W408 = "SMY-W408", Warn,  "A measure ran over a lossy text because its recipe admits one";
+        E480 = "SMY-E480", Error, "A measure refused a lossy text its recipe does not admit";
         W483 = "SMY-W483", Warn,  "A measure was computed but not persisted: its scope has no basis to ground a derived unit";
+        W485 = "SMY-W485", Warn,  "A measure was not run: its sample is below the recipe's min:n";
         E489 = "SMY-E489", Error, "Recipe incompatible: an unknown measure id or version, or inputs that cannot be compared";
     }
 }
@@ -791,9 +798,12 @@ mod tests {
     /// `Measure`: the two of the RFC's ten that a recipe, a payload writer and a unit writer can
     /// raise before any measure exists. The other seven are refusals a measure makes, and wait
     /// for the measures.
+    ///
+    /// 108 with `SMY-W408`, `SMY-E480` and `SMY-W485` in TX-P8 M2, where T1 and T4 read a text
+    /// and can refuse a lossy one, admit it under a recipe that says so, or find it too short.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 105);
+        assert_eq!(Code::ALL.len(), 108);
     }
 
     #[test]

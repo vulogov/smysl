@@ -423,7 +423,8 @@ mod tests {
         // set this build does not carry, and an answer unit grounding outside its dossier.
         // 105 with `SMY-W483` and `SMY-E489` (TX-P8 M1), raised by `smysl-measure`'s unit writer
         // and registry, which the facade does not expose until the `measure` command (M7).
-        assert_eq!(Code::ALL.len(), 105);
+        // 108 with `SMY-W408`, `SMY-E480` and `SMY-W485` (TX-P8 M2), raised by T1 and T4.
+        assert_eq!(Code::ALL.len(), 108);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 
