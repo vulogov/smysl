@@ -22,3 +22,6 @@ smysl-core  = { workspace = true }
 smysl-graph = { workspace = true }
 smysl-check = { workspace = true }
 smysl-pack  = { workspace = true }
+# E6's count, which SMYSL-2.6 §4.3 moves into A5 (`graph::grounding`, TX-P9 N1) so that the
+# harness and the measure are one implementation. Default features: the pure tier's tree.
+smysl-measure = { workspace = true }

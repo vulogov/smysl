@@ -42,6 +42,7 @@ use smysl_core::{KernelType, Status, UnitCore, UnitCoreBuilder};
 use smysl_graph::Store;
 
 pub mod boot;
+pub mod graph;
 pub mod num;
 pub mod outcome;
 pub mod recipe;
@@ -49,6 +50,14 @@ pub mod rng;
 pub mod scope;
 pub mod text;
 
+pub use graph::concentration::A6;
+pub use graph::contention::A7;
+pub use graph::dating::A10;
+pub use graph::density::A1;
+pub use graph::epistemic::A4;
+pub use graph::grounding::A5;
+pub use graph::novelty::A3;
+pub use graph::redundancy::A2;
 pub use outcome::{gist, to_payload, Ci, Headline, Num, Outcome, Refusal, Value};
 pub use recipe::{Axis, ClassPolicy, Level, Param, Recipe, RecipeError};
 pub use scope::{digest, resolve, Basis, Resolved};
@@ -82,6 +91,8 @@ impl Needs {
     pub const TIME: Needs = Needs(1 << 3);
     pub const SALIENCE: Needs = Needs(1 << 4);
     pub const PACK: Needs = Needs(1 << 5);
+    /// A library's text beside the units: A1 counts the words its units were drawn from.
+    pub const LIBRARY: Needs = Needs(1 << 6);
 
     pub const fn union(self, other: Needs) -> Needs {
         Needs(self.0 | other.0)
@@ -100,6 +111,8 @@ pub struct Input<'a> {
     pub scope: &'a Resolved,
     /// The scope's text, read once for every text measure in a run (M2).
     pub text: Option<&'a Corpus>,
+    /// The library the units were drawn from, for a measure that reads their text (A1).
+    pub library: Option<&'a smysl_text::Library>,
 }
 
 impl<'a> Input<'a> {
@@ -108,7 +121,14 @@ impl<'a> Input<'a> {
             store,
             scope,
             text: None,
+            library: None,
         }
+    }
+
+    /// Give the measures that need [`Needs::LIBRARY`] the library their units came from.
+    pub fn with_library(mut self, library: &'a smysl_text::Library) -> Input<'a> {
+        self.library = Some(library);
+        self
     }
 
     /// Give the measures that need [`Needs::TEXT`] the text they read.
@@ -138,7 +158,9 @@ pub trait Measure: Sync {
 }
 
 /// Every measure this build has, in report order.
-pub const ALL: &[&dyn Measure] = &[&T1, &T2, &T3, &T4, &T5, &T6, &T7];
+pub const ALL: &[&dyn Measure] = &[
+    &T1, &T2, &T3, &T4, &T5, &T6, &T7, &A1, &A2, &A3, &A4, &A5, &A6, &A7, &A10,
+];
 
 /// A measure by id and version, against a registry.
 ///
@@ -221,6 +243,11 @@ pub fn run_with(
                 } else {
                     None
                 };
+                if m.needs().contains(Needs::LIBRARY) {
+                    if let Err(r) = graph::density::stamp(&mut recipe, input) {
+                        return refused(recipe, r);
+                    }
+                }
                 if let Err(r) = m.admit(&recipe, input) {
                     return refused(recipe, r);
                 }
@@ -233,6 +260,20 @@ pub fn run_with(
                             .is_some_and(|x| *x < ci.lo.min(ci.hi) || *x > ci.hi.max(ci.lo))
                     }) {
                         v.flags.push(CI_OFF_ESTIMATE.to_string());
+                    }
+                }
+                if let Outcome::Value(v) = &outcome {
+                    if v.flags
+                        .iter()
+                        .any(|f| f == graph::novelty::UNDATED_EXCLUDED)
+                    {
+                        diagnostics.push(Diagnostic::new(Code::W415).with_message(format!(
+                            "{} left out {} undated unit(s) of `{}` on the {} axis",
+                            recipe.id,
+                            v.n.get("undated").copied().unwrap_or(0),
+                            recipe.scope.trim(),
+                            recipe.axis
+                        )));
                     }
                 }
                 if let (Outcome::Value(v), Some(c)) = (&mut outcome, text) {

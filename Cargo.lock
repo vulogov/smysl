@@ -1812,6 +1812,7 @@ dependencies = [
  "smysl-core",
  "smysl-graph",
  "smysl-ingest",
+ "smysl-measure",
  "smysl-pack",
  "smysl-provider",
 ]

@@ -183,9 +183,14 @@ fn strict(edges: &BTreeMap<Uid, BTreeSet<Uid>>) -> Vec<Class> {
         let mut members: BTreeSet<Uid> = BTreeSet::new();
         members.insert(*seed);
         assigned.insert(*seed);
-        // "Every later unassigned unit, in ascending uid order": later than the seed, which the
-        // ordered vertex list gives for free.
-        for candidate in vertices.iter().filter(|c| *c > seed) {
+        // "Every later unassigned unit, in ascending uid order" — and only the seed's neighbours
+        // can be one that joins, since a unit joins only if it is adjacent to every member and
+        // the seed is a member. So the candidates are the seed's neighbours, which a `BTreeSet`
+        // holds in ascending uid order: the same units in the same order as the whole vertex
+        // list filtered, and the same classes, without trying every later unit against every
+        // seed. That was O(V²), and a million units with ten thousand same-as pairs spent ten
+        // seconds in it (SMYSL-2.6 TX-P9 N1, the scale exit).
+        for candidate in edges[seed].iter().filter(|c| *c > seed) {
             if assigned.contains(candidate) {
                 continue;
             }

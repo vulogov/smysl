@@ -99,3 +99,13 @@ name = "divergence"
 # repository does not hold. `--ignored`, with `SMYSL_GE_T6=<dir>`, in release.
 [[test]]
 name = "ge_t6"
+
+# TX-P9 N1's exit, the graph half: A1–A7 and A10 on synthetic stores with planted structure
+# (SMYSL-2.6 §5.2), and A1 and the per-text figures over a library of the committed slices.
+[[test]]
+name = "graph"
+
+# TX-P9 N1's scale exit: 10⁶ units in time within 2× of 10× the 10⁵ run. `--ignored`, in
+# release; its timings feed GE-T7.
+[[test]]
+name = "graph_scale"

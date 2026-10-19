@@ -371,10 +371,15 @@ registry! {
     // for a lossy one, refused or admitted, and `W485` for a sample below the recipe's `min:n`.
     // `W408` is SMYSL-2.0's, filed in the library range and raised only by a measure, so it
     // sits here with the refusal it is the other half of. M3 brings `E484` with T6, the pair of
-    // texts too long for the compressor to see both.
+    // texts too long for the compressor to see both. TX-P9 N1 brings two with the unit
+    // measures: `E481` for a class measure (A2, A3) whose recipe names no class policy, and
+    // `E482` for a time-ordered one (A3) over a scope whose undated share is above the
+    // recipe's `undated:max`.
     Measure => {
         W408 = "SMY-W408", Warn,  "A measure ran over a lossy text because its recipe admits one";
         E480 = "SMY-E480", Error, "A measure refused a lossy text its recipe does not admit";
+        E481 = "SMY-E481", Error, "A class-level measure or assessment has no class policy in its recipe";
+        E482 = "SMY-E482", Error, "A time-ordered measure was refused: the scope's undated share exceeds the recipe's undated:max";
         W483 = "SMY-W483", Warn,  "A measure was computed but not persisted: its scope has no basis to ground a derived unit";
         E484 = "SMY-E484", Error, "A compression distance was refused: the two texts together exceed the compressor's window";
         W485 = "SMY-W485", Warn,  "A measure was not run: its sample is below the recipe's min:n";
@@ -806,9 +811,12 @@ mod tests {
     ///
     /// 109 with `SMY-E484` in TX-P8 M3, where T6 refuses a pair of texts longer than the
     /// compressor's window.
+    ///
+    /// 111 with `SMY-E481` and `SMY-E482` in TX-P9 N1, where A2 and A3 count proposition
+    /// classes and A3 orders a scope by effective time.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 109);
+        assert_eq!(Code::ALL.len(), 111);
     }
 
     #[test]

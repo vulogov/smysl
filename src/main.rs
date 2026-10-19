@@ -961,14 +961,33 @@ fn cli() -> Command {
                     Arg::new("ids")
                         .value_name("IDS")
                         .required(true)
-                        .help("The measures, comma-separated: T1,T2,T3,T4,T5,T6,T7"),
+                        .help("The measures, comma-separated: T1–T7 over text, A1–A7 and A10 over units"),
                 )
                 .arg(
                     Arg::new("scope")
                         .long("scope")
                         .required(true)
                         .value_name("SQ")
-                        .help("The scope, an sq query; a text measure reads its `from`, e.g. `from collection:kjv`"),
+                        .help("The scope, an sq query; a text measure reads its `from`, e.g. `from collection:kjv`, and a unit measure what it answers with"),
+                )
+                .arg(
+                    Arg::new("policy")
+                        .long("policy")
+                        .value_name("POLICY")
+                        .help("Proposition classes for A2 and A3: strict, component or attested:<n>"),
+                )
+                .arg(
+                    Arg::new("profile")
+                        .long("profile")
+                        .value_name("NAME")
+                        .help("The granularity profile A1's density is under"),
+                )
+                .arg(
+                    Arg::new("axis")
+                        .long("axis")
+                        .value_name("AXIS")
+                        .default_value("said")
+                        .help("The time axis A3 and A10 read: said, composed or about"),
                 )
                 .arg(
                     Arg::new("level")
@@ -5837,6 +5856,28 @@ fn cmd_measure(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Usage;
     };
     let seed_check = global.get_flag("seed-check");
+    let policy = match m.get_one::<String>("policy") {
+        None => None,
+        Some(raw) => match measure_policy(raw) {
+            Some(p) => Some(p),
+            None => {
+                eprintln!(
+                    "smysl measure: --policy is strict, component or attested:<n>, not `{raw}`"
+                );
+                return ExitCode::Usage;
+            }
+        },
+    };
+    let raw_axis = m.get_one::<String>("axis").expect("has a default");
+    let axis = match raw_axis.as_str() {
+        "said" => smysl::measure::Axis::Said,
+        "composed" => smysl::measure::Axis::Composed,
+        "about" => smysl::measure::Axis::About,
+        other => {
+            eprintln!("smysl measure: --axis is said, composed or about, not `{other}`");
+            return ExitCode::Usage;
+        }
+    };
 
     // Each id's defaults, so a parameter can be routed to the ids that take it. An id this
     // build does not have is not refused here: it is a result, not run (`SMY-E489`), so the
@@ -5938,7 +5979,7 @@ fn cmd_measure(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if !Library::is_library(root) {
         eprintln!(
             "smysl measure: {path}: not a library; every measure this build has reads a \
-             library's text (`smysl text add`)"
+             library, its text or the units drawn from it (`smysl text add`)"
         );
         return ExitCode::Usage;
     }
@@ -5969,25 +6010,38 @@ fn cmd_measure(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 return ExitCode::Usage;
             }
         };
-        let found = match texts(scope_text, &library) {
-            Ok(t) => t,
-            Err(d) => {
-                eprintln!("smysl measure: {}: {}", d.code.as_str(), d.message);
-                return ExitCode::Usage;
+        // The text is read only when an id reads text: a unit measure's scope may filter, which
+        // a text scope refuses (`SMY-E461`), and reading a Bible to count its units' statuses
+        // would be work nobody asked for.
+        let reads_text = ids.iter().any(|id| {
+            ms::find(ms::ALL, id, None).is_ok_and(|x| x.needs().contains(ms::Needs::TEXT))
+        });
+        let corpus = if reads_text {
+            let found = match texts(scope_text, &library) {
+                Ok(t) => t,
+                Err(d) => {
+                    eprintln!("smysl measure: {}: {}", d.code.as_str(), d.message);
+                    return ExitCode::Usage;
+                }
+            };
+            match Corpus::load(&library, &found, level, analyzer.as_deref()) {
+                Ok(c) => Some(c),
+                Err(TextError::Refused(d)) => {
+                    eprintln!("smysl measure: {}: {}", d.code.as_str(), d.message);
+                    return ExitCode::Usage;
+                }
+                Err(e) => {
+                    eprintln!("smysl measure: {path}: {e}");
+                    return ExitCode::Failure;
+                }
             }
+        } else {
+            None
         };
-        let corpus = match Corpus::load(&library, &found, level, analyzer.as_deref()) {
-            Ok(c) => c,
-            Err(TextError::Refused(d)) => {
-                eprintln!("smysl measure: {}: {}", d.code.as_str(), d.message);
-                return ExitCode::Usage;
-            }
-            Err(e) => {
-                eprintln!("smysl measure: {path}: {e}");
-                return ExitCode::Failure;
-            }
-        };
-        let input = ms::Input::new(library.store(), &resolved).with_text(&corpus);
+        let mut input = ms::Input::new(library.store(), &resolved).with_library(&library);
+        if let Some(c) = &corpus {
+            input = input.with_text(c);
+        }
         let mut results = Vec::with_capacity(ids.len());
         for id in &ids {
             let mut recipe = Recipe::new("", 0, scope_text.as_str());
@@ -5995,6 +6049,9 @@ fn cmd_measure(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             recipe.analyzer = analyzer.clone();
             recipe.seed = *m.get_one::<u64>("seed").expect("has a default");
             recipe.lossy = m.get_flag("allow-lossy");
+            recipe.policy = policy;
+            recipe.profile = m.get_one::<String>("profile").cloned();
+            recipe.axis = axis;
             recipe.min_n = min_one.get(id).copied().or(min_all);
             recipe.params = params.get(id).cloned().unwrap_or_default();
             let r = ms::run(&[id.as_str()], &recipe, &input).remove(0);
@@ -6107,6 +6164,21 @@ fn cmd_measure(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         new + present
     );
     ExitCode::Success
+}
+
+/// `--policy`: `strict`, `component` or `attested:<n>`.
+#[cfg(feature = "text")]
+fn measure_policy(raw: &str) -> Option<smysl::measure::ClassPolicy> {
+    use smysl::measure::ClassPolicy;
+    match raw {
+        "strict" => Some(ClassPolicy::Strict),
+        "component" => Some(ClassPolicy::Component),
+        other => other
+            .strip_prefix("attested:")
+            .and_then(|n| n.parse::<u32>().ok())
+            .filter(|n| *n > 0)
+            .map(ClassPolicy::Attested),
+    }
 }
 
 /// One result as the text report prints it: the id, the unit or why there is none, the gist,

@@ -301,3 +301,101 @@ fn refusals_before_anything_runs() {
     assert_eq!(o.status.code(), Some(2));
     assert!(stderr(&o).contains("not a library"), "{}", stderr(&o));
 }
+
+/// Three claims drawn from each book's first part, and one pair claimed the same: what the
+/// unit measures (TX-P9 N1) have to count in a library that has text and units.
+fn with_units(root: &Path) -> usize {
+    use smysl::{canonical_uid, KernelType, Relation, Status, UnitCoreBuilder};
+    use smysl_core::types::{RelKind, SourceKind, SourceRef};
+
+    let mut library = Library::open(root).expect("a library");
+    let mut parts: Vec<_> = library
+        .store()
+        .manifests()
+        .map(|(_, m)| m.parts[0].tid)
+        .collect();
+    parts.sort();
+    let mut records = Vec::new();
+    let mut uids = Vec::new();
+    for (k, tid) in parts.iter().enumerate() {
+        for i in 0..3 {
+            let core = UnitCoreBuilder::new(
+                KernelType::Claim,
+                format!("claim {i} of book {k}"),
+                Status::Speculative,
+            )
+            .source(SourceRef::new(SourceKind::Doc, tid.canonical()))
+            .build()
+            .unwrap();
+            uids.push(canonical_uid(&core));
+            records.push(Record::Unit(core));
+        }
+    }
+    records.push(Record::Relation(Relation::new(
+        RelKind::Extension(smysl::schemas::text::SAME_AS.into()),
+        uids[0],
+        uids[1],
+    )));
+    library.append_records(&records).expect("appends");
+    uids.len()
+}
+
+/// The unit measures through the command: a scope's units counted, A2 under the policy
+/// `--policy` names and refused without one (`SMY-E481`), A1 refused without `--profile`,
+/// a text measure and a unit measure in one run, and the flags' own refusals.
+#[test]
+fn unit_measures_count_a_scopes_units() {
+    let (dir, root) = bibles("units");
+    let n = with_units(&dir);
+    let json = |extra: &[&str]| -> serde_json::Value {
+        let mut a = vec!["--json", "measure"];
+        a.extend_from_slice(extra);
+        a.extend(["--scope", SCOPE, "--dry-run", &root]);
+        let o = run(&a);
+        assert!(o.status.success(), "{a:?}: {}", stderr(&o));
+        serde_json::from_str(&stdout(&o)).expect("one JSON object")
+    };
+
+    let v = json(&["A2,A4,A5,A7,A10", "--policy", "strict"]);
+    let r = v["results"].as_array().unwrap();
+    for x in r {
+        assert_eq!(x["outcome"], "value", "{x}");
+        assert_eq!(x["n"]["units"], n, "{x}");
+    }
+    assert_eq!(r[0]["values"]["redundancy"], format!("0.0333 (1/{n})"));
+    assert_eq!(r[1]["values"]["status:speculative"], n.to_string());
+
+    let v = json(&["A2,A1"]);
+    assert_eq!(v["results"][0]["code"], "SMY-E481");
+    assert_eq!(v["results"][1]["code"], "SMY-E489");
+    let v = json(&["A1", "--profile", "default", "--analyzer", PLAIN]);
+    assert_eq!(v["results"][0]["outcome"], "value", "{v}");
+    assert_eq!(v["results"][0]["n"]["placed"], n);
+
+    // One run, a text and a unit measure: the text is read for T1 and not for A4.
+    let v = json(&["T1,A4", "--analyzer", PLAIN, "--min-n", "T1=2"]);
+    let ids: Vec<&str> = v["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["outcome"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["value", "value"]);
+
+    // Units drawn from a text carry no time of their own, so a time order is refused.
+    let v = json(&["A3", "--policy", "strict", "--param", "order=time"]);
+    assert_eq!(v["results"][0]["code"], "SMY-E482");
+
+    for (bad, why) in [
+        (vec!["A2", "--policy", "loose"], "--policy is strict"),
+        (vec!["A2", "--policy", "attested:0"], "--policy is strict"),
+        (vec!["A10", "--axis", "known"], "--axis is said"),
+    ] {
+        let mut a = vec!["measure"];
+        a.extend(bad);
+        a.extend(["--scope", SCOPE, "--dry-run", &root]);
+        let o = run(&a);
+        assert_eq!(o.status.code(), Some(2), "{a:?}");
+        assert!(stderr(&o).contains(why), "{a:?}: {}", stderr(&o));
+    }
+}

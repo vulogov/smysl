@@ -150,6 +150,7 @@ pub struct Recipe {
     pub policy: Option<ClassPolicy>,
     pub level: Level,
     pub axis: Axis,
+    /// An sq `where` predicate over the scope's units; empty for none, and then not written.
     pub filter: String,
     /// The largest undated share a time-ordered measure accepts, as a ratio.
     pub undated_max: (u32, u32),
@@ -226,7 +227,11 @@ impl Recipe {
         }
         put(&mut o, "level", HValue::Str(self.level.to_string()));
         put(&mut o, "axis", HValue::Str(self.axis.to_string()));
-        put(&mut o, "filter", HValue::Str(self.filter.clone()));
+        // An empty filter is no filter, and absent is absent: a unit measure's default (TX-P9
+        // N1), which leaves every text measure's recipe, and so its hash, as it was.
+        if !self.filter.is_empty() {
+            put(&mut o, "filter", HValue::Str(self.filter.clone()));
+        }
         put(
             &mut o,
             "undated:max",

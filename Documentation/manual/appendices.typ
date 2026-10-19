@@ -777,20 +777,25 @@ A **measure** is a pure function of a library, a scope and a recipe, and its res
 uid. This build has the seven text-level measures of SMYSL-2.6 — T1 unigram entropy, T2 brotli
 rate, T3 match-length entropy rate, T4 Zipf and Heaps, T5 n-gram surprisal with each segment
 scored by a model of the others, T6 compression distance between texts, T7 Jensen–Shannon
-divergence and collocations — all pure, which is why `--seed-check` takes every one of them.
-`Mixed` is for the measures the registry is meant to hold later, a neural surprisal and an
-embedding distance, which call a model.
+divergence and collocations — and eight over the units a scope answers with: A1 extraction
+density, A2 redundancy, A3 novelty, A4 the spread of statuses, A5 grounding, A6 the Gini of
+salience, A7 contention and A10 dating. All are pure, which is why `--seed-check` takes every
+one of them. `Mixed` is for the measures the registry is meant to hold later, a neural
+surprisal and an embedding distance, which call a model.
 
 #dtable(
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
     ([`IDS`], [positional, required], [The measures, comma-separated, run and reported in the order given. An id this build does not have is a result too — not run, `SMY-E489` — so a typo stands beside the measures that ran.]),
-    ([`--scope`], [`SQ`, required], [An `sq/1` query. A text measure reads its `from`: `from texts`, `from collection:kjv`, `from collection:"kjv/08-rut"`. Anything after the `from` is refused (`SMY-E461`), because a `where` selects units and a text has none until something is extracted from it; name a narrower text by its alias.]),
+    ([`--scope`], [`SQ`, required], [An `sq/1` query. A text measure reads its `from`: `from texts`, `from collection:kjv`, `from collection:"kjv/08-rut"`. Anything after the `from` is refused (`SMY-E461`) when a text measure is asked for, because a `where` selects units and a text has none until something is extracted from it; name a narrower text by its alias. A unit measure counts the units the whole query answers with, so `from collection:kjv where text:mode = asserted` is a scope for one; the text is read only when some id reads text.]),
+    ([`--policy`], [`POLICY`], [How proposition classes are formed for A2 and A3: `strict`, `component` or `attested:<n>`. There is no default, since the three give three numbers; without one, A2 and A3 are not run (`SMY-E481`).]),
+    ([`--profile`], [`NAME`], [The granularity profile A1's density is under. Required by A1 (`SMY-E489` without it): a density of units depends on how finely the text was cut into them.]),
+    ([`--axis`], [`AXIS`], [The time axis A3's time order and A10 read: `said` (the default), `composed` or `about`.]),
     ([`--level`], [`LEVEL`], [The segment a measure counts in: `part` (the default), `chapter`, `verse`, `message` or `window:<n>`. The text is read once, at this level, for every id.]),
     ([`--analyzer`], [`CHAIN:STREAM`], [The analyzer chain and stream, `smysl/an-en/1:surface`. Defaults to the chain the texts' language chooses, surface stream. A scope whose texts choose two chains is refused unless this names one (`SMY-E489`), since a statistic over a stemmed and an unstemmed vocabulary at once describes neither.]),
     ([`--param`], [`[ID.]K=V`], [A measure parameter. Unscoped, it goes to every id asked for that takes the key; `T5.order=2` goes to one. A key no id asked for takes is refused before anything runs, so a parameter cannot land in a recipe it does not belong to and move that recipe's hash.]),
-    ([`--min-n`], [`[ID=]N`], [The smallest sample a measure accepts, in **its own unit**: tokens for T1, T4, T5 and T7, characters for T2, symbols in every text for T3, texts for T6. `T3=2` sets one. Below it the measure is not run (`SMY-W485`) rather than reported off a sample its estimator is biased on.]),
+    ([`--min-n`], [`[ID=]N`], [The smallest sample a measure accepts, in **its own unit**: tokens for T1, T4, T5 and T7, characters for T2, symbols in every text for T3, texts for T6, units for the A-measures (1 by default). `T3=2` sets one. Below it the measure is not run (`SMY-W485`) rather than reported off a sample its estimator is biased on.]),
     ([`--seed`], [`N`], [The bootstrap seed, 0 by default. It is in the recipe, so two seeds are two units.]),
     ([`--allow-lossy`], [—], [Measure a lossy text too; the result is flagged `lossy-admitted` (`SMY-W408`). Without it a lossy text is refused (`SMY-E480`).]),
     ([`--dry-run`], [—], [Print the values and refusals, and write nothing.]),

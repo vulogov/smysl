@@ -1189,7 +1189,7 @@ mode, speaker; the effective-time index (TX-P3) for A3/A10/D*.
 
 | step | work | exit test |
 |---|---|---|
-| N1 | A1–A7, A10; move E6 into `grounding.rs` | §5.2 graph tests; `smysl-eval` lib and `corpus_chain` tests pass unedited; a synthetic 10⁶-unit scope runs A1, A2, A4, A5, A7 in time within 2× of 10× the 10⁵ run (feeds GE-T7) |
+| N1 | A1–A7, A10; move E6 into `grounding.rs` | §5.2 graph tests; `smysl-eval` lib and `corpus_chain` tests pass unedited; a synthetic 10⁶-unit scope runs A1, A2, A4, A5, A7 in time within 2× of 10× the 10⁵ run (feeds GE-T7) — **done 2026-10-19**, below |
 | N2 | A8; move `full_tokens`/`floor_tokens`; `SMY-E407` on `mul` | monotonicity property; bit identity across the matrix; refusal on `mul` + `utf8-div4` |
 | N3 | A9 | planted communities recovered exactly on a two-clique graph |
 | N4 | channel binding, C1–C5 | §5.2 channel tests; C1–C4 on the KJV/Synodal Psalms fixture reported |
@@ -1198,6 +1198,54 @@ mode, speaker; the effective-time index (TX-P3) for A3/A10/D*.
 | N7 | A8 across genres | **GE-T6** complete (A8 arm), with GE-T2's runs |
 
 TX-P9's draft-3 exit tests are GE-T3 and GE-T6; both are listed above.
+
+*N1, done 2026-10-19.* `smysl_measure::graph`: A1 (`density`), A2 (`redundancy`), A3
+(`novelty`), A4 (`epistemic`), A5 (`grounding`), A6 (`concentration`), A7 (`contention`) and
+A10 (`dating`), registered after T1–T7, all pure. E6's count is `graph::grounding::
+warrant_counts`, and `smysl-eval`'s E6 calls it, keeping its own ratio and its 1.0 over nothing
+(§2.1). `measure` runs them: `--policy`, `--profile` and `--axis` are new, and the text is read
+only when an id reads text, so a unit measure's scope may filter. The exit holds:
+`crates/smysl-measure/tests/graph.rs` plants §5.2's structure — four units claimed pairwise the
+same among ten is `[3, 10]` and none is `[0, 10]`; two speculative, two cited and four measured is
+H = 1.5 bits exactly, 1.75 after one retraction; a chain of four claims is depth 0 to 3 as
+`trace` says; six unconnected units give a Gini of 0 exactly; a hundred units whose second half
+repeats the first are novelty `[50, 100]` with every class new once — and A1 and the per-text
+figures over the KJV's Ruth and Jude; `smysl-eval`'s 11 lib and 9 `corpus_chain` tests pass
+unedited; and `tests/graph_scale.rs`, `--ignored` in release, runs A1, A2, A4, A5 and A7 over
+10⁵ units in 0.32 s and 10⁶ in 4.0 s, **12.5×** against the bound of 20 (A1 1.30 s, A2 0.60,
+A4 0.18, A5 1.49, A7 0.45 at 10⁶), which is GE-T7's first figure. `SMY-E481` and `SMY-E482` are
+registered, and the registry is 111. Six findings, each recorded where it applies in the
+crate.
+
+- **Draft 3's default filter selects no unit this build writes.** `holder = text and mode =
+  asserted` (§3.4) needs both halves true of one unit, and SMYSL-2.4 §3.4 writes `asserted` only
+  beside a holder that is an `x.text/entity`, and nothing writes `x.text/v1`'s `text` literal;
+  sq also reads the bare names as payload keys no unit has. Every unit measure would have
+  reported every scope empty. A unit measure's default filter is therefore **empty** — the
+  scope is an sq query and already says which units — and an empty filter is not written to
+  the recipe, so every text measure's recipe, which keeps draft 3's default, hashes as it did and
+  no text result's uid moved. A filter that is given is applied as an sq `where` predicate.
+- **A2 was quadratic, in `smysl-graph`.** The strict partition (A-12.4) tried every later
+  vertex against every seed. Only a seed's neighbours can join its class, and a `BTreeSet`
+  holds them in uid order, so iterating them gives the same classes — the Python reference's
+  four fixture tests still agree — in O(V·d). At 10⁶ units with 10⁴ same-as pairs A2 went from
+  12.3 s to 0.6 s and the scale ratio from 40× to 12.5×; the exit could not have held without
+  it.
+- **A5's depth is the longest chain, not `trace`'s.** `trace` walks breadth first, so its depth
+  is the shortest distance to the farthest unit below, which does not compose and cannot be
+  memoised in topological order as §3.8 asks. The longest chain does compose; on a tree the two
+  agree, and on `a` grounded on `{b, c}` with `b` on `c` it is 2 where `trace` says 1.
+- **A1 counts the parts' words, not the spans'.** Spans overlap and leave gaps, so words over
+  spans would count a verse twice where two claims share it and not at all where nothing was
+  extracted. The denominator is each part the scope's units are drawn from, once, under the
+  recipe's analyzer or the parts' language's; a missing `profile` is `SMY-E489`, since §8 gives
+  it no code of its own.
+- **A3 reads in reading order by default**, by text, part, the span's first byte and the
+  locator, because the said-axis time of every verse of a Bible is the edition's; `order=time`
+  orders by effective time with `SMY-W415` and `SMY-E482` as §3.8 says. `known` is not an axis
+  rule E derives and is refused for A3's time order and A10.
+- **A6 is exact.** Salience is quantised to 1/1024 in [0, 1], so the Gini is a ratio of
+  integers rounded once, and equal scores give 0 exactly rather than a rounding residue.
 
 ---
 

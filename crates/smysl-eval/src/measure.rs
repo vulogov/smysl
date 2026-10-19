@@ -154,24 +154,12 @@ fn gist_coverage(store: &Store, run: &Run) -> Measurement {
 }
 
 /// **E6** - warrant density: warranted survivors per survivor carrying grounds. Gates D-10.
+///
+/// The count is A5's (`smysl_measure::graph::grounding`, TX-P9 N1); the ratio, and its 1.0
+/// over nothing, stay this harness's, since its reports depend on them (SMYSL-2.6 §2.1).
 fn warrant_density(store: &Store, run: &Run) -> Measurement {
-    let survivors = run.survivors();
-    let mut grounded = 0usize;
-    let mut warranted = 0usize;
-    for uid in survivors {
-        let Some(unit) = store.get(uid) else { continue };
-        if unit.core.grounds.is_empty() {
-            continue;
-        }
-        grounded += 1;
-        if store
-            .relations_of_kind(&smysl_core::RelKind::Warrant)
-            .iter()
-            .any(|r| &r.to == uid)
-        {
-            warranted += 1;
-        }
-    }
+    let (warranted, grounded) =
+        smysl_measure::graph::grounding::warrant_counts(store, run.survivors());
     Measurement::observed(
         Metric::WarrantDensity,
         ratio(warranted, grounded),
