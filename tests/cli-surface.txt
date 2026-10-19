@@ -739,3 +739,27 @@ ask        --verbose
 ask        --yes
 ask        --seed-check
 ask        --help
+measure    <IDS>
+measure    [PATH]
+measure    --config
+measure    --scope
+measure    --level
+measure    --analyzer
+measure    --output
+measure    --format
+measure    [possible values: surface, cbor]
+measure    --param
+measure    --min-n
+measure    --strict
+measure    --offline
+measure    --seed
+measure    --allow-lossy
+measure    --no-color
+measure    --dry-run
+measure    --noprogress
+measure    --at
+measure    --json
+measure    --quiet
+measure    --verbose
+measure    --seed-check
+measure    --help

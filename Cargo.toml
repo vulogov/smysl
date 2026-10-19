@@ -204,7 +204,7 @@ cli       = [
 # `smysl-ingest?/text` is weak on purpose: text ingest's windowing and span attachment are
 # `smysl-ingest`'s and need this feature's library layer, but a build with `text` and without
 # `ingest` should not acquire an ingest crate to get a reader.
-text      = ["dep:smysl-text", "dep:getrandom", "smysl-check/text", "smysl-ingest?/text"]
+text      = ["dep:smysl-text", "dep:getrandom", "dep:smysl-measure", "smysl-check/text", "smysl-ingest?/text"]
 # Language identification. Not in `cli` and not in `text`: it is 57 crates and 14.4 MB of
 # `lingua` models (SMYSL-2.4 §3.7, measured in TX-P2 step 1), and nothing in the CLI asks for
 # a guess yet — a manifest's language comes from the reader or from `--lang`, and a fallback
@@ -256,6 +256,10 @@ smysl-pack     = { workspace = true }
 # crate is pure and a query over a plain store needs no feature; `q --library` additionally
 # needs `text`, and says so when the build lacks it.
 smysl-query    = { workspace = true }
+# TX-P8 M7: `measure` computes the text-level measures. Behind `text`, because every measure
+# this build has reads a library's text, and a measure crate in a build that cannot open a
+# library would be one whose every result is a refusal.
+smysl-measure  = { workspace = true, optional = true }
 smysl-thread   = { workspace = true }
 smysl-render   = { workspace = true }
 smysl-provider = { workspace = true, optional = true }

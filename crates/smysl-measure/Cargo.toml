@@ -94,3 +94,8 @@ name = "kneser_ney"
 # computation (`fixtures/measure/g2.tsv`), PMI and the pairs it counts, and T7 over a library.
 [[test]]
 name = "divergence"
+
+# GE-T6's pure arm (SMYSL-2.6 §5.4): T2 and T3 across the Bible's genres, over a corpus this
+# repository does not hold. `--ignored`, with `SMYSL_GE_T6=<dir>`, in release.
+[[test]]
+name = "ge_t6"

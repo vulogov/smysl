@@ -768,6 +768,47 @@ list them and the log does not hold them. The `SMY-W412` that reports a held dat
 names the contention id outright, and `smysl resolve` accepts an id rule E derives over the
 store as well as one the log records.
 
+#section("measure")
+
+*Text, graph, channel and dialogue measures as derived data units.* Mixed · TX-P8.
+
+A **measure** is a pure function of a library, a scope and a recipe, and its result is a
+`@data` unit whose identity is that function's output: same text, same scope, same recipe, same
+uid. This build has the seven text-level measures of SMYSL-2.6 — T1 unigram entropy, T2 brotli
+rate, T3 match-length entropy rate, T4 Zipf and Heaps, T5 n-gram surprisal with each segment
+scored by a model of the others, T6 compression distance between texts, T7 Jensen–Shannon
+divergence and collocations — all pure, which is why `--seed-check` takes every one of them.
+`Mixed` is for the measures the registry is meant to hold later, a neural surprisal and an
+embedding distance, which call a model.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`IDS`], [positional, required], [The measures, comma-separated, run and reported in the order given. An id this build does not have is a result too — not run, `SMY-E489` — so a typo stands beside the measures that ran.]),
+    ([`--scope`], [`SQ`, required], [An `sq/1` query. A text measure reads its `from`: `from texts`, `from collection:kjv`, `from collection:"kjv/08-rut"`. Anything after the `from` is refused (`SMY-E461`), because a `where` selects units and a text has none until something is extracted from it; name a narrower text by its alias.]),
+    ([`--level`], [`LEVEL`], [The segment a measure counts in: `part` (the default), `chapter`, `verse`, `message` or `window:<n>`. The text is read once, at this level, for every id.]),
+    ([`--analyzer`], [`CHAIN:STREAM`], [The analyzer chain and stream, `smysl/an-en/1:surface`. Defaults to the chain the texts' language chooses, surface stream. A scope whose texts choose two chains is refused unless this names one (`SMY-E489`), since a statistic over a stemmed and an unstemmed vocabulary at once describes neither.]),
+    ([`--param`], [`[ID.]K=V`], [A measure parameter. Unscoped, it goes to every id asked for that takes the key; `T5.order=2` goes to one. A key no id asked for takes is refused before anything runs, so a parameter cannot land in a recipe it does not belong to and move that recipe's hash.]),
+    ([`--min-n`], [`[ID=]N`], [The smallest sample a measure accepts, in **its own unit**: tokens for T1, T4, T5 and T7, characters for T2, symbols in every text for T3, texts for T6. `T3=2` sets one. Below it the measure is not run (`SMY-W485`) rather than reported off a sample its estimator is biased on.]),
+    ([`--seed`], [`N`], [The bootstrap seed, 0 by default. It is in the recipe, so two seeds are two units.]),
+    ([`--allow-lossy`], [—], [Measure a lossy text too; the result is flagged `lossy-admitted` (`SMY-W408`). Without it a lossy text is refused (`SMY-E480`).]),
+    ([`--dry-run`], [—], [Print the values and refusals, and write nothing.]),
+    ([`--at`], [`MS`], [The wall clock for the attestations, in milliseconds. Defaults to now.]),
+  ),
+)
+
+*What is written.* The scope, saved as an `x.query/saved` unit — the results' one ground, so a
+measure over a million units carries one uid of grounds and not a million — then each result's
+unit and an attestation of this run (`Op::Transformed`, rung `computed`, the recipe's hash). The
+report prints each id with its uid, its gist and every number under it, each number rendered
+from the integer the payload stores; `--json` gives the same as one object.
+
+*A second run adds no unit.* A result's uid is its recipe, its scope's digest and its value, so
+rerunning `measure` over an unchanged library finds every unit already there and says so — `0
+new, 4 already in the store` — and appends only the run's attestations. A changed text, a
+changed parameter or a new seed is a new unit beside the old one; nothing is overwritten.
+
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix B — Full Diagnostic Code Reference
 // ═══════════════════════════════════════════════════════════════════════

@@ -17,7 +17,7 @@
 //!
 //! # Nothing is skipped
 //!
-//! Unlike [`library`](crate::passes::library), this pass raises every code it is allocated. That is worth
+//! Unlike the [`library` pass](crate::passes::library), this one raises every code it is allocated. That is worth
 //! stating rather than leaving to be noticed: `SMY-E404` and `SMY-W405` are the two codes of
 //! TX-P3's neighbourhood that wait for `source.span` (TX-P5), and they belong to the library
 //! pass, not to this one.

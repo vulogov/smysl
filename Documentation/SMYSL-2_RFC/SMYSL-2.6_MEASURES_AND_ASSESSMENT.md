@@ -858,6 +858,24 @@ smysl assess diff  <state-a> <state-b>
 - `--dry-run` prints values and refusals and writes nothing. Otherwise units are appended and the
   report lists uids, refusals and not-run reasons in id order. `--json` gives the same report.
 - Rule A: `cmd_measure` and `cmd_assess` call only `smysl::measure::*`.
+- *As built (TX-P8 M7).* `smysl measure <IDS> --scope <SQ> [--level L] [--analyzer A]
+  [--param [ID.]K=V]… [--min-n [ID=]N]… [--seed N] [--allow-lossy] [--dry-run] [--at MS]
+  <library>`, the thirty-fourth command; `smysl::measure` is the facade's re-export of the crate,
+  behind `text`. The flags for graph, channel and dialogue measures (`--channel`, `--policy`,
+  `--estimator`, `--profile`, `--axis`) arrive with the measures that read them (TX-P9), since a
+  flag no measure reads would be a recipe field written for nothing. **One recipe per id**:
+  `--param` without a prefix goes to every id asked for that takes the key, `T5.order=2` to one,
+  and a key no requested id takes is refused before anything runs, so a parameter cannot land in
+  a recipe it does not belong to and move that result's hash; `--min-n` is per id the same way,
+  which is what M3 owed (`min:n` is in each measure's own unit). The scope is the M2 form, `from
+  collection:bible` rather than `from texts where collection = bible`, since a text scope is a
+  `from` (§3.7 T1). `Mixed` in the command table, and `reproducible` says pure: every id this
+  build registers is `Purity::Pure`, and `cmd_measure` refuses a model-dependent one under
+  `--seed-check` per id. `SMY-E416` is not registered: no id can raise it until T8 or D5 exists,
+  on the registry's standing rule. Writing is the CLI's: the `x.query/v1` declaration when the
+  store has none, the basis and its answer edges, then each unit with an attestation of the run
+  (`Op::Transformed`, `Rung::Computed`, the recipe hash, `--at` or the clock), through
+  `Library::append_records`; the report counts the units that were new and those the store held.
 
 ### 4.5 Features, dependencies, purity, C toolchain
 
@@ -943,6 +961,16 @@ Generated in-test from a fixed seed with the crate's own generator, so fixtures 
   CIs within each other's width ×2; changing `boot:b` changes the recipe hash and the uid.
 - **Idempotent writes.** Running `measure` twice adds no unit the second time: every unit record
   comes back in `AppendReport::duplicates`, and only the new run's attestations are added.
+- *As built (TX-P8 M7).* The matrix job is `measure-platforms` in CI: `cargo test -p
+  smysl-measure` on x86_64-linux-gnu, x86_64-linux-musl, aarch64-apple-darwin and
+  x86_64-pc-windows-msvc. Every payload the crate produces is pinned in a committed golden —
+  recipe CBOR, payload bytes, `libm` results by bit pattern, each measure over the Bible slices,
+  the T3 calibration table with each row's payload hash — so each platform is compared with the
+  same bytes, and two that pass agree; the golden is the comparison job. Windows checks out
+  with `core.autocrlf` off, or every input's line endings would differ before any measure ran.
+  *Idempotent writes* is `tests/cmd_measure.rs` over the five-Bible slice: the second run's
+  units are all already in the store, and the store gains the run's four attestations and no
+  unit.
 - **`--seed-check`** passes for every pure id on the 5-Bible fixture (TX-P8) and the extraction
   fixture (TX-P9).
 
@@ -962,6 +990,24 @@ Generated in-test from a fixed seed with the crate's own generator, so fixtures 
 - **Kill.** A measure whose between-genre variance is ≤ that variance in ≥ 3 of 5 languages is
   dropped from defaults, as draft 3 §23 states.
 - **Reported:** per language, per measure: H, ε², p, and the genre medians with CIs.
+- *As built (TX-P8 M7): the pure arm.* `crates/smysl-measure/tests/ge_t6.rs`, `--ignored`, with
+  `SMYSL_GE_T6=<dir>` naming GE-T1's five Bibles as USFM (converted by `vpl2usfm.py`, the same
+  bytes as GE-T1's corpus: Ruth is the committed slice byte for byte); the labels are
+  `fixtures/measure/genres.tsv` and the report `fixtures/measure/ge-t6.tsv`. Windows are measured
+  by T2 and T3 themselves, through `run`; a book's value is the median of its 20. The kill
+  criterion's two variances are read as the **between-genre mean square** against the
+  **within-genre mean square plus the window-sampling variance** (each book's value under seeds
+  0–9, its sample variance, averaged over books). The four books §5.4's list does not place
+  (1–2 Chronicles, Ezra, Nehemiah) are excluded and listed. **Both measures are kept, in all
+  five languages**: Kruskal–Wallis H 11.0–17.0 for T2 and 8.7–13.5 for T3, p from 0.0002 to
+  0.0194, ε² 0.34–0.56, and the between-genre mean square 4.9 to 10.1 times the within-genre
+  one plus window variance. **Law is the lowest genre in every language under both** (T2
+  2.17–3.05 bits/char by language, T3 1.15–1.39), and under T2 poetry is the highest in every
+  language; under T3 the English and French epistles, one and two books, sit above poetry. Two caveats the report carries: the equal-length
+  rule excludes most of the New Testament — at 50,000 characters T3 keeps one or two epistles
+  per language and none in the Russian and Spanish, so its "genres" are four there — and the
+  windows of a book only just longer than one overlap almost entirely, which makes the window
+  variance a floor. The run takes 51 s on 16 cores in release.
 
 ### 5.5 GE-T3, GE-T8, GE-T9 (measure side)
 
@@ -989,7 +1035,7 @@ Requires SMYSL-2.4 TX-P1/P2 (parts, analyzers) and SMYSL-2.5 TX-P6 (`sq` scopes)
 | M4 | T3: SA-IS, LCP, LPF, both estimator forms, calibration fixture | LPF equals naive on 10⁴ random inputs; calibration goldens — **done 2026-10-18**, below |
 | M5 | T5 with exact leave-one-out | hand-computed and property tests — **done 2026-10-18**, below |
 | M6 | T7 | §5.1 T7 rows — **done 2026-10-18**, below |
-| M7 | `measure` command for T-ids, `--seed-check`, `--dry-run`, three CLI gates updated | cross-platform matrix job green; `measure T1,T2,T3,T4 --scope 'from texts where collection = bible'` on the 5-Bible fixture adds no unit on a second run; GE-T6 pure arm (T2, T3) reported |
+| M7 | `measure` command for T-ids, `--seed-check`, `--dry-run`, three CLI gates updated | cross-platform matrix job green; `measure T1,T2,T3,T4 --scope 'from texts where collection = bible'` on the 5-Bible fixture adds no unit on a second run; GE-T6 pure arm (T2, T3) reported — **built 2026-10-18**, below; the matrix job's first run is the push that carries it |
 
 *M1, done 2026-10-18.* `crates/smysl-measure`: `Recipe` with every §3.4 field and its canonical
 CBOR and hash; `Num`'s three integer shapes, `Value`, `Outcome`, `Refusal` and `to_payload`;
@@ -1110,6 +1156,26 @@ registry is 109. Two findings, recorded in §3.7 T7: **JSD's form decides whethe
 exact**, so it is computed over integer products rather than as three entropies; and **G² alone
 does not say which way a pair leans**, so collocations are ranked among the pairs seen more often
 than chance. This completes the text-level measures T1–T7; M7 is the `measure` command.
+
+*M7, built 2026-10-18.* `smysl measure`, the thirty-fourth command (§4.4 as built), with
+`--seed-check`, `--dry-run` and `--json`; the three CLI gates — `tests/cli-surface.txt`,
+`tests/dispatch.rs`, `command_table_matches_section_23` and its purity census — updated; the
+manual's command reference gains `measure`. The exit: **a second run adds no unit** —
+`tests/cmd_measure.rs` runs `measure T1,T2,T3,T4 --scope 'from collection:bible'` over the
+five-Bible slice twice, and the store gains five units the first time (four results and the
+saved scope) and none the second, only the run's four attestations; `--seed-check` passes for
+all seven ids. **GE-T6's pure arm is reported** (§5.4 as built): T2 and T3 both kept, in five
+languages of five. **The cross-platform matrix job exists** (§5.3 as built) and has not yet
+run: its first run is the push that carries it, so "green" is owed to that push and not
+claimed here. Two findings. **CI had been red since 2026-10-10**, fifty pushes, for three
+reasons none of which the local sweep could see: the doc gate on CI's newer stable rustdoc,
+which now calls `[`library`](crate::passes::library)` a redundant link; two CLI test files
+(`cmd_ask`, `cmd_same_as`) not gated on the features their binary needs, so every
+`--no-default-features` cell failed; and `make semver` in a shallow checkout with no tag to
+compare against. All three are fixed here, and the matrix job would have been one more cell
+nobody read. **And `measure` runs one recipe per id** rather than one recipe for every id,
+because a parameter shared across measures would sit in the recipe of a measure that never
+reads it and change its uid.
 
 ### TX-P9 (graph, channel, dialogue, assessment)
 

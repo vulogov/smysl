@@ -288,6 +288,15 @@ pub use smysl_provider::{
 #[cfg(feature = "tui")]
 pub use smysl_tui as tui;
 
+/// Measures as derived data units (RFC SMYSL-2.6): recipes, the text-level measures T1–T7, and
+/// the unit writer.
+///
+/// Rule A: `measure` reaches the crate through this name and no other. A module for the reason
+/// `query` is one — the command needs the registry, the recipe, the text substrate and the
+/// unit writer, which is most of the crate. Behind `text`: every measure this build has reads a
+/// library's text.
+#[cfg(feature = "text")]
+pub use smysl_measure as measure;
 /// The query language (RFC SMYSL-2.9) and its planner (SMYSL-2.5 §3.2), whole.
 ///
 /// Rule A: `src/main.rs` reaches every crate through this file, and `q` needs the parser, the

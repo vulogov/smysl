@@ -1,0 +1,72 @@
+# GE-T6's genre labels (SMYSL-2.6 §5.4), one per book of the 66-book canon, by USFM code.
+# Read from §5.4's list: law (Exod-Deut), narrative (Gen, Josh-2 Kgs, Ruth, Esth, the Gospels,
+# Acts), poetry (Job, Ps, Prov, Eccl, Song), prophecy (Isa-Mal, Rev), epistle (Rom-Jude). The
+# list does not place 1-2 Chronicles, Ezra or Nehemiah; they are `-`, and the harness excludes
+# and lists them rather than this file guessing. Labels are fixtures, reviewed once.
+# code	genre
+GEN	narrative
+EXO	law
+LEV	law
+NUM	law
+DEU	law
+JOS	narrative
+JDG	narrative
+RUT	narrative
+1SA	narrative
+2SA	narrative
+1KI	narrative
+2KI	narrative
+1CH	-
+2CH	-
+EZR	-
+NEH	-
+EST	narrative
+JOB	poetry
+PSA	poetry
+PRO	poetry
+ECC	poetry
+SNG	poetry
+ISA	prophecy
+JER	prophecy
+LAM	prophecy
+EZK	prophecy
+DAN	prophecy
+HOS	prophecy
+JOL	prophecy
+AMO	prophecy
+OBA	prophecy
+JON	prophecy
+MIC	prophecy
+NAM	prophecy
+HAB	prophecy
+ZEP	prophecy
+HAG	prophecy
+ZEC	prophecy
+MAL	prophecy
+MAT	narrative
+MRK	narrative
+LUK	narrative
+JHN	narrative
+ACT	narrative
+ROM	epistle
+1CO	epistle
+2CO	epistle
+GAL	epistle
+EPH	epistle
+PHP	epistle
+COL	epistle
+1TH	epistle
+2TH	epistle
+1TI	epistle
+2TI	epistle
+TIT	epistle
+PHM	epistle
+HEB	epistle
+JAS	epistle
+1PE	epistle
+2PE	epistle
+1JN	epistle
+2JN	epistle
+3JN	epistle
+JUD	epistle
+REV	prophecy

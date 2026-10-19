@@ -5,6 +5,7 @@
 //! dossier rendered through the profile's headings, `SMY-W417` with the candidates a person can
 //! pick from, `SMY-E468` as a usage error, `--save` appending a dossier the store then checks
 //! clean and can rerun a slot of, and `--seed-check` agreeing with itself.
+#![cfg(feature = "cli")]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};

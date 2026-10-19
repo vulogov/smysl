@@ -92,6 +92,12 @@ fn reproducible(cmd: &Cmd, sub: &ArgMatches) -> Option<bool> {
             // The dossier is a function of the question and the store: a rule table, a fixed
             // template set and pure plans. `--answer` is the one invocation that asks a model.
             "ask" => Some(!sub.get_flag("answer")),
+            // Mixed for what the registry may come to hold — T8 and D5's embeddings call a
+            // model (SMYSL-2.6 §4.4) — and pure for what it holds: every measure this build
+            // registers is `Purity::Pure`, which `cmd_measure` checks per id before it runs one.
+            // `SMY-E416` is for the refusal of a model-dependent id under `--seed-check`, and is
+            // registered with the first id that can be refused.
+            "measure" => Some(true),
             _ => None,
         },
     }
@@ -170,6 +176,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "summarise", about: "Grounded summary tree over a scope; staged",           purity: Purity::Model, phase: "TX-P7"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "q",         about: "Run an sq/1 query; explain it, or seed-check it",      purity: Purity::Mixed, phase: "TX-P6"  , impure_when: Some("a model-dependent plan (~sem, ~hybrid, near), none of which this build lowers") , forms: NO_DOCUMENT },
     Cmd { name: "ask",       about: "Experimental: a dossier for a question; optionally a model's grounded answer", purity: Purity::Mixed, phase: "TX-P8"  , impure_when: Some("--answer, which asks a model to answer from the dossier") , forms: NO_DOCUMENT },
+    Cmd { name: "measure",   about: "Text, graph, channel and dialogue measures as derived data units", purity: Purity::Mixed, phase: "TX-P8"  , impure_when: Some("a model-dependent id (T8, D5's embeddings), none of which this build registers") , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -948,6 +955,79 @@ fn cli() -> Command {
                     Arg::new("store")
                         .value_name("PATH")
                         .help("Store, or library root"),
+                ),
+            "measure" => sub
+                .arg(
+                    Arg::new("ids")
+                        .value_name("IDS")
+                        .required(true)
+                        .help("The measures, comma-separated: T1,T2,T3,T4,T5,T6,T7"),
+                )
+                .arg(
+                    Arg::new("scope")
+                        .long("scope")
+                        .required(true)
+                        .value_name("SQ")
+                        .help("The scope, an sq query; a text measure reads its `from`, e.g. `from collection:kjv`"),
+                )
+                .arg(
+                    Arg::new("level")
+                        .long("level")
+                        .value_name("LEVEL")
+                        .default_value("part")
+                        .help("The segment a measure counts in: part, chapter, verse, message, window:<n>"),
+                )
+                .arg(
+                    Arg::new("analyzer")
+                        .long("analyzer")
+                        .value_name("CHAIN:STREAM")
+                        .help("Analyzer chain and stream, e.g. `smysl/an-en/1:stem` [default: the texts' language's, surface]"),
+                )
+                .arg(
+                    Arg::new("param")
+                        .long("param")
+                        .value_name("[ID.]K=V")
+                        .action(ArgAction::Append)
+                        .help("A measure parameter, for every id that takes it or for one: `T5.order=2`"),
+                )
+                .arg(
+                    Arg::new("min-n")
+                        .long("min-n")
+                        .value_name("[ID=]N")
+                        .action(ArgAction::Append)
+                        .help("The smallest sample, in each measure's own unit, for every id or for one: `T3=2`"),
+                )
+                .arg(
+                    Arg::new("seed")
+                        .long("seed")
+                        .value_name("N")
+                        .default_value("0")
+                        .value_parser(clap::value_parser!(u64))
+                        .help("The bootstrap seed"),
+                )
+                .arg(
+                    Arg::new("allow-lossy")
+                        .long("allow-lossy")
+                        .help("Measure a lossy text too, flagged `lossy-admitted` (SMY-W408)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .help("Print the values and refusals and write nothing")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .value_name("MS")
+                        .help("Wall clock for the attestations, in milliseconds")
+                        .value_parser(clap::value_parser!(u64)),
+                )
+                .arg(
+                    Arg::new("store")
+                        .value_name("PATH")
+                        .help("Library root"),
                 ),
             "summarise" => sub
                 .arg(
@@ -5673,6 +5753,468 @@ fn cmd_ask(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
     ExitCode::Usage
 }
 
+/// A `--param` value as a recipe parameter: an integer, a boolean, a ratio `n/d`, or text.
+#[cfg(feature = "text")]
+fn measure_param(v: &str) -> smysl::measure::Param {
+    use smysl::measure::Param;
+    if let Ok(i) = v.parse::<i64>() {
+        return Param::Int(i);
+    }
+    match v {
+        "true" => return Param::Bool(true),
+        "false" => return Param::Bool(false),
+        _ => {}
+    }
+    if let Some((n, d)) = v.split_once('/') {
+        if let (Ok(n), Ok(d)) = (n.parse::<u32>(), d.parse::<u32>()) {
+            return Param::Ratio(n, d);
+        }
+    }
+    Param::Text(v.to_string())
+}
+
+/// `--level`'s spellings, as SMYSL-2.6 §3.4 writes them.
+#[cfg(feature = "text")]
+fn measure_level(s: &str) -> Option<smysl::measure::Level> {
+    use smysl::measure::Level;
+    Some(match s {
+        "part" => Level::Part,
+        "chapter" => Level::Chapter,
+        "verse" => Level::Verse,
+        "message" => Level::Message,
+        w => Level::Window(w.strip_prefix("window:")?.parse().ok()?),
+    })
+}
+
+/// `smysl measure` — the text-level measures as derived data units (SMYSL-2.6 §4.4, TX-P8 M7).
+///
+/// Thin, as `q` is: everything a measure computes is `smysl::measure`'s, and what is here is
+/// what the pure crate cannot do for itself. It opens the library; resolves the scope with sq
+/// and saves it as the results' basis; reads the text once at `--level`; builds **one recipe
+/// per id**, so that a parameter or a `min:n` given for one measure is not written into
+/// another's recipe and does not move its hash; runs them in the order given; and appends what
+/// ran — the basis, each result's unit and an attestation of this run — through the library.
+///
+/// A unit's identity is its recipe, its scope and its value, so a second run over the same
+/// library adds no unit: the report says how many were new and how many the store already
+/// held, and only the run's attestations are appended again. `--dry-run` writes nothing.
+/// `--seed-check` computes every result twice and compares the payload bytes.
+#[cfg(feature = "text")]
+fn cmd_measure(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use std::collections::BTreeMap;
+
+    use smysl::measure::text::{texts, Corpus, TextError};
+    use smysl::measure::{self as ms, NotPersisted, Outcome, Recipe};
+    use smysl::query::{Env, PlanOptions};
+    use smysl::text::library::Library;
+
+    let mut ids: Vec<String> = Vec::new();
+    for raw in m
+        .get_one::<String>("ids")
+        .expect("required by clap")
+        .split(',')
+    {
+        let id = raw.trim();
+        if !id.is_empty() && !ids.iter().any(|i| i == id) {
+            ids.push(id.to_string());
+        }
+    }
+    if ids.is_empty() {
+        eprintln!("smysl measure: no measure named; give ids such as T1,T2");
+        return ExitCode::Usage;
+    }
+    let scope_text = m.get_one::<String>("scope").expect("required by clap");
+    let Some(path) = store_arg(m, global) else {
+        eprintln!("smysl measure: no library given");
+        return ExitCode::Usage;
+    };
+    warn_output_is_a_report(global, "measure");
+    let raw_level = m.get_one::<String>("level").expect("has a default");
+    let Some(level) = measure_level(raw_level) else {
+        eprintln!(
+            "smysl measure: --level is part, chapter, verse, message or window:<n>, not `{raw_level}`"
+        );
+        return ExitCode::Usage;
+    };
+    let seed_check = global.get_flag("seed-check");
+
+    // Each id's defaults, so a parameter can be routed to the ids that take it. An id this
+    // build does not have is not refused here: it is a result, not run (`SMY-E489`), so the
+    // report lists every id asked for and a typo stands beside the measures that ran.
+    let mut defaults: BTreeMap<&str, Recipe> = BTreeMap::new();
+    for id in &ids {
+        if let Ok(meas) = ms::find(ms::ALL, id, None) {
+            if seed_check && meas.purity() != ms::Purity::Pure {
+                eprintln!(
+                    "smysl measure: --seed-check asserts rule D, and {id} calls a model, so two \
+                     runs need not agree"
+                );
+                return ExitCode::Usage;
+            }
+            let mut r = Recipe::new(id.as_str(), meas.version(), scope_text.as_str());
+            meas.complete(&mut r);
+            defaults.insert(id.as_str(), r);
+        }
+    }
+
+    let mut params: BTreeMap<String, BTreeMap<String, smysl::measure::Param>> = BTreeMap::new();
+    for raw in m.get_many::<String>("param").into_iter().flatten() {
+        let Some((lhs, v)) = raw.split_once('=') else {
+            eprintln!("smysl measure: --param takes [ID.]K=V, not `{raw}`");
+            return ExitCode::Usage;
+        };
+        let targets: Vec<&str> = match lhs.split_once('.') {
+            Some((id, key)) => {
+                if !ids.iter().any(|i| i == id) {
+                    eprintln!("smysl measure: --param {raw}: {id} is not one of the ids asked for");
+                    return ExitCode::Usage;
+                }
+                match defaults.get(id) {
+                    Some(d) if d.params.contains_key(key) => vec![id],
+                    Some(d) => {
+                        let has: Vec<&str> = d.params.keys().map(String::as_str).collect();
+                        eprintln!(
+                            "smysl measure: --param {raw}: {id} takes no `{key}`; it takes {}",
+                            if has.is_empty() {
+                                "none".to_string()
+                            } else {
+                                has.join(", ")
+                            }
+                        );
+                        return ExitCode::Usage;
+                    }
+                    None => vec![id],
+                }
+            }
+            None => {
+                let takers: Vec<&str> = defaults
+                    .iter()
+                    .filter(|(_, d)| d.params.contains_key(lhs))
+                    .map(|(id, _)| *id)
+                    .collect();
+                if takers.is_empty() {
+                    eprintln!(
+                        "smysl measure: --param {raw}: none of the ids asked for takes `{lhs}`"
+                    );
+                    return ExitCode::Usage;
+                }
+                takers
+            }
+        };
+        let key = lhs.split_once('.').map_or(lhs, |(_, k)| k);
+        for id in targets {
+            params
+                .entry(id.to_string())
+                .or_default()
+                .insert(key.to_string(), measure_param(v));
+        }
+    }
+
+    // `min:n` is in each measure's own unit — tokens, characters, symbols, texts — so one
+    // value for every id is allowed and is what it says, and `ID=N` sets one.
+    let (mut min_all, mut min_one): (Option<u64>, BTreeMap<String, u64>) = (None, BTreeMap::new());
+    for raw in m.get_many::<String>("min-n").into_iter().flatten() {
+        let (id, n) = match raw.split_once('=') {
+            Some((id, n)) => (Some(id), n),
+            None => (None, raw.as_str()),
+        };
+        let Ok(n) = n.parse::<u64>() else {
+            eprintln!("smysl measure: --min-n takes [ID=]N, not `{raw}`");
+            return ExitCode::Usage;
+        };
+        match id {
+            Some(id) if !ids.iter().any(|i| i == id) => {
+                eprintln!("smysl measure: --min-n {raw}: {id} is not one of the ids asked for");
+                return ExitCode::Usage;
+            }
+            Some(id) => {
+                min_one.insert(id.to_string(), n);
+            }
+            None => min_all = Some(n),
+        }
+    }
+
+    let root = std::path::Path::new(&path);
+    if !Library::is_library(root) {
+        eprintln!(
+            "smysl measure: {path}: not a library; every measure this build has reads a \
+             library's text (`smysl text add`)"
+        );
+        return ExitCode::Usage;
+    }
+    let mut library = match Library::open(root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl measure: {path}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let name = root
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+    let analyzer = m.get_one::<String>("analyzer").cloned();
+
+    let (resolved, results) = {
+        let scope = smysl::text::scope::LibraryScope::new(name, &library);
+        let env = Env::new(library.store(), &scope)
+            .with_times(&scope)
+            .with_entities(&scope);
+        let resolved = match ms::resolve(scope_text, &env, &PlanOptions::default()) {
+            Ok(r) => r,
+            Err(ds) => {
+                for d in ds {
+                    eprintln!("smysl measure: {}: {}", d.code.as_str(), d.message);
+                }
+                return ExitCode::Usage;
+            }
+        };
+        let found = match texts(scope_text, &library) {
+            Ok(t) => t,
+            Err(d) => {
+                eprintln!("smysl measure: {}: {}", d.code.as_str(), d.message);
+                return ExitCode::Usage;
+            }
+        };
+        let corpus = match Corpus::load(&library, &found, level, analyzer.as_deref()) {
+            Ok(c) => c,
+            Err(TextError::Refused(d)) => {
+                eprintln!("smysl measure: {}: {}", d.code.as_str(), d.message);
+                return ExitCode::Usage;
+            }
+            Err(e) => {
+                eprintln!("smysl measure: {path}: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        let input = ms::Input::new(library.store(), &resolved).with_text(&corpus);
+        let mut results = Vec::with_capacity(ids.len());
+        for id in &ids {
+            let mut recipe = Recipe::new("", 0, scope_text.as_str());
+            recipe.level = level;
+            recipe.analyzer = analyzer.clone();
+            recipe.seed = *m.get_one::<u64>("seed").expect("has a default");
+            recipe.lossy = m.get_flag("allow-lossy");
+            recipe.min_n = min_one.get(id).copied().or(min_all);
+            recipe.params = params.get(id).cloned().unwrap_or_default();
+            let r = ms::run(&[id.as_str()], &recipe, &input).remove(0);
+            if seed_check {
+                let again = ms::run(&[id.as_str()], &recipe, &input).remove(0);
+                let bytes = |r: &ms::MeasureResult| match &r.outcome {
+                    Outcome::Value(v) => ms::to_payload(&r.recipe, v).ok(),
+                    _ => None,
+                };
+                if again != r || bytes(&again) != bytes(&r) {
+                    eprintln!(
+                        "smysl measure: --seed-check computed {id} twice and the payloads \
+                         differ; rule D does not hold for this run"
+                    );
+                    return ExitCode::Failure;
+                }
+            }
+            results.push(r);
+        }
+        (resolved, results)
+    };
+
+    // Each result's unit, if it ran and has a basis to stand on.
+    let mut units: Vec<Option<(Uid, smysl::UnitCore, bool)>> = Vec::with_capacity(results.len());
+    for r in &results {
+        for d in &r.diagnostics {
+            eprintln!("smysl measure: {}: {}", d.code.as_str(), d.message);
+        }
+        match ms::to_unit(r, resolved.basis.as_ref()) {
+            Ok(core) => {
+                let uid = smysl::canonical_uid(&core);
+                let present = library.store().get(&uid).is_some();
+                units.push(Some((uid, core, present)));
+            }
+            Err(NotPersisted::NotRun) => units.push(None),
+            Err(NotPersisted::NoBasis(d)) | Err(NotPersisted::Unwritable(d)) => {
+                eprintln!("smysl measure: {}: {}", d.code.as_str(), d.message);
+                units.push(None);
+            }
+            Err(_) => units.push(None),
+        }
+    }
+    let dry_run = m.get_flag("dry-run");
+    let new = units.iter().flatten().filter(|u| !u.2).count();
+    let present = units.iter().flatten().filter(|u| u.2).count();
+
+    if global.get_flag("json") {
+        let rows: Vec<String> = results
+            .iter()
+            .zip(&units)
+            .map(|(r, u)| measure_json(r, u.as_ref().map(|(uid, _, p)| (*uid, *p))))
+            .collect();
+        println!(
+            "{{\"scope\":{},\"basis\":{},\"dry_run\":{dry_run},\"new\":{new},\"present\":{present},\"results\":[{}]}}",
+            smysl::json_escape(scope_text),
+            resolved
+                .basis()
+                .map_or("null".to_string(), |b| smysl::json_escape(&b.canonical())),
+            rows.join(",")
+        );
+    } else {
+        for (r, u) in results.iter().zip(&units) {
+            measure_print(r, u.as_ref().map(|(uid, _, p)| (*uid, *p)), dry_run);
+        }
+    }
+
+    if dry_run {
+        eprintln!("smysl measure: --dry-run: nothing written");
+        return ExitCode::Success;
+    }
+    if let (Some(basis), true) = (&resolved.basis, units.iter().any(Option::is_some)) {
+        let agent = match AgentId::new("tool:smysl-measure") {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("smysl measure: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        let at = m.get_one::<u64>("at").copied().unwrap_or_else(now_millis);
+        let mut records = Vec::new();
+        if !declares_query(library.store()) {
+            records.push(Record::SchemaDecl(smysl::schemas::query::decl()));
+        }
+        records.push(Record::Unit(basis.unit.clone()));
+        records.extend(basis.edges.iter().cloned().map(Record::Relation));
+        for ((uid, core, _), r) in units
+            .iter()
+            .zip(&results)
+            .filter_map(|(u, r)| u.as_ref().map(|u| (u, r)))
+        {
+            let mut att = smysl::Attestation::new(
+                *uid,
+                agent.clone(),
+                smysl::Op::Transformed,
+                smysl::Rung::Computed,
+                Hlc::new(at, 0, agent.clone()),
+            );
+            att.recipe = r.recipe.hash().ok();
+            records.push(Record::Unit(core.clone()));
+            records.push(Record::Attestation(att));
+        }
+        if let Err(e) = library.append_records(&records) {
+            eprintln!("smysl measure: {path}: {e}");
+            return ExitCode::Failure;
+        }
+    }
+    eprintln!(
+        "smysl measure: {} result(s), {} unit(s): {new} new, {present} already in the store",
+        results.len(),
+        new + present
+    );
+    ExitCode::Success
+}
+
+/// One result as the text report prints it: the id, the unit or why there is none, the gist,
+/// and every number under it.
+#[cfg(feature = "text")]
+fn measure_print(r: &smysl::measure::MeasureResult, unit: Option<(Uid, bool)>, dry_run: bool) {
+    use smysl::measure::Outcome;
+
+    let state = match unit {
+        Some((uid, present)) => format!(
+            "{uid}  {}",
+            if dry_run {
+                "not written"
+            } else if present {
+                "already in the store"
+            } else {
+                "new"
+            }
+        ),
+        None => "no unit".to_string(),
+    };
+    println!("{} v{}  {state}", r.recipe.id, r.recipe.v);
+    match &r.outcome {
+        Outcome::Value(v) => {
+            println!("  {}", smysl::measure::gist(&r.recipe, v));
+            for (k, n) in &v.n {
+                println!("  n.{k} = {n}");
+            }
+            for (k, x) in &v.values {
+                match v.ci.get(k) {
+                    Some(ci) => println!("  {k} = {x}  [{}, {}]", ci.lo, ci.hi),
+                    None => println!("  {k} = {x}"),
+                }
+            }
+            for f in &v.flags {
+                println!("  flag {f}");
+            }
+        }
+        Outcome::NotRun { why, code } => match code {
+            Some(c) => println!("  not run: {}: {why}", c.as_str()),
+            None => println!("  not run: {why}"),
+        },
+        _ => println!("  not run"),
+    }
+}
+
+/// One result as `--json`'s object: numbers rendered from their stored integers, as the gist is.
+#[cfg(feature = "text")]
+fn measure_json(r: &smysl::measure::MeasureResult, unit: Option<(Uid, bool)>) -> String {
+    use smysl::measure::Outcome;
+
+    let hash = r
+        .recipe
+        .hash()
+        .map(|h| h.iter().map(|b| format!("{b:02x}")).collect::<String>())
+        .unwrap_or_default();
+    let (uid, present) = match unit {
+        Some((u, p)) => (smysl::json_escape(&u.canonical()), p.to_string()),
+        None => ("null".to_string(), "null".to_string()),
+    };
+    let head = format!(
+        "\"id\":{},\"v\":{},\"recipe\":\"{hash}\",\"uid\":{uid},\"present\":{present}",
+        smysl::json_escape(&r.recipe.id),
+        r.recipe.v
+    );
+    match &r.outcome {
+        Outcome::Value(v) => {
+            let n: Vec<String> =
+                v.n.iter()
+                    .map(|(k, x)| format!("{}:{x}", smysl::json_escape(k)))
+                    .collect();
+            let values: Vec<String> = v
+                .values
+                .iter()
+                .map(|(k, x)| {
+                    format!(
+                        "{}:{}",
+                        smysl::json_escape(k),
+                        smysl::json_escape(&x.render())
+                    )
+                })
+                .collect();
+            let flags: Vec<String> = v.flags.iter().map(|f| smysl::json_escape(f)).collect();
+            format!(
+                "{{{head},\"outcome\":\"value\",\"gist\":{},\"n\":{{{}}},\"values\":{{{}}},\"flags\":[{}]}}",
+                smysl::json_escape(&smysl::measure::gist(&r.recipe, v)),
+                n.join(","),
+                values.join(","),
+                flags.join(",")
+            )
+        }
+        Outcome::NotRun { why, code } => format!(
+            "{{{head},\"outcome\":\"not-run\",\"code\":{},\"why\":{}}}",
+            code.map_or("null".to_string(), |c| smysl::json_escape(c.as_str())),
+            smysl::json_escape(why)
+        ),
+        _ => format!("{{{head},\"outcome\":\"not-run\",\"code\":null,\"why\":\"\"}}"),
+    }
+}
+
+#[cfg(not(feature = "text"))]
+fn cmd_measure(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!(
+        "smysl measure: every measure reads a library's text, and this build has no `text` feature"
+    );
+    ExitCode::Usage
+}
+
 /// `ask --answer`: the model's turn, after the dossier is in the store.
 ///
 /// The members are the thread's steps less its gaps — a gap's unit is a saved query, whose gist
@@ -8129,6 +8671,7 @@ fn main() -> ProcExitCode {
         "summarise" => cmd_summarise(sub, &matches),
         "q" => cmd_q(sub, &matches),
         "ask" => cmd_ask(sub, &matches),
+        "measure" => cmd_measure(sub, &matches),
         _ => {
             // Unreachable while every command in `COMMANDS` has an arm above, which
             // `command_table_matches_section_23` enforces. Kept as the honest answer if one
@@ -10291,7 +10834,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 33);
+        assert_eq!(COMMANDS.len(), 34);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -10328,7 +10871,8 @@ mod tests {
                 "link",
                 "summarise",
                 "q",
-                "ask"
+                "ask",
+                "measure"
             ]
         );
     }
@@ -10362,7 +10906,7 @@ mod tests {
             .collect();
         assert_eq!(
             mixed,
-            ["pack", "thread", "find", "link", "q", "ask"],
+            ["pack", "thread", "find", "link", "q", "ask", "measure"],
             "a command is mixed when some invocation of it calls a model"
         );
 
@@ -10394,7 +10938,7 @@ mod tests {
     /// this test rather than shipping a flag that answers "I cannot say".
     #[test]
     fn seed_check_can_judge_every_mixed_command() {
-        let judged = ["find", "pack", "thread", "link", "q", "ask"];
+        let judged = ["find", "pack", "thread", "link", "q", "ask", "measure"];
         for c in COMMANDS.iter().filter(|c| c.purity == Purity::Mixed) {
             assert!(
                 judged.contains(&c.name),

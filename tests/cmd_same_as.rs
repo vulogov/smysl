@@ -11,7 +11,8 @@
 //! a library is a fair thing to run it over, and `--engine anchored` over the same store is
 //! the case that has to be refused.
 
-#![cfg(all(feature = "cli", feature = "text"))]
+// `propose` stages, and staging is the ingest layer's: without it the command says so.
+#![cfg(all(feature = "cli", feature = "text", feature = "ingest"))]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
