@@ -54,6 +54,7 @@ pub use graph::concentration::A6;
 pub use graph::contention::A7;
 pub use graph::dating::A10;
 pub use graph::density::A1;
+pub use graph::entity::A9;
 pub use graph::epistemic::A4;
 pub use graph::grounding::A5;
 pub use graph::novelty::A3;
@@ -160,7 +161,7 @@ pub trait Measure: Sync {
 
 /// Every measure this build has, in report order.
 pub const ALL: &[&dyn Measure] = &[
-    &T1, &T2, &T3, &T4, &T5, &T6, &T7, &A1, &A2, &A3, &A4, &A5, &A6, &A7, &A8, &A10,
+    &T1, &T2, &T3, &T4, &T5, &T6, &T7, &A1, &A2, &A3, &A4, &A5, &A6, &A7, &A8, &A9, &A10,
 ];
 
 /// A measure by id and version, against a registry.

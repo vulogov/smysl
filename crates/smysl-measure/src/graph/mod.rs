@@ -49,6 +49,7 @@ pub mod concentration;
 pub mod contention;
 pub mod dating;
 pub mod density;
+pub mod entity;
 pub mod epistemic;
 pub mod grounding;
 pub mod novelty;

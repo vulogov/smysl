@@ -1195,7 +1195,7 @@ mode, speaker; the effective-time index (TX-P3) for A3/A10/D*.
 |---|---|---|
 | N1 | A1–A7, A10; move E6 into `grounding.rs` | §5.2 graph tests; `smysl-eval` lib and `corpus_chain` tests pass unedited; a synthetic 10⁶-unit scope runs A1, A2, A4, A5, A7 in time within 2× of 10× the 10⁵ run (feeds GE-T7) — **done 2026-10-19**, below |
 | N2 | A8; move `full_tokens`/`floor_tokens`; `SMY-E407` on `mul` | monotonicity property; bit identity across the matrix; refusal on `mul` + `utf8-div4` — **done 2026-10-19**, below |
-| N3 | A9 | planted communities recovered exactly on a two-clique graph |
+| N3 | A9 | planted communities recovered exactly on a two-clique graph — **done 2026-10-19**, below |
 | N4 | channel binding, C1–C5 | §5.2 channel tests; C1–C4 on the KJV/Synodal Psalms fixture reported |
 | N5 | D1–D6 (D5 lexical) | §5.2 dialogue tests; **GE-T8** |
 | N6 | `assess key|score|state|diff`, α | §5.2 assessment tests; **GE-T3**; GE-T9 α reported |
@@ -1287,6 +1287,35 @@ findings.
   closure of its focus; A8's recipe names no focus, so the floor is empty and every point is
   admitted. The `refused` count and its handling stay, for a recipe that one day names a focus,
   and §5.2's "points below the floor are refused" has nothing to bind on in this build.
+
+*N3, done 2026-10-19.* `smysl_measure::graph::entity`: A9, pure, with `top:k` (10) and
+`betweenness` (false) as parameters, and `entity_graph`, `centrality`, `communities`,
+`betweenness` and `chains` public. The exit holds: `crates/smysl-measure/tests/entity.rs` builds
+two cliques of five entities from units that mention them in pairs, half the edges written
+from the entity end, and label propagation recovers both exactly, each named by its smallest
+uid, with and without a bridge unit between them, settled. Beside it, by hand: a four-leaf
+star's centrality is 1 and ½ exactly, the eigenvector of `A + I`; a four-entity path's middle
+betweenness is ⅔; a chain of four `sequences` with a shortcut, a `precedes` pair and a
+two-unit cycle are a longest chain of 4, 8 units chained and 2 cyclic. `measure` runs it with
+the other unit measures. Four decisions, each where §3.8 left a choice.
+
+- **The graph is of entities, joined by co-mention.** §3.8 says "mention graph" for degree and
+  centrality and "entity graph" for betweenness. A mention is a live `x.text/mentions` edge
+  between a scope unit and an `x.text/entity` unit, read in either direction as
+  `smysl_text::link` reads it; two entities are joined when one scope unit mentions both,
+  weighted by how many do. An entity's degree is how many scope units mention it, and an
+  entity need not be in the scope to be named by it.
+- **Centrality iterates `A + I`, not `A`.** On a bipartite graph — one edge is one — `A`'s
+  largest and smallest eigenvalues are equal in magnitude and 100 power steps oscillate rather
+  than converge; the shift moves every eigenvalue by one and no eigenvector. Each step is
+  scaled to sum 1 and the result to a maximum of 1, so no square root is taken.
+- **An entity's own label counts in label propagation.** The synchronous rule §3.8 names swaps
+  the two labels of a single edge for ever; with the entity's own label at weight 1 it settles
+  in a round, on the smaller. At most 100 rounds, and a graph still moving is flagged
+  `lpa-unsettled` rather than refused.
+- **Chains are counted in units, and a cycle is counted, not broken.** `sequences` and
+  `precedes` do not forbid a cycle, so the DAG is the part Kahn's order reaches; a unit on or
+  after a cycle is in `n.cyclic` and in no chain.
 
 ---
 

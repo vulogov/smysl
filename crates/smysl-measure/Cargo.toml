@@ -119,3 +119,8 @@ name = "graph_scale"
 # scope in two languages under a byte estimator.
 [[test]]
 name = "rd"
+
+# TX-P9 N3's exit: A9's planted communities recovered exactly on two cliques, with and without
+# a bridge, and its centrality, betweenness and event chains against planted graphs.
+[[test]]
+name = "entity"

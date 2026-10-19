@@ -357,7 +357,7 @@ fn unit_measures_count_a_scopes_units() {
         serde_json::from_str(&stdout(&o)).expect("one JSON object")
     };
 
-    let v = json(&["A2,A4,A5,A7,A10", "--policy", "strict"]);
+    let v = json(&["A2,A4,A5,A7,A10,A9", "--policy", "strict"]);
     let r = v["results"].as_array().unwrap();
     for x in r {
         assert_eq!(x["outcome"], "value", "{x}");
