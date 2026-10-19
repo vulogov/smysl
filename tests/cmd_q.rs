@@ -7,6 +7,7 @@
 //! command is shown to add nothing and lose nothing on the way to the terminal; and
 //! `--seed-check` is shown to run a pure query twice and agree with itself, which is the
 //! assertion §3.2 specifies and the one the global flag could not make before this command.
+#![cfg(feature = "cli")]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};

@@ -312,3 +312,38 @@ fn the_argument_surface_is_recorded() {
         "the CLI's argument surface moved. If deliberate, run `make cli-surface`."
     );
 }
+
+/// Every test file that runs the binary is compiled only where there is one. The binary needs
+/// `cli` (`required-features`), so without the gate a `--no-default-features` build compiles
+/// the file, finds no `target/debug/smysl` and fails every test in it. Locally a binary left by
+/// an earlier build hides that, which is how `cmd_q.rs` failed eight CI cells for a week while
+/// every local run passed; read from the sources, the check does not depend on what is lying
+/// in `target/`.
+#[test]
+fn every_test_that_runs_the_binary_needs_cli() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut ungated = Vec::new();
+    let mut files: Vec<_> = std::fs::read_dir(&dir)
+        .expect("tests/")
+        .map(|e| e.expect("an entry").path())
+        .filter(|p| p.extension().is_some_and(|x| x == "rs"))
+        .collect();
+    files.sort();
+    for path in files {
+        let src = std::fs::read_to_string(&path).expect("a test file");
+        if !src.contains("CARGO_BIN_EXE_smysl") {
+            continue;
+        }
+        // The crate-level `#![cfg(...)]`, which may run over several lines.
+        let gate = src
+            .find("#![cfg(")
+            .map(|at| &src[at..at + src[at..].find(")]").map_or(0, |e| e + 2)]);
+        if !gate.is_some_and(|g| g.contains("feature = \"cli\"")) {
+            ungated.push(path.file_name().unwrap().to_string_lossy().to_string());
+        }
+    }
+    assert!(
+        ungated.is_empty(),
+        "these run the binary without `#![cfg(feature = \"cli\")]`: {ungated:?}"
+    );
+}

@@ -1035,7 +1035,7 @@ Requires SMYSL-2.4 TX-P1/P2 (parts, analyzers) and SMYSL-2.5 TX-P6 (`sq` scopes)
 | M4 | T3: SA-IS, LCP, LPF, both estimator forms, calibration fixture | LPF equals naive on 10⁴ random inputs; calibration goldens — **done 2026-10-18**, below |
 | M5 | T5 with exact leave-one-out | hand-computed and property tests — **done 2026-10-18**, below |
 | M6 | T7 | §5.1 T7 rows — **done 2026-10-18**, below |
-| M7 | `measure` command for T-ids, `--seed-check`, `--dry-run`, three CLI gates updated | cross-platform matrix job green; `measure T1,T2,T3,T4 --scope 'from texts where collection = bible'` on the 5-Bible fixture adds no unit on a second run; GE-T6 pure arm (T2, T3) reported — **built 2026-10-18**, below; the matrix job's first run is the push that carries it |
+| M7 | `measure` command for T-ids, `--seed-check`, `--dry-run`, three CLI gates updated | cross-platform matrix job green; `measure T1,T2,T3,T4 --scope 'from texts where collection = bible'` on the 5-Bible fixture adds no unit on a second run; GE-T6 pure arm (T2, T3) reported — **done 2026-10-19**, below |
 
 *M1, done 2026-10-18.* `crates/smysl-measure`: `Recipe` with every §3.4 field and its canonical
 CBOR and hash; `Num`'s three integer shapes, `Value`, `Outcome`, `Refusal` and `to_payload`;
@@ -1157,7 +1157,7 @@ exact**, so it is computed over integer products rather than as three entropies;
 does not say which way a pair leans**, so collocations are ranked among the pairs seen more often
 than chance. This completes the text-level measures T1–T7; M7 is the `measure` command.
 
-*M7, built 2026-10-18.* `smysl measure`, the thirty-fourth command (§4.4 as built), with
+*M7, done 2026-10-19.* `smysl measure`, the thirty-fourth command (§4.4 as built), with
 `--seed-check`, `--dry-run` and `--json`; the three CLI gates — `tests/cli-surface.txt`,
 `tests/dispatch.rs`, `command_table_matches_section_23` and its purity census — updated; the
 manual's command reference gains `measure`. The exit: **a second run adds no unit** —
@@ -1165,15 +1165,20 @@ manual's command reference gains `measure`. The exit: **a second run adds no uni
 five-Bible slice twice, and the store gains five units the first time (four results and the
 saved scope) and none the second, only the run's four attestations; `--seed-check` passes for
 all seven ids. **GE-T6's pure arm is reported** (§5.4 as built): T2 and T3 both kept, in five
-languages of five. **The cross-platform matrix job exists** (§5.3 as built) and has not yet
-run: its first run is the push that carries it, so "green" is owed to that push and not
-claimed here. Two findings. **CI had been red since 2026-10-10**, fifty pushes, for three
+languages of five. **The cross-platform matrix job is green** (§5.3 as built): its first
+run, CI run 39193002211 on `5856096`, passed on all four targets — glibc, musl, macOS arm64 and
+Windows — which gives the same payload bytes on each. Three findings. **CI had been red since 2026-10-10**, fifty pushes, for three
 reasons none of which the local sweep could see: the doc gate on CI's newer stable rustdoc,
 which now calls `[`library`](crate::passes::library)` a redundant link; two CLI test files
 (`cmd_ask`, `cmd_same_as`) not gated on the features their binary needs, so every
 `--no-default-features` cell failed; and `make semver` in a shallow checkout with no tag to
 compare against. All three are fixed here, and the matrix job would have been one more cell
-nobody read. **And `measure` runs one recipe per id** rather than one recipe for every id,
+nobody read. **A stale binary hid a fourth.** The same run failed eight `--no-default-features`
+cells on `tests/cmd_q.rs`, one more file that runs the binary without asking for `cli`; every
+local run had passed because `target/debug/smysl` was left from an earlier build. It is gated
+now, and `tests/dispatch.rs` checks from the sources that every test file running the binary
+carries the gate, which no leftover in `target/` can satisfy; with the gate removed it names
+the file. **And `measure` runs one recipe per id** rather than one recipe for every id,
 because a parameter shared across measures would sit in the recipe of a measure that never
 reads it and change its uid.
 
