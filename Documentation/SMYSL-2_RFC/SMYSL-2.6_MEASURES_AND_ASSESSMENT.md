@@ -648,6 +648,7 @@ default `holder = text ∧ mode = asserted` (draft 3 §7.4).
 
 **A8 — rate–distortion.**
 - Budgets `bₖ = fₖ · full_tokens(scope)` for `fₖ ∈ params.fractions` (default 0.05, 0.10, …, 1.00).
+  *As built (N2):* `fₖ = k / params.steps`, `steps` 20, each budget rounded half to even.
   `full_tokens` and `floor_tokens` are the functions moved from `smysl-eval` (§4.3).
 - For each, `pack()` with the recipe's estimator, salience request and `scope`. A budget below the
   mandatory floor gives `PackError`; the point is recorded as **refused**, not as distortion 1,
@@ -655,10 +656,13 @@ default `holder = text ∧ mode = asserted` (draft 3 §7.4).
 - Distortion `D(b) = D_sal + λ·D_stat`, with `D_sal = Σ_{u∉sel} s(u) / Σ s(u)` (salience mass
   excluded) and `D_stat = Σ_{u∉sel} w(status u) / Σ w(status u)`, `w = status.as_u8()` (speculative
   1 … measured 5); `λ = params.lambda`, default 1/2.
-- Signature: the curve and its area by the trapezoid rule over admitted points.
+- Signature: the curve and its area by the trapezoid rule over admitted points. *As built (N2):*
+  the curve is the running minimum of the packs' distortions, since the greedy pack's own is
+  not monotone; each pack's is `series.D:packed`.
 - Refused on a `mul` scope with a byte estimator (`SMY-E407`). Cross-lingual A8 therefore waits for
   FC-6 (SMYSL-2.1).
 - Cost: 20 packs. Greedy pack is about O(U log U) each (unverified at 10⁶; measured in N2).
+  *Measured (N2):* 0.22 s at 10⁴ units, 3.06 s at 10⁵, 35.4 s at 10⁶ — 11.6× per decade.
 
 ### 3.9 Channel measures
 
@@ -1190,7 +1194,7 @@ mode, speaker; the effective-time index (TX-P3) for A3/A10/D*.
 | step | work | exit test |
 |---|---|---|
 | N1 | A1–A7, A10; move E6 into `grounding.rs` | §5.2 graph tests; `smysl-eval` lib and `corpus_chain` tests pass unedited; a synthetic 10⁶-unit scope runs A1, A2, A4, A5, A7 in time within 2× of 10× the 10⁵ run (feeds GE-T7) — **done 2026-10-19**, below |
-| N2 | A8; move `full_tokens`/`floor_tokens`; `SMY-E407` on `mul` | monotonicity property; bit identity across the matrix; refusal on `mul` + `utf8-div4` |
+| N2 | A8; move `full_tokens`/`floor_tokens`; `SMY-E407` on `mul` | monotonicity property; bit identity across the matrix; refusal on `mul` + `utf8-div4` — **done 2026-10-19**, below |
 | N3 | A9 | planted communities recovered exactly on a two-clique graph |
 | N4 | channel binding, C1–C5 | §5.2 channel tests; C1–C4 on the KJV/Synodal Psalms fixture reported |
 | N5 | D1–D6 (D5 lexical) | §5.2 dialogue tests; **GE-T8** |
@@ -1246,6 +1250,43 @@ crate.
   rule E derives and is refused for A3's time order and A10.
 - **A6 is exact.** Salience is quantised to 1/1024 in [0, 1], so the Gini is a ratio of
   integers rounded once, and equal scores give 0 exactly rather than a rounding residue.
+
+*N2, done 2026-10-19.* `smysl_measure::graph::rd`: A8, and `full_tokens` and `floor_tokens`,
+which `smysl-eval::chain` now re-exports under the same names and signatures; its 11 lib and 9
+`corpus_chain` tests pass unedited. `SMY-E407` is registered (draft 3's number, filed with the
+measures as `SMY-W408` is), and the registry is 112. The budgets are `params.steps` (20) equal
+fractions rather than a list, which is draft 3's 0.05 … 1.00 exactly and fits the recipe's
+integer parameters; `lambda` is a ratio, ½. The exit holds: `crates/smysl-measure/tests/rd.rs`
+runs A8 over every fixture of `fixtures/corpus` whole and over twenty seeded random halves of
+each, at 20 and 50 steps, 534 curves, and every curve is non-increasing; the curve over each
+fixture, its recipe hash and its payload bytes are pinned in `fixtures/measure/a8.tsv`, which
+each matrix cell compares byte for byte; and Ruth in the KJV and the Synodal together is refused
+under `smysl/utf8-div4` (`SMY-E407`), each alone runs, and a manifest tagged `mul` is refused on
+its own. `measure` runs A8 through `--param`, and refuses it over five translations' units and
+runs it over one. Measured, as §3.8 left it: A8 over the N1 synthetic store takes 0.22 s at 10⁴
+units, 3.06 s at 10⁵ and 35.4 s at 10⁶, 11.6× per decade (`graph_scale.rs`, `--ignored`). Three
+findings.
+
+- **The greedy pack's own loss is not monotone in budget.** On 12 of the 534 curves, all over
+  halves and none over a whole fixture, a larger budget kept fewer of the scope's units. The
+  pack is greedy by value per token and value counts detail: on one two-unit half of
+  `F8b-agent-beta`, 67 tokens ship a claim, its ground and its rebuttal at `L0`, and at 68 the
+  ground at `L1` is the densest item, costs 68, and nothing else fits. §5.2's property is a
+  property of the rate–distortion **function**, the least distortion at a rate at most R, and
+  a pack within a smaller budget is within a larger one; so `series.D` is the running minimum
+  of the packs' losses, `series.D:packed` is each budget's own pack beside it, and `n.rises`
+  counts the budgets where the pack lost more than an earlier one. The area is over `D`. The
+  test checks the curve against the packs point by point and requires a rise on some half, so
+  the minimum is not untested.
+- **A scope cut from its rebuttals does not end at 0.** `full_tokens(scope)` is the scope's
+  own units at their richest, and rule R will not ship a claim without the unit rebutting it
+  (`ClosureCost`); a scope holding the claim and not the rebuttal cannot be carried whole for
+  its own full cost. Ten of the 534 curves end above 0, every one a half; every whole fixture
+  ends at 0.
+- **No budget is refused.** A pack refuses only below its mandatory floor, and the floor is the
+  closure of its focus; A8's recipe names no focus, so the floor is empty and every point is
+  admitted. The `refused` count and its handling stay, for a recipe that one day names a focus,
+  and §5.2's "points below the floor are refused" has nothing to bind on in this build.
 
 ---
 

@@ -31,6 +31,10 @@ smysl-query = { workspace = true }
 # the analyzer chains whose surface and stem streams are what T1 and T4 count. Default
 # features only, which is the pure tier's own tree; stems are `stem` above.
 smysl-text = { workspace = true }
+# A8 packs a scope at twenty budgets (TX-P9 N2), and `full_tokens` and `floor_tokens` moved here
+# from `smysl-eval` with it. Already in the pure tree through `smysl-query`; greedy only, so the
+# `branch-and-bound` feature a build may unify in cannot move a point.
+smysl-pack = { workspace = true }
 # Every transcendental a result depends on goes through `libm`, never the platform's: glibc's
 # `ln` and this crate disagree in the last bit for 2% of inputs (SMYSL-2.6 §2.9), and a last bit
 # is enough to move a fixed-point payload number. Pinned exactly, with `arch` intrinsics off,
@@ -109,3 +113,9 @@ name = "graph"
 # release; its timings feed GE-T7.
 [[test]]
 name = "graph_scale"
+
+# TX-P9 N2's exit: A8's distortion non-increasing in budget over random stores drawn from
+# `fixtures/corpus`, its curve over every fixture pinned for the matrix, and `SMY-E407` on a
+# scope in two languages under a byte estimator.
+[[test]]
+name = "rd"

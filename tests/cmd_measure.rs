@@ -342,7 +342,8 @@ fn with_units(root: &Path) -> usize {
 
 /// The unit measures through the command: a scope's units counted, A2 under the policy
 /// `--policy` names and refused without one (`SMY-E481`), A1 refused without `--profile`,
-/// a text measure and a unit measure in one run, and the flags' own refusals.
+/// a text measure and a unit measure in one run, A8 refused over five languages and run over
+/// one, and the flags' own refusals.
 #[test]
 fn unit_measures_count_a_scopes_units() {
     let (dir, root) = bibles("units");
@@ -385,6 +386,23 @@ fn unit_measures_count_a_scopes_units() {
     // Units drawn from a text carry no time of their own, so a time order is refused.
     let v = json(&["A3", "--policy", "strict", "--param", "order=time"]);
     assert_eq!(v["results"][0]["code"], "SMY-E482");
+
+    // A8 budgets by bytes, and the scope's units are drawn from five languages (`SMY-E407`);
+    // one translation's units are one language, and its steps are a `--param`.
+    let v = json(&["A8"]);
+    assert_eq!(v["results"][0]["code"], "SMY-E407", "{v}");
+    let mut a = vec!["--json", "measure", "A8", "--param", "steps=4"];
+    a.extend([
+        "--scope",
+        "from collection:\"bible/eng-kjv\"",
+        "--dry-run",
+        &root,
+    ]);
+    let o = run(&a);
+    assert!(o.status.success(), "{a:?}: {}", stderr(&o));
+    let v: serde_json::Value = serde_json::from_str(&stdout(&o)).expect("one JSON object");
+    assert_eq!(v["results"][0]["outcome"], "value", "{v}");
+    assert_eq!(v["results"][0]["n"]["points"], 4, "{v}");
 
     for (bad, why) in [
         (vec!["A2", "--policy", "loose"], "--policy is strict"),

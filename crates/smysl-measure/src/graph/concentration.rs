@@ -13,7 +13,8 @@
 //! units are asked about. A scope whose scores are all zero has no concentration to report and
 //! is not run.
 
-use smysl_graph::salience::{salience, SalienceRequest};
+use smysl_core::Uid;
+use smysl_graph::salience::{salience, SalienceReport, SalienceRequest};
 
 use crate::graph;
 use crate::{Input, Measure, Needs, Num, Outcome, Purity, Recipe, Refusal, Value};
@@ -21,6 +22,12 @@ use crate::{Input, Measure, Needs, Num, Outcome, Purity, Recipe, Refusal, Value}
 /// A6.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct A6;
+
+/// A unit's salience as the integer `1024 s` it was quantised to; `None` off the grid.
+pub(crate) fn quantised(report: &SalienceReport, uid: &Uid) -> Option<u64> {
+    let s = f64::from(report.get(uid)) * 1024.0;
+    (s.fract() == 0.0 && s >= 0.0).then_some(s as u64)
+}
 
 /// The Gini coefficient of integer scores, as a payload number; `None` when they sum to 0.
 pub fn gini(scores: &mut [u64]) -> Option<i64> {
@@ -71,14 +78,13 @@ impl Measure for A6 {
         let report = salience(input.store, &SalienceRequest::default());
         let mut q: Vec<u64> = Vec::with_capacity(uids.len());
         for u in &uids {
-            let s = f64::from(report.get(u)) * 1024.0;
-            if s.fract() != 0.0 || s < 0.0 {
+            let Some(s) = quantised(&report, u) else {
                 return Outcome::NotRun {
                     why: format!("a salience score of {u} is not on the 1/1024 grid"),
                     code: None,
                 };
-            }
-            q.push(s as u64);
+            };
+            q.push(s);
         }
         let Some(g) = gini(&mut q) else {
             return Outcome::NotRun {

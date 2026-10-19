@@ -52,6 +52,7 @@ pub mod density;
 pub mod epistemic;
 pub mod grounding;
 pub mod novelty;
+pub mod rd;
 pub mod redundancy;
 
 /// The smallest scope a unit measure reports on by default: one unit. A ratio over none has

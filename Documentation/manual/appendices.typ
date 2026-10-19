@@ -777,10 +777,21 @@ A **measure** is a pure function of a library, a scope and a recipe, and its res
 uid. This build has the seven text-level measures of SMYSL-2.6 — T1 unigram entropy, T2 brotli
 rate, T3 match-length entropy rate, T4 Zipf and Heaps, T5 n-gram surprisal with each segment
 scored by a model of the others, T6 compression distance between texts, T7 Jensen–Shannon
-divergence and collocations — and eight over the units a scope answers with: A1 extraction
+divergence and collocations — and nine over the units a scope answers with: A1 extraction
 density, A2 redundancy, A3 novelty, A4 the spread of statuses, A5 grounding, A6 the Gini of
-salience, A7 contention and A10 dating. All are pure, which is why `--seed-check` takes every
-one of them. `Mixed` is for the measures the registry is meant to hold later, a neural
+salience, A7 contention, A8 rate–distortion and A10 dating. All are pure, which is why `--seed-check` takes every
+one of them.
+
+*A8* packs the scope at twenty budgets, 5% to 100% of what carrying all of it at full detail
+costs, and reports what each loses: the salience mass left out plus half the status weight
+left out (`--param steps=N`, `--param lambda=A/B`). The curve is the least loss of any of the
+packs within a budget, so it never rises; `D:packed` beside it is each budget's own pack, which
+can, since the pack is greedy, and `rises` counts where it did. A scope holding a claim without
+the unit that rebuts it ends above 0, because rule R will not ship the claim alone. Its budgets
+count bytes (`smysl/utf8-div4`), so a scope whose units are drawn from text in two languages, or
+tagged `mul`, is refused (`SMY-E407`).
+
+`Mixed` is for the measures the registry is meant to hold later, a neural
 surprisal and an embedding distance, which call a model.
 
 #dtable(

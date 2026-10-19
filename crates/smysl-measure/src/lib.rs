@@ -57,6 +57,7 @@ pub use graph::density::A1;
 pub use graph::epistemic::A4;
 pub use graph::grounding::A5;
 pub use graph::novelty::A3;
+pub use graph::rd::A8;
 pub use graph::redundancy::A2;
 pub use outcome::{gist, to_payload, Ci, Headline, Num, Outcome, Refusal, Value};
 pub use recipe::{Axis, ClassPolicy, Level, Param, Recipe, RecipeError};
@@ -159,7 +160,7 @@ pub trait Measure: Sync {
 
 /// Every measure this build has, in report order.
 pub const ALL: &[&dyn Measure] = &[
-    &T1, &T2, &T3, &T4, &T5, &T6, &T7, &A1, &A2, &A3, &A4, &A5, &A6, &A7, &A10,
+    &T1, &T2, &T3, &T4, &T5, &T6, &T7, &A1, &A2, &A3, &A4, &A5, &A6, &A7, &A8, &A10,
 ];
 
 /// A measure by id and version, against a registry.

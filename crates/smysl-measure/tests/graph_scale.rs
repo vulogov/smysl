@@ -87,6 +87,10 @@ fn store(n: u32, library: &Library) -> (Store, Resolved) {
 }
 
 fn timed(n: u32, library: &Library) -> f64 {
+    timed_ids(n, library, &IDS)
+}
+
+fn timed_ids(n: u32, library: &Library, ids: &[&str]) -> f64 {
     let (store, scope) = store(n, library);
     let input = Input::new(&store, &scope).with_library(library);
     let mut recipe = Recipe::new("", 0, "synthetic");
@@ -95,7 +99,7 @@ fn timed(n: u32, library: &Library) -> f64 {
     let start = Instant::now();
     let mut results = Vec::new();
     let mut each = Vec::new();
-    for id in IDS {
+    for &id in ids {
         let t = Instant::now();
         results.extend(run(&[id], &recipe, &input));
         each.push(format!("{id} {:.3}", t.elapsed().as_secs_f64()));
@@ -110,17 +114,14 @@ fn timed(n: u32, library: &Library) -> f64 {
             r.outcome
         );
     }
-    eprintln!("{n:>8} units: {secs:.3} s for {}", IDS.join(", "));
+    eprintln!("{n:>8} units: {secs:.3} s for {}", ids.join(", "));
     secs
 }
 
-#[test]
-#[ignore = "builds a million units; run in release with --ignored"]
-fn a_million_units_take_at_most_twenty_times_a_hundred_thousand() {
-    let root = std::env::temp_dir().join(format!("smysl-measure-scale-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(&root).unwrap();
-    let mut library = Library::create(&root).unwrap();
+fn ruth(root: &Path) -> Library {
+    let _ = std::fs::remove_dir_all(root);
+    std::fs::create_dir_all(root).unwrap();
+    let mut library = Library::create(root).unwrap();
     let raw = std::fs::read(repo("fixtures/library/bibles/slice/eng-kjv/08-RUT.usfm")).unwrap();
     let spec = AddSpec::new("usfm/1", "kjv/08-rut", "public-domain")
         .with_lang(LangTag::new("en").unwrap())
@@ -128,6 +129,40 @@ fn a_million_units_take_at_most_twenty_times_a_hundred_thousand() {
     library
         .add(&ReadInput::new(&raw), &spec, &Caps::DEFAULT)
         .unwrap();
+    library
+}
+
+/// TX-P9 N2: A8 is twenty greedy packs, which §3.8 put at O(U log U) each without having
+/// measured it. Measured here at three sizes, over the same store; the ratios are printed, and
+/// the bound is N1's, 2× of 10× per decade.
+#[test]
+#[ignore = "packs a million units twenty times; run in release with --ignored"]
+fn a8_is_twenty_packs_and_scales_with_them() {
+    let root = std::env::temp_dir().join(format!("smysl-measure-a8-{}", std::process::id()));
+    let library = ruth(&root);
+    let t: Vec<f64> = [10_000, 100_000, 1_000_000]
+        .into_iter()
+        .map(|n| timed_ids(n, &library, &["A8"]))
+        .collect();
+    let _ = std::fs::remove_dir_all(&root);
+    eprintln!(
+        "ratios {:.2} and {:.2} (the bound is 20)",
+        t[1] / t[0],
+        t[2] / t[1]
+    );
+    assert!(
+        t[2] <= 20.0 * t[1],
+        "10⁶ took {:.3} s and 10⁵ {:.3} s",
+        t[2],
+        t[1]
+    );
+}
+
+#[test]
+#[ignore = "builds a million units; run in release with --ignored"]
+fn a_million_units_take_at_most_twenty_times_a_hundred_thousand() {
+    let root = std::env::temp_dir().join(format!("smysl-measure-scale-{}", std::process::id()));
+    let library = ruth(&root);
 
     let small = timed(100_000, &library);
     let large = timed(1_000_000, &library);

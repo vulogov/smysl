@@ -158,32 +158,9 @@ fn selection_tokens(store: &Store, sel: &Selection, est: &Estimator) -> u64 {
         .sum()
 }
 
-/// The cheapest way to carry every unit: all of them at `L0`, gist only.
-///
-/// This is the line below which units *have* to be dropped. Above it, a budget can be met
-/// by shedding detail alone, so a unit going missing means something other than arithmetic
-/// decided it - which is what makes this worth exposing rather than inlining.
-pub fn floor_tokens(store: &Store, uids: &BTreeSet<Uid>, est: &Estimator) -> u64 {
-    uids.iter()
-        .filter_map(|u| store.get(u))
-        .map(|u| est.unit(&u.core, Lod::L0))
-        .sum()
-}
-
-/// The input's cost with nothing left behind: every unit at its richest available level.
-/// This is the denominator E1 is a fraction of - what handing the whole graph over costs.
-pub fn full_tokens(store: &Store, uids: &BTreeSet<Uid>, est: &Estimator) -> u64 {
-    uids.iter()
-        .filter_map(|u| store.get(u))
-        .map(|u| {
-            let level = smysl_pack::available_levels(&u.core)
-                .last()
-                .copied()
-                .unwrap_or(Lod::L0);
-            est.unit(&u.core, level)
-        })
-        .sum()
-}
+// `floor_tokens` and `full_tokens` moved to `smysl-measure` with A8 (SMYSL-2.6 §4.3, TX-P9 N2),
+// which packs a scope at fractions of the second; the names stay here, signatures unchanged.
+pub use smysl_measure::graph::rd::{floor_tokens, full_tokens};
 
 /// Count the rebuttal pairs among a surviving set.
 ///

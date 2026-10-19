@@ -374,8 +374,10 @@ registry! {
     // texts too long for the compressor to see both. TX-P9 N1 brings two with the unit
     // measures: `E481` for a class measure (A2, A3) whose recipe names no class policy, and
     // `E482` for a time-ordered one (A3) over a scope whose undated share is above the
-    // recipe's `undated:max`.
+    // recipe's `undated:max`. N2 brings `E407` with A8: draft 3's, in the library range like
+    // `W408`, and raised only by a measure that budgets a scope in two languages by bytes.
     Measure => {
+        E407 = "SMY-E407", Error, "A byte-counting estimator was refused over a scope in more than one language";
         W408 = "SMY-W408", Warn,  "A measure ran over a lossy text because its recipe admits one";
         E480 = "SMY-E480", Error, "A measure refused a lossy text its recipe does not admit";
         E481 = "SMY-E481", Error, "A class-level measure or assessment has no class policy in its recipe";
@@ -814,9 +816,12 @@ mod tests {
     ///
     /// 111 with `SMY-E481` and `SMY-E482` in TX-P9 N1, where A2 and A3 count proposition
     /// classes and A3 orders a scope by effective time.
+    ///
+    /// 112 with `SMY-E407` in TX-P9 N2, where A8 budgets a scope with `smysl/utf8-div4` and
+    /// refuses one whose units are drawn from text in more than one language.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 111);
+        assert_eq!(Code::ALL.len(), 112);
     }
 
     #[test]
