@@ -779,8 +779,10 @@ rate, T3 match-length entropy rate, T4 Zipf and Heaps, T5 n-gram surprisal with 
 scored by a model of the others, T6 compression distance between texts, T7 Jensen–Shannon
 divergence and collocations — and ten over the units a scope answers with: A1 extraction
 density, A2 redundancy, A3 novelty, A4 the spread of statuses, A5 grounding, A6 the Gini of
-salience, A7 contention, A8 rate–distortion, A9 the entity graph and A10 dating. All are pure, which is why `--seed-check` takes every
-one of them.
+salience, A7 contention, A8 rate–distortion, A9 the entity graph and A10 dating — and five over
+a channel, a source and the target it was carried into: C1 survival, C2 support, C3
+inflation, C4 attribution and C5 the ratio of the two texts' compression rates. All are pure,
+which is why `--seed-check` takes every one of them.
 
 *A8* packs the scope at twenty budgets, 5% to 100% of what carrying all of it at full detail
 costs, and reports what each loses: the salience mass left out plus half the status weight
@@ -798,6 +800,23 @@ The ten entities with the highest degree and centrality are reported by name
 (`--param top:k=N`); betweenness costs a pass from every entity and is computed only with
 `--param betweenness=true`.
 
+*C1–C5* compare the scope, the **source**, with the scope `--channel` names, the **target**:
+`smysl measure C1,C2 --policy strict --scope 'from collection:kjv' --channel 'from
+collection:synodal'`. (sq's own `channel:` is a chat conversation, so the target is a second
+query rather than a scope form.) Proposition classes are formed over both together under
+`--policy`, so a `same-as` edge from a source unit to a target unit is what carries it.
+C1 is the share of source classes the target still holds; C2 the share of target units the
+source supports, its complement `addition`, and `fabrication` beside it when a model
+attested a target unit; C3 how often a target unit's status is above its strongest source
+partner's, with every step `delta:-5` … `delta:5` and the `text:mode` changes; C4 how often
+the holder changed, entities compared by class. C5 is T2 and T3 of the target over T2 and T3
+of the source, from the stored integers; T3 needs 50,000 symbols in every text and is
+flagged `t3-not-run` where it has fewer. The two scopes must not share a unit or a part
+(`SMY-E489`), and the result is grounded on both saved scopes. A channel measure counts
+classes, so it is as good as the `same-as` it is given: accepting every candidate the
+`anchored` engine proposes over the Psalms pairs Psalm 51 with the wrong verses of Psalm 50
+and leaves C1–C4 exactly as they were.
+
 `Mixed` is for the measures the registry is meant to hold later, a neural
 surprisal and an embedding distance, which call a model.
 
@@ -807,7 +826,8 @@ surprisal and an embedding distance, which call a model.
     ([Flag], [Value], [Meaning]),
     ([`IDS`], [positional, required], [The measures, comma-separated, run and reported in the order given. An id this build does not have is a result too — not run, `SMY-E489` — so a typo stands beside the measures that ran.]),
     ([`--scope`], [`SQ`, required], [An `sq/1` query. A text measure reads its `from`: `from texts`, `from collection:kjv`, `from collection:"kjv/08-rut"`. Anything after the `from` is refused (`SMY-E461`) when a text measure is asked for, because a `where` selects units and a text has none until something is extracted from it; name a narrower text by its alias. A unit measure counts the units the whole query answers with, so `from collection:kjv where text:mode = asserted` is a scope for one; the text is read only when some id reads text.]),
-    ([`--policy`], [`POLICY`], [How proposition classes are formed for A2 and A3: `strict`, `component` or `attested:<n>`. There is no default, since the three give three numbers; without one, A2 and A3 are not run (`SMY-E481`).]),
+    ([`--channel`], [`SQ`], [The target of a channel measure (C1–C5), an `sq/1` query read as `--scope` is; the scope is the source. Refused when no id asked for compares two scopes.]),
+    ([`--policy`], [`POLICY`], [How proposition classes are formed for A2, A3 and C1–C4: `strict`, `component` or `attested:<n>`. There is no default, since the three give three numbers; without one, those measures are not run (`SMY-E481`).]),
     ([`--profile`], [`NAME`], [The granularity profile A1's density is under. Required by A1 (`SMY-E489` without it): a density of units depends on how finely the text was cut into them.]),
     ([`--axis`], [`AXIS`], [The time axis A3's time order and A10 read: `said` (the default), `composed` or `about`.]),
     ([`--level`], [`LEVEL`], [The segment a measure counts in: `part` (the default), `chapter`, `verse`, `message` or `window:<n>`. The text is read once, at this level, for every id.]),

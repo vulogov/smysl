@@ -100,7 +100,7 @@ pub(crate) fn stamp(recipe: &mut Recipe, input: &Input<'_>) -> Result<(), Refusa
     Ok(())
 }
 
-fn text_field(store: &Store, uid: &Uid, key: &str) -> Option<String> {
+pub(crate) fn text_field(store: &Store, uid: &Uid, key: &str) -> Option<String> {
     let payload = store.get(uid)?.core.payload.as_ref()?;
     let o = payload_to_object(payload).ok()?;
     o.get(key)

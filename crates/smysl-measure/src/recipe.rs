@@ -140,6 +140,12 @@ pub struct Recipe {
     pub scope: String,
     /// [`crate::scope::digest`] of what the scope resolved to.
     pub scope_digest: [u8; 32],
+    /// A channel measure's target scope (§3.9), as written: the scope is the source. `None`
+    /// for every other measure, and then not written, so no other recipe's hash moved when
+    /// channels arrived (TX-P9 N4).
+    pub channel: Option<String>,
+    /// The target's digest, as `scope_digest` is the source's.
+    pub channel_digest: Option<[u8; 32]>,
     /// The lens chain the scope resolved under. `None` until TX-P12 applies one.
     pub lenses: Option<[u8; 32]>,
     /// Analyzer chain and stream, `en/1:surface`.
@@ -174,6 +180,8 @@ impl Recipe {
             v,
             scope: scope.into(),
             scope_digest: [0; 32],
+            channel: None,
+            channel_digest: None,
             lenses: None,
             analyzer: None,
             estimator: None,
@@ -210,6 +218,12 @@ impl Recipe {
         put(&mut o, "v", HValue::Int(i64::from(self.v)));
         put(&mut o, "scope", HValue::Str(self.scope.clone()));
         put(&mut o, "scope:digest", HValue::Str(b3(&self.scope_digest)));
+        if let Some(c) = &self.channel {
+            put(&mut o, "channel", HValue::Str(c.clone()));
+        }
+        if let Some(d) = &self.channel_digest {
+            put(&mut o, "channel:digest", HValue::Str(b3(d)));
+        }
         if let Some(l) = &self.lenses {
             put(&mut o, "lenses", HValue::Str(b3(l)));
         }

@@ -961,7 +961,7 @@ fn cli() -> Command {
                     Arg::new("ids")
                         .value_name("IDS")
                         .required(true)
-                        .help("The measures, comma-separated: T1–T7 over text, A1–A7 and A10 over units"),
+                        .help("The measures, comma-separated: T1–T7 over text, A1–A10 over units, C1–C5 over a channel"),
                 )
                 .arg(
                     Arg::new("scope")
@@ -971,10 +971,16 @@ fn cli() -> Command {
                         .help("The scope, an sq query; a text measure reads its `from`, e.g. `from collection:kjv`, and a unit measure what it answers with"),
                 )
                 .arg(
+                    Arg::new("channel")
+                        .long("channel")
+                        .value_name("SQ")
+                        .help("The target a channel measure (C1–C5) compares the scope with, an sq query; the scope is the source"),
+                )
+                .arg(
                     Arg::new("policy")
                         .long("policy")
                         .value_name("POLICY")
-                        .help("Proposition classes for A2 and A3: strict, component or attested:<n>"),
+                        .help("Proposition classes for A2, A3 and C1–C4: strict, component or attested:<n>"),
                 )
                 .arg(
                     Arg::new("profile")
@@ -5843,6 +5849,7 @@ fn cmd_measure(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Usage;
     }
     let scope_text = m.get_one::<String>("scope").expect("required by clap");
+    let channel_text = m.get_one::<String>("channel");
     let Some(path) = store_arg(m, global) else {
         eprintln!("smysl measure: no library given");
         return ExitCode::Usage;
@@ -5878,6 +5885,18 @@ fn cmd_measure(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             return ExitCode::Usage;
         }
     };
+
+    // A target no id reads would be a recipe field written for nothing, as an unread
+    // parameter would.
+    let reads_channel = |id: &String| {
+        ms::find(ms::ALL, id, None).is_ok_and(|x| x.needs().contains(ms::Needs::CHANNEL))
+    };
+    if channel_text.is_some() && !ids.iter().any(reads_channel) {
+        eprintln!(
+            "smysl measure: --channel: none of the ids asked for compares two scopes (C1–C5 do)"
+        );
+        return ExitCode::Usage;
+    }
 
     // Each id's defaults, so a parameter can be routed to the ids that take it. An id this
     // build does not have is not refused here: it is a result, not run (`SMY-E489`), so the
@@ -5996,19 +6015,29 @@ fn cmd_measure(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .unwrap_or_else(|| path.clone());
     let analyzer = m.get_one::<String>("analyzer").cloned();
 
-    let (resolved, results) = {
+    let (resolved, target, results) = {
         let scope = smysl::text::scope::LibraryScope::new(name, &library);
         let env = Env::new(library.store(), &scope)
             .with_times(&scope)
             .with_entities(&scope);
-        let resolved = match ms::resolve(scope_text, &env, &PlanOptions::default()) {
-            Ok(r) => r,
+        let resolve = |text: &str| match ms::resolve(text, &env, &PlanOptions::default()) {
+            Ok(r) => Some(r),
             Err(ds) => {
                 for d in ds {
                     eprintln!("smysl measure: {}: {}", d.code.as_str(), d.message);
                 }
-                return ExitCode::Usage;
+                None
             }
+        };
+        let Some(resolved) = resolve(scope_text) else {
+            return ExitCode::Usage;
+        };
+        let target = match channel_text {
+            None => None,
+            Some(t) => match resolve(t) {
+                Some(r) => Some(r),
+                None => return ExitCode::Usage,
+            },
         };
         // The text is read only when an id reads text: a unit measure's scope may filter, which
         // a text scope refuses (`SMY-E461`), and reading a Bible to count its units' statuses
@@ -6016,31 +6045,60 @@ fn cmd_measure(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         let reads_text = ids.iter().any(|id| {
             ms::find(ms::ALL, id, None).is_ok_and(|x| x.needs().contains(ms::Needs::TEXT))
         });
-        let corpus = if reads_text {
-            let found = match texts(scope_text, &library) {
+        // Each side's text is read under its own language's analyzer unless one is named,
+        // since a channel's target is often another language.
+        let load = |text: &str, analyzer: Option<&str>| -> Result<Corpus, ExitCode> {
+            let found = match texts(text, &library) {
                 Ok(t) => t,
                 Err(d) => {
                     eprintln!("smysl measure: {}: {}", d.code.as_str(), d.message);
-                    return ExitCode::Usage;
+                    return Err(ExitCode::Usage);
                 }
             };
-            match Corpus::load(&library, &found, level, analyzer.as_deref()) {
-                Ok(c) => Some(c),
+            match Corpus::load(&library, &found, level, analyzer) {
+                Ok(c) => Ok(c),
                 Err(TextError::Refused(d)) => {
                     eprintln!("smysl measure: {}: {}", d.code.as_str(), d.message);
-                    return ExitCode::Usage;
+                    Err(ExitCode::Usage)
                 }
                 Err(e) => {
                     eprintln!("smysl measure: {path}: {e}");
-                    return ExitCode::Failure;
+                    Err(ExitCode::Failure)
                 }
+            }
+        };
+        let corpus = if reads_text {
+            match load(scope_text, analyzer.as_deref()) {
+                Ok(c) => Some(c),
+                Err(code) => return code,
             }
         } else {
             None
         };
+        let target_corpus = match channel_text {
+            Some(t)
+                if ids.iter().any(|id| {
+                    reads_channel(id)
+                        && ms::find(ms::ALL, id, None)
+                            .is_ok_and(|x| x.needs().contains(ms::Needs::TEXT))
+                }) =>
+            {
+                match load(t, None) {
+                    Ok(c) => Some(c),
+                    Err(code) => return code,
+                }
+            }
+            _ => None,
+        };
         let mut input = ms::Input::new(library.store(), &resolved).with_library(&library);
         if let Some(c) = &corpus {
             input = input.with_text(c);
+        }
+        if let Some(t) = &target {
+            input = input.with_channel(t);
+        }
+        if let Some(c) = &target_corpus {
+            input = input.with_target_text(c);
         }
         let mut results = Vec::with_capacity(ids.len());
         for id in &ids {
@@ -6071,7 +6129,7 @@ fn cmd_measure(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             }
             results.push(r);
         }
-        (resolved, results)
+        (resolved, target, results)
     };
 
     // Each result's unit, if it ran and has a basis to stand on.
@@ -6080,7 +6138,16 @@ fn cmd_measure(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         for d in &r.diagnostics {
             eprintln!("smysl measure: {}: {}", d.code.as_str(), d.message);
         }
-        match ms::to_unit(r, resolved.basis.as_ref()) {
+        let channel = r.recipe.channel.is_some();
+        let bases = if channel {
+            vec![
+                resolved.basis.as_ref(),
+                target.as_ref().and_then(|t| t.basis.as_ref()),
+            ]
+        } else {
+            vec![resolved.basis.as_ref()]
+        };
+        match ms::to_unit_on(r, &bases) {
             Ok(core) => {
                 let uid = smysl::canonical_uid(&core);
                 let present = library.store().get(&uid).is_some();
@@ -6105,10 +6172,15 @@ fn cmd_measure(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             .map(|(r, u)| measure_json(r, u.as_ref().map(|(uid, _, p)| (*uid, *p))))
             .collect();
         println!(
-            "{{\"scope\":{},\"basis\":{},\"dry_run\":{dry_run},\"new\":{new},\"present\":{present},\"results\":[{}]}}",
+            "{{\"scope\":{},\"basis\":{},\"channel\":{},\"channel_basis\":{},\"dry_run\":{dry_run},\"new\":{new},\"present\":{present},\"results\":[{}]}}",
             smysl::json_escape(scope_text),
             resolved
                 .basis()
+                .map_or("null".to_string(), |b| smysl::json_escape(&b.canonical())),
+            channel_text.map_or("null".to_string(), |t| smysl::json_escape(t)),
+            target
+                .as_ref()
+                .and_then(|t| t.basis())
                 .map_or("null".to_string(), |b| smysl::json_escape(&b.canonical())),
             rows.join(",")
         );
@@ -6137,6 +6209,14 @@ fn cmd_measure(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
         records.push(Record::Unit(basis.unit.clone()));
         records.extend(basis.edges.iter().cloned().map(Record::Relation));
+        // A channel result rests on the target's saved scope as well; the store deduplicates
+        // it when the two are one query.
+        if let Some(tb) = target.as_ref().and_then(|t| t.basis.as_ref()) {
+            if results.iter().any(|r| r.recipe.channel.is_some()) {
+                records.push(Record::Unit(tb.unit.clone()));
+                records.extend(tb.edges.iter().cloned().map(Record::Relation));
+            }
+        }
         for ((uid, core, _), r) in units
             .iter()
             .zip(&results)

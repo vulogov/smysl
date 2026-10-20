@@ -1196,7 +1196,7 @@ mode, speaker; the effective-time index (TX-P3) for A3/A10/D*.
 | N1 | A1–A7, A10; move E6 into `grounding.rs` | §5.2 graph tests; `smysl-eval` lib and `corpus_chain` tests pass unedited; a synthetic 10⁶-unit scope runs A1, A2, A4, A5, A7 in time within 2× of 10× the 10⁵ run (feeds GE-T7) — **done 2026-10-19**, below |
 | N2 | A8; move `full_tokens`/`floor_tokens`; `SMY-E407` on `mul` | monotonicity property; bit identity across the matrix; refusal on `mul` + `utf8-div4` — **done 2026-10-19**, below |
 | N3 | A9 | planted communities recovered exactly on a two-clique graph — **done 2026-10-19**, below |
-| N4 | channel binding, C1–C5 | §5.2 channel tests; C1–C4 on the KJV/Synodal Psalms fixture reported |
+| N4 | channel binding, C1–C5 | §5.2 channel tests; C1–C4 on the KJV/Synodal Psalms fixture reported — **done 2026-10-19**, below |
 | N5 | D1–D6 (D5 lexical) | §5.2 dialogue tests; **GE-T8** |
 | N6 | `assess key|score|state|diff`, α | §5.2 assessment tests; **GE-T3**; GE-T9 α reported |
 | N7 | A8 across genres | **GE-T6** complete (A8 arm), with GE-T2's runs |
@@ -1316,6 +1316,42 @@ the other unit measures. Four decisions, each where §3.8 left a choice.
 - **Chains are counted in units, and a cycle is counted, not broken.** `sequences` and
   `precedes` do not forbid a cycle, so the DAG is the part Kahn's order reaches; a unit on or
   after a cycle is in `n.cyclic` and in no chain.
+
+*N4, done 2026-10-19.* `smysl_measure::channel`: the binding (`Channel::bind`, `pairs`,
+`strongest`) and C1 (survival), C2 (support, addition, fabrication), C3 (inflation, the eleven
+`delta:` counts, the mode changes), C4 (holder changed, gained, lost, moved) and C5 (T2 and T3
+ratios), all pure, registered after A10. The recipe gains `channel` and `channel:digest`,
+written only when present, so no earlier recipe's hash moved; `Needs::CHANNEL`,
+`Input::with_channel` and `with_target_text` carry the target; `to_unit_on` grounds a channel
+result on both saved scopes. `measure` takes `--channel`. No code is new: overlap is
+`SMY-E489` and a missing policy `SMY-E481`, as §3.9 and §3.8 say, and a channel with no
+aligned pair refuses C3 and C4 with `SMY-W485`. The exit holds:
+`crates/smysl-measure/tests/channel.rs` plants ten source and eight target units with two
+drops, an addition a model attested, one inflation per status step, a level pair beside a
+weaker and a stronger source member, a deflation of two steps and three holder rewrites, and
+C1 = `[7, 9]`, C2 = `[7, 8]` with addition and fabrication `[1, 8]`, C3 = `[4, 7]` with four
+at `delta:1`, C4 = `[3, 7]`, exactly; C5 over Ruth in the KJV and the Synodal is 3.4943 /
+2.5767 = 1.3561 bits per character, from the two stored integers, with T3 flagged
+`t3-not-run` below its 50,000 symbols. **Reported, on the Psalms fixture** (TX-P4's, two
+psalters in two numberings and the map between them): with the six places the map names
+accepted as `same-as`, KJV → Synodal under `strict` is C1 `[6, 7]` (Psalm 15 is in no row),
+C2 `[6, 8]` (the Synodal's Psalm 14 and Psalm 50's title have no source), C3 `[0, 6]`, C4
+`[0, 6]`; the other way, C1 is `[6, 8]`. Three findings.
+
+- **sq's `channel:` is a conversation.** §3.9 writes the binding `from channel kjv-1769 ->
+  syn-1876`; TX-P6 defined `channel:<name>` as a chat (SMYSL-2.5 §3.3) and 2.9 fixed the
+  grammar, so a second meaning would make `from channel:general` ambiguous. The target is a
+  second sq query, `--scope S --channel T`, which is §4.4's flag as written.
+- **A channel measure is as good as the `same-as` it is given.** `anchored` proposes every
+  aligned place and its neighbour, and the reverse of `Ps.51 → Ps.50` carries Psalm 50's title
+  onto 51:1, so it makes 16 proposals for the fixture's 6 places. Accepted wholesale, the
+  `strict` classes pair all three verses of Psalm 51 with the wrong verse of Psalm 50 and
+  C1–C4 give the same numbers to the digit: they count classes, not which verse a class
+  paired. The test asserts both, so the blindness is on record rather than assumed away;
+  `anchored`'s own header already says one engine's proposal is not an acceptance.
+- **The mode matrix has an eighth row.** §3.9's 7×7 is over `text:mode`, and a unit a reader
+  drew from a Bible has none; without a `none` row the matrix would be empty where the channel
+  is not. Only cells with a count are written.
 
 ---
 

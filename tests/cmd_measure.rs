@@ -417,3 +417,149 @@ fn unit_measures_count_a_scopes_units() {
         assert!(stderr(&o).contains(why), "{a:?}: {}", stderr(&o));
     }
 }
+
+/// The channel measures through the command (TX-P9 N4): `--channel` names the target, the
+/// scope is the source; one KJV claim is claimed the same as one Synodal claim, so one target
+/// unit of six is supported; the result is written grounded on both saved scopes and a rerun
+/// finds it; C5 reads both texts; and the refusals — a target equal to the source, a channel
+/// measure with no target, a target no id reads.
+#[test]
+fn channel_measures_compare_a_scope_with_its_target() {
+    use smysl::{Relation, Status};
+    use smysl_core::types::RelKind;
+
+    let (dir, root) = bibles("channel");
+    with_units(&dir);
+    let kjv = "from collection:\"bible/eng-kjv\"";
+    let syn = "from collection:\"bible/russyn\"";
+    {
+        let mut library = Library::open(&dir).expect("a library");
+        let side = |alias: &str| {
+            let tids: Vec<_> = library
+                .store()
+                .manifests()
+                .filter(|(_, m)| m.alias.starts_with(alias))
+                .flat_map(|(_, m)| m.parts.iter().map(|p| p.tid.canonical()))
+                .collect();
+            let mut u: Vec<_> = library
+                .store()
+                .units()
+                .filter(|(_, x)| {
+                    x.core.status == Status::Speculative
+                        && x.core
+                            .source
+                            .as_ref()
+                            .is_some_and(|s| tids.contains(&s.reference))
+                })
+                .map(|(uid, _)| *uid)
+                .collect();
+            u.sort();
+            u[0]
+        };
+        let (a, b) = (side("bible/eng-kjv/"), side("bible/russyn/"));
+        library
+            .append_records(&[Record::Relation(Relation::new(
+                RelKind::Extension(smysl::schemas::text::SAME_AS.into()),
+                a,
+                b,
+            ))])
+            .expect("appends");
+    }
+    let json = |extra: &[&str]| -> (Output, serde_json::Value) {
+        let mut a = vec!["--json", "measure"];
+        a.extend_from_slice(extra);
+        a.push(&root);
+        let o = run(&a);
+        assert!(o.status.success(), "{a:?}: {}", stderr(&o));
+        let v = serde_json::from_str(&stdout(&o)).expect("one JSON object");
+        (o, v)
+    };
+
+    let args = [
+        "C1,C2,C3,C4",
+        "--policy",
+        "strict",
+        "--scope",
+        kjv,
+        "--channel",
+        syn,
+    ];
+    let mut dry = args.to_vec();
+    dry.push("--dry-run");
+    let (_, v) = json(&dry);
+    assert_eq!(v["channel"], syn);
+    let r = v["results"].as_array().unwrap();
+    for x in r {
+        assert_eq!(x["outcome"], "value", "{x}");
+    }
+    let classes = r[0]["n"]["source:classes"].as_u64().unwrap();
+    assert_eq!(
+        r[0]["values"]["survival"]
+            .as_str()
+            .unwrap()
+            .split_once(' ')
+            .unwrap()
+            .1,
+        format!("(1/{classes})")
+    );
+    assert_eq!(r[1]["values"]["support"], "0.1667 (1/6)");
+    assert_eq!(r[2]["n"]["pairs"], 1);
+
+    let (o, v) = json(&args);
+    assert!(stderr(&o).contains("4 new"), "{}", stderr(&o));
+    assert!(v["channel_basis"].is_string(), "{v}");
+    let (o, _) = json(&args);
+    assert!(
+        stderr(&o).contains("4 already in the store"),
+        "{}",
+        stderr(&o)
+    );
+    {
+        let library = Library::open(&dir).expect("a library");
+        let uid = smysl_core::Uid::parse(v["results"][0]["uid"].as_str().unwrap()).unwrap();
+        let unit = library.store().get(&uid).expect("written");
+        let grounds: Vec<String> = unit.core.grounds.iter().map(|g| g.canonical()).collect();
+        let mut want = vec![
+            v["basis"].as_str().unwrap().to_string(),
+            v["channel_basis"].as_str().unwrap().to_string(),
+        ];
+        want.sort();
+        let mut grounds = grounds;
+        grounds.sort();
+        assert_eq!(grounds, want, "a channel result rests on both scopes");
+    }
+
+    let (_, v) = json(&["C5", "--scope", kjv, "--channel", syn, "--dry-run"]);
+    let x = &v["results"][0];
+    assert_eq!(x["outcome"], "value", "{x}");
+    assert!(x["values"]["T2:ratio"].is_string(), "{x}");
+    assert_eq!(x["flags"][0], "t3-not-run", "{x}");
+
+    let (_, v) = json(&[
+        "C1",
+        "--policy",
+        "strict",
+        "--scope",
+        kjv,
+        "--channel",
+        kjv,
+        "--dry-run",
+    ]);
+    assert_eq!(v["results"][0]["code"], "SMY-E489", "{v}");
+    let (_, v) = json(&["C1", "--policy", "strict", "--scope", kjv, "--dry-run"]);
+    assert_eq!(v["results"][0]["code"], "SMY-E489", "{v}");
+    let o = run(&[
+        "measure",
+        "A2",
+        "--policy",
+        "strict",
+        "--scope",
+        kjv,
+        "--channel",
+        syn,
+        "--dry-run",
+        &root,
+    ]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(stderr(&o).contains("--channel"), "{}", stderr(&o));
+}

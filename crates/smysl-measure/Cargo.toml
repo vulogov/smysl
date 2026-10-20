@@ -124,3 +124,9 @@ name = "rd"
 # a bridge, and its centrality, betweenness and event chains against planted graphs.
 [[test]]
 name = "entity"
+
+# TX-P9 N4's exit: C1–C4 on a source and a target with planted drops, additions, one
+# inflation per status step and holder rewrites, exact; C5 over Ruth in two translations; and
+# C1–C4 on the KJV and Synodal Psalms fixture, reported.
+[[test]]
+name = "channel"

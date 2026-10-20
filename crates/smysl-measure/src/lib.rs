@@ -17,6 +17,9 @@
 //! **M6 adds T7** ([`text::divergence`]), Jensen–Shannon between texts and collocations by G²
 //! and PMI, which completes the text-level measures; M7 is the `measure` command.
 //!
+//! **TX-P9** adds the measures over units: A1–A10 ([`graph`]) over one scope, and C1–C5
+//! ([`channel`]) over two, a source and the target it was carried into.
+//!
 //! # A result as a unit (SMYSL-2.6 §3.6)
 //!
 //! Schema `data`, status `derived`, grounded on the scope's [`scope::Basis`] and on nothing
@@ -38,10 +41,11 @@
 #![forbid(unsafe_code)]
 
 use smysl_core::diag::{Code, Diagnostic};
-use smysl_core::{KernelType, Status, UnitCore, UnitCoreBuilder};
+use smysl_core::{KernelType, Status, Uid, UnitCore, UnitCoreBuilder};
 use smysl_graph::Store;
 
 pub mod boot;
+pub mod channel;
 pub mod graph;
 pub mod num;
 pub mod outcome;
@@ -50,6 +54,11 @@ pub mod rng;
 pub mod scope;
 pub mod text;
 
+pub use channel::c1::C1;
+pub use channel::c2::C2;
+pub use channel::c3::C3;
+pub use channel::c4::C4;
+pub use channel::c5::C5;
 pub use graph::concentration::A6;
 pub use graph::contention::A7;
 pub use graph::dating::A10;
@@ -95,6 +104,8 @@ impl Needs {
     pub const PACK: Needs = Needs(1 << 5);
     /// A library's text beside the units: A1 counts the words its units were drawn from.
     pub const LIBRARY: Needs = Needs(1 << 6);
+    /// A second scope, the target a channel measure compares the scope with (§3.9).
+    pub const CHANNEL: Needs = Needs(1 << 7);
 
     pub const fn union(self, other: Needs) -> Needs {
         Needs(self.0 | other.0)
@@ -115,6 +126,11 @@ pub struct Input<'a> {
     pub text: Option<&'a Corpus>,
     /// The library the units were drawn from, for a measure that reads their text (A1).
     pub library: Option<&'a smysl_text::Library>,
+    /// A channel's target, for the measures that need [`Needs::CHANNEL`]; the scope is its
+    /// source (TX-P9 N4).
+    pub target: Option<&'a Resolved>,
+    /// The target's text, for a channel measure that also reads text (C5).
+    pub target_text: Option<&'a Corpus>,
 }
 
 impl<'a> Input<'a> {
@@ -124,7 +140,21 @@ impl<'a> Input<'a> {
             scope,
             text: None,
             library: None,
+            target: None,
+            target_text: None,
         }
+    }
+
+    /// Give the channel measures the target the scope was carried into.
+    pub fn with_channel(mut self, target: &'a Resolved) -> Input<'a> {
+        self.target = Some(target);
+        self
+    }
+
+    /// Give a channel measure that reads text (C5) the target's text.
+    pub fn with_target_text(mut self, text: &'a Corpus) -> Input<'a> {
+        self.target_text = Some(text);
+        self
     }
 
     /// Give the measures that need [`Needs::LIBRARY`] the library their units came from.
@@ -161,7 +191,8 @@ pub trait Measure: Sync {
 
 /// Every measure this build has, in report order.
 pub const ALL: &[&dyn Measure] = &[
-    &T1, &T2, &T3, &T4, &T5, &T6, &T7, &A1, &A2, &A3, &A4, &A5, &A6, &A7, &A8, &A9, &A10,
+    &T1, &T2, &T3, &T4, &T5, &T6, &T7, &A1, &A2, &A3, &A4, &A5, &A6, &A7, &A8, &A9, &A10, &C1, &C2,
+    &C3, &C4, &C5,
 ];
 
 /// A measure by id and version, against a registry.
@@ -245,6 +276,9 @@ pub fn run_with(
                 } else {
                     None
                 };
+                if m.needs().contains(Needs::CHANNEL) {
+                    channel::stamp(&mut recipe, input);
+                }
                 if m.needs().contains(Needs::LIBRARY) {
                     if let Err(r) = graph::density::stamp(&mut recipe, input) {
                         return refused(recipe, r);
@@ -376,10 +410,21 @@ pub enum NotPersisted {
 
 /// The `@data` unit a result is (SMYSL-2.6 §3.6), grounded on `basis`.
 pub fn to_unit(result: &MeasureResult, basis: Option<&Basis>) -> Result<UnitCore, NotPersisted> {
+    to_unit_on(result, &[basis])
+}
+
+/// The unit a result is, grounded on every basis in `bases`: a channel measure's on the
+/// source's and the target's saved scopes, since it was computed over both (TX-P9 N4). A
+/// result any of whose scopes has no basis is not written (`SMY-W483`).
+pub fn to_unit_on(
+    result: &MeasureResult,
+    bases: &[Option<&Basis>],
+) -> Result<UnitCore, NotPersisted> {
     let Outcome::Value(value) = &result.outcome else {
         return Err(NotPersisted::NotRun);
     };
-    let Some(basis) = basis else {
+    let grounds: Option<Vec<Uid>> = bases.iter().map(|b| b.map(|b| b.uid)).collect();
+    let Some(grounds) = grounds.filter(|g| !g.is_empty()) else {
         return Err(NotPersisted::NoBasis(
             Diagnostic::new(Code::W483).with_message(format!(
                 "{} was computed over `{}`, which is not a saved scope, so there is no unit to \
@@ -393,7 +438,7 @@ pub fn to_unit(result: &MeasureResult, basis: Option<&Basis>) -> Result<UnitCore
         to_payload(&result.recipe, value).map_err(|e| NotPersisted::Unwritable(e.diagnostic()))?;
     let full = gist(&result.recipe, value);
     UnitCoreBuilder::new(KernelType::Data, fit(&full), Status::Derived)
-        .grounds([basis.uid])
+        .grounds(grounds)
         .payload(payload)
         .build()
         .map_err(|e| {

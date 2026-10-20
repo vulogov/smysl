@@ -686,7 +686,8 @@ fn per_text_figures_follow_the_units_texts() {
     assert_eq!(v.values["novelty"], Num::Ratio(6, 7));
 }
 
-/// Registry order is report order: the text measures, then the unit measures.
+/// Registry order is report order: the text measures, the unit measures, then the channel
+/// measures.
 #[test]
 fn the_registry_lists_the_unit_measures() {
     let ids: Vec<&str> = smysl_measure::ALL.iter().map(|m| m.id()).collect();
@@ -694,7 +695,7 @@ fn the_registry_lists_the_unit_measures() {
         ids,
         [
             "T1", "T2", "T3", "T4", "T5", "T6", "T7", "A1", "A2", "A3", "A4", "A5", "A6", "A7",
-            "A8", "A9", "A10"
+            "A8", "A9", "A10", "C1", "C2", "C3", "C4", "C5"
         ]
     );
 }
