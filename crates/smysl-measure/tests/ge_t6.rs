@@ -28,7 +28,11 @@
 //!   against in 3 of 5 languages is dropped from defaults.
 //!
 //! The windows are measured by the measures themselves, through `run`, so what is tested is
-//! what `measure` computes.
+//! what `measure` computes. The statistics are `support/genre.rs`, which A8's arm
+//! (`tests/ge_t6_a8.rs`) shares.
+
+#[path = "support/genre.rs"]
+mod genre;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -46,19 +50,13 @@ use smysl_text::library::{AddSpec, Library};
 use smysl_text::limits::Caps;
 use smysl_text::readers::Input as ReadInput;
 
+use genre::{analyse, genre_names, genres, mean_variance, median, repo, verdict};
+
 const WINDOWS: usize = 20;
 const SEEDS: u64 = 10;
-const SHUFFLES: usize = 10_000;
-const BOOTSTRAP: usize = 1_000;
 
 /// The two measures of the pure arm: id, window in characters, the value read.
 const MEASURES: [(&str, usize, &str); 2] = [("T2", 20_000, "bits/char"), ("T3", 50_000, "H")];
-
-fn repo(rel: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(rel)
-}
 
 fn lang_of(edition: &str) -> &'static str {
     match edition {
@@ -69,18 +67,6 @@ fn lang_of(edition: &str) -> &'static str {
         "spaRV1909" => "es",
         other => panic!("no language for edition `{other}`"),
     }
-}
-
-fn genres() -> BTreeMap<String, String> {
-    std::fs::read_to_string(repo("fixtures/measure/genres.tsv"))
-        .unwrap()
-        .lines()
-        .filter(|l| !l.starts_with('#'))
-        .map(|l| {
-            let (c, g) = l.split_once('\t').unwrap();
-            (c.to_string(), g.to_string())
-        })
-        .collect()
 }
 
 /// One edition's books, read through a library as a measure reads them: `(code, characters)`.
@@ -142,16 +128,6 @@ fn measure(id: &str, key: &str, window: String) -> f64 {
     }
 }
 
-fn median(xs: &mut [f64]) -> f64 {
-    xs.sort_by(f64::total_cmp);
-    let n = xs.len();
-    if n % 2 == 1 {
-        xs[n / 2]
-    } else {
-        (xs[n / 2 - 1] + xs[n / 2]) / 2.0
-    }
-}
-
 /// A book's value under one seed: the median of its 20 windows.
 fn book_value(
     id: &str,
@@ -171,53 +147,6 @@ fn book_value(
         })
         .collect();
     median(&mut vals)
-}
-
-/// Kruskal–Wallis H, ties corrected.
-fn kruskal_wallis(xs: &[f64], groups: &[usize], k: usize) -> f64 {
-    let n = xs.len();
-    let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&a, &b| xs[a].total_cmp(&xs[b]));
-    let mut ranks = vec![0.0; n];
-    let mut ties = 0.0;
-    let mut i = 0;
-    while i < n {
-        let mut j = i;
-        while j + 1 < n && xs[order[j + 1]] == xs[order[i]] {
-            j += 1;
-        }
-        let r = (i + j) as f64 / 2.0 + 1.0;
-        for &o in &order[i..=j] {
-            ranks[o] = r;
-        }
-        let t = (j - i + 1) as f64;
-        ties += t * t * t - t;
-        i = j + 1;
-    }
-    let (mut sum, mut cnt) = (vec![0.0; k], vec![0.0; k]);
-    for (r, &g) in ranks.iter().zip(groups) {
-        sum[g] += r;
-        cnt[g] += 1.0;
-    }
-    let nf = n as f64;
-    let mut h = 0.0;
-    for g in 0..k {
-        if cnt[g] > 0.0 {
-            h += sum[g] * sum[g] / cnt[g];
-        }
-    }
-    h = 12.0 / (nf * (nf + 1.0)) * h - 3.0 * (nf + 1.0);
-    let c = 1.0 - ties / (nf * nf * nf - nf);
-    if c > 0.0 {
-        h / c
-    } else {
-        0.0
-    }
-}
-
-fn percentile(sorted: &[f64], p: f64) -> f64 {
-    let k = ((p * sorted.len() as f64).ceil() as usize).clamp(1, sorted.len());
-    sorted[k - 1]
 }
 
 /// Run `tasks` across the machine's cores; the results come back in task order, so the
@@ -251,10 +180,7 @@ fn ge_t6_pure_arm() {
         return;
     };
     let labels = genres();
-    let genre_names: Vec<String> = {
-        let s: BTreeSet<&String> = labels.values().filter(|g| *g != "-").collect();
-        s.into_iter().cloned().collect()
-    };
+    let genre_names = genre_names(&labels);
     let mut editions: Vec<String> = std::fs::read_dir(&dir)
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
@@ -295,106 +221,20 @@ fn ge_t6_pure_arm() {
             let by_seed: Vec<&[f64]> = vals.chunks(SEEDS as usize).collect();
             let x: Vec<f64> = by_seed.iter().map(|v| v[0]).collect();
             let g: Vec<usize> = kept.iter().map(|k| k.1).collect();
-            let k = genre_names.len();
-            let present: BTreeSet<usize> = g.iter().copied().collect();
-            let h = kruskal_wallis(&x, &g, k);
-            let n = x.len();
-
-            let mut rng = Rng::new(&smysl_core::hash_bytes(b"smysl/ge-t6/1\0shuffle"), 0);
-            let mut perm = g.clone();
-            let mut at_least = 0usize;
-            for _ in 0..SHUFFLES {
-                for i in (1..perm.len()).rev() {
-                    let j = rng.index(i + 1);
-                    perm.swap(i, j);
-                }
-                if kruskal_wallis(&x, &perm, k) >= h - 1e-12 {
-                    at_least += 1;
-                }
-            }
-            let p = (1 + at_least) as f64 / (1 + SHUFFLES) as f64;
-
-            let mean = x.iter().sum::<f64>() / n as f64;
-            let (mut ssb, mut ssw) = (0.0, 0.0);
-            for &gi in &present {
-                let xs: Vec<f64> = x
-                    .iter()
-                    .zip(&g)
-                    .filter(|(_, &q)| q == gi)
-                    .map(|(v, _)| *v)
-                    .collect();
-                let m = xs.iter().sum::<f64>() / xs.len() as f64;
-                ssb += xs.len() as f64 * (m - mean) * (m - mean);
-                ssw += xs.iter().map(|v| (v - m) * (v - m)).sum::<f64>();
-            }
-            let kk = present.len();
-            let ms_between = ssb / (kk as f64 - 1.0);
-            let ms_within = ssw / (n - kk) as f64;
-            let var_window = by_seed
-                .iter()
-                .map(|v| {
-                    let m = v.iter().sum::<f64>() / v.len() as f64;
-                    v.iter().map(|x| (x - m) * (x - m)).sum::<f64>() / (v.len() - 1) as f64
-                })
-                .sum::<f64>()
-                / n as f64;
-            let kill = ms_between <= ms_within + var_window;
-            if kill {
+            let a = analyse(&x, &g, genre_names.len(), mean_variance(&by_seed));
+            if a.against {
                 *against.entry(id).or_default() += 1;
             }
-
-            let row = |key: &str, v: String| format!("{edition}\t{id}\t{key}\t{v}\n");
-            out.push_str(&row("books", n.to_string()));
-            out.push_str(&row("genres", kk.to_string()));
-            out.push_str(&row("excluded", excluded.join(" ")));
-            out.push_str(&row("H", format!("{h:.4}")));
-            out.push_str(&row("epsilon2", format!("{:.4}", h / (n as f64 - 1.0))));
-            out.push_str(&row("p", format!("{p:.4}")));
-            out.push_str(&row("ms:between", format!("{ms_between:.6}")));
-            out.push_str(&row("ms:within", format!("{ms_within:.6}")));
-            out.push_str(&row("var:window", format!("{var_window:.6}")));
-            out.push_str(&row("against", kill.to_string()));
-            let mut boot = Rng::new(&smysl_core::hash_bytes(b"smysl/ge-t6/1\0bootstrap"), 0);
-            for &gi in &present {
-                let mut xs: Vec<f64> = x
-                    .iter()
-                    .zip(&g)
-                    .filter(|(_, &q)| q == gi)
-                    .map(|(v, _)| *v)
-                    .collect();
-                let med = median(&mut xs);
-                let mut reps: Vec<f64> = (0..BOOTSTRAP)
-                    .map(|_| {
-                        let mut r: Vec<f64> =
-                            (0..xs.len()).map(|_| xs[boot.index(xs.len())]).collect();
-                        median(&mut r)
-                    })
-                    .collect();
-                reps.sort_by(f64::total_cmp);
-                out.push_str(&row(
-                    &format!("median:{}", genre_names[gi]),
-                    format!(
-                        "{med:.4} [{:.4}, {:.4}] n={}",
-                        percentile(&reps, 0.025),
-                        percentile(&reps, 0.975),
-                        xs.len()
-                    ),
-                ));
-            }
-            eprintln!("  {edition} {id}: {n} books, H {h:.2}, p {p:.4}, against {kill}");
+            out.push_str(&a.rows(edition, id, &excluded, "var:window", &genre_names));
+            eprintln!(
+                "  {edition} {id}: {} books, H {:.2}, p {:.4}, against {}",
+                a.n, a.h, a.p, a.against
+            );
         }
     }
     for (id, _, _) in MEASURES {
         let k = against.get(id).copied().unwrap_or(0);
-        out.push_str(&format!(
-            "all\t{id}\tverdict\t{} ({k} of {} languages against)\n",
-            if k >= 3 {
-                "dropped from defaults"
-            } else {
-                "kept"
-            },
-            editions.len()
-        ));
+        out.push_str(&verdict(id, k, editions.len()));
     }
     print!("{out}");
     let path = repo("fixtures/measure/ge-t6.tsv");

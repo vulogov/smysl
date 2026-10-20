@@ -104,6 +104,12 @@ name = "divergence"
 [[test]]
 name = "ge_t6"
 
+# GE-T6's A8 arm (SMYSL-2.6 §5.4, TX-P9 N7): books found by the text a unit was read from, A8
+# per book, and the kill criterion reading extraction variance, scripted; the measurement over
+# extraction runs this repository does not hold is `--ignored`, with `SMYSL_GE_T6_A8=<dir>`.
+[[test]]
+name = "ge_t6_a8"
+
 # TX-P9 N1's exit, the graph half: A1–A7 and A10 on synthetic stores with planted structure
 # (SMYSL-2.6 §5.2), and A1 and the per-text figures over a library of the committed slices.
 [[test]]

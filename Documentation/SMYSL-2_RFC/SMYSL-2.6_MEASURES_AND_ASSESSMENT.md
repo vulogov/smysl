@@ -1199,7 +1199,7 @@ mode, speaker; the effective-time index (TX-P3) for A3/A10/D*.
 | N4 | channel binding, C1–C5 | §5.2 channel tests; C1–C4 on the KJV/Synodal Psalms fixture reported — **done 2026-10-19**, below |
 | N5 | D1–D6 (D5 lexical) | §5.2 dialogue tests; **GE-T8** — **done 2026-10-19**, below; GE-T8's instrument built, its measurement owed |
 | N6 | `assess key|score|state|diff`, α | §5.2 assessment tests; **GE-T3**; GE-T9 α reported — **done 2026-10-20**, below; GE-T3's instrument built and its runs owed, GE-T9's human α owed |
-| N7 | A8 across genres | **GE-T6** complete (A8 arm), with GE-T2's runs |
+| N7 | A8 across genres | **GE-T6** complete (A8 arm), with GE-T2's runs — **built 2026-10-20**, below; the A8 arm's instrument built and its runs owed |
 
 TX-P9's draft-3 exit tests are GE-T3 and GE-T6; both are listed above.
 
@@ -1452,6 +1452,48 @@ language-only table from a run-only one exactly, and `SMYSL_GE_T3` takes the run
 validated, and what is owed is the people. **`key --generate` and `score --judge model`** are
 the command's model invocations and are not in this build: both need the ingest arm above,
 and `smysl-eval`'s `Judge` port has no production implementation to stand on.
+
+*N7, built 2026-10-20.* GE-T6's A8 arm is `crates/smysl-measure/tests/ge_t6_a8.rs`, and the
+statistics both arms read are `tests/support/genre.rs`: the labels, Kruskal–Wallis H with ε²
+and the permutation p, the bootstrap medians, the two mean squares and the verdict, moved out
+of `ge_t6.rs` with their seeds and their order of operations. The pure arm was re-run on the
+shared module against `fixtures/measure/ge-t6.tsv`, over GE-T1's five Bibles converted again
+by `vpl2usfm.py`, and is byte-identical (51.7 s, as before). The A8 arm is §5.4 with two
+readings:
+
+- **The noise is extraction's.** A book's value is A8's `area` over its units in each run and
+  the median of its runs; the noise beside the within-genre mean square is each book's sample
+  variance over its runs, averaged over books — the window variance's place in the pure arm.
+  A book A8 refuses in any run, or a run did not extract, is excluded and listed with the run.
+- **A book is the units drawn from its text**, by the rule A3's reading order uses: the
+  manifest a unit was read under when its source names one, else the head manifest listing
+  its part. A unit drawn from no part is in no book.
+- **No length control.** A8's budgets are fractions of the book's own `full_tokens`, so the
+  curve is in the book's units already, and an equal-length window would cut a claim from the
+  grounds and rebuttals rule R makes a pack carry with it — the closure A8 measures. The
+  equal-length rule in §5.4 and §7 is the pure measures'.
+
+The scripted arm runs everywhere: three planted runs over Ruth and Jude find each unit in its
+book and the unit drawn from no part in none, each run's value is `run`'s over exactly that
+book, and a run that did not extract Jude excludes `JUD(none in run 3)`; and twenty planted
+books in five genres are kept with runs 0.001 apart (p < 0.001) and counted against with runs
+0.5 apart over the same medians, so the criterion reads extraction's variance and not only the
+books'. Two findings:
+
+- **GE-T2's runs are not A8's material.** The exit test says "with GE-T2's runs", and GE-T2's
+  corpus is 59 lines per language — 26 verses of narrative, 26 of law and 7 of poetry — in
+  three runs, not 66 books in five; and its harness extracts into a scratch library it removes,
+  so even those runs left no store to measure. What the A8 arm needs is its own: 5 editions × 5
+  runs of the canon, about 780,000 verses through a model, `SMYSL_INGEST_LIVE=1` as GE-T2's,
+  kept as `<edition>/<run>` stores for `SMYSL_GE_T6_A8`.
+- **A8's area is at most 1 + λ**, 1½ under the default recipe, not 1: `D` is `D_sal + λ·D_stat`
+  with each part a fraction. A genre median of A8 is therefore not a share of anything, and the
+  report says so by giving the area and not a percentage.
+
+**Owed, and why.** **GE-T6's A8 arm** is owed with its runs: the harness, the report
+(`fixtures/measure/ge-t6-a8.tsv`, under `SMYSL_BLESS=1`) and the verdict are built, and what
+is owed is the extraction. With it, TX-P9's two draft-3 exit tests, GE-T3 and GE-T6, are both
+built and both owe model runs; every step's own exit test is met.
 
 ---
 
