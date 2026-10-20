@@ -63,10 +63,30 @@ pub(crate) fn axis(recipe: &Recipe) -> Result<smysl_core::types::Axis, Refusal> 
     }
 }
 
-/// A reading position: the text, the part's place in it, the span's first byte, the locator.
-type Place = (String, usize, Option<u64>, Option<Locator>);
+/// `SMY-E482` when `undated` of `units` is above the recipe's `undated:max`: a figure over the
+/// dated tenth of a scope is a figure about which units happened to be dated.
+pub(crate) fn within_undated_max(recipe: &Recipe, undated: u64, units: u64) -> Result<(), Refusal> {
+    let (num, den) = recipe.undated_max;
+    // undated / units > num / den, in integers.
+    if u128::from(undated) * u128::from(den) > u128::from(num) * u128::from(units) {
+        return Err(Refusal::new(
+            Code::E482,
+            format!(
+                "{undated} of {units} units in `{}` have no time on the {} axis, above the \
+                 recipe's undated:max of {num}/{den}",
+                recipe.scope.trim(),
+                recipe.axis
+            ),
+        ));
+    }
+    Ok(())
+}
 
-fn places(store: &Store, uids: &[Uid]) -> BTreeMap<Uid, Place> {
+/// A reading position: the text, the part's place in it, the span's first byte, the locator.
+pub(crate) type Place = (String, usize, Option<u64>, Option<Locator>);
+
+/// Each unit's reading position; a unit drawn from no part has none.
+pub(crate) fn places(store: &Store, uids: &[Uid]) -> BTreeMap<Uid, Place> {
     let mut at: BTreeMap<Tid, (String, usize)> = BTreeMap::new();
     for (mid, m) in store.manifests() {
         if store.is_superseded(mid) {
@@ -147,21 +167,7 @@ fn order(recipe: &Recipe, store: &Store, uids: &[Uid]) -> Result<Ordered, Refusa
                 keyed.push(((lo, hi), *u));
             }
             let undated = (uids.len() - keyed.len()) as u64;
-            let (num, den) = recipe.undated_max;
-            // undated / units > num / den, in integers.
-            if u128::from(undated) * u128::from(den) > u128::from(num) * uids.len() as u128 {
-                return Err(Refusal::new(
-                    Code::E482,
-                    format!(
-                        "{} of {} units in `{}` have no time on the {} axis, above the recipe's \
-                         undated:max of {num}/{den}",
-                        undated,
-                        uids.len(),
-                        recipe.scope.trim(),
-                        recipe.axis
-                    ),
-                ));
-            }
+            within_undated_max(recipe, undated, uids.len() as u64)?;
             keyed.sort();
             Ok(Ordered {
                 uids: keyed.into_iter().map(|(_, u)| u).collect(),

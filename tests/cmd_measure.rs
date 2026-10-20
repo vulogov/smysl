@@ -563,3 +563,33 @@ fn channel_measures_compare_a_scope_with_its_target() {
     assert_eq!(o.status.code(), Some(2));
     assert!(stderr(&o).contains("--channel"), "{}", stderr(&o));
 }
+
+/// TX-P9 N5: the dialogue measures from the command line. D5 reads the text in windows and is
+/// refused at any other level; D2 over units nobody spoke has nothing to count; D3 without a
+/// policy is refused before anything runs.
+#[test]
+fn dialogue_measures_run_from_the_command_line() {
+    let (dir, root) = bibles("dialogue");
+    with_units(&dir);
+    let kjv = "from collection:\"bible/eng-kjv\"";
+    let json = |extra: &[&str]| -> serde_json::Value {
+        let mut a = vec!["--json", "measure"];
+        a.extend_from_slice(extra);
+        a.push(&root);
+        let o = run(&a);
+        assert!(o.status.success(), "{a:?}: {}", stderr(&o));
+        serde_json::from_str(&stdout(&o)).expect("one JSON object")
+    };
+    let v = json(&["D5", "--scope", kjv, "--level", "window:200", "--dry-run"]);
+    let x = &v["results"][0];
+    assert_eq!(x["outcome"], "value", "{x}");
+    assert!(x["values"]["jsd:mean"].is_string(), "{x}");
+    assert!(x["n"]["pairs"].as_u64().unwrap() > 0, "{x}");
+
+    let v = json(&["D5", "--scope", kjv, "--dry-run"]);
+    assert_eq!(v["results"][0]["code"], "SMY-E489", "{v}");
+    let v = json(&["D2", "--scope", kjv, "--dry-run"]);
+    assert_eq!(v["results"][0]["code"], "SMY-W485", "{v}");
+    let v = json(&["D3", "--scope", kjv, "--dry-run"]);
+    assert_eq!(v["results"][0]["code"], "SMY-E481", "{v}");
+}

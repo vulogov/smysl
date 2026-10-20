@@ -18,7 +18,8 @@
 //! and PMI, which completes the text-level measures; M7 is the `measure` command.
 //!
 //! **TX-P9** adds the measures over units: A1–A10 ([`graph`]) over one scope, and C1–C5
-//! ([`channel`]) over two, a source and the target it was carried into.
+//! ([`channel`]) over two, a source and the target it was carried into, and D1–D6
+//! ([`dialogue`]) over a conversation.
 //!
 //! # A result as a unit (SMYSL-2.6 §3.6)
 //!
@@ -46,6 +47,7 @@ use smysl_graph::Store;
 
 pub mod boot;
 pub mod channel;
+pub mod dialogue;
 pub mod graph;
 pub mod num;
 pub mod outcome;
@@ -59,6 +61,12 @@ pub use channel::c2::C2;
 pub use channel::c3::C3;
 pub use channel::c4::C4;
 pub use channel::c5::C5;
+pub use dialogue::d1::D1;
+pub use dialogue::d2::D2;
+pub use dialogue::d3::D3;
+pub use dialogue::d4::D4;
+pub use dialogue::d5::D5;
+pub use dialogue::d6::D6;
 pub use graph::concentration::A6;
 pub use graph::contention::A7;
 pub use graph::dating::A10;
@@ -192,7 +200,7 @@ pub trait Measure: Sync {
 /// Every measure this build has, in report order.
 pub const ALL: &[&dyn Measure] = &[
     &T1, &T2, &T3, &T4, &T5, &T6, &T7, &A1, &A2, &A3, &A4, &A5, &A6, &A7, &A8, &A9, &A10, &C1, &C2,
-    &C3, &C4, &C5,
+    &C3, &C4, &C5, &D1, &D2, &D3, &D4, &D5, &D6,
 ];
 
 /// A measure by id and version, against a registry.

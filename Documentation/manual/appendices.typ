@@ -781,7 +781,9 @@ divergence and collocations — and ten over the units a scope answers with: A1 
 density, A2 redundancy, A3 novelty, A4 the spread of statuses, A5 grounding, A6 the Gini of
 salience, A7 contention, A8 rate–distortion, A9 the entity graph and A10 dating — and five over
 a channel, a source and the target it was carried into: C1 survival, C2 support, C3
-inflation, C4 attribution and C5 the ratio of the two texts' compression rates. All are pure,
+inflation, C4 attribution and C5 the ratio of the two texts' compression rates — and six over a
+conversation: D1 answers, D2 uptake, D3 persistence, D4 initiative, D5 lexical drift and D6
+reversals. All are pure,
 which is why `--seed-check` takes every one of them.
 
 *A8* packs the scope at twenty budgets, 5% to 100% of what carrying all of it at full detail
@@ -817,6 +819,20 @@ classes, so it is as good as the `same-as` it is given: accepting every candidat
 `anchored` engine proposes over the Psalms pairs Psalm 51 with the wrong verses of Psalm 50
 and leaves C1–C4 exactly as they were.
 
+*D1–D6* read a conversation: a speaker is a unit's `text:speaker`, a time its effective time
+on `--axis`, and a response counts only when both its ends are in the scope. D1 is the share
+of `question` units something in the scope `answers`, and the median and p90 seconds to the
+first answer; an answer said before its question is counted (`inverted`) and given no time.
+D2 is, per speaker, the share of their asserted units another speaker elaborates, rebuts,
+answers or restates by `same-as`. D3 is how long each proposition class lasts, from its first
+utterance to the last unit that is a member or points into one, as a median over classes. D4
+is, per speaker, the share of classes they introduced, in reading order, less their share of
+the messages the units were drawn from. D5 is the Jensen–Shannon divergence between
+consecutive full windows of the text and needs `--level window:<n>`. D6 counts each speaker's
+switches between `asserted` and `negated` within a class, in time. D1, D3 and D6 leave undated
+units out (`SMY-W415`) and refuse a scope too little of which is dated (`SMY-E482`); D3, D4 and
+D6 need `--policy`.
+
 `Mixed` is for the measures the registry is meant to hold later, a neural
 surprisal and an embedding distance, which call a model.
 
@@ -827,13 +843,13 @@ surprisal and an embedding distance, which call a model.
     ([`IDS`], [positional, required], [The measures, comma-separated, run and reported in the order given. An id this build does not have is a result too — not run, `SMY-E489` — so a typo stands beside the measures that ran.]),
     ([`--scope`], [`SQ`, required], [An `sq/1` query. A text measure reads its `from`: `from texts`, `from collection:kjv`, `from collection:"kjv/08-rut"`. Anything after the `from` is refused (`SMY-E461`) when a text measure is asked for, because a `where` selects units and a text has none until something is extracted from it; name a narrower text by its alias. A unit measure counts the units the whole query answers with, so `from collection:kjv where text:mode = asserted` is a scope for one; the text is read only when some id reads text.]),
     ([`--channel`], [`SQ`], [The target of a channel measure (C1–C5), an `sq/1` query read as `--scope` is; the scope is the source. Refused when no id asked for compares two scopes.]),
-    ([`--policy`], [`POLICY`], [How proposition classes are formed for A2, A3 and C1–C4: `strict`, `component` or `attested:<n>`. There is no default, since the three give three numbers; without one, those measures are not run (`SMY-E481`).]),
+    ([`--policy`], [`POLICY`], [How proposition classes are formed for A2, A3, C1–C4, D3, D4 and D6: `strict`, `component` or `attested:<n>`. There is no default, since the three give three numbers; without one, those measures are not run (`SMY-E481`).]),
     ([`--profile`], [`NAME`], [The granularity profile A1's density is under. Required by A1 (`SMY-E489` without it): a density of units depends on how finely the text was cut into them.]),
-    ([`--axis`], [`AXIS`], [The time axis A3's time order and A10 read: `said` (the default), `composed` or `about`.]),
+    ([`--axis`], [`AXIS`], [The time axis A3's time order, A10, D1, D3 and D6 read: `said` (the default), `composed` or `about`.]),
     ([`--level`], [`LEVEL`], [The segment a measure counts in: `part` (the default), `chapter`, `verse`, `message` or `window:<n>`. The text is read once, at this level, for every id.]),
     ([`--analyzer`], [`CHAIN:STREAM`], [The analyzer chain and stream, `smysl/an-en/1:surface`. Defaults to the chain the texts' language chooses, surface stream. A scope whose texts choose two chains is refused unless this names one (`SMY-E489`), since a statistic over a stemmed and an unstemmed vocabulary at once describes neither.]),
     ([`--param`], [`[ID.]K=V`], [A measure parameter. Unscoped, it goes to every id asked for that takes the key; `T5.order=2` goes to one. A key no id asked for takes is refused before anything runs, so a parameter cannot land in a recipe it does not belong to and move that recipe's hash.]),
-    ([`--min-n`], [`[ID=]N`], [The smallest sample a measure accepts, in **its own unit**: tokens for T1, T4, T5 and T7, characters for T2, symbols in every text for T3, texts for T6, units for the A-measures (1 by default). `T3=2` sets one. Below it the measure is not run (`SMY-W485`) rather than reported off a sample its estimator is biased on.]),
+    ([`--min-n`], [`[ID=]N`], [The smallest sample a measure accepts, in **its own unit**: tokens for T1, T4, T5 and T7, characters for T2, symbols in every text for T3, texts for T6, units for the A-measures, C1–C4, D1–D4 and D6 (1 by default), full windows for D5 (2). `T3=2` sets one. Below it the measure is not run (`SMY-W485`) rather than reported off a sample its estimator is biased on.]),
     ([`--seed`], [`N`], [The bootstrap seed, 0 by default. It is in the recipe, so two seeds are two units.]),
     ([`--allow-lossy`], [—], [Measure a lossy text too; the result is flagged `lossy-admitted` (`SMY-W408`). Without it a lossy text is refused (`SMY-E480`).]),
     ([`--dry-run`], [—], [Print the values and refusals, and write nothing.]),

@@ -961,7 +961,7 @@ fn cli() -> Command {
                     Arg::new("ids")
                         .value_name("IDS")
                         .required(true)
-                        .help("The measures, comma-separated: T1–T7 over text, A1–A10 over units, C1–C5 over a channel"),
+                        .help("The measures, comma-separated: T1–T7 over text, A1–A10 over units, C1–C5 over a channel, D1–D6 over a conversation"),
                 )
                 .arg(
                     Arg::new("scope")
@@ -980,7 +980,7 @@ fn cli() -> Command {
                     Arg::new("policy")
                         .long("policy")
                         .value_name("POLICY")
-                        .help("Proposition classes for A2, A3 and C1–C4: strict, component or attested:<n>"),
+                        .help("Proposition classes for A2, A3, C1–C4, D3, D4 and D6: strict, component or attested:<n>"),
                 )
                 .arg(
                     Arg::new("profile")
@@ -993,7 +993,7 @@ fn cli() -> Command {
                         .long("axis")
                         .value_name("AXIS")
                         .default_value("said")
-                        .help("The time axis A3 and A10 read: said, composed or about"),
+                        .help("The time axis A3, A10, D1, D3 and D6 read: said, composed or about"),
                 )
                 .arg(
                     Arg::new("level")

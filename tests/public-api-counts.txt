@@ -36,4 +36,4 @@ smysl-ingest     1780
 smysl-tui        216
 smysl-text       3848
 smysl-query      3014
-smysl-measure    2610
+smysl-measure    2944

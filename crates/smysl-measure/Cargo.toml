@@ -130,3 +130,13 @@ name = "entity"
 # C1–C4 on the KJV and Synodal Psalms fixture, reported.
 [[test]]
 name = "channel"
+
+# TX-P9 N5's exit: D1–D6 on synthetic chats with planted answers, take-ups, returns,
+# introductions, drift and reversals, and clocks that disagree with the reply graph.
+[[test]]
+name = "dialogue"
+
+# GE-T8's instrument: D1's precision on the answers edges it counts, against a labelled
+# sheet. Scripted unless SMYSL_GE_T8_STORE and SMYSL_GE_T8_SHEET are set; the clause is owed.
+[[test]]
+name = "ge_t8"

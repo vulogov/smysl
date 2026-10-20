@@ -1197,7 +1197,7 @@ mode, speaker; the effective-time index (TX-P3) for A3/A10/D*.
 | N2 | A8; move `full_tokens`/`floor_tokens`; `SMY-E407` on `mul` | monotonicity property; bit identity across the matrix; refusal on `mul` + `utf8-div4` — **done 2026-10-19**, below |
 | N3 | A9 | planted communities recovered exactly on a two-clique graph — **done 2026-10-19**, below |
 | N4 | channel binding, C1–C5 | §5.2 channel tests; C1–C4 on the KJV/Synodal Psalms fixture reported — **done 2026-10-19**, below |
-| N5 | D1–D6 (D5 lexical) | §5.2 dialogue tests; **GE-T8** |
+| N5 | D1–D6 (D5 lexical) | §5.2 dialogue tests; **GE-T8** — **done 2026-10-19**, below; GE-T8's instrument built, its measurement owed |
 | N6 | `assess key|score|state|diff`, α | §5.2 assessment tests; **GE-T3**; GE-T9 α reported |
 | N7 | A8 across genres | **GE-T6** complete (A8 arm), with GE-T2's runs |
 
@@ -1352,6 +1352,54 @@ C2 `[6, 8]` (the Synodal's Psalm 14 and Psalm 50's title have no source), C3 `[0
 - **The mode matrix has an eighth row.** §3.9's 7×7 is over `text:mode`, and a unit a reader
   drew from a Bible has none; without a `none` row the matrix would be empty where the channel
   is not. Only cells with a count are written.
+
+*N5, done 2026-10-19.* `smysl_measure::dialogue`: D1 (answered, time to answer), D2 (uptake),
+D3 (class life), D4 (initiative), D5 (lexical drift) and D6 (reversals), all pure, registered
+after C5. A speaker is `text:speaker`, a mode `text:mode`, and a time the effective time on
+`axis` read as an instant, the interval's lower bound (its upper when the lower is open), the
+key A3 sorts by. D1, D3 and D6 share A3's `undated:max` check, now `within_undated_max`, and
+flag what they leave out, so `SMY-W415` comes from the same place. No code is new: a missing
+policy is `SMY-E481` for D3, D4 and D6, a level D5 cannot read is `SMY-E489`, and nothing to
+count is `SMY-W485`. The exit holds: `crates/smysl-measure/tests/dialogue.rs` plants one
+conversation per measure — four questions with answers a minute and five minutes late, one
+answered before it was asked and one answered only from outside, D1 `[3, 4]` with a median
+of 60 s and a p90 of 300 s; three take-ups among eleven assertions, D2 `[3, 11]`, with a
+self-elaboration, a speakerless rebuttal and an outside one not counted; five classes two of
+which are returned to, D3 median 0 s and p90 800 s; six classes over six messages, D4's gaps
+1/6 and −1/6 exactly; windows 0 and 1 bit apart, D5 a mean of 1/2; and three reversals in
+four speaker–class pairs, D6, a tie in time broken by uid and a `reported` unit passed over.
+`measure` needs no new flag: `--policy`, `--axis` and `--level window:<n>` already reach
+them. Four decisions, each where §3.10 left a choice.
+
+- **A response counts only when both its ends are in the scope.** A conversation is the
+  scope, and an edge from outside it — a later thread rebutting this one — is a different
+  conversation's; the tests plant one for D1, D2 and D3. D3's "a relation into a member"
+  takes every kind but `x.query/answers`, the saved scope's edge to each unit its query found
+  (§3.1), which a scope over every unit contains on a rerun. Kernel `answers` is not that
+  edge — OQ-49 kept the saved query off it so as not to move salience — so D1 cannot mistake a
+  query for a reply.
+- **An answer said before its question has no time.** A clock that disagrees with the reply
+  graph is what GE-T13 plants and rule E reports; D1 counts it (`n.inverted`) rather than
+  storing a negative time to answer, which would describe the clocks.
+- **D4 is in reading order, over the messages units were drawn from.** §3.10 names D1, D3 and
+  D6 as time-ordered and not D4, so D4 takes A3's reading order, which for a chat export is the
+  order the export recorded. A message is a unit's source reference (`<tid>#<locator>`); a
+  unit measure sees no message nothing was extracted from, so D4 compares what a speaker
+  introduced with how many of their messages said something.
+- **D5 compares full windows.** A text's last window is what was left over, and a short
+  window is far from a long one because it is short; it is counted (`n.partial`) and not
+  compared. `min:n` is in full windows, two by default.
+
+**GE-T8 is owed.** Its material is 300 hand-labelled question/answer pairs from 3 chat
+exports, and neither half is here: an `answers` edge between chat units is written by
+extraction, which costs model turns, and a label is a person's reading of an edge.
+`crates/smysl-measure/tests/ge_t8.rs` is the instrument — D1's own edges
+(`dialogue::d1::answered`) over every unit of a store, looked up on a sheet of
+`answer question yes|no`, a precision in integers against 4/5 and at least 300 labelled
+edges — and `SMYSL_GE_T8_STORE` and `SMYSL_GE_T8_SHEET` decide the clause with no code
+change. Without them a scripted arm shows the bar does what it says: 8 of 10 right meets it,
+7 does not, and an edge the sheet does not label is counted and left out of the precision.
+"Drops D1 from defaults" has nothing to act on yet: `measure` runs the ids it is given.
 
 ---
 
