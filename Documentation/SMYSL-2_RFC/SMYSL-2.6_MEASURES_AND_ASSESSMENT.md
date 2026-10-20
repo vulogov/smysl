@@ -1017,7 +1017,11 @@ Generated in-test from a fixed seed with the crate's own generator, so fixtures 
 
 - **GE-T3.** 50 verses × 5 translations × 5 extraction runs. A1 and class count per verse. Two-way
   decomposition (language, run) of variance per verse, summed. Language variance > run variance:
-  the bias is reported as a finding and cross-lingual A* carries it (draft 3 §23).
+  the bias is reported as a finding and cross-lingual A* carries it (draft 3 §23). As built
+  (N6), run is nested in language — run 3 of German and run 3 of Russian are not one level — so
+  the run mean square is the within-language one, ΣΣ(x − m_l)² / (L(R − 1)), and the crossed
+  one is printed beside it. Measured on GE-T2's 59-verse corpus: language exceeds run, for
+  units and for classes.
 - **GE-T8.** 300 hand-labelled question/answer pairs from 3 chat exports. D1's precision on the
   `answers` edges it counts; < 0.8 drops D1 from defaults.
 - **GE-T9.** α from `assess::agreement::alpha` over 2 annotators × 20 passages, en and ru, for
@@ -1198,7 +1202,7 @@ mode, speaker; the effective-time index (TX-P3) for A3/A10/D*.
 | N3 | A9 | planted communities recovered exactly on a two-clique graph — **done 2026-10-19**, below |
 | N4 | channel binding, C1–C5 | §5.2 channel tests; C1–C4 on the KJV/Synodal Psalms fixture reported — **done 2026-10-19**, below |
 | N5 | D1–D6 (D5 lexical) | §5.2 dialogue tests; **GE-T8** — **done 2026-10-19**, below; GE-T8's instrument built, its measurement owed |
-| N6 | `assess key|score|state|diff`, α | §5.2 assessment tests; **GE-T3**; GE-T9 α reported — **done 2026-10-20**, below; GE-T3's instrument built and its runs owed, GE-T9's human α owed |
+| N6 | `assess key|score|state|diff`, α | §5.2 assessment tests; **GE-T3**; GE-T9 α reported — **done 2026-10-20**, below; GE-T3 measured 2026-10-20 (language > run), GE-T9's human α owed |
 | N7 | A8 across genres | **GE-T6** complete (A8 arm), with GE-T2's runs — **built 2026-10-20**, below; the A8 arm's instrument built and its runs owed |
 
 TX-P9's draft-3 exit tests are GE-T3 and GE-T6; both are listed above.
@@ -1444,11 +1448,35 @@ one coder, one value or nothing pairable, as the GE-T5 harness has it. Six findi
   without a dev-dependency cycle. The two agree on the same three no-answer cases, and the
   measure crate's is the one with the published example behind it.
 
-**Owed, and why.** **GE-T3** needs 25 extraction runs — 50 verses in 5 translations, 5 runs
-each — a model's each; `crates/smysl-measure/tests/ge_t3.rs` is the instrument, the per-verse
-two-way decomposition into language and run mean squares, summed, its scripted arm telling a
-language-only table from a run-only one exactly, and `SMYSL_GE_T3` takes the runs' table.
-**GE-T9's human α** needs independent annotators, and there are none; the α is built and
+**GE-T3, measured 2026-10-20.** GE-T2's corpus — 59 lines in each of en, de, fr, es and ru,
+not 50, because that is what the corpus has — through `deepseek-chat` at temperature 0, five
+runs per language, each its own library (`text add`, then `ingest --window-level line`). A
+verse's figures are its units, by the line a unit's source names, and its classes, under A2's
+`strict` policy over `same-as` edges from the lexical engine (`same-as propose --engine
+lexical --offline`), which needs no model; GE-T3 names neither, and these are the build's
+defaults that keep the second figure free of a second model. The table is
+`fixtures/measure/ge-t3.tsv`, rebuilt by `ge_t3_table_from_runs` under `SMYSL_GE_T3_RUNS`, and
+`ge_t3_measured` re-reads the verdict from it on every run. Summed over the 59 verses:
+
+| figure | language MS | run MS (within language) | run MS (crossed) |
+|---|---|---|---|
+| units | 74.90 | 21.76 | 13.50 |
+| classes | 24.34 | 9.20 | 6.34 |
+
+Language variance exceeds run variance on both, so the bias is reported and cross-lingual `A*`
+carries it. Three findings:
+
+- **N6's instrument crossed run with language.** Runs are drawn independently per language, so
+  the two-way table's run factor had no meaning; the nested mean square is the right one, and
+  the scripted arm now pins it (125 on a run-only plant, 0 on a language-only one).
+- **Russian run 5 failed.** The model wrote English gists for the Cyrillic text and `SMY-W436`
+  refused them, leaving 2 units with no span. It is kept as the run it was; without every
+  language's run 5 the verdict holds (units 73.43 against 16.90, classes 25.38 against 6.87).
+- **Run variance is large in itself.** French gave 72, 19, 73, 102 and 26 units over its five
+  runs at temperature 0; in six of the 25 stores the lexical engine proposed no edge, and there
+  the classes are the units.
+
+**Owed, and why.** **GE-T9's human α** needs independent annotators, and there are none; the α is built and
 validated, and what is owed is the people. **`key --generate` and `score --judge model`** are
 the command's model invocations and are not in this build: both need the ingest arm above,
 and `smysl-eval`'s `Judge` port has no production implementation to stand on.
@@ -1493,7 +1521,8 @@ books'. Two findings:
 **Owed, and why.** **GE-T6's A8 arm** is owed with its runs: the harness, the report
 (`fixtures/measure/ge-t6-a8.tsv`, under `SMYSL_BLESS=1`) and the verdict are built, and what
 is owed is the extraction. With it, TX-P9's two draft-3 exit tests, GE-T3 and GE-T6, are both
-built and both owe model runs; every step's own exit test is met.
+built; GE-T3 is measured (above) and GE-T6's A8 arm owes its runs; every step's own exit test
+is met.
 
 ---
 

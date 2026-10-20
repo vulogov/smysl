@@ -10,10 +10,10 @@
 //!
 //! # The protocol, as built
 //!
-//! - **Material**: `SMYSL_GE_T6_A8=<dir>` holds `<edition>/<run>`, one store per extraction run
-//!   of one edition — each GE-T1 book added to a library as `bible/<nn>-<code>`, as the pure arm
-//!   adds them, and ingested with `ingest --text`. Runs are the files in `<edition>/`, in name
-//!   order; §5.4 asks for GE-T2's five.
+//! - **Material**: `SMYSL_GE_T6_A8=<dir>` holds `<edition>/<run>/store.smysl`, one library per
+//!   extraction run of one edition — each GE-T1 book added as `bible/<nn>-<code>`, as the pure
+//!   arm adds them, and ingested with `ingest --text`. Runs are the directories in `<edition>/`,
+//!   in name order; §5.4 asks for five.
 //! - **A book** is the units of a run drawn from that book's parts: the text a unit was read
 //!   under when its source names a manifest, else the manifest listing its part. A unit drawn
 //!   from no part is in no book.
@@ -121,11 +121,11 @@ fn area(store: &Store, uids: &BTreeSet<Uid>) -> Result<f64, String> {
 type Kept = Vec<(String, usize, Vec<f64>)>;
 
 fn edition(
-    runs: &[Store],
+    runs: &[&Store],
     labels: &BTreeMap<String, String>,
     names: &[String],
 ) -> (Kept, Vec<String>) {
-    let per_run: Vec<BTreeMap<String, BTreeSet<Uid>>> = runs.iter().map(books).collect();
+    let per_run: Vec<BTreeMap<String, BTreeSet<Uid>>> = runs.iter().map(|s| books(s)).collect();
     let codes: BTreeSet<&String> = per_run.iter().flat_map(|b| b.keys()).collect();
     let (mut kept, mut excluded) = (Vec::new(), Vec::new());
     'book: for code in codes {
@@ -255,7 +255,8 @@ fn a_book_is_the_units_drawn_from_its_text() {
     }
 
     let stores: Vec<Store> = runs.into_iter().map(|(s, _)| s).collect();
-    let (kept, excluded) = edition(&stores, &labels, &names);
+    let refs: Vec<&Store> = stores.iter().collect();
+    let (kept, excluded) = edition(&refs, &labels, &names);
     assert!(excluded.is_empty(), "{excluded:?}");
     assert_eq!(kept.len(), 2);
     for (code, gi, areas) in &kept {
@@ -288,7 +289,8 @@ fn a_book_is_the_units_drawn_from_its_text() {
             .collect(),
     );
     short.push(ruth_only);
-    let (kept, excluded) = edition(&short, &labels, &names);
+    let refs: Vec<&Store> = short.iter().collect();
+    let (kept, excluded) = edition(&refs, &labels, &names);
     assert_eq!(kept.len(), 1);
     assert_eq!(excluded, ["JUD(none in run 3)"]);
 }
@@ -353,16 +355,16 @@ fn ge_t6_a8_arm() {
     };
     let labels = genres();
     let names = genre_names(&labels);
-    let list = |d: &Path, dirs: bool| -> Vec<String> {
+    let list = |d: &Path| -> Vec<String> {
         let mut v: Vec<String> = std::fs::read_dir(d)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
-            .filter(|n| !n.starts_with('.') && d.join(n).is_dir() == dirs)
+            .filter(|n| !n.starts_with('.') && d.join(n).is_dir())
             .collect();
         v.sort();
         v
     };
-    let editions = list(&dir, true);
+    let editions = list(&dir);
 
     let mut out = String::from(
         "# GE-T6's A8 arm (SMYSL-2.6 §5.4): A8's area across the Bible's genres, per edition.\n\
@@ -372,16 +374,20 @@ fn ge_t6_a8_arm() {
     );
     let mut against = 0;
     for ed in &editions {
-        let run_names = list(&dir.join(ed), false);
+        let run_names = list(&dir.join(ed));
         assert!(
             run_names.len() >= 2,
             "{ed}: {} run(s); the noise is a variance across runs and needs two",
             run_names.len()
         );
-        let runs: Vec<Store> = run_names
+        let libraries: Vec<Library> = run_names
             .iter()
-            .map(|r| Store::open(dir.join(ed).join(r)).unwrap_or_else(|e| panic!("{ed}/{r}: {e}")))
+            .map(|r| {
+                Library::open(&dir.join(ed).join(r).join("store.smysl"))
+                    .unwrap_or_else(|e| panic!("{ed}/{r}: {e}"))
+            })
             .collect();
+        let runs: Vec<&Store> = libraries.iter().map(Library::store).collect();
         let (kept, excluded) = edition(&runs, &labels, &names);
         let x: Vec<f64> = kept.iter().map(|k| median(&mut k.2.clone())).collect();
         let g: Vec<usize> = kept.iter().map(|k| k.1).collect();
