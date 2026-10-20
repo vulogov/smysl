@@ -90,6 +90,22 @@ pub enum ClassPolicy {
     Attested(u32),
 }
 
+impl ClassPolicy {
+    /// `strict`, `component` or `attested:<n>` with `n` at least 1, as [`fmt::Display`] writes
+    /// it; `None` for anything else.
+    pub fn parse(s: &str) -> Option<ClassPolicy> {
+        match s {
+            "strict" => Some(ClassPolicy::Strict),
+            "component" => Some(ClassPolicy::Component),
+            other => other
+                .strip_prefix("attested:")
+                .and_then(|n| n.parse::<u32>().ok())
+                .filter(|n| *n > 0)
+                .map(ClassPolicy::Attested),
+        }
+    }
+}
+
 impl fmt::Display for ClassPolicy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

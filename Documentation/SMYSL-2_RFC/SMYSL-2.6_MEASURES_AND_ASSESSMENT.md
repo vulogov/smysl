@@ -1198,7 +1198,7 @@ mode, speaker; the effective-time index (TX-P3) for A3/A10/D*.
 | N3 | A9 | planted communities recovered exactly on a two-clique graph — **done 2026-10-19**, below |
 | N4 | channel binding, C1–C5 | §5.2 channel tests; C1–C4 on the KJV/Synodal Psalms fixture reported — **done 2026-10-19**, below |
 | N5 | D1–D6 (D5 lexical) | §5.2 dialogue tests; **GE-T8** — **done 2026-10-19**, below; GE-T8's instrument built, its measurement owed |
-| N6 | `assess key|score|state|diff`, α | §5.2 assessment tests; **GE-T3**; GE-T9 α reported |
+| N6 | `assess key|score|state|diff`, α | §5.2 assessment tests; **GE-T3**; GE-T9 α reported — **done 2026-10-20**, below; GE-T3's instrument built and its runs owed, GE-T9's human α owed |
 | N7 | A8 across genres | **GE-T6** complete (A8 arm), with GE-T2's runs |
 
 TX-P9's draft-3 exit tests are GE-T3 and GE-T6; both are listed above.
@@ -1400,6 +1400,58 @@ edges — and `SMYSL_GE_T8_STORE` and `SMYSL_GE_T8_SHEET` decide the clause with
 change. Without them a scripted arm shows the bar does what it says: 8 of 10 right meets it,
 7 does not, and an edge the sheet does not label is counted and left out of the precision.
 "Drops D1 from defaults" has nothing to act on yet: `measure` runs the ids it is given.
+
+*N6, done 2026-10-20.* `smysl_measure::assess`: K1 (`key_from_view`, `Key`), K3 (`score`,
+`Score`), K4 (`state`, `State`, `diff`, `StateDiff`) and `agreement::alpha`, all pure, and
+`smysl assess key|score|state|diff`, the thirty-fifth command, `Mixed` for the two model
+invocations §4.4 gives it and pure for everything this build has. `SMY-W487` and `SMY-W488`
+are registered; the registry is 114. The exit holds: `crates/smysl-measure/tests/assess.rs`
+keys a view (a question two `grounds` steps from a span is `d_path` 2) and a dossier slot (its
+saved query the question, its results the answers); scores a reader against seven planted
+items — three correct, one of them inflated and one with its holder changed, two wrong of
+which one is fabricated, one unanswered, one whose answer was retracted after the key was
+made, and a unit that answers nothing — as accuracy `[3, 6]`, inflation `[1, 3]`, holder
+`[1, 3]`, fabrication `[1, 5]`, one `W487` and one `W488`; and moves a class's id between two
+states by joining a smaller cited member, which the diff reports as kept, with one class
+gained and one rise in status. **α reproduces Krippendorff's worked example** (2011, four
+observers, twelve units, nominal): his 0.743 is 113/152 exactly here, computed in integers
+over a coincidence matrix scaled by the least common multiple of the `m − 1`, with no α for
+one coder, one value or nothing pairable, as the GE-T5 harness has it. Six findings.
+
+- **`reader:<id>` is not an agent id.** K2 names readers `reader:<id>`; SMYSL-2.3's agent
+  grammar has three kinds, `human`, `model` and `tool`, so a reader is `human:<id>` or
+  `model:<id>`, which also says which rung its typed answers carry.
+- **K2 has no ingest path yet.** §3.11 says responses arrive through text ingest with
+  `--agent`, `--recipe assess-response/1` and `--key`, and "not new code in this crate"; ingest
+  has none of the three, and every ingested unit is attested by `tool:smysl-ingest`. A score
+  reads whatever units a reader attested with an `answers` edge to an item, however they got
+  there, so it is built and tested; the ingest flags are owed with the model arm below.
+- **SMYSL-2.4's engines rank and do not threshold.** `lexical` proposes each unit's top-k
+  BM25 neighbours, so asked within one item it pairs every response with that item's answer
+  and every reader scores 1. The judge is asked once over the whole key's answers and
+  responses with `k = 1`: a response matches when its nearest unit is its own item's answer.
+  A proposal is a match for this score and is not written, so scoring moves no class.
+- **A key keys whatever answers its questions.** Made after a reader has responded, a key
+  would take the responses for answers, since both are `answers` edges into the question. The
+  tests key first; nothing refuses the other order yet, and a key made late says nothing
+  about it. Recorded rather than guessed at: the remedy is a rule about which agents may key,
+  which is policy.
+- **A diff reports splits and merges and does not resolve them.** Correspondence by shared
+  membership can map one class to two, which OQ-58 asks about; `StateDiff` counts `split` and
+  `merged` beside `kept`, `lost` and `gained`, and leaves OQ-58 open.
+- **The GE-T5 harness keeps its own α.** §5.2 asks it to call `agreement::alpha` once that
+  exists; `smysl-measure` depends on `smysl-text`, so `smysl-text`'s test cannot depend back
+  without a dev-dependency cycle. The two agree on the same three no-answer cases, and the
+  measure crate's is the one with the published example behind it.
+
+**Owed, and why.** **GE-T3** needs 25 extraction runs — 50 verses in 5 translations, 5 runs
+each — a model's each; `crates/smysl-measure/tests/ge_t3.rs` is the instrument, the per-verse
+two-way decomposition into language and run mean squares, summed, its scripted arm telling a
+language-only table from a run-only one exactly, and `SMYSL_GE_T3` takes the runs' table.
+**GE-T9's human α** needs independent annotators, and there are none; the α is built and
+validated, and what is owed is the people. **`key --generate` and `score --judge model`** are
+the command's model invocations and are not in this build: both need the ingest arm above,
+and `smysl-eval`'s `Judge` port has no production implementation to stand on.
 
 ---
 

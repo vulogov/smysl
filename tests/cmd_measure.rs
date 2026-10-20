@@ -593,3 +593,125 @@ fn dialogue_measures_run_from_the_command_line() {
     let v = json(&["D3", "--scope", kjv, "--dry-run"]);
     assert_eq!(v["results"][0]["code"], "SMY-E481", "{v}");
 }
+
+/// TX-P9 N6: `smysl assess` end to end. A view of two questions is keyed; a reader who
+/// restates one answer scores 1/2 and is in a state of one class; after answering the other
+/// too, the second state has gained one class and kept the first, and the diff says so. A
+/// key without a policy is refused (`SMY-E481`), and a score without a reader is a usage
+/// error.
+#[test]
+fn assess_keys_scores_and_diffs_a_reader() {
+    use smysl::{
+        canonical_uid, AgentId, Attestation, Hlc, KernelType, Op, Relation, Rung, Status,
+        UnitCoreBuilder, View, ViewId,
+    };
+    use smysl_core::types::RelKind;
+
+    let (dir, root) = bibles("assess");
+    let unit = |gist: &str, kind: KernelType| {
+        UnitCoreBuilder::new(kind, gist, Status::Speculative)
+            .build()
+            .unwrap()
+    };
+    let same = |a, b| {
+        Record::Relation(Relation::new(
+            RelKind::Extension(smysl::schemas::text::SAME_AS.into()),
+            a,
+            b,
+        ))
+    };
+    let reader = AgentId::new("human:ada").unwrap();
+    let respond = |uid, q| {
+        vec![
+            Record::Attestation(Attestation::new(
+                uid,
+                reader.clone(),
+                Op::Authored,
+                Rung::Document,
+                Hlc::new(1, 0, reader.clone()),
+            )),
+            Record::Relation(Relation::new(RelKind::Answers, uid, q)),
+        ]
+    };
+    let (q1, q2) = (
+        unit("Who gleaned in the field?", KernelType::Question),
+        unit("Whose field was it?", KernelType::Question),
+    );
+    let (a1, a2) = (
+        unit("Ruth gleaned in the field", KernelType::Claim),
+        unit("The field was Boaz's", KernelType::Claim),
+    );
+    let [q1u, q2u, a1u, a2u] = [&q1, &q2, &a1, &a2].map(canonical_uid);
+    let mut library = Library::open(&dir).expect("a library");
+    library
+        .append_records(&[
+            Record::Unit(q1),
+            Record::Unit(q2),
+            Record::Unit(a1),
+            Record::Unit(a2),
+            Record::Relation(Relation::new(RelKind::Answers, a1u, q1u)),
+            Record::Relation(Relation::new(RelKind::Answers, a2u, q2u)),
+            Record::View(View::new(ViewId::new("v/ruth").unwrap(), "quiz").with_roots([q1u, q2u])),
+        ])
+        .expect("appends");
+    drop(library);
+
+    let assess = |extra: &[&str]| -> Output {
+        let mut a = vec!["--json", "assess"];
+        a.extend_from_slice(extra);
+        a.extend_from_slice(&["-s", &root]);
+        run(&a)
+    };
+    let field = |o: &Output, k: &str| -> String {
+        assert!(o.status.success(), "{}", stderr(o));
+        let v: serde_json::Value = serde_json::from_str(&stdout(o)).expect("one JSON object");
+        match &v[k] {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        }
+    };
+
+    let o = assess(&["key", "v/ruth"]);
+    assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
+    assert!(stderr(&o).contains("SMY-E481"), "{}", stderr(&o));
+    let o = assess(&["key", "v/ruth", "--policy", "strict"]);
+    assert_eq!(field(&o, "items"), "2");
+    let key = field(&o, "key");
+
+    let r1 = unit("It was Ruth who gleaned", KernelType::Claim);
+    let r1u = canonical_uid(&r1);
+    let mut library = Library::open(&dir).expect("a library");
+    let mut records = vec![Record::Unit(r1), same(r1u, a1u)];
+    records.extend(respond(r1u, q1u));
+    library.append_records(&records).expect("appends");
+    drop(library);
+
+    let o = assess(&["score", &key]);
+    assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
+    let o = assess(&["score", &key, "--reader", "human:ada"]);
+    assert_eq!(field(&o, "accuracy"), "1/2");
+    assert_eq!(field(&o, "unanswered"), "1");
+    let o = assess(&["state", &key, "--reader", "human:ada"]);
+    assert_eq!(field(&o, "classes"), "1");
+    let before = field(&o, "state");
+
+    let r2 = unit("Boaz owned it", KernelType::Claim);
+    let r2u = canonical_uid(&r2);
+    let mut library = Library::open(&dir).expect("a library");
+    let mut records = vec![Record::Unit(r2), same(r2u, a2u)];
+    records.extend(respond(r2u, q2u));
+    library.append_records(&records).expect("appends");
+    drop(library);
+
+    let o = assess(&["state", &key, "--reader", "human:ada"]);
+    assert_eq!(field(&o, "classes"), "2");
+    let after = field(&o, "state");
+    let o = assess(&["diff", &before, &after]);
+    assert_eq!(
+        (field(&o, "kept"), field(&o, "gained"), field(&o, "lost")),
+        ("1".into(), "1".into(), "0".into())
+    );
+    let o = assess(&["score", &key, "--reader", "human:ada", "--dry-run"]);
+    assert_eq!(field(&o, "accuracy"), "2/2");
+    assert!(stderr(&o).contains("nothing written"), "{}", stderr(&o));
+}

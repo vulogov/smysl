@@ -376,6 +376,8 @@ registry! {
     // `E482` for a time-ordered one (A3) over a scope whose undated share is above the
     // recipe's `undated:max`. N2 brings `E407` with A8: draft 3's, in the library range like
     // `W408`, and raised only by a measure that budgets a scope in two languages by bytes.
+    // N6 brings the two the assessment raises: `W487` for a reader's unit that answers no item
+    // of the key, and `W488` for an item whose question or answer no longer stands.
     Measure => {
         E407 = "SMY-E407", Error, "A byte-counting estimator was refused over a scope in more than one language";
         W408 = "SMY-W408", Warn,  "A measure ran over a lossy text because its recipe admits one";
@@ -385,6 +387,8 @@ registry! {
         W483 = "SMY-W483", Warn,  "A measure was computed but not persisted: its scope has no basis to ground a derived unit";
         E484 = "SMY-E484", Error, "A compression distance was refused: the two texts together exceed the compressor's window";
         W485 = "SMY-W485", Warn,  "A measure was not run: its sample is below the recipe's min:n";
+        W487 = "SMY-W487", Warn,  "A response unit was not scored: it answers no item of the key";
+        W488 = "SMY-W488", Warn,  "A key item drifted: its question or an answer was withdrawn, retracted, superseded or became unfounded";
         E489 = "SMY-E489", Error, "Recipe incompatible: an unknown measure id or version, or inputs that cannot be compared";
     }
 }
@@ -819,9 +823,12 @@ mod tests {
     ///
     /// 112 with `SMY-E407` in TX-P9 N2, where A8 budgets a scope with `smysl/utf8-div4` and
     /// refuses one whose units are drawn from text in more than one language.
+    ///
+    /// 114 with `SMY-W487` and `SMY-W488` in TX-P9 N6, where a score skips a reader's unit
+    /// that answers no item and leaves out an item that drifted after its key was made.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 112);
+        assert_eq!(Code::ALL.len(), 114);
     }
 
     #[test]

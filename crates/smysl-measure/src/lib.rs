@@ -45,6 +45,7 @@ use smysl_core::diag::{Code, Diagnostic};
 use smysl_core::{KernelType, Status, Uid, UnitCore, UnitCoreBuilder};
 use smysl_graph::Store;
 
+pub mod assess;
 pub mod boot;
 pub mod channel;
 pub mod dialogue;
@@ -459,7 +460,7 @@ pub fn to_unit_on(
 
 /// The gist cut to the default profile's bound, at a word, with an ellipsis — the scope is
 /// last, so it is what is cut.
-fn fit(full: &str) -> String {
+pub(crate) fn fit(full: &str) -> String {
     let g = smysl_core::GranularityProfile::default();
     if g.tokens(full).is_some_and(|n| g.gist_within_bound(n)) {
         return full.to_string();

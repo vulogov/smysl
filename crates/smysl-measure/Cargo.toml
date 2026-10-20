@@ -140,3 +140,13 @@ name = "dialogue"
 # sheet. Scripted unless SMYSL_GE_T8_STORE and SMYSL_GE_T8_SHEET are set; the clause is owed.
 [[test]]
 name = "ge_t8"
+
+# TX-P9 N6's exit: keys from a view and a dossier, a reader scored against planted answers,
+# a class id that moves between two states and is kept, and alpha on Krippendorff's example.
+[[test]]
+name = "assess"
+
+# GE-T3's instrument: language against run variance of per-verse unit and class counts.
+# Scripted unless SMYSL_GE_T3 names a table of extraction runs; the measurement is owed.
+[[test]]
+name = "ge_t3"

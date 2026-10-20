@@ -868,6 +868,53 @@ rerunning `measure` over an unchanged library finds every unit already there and
 new, 4 already in the store` — and appends only the run's attestations. A changed text, a
 changed parameter or a new seed is a new unit beside the old one; nothing is overwritten.
 
+#section("assess")
+
+*Assessment keys, reader scores and knowledge states.* Mixed · TX-P9.
+
+An **assessment** asks what a reader got out of a set of texts. `assess key VIEW --policy
+strict` reads a view in the store — one `view` printed, or the one `ask` wrote for a dossier —
+and keys every `question` among its members that something `answers`, and every dossier slot
+that found units; each item records its answers by uid, never by class, and two difficulty
+priors: `d_path`, the shortest walk along `grounds` from an answer to a unit drawn from a span,
+and `d_spans`, the places in the text that walk reaches. The key is a `@data` unit grounded on
+its questions, beside a view of them.
+
+A reader's **responses** are the units the reader attested — `human:<id>` or `model:<id>` —
+with an `answers` edge to an item's question. `assess score KEY --reader human:ada` matches
+each response to the keyed answers by class under the key's policy, and with `--judge
+lexical` also by the nearest answer by BM25 over the whole key (a match, never a `same-as`
+written). It reports accuracy, unanswered items apart from wrong ones, **inflation** (a
+response at a higher status than the answer it matched), **holder change**, and, when the key
+was made with `--scope`, **fabrication**: responses whose class has no member in those texts.
+A reader's unit that answers no item is counted and skipped (`SMY-W487`); an item whose
+question or answer has since been retracted, superseded or become unfounded is left out
+(`SMY-W488`). `assess state` writes the classes the reader reproduced, every member listed,
+and `assess diff A B` compares two states by membership, so a class whose id moved because a
+smaller member joined is **kept**, not lost and gained.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`ACTION`], [positional, required], [`key`, `score`, `state` or `diff`.]),
+    ([`TARGET`], [positional, required], [The view id for `key`; the key unit for `score` and `state`; the first state for `diff`. A unit is a uid, a prefix or a label.]),
+    ([`OTHER`], [positional], [The second state, for `diff`, and only for it.]),
+    ([`--reader`], [`AGENT`], [Whose attested units are the responses. Required by `score` and `state`.]),
+    ([`--policy`], [`POLICY`], [`strict`, `component` or `attested:<n>`. Required by `key` (`SMY-E481`), which records it; `score`, `state` and `diff` use the recorded one unless this names another.]),
+    ([`--scope`], [`SQ`], [The texts fabrication is judged against (`key`), an `sq/1` query resolved when the key is scored.]),
+    ([`--mode`], [`any|all`], [An item is right when any of its answers is matched (the default), or only when all are (`key`).]),
+    ([`--judge`], [`accepted|lexical|anchored`], [What matches beyond the store's own `same-as`: nothing (the default), the nearest answer by BM25, or the library's alignment table.]),
+    ([`--neighbours`], [`K`], [The lexical judge's nearest units per response, 1 by default.]),
+    ([`--dry-run`], [—], [Print the result and write nothing.]),
+    ([`--at`], [`MS`], [The wall clock for the attestations, in milliseconds. Defaults to now.]),
+  ),
+)
+
+The store is `-s`/`--store`, since `diff` takes two positionals. Every unit written carries
+an attestation by `tool:smysl-assess` at rung `computed`. `Mixed` is for `key --generate` and
+`score --judge model`, which SMYSL-2.6 gives a model and this build does not have yet.
+
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix B — Full Diagnostic Code Reference
 // ═══════════════════════════════════════════════════════════════════════

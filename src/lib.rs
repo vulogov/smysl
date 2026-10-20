@@ -435,8 +435,9 @@ mod tests {
         // 108 with `SMY-W408`, `SMY-E480` and `SMY-W485` (TX-P8 M2), raised by T1 and T4.
         // 109 with `SMY-E484` (TX-P8 M3), raised by T6.
         // 111 with `SMY-E481` and `SMY-E482` (TX-P9 N1), raised by A2 and A3; 112 with
-        // `SMY-E407` (TX-P9 N2), raised by A8.
-        assert_eq!(Code::ALL.len(), 112);
+        // `SMY-E407` (TX-P9 N2), raised by A8; 114 with `SMY-W487` and `SMY-W488` (TX-P9
+        // N6), raised by `assess score`.
+        assert_eq!(Code::ALL.len(), 114);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

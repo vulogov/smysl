@@ -98,6 +98,10 @@ fn reproducible(cmd: &Cmd, sub: &ArgMatches) -> Option<bool> {
             // `SMY-E416` is for the refusal of a model-dependent id under `--seed-check`, and is
             // registered with the first id that can be refused.
             "measure" => Some(true),
+            // Mixed for what SMYSL-2.6 §4.4 gives it — `key --generate` writes questions with a
+            // model and `score --judge model` asks one — and pure for what this build has: a
+            // key from a view, the accepted, lexical and anchored judges, and the diff.
+            "assess" => Some(true),
             _ => None,
         },
     }
@@ -177,6 +181,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "q",         about: "Run an sq/1 query; explain it, or seed-check it",      purity: Purity::Mixed, phase: "TX-P6"  , impure_when: Some("a model-dependent plan (~sem, ~hybrid, near), none of which this build lowers") , forms: NO_DOCUMENT },
     Cmd { name: "ask",       about: "Experimental: a dossier for a question; optionally a model's grounded answer", purity: Purity::Mixed, phase: "TX-P8"  , impure_when: Some("--answer, which asks a model to answer from the dossier") , forms: NO_DOCUMENT },
     Cmd { name: "measure",   about: "Text, graph, channel and dialogue measures as derived data units", purity: Purity::Mixed, phase: "TX-P8"  , impure_when: Some("a model-dependent id (T8, D5's embeddings), none of which this build registers") , forms: NO_DOCUMENT },
+    Cmd { name: "assess",    about: "Assessment keys, reader scores and knowledge states",  purity: Purity::Mixed, phase: "TX-P9"  , impure_when: Some("a generated key or a model judge (--generate, --judge model), neither of which this build has") , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -1053,6 +1058,83 @@ fn cli() -> Command {
                     Arg::new("store")
                         .value_name("PATH")
                         .help("Library root"),
+                ),
+            "assess" => sub
+                .arg(
+                    Arg::new("action")
+                        .required(true)
+                        .value_name("ACTION")
+                        .value_parser(["key", "score", "state", "diff"])
+                        .help(
+                            "key a view or dossier, score a reader against a key, write the \
+                             reader's knowledge state, or diff two states",
+                        ),
+                )
+                .arg(
+                    Arg::new("target")
+                        .required(true)
+                        .value_name("TARGET")
+                        .help("The view id for `key`, the key unit for `score` and `state`, the first state for `diff`"),
+                )
+                .arg(
+                    Arg::new("other")
+                        .value_name("OTHER")
+                        .help("The second state, for `diff`"),
+                )
+                .arg(
+                    Arg::new("reader")
+                        .long("reader")
+                        .value_name("AGENT")
+                        .help("The reader whose attested units are the responses (`score`, `state`), such as `human:ada`"),
+                )
+                .arg(
+                    Arg::new("policy")
+                        .long("policy")
+                        .value_name("POLICY")
+                        .help("Proposition classes: strict, component or attested:<n>; required by `key`, and the key's own by default"),
+                )
+                .arg(
+                    Arg::new("scope")
+                        .long("scope")
+                        .value_name("SQ")
+                        .help("The texts a key's fabrication is judged against, an sq query (`key`)"),
+                )
+                .arg(
+                    Arg::new("mode")
+                        .long("mode")
+                        .value_name("MODE")
+                        .value_parser(["any", "all"])
+                        .default_value("any")
+                        .help("Whether an item is answered by any of its answers or needs all (`key`)"),
+                )
+                .arg(
+                    Arg::new("judge")
+                        .long("judge")
+                        .value_name("JUDGE")
+                        .value_parser(["accepted", "lexical", "anchored"])
+                        .default_value("accepted")
+                        .help("What matches a response to an answer beyond the store's same-as (`score`, `state`)"),
+                )
+                .arg(
+                    Arg::new("neighbours")
+                        .long("neighbours")
+                        .value_name("K")
+                        .default_value("1")
+                        .value_parser(clap::value_parser!(usize))
+                        .help("The lexical judge's nearest units per response"),
+                )
+                .arg(
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .help("Print the result and write nothing")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .value_name("MS")
+                        .help("Wall clock for the attestations, in milliseconds")
+                        .value_parser(clap::value_parser!(u64)),
                 ),
             "summarise" => sub
                 .arg(
@@ -6367,6 +6449,405 @@ fn cmd_measure(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
     ExitCode::Usage
 }
 
+/// `smysl assess key|score|state|diff` (SMYSL-2.6 §3.11, TX-P9 N6).
+///
+/// `key` reads a view in the store (`smysl view`, or a dossier's) and writes the key unit and
+/// a view of its questions; `score` and `state` read a key unit and a reader's attested units
+/// and write a score or a state with its view; `diff` reads two states and writes nothing.
+/// Every written unit carries an attestation by `tool:smysl-assess` at rung `computed`, as a
+/// measure does. Rule A: everything here is `smysl::measure::assess`.
+#[cfg(feature = "text")]
+fn cmd_assess(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use smysl::measure::assess::{self as asx, Judge, Key, Mode, State};
+    use smysl::query::{Env, PlanOptions};
+    use smysl::text::library::Library;
+
+    let path = match store_path(m, global, "assess") {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+    let action = m
+        .get_one::<String>("action")
+        .map(String::as_str)
+        .unwrap_or("");
+    let target = m.get_one::<String>("target").cloned().unwrap_or_default();
+    let other = m.get_one::<String>("other");
+    if (action == "diff") != other.is_some() {
+        eprintln!(
+            "smysl assess {action}: {}",
+            if action == "diff" {
+                "diff compares two states; name the second"
+            } else {
+                "one target only; the store is `--store` or `-s`"
+            }
+        );
+        return ExitCode::Usage;
+    }
+    let policy = match m.get_one::<String>("policy") {
+        None => None,
+        Some(raw) => match measure_policy(raw) {
+            Some(p) => Some(p),
+            None => {
+                eprintln!(
+                    "smysl assess: --policy is strict, component or attested:<n>, not `{raw}`"
+                );
+                return ExitCode::Usage;
+            }
+        },
+    };
+    let reader = match (action, m.get_one::<String>("reader")) {
+        ("score" | "state", None) => {
+            eprintln!("smysl assess {action}: --reader names whose responses are scored");
+            return ExitCode::Usage;
+        }
+        (_, Some(raw)) => match AgentId::new(raw.as_str()) {
+            Ok(a) => Some(a),
+            Err(e) => {
+                eprintln!("smysl assess: --reader: {e}");
+                return ExitCode::Usage;
+            }
+        },
+        _ => None,
+    };
+    let dry_run = m.get_flag("dry-run");
+    let json = global.get_flag("json");
+    let root = std::path::Path::new(&path);
+    if !Library::is_library(root) {
+        eprintln!("smysl assess: {path}: not a library (`smysl text add` makes one)");
+        return ExitCode::Usage;
+    }
+    let mut library = match Library::open(root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl assess: {path}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let refused = |r: smysl::measure::Refusal| {
+        eprintln!("smysl assess {action}: {}: {}", r.code.as_str(), r.message);
+        if r.code.severity() == Severity::Warn {
+            ExitCode::Success
+        } else {
+            ExitCode::Failure
+        }
+    };
+    let unit_of = |raw: &str| -> Result<Uid, ExitCode> {
+        resolve(library.store(), raw).map_err(|e| {
+            eprintln!("smysl assess {action}: {e}");
+            e.code
+        })
+    };
+    let table = library.index().align.clone();
+    let judge = match m.get_one::<String>("judge").map(String::as_str) {
+        Some("lexical") => Judge::Lexical(smysl::text::proposition::Lexical {
+            k: *m.get_one::<usize>("neighbours").unwrap_or(&1),
+            adjacent_only: false,
+        }),
+        Some("anchored") => Judge::Anchored(&table),
+        _ => Judge::Accepted,
+    };
+
+    // What is written: units, views, and an attestation per unit.
+    let mut out: Vec<Record> = Vec::new();
+    let mut written: Vec<Uid> = Vec::new();
+    // `--json`: one object, its values already JSON.
+    let mut report: Vec<(&str, String)> = vec![("action", smysl::json_escape(action))];
+    let push_unit = |out: &mut Vec<Record>, written: &mut Vec<Uid>, core: smysl::UnitCore| {
+        let uid = smysl::canonical_uid(&core);
+        written.push(uid);
+        out.push(Record::Unit(core));
+        uid
+    };
+    let view_id = |kind: &str, uid: &Uid| {
+        let c = uid.canonical();
+        let tail: String = c.trim_start_matches("b3:").chars().take(16).collect();
+        ViewId::new(format!("v/{kind}-{tail}"))
+    };
+
+    match action {
+        "key" => {
+            let Some(view) = library
+                .store()
+                .views()
+                .find(|v| v.id.as_str() == target)
+                .cloned()
+            else {
+                eprintln!("smysl assess key: no view `{target}` in {path}");
+                return ExitCode::Failure;
+            };
+            let Some(policy) = policy else {
+                return refused(smysl::measure::Refusal::new(
+                    Code::E481,
+                    "a key records the class policy it is scored under; give --policy",
+                ));
+            };
+            let mode = m
+                .get_one::<String>("mode")
+                .and_then(|s| Mode::parse(s))
+                .unwrap_or_default();
+            let scope = m.get_one::<String>("scope").cloned().unwrap_or_default();
+            let key = match asx::key_from_view(library.store(), &view, policy, &scope, mode) {
+                Ok(k) => k,
+                Err(r) => return refused(r),
+            };
+            let core = match key.to_unit() {
+                Ok(c) => c,
+                Err(r) => return refused(r),
+            };
+            let uid = push_unit(&mut out, &mut written, core);
+            match view_id("key", &uid) {
+                Ok(id) => out.push(Record::View(key.as_view(id))),
+                Err(e) => {
+                    eprintln!("smysl assess key: {e}");
+                    return ExitCode::Failure;
+                }
+            }
+            if !json {
+                println!(
+                    "key {}  {} item(s) from {}",
+                    uid.canonical(),
+                    key.items.len(),
+                    key.view
+                );
+                for i in &key.items {
+                    println!(
+                        "  {}  {} answer(s), d_path {}, d_spans {}",
+                        i.q.canonical(),
+                        i.answers.len(),
+                        i.d_path.map_or("-".to_string(), |d| d.to_string()),
+                        i.d_spans
+                    );
+                }
+            }
+            report.push(("key", smysl::json_escape(&uid.canonical())));
+            report.push(("items", key.items.len().to_string()));
+        }
+        "score" | "state" => {
+            let key_uid = match unit_of(&target) {
+                Ok(u) => u,
+                Err(code) => return code,
+            };
+            let key = match Key::from_unit(library.store(), &key_uid) {
+                Ok(k) => k,
+                Err(r) => return refused(r),
+            };
+            let reader = reader.expect("checked above");
+            if action == "score" {
+                let scope: Option<std::collections::BTreeSet<Uid>> = if key.scope.is_empty() {
+                    None
+                } else {
+                    let name = root
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| path.clone());
+                    let ls = smysl::text::scope::LibraryScope::new(name, &library);
+                    let env = Env::new(library.store(), &ls)
+                        .with_times(&ls)
+                        .with_entities(&ls);
+                    match smysl::measure::resolve(&key.scope, &env, &PlanOptions::default()) {
+                        Ok(r) => Some(r.uids),
+                        Err(ds) => {
+                            for d in ds {
+                                eprintln!("smysl assess score: {}: {}", d.code.as_str(), d.message);
+                            }
+                            return ExitCode::Failure;
+                        }
+                    }
+                };
+                let sc = match asx::score(
+                    library.store(),
+                    &key,
+                    &reader,
+                    policy,
+                    &judge,
+                    scope.as_ref(),
+                ) {
+                    Ok(s) => s,
+                    Err(r) => return refused(r),
+                };
+                for d in &sc.diagnostics {
+                    eprintln!("smysl assess score: {}: {}", d.code.as_str(), d.message);
+                }
+                let core = match sc.to_unit(&key_uid) {
+                    Ok(c) => c,
+                    Err(r) => return refused(r),
+                };
+                let uid = push_unit(&mut out, &mut written, core);
+                let r = |(n, d): (u64, u64)| format!("{n}/{d}");
+                if !json {
+                    println!(
+                        "score {}  {} under {}, judge {}",
+                        uid.canonical(),
+                        reader.as_str(),
+                        sc.policy,
+                        sc.judge
+                    );
+                    println!("  accuracy     {}", r(sc.accuracy));
+                    println!("  unanswered   {}", sc.unanswered);
+                    println!("  wrong        {}", sc.wrong);
+                    println!("  inflation    {}", r(sc.inflation));
+                    println!("  holder       {}", r(sc.holder));
+                    if let Some(f) = sc.fabrication {
+                        println!("  fabrication  {}", r(f));
+                    }
+                    println!("  unscorable   {}", sc.unscorable);
+                    println!("  drifted      {}", sc.drifted);
+                }
+                report.push(("score", smysl::json_escape(&uid.canonical())));
+                report.push(("judge", smysl::json_escape(sc.judge)));
+                report.push(("accuracy", smysl::json_escape(&r(sc.accuracy))));
+                report.push(("unanswered", sc.unanswered.to_string()));
+                report.push(("wrong", sc.wrong.to_string()));
+                report.push(("inflation", smysl::json_escape(&r(sc.inflation))));
+                report.push(("holder", smysl::json_escape(&r(sc.holder))));
+                report.push((
+                    "fabrication",
+                    sc.fabrication
+                        .map_or("null".to_string(), |f| smysl::json_escape(&r(f))),
+                ));
+                report.push(("unscorable", sc.unscorable.to_string()));
+                report.push(("drifted", sc.drifted.to_string()));
+            } else {
+                let st = match asx::state(library.store(), &key, &key_uid, &reader, policy, &judge)
+                {
+                    Ok(s) => s,
+                    Err(r) => return refused(r),
+                };
+                let core = match st.to_unit() {
+                    Ok(c) => c,
+                    Err(r) => return refused(r),
+                };
+                let uid = push_unit(&mut out, &mut written, core);
+                match view_id("state", &uid) {
+                    Ok(id) => out.push(Record::View(st.as_view(id))),
+                    Err(e) => {
+                        eprintln!("smysl assess state: {e}");
+                        return ExitCode::Failure;
+                    }
+                }
+                if !json {
+                    println!(
+                        "state {}  {}: {} class(es) reproduced",
+                        uid.canonical(),
+                        reader.as_str(),
+                        st.classes.len()
+                    );
+                    for c in &st.classes {
+                        println!("  {}  {} member(s)", c[0].canonical(), c.len());
+                    }
+                }
+                report.push(("state", smysl::json_escape(&uid.canonical())));
+                report.push(("classes", st.classes.len().to_string()));
+            }
+        }
+        _ => {
+            let (a, b) = match (unit_of(&target), unit_of(other.expect("checked above"))) {
+                (Ok(a), Ok(b)) => (a, b),
+                (Err(code), _) | (_, Err(code)) => return code,
+            };
+            let (sa, sb) = match (
+                State::from_unit(library.store(), &a),
+                State::from_unit(library.store(), &b),
+            ) {
+                (Ok(x), Ok(y)) => (x, y),
+                (Err(r), _) | (_, Err(r)) => return refused(r),
+            };
+            let policy = match policy {
+                Some(p) => p,
+                None if sa.policy == sb.policy => sa.policy,
+                None => {
+                    return refused(smysl::measure::Refusal::new(
+                        Code::E489,
+                        format!(
+                            "the states were taken under {} and {}; name the policy to compare them under",
+                            sa.policy, sb.policy
+                        ),
+                    ))
+                }
+            };
+            let d = match asx::diff(library.store(), &sa, &sb, policy) {
+                Ok(d) => d,
+                Err(r) => return refused(r),
+            };
+            if !json {
+                println!("diff under {policy}");
+                for (k, v) in [
+                    ("kept", d.kept),
+                    ("gained", d.gained),
+                    ("lost", d.lost),
+                    ("split", d.split),
+                    ("merged", d.merged),
+                    ("rose", d.rose),
+                    ("fell", d.fell),
+                ] {
+                    println!("  {k:<7}{v}");
+                }
+            }
+            for (k, v) in [
+                ("kept", d.kept),
+                ("gained", d.gained),
+                ("lost", d.lost),
+                ("split", d.split),
+                ("merged", d.merged),
+                ("rose", d.rose),
+                ("fell", d.fell),
+            ] {
+                report.push((k, v.to_string()));
+            }
+        }
+    }
+    if json {
+        let fields: Vec<String> = report
+            .iter()
+            .map(|(k, v)| format!("{}:{v}", smysl::json_escape(k)))
+            .collect();
+        println!("{{{}}}", fields.join(","));
+    }
+    if dry_run || written.is_empty() {
+        if dry_run {
+            eprintln!("smysl assess {action}: --dry-run: nothing written");
+        }
+        return ExitCode::Success;
+    }
+    let agent = match AgentId::new("tool:smysl-assess") {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl assess: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let at = m.get_one::<u64>("at").copied().unwrap_or_else(now_millis);
+    let present = written
+        .iter()
+        .filter(|u| library.store().get(u).is_some())
+        .count();
+    for uid in &written {
+        out.push(Record::Attestation(smysl::Attestation::new(
+            *uid,
+            agent.clone(),
+            smysl::Op::Transformed,
+            smysl::Rung::Computed,
+            Hlc::new(at, 0, agent.clone()),
+        )));
+    }
+    if let Err(e) = library.append_records(&out) {
+        eprintln!("smysl assess: {path}: {e}");
+        return ExitCode::Failure;
+    }
+    eprintln!(
+        "smysl assess {action}: {} unit(s): {} new, {present} already in the store",
+        written.len(),
+        written.len() - present
+    );
+    ExitCode::Success
+}
+
+#[cfg(not(feature = "text"))]
+fn cmd_assess(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl assess: an assessment reads a library, and this build has no `text` feature");
+    ExitCode::Usage
+}
+
 /// `ask --answer`: the model's turn, after the dossier is in the store.
 ///
 /// The members are the thread's steps less its gaps — a gap's unit is a saved query, whose gist
@@ -8824,6 +9305,7 @@ fn main() -> ProcExitCode {
         "q" => cmd_q(sub, &matches),
         "ask" => cmd_ask(sub, &matches),
         "measure" => cmd_measure(sub, &matches),
+        "assess" => cmd_assess(sub, &matches),
         _ => {
             // Unreachable while every command in `COMMANDS` has an arm above, which
             // `command_table_matches_section_23` enforces. Kept as the honest answer if one
@@ -10986,7 +11468,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 34);
+        assert_eq!(COMMANDS.len(), 35);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -11024,7 +11506,8 @@ mod tests {
                 "summarise",
                 "q",
                 "ask",
-                "measure"
+                "measure",
+                "assess"
             ]
         );
     }
@@ -11058,7 +11541,7 @@ mod tests {
             .collect();
         assert_eq!(
             mixed,
-            ["pack", "thread", "find", "link", "q", "ask", "measure"],
+            ["pack", "thread", "find", "link", "q", "ask", "measure", "assess"],
             "a command is mixed when some invocation of it calls a model"
         );
 
@@ -11090,7 +11573,9 @@ mod tests {
     /// this test rather than shipping a flag that answers "I cannot say".
     #[test]
     fn seed_check_can_judge_every_mixed_command() {
-        let judged = ["find", "pack", "thread", "link", "q", "ask", "measure"];
+        let judged = [
+            "find", "pack", "thread", "link", "q", "ask", "measure", "assess",
+        ];
         for c in COMMANDS.iter().filter(|c| c.purity == Purity::Mixed) {
             assert!(
                 judged.contains(&c.name),

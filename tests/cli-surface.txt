@@ -767,3 +767,31 @@ measure    --dry-run
 measure    --seed-check
 measure    --at
 measure    --help
+assess     <ACTION>
+assess     [possible values: key, score, state, diff]
+assess     <TARGET>
+assess     [OTHER]
+assess     --config
+assess     --reader
+assess     --policy
+assess     --store
+assess     --output
+assess     --scope
+assess     --format
+assess     [possible values: surface, cbor]
+assess     --mode
+assess     [possible values: any, all]
+assess     --judge
+assess     [possible values: accepted, lexical, anchored]
+assess     --strict
+assess     --neighbours
+assess     --offline
+assess     --dry-run
+assess     --no-color
+assess     --at
+assess     --noprogress
+assess     --json
+assess     --quiet
+assess     --verbose
+assess     --seed-check
+assess     --help

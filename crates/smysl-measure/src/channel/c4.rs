@@ -11,6 +11,7 @@
 use std::collections::BTreeMap;
 
 use smysl_core::Uid;
+use smysl_graph::proposition::Policy;
 use smysl_graph::Store;
 
 use crate::channel;
@@ -23,14 +24,14 @@ pub struct C4;
 
 /// Who holds a unit's claim.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum Holder {
+pub(crate) enum Holder {
     Text,
     Entity(Uid),
     /// A `text:holder` that is neither `text` nor a uid, compared as written.
     Other(String),
 }
 
-fn holder_of(store: &Store, uid: &Uid) -> Holder {
+pub(crate) fn holder_of(store: &Store, uid: &Uid) -> Holder {
     match text_field(store, uid, "text:holder") {
         None => Holder::Text,
         Some(h) if h == "text" => Holder::Text,
@@ -38,6 +39,60 @@ fn holder_of(store: &Store, uid: &Uid) -> Holder {
             Ok(u) => Holder::Entity(u),
             Err(_) => Holder::Other(h),
         },
+    }
+}
+
+/// How the holders of `(target, source)` pairs changed, entities compared by class.
+pub(crate) struct Changes {
+    pub changed: u64,
+    pub gained: u64,
+    pub lost: u64,
+    pub moved: u64,
+    /// The distinct entities holding either side.
+    pub holders: u64,
+}
+
+/// [`Changes`] over `pairs`, each `(target, source)`, entity holders compared by their class
+/// under `policy` (K3 reads holder fidelity through this too).
+pub(crate) fn changes(store: &Store, policy: Policy, pairs: &[(Uid, Uid)]) -> Changes {
+    let held: Vec<(Holder, Holder)> = pairs
+        .iter()
+        .map(|(t, s)| (holder_of(store, s), holder_of(store, t)))
+        .collect();
+    let mut entities: Vec<Uid> = held
+        .iter()
+        .flat_map(|(a, b)| [a, b])
+        .filter_map(|h| match h {
+            Holder::Entity(u) => Some(*u),
+            _ => None,
+        })
+        .collect();
+    entities.sort();
+    entities.dedup();
+    let class: BTreeMap<Uid, Uid> = redundancy::class_of(store, policy, &entities);
+    let canon = |h: &Holder| match h {
+        Holder::Entity(u) => Holder::Entity(class.get(u).copied().unwrap_or(*u)),
+        other => other.clone(),
+    };
+    let (mut changed, mut gained, mut lost, mut moved) = (0u64, 0u64, 0u64, 0u64);
+    for (s, t) in &held {
+        let (s, t) = (canon(s), canon(t));
+        if s == t {
+            continue;
+        }
+        changed += 1;
+        match (&s, &t) {
+            (Holder::Text, _) => gained += 1,
+            (_, Holder::Text) => lost += 1,
+            _ => moved += 1,
+        }
+    }
+    Changes {
+        changed,
+        gained,
+        lost,
+        moved,
+        holders: entities.len() as u64,
     }
 }
 
@@ -73,48 +128,16 @@ impl Measure for C4 {
             Ok(x) => x,
             Err(r) => return Outcome::refused(r),
         };
-        let store = input.store;
-        let held: Vec<(Holder, Holder)> = pairs
-            .iter()
-            .map(|(t, s)| (holder_of(store, s), holder_of(store, t)))
-            .collect();
-        let mut entities: Vec<Uid> = held
-            .iter()
-            .flat_map(|(a, b)| [a, b])
-            .filter_map(|h| match h {
-                Holder::Entity(u) => Some(*u),
-                _ => None,
-            })
-            .collect();
-        entities.sort();
-        entities.dedup();
-        let class: BTreeMap<Uid, Uid> = redundancy::class_of(store, policy, &entities);
-        let canon = |h: &Holder| match h {
-            Holder::Entity(u) => Holder::Entity(class.get(u).copied().unwrap_or(*u)),
-            other => other.clone(),
-        };
-        let (mut changed, mut gained, mut lost, mut moved) = (0u64, 0u64, 0u64, 0u64);
-        for (s, t) in &held {
-            let (s, t) = (canon(s), canon(t));
-            if s == t {
-                continue;
-            }
-            changed += 1;
-            match (&s, &t) {
-                (Holder::Text, _) => gained += 1,
-                (_, Holder::Text) => lost += 1,
-                _ => moved += 1,
-            }
-        }
+        let h = changes(input.store, policy, &pairs);
         let n = pairs.len() as u64;
         Outcome::Value(
             Value::new()
                 .with_n("pairs", n)
-                .with_n("holders", entities.len() as u64)
-                .with_value("holder:changed", Num::Ratio(changed, n))
-                .with_value("holder:gained", Num::Count(gained))
-                .with_value("holder:lost", Num::Count(lost))
-                .with_value("holder:moved", Num::Count(moved))
+                .with_n("holders", h.holders)
+                .with_value("holder:changed", Num::Ratio(h.changed, n))
+                .with_value("holder:gained", Num::Count(h.gained))
+                .with_value("holder:lost", Num::Count(h.lost))
+                .with_value("holder:moved", Num::Count(h.moved))
                 .with_headline_in("holder:changed", "holder changed", ""),
         )
     }
