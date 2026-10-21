@@ -436,8 +436,9 @@ mod tests {
         // 109 with `SMY-E484` (TX-P8 M3), raised by T6.
         // 111 with `SMY-E481` and `SMY-E482` (TX-P9 N1), raised by A2 and A3; 112 with
         // `SMY-E407` (TX-P9 N2), raised by A8; 114 with `SMY-W487` and `SMY-W488` (TX-P9
-        // N6), raised by `assess score`.
-        assert_eq!(Code::ALL.len(), 114);
+        // N6), raised by `assess score`; 118 with `SMY-W425`, `SMY-W490`, `SMY-W495` and
+        // `SMY-W497` (TX-P11 step 2), raised by `smysl-lib`'s exporter.
+        assert_eq!(Code::ALL.len(), 118);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

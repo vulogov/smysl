@@ -929,7 +929,7 @@ Steps 1–4 do not need either and can start once TX-P0 has landed.
 | # | work | needs | exit test |
 |---|---|---|---|
 | 1 | §4.3 prerequisites: `Subject::Record`, `has_surface_form` (+ `cmd_merge` uses it), `contains_record`, `record_hash`, `pending_attestations` | TX-P0 (`record_set_digest`) | `merge F13 --format surface` reports 0 omitted; existing suite green; `public-api*.txt` updated — **done 2026-10-21**, below |
-| 2 | `smysl-lib` skeleton; `export_store` with `select`, `closure` (fixpoint), `write` (canonical), layouts `single`/`by-view`, `full` | 1 | §5.1 select tests; F1–F13 single-layout exports, in-memory P1 against `rsd(X)` |
+| 2 | `smysl-lib` skeleton; `export_store` with `select`, `closure` (fixpoint), `write` (canonical), layouts `single`/`by-view`, `full` | 1 | §5.1 select tests; F1–F13 single-layout exports, in-memory P1 against `rsd(X)` — **done 2026-10-21**, below |
 | 3 | `index`, `verify` (file checks, P1, P3), `ref` mode, duplication factor | 2 | `verify` passes on F1–F13 × {single, by-view} × {full, ref}; a flipped byte gives exit 9 |
 | 4 | import: decode, classify, CBOR staging, quarantine, waiting, tables (CBOR fallback), manifest (without mid until TX-P1 → placeholder hash of the body, replaced by `mid`), `accept`/`discard`/`status` | 3 | idempotence and commutativity property tests; F6 quarantine test; early-attestation promotion test |
 | 5 | CLI `lib` group, global `--format` change, dispatch and cli-surface tests | 4 | `tests/dispatch.rs` with 27 commands; `lib export … && lib verify` exits 0 on F1–F13 |
@@ -969,6 +969,80 @@ commitment over-count this step was first written for. One finding:
   `tests/cmd_merge.rs` now asserts none omitted on all three and that every `@commit`,
   `@manifest`, `@redact` and `@date` comes back. A second list drifted from the writer a third
   time, which is the case for §4.3's one predicate.
+
+*Step 2, done 2026-10-21.* Crate `smysl-lib`, registered as pure and unpublished. It depends on
+`smysl-core`, `smysl-graph` and `blake3`, and on nothing from §4.1's list that step 2 does not
+read: `smysl-check`, `smysl-text` and `smysl-query` arrive with import, manifests and `sq`.
+
+- **API.** `export_store(&Store, &Selection, &ExportOptions) -> Result<Collection, LibError>`.
+  - `Selection::all` or `Selection::of` stands in for the `sq` scope until step 8.
+  - `Layout` is `Single` or `ByView`, `Closure` is `Full`, and `With` covers `views` and
+    `packs`. `UnknownRecords` is `Include` or `Drop`. Every enum and options struct is
+    `#[non_exhaustive]`, so the later steps add to them.
+  - A `Collection` holds its files sorted by path, `rsd` (that is `rsd(X)`), the duplication
+    factor's two terms, and a `Report`. The free function `slug` is §3.4's.
+  - `LibError` has one variant, a selected uid the store does not hold.
+- **Codes.** `SMY-W425`, `W490`, `W495` and `W497` are registered in a twelfth group, `Export`,
+  with the code that raises them (118 codes).
+- **`by-view`, made exact.** A unit's key is the least corpus view id, in byte order, whose
+  membership (roots closed along `deps` and `grounds`) holds it. A unit in no view goes to
+  `unkeyed`. `export/` views are never keys. Each unit is a root of exactly one file.
+- **Rows 14, 17 and 19 as written, ahead of steps 6 and 7.** The types exist in this tree, so a
+  table that skipped them would lose them.
+  - A manifest travels when an included unit's `source` names its mid.
+  - A dating travels when its target is included. A part target counts when an included
+    unit's `source.reference` names that part.
+  - A redaction travels with any part an included unit references.
+  - A dating's `basis` and a redaction's `reason` join the annotation pull-in, and the
+    datings' dids count for rows 11 and 13.
+  - Records 15 and 18 are not selected until step 6 brings `--with-text`. That is the rule,
+    not a loss.
+- **The generated view's `lang`** counts only the selected units that name a language. If they
+  all name one, the view takes it; if they name several, `mul`; if none names any, `und`.
+- **Duplication** counts selected records and leaves generated views out of both terms. Every
+  file has its own view, so counting them would only add one to each side.
+
+The exit test asks that, with every unit selected, nothing is lost but what W490 counts. Over F1–F13
+and F14 under both layouts, that found three places where §3.6's table is not complete. Each
+is now completed in `select.rs`:
+
+1. **Row 8 misses a declaration that lists neither a type nor a kind.** F11's `x.code/v1`
+   declares nothing; its units use it through payload keys (`"code:kind"`), and §5.1's own
+   "F11's declaration travels" failed. A declaration now also travels with a unit whose
+   payload has a key prefixed by the schema's domain (`code` for `x.code/…`). That is the one
+   link the format makes between a payload and a schema. §5 of the format spec lists
+   `meta:` keys under `x.text/v1`, so it is not complete, and a payload-only schema outside
+   its own domain still needs a view's `requires`.
+2. **Row 12 misses a resolution of a detected contention.** Merge detects contentions and never
+   records them (§2.2), so "a contention id of an included contention" never matched a
+   resolution of a detected one. Detection over the snapshot now counts. A detected
+   contention whose `over` is in the file has its positions pulled in, as a recorded one's
+   are, so the recipient derives the same id.
+3. **"Exported as they are" had no file to go to.** F10 resolves `k/ccm3…`, which its store
+   neither records nor detects (no thread holds the rebuttals). Row 12 dropped it silently,
+   and §3.6's sentence on records dangling at source says they travel. A record whose
+   target the snapshot does not hold at all is an attestation, binding, withdrawal,
+   resolution, commitment, contention, dating or relation naming nothing held. No key owns
+   it, so it now goes into **every** keyed file and is counted once (`W495`). A relation
+   with one missing end goes where its held end goes. Step 3's `ref` mode will give each
+   one owner, the lowest path.
+
+The test is `crates/smysl-lib/tests/export.rs`, 15 tests:
+- **§5.1's select rows.** These include §2.3's reproductions: F13's four commitments, F11's and
+  F12's declarations, an edge attestation, the annotation pull-in, a withdrawn relation with its
+  withdrawal, two weights of one edge, and `Unknown { 42 }` against `Unknown { 9 }`.
+- **Rules L and R.**
+- **A thread left out and counted.**
+- **A refused selection.**
+- **Byte-identical files over 50 seeded shuffles of every fixture's log.**
+- **The exit.** Over F1–F13 and F14 under `single` and `by-view`, it checks:
+  - P1, with `Store::from_records` of the files standing in for an import into an empty
+    library until step 4;
+  - each file's `rsd` against its decoded bytes;
+  - each file's name against its view id;
+  - and that, with every unit selected, a record is lost only as W490 counts.
+
+`layout.rs`'s unit tests are §5.1's slug table. Every generated id passes `ViewId::new`.
 
 ---
 

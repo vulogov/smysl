@@ -1837,6 +1837,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "smysl-lib"
+version = "1.10.0"
+dependencies = [
+ "blake3",
+ "smysl-core",
+ "smysl-graph",
+]
+
+[[package]]
 name = "smysl-measure"
 version = "1.10.0"
 dependencies = [

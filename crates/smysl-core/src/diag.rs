@@ -180,7 +180,7 @@ macro_rules! registry {
 }
 
 registry! {
-    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library, Query, Measure }
+    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library, Query, Measure, Export }
 
     // --- Parse and encoding ------------------------------------------------
     Parse => {
@@ -390,6 +390,21 @@ registry! {
         W487 = "SMY-W487", Warn,  "A response unit was not scored: it answers no item of the key";
         W488 = "SMY-W488", Warn,  "A key item drifted: its question or an answer was withdrawn, retracted, superseded or became unfounded";
         E489 = "SMY-E489", Error, "Recipe incompatible: an unknown measure id or version, or inputs that cannot be compared";
+    }
+
+    // --- Export (RFC SMYSL-2.7 §8), in a twelfth group ------------------------------------------
+    //
+    // On the library block's rule: registered with the code that raises them. TX-P11 step 2
+    // builds `smysl-lib`'s exporter, which can leave a record out because what it names is not
+    // all in the file (`W490`), export records naming uids the source store does not hold
+    // (`W495`), and give a generated view id a hash suffix (`W497`). `W425` is SMYSL-2.0's,
+    // raised only by export, so it sits here. The rest arrive with import (`E493`, `W496`),
+    // the index (`E494`), `--as-of` (`W498`) and `--target-revision` (`W491`, `E492`).
+    Export => {
+        W425 = "SMY-W425", Warn,  "Unknown records were exported to unattributed.cbor, or dropped with --unknown drop; counted";
+        W490 = "SMY-W490", Warn,  "A record was left out of an export file: the records it names are not all in it; counted";
+        W495 = "SMY-W495", Warn,  "Exported records reference uids the source store does not hold; counted";
+        W497 = "SMY-W497", Warn,  "A layout key is not a view-id segment, or two keys collide; the generated id has a hash suffix";
     }
 }
 
@@ -847,9 +862,12 @@ mod tests {
     ///
     /// 114 with `SMY-W487` and `SMY-W488` in TX-P9 N6, where a score skips a reader's unit
     /// that answers no item and leaves out an item that drifted after its key was made.
+    ///
+    /// 118 with `SMY-W425`, `SMY-W490`, `SMY-W495` and `SMY-W497` in TX-P11 step 2, raised by
+    /// `smysl-lib`'s exporter, in a twelfth group.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 114);
+        assert_eq!(Code::ALL.len(), 118);
     }
 
     #[test]
@@ -860,7 +878,7 @@ mod tests {
                 "group {g} has no codes"
             );
         }
-        assert_eq!(Group::ALL.len(), 11);
+        assert_eq!(Group::ALL.len(), 12);
     }
 
     #[test]

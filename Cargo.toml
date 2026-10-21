@@ -32,6 +32,7 @@ smysl-tui      = { path = "crates/smysl-tui",      version = "1.10.0" }
 smysl-text     = { path = "crates/smysl-text",     version = "1.10.0" }
 smysl-query    = { path = "crates/smysl-query",    version = "1.10.0" }
 smysl-measure  = { path = "crates/smysl-measure",  version = "1.10.0" }
+smysl-lib      = { path = "crates/smysl-lib",      version = "1.10.0" }
 
 # `pure` keeps the C SIMD backend out of the build: zero C in the core path (§13).
 blake3                = { version = "1", default-features = false, features = ["std", "pure"] }
