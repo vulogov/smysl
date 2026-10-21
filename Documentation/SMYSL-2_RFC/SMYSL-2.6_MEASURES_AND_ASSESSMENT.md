@@ -1012,6 +1012,12 @@ Generated in-test from a fixed seed with the crate's own generator, so fixtures 
   per language and none in the Russian and Spanish, so its "genres" are four there — and the
   windows of a book only just longer than one overlap almost entirely, which makes the window
   variance a floor. The run takes 51 s on 16 cores in release.
+- *As built (TX-P9 N7): the A8 arm.* `crates/smysl-measure/tests/ge_t6_a8.rs`, `--ignored`,
+  with `SMYSL_GE_T6_A8=<dir>` naming `<edition>/<run>/store.smysl`, five runs of each Bible
+  extracted book by book; the report is `fixtures/measure/ge-t6-a8.tsv`. A book's value is A8's
+  area over the units drawn from its text, the median of its runs; the noise is the run
+  variance. Measured 2026-10-20: **A8 is kept in all five languages** (H 19.4–28.3, p ≤
+  0.0005), and kept still without the 43 books a run's window was cut off in.
 
 ### 5.5 GE-T3, GE-T8, GE-T9 (measure side)
 
@@ -1203,7 +1209,7 @@ mode, speaker; the effective-time index (TX-P3) for A3/A10/D*.
 | N4 | channel binding, C1–C5 | §5.2 channel tests; C1–C4 on the KJV/Synodal Psalms fixture reported — **done 2026-10-19**, below |
 | N5 | D1–D6 (D5 lexical) | §5.2 dialogue tests; **GE-T8** — **done 2026-10-19**, below; GE-T8's instrument built, its measurement owed |
 | N6 | `assess key|score|state|diff`, α | §5.2 assessment tests; **GE-T3**; GE-T9 α reported — **done 2026-10-20**, below; GE-T3 measured 2026-10-20 (language > run), GE-T9's human α owed |
-| N7 | A8 across genres | **GE-T6** complete (A8 arm), with GE-T2's runs — **built 2026-10-20**, below; the A8 arm's instrument built and its runs owed |
+| N7 | A8 across genres | **GE-T6** complete (A8 arm), with GE-T2's runs — **done 2026-10-20**, below; A8 kept in 5 of 5 languages |
 
 TX-P9's draft-3 exit tests are GE-T3 and GE-T6; both are listed above.
 
@@ -1518,11 +1524,42 @@ books'. Two findings:
   with each part a fraction. A genre median of A8 is therefore not a share of anything, and the
   report says so by giving the area and not a percentage.
 
-**Owed, and why.** **GE-T6's A8 arm** is owed with its runs: the harness, the report
-(`fixtures/measure/ge-t6-a8.tsv`, under `SMYSL_BLESS=1`) and the verdict are built, and what
-is owed is the extraction. With it, TX-P9's two draft-3 exit tests, GE-T3 and GE-T6, are both
-built; GE-T3 is measured (above) and GE-T6's A8 arm owes its runs; every step's own exit test
-is met.
+**GE-T6's A8 arm, measured 2026-10-20.** GE-T1's five Bibles, five runs each through
+`deepseek-chat` at temperature 0, each run one library with every book its own text
+`bible/<nn>-<code>`, ingested with `--window-level chapter` under a 16,384-token context
+window: 1,650 book-runs, 94.8M tokens in and 26.9M out. Per edition:
+
+| edition | books | H | ε² | p | between MS | within MS | run variance | against |
+|---|---|---|---|---|---|---|---|---|
+| deu1912 | 62 | 19.43 | 0.319 | 0.0005 | 0.04998 | 0.02182 | 0.00607 | no |
+| eng-kjv | 61 | 27.09 | 0.452 | 0.0001 | 0.01324 | 0.00968 | 0.00020 | no |
+| fraLSG | 62 | 25.32 | 0.415 | 0.0001 | 0.00271 | 0.00033 | 0.00144 | no |
+| russyn | 62 | 28.30 | 0.464 | 0.0001 | 0.00907 | 0.00306 | 0.00335 | no |
+| spaRV1909 | 61 | 28.07 | 0.468 | 0.0001 | 0.00359 | 0.00040 | 0.00019 | no |
+
+**A8 is kept**, 0 of 5 languages against. Epistles and prophecy have the higher areas in every
+edition, and law, narrative and poetry the lower. `ge_t6_a8_measured` re-reads the verdict from the
+report on every run. Three findings:
+
+- **A first set of runs read A8 dropped, and it was the output limit.** With the default verse
+  leaves and a 32,768-token window — windows of about 15,000 tokens — 564 of 1,650 book-runs had
+  an answer cut off at the model's 8,192-token output limit (`SMY-W304`), 91 losing every
+  window; that set read A8 against in 4 of 5 languages, with the run variance the
+  truncation's. Chapter windows answer more sparsely (Lamentations: 2,415 output tokens where
+  verse leaves overran 8,192 twice) and the smaller window keeps a long book's windows under
+  the limit; together they leave 67 book-runs cut off, in 43 books, and 2 with nothing
+  extracted. A cut-off window degrades to a unit with no source, which is in no book, so the
+  store cannot say a book lost one: `SMYSL_GE_T6_A8_CUT` takes the books the logs list, and
+  without them A8 is kept in all five still (50–58 books, p ≤ 0.0032).
+- **The harness dropped a book no run extracted without listing it**, because it took the
+  books from the units found; it now takes them from the texts each run holds, so English Amos
+  in the first set was listed and not lost.
+- **The recipe does not record the context window.** The 16,384- and 32,768-token runs at
+  chapter level have one recipe id, though their windows differ; `--window-level` does change
+  it. The window budget is a property of the extraction the recipe does not yet carry.
+
+With it, TX-P9's two draft-3 exit tests, GE-T3 and GE-T6, are both measured, and every step's
+own exit test is met; GE-T8's measurement and GE-T9's human α stay owed.
 
 ---
 

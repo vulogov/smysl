@@ -1,0 +1,85 @@
+# GE-T6's A8 arm (SMYSL-2.6 §5.4): A8's area across the Bible's genres, per edition.
+# Written by crates/smysl-measure/tests/ge_t6_a8.rs under SMYSL_BLESS=1 with
+# SMYSL_GE_T6_A8 naming the extraction runs. The noise is the variance across runs.
+# edition	measure	key	value
+deu1912	A8	runs	5
+deu1912	A8	books	62
+deu1912	A8	genres	5
+deu1912	A8	excluded	1CH(unlabelled) 2CH(unlabelled) EZR(unlabelled) NEH(unlabelled)
+deu1912	A8	H	19.4303
+deu1912	A8	epsilon2	0.3185
+deu1912	A8	p	0.0005
+deu1912	A8	ms:between	0.049983
+deu1912	A8	ms:within	0.021822
+deu1912	A8	var:run	0.006067
+deu1912	A8	against	false
+deu1912	A8	median:epistle	0.6537 [0.6336, 0.6627] n=21
+deu1912	A8	median:law	0.6115 [0.6074, 0.6138] n=4
+deu1912	A8	median:narrative	0.6079 [0.6036, 0.6139] n=14
+deu1912	A8	median:poetry	0.6099 [0.5823, 0.6556] n=5
+deu1912	A8	median:prophecy	0.6385 [0.6238, 0.6506] n=18
+eng-kjv	A8	runs	5
+eng-kjv	A8	books	61
+eng-kjv	A8	genres	5
+eng-kjv	A8	excluded	1CH(unlabelled) 2CH(unlabelled) EPH(none in run 2) EZR(unlabelled) NEH(unlabelled)
+eng-kjv	A8	H	27.0918
+eng-kjv	A8	epsilon2	0.4515
+eng-kjv	A8	p	0.0001
+eng-kjv	A8	ms:between	0.013238
+eng-kjv	A8	ms:within	0.009684
+eng-kjv	A8	var:run	0.000199
+eng-kjv	A8	against	false
+eng-kjv	A8	median:epistle	0.6479 [0.6294, 0.6739] n=20
+eng-kjv	A8	median:law	0.6148 [0.6125, 0.6176] n=4
+eng-kjv	A8	median:narrative	0.6121 [0.6105, 0.6176] n=14
+eng-kjv	A8	median:poetry	0.6198 [0.6129, 0.6375] n=5
+eng-kjv	A8	median:prophecy	0.6377 [0.6276, 0.6570] n=18
+fraLSG	A8	runs	5
+fraLSG	A8	books	62
+fraLSG	A8	genres	5
+fraLSG	A8	excluded	1CH(unlabelled) 2CH(unlabelled) EZR(unlabelled) NEH(unlabelled)
+fraLSG	A8	H	25.3199
+fraLSG	A8	epsilon2	0.4151
+fraLSG	A8	p	0.0001
+fraLSG	A8	ms:between	0.002712
+fraLSG	A8	ms:within	0.000331
+fraLSG	A8	var:run	0.001441
+fraLSG	A8	against	false
+fraLSG	A8	median:epistle	0.6445 [0.6295, 0.6529] n=21
+fraLSG	A8	median:law	0.6120 [0.6101, 0.6152] n=4
+fraLSG	A8	median:narrative	0.6087 [0.6036, 0.6155] n=14
+fraLSG	A8	median:poetry	0.6162 [0.6125, 0.6477] n=5
+fraLSG	A8	median:prophecy	0.6378 [0.6226, 0.6511] n=18
+russyn	A8	runs	5
+russyn	A8	books	62
+russyn	A8	genres	5
+russyn	A8	excluded	1CH(unlabelled) 2CH(unlabelled) EZR(unlabelled) NEH(unlabelled)
+russyn	A8	H	28.2951
+russyn	A8	epsilon2	0.4639
+russyn	A8	p	0.0001
+russyn	A8	ms:between	0.009065
+russyn	A8	ms:within	0.003055
+russyn	A8	var:run	0.003345
+russyn	A8	against	false
+russyn	A8	median:epistle	0.6396 [0.6295, 0.6522] n=21
+russyn	A8	median:law	0.5927 [0.5683, 0.6097] n=4
+russyn	A8	median:narrative	0.6027 [0.5944, 0.6095] n=14
+russyn	A8	median:poetry	0.5988 [0.4872, 0.6161] n=5
+russyn	A8	median:prophecy	0.6324 [0.6136, 0.6449] n=18
+spaRV1909	A8	runs	5
+spaRV1909	A8	books	61
+spaRV1909	A8	genres	5
+spaRV1909	A8	excluded	1CH(unlabelled) 2CH(unlabelled) EZR(unlabelled) JAS(none in run 3) NEH(unlabelled)
+spaRV1909	A8	H	28.0687
+spaRV1909	A8	epsilon2	0.4678
+spaRV1909	A8	p	0.0001
+spaRV1909	A8	ms:between	0.003594
+spaRV1909	A8	ms:within	0.000403
+spaRV1909	A8	var:run	0.000194
+spaRV1909	A8	against	false
+spaRV1909	A8	median:epistle	0.6450 [0.6380, 0.6645] n=20
+spaRV1909	A8	median:law	0.6160 [0.6086, 0.6208] n=4
+spaRV1909	A8	median:narrative	0.6139 [0.6115, 0.6205] n=14
+spaRV1909	A8	median:poetry	0.6232 [0.5684, 0.6442] n=5
+spaRV1909	A8	median:prophecy	0.6436 [0.6336, 0.6539] n=18
+all	A8	verdict	kept (0 of 5 languages against)

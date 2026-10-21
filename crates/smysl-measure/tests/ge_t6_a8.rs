@@ -20,19 +20,32 @@
 //! - **A book's value** is A8's `area` over its units under the default recipe, one per run, and
 //!   the median of its runs; the **noise** is each book's sample variance over its runs,
 //!   averaged over books. A book A8 refuses in any run, or which a run did not extract at all,
-//!   is excluded and listed with the reason, as the pure arm lists a book shorter than a window.
+//!   is excluded and listed with the reason, as the pure arm lists a book shorter than a window;
+//!   a book is any a run holds a text for, so one that no run extracted is listed too. A window
+//!   whose answer was cut off and degraded to prose (`SMY-W304`) leaves a unit with no source,
+//!   which is in no book: the store cannot say a book lost a window, and only the run's log can.
 //! - **No length control.** A8's budgets are fractions of the book's own `full_tokens`, so its
 //!   curve is in the book's units already; equal-length windows would cut the grounds and
 //!   rebuttals a pack has to carry together, which is the thing A8 measures.
 //!
 //! The scripted arm runs everywhere: books found by the text a unit was read from, A8 per book
 //! as `run` computes it, and the kill criterion reading extraction variance on planted values.
-//! The measurement is `--ignored`, and **owed** until the runs exist: 5 editions × 5 runs of
-//! 66 books is about 780,000 verses through a model, `SMYSL_INGEST_LIVE=1` as GE-T2's.
+//! The measurement is `--ignored`: it reads the runs, and its report is
+//! `fixtures/measure/ge-t6-a8.tsv`, which `ge_t6_a8_measured` re-reads on every run.
 //!
 //! ```text
 //! SMYSL_GE_T6_A8=<dir> cargo test --release -p smysl-measure --test ge_t6_a8 -- --ignored --nocapture
 //! ```
+//!
+//! # What was measured
+//!
+//! GE-T1's five Bibles, 5 runs each through `deepseek-chat` at temperature 0, every book its own
+//! text, `ingest --window-level chapter` with a 16,384-token context window. A8 is kept in all
+//! five languages. A first set of runs with the default verse leaves and a 32,768-token window
+//! was cut off at the model's 8,192-token output limit in 564 of 1,650 book-runs, and read
+//! dropped in four; that was the truncation's variance, not extraction's, and it is not the
+//! report. The chapter runs were cut off in 67, in 43 books; without those books A8 is kept in
+//! all five still (`SMYSL_GE_T6_A8_CUT`).
 
 #[path = "support/genre.rs"]
 mod genre;
@@ -126,17 +139,23 @@ fn edition(
     names: &[String],
 ) -> (Kept, Vec<String>) {
     let per_run: Vec<BTreeMap<String, BTreeSet<Uid>>> = runs.iter().map(|s| books(s)).collect();
-    let codes: BTreeSet<&String> = per_run.iter().flat_map(|b| b.keys()).collect();
+    // Every book a run holds a text for, and not only those it drew units from: a book no run
+    // extracted is excluded with a reason, not left out of the table without one.
+    let codes: BTreeSet<String> = runs
+        .iter()
+        .flat_map(|s| s.manifests().map(|(_, m)| code_of(&m.alias)))
+        .chain(per_run.iter().flat_map(|b| b.keys().cloned()))
+        .collect();
     let (mut kept, mut excluded) = (Vec::new(), Vec::new());
     'book: for code in codes {
-        let g = labels.get(code).map(String::as_str).unwrap_or("-");
+        let g = labels.get(&code).map(String::as_str).unwrap_or("-");
         if g == "-" {
             excluded.push(format!("{code}(unlabelled)"));
             continue;
         }
         let mut areas = Vec::with_capacity(runs.len());
         for (r, (store, books)) in runs.iter().zip(&per_run).enumerate() {
-            let Some(uids) = books.get(code) else {
+            let Some(uids) = books.get(&code) else {
                 excluded.push(format!("{code}(none in run {r})"));
                 continue 'book;
             };
@@ -149,7 +168,7 @@ fn edition(
             }
         }
         let gi = names.iter().position(|x| x == g).unwrap();
-        kept.push((code.clone(), gi, areas));
+        kept.push((code, gi, areas));
     }
     (kept, excluded)
 }
@@ -293,6 +312,12 @@ fn a_book_is_the_units_drawn_from_its_text() {
     let (kept, excluded) = edition(&refs, &labels, &names);
     assert_eq!(kept.len(), 1);
     assert_eq!(excluded, ["JUD(none in run 3)"]);
+
+    // A book no run extracted is listed too: its text is in every run, its units in none.
+    let none: Vec<&Store> = vec![short.last().unwrap(); 3];
+    let (kept, excluded) = edition(&none, &labels, &names);
+    assert_eq!(kept.len(), 1);
+    assert_eq!(excluded, ["JUD(none in run 0)"]);
 }
 
 /// Planted values: twenty books in five genres a step apart, five runs each. With runs that
@@ -337,11 +362,34 @@ fn the_kill_reads_extraction_variance() {
         verdict("A8", 3, 5),
         "all\tA8\tverdict\tdropped from defaults (3 of 5 languages against)\n"
     );
+}
 
-    println!(
-        "GE-T6's A8 arm is OWED: 5 editions x 5 extraction runs of 66 books have not been made. \
-         SMYSL_GE_T6_A8=<dir> of <edition>/<run> stores reports them (--ignored)."
-    );
+/// The committed report: every edition has five runs and is not counted against, so A8 stays in
+/// the defaults.
+#[test]
+fn ge_t6_a8_measured() {
+    let path = repo("fixtures/measure/ge-t6-a8.tsv");
+    let table = std::fs::read_to_string(&path).unwrap();
+    let rows: Vec<Vec<&str>> = table
+        .lines()
+        .filter(|l| !l.starts_with('#'))
+        .map(|l| l.split('\t').collect())
+        .collect();
+    let value = |ed: &str, key: &str| -> Vec<&str> {
+        rows.iter()
+            .filter(|r| r[0] == ed && r[2] == key)
+            .map(|r| r[3])
+            .collect()
+    };
+    let editions: BTreeSet<&str> = rows.iter().map(|r| r[0]).filter(|e| *e != "all").collect();
+    assert_eq!(editions.len(), 5);
+    for ed in editions {
+        assert_eq!(value(ed, "runs"), ["5"], "{ed}");
+        assert_eq!(value(ed, "against"), ["false"], "{ed}");
+        let p: f64 = value(ed, "p")[0].parse().unwrap();
+        assert!(p < 0.001, "{ed}: p {p}");
+    }
+    assert_eq!(value("all", "verdict"), ["kept (0 of 5 languages against)"]);
 }
 
 // ---- the measurement -----------------------------------------------------------------------
@@ -365,6 +413,20 @@ fn ge_t6_a8_arm() {
         v
     };
     let editions = list(&dir);
+    // A window cut off at the output limit leaves a unit with no source, so the store cannot say
+    // a book lost one; the runs' logs can, and `SMYSL_GE_T6_A8_CUT` names a file of
+    // `<edition> <CODE>` lines they list. The books in it are excluded, and the result is a
+    // sensitivity check, printed and never blessed.
+    let cut: BTreeSet<(String, String)> = std::env::var_os("SMYSL_GE_T6_A8_CUT")
+        .map(|f| {
+            std::fs::read_to_string(&f)
+                .unwrap()
+                .lines()
+                .filter_map(|l| l.split_once(char::is_whitespace))
+                .map(|(e, c)| (e.to_string(), c.trim().to_uppercase()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     let mut out = String::from(
         "# GE-T6's A8 arm (SMYSL-2.6 §5.4): A8's area across the Bible's genres, per edition.\n\
@@ -388,7 +450,15 @@ fn ge_t6_a8_arm() {
             })
             .collect();
         let runs: Vec<&Store> = libraries.iter().map(Library::store).collect();
-        let (kept, excluded) = edition(&runs, &labels, &names);
+        let (mut kept, mut excluded) = edition(&runs, &labels, &names);
+        kept.retain(|k| {
+            let drop = cut.contains(&(ed.clone(), k.0.clone()));
+            if drop {
+                excluded.push(format!("{}(cut off)", k.0));
+            }
+            !drop
+        });
+        excluded.sort();
         let x: Vec<f64> = kept.iter().map(|k| median(&mut k.2.clone())).collect();
         let g: Vec<usize> = kept.iter().map(|k| k.1).collect();
         let by: Vec<&[f64]> = kept.iter().map(|k| k.2.as_slice()).collect();
@@ -409,6 +479,13 @@ fn ge_t6_a8_arm() {
     }
     out.push_str(&verdict("A8", against, editions.len()));
     print!("{out}");
+    if !cut.is_empty() {
+        eprintln!(
+            "  {} book(s) excluded as cut off: a sensitivity check, not blessed",
+            cut.len()
+        );
+        return;
+    }
     let path = repo("fixtures/measure/ge-t6-a8.tsv");
     if std::env::var("SMYSL_BLESS").is_ok_and(|v| v == "1") {
         std::fs::write(&path, &out).unwrap();
