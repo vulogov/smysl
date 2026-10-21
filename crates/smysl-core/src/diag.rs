@@ -411,6 +411,12 @@ pub enum Subject {
     Span(Span),
     /// A unit, identified by uid.
     Unit(Uid),
+    /// A record that is not a unit — a relation, an attestation, a commitment, a binding —
+    /// identified by the BLAKE3 of its canonical encoding, the hash the store dedupes by.
+    ///
+    /// SMYSL-2.7 §4.3: import quarantines records one by one, and a finding the check attributed
+    /// to a relation's target unit or to the whole store could not say which record it was.
+    Record([u8; 32]),
     /// Neither - a whole-store or whole-run diagnostic.
     Store,
 }
@@ -448,6 +454,11 @@ impl Diagnostic {
         Diagnostic::new(code).with_subject(Subject::Unit(uid))
     }
 
+    /// A diagnostic about one record, by the hash of its canonical encoding.
+    pub fn on_record(code: Code, hash: [u8; 32]) -> Diagnostic {
+        Diagnostic::new(code).with_subject(Subject::Record(hash))
+    }
+
     pub fn with_subject(mut self, subject: Subject) -> Diagnostic {
         self.subject = subject;
         self
@@ -477,6 +488,14 @@ impl Diagnostic {
         }
     }
 
+    /// The record hash this diagnostic is about, when it names a record that is not a unit.
+    pub fn record(&self) -> Option<&[u8; 32]> {
+        match &self.subject {
+            Subject::Record(h) => Some(h),
+            _ => None,
+        }
+    }
+
     pub fn is_error(&self) -> bool {
         self.severity == Severity::Error
     }
@@ -488,6 +507,8 @@ impl fmt::Display for Diagnostic {
         match &self.subject {
             Subject::Span(s) => write!(f, " (at {s})")?,
             Subject::Unit(u) => write!(f, " (at {u})")?,
+            // A uid's short width, under its own prefix: a record hash is not a uid.
+            Subject::Record(h) => write!(f, " (at rec:{})", crate::ids::base32(h, 26))?,
             Subject::Store => {}
         }
         if let Some(s) = &self.suggestion {
@@ -853,6 +874,21 @@ mod tests {
     fn display_is_the_wire_form() {
         assert_eq!(Code::E030.to_string(), "SMY-E030");
         assert_eq!(Code::W304.to_string(), "SMY-W304");
+    }
+
+    /// A record subject is a record's hash, read back by `record()` and printed at a uid's
+    /// short width under `rec:`, so it is never mistaken for a uid.
+    #[test]
+    fn a_diagnostic_can_name_a_record() {
+        let h = [0xa5; 32];
+        let d = Diagnostic::on_record(Code::E060, h);
+        assert_eq!(d.subject, Subject::Record(h));
+        assert_eq!(d.record(), Some(&h));
+        assert_eq!((d.uid(), d.span()), (None, None));
+        let shown = d.to_string();
+        let at = shown.rsplit_once(" (at ").unwrap().1;
+        assert_eq!(at, format!("rec:{})", crate::ids::base32(&h, 26)));
+        assert_eq!(at.len(), "rec:".len() + 26 + 1);
     }
 
     #[test]

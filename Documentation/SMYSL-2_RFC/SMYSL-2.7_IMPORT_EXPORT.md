@@ -928,7 +928,7 @@ Steps 1–4 do not need either and can start once TX-P0 has landed.
 
 | # | work | needs | exit test |
 |---|---|---|---|
-| 1 | §4.3 prerequisites: `Subject::Record`, `has_surface_form` (+ `cmd_merge` uses it), `contains_record`, `record_hash`, `pending_attestations` | TX-P0 (`record_set_digest`) | `merge F13 --format surface` reports 0 omitted; existing suite green; `public-api*.txt` updated |
+| 1 | §4.3 prerequisites: `Subject::Record`, `has_surface_form` (+ `cmd_merge` uses it), `contains_record`, `record_hash`, `pending_attestations` | TX-P0 (`record_set_digest`) | `merge F13 --format surface` reports 0 omitted; existing suite green; `public-api*.txt` updated — **done 2026-10-21**, below |
 | 2 | `smysl-lib` skeleton; `export_store` with `select`, `closure` (fixpoint), `write` (canonical), layouts `single`/`by-view`, `full` | 1 | §5.1 select tests; F1–F13 single-layout exports, in-memory P1 against `rsd(X)` |
 | 3 | `index`, `verify` (file checks, P1, P3), `ref` mode, duplication factor | 2 | `verify` passes on F1–F13 × {single, by-view} × {full, ref}; a flipped byte gives exit 9 |
 | 4 | import: decode, classify, CBOR staging, quarantine, waiting, tables (CBOR fallback), manifest (without mid until TX-P1 → placeholder hash of the body, replaced by `mid`), `accept`/`discard`/`status` | 3 | idempotence and commutativity property tests; F6 quarantine test; early-attestation promotion test |
@@ -941,6 +941,34 @@ Steps 1–4 do not need either and can start once TX-P0 has landed.
 | 11 | Fuzz targets, cross-implementation additions and harness | 5 | 1 h fuzz on each target with no finding; all three implementations verify every export |
 | 12 | GE-T15 full run, scale cells at 10⁵/10⁶ | 6–11 | GE-T15 kill criteria (draft 3 §23): no P1/P3 failure, no record type lost; duplication factor per layout recorded (OQ-26) |
 | 13 (TX-P12) | `--target-revision` | SMYSL-2.5 lens engine | GE-T16's synthetic revisions: a `split-value` lens exports; a `retire` refuses with `E422`; a two-level grounds chain gets new uids in dependency order and every rewritten core references only mapped uids |
+
+*Step 1, done 2026-10-21.* The five prerequisites of §4.3, against the tree as it is now and not
+`d25ec9e`:
+
+- **`Subject::Record([u8; 32])`** in `smysl_core::diag`, with `Diagnostic::on_record` and
+  `Diagnostic::record()`. It prints as `(at rec:<26 base32>)`, a uid's short width under its own
+  prefix, so a record hash is never read as a uid. No pass attributes with it yet: §4.3 makes
+  that gradual, one pass at a time, and step 4's quarantine is the first reader.
+- **`smysl_core::surface::has_surface_form(r, ctx, view)`**, composed of the per-type predicates
+  `write_surface` already guards each arm with; `merge` and `bundle` count omissions with it
+  and keep no list of their own. `tests/surface_form.rs` holds it to the writer record by
+  record: over the corpus, the wire fixtures, the manifest fixture and a dating fixture, a
+  record it calls written is written on its own and one it calls omitted writes nothing.
+- **`Store::record_hash`** made public, **`Store::contains_record`** and
+  **`Store::pending_attestations`**; and **`smysl_graph::record_set_digest(records)`**, the
+  digest of records not held in a store, which the store's own method and it share one framing
+  for (§3.1's `smysl/rsd/1`, repeats once, order free).
+
+`merge F13 --format surface` reports nothing omitted; it already did, since H-16 fixed the
+commitment over-count this step was first written for. One finding:
+
+- **The count still over-counted, by every redaction and every dating.** The list `merge` kept
+  beside the writer ended in `_ => true`, and `@redact` (1.10, rule Z) and `@date` (TX-P3)
+  arrived after it; the manifest fixture was reported as 4 records omitted — its 3 datings and
+  1 redaction — and a one-dating document as 1, over output holding every one.
+  `tests/cmd_merge.rs` now asserts none omitted on all three and that every `@commit`,
+  `@manifest`, `@redact` and `@date` comes back. A second list drifted from the writer a third
+  time, which is the case for §4.3's one predicate.
 
 ---
 

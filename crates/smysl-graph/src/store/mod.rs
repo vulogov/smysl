@@ -1065,8 +1065,23 @@ impl Store {
     /// also what keeps the record set the same whichever order stores are merged in — a relation
     /// differing only in weight is a different record, and keying it by its endpoints kept
     /// whichever variant arrived first.
-    fn record_hash(r: &Record) -> [u8; 32] {
+    ///
+    /// Public for SMYSL-2.7, whose import classifies and promotes records by this hash and
+    /// whose export digests a selection that is not a store: one hash, defined once.
+    pub fn record_hash(r: &Record) -> [u8; 32] {
         hash_bytes(&to_cbor(r))
+    }
+
+    /// Whether the log holds a record whose canonical encoding hashes to `h`
+    /// ([`Store::record_hash`]): the byte identity `append` dedupes by.
+    pub fn contains_record(&self, h: &[u8; 32]) -> bool {
+        self.record_hashes.contains(h)
+    }
+
+    /// Attestations held for a unit or edge the store does not hold yet (1.8), in arrival
+    /// order: the precedent for what SMYSL-2.7's import calls waiting.
+    pub fn pending_attestations(&self) -> &[Attestation] {
+        &self.pending_attestations
     }
 
     fn rel_key(r: &Relation) -> (String, Uid, Uid) {
@@ -1334,13 +1349,7 @@ impl Store {
     /// every record that arrives, whatever it is, so a record type added later is covered
     /// without anybody remembering to extend this function.
     pub fn record_set_digest(&self) -> [u8; 32] {
-        let mut h = Rolling::new();
-        h.update(b"smysl/rsd/1");
-        h.update(&[0x00]);
-        for rh in &self.record_hashes {
-            h.update(rh);
-        }
-        h.finish()
+        digest_of_hashes(&self.record_hashes)
     }
 
     /// Whether two stores have converged (rule U).
@@ -1566,4 +1575,23 @@ impl Store {
             .filter(|r| &r.kind == kind && !self.is_withdrawn(r))
             .collect()
     }
+}
+
+/// The record-set digest of any records, held in a store or not (SMYSL-2.3 A-4): what
+/// [`Store::record_set_digest`] computes over the records it holds, for a selection, an
+/// export file or a batch that is not a store. Repeats count once, and order does not count.
+pub fn record_set_digest<'a>(records: impl IntoIterator<Item = &'a Record>) -> [u8; 32] {
+    let hashes: BTreeSet<[u8; 32]> = records.into_iter().map(Store::record_hash).collect();
+    digest_of_hashes(&hashes)
+}
+
+/// §3.1's framing over a set of record hashes, ascending.
+fn digest_of_hashes(hashes: &BTreeSet<[u8; 32]>) -> [u8; 32] {
+    let mut h = Rolling::new();
+    h.update(b"smysl/rsd/1");
+    h.update(&[0x00]);
+    for rh in hashes {
+        h.update(rh);
+    }
+    h.finish()
 }

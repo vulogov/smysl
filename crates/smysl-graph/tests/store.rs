@@ -14,7 +14,7 @@ use smysl_core::{
     KernelType, Op, Record, RelKind, Relation, Rung, SourceKind, SourceRef, Status, Thread,
     ThreadId, ThreadSchema, Uid, UnitCore, UnitCoreBuilder, View, ViewId,
 };
-use smysl_graph::{EdgeSet, Store, StoreOptions};
+use smysl_graph::{record_set_digest, EdgeSet, Store, StoreOptions};
 
 fn agent() -> AgentId {
     AgentId::new("human:vladimir").unwrap()
@@ -392,6 +392,47 @@ fn an_attestation_delivered_before_its_unit_still_attaches() {
     assert!(s.get(&uid).is_none());
     s.append(&[Record::Unit(c)]).unwrap();
     assert_eq!(s.get(&uid).unwrap().attestations.len(), 1);
+}
+
+/// The attestation waits, visibly, until its unit arrives; then nothing waits (SMYSL-2.7 §4.3).
+#[test]
+fn an_early_attestation_is_pending_until_its_unit_arrives() {
+    let c = claim("a claim", vec![]);
+    let uid = canonical_uid(&c);
+    let a = Attestation::new(
+        uid,
+        agent(),
+        Op::Authored,
+        Rung::Document,
+        Hlc::new(1, 0, agent()),
+    );
+    let mut s = Store::new();
+    s.append(&[Record::Attestation(a.clone())]).unwrap();
+    assert_eq!(s.pending_attestations(), [a]);
+    s.append(&[Record::Unit(c)]).unwrap();
+    assert!(s.pending_attestations().is_empty());
+}
+
+/// `contains_record` answers by the hash `append` dedupes by, for every record the store holds
+/// and for none it does not; the free digest over the records equals the store's, whatever
+/// their order and however often one repeats.
+#[test]
+fn records_are_known_by_their_hash_and_digested_without_a_store() {
+    let records = corpus();
+    let s = Store::from_records(records.clone());
+    for r in &records {
+        assert!(s.contains_record(&Store::record_hash(r)), "{r:?}");
+    }
+    let absent = Record::Unit(claim("not in the store", vec![]));
+    assert!(!s.contains_record(&Store::record_hash(&absent)));
+
+    assert_eq!(record_set_digest(&records), s.record_set_digest());
+    let mut shuffled: Vec<Record> = records.iter().rev().cloned().collect();
+    shuffled.push(records[0].clone());
+    assert_eq!(record_set_digest(&shuffled), s.record_set_digest());
+    let mut more = records.clone();
+    more.push(absent);
+    assert_ne!(record_set_digest(&more), s.record_set_digest());
 }
 
 #[test]

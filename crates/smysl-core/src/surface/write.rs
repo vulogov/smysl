@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::ids::{Label, Uid};
+use crate::ids::{Label, Uid, ViewId};
 use crate::surface::hjson::{HObject, HValue};
 use crate::surface::payload::payload_to_object;
 use crate::types::library::{Dating, DatingTarget, DatingValue};
@@ -160,6 +160,35 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
         out.pop();
     }
     out
+}
+
+/// Whether `write_surface` writes `r`, given the context it writes under and the one view it
+/// makes the `@doc` header: the single predicate it honours (SMYSL-2.7 §4.3).
+///
+/// Everything a surface rendering omits is counted by this and nothing else — `merge`'s and
+/// `bundle`'s warning, and export's `SMY-W428`. Two lists drifted three times: a commitment
+/// counted omitted while it was written (H-16), a manifest the same way, and a redaction and a
+/// dating still, which the writer writes and the count called omitted.
+///
+/// A label binding is written when the context spells that unit with that label, since a label
+/// lives in its unit's header and has no line of its own; a view only as the header.
+pub fn has_surface_form(r: &Record, ctx: &WriteContext, view: Option<&ViewId>) -> bool {
+    match r {
+        Record::Unit(u) => unit_has_surface_form(u),
+        Record::Relation(_) | Record::Redaction(_) => true,
+        Record::Thread(t) => thread_has_surface_form(t),
+        Record::SchemaDecl(d) => schema_decl_has_surface_form(d),
+        Record::Manifest(m) => manifest_has_surface_form(m),
+        Record::Withdrawal(w) => withdrawal_has_surface_form(w),
+        Record::Resolution(res) => resolution_has_surface_form(res),
+        Record::Commit(c) => commit_has_surface_form(c),
+        Record::Dating(d) => dating_has_surface_form(d),
+        Record::View(v) => Some(&v.id) == view,
+        Record::LabelBinding(b) => ctx.labels.get(&b.uid) == Some(&b.label),
+        // Attestations, contentions, pack infos, part texts, readings and records this build
+        // does not know travel as CBOR only.
+        _ => false,
+    }
 }
 
 /// Whether a declaration can be spelled `@schema` without losing anything.

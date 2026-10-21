@@ -420,3 +420,58 @@ fn a_name_the_grammar_cannot_place_is_counted_exactly_once() {
         "no unit was dropped, only a name: {text}"
     );
 }
+
+/// Commitments, a manifest, a redaction and datings are all written, so none is counted as
+/// omitted (SMYSL-2.7 step 1). The count is the writer's own predicate now; the list it
+/// replaced still called every redaction and dating omitted — four on the manifest fixture and
+/// one on the dating one, over output that holds them all.
+#[test]
+fn records_the_writer_writes_are_never_counted_omitted() {
+    let dir = scratch("written-whole");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for (name, rel, lines) in [
+        (
+            "canon.smy",
+            "fixtures/corpus/F13-canon.smy",
+            &["@commit"][..],
+        ),
+        (
+            "manifest.smy",
+            "fixtures/library/wire/manifest.smy",
+            &["@manifest", "@redact", "@date"][..],
+        ),
+        (
+            "dating.smy",
+            "fixtures/conformance/check/time/impossible-dating.smy",
+            &["@date"][..],
+        ),
+    ] {
+        let body = std::fs::read_to_string(root.join(rel)).expect("fixture");
+        let input = write(&dir, name, &body);
+        let out = run_in(
+            &dir,
+            &["merge", "--format", "surface", input.to_str().unwrap()],
+        );
+        assert_eq!(out.code, SUCCESS, "{rel}: {}", out.stderr);
+        assert!(
+            !out.stderr.contains("no surface form"),
+            "{rel}: nothing was omitted: {}",
+            out.stderr
+        );
+        let text = out.text();
+        let count = |s: &str, l: &str| {
+            s.lines()
+                .filter(|x| x.starts_with(&format!("{l} ")))
+                .count()
+        };
+        for l in lines {
+            assert!(count(&body, l) > 0, "{rel} has a {l}");
+            assert_eq!(
+                count(&text, l),
+                count(&body, l),
+                "{rel}: every {l} came back: {text}"
+            );
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -4979,31 +4979,10 @@ fn warn_surface_omissions(
     emitted: Option<&smysl::ViewId>,
     ctx: &WriteContext,
 ) {
+    // One predicate, the writer's own: every list kept beside it has drifted (H-16).
     let dropped = records
         .iter()
-        .filter(|r| match r {
-            // A relation always has a surface form; a unit or a thread may not, and the count
-            // said they always did. H-16: a commitment fell to the catch-all below and was
-            // counted as omitted while `write_surface` wrote it — a guaranteed over-count on
-            // any store carrying one.
-            Record::Relation(_) => false,
-            Record::Unit(u) => !smysl::surface::unit_has_surface_form(u),
-            Record::Thread(t) => !smysl::surface::thread_has_surface_form(t),
-            Record::Commit(c) => !smysl::surface::commit_has_surface_form(c),
-            // `@manifest` since 1.10, on the same terms — and listed here for the reason H-16
-            // records: a record the writer emits while the count calls it omitted is a
-            // guaranteed over-count on every store carrying one. Part texts and readings have
-            // no surface form at all and fall to the catch-all, correctly.
-            Record::Manifest(m) => !smysl::surface::manifest_has_surface_form(m),
-            Record::View(v) => Some(&v.id) != emitted,
-            Record::LabelBinding(b) => ctx.labels.get(&b.uid) != Some(&b.label),
-            // Spelled `@schema` since 1.3, unless it carries what surface text cannot.
-            Record::SchemaDecl(d) => !smysl::surface::schema_decl_has_surface_form(d),
-            // `@withdraw` and `@resolve` since 1.4, on the same terms.
-            Record::Withdrawal(w) => !smysl::surface::withdrawal_has_surface_form(w),
-            Record::Resolution(r) => !smysl::surface::resolution_has_surface_form(r),
-            _ => true,
-        })
+        .filter(|r| !smysl::surface::has_surface_form(r, ctx, emitted))
         .count();
     if dropped > 0 {
         eprintln!(
