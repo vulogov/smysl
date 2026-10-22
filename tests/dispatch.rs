@@ -8,7 +8,7 @@
 //! - deleting a command's arm in **`main`** removes its *routing*. The subcommand still parses;
 //!   the router falls through to "not wired in this build". Invoking the command finds this.
 //! - deleting its arm in **`cli()`** removes its *arguments*, and nothing else. `cli()` registers
-//!   all thirty-five subcommands from the `COMMANDS` table unconditionally, so the command is
+//!   all thirty-six subcommands from the `COMMANDS` table unconditionally, so the command is
 //!   still there, still routes, still runs — it has simply lost every flag and positional of its
 //!   own. Invoking it with no arguments notices nothing at all.
 //!
@@ -27,7 +27,7 @@ use std::process::{Command, Stdio};
 
 const BIN: &str = env!("CARGO_BIN_EXE_smysl");
 
-/// The thirty-five commands, written out rather than read from the binary.
+/// The thirty-six commands, written out rather than read from the binary.
 ///
 /// This list must not come from the thing it is testing. Parsing `smysl --help` for the names
 /// and then checking each one dispatches is a check that cannot fail: delete a `cli` arm and the
@@ -37,7 +37,7 @@ const BIN: &str = env!("CARGO_BIN_EXE_smysl");
 ///
 /// Hardcoding it costs one thing — the list can go stale when a command is added — and
 /// `the_help_lists_exactly_these_commands` below is what covers that, in both directions.
-const COMMANDS: [&str; 35] = [
+const COMMANDS: [&str; 36] = [
     "fmt",
     "check",
     "pack",
@@ -73,6 +73,7 @@ const COMMANDS: [&str; 35] = [
     "ask",
     "measure",
     "assess",
+    "lib",
 ];
 
 /// Clap's answer when `cli()` never registered the subcommand.
@@ -132,6 +133,9 @@ fn minimal_args(command: &str) -> Vec<&'static str> {
         "measure" => vec!["T1", "--scope", "from texts"],
         // The action and target are required; with no store given, `assess` says so.
         "assess" => vec!["diff", "b3:a", "b3:b"],
+        // `status` rather than `import`: the action is required, and `status` needs nothing
+        // else. With no store given, `lib` says so.
+        "lib" => vec!["status"],
         _ => vec![],
     }
 }
@@ -139,7 +143,7 @@ fn minimal_args(command: &str) -> Vec<&'static str> {
 /// A directory of this command's own, because several of them write.
 ///
 /// `ingest` appends to `.smysl/staged.smy` and `usage` to `.smysl/usage.log`, both resolved
-/// against the working directory. Running the thirty-five in a checkout leaves two untracked
+/// against the working directory. Running the thirty-six in a checkout leaves two untracked
 /// files behind — which is not hypothetical: probing this by hand did exactly that, and the
 /// `usage` invocation then read a ledger the `ingest` invocation had just written. A test that
 /// dirties the tree is one step from a test that depends on the tree.
@@ -209,7 +213,7 @@ fn every_command_dispatches() {
 /// binary and not to the array shows up as an extra. Either way somebody has to type the change,
 /// which is the whole point of a golden list.
 ///
-/// `help` is clap's own and is not one of the thirty-five.
+/// `help` is clap's own and is not one of the thirty-six.
 #[test]
 fn the_help_lists_exactly_these_commands() {
     let out = Command::new(BIN)

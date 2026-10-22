@@ -302,6 +302,7 @@ pub use smysl::label_bindings
 pub use smysl::label_index
 pub use smysl::labels_of
 pub use smysl::lang_verify
+pub use smysl::lib
 pub use smysl::measure
 pub use smysl::membership
 pub use smysl::merge

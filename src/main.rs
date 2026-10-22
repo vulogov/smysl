@@ -143,6 +143,10 @@ const BOTH: &[&str] = &["surface", "cbor"];
 const CBOR_ONLY: &[&str] = &["cbor"];
 /// Not a document: a report, a store written in place, or an artifact with its own target.
 const NO_DOCUMENT: &[&str] = &[];
+/// Every form `lib export` names. The table cannot say which of `lib`'s actions writes a
+/// document, so `cmd_lib` refuses `--format` for the other five, and the forms this build does
+/// not write yet, itself.
+const LIB_FORMS: &[&str] = &["surface", "cbor", "pack"];
 
 /// The command table of §23, in table order.
 #[rustfmt::skip]
@@ -182,6 +186,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "ask",       about: "Experimental: a dossier for a question; optionally a model's grounded answer", purity: Purity::Mixed, phase: "TX-P8"  , impure_when: Some("--answer, which asks a model to answer from the dossier") , forms: NO_DOCUMENT },
     Cmd { name: "measure",   about: "Text, graph, channel and dialogue measures as derived data units", purity: Purity::Mixed, phase: "TX-P8"  , impure_when: Some("a model-dependent id (T8, D5's embeddings), none of which this build registers") , forms: NO_DOCUMENT },
     Cmd { name: "assess",    about: "Assessment keys, reader scores and knowledge states",  purity: Purity::Mixed, phase: "TX-P9"  , impure_when: Some("a generated key or a model judge (--generate, --judge model), neither of which this build has") , forms: NO_DOCUMENT },
+    Cmd { name: "lib",       about: "Import smysl files into the library; export it as files", purity: Purity::Pure,  phase: "TX-P11" , impure_when: None , forms: LIB_FORMS },
 ];
 
 fn cli() -> Command {
@@ -209,7 +214,10 @@ fn cli() -> Command {
             .global(true)
             .help("Output form; defaults to cbor on a non-TTY stdout (rule P)")
             .value_name("FORM")
-            .value_parser(["surface", "cbor"]),
+            // `pack` is `lib export`'s alone (SMYSL-2.7 §4.4, OQ-62): a pack is a lossy
+            // selection, and no other command's output can be one. The dispatcher refuses it
+            // everywhere else, as it refuses any form a command does not write.
+            .value_parser(["surface", "cbor", "pack"]),
         Arg::new("strict")
             .long("strict")
             .global(true)
@@ -2085,6 +2093,133 @@ fn cli() -> Command {
                     Arg::new("store")
                         .value_name("PATH")
                         .help("Store to reindex"),
+                ),
+            // `lib`'s six actions are values of `<ACTION>`, as `text`'s and `assess`'s are, and
+            // not the nested clap subcommands SMYSL-2.7 §4.4 sketched. Nested, `lib --help`
+            // would list six names and none of their flags, and `make cli-surface` reads each
+            // command's `--help` once: the gate would record `lib` as taking nothing.
+            "lib" => sub
+                .arg(
+                    Arg::new("action")
+                        .required(true)
+                        .value_name("ACTION")
+                        .value_parser(["import", "status", "accept", "discard", "export", "verify"])
+                        .help(
+                            "import files into the library, list its imports, accept or \
+                             discard a staged one, export the library as a collection, or \
+                             verify a collection against its index",
+                        ),
+                )
+                .arg(
+                    Arg::new("targets")
+                        .value_name("TARGET")
+                        .num_args(0..)
+                        .action(ArgAction::Append)
+                        .help(
+                            "the files, directories and export indexes for `import` (`-` \
+                             reads stdin); the import's name for `accept` and `discard`; the \
+                             index, or its directory, for `verify`",
+                        ),
+                )
+                .arg(
+                    Arg::new("name")
+                        .long("name")
+                        .value_name("N")
+                        .help("The import's name, `import:<N>` in its manifests (`import`); the first input's stem by default"),
+                )
+                .arg(
+                    Arg::new("accept")
+                        .long("accept")
+                        .help("Append what passes, rather than stage it (`import`)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("licence")
+                        .long("licence")
+                        .value_name("SPDX")
+                        .help("The licence the manifests record (`import`); `unknown` by default"),
+                )
+                .arg(
+                    Arg::new("origin")
+                        .long("origin")
+                        .value_name("URL")
+                        .help("Where the files came from (`import`); otherwise each manifest records its file name"),
+                )
+                .arg(
+                    Arg::new("import")
+                        .long("import")
+                        .value_name("NAME")
+                        .help("Report this import only (`status`)"),
+                )
+                .arg(
+                    Arg::new("fail-on-contention")
+                        .long("fail-on-contention")
+                        .help("Merge nothing if the import would give rise to a new contention (`accept`); exits 5")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("scope")
+                        .long("scope")
+                        .value_name("SQ")
+                        .action(ArgAction::Append)
+                        .help(
+                            "What to export: `all`, or a unit by uid or label, repeated \
+                             (`export`, required). sq queries arrive with TX-P11 step 8",
+                        ),
+                )
+                .arg(
+                    Arg::new("layout")
+                        .long("layout")
+                        .value_name("LAYOUT")
+                        .value_parser(["single", "by-view"])
+                        .default_value("single")
+                        .help("One file, or one per corpus view (`export`)"),
+                )
+                .arg(
+                    Arg::new("closure")
+                        .long("closure")
+                        .value_name("MODE")
+                        .value_parser(["full", "ref"])
+                        .default_value("full")
+                        .help("Every file closed on its own, or every record written once (`export`)"),
+                )
+                .arg(
+                    Arg::new("with-views")
+                        .long("with-views")
+                        .help("Export the corpus views as well (`export`)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("with-packs")
+                        .long("with-packs")
+                        .help("Export the pack infos as well (`export`)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("edges")
+                        .long("edges")
+                        .value_name("LIST")
+                        .help("Edges the closure follows beside deps and grounds, as `trace --edges` takes them (`export`); every edge by default"),
+                )
+                .arg(
+                    Arg::new("unknown")
+                        .long("unknown")
+                        .value_name("WHAT")
+                        .value_parser(["include", "drop"])
+                        .default_value("include")
+                        .help("Records this build cannot interpret: kept in `unattributed.cbor`, or left out and counted (`export`)"),
+                )
+                .arg(
+                    Arg::new("no-verify")
+                        .long("no-verify")
+                        .help("Write without checking P1 and P3 in memory first (`export`)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("force")
+                        .long("force")
+                        .help("Write into an output directory that is not empty (`export`)")
+                        .action(ArgAction::SetTrue),
                 ),
             _ => sub.arg(
                 Arg::new("args")
@@ -6827,6 +6962,666 @@ fn cmd_assess(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
     ExitCode::Usage
 }
 
+// ---------------------------------------------------------------------------
+// `lib` — import and export (RFC SMYSL-2.7 §4.4, TX-P11 step 5)
+// ---------------------------------------------------------------------------
+
+/// `lib <ACTION>`. `--format` is decided here, per action: the table lets `lib` through with
+/// every form, because `export` names them all, and the other five write no document.
+#[cfg(feature = "text")]
+fn cmd_lib(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let action = m.get_one::<String>("action").expect("required").as_str();
+    if let Some(want) = global.get_one::<String>("format") {
+        match action {
+            "export" if want == "cbor" => {}
+            "export" => {
+                eprintln!(
+                    "smysl lib export: --format {want} is not in this build yet - a collection \
+                     is written as cbor. surface and pack arrive with TX-P11 step 10."
+                );
+                return ExitCode::Usage;
+            }
+            _ => {
+                eprintln!(
+                    "smysl lib {action}: --format is not honoured here - lib {action} does not \
+                     write a document. Use --json if you are parsing its output."
+                );
+                return ExitCode::Usage;
+            }
+        }
+    }
+    if action != "export" {
+        warn_output_is_a_report(global, &format!("lib {action}"));
+    }
+    match action {
+        "import" => lib_import(m, global),
+        "status" => lib_status(m, global),
+        "accept" => lib_accept(m, global),
+        "discard" => lib_discard(m, global),
+        "export" => lib_export(m, global),
+        "verify" => lib_verify(m, global),
+        other => {
+            eprintln!(
+                "smysl lib: `{other}` is not an action; it is import, status, accept, discard, \
+                 export or verify"
+            );
+            ExitCode::Usage
+        }
+    }
+}
+
+#[cfg(not(feature = "text"))]
+fn cmd_lib(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!(
+        "smysl lib: import and export work on a library, and this build has no `text` feature"
+    );
+    ExitCode::Usage
+}
+
+#[cfg(feature = "text")]
+fn lib_targets(m: &ArgMatches) -> Vec<String> {
+    m.get_many::<String>("targets")
+        .map(|v| v.cloned().collect())
+        .unwrap_or_default()
+}
+
+/// The one target `accept`, `discard` and `verify` take.
+#[cfg(feature = "text")]
+fn lib_one_target(m: &ArgMatches, action: &str, what: &str) -> Result<String, ExitCode> {
+    match lib_targets(m).as_slice() {
+        [one] => Ok(one.clone()),
+        [] => {
+            eprintln!("smysl lib {action}: no {what} given");
+            Err(ExitCode::Usage)
+        }
+        more => {
+            eprintln!("smysl lib {action}: one {what}, not {}", more.len());
+            Err(ExitCode::Usage)
+        }
+    }
+}
+
+/// What a refusal from `smysl-lib` exits with: a name that does not fit or names nothing is
+/// the caller's, a contention is `Contentions`, and the rest is the filesystem's or the
+/// library's.
+#[cfg(feature = "text")]
+fn lib_error_code(e: &smysl::lib::LibError) -> ExitCode {
+    use smysl::lib::LibError as E;
+    match e {
+        E::BadName(_) | E::NameTaken(_) | E::NoImport(_) | E::NotStaged(_) | E::NotInStore(_) => {
+            ExitCode::Usage
+        }
+        E::Contentions(_) => ExitCode::Contentions,
+        _ => ExitCode::Failure,
+    }
+}
+
+/// Run `f` on the library `-s` names, under its lock, as `text add` does.
+///
+/// `create` for `import`, which may be a library's first write, as `text add` may be; `accept`
+/// and `discard` name an import, and a library that does not exist has none.
+#[cfg(feature = "text")]
+fn with_library<T>(
+    m: &ArgMatches,
+    global: &ArgMatches,
+    action: &str,
+    create: bool,
+    f: impl FnOnce(&mut smysl::text::library::Library) -> T,
+) -> Result<T, ExitCode> {
+    use smysl::text::library::Library;
+    let cmd = format!("lib {action}");
+    let root = library_root(m, global, &cmd)?;
+    if !create && !Library::is_library(&root) {
+        eprintln!(
+            "smysl {cmd}: {} is not a library (it has no `{}` marker)",
+            root.display(),
+            smysl::text::library::MARKER
+        );
+        return Err(ExitCode::Usage);
+    }
+    let opened = if create {
+        Library::create(&root)
+    } else {
+        Library::open(&root)
+    };
+    let mut library = opened.map_err(|e| {
+        eprintln!("smysl {cmd}: {}: {e}", root.display());
+        ExitCode::Failure
+    })?;
+    let shards = library.shards();
+    let _locks = smysl::text::lock::acquire_all(&root, &shards, &cmd).map_err(|e| {
+        eprintln!("smysl {cmd}: {e}");
+        ExitCode::Failure
+    })?;
+    Ok(f(&mut library))
+}
+
+#[cfg(feature = "text")]
+fn hex32(b: &[u8; 32]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// `lib import <inputs…>`. Exits 1 when an input did not decode or a collection did not match
+/// its index, 3 under `--strict` when anything was quarantined, 10 when anything was staged,
+/// and 0 otherwise.
+#[cfg(feature = "text")]
+fn lib_import(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use smysl::lib::{ImportOptions, Input, INDEX_FILE};
+    let raw = lib_targets(m);
+    if raw.is_empty() {
+        eprintln!("smysl lib import: no input given - files, directories, or an export index");
+        return ExitCode::Usage;
+    }
+    let mut inputs = Vec::new();
+    for t in &raw {
+        let p = std::path::Path::new(t);
+        inputs.push(if t == "-" {
+            let mut bytes = Vec::new();
+            if let Err(e) = std::io::stdin().read_to_end(&mut bytes) {
+                eprintln!("smysl lib import: stdin: {e}");
+                return ExitCode::Failure;
+            }
+            Input::Bytes {
+                name: "stdin".to_string(),
+                bytes,
+            }
+        } else if p.is_dir() && p.join(INDEX_FILE).is_file() {
+            // A directory an export wrote is a collection, and is checked against its index
+            // before anything in it is read; any other directory is its files.
+            Input::Index(p.join(INDEX_FILE))
+        } else if p.is_dir() {
+            Input::Dir(p.to_path_buf())
+        } else if p.file_name().is_some_and(|n| n == INDEX_FILE) {
+            Input::Index(p.to_path_buf())
+        } else {
+            Input::File(p.to_path_buf())
+        });
+    }
+    let mut opts = ImportOptions::new().accept(m.get_flag("accept"));
+    if let Some(n) = m.get_one::<String>("name") {
+        opts = opts.name(n.clone());
+    }
+    if let Some(l) = m.get_one::<String>("licence") {
+        opts = opts.licence(l.clone());
+    }
+    if let Some(o) = m.get_one::<String>("origin") {
+        opts = opts.origin(o.clone());
+    }
+    let outcome = match with_library(m, global, "import", true, |lib| {
+        smysl::lib::import(lib, &inputs, &opts)
+    }) {
+        Ok(o) => o,
+        Err(code) => return code,
+    };
+    let r = match outcome {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl lib import: {e}");
+            return lib_error_code(&e);
+        }
+    };
+    for d in r.report.iter() {
+        eprintln!("import:{}: {d}", r.name);
+    }
+    for c in &r.contentions {
+        eprintln!(
+            "import:{}: contention {} over {} ({} positions, {})",
+            r.name,
+            c.id,
+            c.over,
+            c.positions.len(),
+            c.detected.kind
+        );
+    }
+    let sum = |f: fn(&smysl::lib::FileOutcome) -> usize| r.files.iter().map(f).sum::<usize>();
+    let (staged, quarantined) = (sum(|f| f.staged), sum(|f| f.quarantined));
+    if global.get_flag("json") {
+        let files: Vec<String> = r
+            .files
+            .iter()
+            .map(|f| {
+                format!(
+                    "{{\"file\":{},\"mid\":{},\"original\":\"{}\",\"records\":\"{}\",\
+                     \"added\":{},\"duplicates\":{},\"accepted\":{},\"staged\":{},\
+                     \"waiting\":{},\"quarantined\":{},\"text\":{},\
+                     \"already_imported\":{},\"rejected\":{}}}",
+                    smysl::json_escape(&f.file),
+                    f.mid
+                        .map(|m| smysl::json_escape(&m.canonical()))
+                        .unwrap_or_else(|| "null".to_string()),
+                    hex32(&f.original),
+                    hex32(&f.rsd),
+                    f.added,
+                    f.duplicates,
+                    f.accepted,
+                    f.staged,
+                    f.waiting,
+                    f.quarantined,
+                    f.text,
+                    f.already_imported,
+                    f.rejected
+                )
+            })
+            .collect();
+        println!(
+            "{{\"name\":{},\"files\":[{}],\"contentions\":{}}}",
+            smysl::json_escape(&r.name),
+            files.join(","),
+            r.contentions.len()
+        );
+    } else if !global.get_flag("quiet") {
+        println!("import  {}", r.name);
+        for f in &r.files {
+            let what = if f.rejected {
+                "not decoded (SMY-E493); nothing from it was used".to_string()
+            } else if f.already_imported {
+                "already imported".to_string()
+            } else {
+                format!(
+                    "{} new, {} already held: {} accepted, {} staged, {} waiting, {} quarantined",
+                    f.added, f.duplicates, f.accepted, f.staged, f.waiting, f.quarantined
+                )
+            };
+            println!("  {}  {what}", f.file);
+        }
+    }
+    let bad_input = r.files.iter().any(|f| f.rejected)
+        || r.report
+            .iter()
+            .any(|d| matches!(d.code, smysl::Code::E493 | smysl::Code::E494));
+    if bad_input {
+        ExitCode::Failure
+    } else if global.get_flag("strict") && quarantined > 0 {
+        ExitCode::CheckErrors
+    } else if staged > 0 {
+        ExitCode::Staged
+    } else {
+        ExitCode::Success
+    }
+}
+
+/// `lib status [--import NAME]`: every import, or one, with its state and counts.
+#[cfg(feature = "text")]
+fn lib_status(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let root = match library_root(m, global, "lib status") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    if !smysl::text::library::Library::is_library(&root) {
+        eprintln!(
+            "smysl lib status: {} is not a library (it has no `{}` marker)",
+            root.display(),
+            smysl::text::library::MARKER
+        );
+        return ExitCode::Usage;
+    }
+    let batches = match smysl::lib::status(&root, m.get_one::<String>("import").map(String::as_str))
+    {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("smysl lib status: {e}");
+            return lib_error_code(&e);
+        }
+    };
+    if global.get_flag("json") {
+        let rows: Vec<String> = batches
+            .iter()
+            .map(|b| {
+                format!(
+                    "{{\"name\":{},\"state\":\"{}\",\"manifests\":[{}],\"accepted\":{},\
+                     \"staged\":{},\"waiting\":{},\"quarantined\":{},\"tool\":{}}}",
+                    smysl::json_escape(&b.name),
+                    b.state.as_str(),
+                    b.mids
+                        .iter()
+                        .map(|m| smysl::json_escape(&m.canonical()))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    b.accepted,
+                    b.staged,
+                    b.waiting,
+                    b.quarantined,
+                    smysl::json_escape(&b.tool)
+                )
+            })
+            .collect();
+        println!("[{}]", rows.join(","));
+        return ExitCode::Success;
+    }
+    for b in &batches {
+        println!(
+            "{:<24} {:<11} {} accepted, {} staged, {} waiting, {} quarantined ({} file(s))",
+            b.name,
+            b.state.as_str(),
+            b.accepted,
+            b.staged,
+            b.waiting,
+            b.quarantined,
+            b.mids.len()
+        );
+    }
+    ExitCode::Success
+}
+
+/// `lib accept <name>`: merge a staged import. Exits 5 under `--fail-on-contention` when the
+/// import would give rise to a contention, and merges nothing.
+#[cfg(feature = "text")]
+fn lib_accept(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let name = match lib_one_target(m, "accept", "import name") {
+        Ok(n) => n,
+        Err(code) => return code,
+    };
+    let fail = m.get_flag("fail-on-contention");
+    let outcome = match with_library(m, global, "accept", false, |lib| {
+        smysl::lib::accept(lib, &name, fail)
+    }) {
+        Ok(o) => o,
+        Err(code) => return code,
+    };
+    match outcome {
+        Ok(r) => {
+            for d in r.report.iter() {
+                eprintln!("import:{name}: {d}");
+            }
+            for c in &r.contentions {
+                eprintln!(
+                    "import:{name}: contention {} over {} ({} positions, {})",
+                    c.id,
+                    c.over,
+                    c.positions.len(),
+                    c.detected.kind
+                );
+            }
+            if !global.get_flag("quiet") {
+                println!("accepted  {name}");
+            }
+            ExitCode::Success
+        }
+        Err(e) => {
+            eprintln!("smysl lib accept: {e}");
+            lib_error_code(&e)
+        }
+    }
+}
+
+/// `lib discard <name>`: drop a staged import's staged and waiting records. Its manifests and
+/// its quarantine stay.
+#[cfg(feature = "text")]
+fn lib_discard(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let name = match lib_one_target(m, "discard", "import name") {
+        Ok(n) => n,
+        Err(code) => return code,
+    };
+    let outcome = match with_library(m, global, "discard", false, |lib| {
+        smysl::lib::discard(lib, &name)
+    }) {
+        Ok(o) => o,
+        Err(code) => return code,
+    };
+    match outcome {
+        Ok(n) => {
+            if !global.get_flag("quiet") {
+                println!("discarded  {name}: {n} record(s)");
+            }
+            ExitCode::Success
+        }
+        Err(e) => {
+            eprintln!("smysl lib discard: {e}");
+            lib_error_code(&e)
+        }
+    }
+}
+
+/// `lib export --scope … -o DIR`: the store `-s` names, as a collection in `DIR`.
+///
+/// Verified in memory before anything is written, unless `--no-verify`: a collection whose P1
+/// or P3 fails is not written at all and exits 9. That is stricter than draft 3 §16.8's index
+/// marked incomplete, which is for what an export cannot spell (`SMY-E424`, surface); a cbor
+/// collection that does not verify is this build's defect, and a directory holding one would
+/// be mistaken for an export.
+#[cfg(feature = "text")]
+fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use smysl::lib::{
+        export_store, verify_collection, write_collection, Closure, ExportOptions, Layout,
+        Selection, UnknownRecords, With,
+    };
+    let path = match store_path(m, global, "lib export") {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+    let Some(scope) = m.get_many::<String>("scope") else {
+        eprintln!("smysl lib export: --scope is required: `all`, or the units to export");
+        return ExitCode::Usage;
+    };
+    let scope: Vec<&String> = scope.collect();
+    let Some(out) = global.get_one::<String>("output") else {
+        eprintln!("smysl lib export: -o DIR is required - a collection is a directory of files");
+        return ExitCode::Usage;
+    };
+    let dir = std::path::Path::new(out);
+    if dir.is_file() {
+        eprintln!("smysl lib export: {out} is a file; a collection is written into a directory");
+        return ExitCode::Usage;
+    }
+    let occupied = std::fs::read_dir(dir).is_ok_and(|mut d| d.next().is_some());
+    if occupied && !m.get_flag("force") {
+        eprintln!(
+            "smysl lib export: {out} is not empty; pass --force to write into it (files the \
+             new index does not name are left as they are)"
+        );
+        return ExitCode::Usage;
+    }
+    let (store, _) = match load_store(&path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("smysl lib export: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let selection = if scope.iter().any(|s| s.as_str() == "all") {
+        if scope.len() > 1 {
+            eprintln!(
+                "smysl lib export: --scope all selects everything, and takes nothing beside it"
+            );
+            return ExitCode::Usage;
+        }
+        Selection::all(&store)
+    } else {
+        let mut uids = Vec::new();
+        for s in &scope {
+            match resolve(&store, s) {
+                Ok(u) => uids.push(u),
+                Err(e) => {
+                    eprintln!("smysl lib export: --scope {s}: {e}");
+                    return e.code;
+                }
+            }
+        }
+        Selection::of(uids)
+    };
+    let layout = m.get_one::<String>("layout").expect("defaulted");
+    let closure = m.get_one::<String>("closure").expect("defaulted");
+    let mut opts = ExportOptions::new()
+        .layout(Layout::parse(layout).expect("the parser's values"))
+        .closure(Closure::parse(closure).expect("the parser's values"))
+        .with(
+            With::new()
+                .views(m.get_flag("with-views"))
+                .packs(m.get_flag("with-packs")),
+        );
+    if m.get_one::<String>("unknown").map(String::as_str) == Some("drop") {
+        opts = opts.unknown(UnknownRecords::Drop);
+    }
+    if let Some(raw) = m.get_one::<String>("edges") {
+        match edge_set(&store, raw, "lib export") {
+            Ok(e) => opts = opts.edges(e),
+            Err(code) => return code,
+        }
+    }
+    let c = match export_store(&store, &selection, &opts) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("smysl lib export: {e}");
+            return lib_error_code(&e);
+        }
+    };
+    for d in c.report.iter() {
+        eprintln!("lib export: {d}");
+    }
+    let verified = !m.get_flag("no-verify");
+    if verified {
+        let v = verify_collection(&c);
+        if !v.holds() {
+            eprintln!("smysl lib export: the collection does not verify, and nothing was written");
+            print_verify(&v, true);
+            return ExitCode::HashVerification;
+        }
+    }
+    if let Err(e) = write_collection(&c, dir) {
+        eprintln!("smysl lib export: {e}");
+        return lib_error_code(&e);
+    }
+    let records: usize = c.files.iter().map(|f| f.records).sum();
+    if global.get_flag("json") {
+        let files: Vec<String> = c
+            .files
+            .iter()
+            .map(|f| {
+                format!(
+                    "{{\"path\":{},\"records\":{},\"rsd\":\"{}\"}}",
+                    smysl::json_escape(&f.path),
+                    f.records,
+                    hex32(&f.rsd)
+                )
+            })
+            .collect();
+        println!(
+            "{{\"files\":[{}],\"records\":{records},\"rsd\":\"{}\",\"duplication\":[{},{}],\
+             \"verified\":{verified}}}",
+            files.join(","),
+            hex32(&c.rsd()),
+            c.duplication().0,
+            c.duplication().1
+        );
+    } else if !global.get_flag("quiet") {
+        println!(
+            "{} file(s), {records} record(s), rsd {}{}",
+            c.files.len(),
+            hex32(&c.rsd()),
+            if verified {
+                "; P1 and P3 hold"
+            } else {
+                "; not verified"
+            }
+        );
+        for f in &c.files {
+            println!("  {}  {}", f.path, f.records);
+        }
+    }
+    match strict_threshold(global, &c.report) {
+        Some(code) => code,
+        None => ExitCode::Success,
+    }
+}
+
+/// `lib verify <index|dir>`: every file against the index, then P1 and P3. Exits 9 when a file
+/// or a digest does not match.
+#[cfg(feature = "text")]
+fn lib_verify(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let target = match lib_one_target(m, "verify", "index") {
+        Ok(t) => t,
+        Err(code) => return code,
+    };
+    let mut p = std::path::PathBuf::from(&target);
+    if p.is_dir() {
+        p = p.join(smysl::lib::INDEX_FILE);
+    }
+    let v = match smysl::lib::verify(&p) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl lib verify: {e}");
+            return lib_error_code(&e);
+        }
+    };
+    for d in v.report.iter() {
+        eprintln!("lib verify: {d}");
+    }
+    if global.get_flag("json") {
+        let prop = |p: &smysl::lib::Property| match p {
+            smysl::lib::Property::Holds => "\"holds\"",
+            smysl::lib::Property::NotApplicable(_) => "\"not-applicable\"",
+            _ => "\"fails\"",
+        };
+        let files: Vec<String> = v
+            .files
+            .iter()
+            .map(|f| {
+                format!(
+                    "{{\"path\":{},\"problem\":{}}}",
+                    smysl::json_escape(&f.path),
+                    f.problem
+                        .as_deref()
+                        .map(smysl::json_escape)
+                        .unwrap_or_else(|| "null".to_string())
+                )
+            })
+            .collect();
+        println!(
+            "{{\"holds\":{},\"files\":[{}],\"p1\":{},\"p3\":{}}}",
+            v.holds(),
+            files.join(","),
+            prop(&v.p1),
+            prop(&v.p3)
+        );
+    } else if !global.get_flag("quiet") || !v.holds() {
+        print_verify(&v, false);
+    }
+    v.exit_code()
+}
+
+/// A verify report, one line per file that does not match and one per property.
+#[cfg(feature = "text")]
+fn print_verify(v: &smysl::lib::VerifyReport, to_stderr: bool) {
+    use smysl::lib::Property;
+    let mut lines = Vec::new();
+    let ok = v.files.iter().filter(|f| f.problem.is_none()).count();
+    lines.push(format!("{ok} of {} file(s) match the index", v.files.len()));
+    for f in &v.files {
+        if let Some(p) = &f.problem {
+            lines.push(format!("  {}: {p}", f.path));
+        }
+    }
+    for (name, p) in [("P1", &v.p1), ("P3", &v.p3)] {
+        lines.push(match p {
+            Property::Holds => format!("{name} holds"),
+            Property::NotApplicable(why) => format!("{name} not checked: {why}"),
+            Property::Fails {
+                missing,
+                extra,
+                first_diff,
+            } => {
+                let mut s = format!(
+                    "{name} fails: {} record(s) missing, {} extra",
+                    missing.len(),
+                    extra.len()
+                );
+                if let Some((file, at)) = first_diff {
+                    s.push_str(&format!("; {file} first differs at byte {at}"));
+                }
+                s
+            }
+            _ => format!("{name}: an outcome this build does not know"),
+        });
+    }
+    for l in lines {
+        if to_stderr {
+            eprintln!("{l}");
+        } else {
+            println!("{l}");
+        }
+    }
+}
+
 /// `ask --answer`: the model's turn, after the dossier is in the store.
 ///
 /// The members are the thread's steps less its gaps — a gap's unit is a saved query, whose gist
@@ -9233,7 +10028,13 @@ fn main() -> ProcExitCode {
     // a refusal that only says no leaves the caller to guess which flag they wanted.
     if let Some(want) = matches.get_one::<String>("format") {
         if !cmd.forms.contains(&want.as_str()) {
-            if cmd.forms.is_empty() {
+            if want == "pack" {
+                eprintln!(
+                    "smysl {name}: --format pack is not available - a pack is a lossy \
+                     selection, and only `lib export` writes one. Use `smysl pack` for a \
+                     budgeted selection of a store."
+                );
+            } else if cmd.forms.is_empty() {
                 eprintln!(
                     "smysl {name}: --format is not honoured here - {name} does not write a \
                      document. Use --json if you are parsing its output."
@@ -9285,6 +10086,7 @@ fn main() -> ProcExitCode {
         "ask" => cmd_ask(sub, &matches),
         "measure" => cmd_measure(sub, &matches),
         "assess" => cmd_assess(sub, &matches),
+        "lib" => cmd_lib(sub, &matches),
         _ => {
             // Unreachable while every command in `COMMANDS` has an arm above, which
             // `command_table_matches_section_23` enforces. Kept as the honest answer if one
@@ -11447,7 +12249,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 35);
+        assert_eq!(COMMANDS.len(), 36);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -11486,7 +12288,8 @@ mod tests {
                 "q",
                 "ask",
                 "measure",
-                "assess"
+                "assess",
+                "lib"
             ]
         );
     }
@@ -11643,13 +12446,17 @@ mod tests {
     /// out there rather than read from here. This is the invariant that list cannot express: a
     /// command's forms are either both, or the store log alone, or none — never some other
     /// subset, and never, as happened for twenty-three commands, a flag the dispatcher accepts
-    /// and the command ignores.
+    /// and the command ignores. `lib` is the one exception, with all three: its actions differ,
+    /// and `cmd_lib` refuses per action what the table cannot (TX-P11 step 5).
     #[test]
     fn every_command_declares_its_output_forms() {
         let mut documents = 0;
         for c in COMMANDS {
             assert!(
-                c.forms == BOTH || c.forms == CBOR_ONLY || c.forms == NO_DOCUMENT,
+                c.forms == BOTH
+                    || c.forms == CBOR_ONLY
+                    || c.forms == NO_DOCUMENT
+                    || (c.name == "lib" && c.forms == LIB_FORMS),
                 "{} declares an unexpected form set: {:?}",
                 c.name,
                 c.forms
@@ -11659,15 +12466,15 @@ mod tests {
             }
             for f in c.forms {
                 assert!(
-                    *f == "surface" || *f == "cbor",
+                    *f == "surface" || *f == "cbor" || *f == "pack",
                     "{} names a form `--format` does not accept: {f}",
                     c.name
                 );
             }
         }
-        // Five write both, three write a store log. The rest report, mutate in place, or
-        // render an artifact through their own `--target`.
-        assert_eq!(documents, 8);
+        // Five write both, three write a store log, and `lib export` writes a collection. The
+        // rest report, mutate in place, or render an artifact through their own `--target`.
+        assert_eq!(documents, 9);
     }
 
     /// A store named with no directory part has a parent of `""`, which is not the current

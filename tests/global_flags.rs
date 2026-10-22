@@ -365,8 +365,12 @@ fn every_command_honours_format_or_refuses_it() {
 
     // The refusal happens before the command runs, so an invocation that would fail for want of
     // arguments still reaches it. That is the point of checking it in one place.
+    //
+    // `pack` since TX-P11 step 5, when the global flag was widened to it for `lib export`
+    // (SMYSL-2.7 §4.4, OQ-62): none of these writes one, so every row refuses it. `lib`'s own
+    // refusals are per action and are `tests/cmd_lib.rs`'s.
     for (name, forms, args) in FORMS {
-        for form in ["surface", "cbor"] {
+        for form in ["surface", "cbor", "pack"] {
             let mut argv = vec![*name];
             argv.extend_from_slice(args);
             argv.push("--format");

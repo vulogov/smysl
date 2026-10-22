@@ -932,7 +932,7 @@ Steps 1–4 do not need either and can start once TX-P0 has landed.
 | 2 | `smysl-lib` skeleton; `export_store` with `select`, `closure` (fixpoint), `write` (canonical), layouts `single`/`by-view`, `full` | 1 | §5.1 select tests; F1–F13 single-layout exports, in-memory P1 against `rsd(X)` — **done 2026-10-21**, below |
 | 3 | `index`, `verify` (file checks, P1, P3), `ref` mode, duplication factor | 2 | `verify` passes on F1–F13 × {single, by-view} × {full, ref}; a flipped byte gives exit 9 — **done 2026-10-21**, below |
 | 4 | import: decode, classify, CBOR staging, quarantine, waiting, tables (CBOR fallback), manifest (without mid until TX-P1 → placeholder hash of the body, replaced by `mid`), `accept`/`discard`/`status` | 3 | idempotence and commutativity property tests; F6 quarantine test; early-attestation promotion test — **done 2026-10-21**, below |
-| 5 | CLI `lib` group, global `--format` change, dispatch and cli-surface tests | 4 | `tests/dispatch.rs` with 27 commands; `lib export … && lib verify` exits 0 on F1–F13 |
+| 5 | CLI `lib` group, global `--format` change, dispatch and cli-surface tests | 4 | `tests/dispatch.rs` with 27 commands; `lib export … && lib verify` exits 0 on F1–F13 — **done 2026-10-22**, below (36 commands) |
 | 6 | Manifest-backed parts: real mids, `--keep-original` (o3), `--with-text`, records 14/15/18/19 rows, redaction at the door, layouts `by-expression`/`by-collection` | TX-P1, TX-P2 | Bible corpus cells of GE-T15 pass P1/P3; a redacted tid's 15/18 are dropped on import (`W414`) |
 | 7 | Datings and time: rows 11/13/17 with datings, `by-time`, `--as-of` | TX-P3 | chat cells pass; `--as-of` excludes exactly the planted late records, with W415/W498 counts |
 | 8 | `--scope` through `sq`, `by-query`, `from import:<…>` resolution (§3.9) | TX-P6 | P3 with scope `from import:<collection>` is byte-identical on all landed cells |
@@ -1206,6 +1206,75 @@ The test is `crates/smysl-lib/tests/import.rs`, 10 tests:
   {`single`, `by-view`} × {`full`, `ref`}, written, imported as an index into an empty
   library. `rsd(retained)` equals `index.rsd`.
 - **A collection with a flipped byte** gives `E494` and imports nothing.
+
+*Step 5, done 2026-10-22.* The command line: one `lib` row in `COMMANDS` (pure, `TX-P11`),
+wired to step 2–4's API through the facade, `smysl::lib`, behind `text`. The facade now
+depends on `smysl-lib`.
+
+- **Thirty-six commands, not 27.** §2.8 counted 26 at `d25ec9e`. Nine arrived between then and
+  this step (`text`, `date`, `same-as`, `link`, `summarise`, `q`, `ask`, `measure`, `assess`).
+  `tests/dispatch.rs`, `command_table_matches_section_23`, the Makefile's `COMMAND_NAMES` and
+  `tests/cli-surface.txt` each record 36.
+- **Six actions as values of `<ACTION>`, not nested subcommands.** §4.4 sketched a nested clap
+  group, the first in the tree. `text`, `date`, `same-as` and `assess` already take their
+  actions as a positional, and that is the house form. It is also the one the third CLI gate
+  can see: `make cli-surface` reads each command's `--help` once. Nested, `lib --help` lists
+  six names and none of their flags, and the gate would have recorded `lib` as taking nothing.
+- **Flags: what works, and nothing that only refuses.**
+  - `import`: `--name`, `--accept`, `--licence` and `--origin`. A directory that holds an
+    `export-index.cbor` is imported as a collection and checked first. `-` reads stdin.
+  - `status`: `--import`, and the global `--json`.
+  - `accept`: `--fail-on-contention`.
+  - `export`: `--scope` (required), `--layout single|by-view`, `--closure full|ref`,
+    `--with-views`, `--with-packs`, `--edges` (`trace`'s parser), `--unknown`, `--no-verify`
+    and `--force`, writing into `-o DIR`.
+  - `verify`: one index, or the directory that holds it.
+  - The other flags in §4.4's table arrive with the steps that give them meaning:
+    - `--shard`, `--attest`, `--keep-original`, `--no-join`, `--with-text`,
+      `--with-provenance`, `--with-quarantine`, `--with-staged`, `--window`, `--group-by`,
+      `--budget`, `--as-of`, `--target-revision`, `--agent`, `--p2` and `--keep-scratch`;
+    - the layouts after `by-view`.
+
+    `cli-surface` records each one as it lands.
+- **`--scope` before `sq`.** It is `all`, or units by uid or label, repeated: the CLI form of
+  `Selection::all` and `Selection::of`. Step 8 adds the query form. A uid is `b3:…` and a label
+  has no spaces, so neither reads as a query.
+- **Exits** are §4.4's:
+  - `import`: 0, or 10 when anything was staged. 3 under `--strict` when anything was
+    quarantined. 1 when an input did not decode or a collection did not match its index.
+  - `accept`: 5 under `--fail-on-contention`.
+  - `export` and `verify`: 9 when a collection does not verify.
+  - 2 for a name that is not a staged import, a missing `--scope` or `-o`, and an occupied
+    output directory without `--force`.
+- **An export that does not verify is not written.** §4.4 has export check P1 and P3 in memory
+  before calling its index complete. A cbor collection can fail them only through a defect of
+  this build. A directory holding one would read as an export, so none is written and the exit
+  is 9. `complete: false` stays what §3.8 makes it: the mark of what surface cannot spell
+  (`SMY-E424`, step 10).
+- **`--format` widened to `pack`** (OQ-62's proposal, taken):
+  - The dispatcher refuses `pack` on every other command, with its own message.
+    `tests/global_flags.rs`'s matrix now runs all three forms.
+  - The table gives `lib` every form, since `export` names them all. `cmd_lib` decides per
+    action: `export` writes `cbor` and refuses `surface` and `pack` until step 10, and the
+    other five write no document and refuse `--format` outright, as `NO_DOCUMENT` commands
+    do.
+
+The test is `tests/cmd_lib.rs`, 9 tests:
+- **The exit.** `lib export … && lib verify` exits 0 for every fixture of F1–F13, plus F10
+  and F14 from the wire, × {`single`, `by-view`} × {`full`, `ref`}.
+- **A flipped byte** in an exported file makes `verify` exit 9 with `SMY-E494`.
+- **An occupied directory** is refused without `--force` and written into with it. A file
+  that was already there is left alone.
+- **`export` without `--scope` or `-o`** is refused, and so is a scope naming a unit the store
+  does not hold. Neither writes anything.
+- **`import`** exits 10 staged and 0 with `--accept`, and 0 again for a repeat that says
+  `already imported`. `status --json` reports the state.
+- **`accept` and `discard`** each exit 0 on a staged import, and 2 on one that is not staged
+  or does not exist.
+- **A truncated file** exits 1 with `SMY-E493`.
+- **The `--format` refusals.** `pack` outside `lib export`, `surface` and `pack` on
+  `lib export`, and any form on `lib status`.
+- **`status`** on a directory that is not a library is refused, and creates nothing.
 
 ---
 

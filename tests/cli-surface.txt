@@ -30,7 +30,7 @@ fmt        --store
 fmt        --write
 fmt        --output
 fmt        --format
-fmt        [possible values: surface, cbor]
+fmt        [possible values: surface, cbor, pack]
 fmt        --strict
 fmt        --offline
 fmt        --no-color
@@ -48,7 +48,7 @@ check      --store
 check      --as
 check      --output
 check      --format
-check      [possible values: surface, cbor]
+check      [possible values: surface, cbor, pack]
 check      --granularity
 check      --estimator
 check      --strict
@@ -69,7 +69,7 @@ pack       --output
 pack       --support
 pack       --focus
 pack       --format
-pack       [possible values: surface, cbor]
+pack       [possible values: surface, cbor, pack]
 pack       --query
 pack       --strict
 pack       --offline
@@ -103,7 +103,7 @@ merge      --output
 merge      --staged
 merge      --fail-on-contention
 merge      --format
-merge      [possible values: surface, cbor]
+merge      [possible values: surface, cbor, pack]
 merge      --max-contentions-per-agent
 merge      --strict
 merge      --offline
@@ -122,7 +122,7 @@ diff       --store
 diff       --output
 diff       --recipe
 diff       --format
-diff       [possible values: surface, cbor]
+diff       [possible values: surface, cbor, pack]
 diff       --strict
 diff       --offline
 diff       --no-color
@@ -140,7 +140,7 @@ trace      --depth
 trace      --output
 trace      --parents
 trace      --format
-trace      [possible values: surface, cbor]
+trace      [possible values: surface, cbor, pack]
 trace      --grounds
 trace      --both
 trace      --strict
@@ -160,7 +160,7 @@ view       --id
 view       --output
 view       --threads
 view       --format
-view       [possible values: surface, cbor]
+view       [possible values: surface, cbor, pack]
 view       --requires
 view       --strict
 view       --offline
@@ -179,7 +179,7 @@ bundle     --output
 bundle     --unknown
 bundle     [possible values: keep, drop]
 bundle     --format
-bundle     [possible values: surface, cbor]
+bundle     [possible values: surface, cbor, pack]
 bundle     --strict
 bundle     --offline
 bundle     --no-color
@@ -198,7 +198,7 @@ thread     [possible values: analysis, narrative, brief, qa, plan, exposition, d
 thread     --output
 thread     --only
 thread     --format
-thread     [possible values: surface, cbor]
+thread     [possible values: surface, cbor, pack]
 thread     --list
 thread     --show
 thread     --strict
@@ -222,7 +222,7 @@ salience   --top
 salience   --explain
 salience   --output
 salience   --format
-salience   [possible values: surface, cbor]
+salience   [possible values: surface, cbor, pack]
 salience   --weights
 salience   --seed
 salience   --strict
@@ -244,7 +244,7 @@ find       --output
 find       --engine
 find       [possible values: lexical, semantic, hybrid]
 find       --format
-find       [possible values: surface, cbor]
+find       [possible values: surface, cbor, pack]
 find       --model
 find       --strict
 find       --offline
@@ -271,7 +271,7 @@ retract    --output
 retract    --reason
 retract    --authority
 retract    --format
-retract    [possible values: surface, cbor]
+retract    [possible values: surface, cbor, pack]
 retract    --strict
 retract    --offline
 retract    --no-color
@@ -290,7 +290,7 @@ withdraw   --output
 withdraw   --reason
 withdraw   --at
 withdraw   --format
-withdraw   [possible values: surface, cbor]
+withdraw   [possible values: surface, cbor, pack]
 withdraw   --dry-run
 withdraw   --strict
 withdraw   --offline
@@ -310,7 +310,7 @@ resolve    --at
 resolve    --output
 resolve    --dry-run
 resolve    --format
-resolve    [possible values: surface, cbor]
+resolve    [possible values: surface, cbor, pack]
 resolve    --strict
 resolve    --offline
 resolve    --no-color
@@ -328,7 +328,7 @@ review     [possible values: human, model, tool]
 review     --all
 review     --output
 review     --format
-review     [possible values: surface, cbor]
+review     [possible values: surface, cbor, pack]
 review     --strict
 review     --offline
 review     --no-color
@@ -348,7 +348,7 @@ commit     --note
 commit     --output
 commit     --at
 commit     --format
-commit     [possible values: surface, cbor]
+commit     [possible values: surface, cbor, pack]
 commit     --dry-run
 commit     --strict
 commit     --offline
@@ -367,7 +367,7 @@ render     --output
 render     --target
 render     [possible values: markdown, md, typst, html, slides, json, text]
 render     --format
-render     [possible values: surface, cbor]
+render     [possible values: surface, cbor, pack]
 render     --lod
 render     [possible values: L0, L1, L2]
 render     --contentions
@@ -391,7 +391,7 @@ import     [possible values: file, metric, tool, url, doc]
 import     --store
 import     --output
 import     --format
-import     [possible values: surface, cbor]
+import     [possible values: surface, cbor, pack]
 import     --strict
 import     --offline
 import     --no-color
@@ -407,7 +407,7 @@ relink     --dry-run
 relink     --store
 relink     --output
 relink     --format
-relink     [possible values: surface, cbor]
+relink     [possible values: surface, cbor, pack]
 relink     --strict
 relink     --offline
 relink     --no-color
@@ -423,7 +423,7 @@ compact    --dry-run
 compact    --store
 compact    --output
 compact    --format
-compact    [possible values: surface, cbor]
+compact    [possible values: surface, cbor, pack]
 compact    --strict
 compact    --offline
 compact    --no-color
@@ -444,7 +444,7 @@ ingest     [possible values: coarse, default, standard, fine]
 ingest     --output
 ingest     --estimator
 ingest     --format
-ingest     [possible values: surface, cbor]
+ingest     [possible values: surface, cbor, pack]
 ingest     --max-output
 ingest     --strict
 ingest     --lang-policy
@@ -478,7 +478,7 @@ attest     [possible values: gist-coverage, warrant-plausibility, granularity]
 attest     --sample
 attest     --output
 attest     --format
-attest     [possible values: surface, cbor]
+attest     [possible values: surface, cbor, pack]
 attest     --strict
 attest     --offline
 attest     --no-color
@@ -495,7 +495,7 @@ providers  --store
 providers  --output
 providers  --tasks
 providers  --format
-providers  [possible values: surface, cbor]
+providers  [possible values: surface, cbor, pack]
 providers  --strict
 providers  --offline
 providers  --no-color
@@ -513,7 +513,7 @@ usage      --since
 usage      --output
 usage      --reset
 usage      --format
-usage      [possible values: surface, cbor]
+usage      [possible values: surface, cbor, pack]
 usage      --strict
 usage      --offline
 usage      --no-color
@@ -528,7 +528,7 @@ reindex    --config
 reindex    --verify
 reindex    --output
 reindex    --format
-reindex    [possible values: surface, cbor]
+reindex    [possible values: surface, cbor, pack]
 reindex    --strict
 reindex    --offline
 reindex    --no-color
@@ -543,7 +543,7 @@ ui         --config
 ui         --store
 ui         --output
 ui         --format
-ui         [possible values: surface, cbor]
+ui         [possible values: surface, cbor, pack]
 ui         --strict
 ui         --offline
 ui         --no-color
@@ -565,7 +565,7 @@ text       --output
 text       --scheme
 text       --alias
 text       --format
-text       [possible values: surface, cbor]
+text       [possible values: surface, cbor, pack]
 text       --lang
 text       --strict
 text       --licence
@@ -604,7 +604,7 @@ date       --output
 date       --window
 date       --basis
 date       --format
-date       [possible values: surface, cbor]
+date       [possible values: surface, cbor, pack]
 date       --as
 date       --strict
 date       --at
@@ -628,7 +628,7 @@ same-as    --store
 same-as    --output
 same-as    --scope
 same-as    --format
-same-as    [possible values: surface, cbor]
+same-as    [possible values: surface, cbor, pack]
 same-as    --neighbours
 same-as    --no-adjacent
 same-as    --strict
@@ -650,7 +650,7 @@ link       --store
 link       --output
 link       --per-unit
 link       --format
-link       [possible values: surface, cbor]
+link       [possible values: surface, cbor, pack]
 link       --neighbours
 link       --hub
 link       --strict
@@ -672,7 +672,7 @@ summarise  --store
 summarise  --at
 summarise  --output
 summarise  --format
-summarise  [possible values: surface, cbor]
+summarise  [possible values: surface, cbor, pack]
 summarise  --yes
 summarise  --strict
 summarise  --offline
@@ -691,7 +691,7 @@ q          --library
 q          --explain
 q          --output
 q          --format
-q          [possible values: surface, cbor]
+q          [possible values: surface, cbor, pack]
 q          --why
 q          --param
 q          --strict
@@ -721,7 +721,7 @@ ask        --lang
 ask        [possible values: en, de, es, fr, ru]
 ask        --output
 ask        --format
-ask        [possible values: surface, cbor]
+ask        [possible values: surface, cbor, pack]
 ask        --subject
 ask        --strict
 ask        --templates
@@ -747,7 +747,7 @@ measure    --channel
 measure    --output
 measure    --policy
 measure    --format
-measure    [possible values: surface, cbor]
+measure    [possible values: surface, cbor, pack]
 measure    --profile
 measure    --axis
 measure    --strict
@@ -778,7 +778,7 @@ assess     --store
 assess     --output
 assess     --scope
 assess     --format
-assess     [possible values: surface, cbor]
+assess     [possible values: surface, cbor, pack]
 assess     --mode
 assess     [possible values: any, all]
 assess     --judge
@@ -795,3 +795,38 @@ assess     --quiet
 assess     --verbose
 assess     --seed-check
 assess     --help
+lib        <ACTION>
+lib        [possible values: import, status, accept, discard, export, verify]
+lib        [TARGET]
+lib        --config
+lib        --name
+lib        --accept
+lib        --store
+lib        --licence
+lib        --output
+lib        --format
+lib        [possible values: surface, cbor, pack]
+lib        --origin
+lib        --import
+lib        --strict
+lib        --fail-on-contention
+lib        --offline
+lib        --no-color
+lib        --scope
+lib        --layout
+lib        [possible values: single, by-view]
+lib        --noprogress
+lib        --closure
+lib        [possible values: full, ref]
+lib        --json
+lib        --quiet
+lib        --with-views
+lib        --verbose
+lib        --with-packs
+lib        --edges
+lib        --seed-check
+lib        --unknown
+lib        [possible values: include, drop]
+lib        --no-verify
+lib        --force
+lib        --help

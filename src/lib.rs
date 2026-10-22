@@ -288,6 +288,15 @@ pub use smysl_provider::{
 #[cfg(feature = "tui")]
 pub use smysl_tui as tui;
 
+/// Import and export (RFC SMYSL-2.7): files into a library and the library out as a
+/// collection, the index a collection describes itself with, and the checks that it round-trips.
+///
+/// Rule A: `lib` reaches the crate through this name and no other. A module, and not names at
+/// the root, because the root already has an `ImportOptions` — `import`'s, for tabular
+/// readings — and this crate's would collide with it (SMYSL-2.7 §2.8). Behind `text`, as the
+/// library it writes into is.
+#[cfg(feature = "text")]
+pub use smysl_lib as lib;
 /// Measures as derived data units (RFC SMYSL-2.6): recipes, the text-level measures T1–T7, and
 /// the unit writer.
 ///
