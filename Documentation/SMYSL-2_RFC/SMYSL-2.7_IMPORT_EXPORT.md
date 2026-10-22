@@ -931,7 +931,7 @@ Steps 1–4 do not need either and can start once TX-P0 has landed.
 | 1 | §4.3 prerequisites: `Subject::Record`, `has_surface_form` (+ `cmd_merge` uses it), `contains_record`, `record_hash`, `pending_attestations` | TX-P0 (`record_set_digest`) | `merge F13 --format surface` reports 0 omitted; existing suite green; `public-api*.txt` updated — **done 2026-10-21**, below |
 | 2 | `smysl-lib` skeleton; `export_store` with `select`, `closure` (fixpoint), `write` (canonical), layouts `single`/`by-view`, `full` | 1 | §5.1 select tests; F1–F13 single-layout exports, in-memory P1 against `rsd(X)` — **done 2026-10-21**, below |
 | 3 | `index`, `verify` (file checks, P1, P3), `ref` mode, duplication factor | 2 | `verify` passes on F1–F13 × {single, by-view} × {full, ref}; a flipped byte gives exit 9 — **done 2026-10-21**, below |
-| 4 | import: decode, classify, CBOR staging, quarantine, waiting, tables (CBOR fallback), manifest (without mid until TX-P1 → placeholder hash of the body, replaced by `mid`), `accept`/`discard`/`status` | 3 | idempotence and commutativity property tests; F6 quarantine test; early-attestation promotion test |
+| 4 | import: decode, classify, CBOR staging, quarantine, waiting, tables (CBOR fallback), manifest (without mid until TX-P1 → placeholder hash of the body, replaced by `mid`), `accept`/`discard`/`status` | 3 | idempotence and commutativity property tests; F6 quarantine test; early-attestation promotion test — **done 2026-10-21**, below |
 | 5 | CLI `lib` group, global `--format` change, dispatch and cli-surface tests | 4 | `tests/dispatch.rs` with 27 commands; `lib export … && lib verify` exits 0 on F1–F13 |
 | 6 | Manifest-backed parts: real mids, `--keep-original` (o3), `--with-text`, records 14/15/18/19 rows, redaction at the door, layouts `by-expression`/`by-collection` | TX-P1, TX-P2 | Bible corpus cells of GE-T15 pass P1/P3; a redacted tid's 15/18 are dropped on import (`W414`) |
 | 7 | Datings and time: rows 11/13/17 with datings, `by-time`, `--as-of` | TX-P3 | chat cells pass; `--as-of` excludes exactly the planted late records, with W415/W498 counts |
@@ -1119,6 +1119,93 @@ The test is `crates/smysl-lib/tests/verify.rs`, 8 tests:
 
 `tests/export.rs`'s by-view duplication is now (5, 5): the three units plus each file's
 keying view.
+
+*Step 4, done 2026-10-21.* Import, against the library as it is now. Three codes are
+registered in the Export group: `SMY-E493`, `SMY-W496`, and `SMY-W423` (SMYSL-2.0's, raised
+only here). That makes the registry 122. `smysl-lib` now depends on `smysl-check` and
+`smysl-text`, both pure.
+
+- **The seam.**
+  - `LibraryRead`, with `snapshot` and `root`, and `LibraryWrite`, with `append`. Both are
+    implemented for `smysl_text::Library`.
+  - It is narrower than §4.2's sketch on purpose. A library has one log until SMYSL-2.8
+    shards it, text objects are step 6's, and the tables have their CBOR fallback. The traits
+    grow as those land.
+  - The caller holds the locks, as for `Library::add`.
+- **API.**
+  - `import(lib, inputs, opts)`, `accept`, `discard`, `status`, and `retained` (the import
+    side of §3.9).
+  - `Input::{File, Dir, Index, Bytes}`.
+  - `ImportOptions` (`name`, `accept`, `licence`, `origin`), `ImportReport`, `FileOutcome`.
+  - `Batch` and `State` (`accepted`, `staged`, `waiting`, `quarantined`, `discarded`).
+- **Decoding.**
+  - A file is surface when `smysl check` would read it as surface. Otherwise it is a CBOR
+    sequence, which must decode to its last byte. Anything else is `E493` with no manifest.
+  - An index's files are checked against it first, and one mismatch refuses the whole
+    collection (`E494`).
+  - Records 15 and 18 are counted (`FileOutcome.text`) and left out. A log refuses them
+    (OQ-39), and step 6 puts them in the object store.
+- **The manifest** follows §3.1, one per file:
+  - alias `import:<name>`, or `import:<name>/<stem>` when the import holds several files;
+  - reader `smysl-lib/import/1`, lang `und`, and the default part policy;
+  - origin `--origin`, or the basename;
+  - `identifiers.original` and `identifiers.records` in hex;
+  - no parts.
+
+  A manifest already in the library makes the file `already_imported`, and nothing else
+  happens. That is idempotence.
+- **The tables** live in `lib/tables/{imported,batches,waiting}.cbor`, deterministic CBOR in key
+  order, written by rename.
+  - `waiting` is stored by record (§4.1's `waiting_by_record`), and the by-id view is built
+    when promotion asks.
+  - A contention id gets tag `0x03`, which §4.1's table lacks: a resolution of a contention
+    nobody holds waits as an attestation does.
+  - Units, rids and dids share tag `0x01`, as they share the uid space on the wire. An
+    attestation's `uid` does not say which of the three it names.
+- **Classification** follows §3.3, with two findings from the exit:
+  - **The check runs over what does not wait.** A missing ground is `SMY-E060`, an error.
+    Checked whole, a unit whose ground had not yet arrived would have been quarantined, not
+    held waiting.
+  - **A unit whose finding rests on another unit with one waits for it.** It is not
+    quarantined beside it. Each round quarantines only the minimal offenders. F6's finding
+    breaks rule M itself and rests on the two claims that break it first. Quarantined beside
+    them when it arrived with them, it waited when it arrived first, and the commutativity
+    test caught the difference. Only a cycle of findings is quarantined whole.
+  - A quarantined unit takes its attestations, bindings, commitments, edges and contentions
+    with it. Views, threads and the rest wait.
+- **Staging and promotion.**
+  - Without `accept`, the accepted set goes to `lib/staged/<name>.cbor`, exact and in canonical
+    order, and only the manifests are appended. `accept` appends the batch. With
+    `fail_on_contention`, a new detected contention refuses it (`LibError::Contentions`, exit 5
+    in step 5).
+  - `discard` drops the staged and waiting records. Manifests and quarantine stay, since the
+    files were read.
+  - Promotion re-classifies every waiting record of every import that is not discarded, to a
+    fixpoint, after each accepted import and each `accept`. Each record goes where its import's
+    content went. A staged import holds its own staged records as held.
+
+The test is `crates/smysl-lib/tests/import.rs`, 10 tests:
+- **Commutativity.** Every fixture is cut into three files at random (seeded), twice, and
+  imported in all six orders. The library's content and the waiting and quarantined counts
+  agree.
+- **Idempotence.** Every fixture in two pieces, imported twice: every file says
+  `already_imported`, and the library and its tables are unchanged.
+- **Promotion to the whole.** Every fixture in four pieces gives the library that the fixture
+  imported whole gives.
+- **F6.** Exactly the two minimal `E030` claims are quarantined, with `W423` and a `.report`
+  naming `E030`. The finding and the view rooted on it wait (`W496`). The retained set is the
+  file's.
+- **An early attestation** waits in the table and in `lib/waiting/`, and is appended when a
+  second import brings its unit.
+- **Staging.** A staged-then-accepted import equals an accepted one, record for record, and a
+  discarded one retains nothing.
+- **Truncated CBOR** gives `E493` and writes nothing, not even a manifest.
+- **One mid per file and options.** Importing twice gives `added = 0`. A new licence gives a
+  new mid and no new content. The manifest names the basename.
+- **P1 through a real import,** replacing step 3's stand-in in the test: every fixture under
+  {`single`, `by-view`} × {`full`, `ref`}, written, imported as an index into an empty
+  library. `rsd(retained)` equals `index.rsd`.
+- **A collection with a flipped byte** gives `E494` and imports nothing.
 
 ---
 

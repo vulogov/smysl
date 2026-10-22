@@ -282,6 +282,18 @@ pub enum LibError {
     Index(IndexError),
     /// A file could not be read or written. The path, and what the system said.
     Io(String, String),
+    /// The library refused a write, and why.
+    Library(String),
+    /// An import name that is not a slug (`[a-z0-9_-]`, starting with a letter, at most 48).
+    BadName(String),
+    /// Another import already has this name.
+    NameTaken(String),
+    /// No import has this name.
+    NoImport(String),
+    /// The import is not staged, so there is nothing to accept or discard.
+    NotStaged(String),
+    /// `accept --fail-on-contention` found this many new contentions, and merged nothing.
+    Contentions(usize),
 }
 
 impl fmt::Display for LibError {
@@ -296,6 +308,12 @@ impl fmt::Display for LibError {
             }
             LibError::Index(e) => write!(f, "{e}"),
             LibError::Io(path, e) => write!(f, "{path}: {e}"),
+            LibError::Library(e) => write!(f, "the library refused the write: {e}"),
+            LibError::BadName(n) => write!(f, "`{n}` is not an import name: lowercase letters, digits, `-` and `_`, starting with a letter"),
+            LibError::NameTaken(n) => write!(f, "an import named `{n}` already exists"),
+            LibError::NoImport(n) => write!(f, "no import is named `{n}`"),
+            LibError::NotStaged(n) => write!(f, "import `{n}` is not staged"),
+            LibError::Contentions(k) => write!(f, "{k} new contention(s); nothing was merged"),
         }
     }
 }

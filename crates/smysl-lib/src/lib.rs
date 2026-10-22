@@ -9,22 +9,33 @@
 //! TX-P11 step 2 built the exporter over a store the caller holds ([`export_store`]), with
 //! the `single` and `by-view` layouts and `full` closure. Step 3 adds `ref` closure, the
 //! collection's index ([`ExportIndex`], `export-index.cbor`), and [`verify()`]: each file
-//! against its index, then P1 and P3. Import and the library seam arrive in later steps.
+//! against its index, then P1 and P3. Step 4 adds import ([`import()`], [`accept()`],
+//! [`discard()`], [`status()`]) over the library seam ([`LibraryWrite`]): each record of a file
+//! accepted, staged, waiting or quarantined, with one manifest per file and the import tables
+//! in their CBOR fallback.
 //!
 //! Pure. No clock, no environment, no I/O: the same store and options give the same bytes,
 //! whatever order the store's log holds its records in (rule D).
 
 #![forbid(unsafe_code)]
 
+pub mod access;
 pub mod export;
+pub mod import;
 pub mod index;
+pub mod tables;
 pub mod verify;
 
+pub use access::{LibraryRead, LibraryWrite};
 pub use export::{
     export_store, slug, Closure, Collection, ExportOptions, ExportedFile, Layout, LibError,
     Selection, UnknownRecords, With,
 };
+pub use import::{
+    accept, discard, import, retained, status, FileOutcome, ImportOptions, ImportReport, Input,
+};
 pub use index::{ExportIndex, IndexError, IndexFile, Role, INDEX_FILE};
+pub use tables::{Batch, State};
 pub use verify::{
     verify, verify_collection, verify_files, write_collection, FileCheck, Property, VerifyReport,
 };

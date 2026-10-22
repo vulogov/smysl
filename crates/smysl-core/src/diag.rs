@@ -399,14 +399,19 @@ registry! {
     // all in the file (`W490`), export records naming uids the source store does not hold
     // (`W495`), and give a generated view id a hash suffix (`W497`). `W425` is SMYSL-2.0's,
     // raised only by export, so it sits here. Step 3's index and `verify` bring `E494`, a file
-    // that does not match its index. The rest arrive with import (`E493`, `W496`), `--as-of`
-    // (`W498`) and `--target-revision` (`W491`, `E492`).
+    // that does not match its index. Step 4's import brings `E493`, an input that does not
+    // decode, `W496`, records held waiting, and `W423`, SMYSL-2.0's quarantine code, raised
+    // only by import. The rest arrive with `--as-of` (`W498`) and `--target-revision` (`W491`,
+    // `E492`).
     Export => {
         W425 = "SMY-W425", Warn,  "Unknown records were exported to unattributed.cbor, or dropped with --unknown drop; counted";
         W490 = "SMY-W490", Warn,  "A record was left out of an export file: the records it names are not all in it; counted";
         W495 = "SMY-W495", Warn,  "Exported records reference uids the source store does not hold; counted";
         W497 = "SMY-W497", Warn,  "A layout key is not a view-id segment, or two keys collide; the generated id has a hash suffix";
         E494 = "SMY-E494", Error, "An export collection's file does not match its index (BLAKE3, record count or record-set digest)";
+        E493 = "SMY-E493", Error, "A lib import input is truncated or undecodable; nothing from that file is imported";
+        W496 = "SMY-W496", Warn,  "Imported records are waiting for a unit, edge, part or manifest the library does not hold; counted";
+        W423 = "SMY-W423", Warn,  "An imported record failed a check and was quarantined";
     }
 }
 
@@ -869,9 +874,11 @@ mod tests {
     /// `smysl-lib`'s exporter, in a twelfth group.
     ///
     /// 119 with `SMY-E494` in TX-P11 step 3, raised by `verify` on a file its index disowns.
+    ///
+    /// 122 with `SMY-E493`, `SMY-W496` and `SMY-W423` in TX-P11 step 4, raised by import.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 119);
+        assert_eq!(Code::ALL.len(), 122);
     }
 
     #[test]
