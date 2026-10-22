@@ -530,6 +530,20 @@ jobs:
               exit 1
             }
           done
+      # Import and export (TX-P11 step 11): P1 and P3 over generated stores, and arbitrary
+      # bytes offered to `lib import`, which must classify every record it decodes once.
+      - name: import and export
+        run: |
+          for t in lib_roundtrip lib_import; do
+            ls fuzz/artifacts/$t > /tmp/before-$t.txt 2>/dev/null || true
+            cargo +nightly fuzz run $t -- -max_total_time=60 || {
+              ls fuzz/artifacts/$t > /tmp/after-$t.txt 2>/dev/null || true
+              for f in $(comm -13 /tmp/before-$t.txt /tmp/after-$t.txt); do
+                echo "::error title=$t-crash::$f = $(base64 -w0 fuzz/artifacts/$t/$f)"
+              done
+              exit 1
+            }
+          done
       # A crash leaves its input behind; publish it so the failure is reproducible rather
       # than merely reported.
       - name: upload any crash found
@@ -538,3 +552,35 @@ jobs:
         with:
           name: fuzz-artifacts
           path: fuzz/artifacts/
+
+  # GE-T15, the round-trip gate (RFC SMYSL-2.7 §5.2, TX-P11 step 12; gate G2), on the two
+  # platforms §5.2's axis names. The matrix and its duplication golden, the 10⁵ scale cell,
+  # and the cross-implementation harness with every implementation **required**: a runner
+  # missing `python3`, `node` or `go` fails rather than skips (`SMYSL_XI_REQUIRED`). The two
+  # platforms agree on every file's BLAKE3 because both compare against the same committed
+  # goldens. The 10⁶ cell needs about 13 GB and runs locally (`--ignored`).
+  ge-t15:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: the matrix, P2, the 10⁵ scale cell and the cross-implementation harness
+        env:
+          SMYSL_XI_REQUIRED: "1"
+        run: >
+          cargo test --release -p smysl-lib --test ge_t15 --test cross_impl --
+          --include-ignored --skip scale_cell_at_10e6

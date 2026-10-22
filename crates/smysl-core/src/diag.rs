@@ -311,6 +311,7 @@ registry! {
         W411 = "SMY-W411", Warn,  "The observed instant lies outside the published interval";
         W412 = "SMY-W412", Warn,  "A live dating rule E could not apply: held, outranked, or applying to nothing";
         W413 = "SMY-W413", Warn,  "Temporal inconsistency: a negative cycle or an empty interval under rule E";
+        W414 = "SMY-W414", Warn,  "Source redacted: a part text or reading was dropped on receipt under rule Z; counted";
         W415 = "SMY-W415", Warn,  "Units excluded from a time-scoped result for lack of a time on the axis asked; counted";
         W418 = "SMY-W418", Warn,  "Expression fork: one alias has two manifest heads";
         E440 = "SMY-E440", Error, "Reader resource cap exceeded; nothing was written";
@@ -401,7 +402,10 @@ registry! {
     // raised only by export, so it sits here. Step 3's index and `verify` bring `E494`, a file
     // that does not match its index. Step 4's import brings `E493`, an input that does not
     // decode, `W496`, records held waiting, and `W423`, SMYSL-2.0's quarantine code, raised
-    // only by import. The rest arrive with `--as-of` (`W498`) and `--target-revision` (`W491`,
+    // only by import. Step 7's `--as-of` brings `W498`, a unit left out because what it rests
+    // on was not yet known. Step 10's surface format brings `W428`, records the surface cannot
+    // spell, and `E424`, a file that does not read back as what was selected, both
+    // SMYSL-2.0's and raised only here. The rest arrive with `--target-revision` (`W491`,
     // `E492`).
     Export => {
         W425 = "SMY-W425", Warn,  "Unknown records were exported to unattributed.cbor, or dropped with --unknown drop; counted";
@@ -412,6 +416,9 @@ registry! {
         E493 = "SMY-E493", Error, "A lib import input is truncated or undecodable; nothing from that file is imported";
         W496 = "SMY-W496", Warn,  "Imported records are waiting for a unit, edge, part or manifest the library does not hold; counted";
         W423 = "SMY-W423", Warn,  "An imported record failed a check and was quarantined";
+        W498 = "SMY-W498", Warn,  "--as-of excluded units whose deps or grounds were not yet known on that date; counted";
+        W428 = "SMY-W428", Warn,  "Records with no surface form were left out of a surface export; counted per type";
+        E424 = "SMY-E424", Error, "A surface export file does not read back as the records selected for it; the index is incomplete";
     }
 }
 
@@ -876,9 +883,13 @@ mod tests {
     /// 119 with `SMY-E494` in TX-P11 step 3, raised by `verify` on a file its index disowns.
     ///
     /// 122 with `SMY-E493`, `SMY-W496` and `SMY-W423` in TX-P11 step 4, raised by import.
+    /// 123 with `SMY-W414` in TX-P11 step 6, where import drops a redacted part's text and
+    /// readings at the door (rule Z, SMYSL-2.3 A-12.3).
+    /// 124 with `SMY-W498` in TX-P11 step 7, raised by `--as-of`.
+    /// 126 with `SMY-W428` and `SMY-E424` in TX-P11 step 10, raised by the surface format.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 122);
+        assert_eq!(Code::ALL.len(), 126);
     }
 
     #[test]

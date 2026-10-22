@@ -1,0 +1,5 @@
+[
+  {"file": "empty.cbor", "records": 0, "rsd": "3a19130f86b553c1595fda07bb0f579c0f580a57ead0928c7caa33bfb432b21f"},
+  {"file": "f13.cbor", "records": 11, "rsd": "6f9a36caf1b43b20117a2133d22b7bb8736365fb23f281974460ba35484016ba"},
+  {"file": "repeats.cbor", "records": 22, "rsd": "6f9a36caf1b43b20117a2133d22b7bb8736365fb23f281974460ba35484016ba"}
+]

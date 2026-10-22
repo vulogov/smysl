@@ -23,21 +23,24 @@ pub mod access;
 pub mod export;
 pub mod import;
 pub mod index;
+pub mod scope;
 pub mod tables;
 pub mod verify;
 
-pub use access::{LibraryRead, LibraryWrite};
+pub use access::{LibraryRead, LibraryWrite, NoText, TextSource};
 pub use export::{
-    export_store, slug, Closure, Collection, ExportOptions, ExportedFile, Layout, LibError,
-    Selection, UnknownRecords, With,
+    export_library, export_store, slug, snapshot, Closure, Collection, ExportOptions, ExportedFile,
+    Format, Layout, LibError, Selection, UnknownRecords, With,
 };
 pub use import::{
-    accept, discard, import, retained, status, FileOutcome, ImportOptions, ImportReport, Input,
+    accept, discard, import, original_path, retained, status, FileOutcome, ImportOptions,
+    ImportReport, Input,
 };
 pub use index::{ExportIndex, IndexError, IndexFile, Role, INDEX_FILE};
 pub use tables::{Batch, State};
 pub use verify::{
-    verify, verify_collection, verify_files, write_collection, FileCheck, Property, VerifyReport,
+    p2, verify, verify_collection, verify_files, write_collection, FileCheck, Property,
+    VerifyReport,
 };
 
 /// The tool id an export records itself under.

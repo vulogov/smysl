@@ -287,7 +287,10 @@ fn the_argument_surface_is_recorded() {
                 t.find("--").map(|at| {
                     let flag: String = t[at..]
                         .chars()
-                        .take_while(|c| c.is_ascii_lowercase() || *c == '-')
+                        // Digits too, as `make cli-surface`'s `--[a-z0-9-]+` takes them:
+                        // `lib verify --p2` (TX-P11 step 11) was the first flag with one, and
+                        // this parser read it as `--p`.
+                        .take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-')
                         .collect();
                     flag
                 })

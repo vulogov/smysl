@@ -920,47 +920,71 @@ an attestation by `tool:smysl-assess` at rung `computed`. `Mixed` is for `key --
 *Import smysl files into the library; export it as files.* Pure · TX-P11.
 
 `lib` moves records between a library and files, both ways (RFC SMYSL-2.7). **Export** writes
-a store as a *collection*: one canonical CBOR file per layout key, each closed under the rules
-that keep a unit's grounds, edges, attestations and bindings with it, and an
+a store as a *collection*: one file per layout key, each closed under the rules that keep a
+unit's grounds, edges, attestations, bindings, datings and text with it, and an
 `export-index.cbor` written last that lists every file with its BLAKE3, its record count and
 its record-set digest. **Import** reads files, directories or collections into a library. Each
 file gets one manifest, `import:<name>`, and each of its records is accepted, staged, held
 waiting for an id the library does not hold yet (`SMY-W496`), or quarantined because it fails
-a check (`SMY-W423`). A waiting record is promoted by the import that brings what it names, so
-the order files arrive in does not change what the library ends up holding.
+a check (`SMY-W423`), a span past its part's end (`SMY-E404`) among them. A waiting record is
+promoted by the import that brings what it names, so the order files arrive in does not change
+what the library ends up holding. Text goes to the object store and the rest to the log, and a
+part the library has redacted is dropped at the door (`SMY-W414`).
 
 #dtable(
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
     ([`ACTION`], [positional, required], [`import`, `status`, `accept`, `discard`, `export` or `verify`.]),
-    ([`TARGET…`], [positional], [The files, directories and export indexes to `import` (`-` reads stdin; a directory with an index is a collection, checked against it first); the import's name for `accept` and `discard`; the index, or its directory, for `verify`.]),
+    ([`TARGET…`], [positional], [The files, directories and export indexes to `import` (`-` reads stdin; a directory with an index is a collection, checked against it first); the import's name for `accept` and `discard` (`join:<name>` for its joins); the index, or its directory, for `verify`.]),
     ([`--name`], [`N`], [The import's name (`import`). The first input's stem by default.]),
     ([`--accept`], [—], [Append what passes rather than stage it (`import`). Staging is the default for every source.]),
     ([`--licence`], [`SPDX`], [The licence the manifests record (`import`); `unknown` by default.]),
     ([`--origin`], [`URL`], [Where the files came from (`import`). Otherwise each manifest records its file's name, never its path.]),
+    ([`--keep-original`], [—], [Keep each file's bytes at `objects/o3/`, under the BLAKE3 its manifest records (`import`).]),
+    ([`--no-join`], [—], [Propose no `same-as` edges to what the library holds (`import`).]),
     ([`--import`], [`NAME`], [Report one import (`status`).]),
     ([`--fail-on-contention`], [—], [Merge nothing if the import would give rise to a new contention (`accept`).]),
-    ([`--scope`], [`SQ`], [What to export: `all`, or a unit by uid or label, repeated. Required by `export`. `sq` queries arrive with TX-P11 step 8.]),
-    ([`--layout`], [`single|by-view`], [One file, or one per corpus view (`export`).]),
+    ([`--scope`], [`SQ`], [What to export, required: an `sq/1` query, such as `from library` or `from import:<name>`; `all`; or a unit by uid or label, repeated (`export`).]),
+    ([`--layout`], [`single|by-view|by-expression|by-collection|by-time|by-query`], [One file; or one per corpus view, expression, collection (an alias's namespace up to its first `/`), window of effective time, or value of `--group-by` (`export`).]),
+    ([`--window`], [`D`], [The width of a `by-time` window: `30m`, `6h`, `1d`, `2w`; a day by default.]),
+    ([`--group-by`], [`FIELD`], [The `group by` field `by-query` files by, such as `kind` or `lang`.]),
     ([`--closure`], [`full|ref`], [Every file closed on its own, or every record written once and the index saying which files a file needs (`export`).]),
     ([`--with-views`], [—], [Export the corpus views too (`export`).]),
     ([`--with-packs`], [—], [Export the pack infos too (`export`).]),
+    ([`--with-text`], [—], [Export the text of the parts the units are drawn from, where the manifest's carry is `text`, its licence permits it, and the part is not redacted (`export`, a library).]),
+    ([`--with-provenance`], [—], [Export the import manifests the records arrived under (`export`, a library). Outside P3.]),
+    ([`--with-staged`], [—], [Export staged imports too (`export`, a library).]),
+    ([`--with-quarantine`], [—], [Export quarantined records too (`export`, a library).]),
+    ([`--as-of`], [`EDTF`], [Export only what was known before the end of this date: a record's own clock, a unit's earliest attestation (`SMY-W415` for one with none), and nothing resting on what was not yet known (`SMY-W498`) (`export`).]),
+    ([`--budget`], [`N`], [The token budget each file is packed to, for `--format pack` (`export`).]),
     ([`--edges`], [`LIST`], [Edges the closure follows beside `deps` and `grounds`, as `trace --edges` takes them (`export`). Every edge by default.]),
     ([`--unknown`], [`include|drop`], [Records this build cannot interpret: kept in `unattributed.cbor`, or left out and counted (`export`, `SMY-W425`).]),
     ([`--no-verify`], [—], [Write without checking P1 and P3 first (`export`).]),
     ([`--force`], [—], [Write into an output directory that is not empty (`export`). Files the new index does not name are left alone.]),
+    ([`--p2`], [`FILE`], [Check P2 for a file, repeated: import it into a scratch library and export it again (`verify`).]),
+    ([`--keep-scratch`], [—], [Keep the scratch libraries `--p2` builds (`verify`).]),
   ),
 )
 
 The library is `-s`/`--store`, as for `text`; `import` creates it if it is not there, and the
 other actions refuse a directory that is not one. `export` reads any store `-s` names and writes
-into `-o DIR`. Before it writes anything it loads the collection into a store in memory and
-checks **P1** (that store's record-set digest is the index's) and **P3** (exporting that store
-again gives the same bytes, file for file). P1 through a real import, manifests and all, is
-`smysl-lib`'s own test. A collection that fails either is not written, and `export` exits 9. `verify`
-runs the same checks on a collection on disk. Every file must match its index (`SMY-E494`
-otherwise), and the exit is 9 when one does not.
+into `-o DIR`; the four `--with-*` flags that read a library are refused on a plain store. Before
+it writes anything it loads the collection into a store in memory and checks **P1** (that store's
+record-set digest is the index's) and **P3** (exporting that store again gives the same bytes,
+file for file). A CBOR collection that fails either is not written, and `export` exits 9.
+`verify` runs the same checks on a collection on disk; every file must match its index
+(`SMY-E494` otherwise). `--format` is `export`'s alone among the actions: `cbor` by default;
+`surface`, which writes `<slug>.smy` and counts what the surface cannot spell (`SMY-W428`), and
+writes an incomplete index if a file does not read back as exactly the rest (`SMY-E424`); or
+`pack`, a budgeted, lossy selection per file, outside P1 and P3.
+
+An import proposes `same-as` edges between the units it brought and the library's: the same
+bytes of one part read under two manifests with one gist (`identical-span`), and one entity name
+in one language from two expressions. They are staged as `join:<name>`, apart from the import,
+and `lib accept join:<name>` merges them. `--scope "from import:<name>"` over a collection
+`lib export` wrote resolves to that collection's export roots, so exporting it again with the
+index's options gives every file back byte for byte (P3 through a library).
 
 #dtable(
   (auto, 1fr),
@@ -970,15 +994,13 @@ otherwise), and the exit is 9 when one does not.
     ([`status`], [0. `--json` gives one object per import: its state, manifests and counts.]),
     ([`accept`], [0; 5 under `--fail-on-contention` when the import would give rise to a contention; 2 when the name is not a staged import.]),
     ([`discard`], [0; 2 when the name is not a staged import. The manifests stay, since the files were read, and so does the quarantine.]),
-    ([`export`], [0; 9 when the collection does not verify; 2 for a missing `--scope` or `-o`, or an occupied directory without `--force`.]),
-    ([`verify`], [0 when every file matches and P1 and P3 hold; 9 otherwise.]),
+    ([`export`], [0; 3 when a surface file does not read back (`SMY-E424`, the index written incomplete); 9 when a CBOR collection does not verify; 4 when a pack is infeasible; 2 for a missing `--scope` or `-o`, a scope that does not run, a bad `--as-of`, or an occupied directory without `--force`.]),
+    ([`verify`], [0 when every file matches and P1 and P3 hold, or every `--p2` file comes back; 9 otherwise.]),
   ),
 )
 
-`--format` is decided per action: `export` writes `cbor`; `surface` and `pack` are recorded in
-the flag and refused until TX-P11 step 10, and the other five actions write no document and
-refuse it outright. Importing the same files a second time under the same options changes
-nothing, and each file reports `already imported`.
+Importing the same files a second time under the same options changes nothing, and each file
+reports `already imported`.
 
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix B — Full Diagnostic Code Reference

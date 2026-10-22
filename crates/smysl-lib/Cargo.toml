@@ -29,6 +29,19 @@ smysl-check = { workspace = true }
 # The library an import writes into, behind `LibraryWrite`, and the part policy its manifests
 # record (§3.1). Pure; no reader feature is needed, since import reads smysl files only.
 smysl-text = { workspace = true }
+# `--scope` is an `sq/1` query, planned and run as `q` runs one, and `by-query` groups by a
+# `group by` field (TX-P11 step 8). Pure, and already below `smysl-text`.
+smysl-query = { workspace = true }
+# `--format pack` packs each file's selection as `smysl pack` does (TX-P11 step 10). Pure.
+smysl-pack = { workspace = true }
+
+[dev-dependencies]
+# The five-Bible corpus of `tests/text.rs` is USFM, and the chats of `tests/time.rs` WhatsApp
+# and Telegram, added through the library as `text add` adds them. Tests only: import itself
+# reads smysl files and needs no reader.
+smysl-text = { workspace = true, features = ["reader-usfm", "reader-whatsapp", "reader-telegram"] }
+# `tests/scope.rs` builds a plain store's query ports, as `smysl q` does.
+smysl-query = { workspace = true }
 
 # The selection, closure and layout tests of TX-P11 step 2 (SMYSL-2.7 §5.1), over the corpus.
 [[test]]
@@ -41,3 +54,36 @@ name = "verify"
 # Import, staging, waiting, quarantine and the tables of TX-P11 step 4 (SMYSL-2.7 §5.1).
 [[test]]
 name = "import"
+
+# Text in collections, `by-expression` and `by-collection`, and rule Z at the door, of TX-P11
+# step 6 (SMYSL-2.7 §3.2, §3.4, §3.6).
+[[test]]
+name = "text"
+
+# `by-time` and `--as-of`, of TX-P11 step 7 (SMYSL-2.7 §3.4, §3.10).
+[[test]]
+name = "time"
+
+# `--scope` as an `sq` query, `by-query`, and P3 from `import:<…>`, of TX-P11 step 8
+# (SMYSL-2.7 §3.6, §3.9).
+[[test]]
+name = "scope"
+
+# Span re-verification at import and the two joins, of TX-P11 step 9 (SMYSL-2.7 §3.2, §3.5).
+[[test]]
+name = "join"
+
+# The `surface` and `pack` formats, of TX-P11 step 10 (SMYSL-2.7 §3.8).
+[[test]]
+name = "format"
+
+# The cross-implementation harness and the record-set digest vectors, of TX-P11 step 11
+# (SMYSL-2.7 §5.4). Skips an implementation whose toolchain is absent unless
+# `SMYSL_XI_REQUIRED` is set.
+[[test]]
+name = "cross_impl"
+
+# GE-T15, the round-trip gate of TX-P11 (SMYSL-2.7 §5.2, step 12; gate G2). The scale cells
+# at 10⁵ and 10⁶ records are `--ignored`.
+[[test]]
+name = "ge_t15"

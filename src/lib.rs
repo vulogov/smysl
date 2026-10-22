@@ -448,8 +448,11 @@ mod tests {
         // N6), raised by `assess score`; 118 with `SMY-W425`, `SMY-W490`, `SMY-W495` and
         // `SMY-W497` (TX-P11 step 2), raised by `smysl-lib`'s exporter; 119 with `SMY-E494`
         // (TX-P11 step 3), raised by its `verify`; 122 with `SMY-E493`, `SMY-W496` and
-        // `SMY-W423` (TX-P11 step 4), raised by its import.
-        assert_eq!(Code::ALL.len(), 122);
+        // `SMY-W423` (TX-P11 step 4), raised by its import; 123 with `SMY-W414` (TX-P11
+        // step 6), raised when import drops a redacted part's text; 124 with `SMY-W498`
+        // (TX-P11 step 7), raised by `--as-of`; 126 with `SMY-W428` and `SMY-E424` (TX-P11
+        // step 10), raised by the surface format.
+        assert_eq!(Code::ALL.len(), 126);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

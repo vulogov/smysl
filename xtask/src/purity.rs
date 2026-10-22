@@ -176,8 +176,9 @@ const PURE_CRATES: &[&str] = &[
     // and its options, byte for byte, which is P3. Registered with the crate, as the others
     // were: at step 2 it holds the exporter and depends on `smysl-core`, `smysl-graph` and
     // `blake3`, all already pure. Step 4's import adds `smysl-check` and `smysl-text`, pure as
-    // well. The `std::fs` that `write_collection` and `import` use is the store's own
-    // precedent, not a runtime.
+    // well, and step 8's `--scope` adds `smysl-query`, already below `smysl-text`. The
+    // `std::fs` that `write_collection` and `import` use is the store's own precedent, not a
+    // runtime.
     "smysl-lib",
 ];
 

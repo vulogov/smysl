@@ -16,6 +16,12 @@ about its source, so the ids are canonical and nothing behind them is in this re
 third unit is at other bytes of the same part, and it is there so that an engine proposing every
 pair fails against the file rather than passing.
 
+`wire/rsd/` holds the record-set digest's vectors (SMYSL-2.7 §5.4): `empty.cbor`, `f13.cbor` (F13
+as CBOR) and `repeats.cbor` (F13 reversed, then again), with `cases.json` naming each one's record
+count and digest. The last two have one digest, which is the property: order and repeats do not
+count. The Rust writes them (`crates/smysl-lib/tests/cross_impl.rs`, `SMYSL_BLESS=1` to rewrite)
+and `python/`, `nodejs/` and `go/` each recompute them in their own suite.
+
 Six trees hold **gate material** rather than fixtures, and the difference is who they are
 addressed to: a fixture is an instrument, and these are the things being measured.
 

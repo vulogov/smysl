@@ -933,13 +933,13 @@ Steps 1–4 do not need either and can start once TX-P0 has landed.
 | 3 | `index`, `verify` (file checks, P1, P3), `ref` mode, duplication factor | 2 | `verify` passes on F1–F13 × {single, by-view} × {full, ref}; a flipped byte gives exit 9 — **done 2026-10-21**, below |
 | 4 | import: decode, classify, CBOR staging, quarantine, waiting, tables (CBOR fallback), manifest (without mid until TX-P1 → placeholder hash of the body, replaced by `mid`), `accept`/`discard`/`status` | 3 | idempotence and commutativity property tests; F6 quarantine test; early-attestation promotion test — **done 2026-10-21**, below |
 | 5 | CLI `lib` group, global `--format` change, dispatch and cli-surface tests | 4 | `tests/dispatch.rs` with 27 commands; `lib export … && lib verify` exits 0 on F1–F13 — **done 2026-10-22**, below (36 commands) |
-| 6 | Manifest-backed parts: real mids, `--keep-original` (o3), `--with-text`, records 14/15/18/19 rows, redaction at the door, layouts `by-expression`/`by-collection` | TX-P1, TX-P2 | Bible corpus cells of GE-T15 pass P1/P3; a redacted tid's 15/18 are dropped on import (`W414`) |
-| 7 | Datings and time: rows 11/13/17 with datings, `by-time`, `--as-of` | TX-P3 | chat cells pass; `--as-of` excludes exactly the planted late records, with W415/W498 counts |
-| 8 | `--scope` through `sq`, `by-query`, `from import:<…>` resolution (§3.9) | TX-P6 | P3 with scope `from import:<collection>` is byte-identical on all landed cells |
-| 9 | Joins: span re-verification, `identical-span` + lexical same-as into `join:<name>` | TX-P5, TX-P7 | an imported unit with an out-of-range span is quarantined (`E404`); same-span units from two imports gain one same-as edge; P1 unaffected (`--no-join` and with joins) |
-| 10 | `surface` and `pack` formats, W428 exactness | 5 | surface cells of GE-T15 |
-| 11 | Fuzz targets, cross-implementation additions and harness | 5 | 1 h fuzz on each target with no finding; all three implementations verify every export |
-| 12 | GE-T15 full run, scale cells at 10⁵/10⁶ | 6–11 | GE-T15 kill criteria (draft 3 §23): no P1/P3 failure, no record type lost; duplication factor per layout recorded (OQ-26) |
+| 6 | Manifest-backed parts: real mids, `--keep-original` (o3), `--with-text`, records 14/15/18/19 rows, redaction at the door, layouts `by-expression`/`by-collection` | TX-P1, TX-P2 | Bible corpus cells of GE-T15 pass P1/P3; a redacted tid's 15/18 are dropped on import (`W414`) — **done 2026-10-22**, below |
+| 7 | Datings and time: rows 11/13/17 with datings, `by-time`, `--as-of` | TX-P3 | chat cells pass; `--as-of` excludes exactly the planted late records, with W415/W498 counts — **done 2026-10-22**, below |
+| 8 | `--scope` through `sq`, `by-query`, `from import:<…>` resolution (§3.9) | TX-P6 | P3 with scope `from import:<collection>` is byte-identical on all landed cells — **done 2026-10-22**, below |
+| 9 | Joins: span re-verification, `identical-span` + lexical same-as into `join:<name>` | TX-P5, TX-P7 | an imported unit with an out-of-range span is quarantined (`E404`); same-span units from two imports gain one same-as edge; P1 unaffected (`--no-join` and with joins) — **done 2026-10-22**, below |
+| 10 | `surface` and `pack` formats, W428 exactness | 5 | surface cells of GE-T15 — **done 2026-10-22**, below |
+| 11 | Fuzz targets, cross-implementation additions and harness | 5 | 1 h fuzz on each target with no finding; all three implementations verify every export — **done 2026-10-22**, below |
+| 12 | GE-T15 full run, scale cells at 10⁵/10⁶ | 6–11 | GE-T15 kill criteria (draft 3 §23): no P1/P3 failure, no record type lost; duplication factor per layout recorded (OQ-26) — **done 2026-10-22**, below |
 | 13 (TX-P12) | `--target-revision` | SMYSL-2.5 lens engine | GE-T16's synthetic revisions: a `split-value` lens exports; a `retire` refuses with `E422`; a two-level grounds chain gets new uids in dependency order and every rewritten core references only mapped uids |
 
 *Step 1, done 2026-10-21.* The five prerequisites of §4.3, against the tree as it is now and not
@@ -1275,6 +1275,393 @@ The test is `tests/cmd_lib.rs`, 9 tests:
 - **The `--format` refusals.** `pack` outside `lib export`, `surface` and `pack` on
   `lib export`, and any form on `lib status`.
 - **`status`** on a directory that is not a library is refused, and creates nothing.
+
+*Step 6, done 2026-10-22.* Text in collections, the two alias layouts, and rule Z at the door.
+The registry is 123 with `SMY-W414`, the Library group's "source redacted" (SMYSL-2.3 A-12.3),
+registered here because import is the first thing to raise it.
+
+- **Real mids were already there.** Step 4 wrote every import manifest through
+  `Manifest::new` and `mid()`, since TX-P1 had landed; the placeholder the table names never
+  existed.
+- **Text goes through `append`.** `LibraryWrite::append` for `smysl_text::Library` puts records
+  15 and 18 in the object store and the rest in the log, and `LibraryRead` gains `holds` (a
+  part is held when the object store has its tid) and a `TextSource` supertrait (`part`,
+  `reading`). Import, staging, `accept` and promotion then needed no case for text: a staged
+  batch holds its parts as it holds its units, and `lib accept` puts each where it lives. A
+  part whose bytes do not hash to its tid is quarantined with `SMY-E446` and never reaches
+  the object store.
+- **Rule Z at the door** (§3.2 step 2). A part text or reading whose tid the library has
+  redacted, or that a record 19 among the import's files redacts, is dropped and counted
+  (`FileOutcome.redacted`, `SMY-W414`). A file's `identifiers.records` is its digest *before*
+  the drop, so one file is one mid whatever the receiving library has redacted since.
+- **`--with-text`** (rows 15 and 18): the part texts and readings of the parts the selected
+  units are drawn from, when the manifest listing the part is in the file, its carry is `text`,
+  `carry_allowed` passes its licence, and the part is not redacted. These are the tests
+  `text add` makes before it will hold somebody else's text (`SMY-E402`). `export_library`
+  reads them from the object store; an in-memory store holds them as records, which is what
+  lets `verify`'s P3 re-export a collection that carries text with no library at all.
+- **`export_library` and `snapshot`.** A library is exported from `snapshot(lib, with)`: the
+  log, plus its staged batches with `--with-staged` and its quarantined records with
+  `--with-quarantine` (§3.6). `--with-provenance` adds the import manifests the `imported` table
+  lists the selected records under (row 14). It is outside P3 by construction, since a
+  re-export names the importer's manifests, so `verify` reports P3 not applicable under it. All
+  four are refused on a plain store (exit 2) rather than answered with nothing.
+- **`by-expression` and `by-collection`.** A unit's key is the alias of the manifest its source
+  names, or that alias's namespace up to the first `/` (`collection:kjv` reads `kjv/08-rut` the
+  same way). `/` and `:` become `-`, as `by-view` treats a view id, so `kjv/08-rut` is the
+  file `kjv-08-rut.cbor` with no suffix. Two aliases that would meet that way keep their own
+  spelling and are suffixed apart (`SMY-W497`). A unit that names no manifest goes to
+  `unkeyed`.
+- **`--keep-original`** keeps each file's bytes at `objects/o3/ab/cd/<rest>`, the lowercase hex
+  of the BLAKE3 the manifest records as `identifiers.original`, fanned out as `t3/` and `r3/`
+  are rather than flat as §3.2 writes it.
+
+The test is `crates/smysl-lib/tests/text.rs`, 7 tests, over `fixtures/library/bibles/slice/`
+(Ruth and Jude in five editions, `<edition>/<book>`, one unit drawn from each part):
+- **The Bible cells.** {`single`, `by-expression`, `by-collection`} × {`full`, `ref`} with
+  `--with-text`: every part and its reading travel, P1 and P3 hold in memory, and an import
+  into an empty library puts every part in its object store and retains exactly the
+  collection's digest.
+- **The keys.** `by-collection` writes one file per edition; `by-expression` writes
+  `eng-kjv-08-rut.cbor` and suffixes nothing.
+- **The gate.** No text without `--with-text`, and none under `carry: ref`.
+- **Rule Z.** A library that redacted one part receives the collection without that part's
+  text and reading (2 dropped, `W414`) and with every other part; a record 19 in the same
+  file does the same for a library that had redacted nothing.
+- **Staged text** is in the object store only after `lib accept`, and P1 holds after it.
+- **`--keep-original`** keeps the bytes under their hash.
+- **A part that is not its tid** is quarantined with `E446` and never stored.
+
+`tests/cmd_lib.rs` adds two: the four library flags are refused on a plain store, and
+`by-expression` and `by-collection` round-trip every corpus fixture through `lib verify`.
+
+*Step 7, done 2026-10-22.* `by-time` and `--as-of`. The registry is 124 with `SMY-W498`. Rows
+11, 13 and 17 already followed datings, from step 2, so the step is the layout and the cut.
+
+- **`by-time`.** A unit's key is the start of the window its effective time begins in: rule E
+  over the `said` axis (`smysl_text::time::engine::effective`), so an observed instant is
+  corrected by any live dating before it is filed. Windows are `--window` wide (`30m`, `6h`,
+  `1d`, `2w`; a day by default) and aligned to the Unix epoch, so a key is a function of the
+  time and the width alone. An undated unit goes to `unkeyed`. The width is recorded in the
+  index as the flag `window=<ms>`, which is what lets P3 cut the same windows again.
+- **The key is lower-case.** §3.4 writes `t` + `YYYYMMDDTHHMMSSZ`. A key is a view-id segment,
+  and a segment is lower-case, so the key §3.4 writes would give every window a hash suffix
+  (`SMY-W497`). The key is `t20240115t000000z`, the same digits.
+- **`--as-of`** is §3.10, built before selection, and the selection is cut to what it keeps.
+  The upper bound is the end of the interval the EDTF value admits, exclusive, so `2024-01`
+  keeps all of January. A value that is not EDTF, or has no upper bound (`2024/..`), is refused
+  (`LibError::AsOf`, exit 2). The rules as built:
+  - a record with its own clock (attestation, dating, commitment, withdrawal, resolution,
+    redaction, thread) is kept when its wall time is before the bound;
+  - a unit's known time is its earliest attestation. One with none is left out and counted
+    (`SMY-W415`);
+  - a relation's is its earliest attestation, or else the later of its ends', and both ends
+    must be kept;
+  - a unit whose `deps` or `grounds` the store holds and the cut does not keep is left out, to
+    a fixpoint, and counted (`SMY-W498`);
+  - **every other record is kept only when every uid it names is kept, or was never held at
+    all.** §3.10 step 5 says such records "enter only through the inclusion rules", and that
+    is not enough: a record naming a unit the cut removed is dangling *in the subset*, and the
+    inclusion rules export dangling records as they are (`SMY-W495`). An attestation of a unit
+    that was not yet known was not yet known either;
+  - a schema's declarations above the highest version a kept unit or relation needs are cut.
+
+  Both counts are in the index (`counts`), and `as_of` holds the value. P3 holds under a cut:
+  the re-export applies it again and finds nothing more to remove.
+
+The test is `crates/smysl-lib/tests/time.rs`, 4 tests, over the WhatsApp and Telegram reader
+fixtures (`chat/wa`, `chat/tg`). Six units are drawn from each chat, six hours apart from
+2024-01-15T00:00Z, beside a clock-correction dating, an edge with its withdrawal and a
+resolution of it, a commitment, and a redaction:
+- **The chat cells.** {`single`, `by-expression`, `by-collection`, `by-time`} × {`full`,
+  `ref`}: P1 and P3 hold, records 3, 11, 12, 13, 17 and 19 travel, and P1 holds through a
+  real import.
+- **`by-time`** cuts three files for twelve units at a day (`t20240115t000000z.cbor` first,
+  no suffix) and twelve at six hours, and records the width.
+- **`--as-of` excludes exactly the planted late records.** The planted ones: a unit attested
+  after the cut, one never attested (`W415` = 1), one attested before the cut and grounded on
+  the late one (`W498` = 1), a late attestation of an early unit, and an edge between early
+  units attested late. The chat units after the cut go too. The assertion is that the cut
+  export equals the plain export of the store without exactly those records, digest for
+  digest and byte for byte. What travelled only beside a late unit, such as the Telegram chat's
+  manifest and its part's redaction once all its units are late, goes with it, as it would
+  from a store that never held them.
+- **A value with no end, and one that is not EDTF,** are refused.
+
+`tests/cmd_lib.rs` adds one: `--layout by-time --window 6h` and `--as-of 2999` export and
+verify, and `--window` without `by-time`, a window with no unit, and `--as-of yesterday` are
+refused.
+
+*Step 8, done 2026-10-22.* `--scope` through `sq`, `by-query`, and `from import:<…>`.
+`smysl-lib` now depends on `smysl-query`, which was already below `smysl-text`.
+
+- **`smysl_lib::scope`.**
+  - `query(env, text)` parses, plans and runs an `sq/1` query through the ports the caller
+    built: a library's `LibraryScope`, or a plain store's `StoreScope` named by the file's stem,
+    as `q` names it. The selection is the units the query answers, whatever their order. A
+    ranking gives its units, `group by` gives every group's, and `count` is refused.
+  - The text is recorded in the index's `scope`, with `sq_version` `sq/1`. `Selection` now
+    carries both, beside its units.
+  - On the command line, a `--scope` value containing whitespace is a query. `all`, a uid and a
+    label contain none, so step 5's forms keep their meaning.
+- **`by-query`** files units by the value of a `group by` field (`--group-by kind`). The field
+  is recorded in the index as `group-by=<field>`.
+  - The grouping always runs over a plain store of the snapshot, never through a library's
+    ports. A group value then depends on the records alone, so `verify`'s P3, which re-exports
+    from an in-memory store, cuts the same groups. A library's port could answer a field from
+    its catalogue, and the in-memory store could not.
+  - `by-query` without `--group-by`, and `--group-by` on another layout, are refused (exit 2).
+- **`from import:<name>`** (§3.9). For an import of a collection `lib export` wrote, it is the
+  union of the roots of that collection's `export/` views (`import_scope`), not every unit that
+  arrived. Otherwise closure units would become selected and the partition would move.
+  - For an import of files no export wrote, it means what `sq` says it means.
+  - The CLI resolves it this way only when the scope is exactly `from import:<name>`.
+- **P3 through a library** is `reexport_import(lib, name, index)`, using
+  `ExportOptions::from_index` and the recorded `group-by`. It re-exports from the library's log
+  **and everything the import retained**: staged, waiting and quarantined as well as accepted.
+  That is P1's import-side set. Over the log alone, a collection holding one unit a check
+  refuses (F6) could never come back whole, though every byte of it arrived and was kept.
+  That is the finding the step's exit produced.
+
+The test is `crates/smysl-lib/tests/scope.rs`, 5 tests:
+- **The exit.** Every corpus fixture under all six layouts (`by-view` where it has views,
+  `by-query` by `status`) and both closures, then the five Bibles with text and the two chats
+  under five layouts and both closures. Each is exported, written, imported with `--accept` as
+  `coll`, and exported again from `import:coll`. Every file is byte-identical, the index's
+  `files` and `rsd` are equal, and its `scope` is `from import:coll`.
+- **A query selects, and is recorded.** `where kind = claim` selects only claims. The index
+  holds the text and `sq/1`. A `count` and a scope that does not parse are refused.
+- **`by-query`** writes one file per kind, each view's roots of that kind, and P3 holds. With
+  no field it is refused.
+- **`from import:`** resolves to the selected root, not to the units its closure brought.
+
+`tests/cmd_lib.rs` adds two:
+- An `sq` scope exports and verifies, and a bad one exits 2. `by-query --group-by kind` works,
+  and either flag without the other exits 2.
+- **The exit through the CLI.** `lib export --layout by-view`, then `lib import --accept --name
+  coll`, then `lib export --scope "from import:coll" --layout by-view` from the library, gives
+  every file back byte for byte.
+
+*Step 9, done 2026-10-22.* Span re-verification at the door, and the two pure joins.
+
+- **Spans are checked at import** (§3.2 step 4). The check already raised `SMY-E404`, for a
+  span past its part's end, and `SMY-W405`, for a locator that names another place, but only
+  when it was handed a part resolver, and import's check was handed none.
+  - `LibraryRead::parts` now gives the library's object store as one.
+  - Import checks against a resolver that answers first from the parts arriving with it, then
+    from the library's. A span is checked against its text whether that text was already held
+    or came in the same file.
+  - Only parts that hash to their tid are offered. One that does not is quarantined on its own
+    (`SMY-E446`, step 6), and offered to the library pass it would be reported against the
+    whole store.
+  - A unit with `E404` is quarantined like any unit with an error, and its attestation goes
+    with it.
+- **Joins** (`import/join.rs`), over the library as it is after the import, with the import's
+  staged records beside it when it staged them. A pair is proposed only when one end at least
+  is a unit this import introduced and the library does not already hold the edge live:
+  - **`identical-span`**, TX-P7's engine unchanged: the same tid, span and gist under two
+    manifests.
+  - **Lexical entity same-as within a language**: two `x.text/entity` units with one name in
+    one language from two expressions. Rule 7 gives an entity no manifest, and its source is
+    `alias:<expression alias>`, so the expression is read from there rather than from a
+    manifest.
+
+  Each edge is attested by its engine's agent (`tool:smysl-same-as-identical-span`,
+  `tool:smysl-same-as-entity`) at rung `computed`, `Op::Imported`, under the fixed clock
+  `Hlc::new(0, 0, tool:smysl-lib)`. The same imports therefore propose the same records. The
+  `x.text/v1` declaration is added when the library holds none.
+- **`join:<name>`** is a staged batch of its own. Its file is `lib/staged/join/<name>.cbor`,
+  since a `:` is not portable in a file name, and its `imported` rows stand under a marker mid
+  that no manifest body hashes to. `lib accept join:<name>` merges it, and `lib status` lists
+  it. P1 leaves it out without a case of its own, since `retained` counts an import's rows by
+  that import's manifests. `--no-join` (`ImportOptions::join(false)`) skips the step. The
+  report's `joins` counts the edges, and `lib import` prints how to accept them.
+
+The test is `crates/smysl-lib/tests/join.rs`, 4 tests. The text is Ruth in the KJV, added
+twice as `kjv/08-rut` and `reprint/08-rut`: one set of tids under two manifests, the reprint
+case `identical-span` exists for.
+- **One edge.** The two units with one span and one gist, exported apart and imported in
+  either order, give the second import exactly one join. It is staged as three records: the
+  edge, its attestation and the declaration. After `lib accept join:two` the library holds
+  the one edge. P1 holds for both imports, joins excluded.
+- **`--no-join`** proposes nothing, and P1 is the same digest.
+- **`E404`.** A unit whose span reaches past a part the library holds is quarantined with its
+  attestation, and `W423` names `E404`. A unit in the same file as its part and manifest is
+  checked against that part, and the rest of the file is accepted.
+- **Entities.** "Naomi" in English from two expressions is joined. "Naomi" in French is
+  joined to neither.
+
+*Step 10, done 2026-10-22.* The `surface` and `pack` formats. The registry is 126 with
+`SMY-W428` and `SMY-E424`, both SMYSL-2.0's and raised only here. `smysl-lib` now depends on
+`smysl-pack`.
+
+- **One selection, three writings.** A collection is selected, closed and cut in CBOR whatever
+  its format. A file's `surface` or `pack` form is made from its CBOR form, so the three formats
+  cut the same files from the same records.
+- **`surface`** writes `<slug>.smy` with `write_surface`: the file's view as its `@doc` header,
+  the labels of its bindings, and the store's relations, so a withdrawal can be spelled by its
+  edge.
+  - The records `has_surface_form` says the writer cannot spell are counted per type
+    (`SMY-W428`).
+  - The text is then parsed back, and what it reads must be exactly the rest. Anything else is
+    `SMY-E424`: the collection is written, the index says `complete: false`, and `lib export`
+    exits 3.
+  - That is GE-T15's "report exactly the records F-18 cannot spell", checked on every file of
+    every export.
+  - `unattributed.cbor` stays CBOR, since unknown records have no surface form. `verify` reads
+    `.smy` files as surface, so their counts and digests are checked like any file's. P3 is not
+    applicable outside CBOR.
+- **The finding** (F1, `by-view`, `ref`): a label binding is spellable only on its unit's
+  declaration. Under `ref` a file can own a binding whose unit another file declares. The
+  context then held the label, `has_surface_form` called the binding spellable, and the writer
+  had nowhere to put it, so the read-back caught 8 records missing.
+  - The context is now built only from the bindings of units the file declares, and the others
+    are counted as having no surface form, which is what they are.
+  - `has_surface_form` answers record by record and cannot see the record set, so the
+    restriction belongs to the caller that knows it.
+- **`pack`** writes `<slug>.pack.cbor` as `smysl pack` writes one: `smysl_pack::pack` over the
+  file's selection at `--budget`, seeded by the file's view. The file holds the view, the
+  selected units, the bindings of those that survived, and the pack info.
+  - The index says `format: pack` and `derived: lossy`. P1 is a statement about the files as
+    written, and P3 is not applicable.
+  - A budget no unit fits in packs nothing and says so in its pack info. It is not an error.
+    `smysl_pack`'s own refusals (rule R) exit 4.
+  - `--format pack` without `--budget`, and `--budget` without it, are refused.
+
+The test is `crates/smysl-lib/tests/format.rs`, 3 tests:
+- **The surface cells.** Every corpus fixture × {`single`, `by-view`, `by-expression`,
+  `by-time`} × {`full`, `ref`}. Each surface file read back equals its CBOR twin minus exactly
+  the records with no surface form, per file and from outside the exporter. `SMY-W428` counts
+  them, the index is complete, `verify` holds, and P3 is not applicable.
+- **A surface collection imports** as what it spells: P1 holds through a real import.
+- **A pack collection** writes one pack info per file, says `lossy`, and verifies. A budget of 1
+  packs no unit.
+
+`tests/cmd_lib.rs`'s format test now writes and verifies all three formats, and refuses
+`pack` without `--budget` and `--budget` without `pack`.
+
+*Step 11, done 2026-10-22.* Fuzz targets, and export verification in the other three
+implementations.
+
+- **`fuzz/fuzz_targets/lib_roundtrip.rs`**: `generate(&mut Choices, 40)` → `export_store` under
+  a layout (five), a closure mode and a format (one in four surface) the input chooses →
+  `verify_collection`. Exporting twice gives the same collection. For `cbor`, P1 and P3 hold;
+  for `surface`, the index is complete (`SMY-E424` never raised).
+- **`fuzz/fuzz_targets/lib_import.rs`**: arbitrary bytes, as one file, offered to
+  `lib import --accept` over a fixed library (F13).
+  - It must not panic. A file is either refused whole with `SMY-E493`, or every record it
+    decoded to is counted once: held already, dropped by rule Z, or new and then accepted,
+    waiting or quarantined.
+  - `--accept` stages nothing, and the log grows by at most the accepted records and the
+    file's manifest.
+  - `make seed-fuzz` seeds it with every corpus and wire fixture. Both targets are in
+    `FUZZ_TARGETS` and in CI's fuzz job, 60 s each.
+- **The exit's hour each**, from the seeded corpus, both at once on this machine, found nothing:
+
+  | target | runs in 3,601 s | coverage | corpus | finding |
+  |---|---:|---:|---:|---|
+  | `lib_roundtrip` | 902,205 | 9,985 | 3,033 inputs | none |
+  | `lib_import` | 1,296,897 | 18,098 | 5,653 inputs | none |
+- **The other implementations** (§5.4), with no new dependency in any of them:
+  - `python/smysl/export.py`, `nodejs/src/export.js` and `go/export.go` with `go/cmd/xi/`.
+  - Each has the §2.7 record-set digest over the raw bytes it keeps, an export-index reader
+    over its own generic CBOR, and `verify_export`. That checks every file's BLAKE3, record
+    count and digest, that each record re-encodes to the bytes it was read from, and the
+    collection's digest.
+  - A `.smy` file is checked by its hash only: reading surface text is the Rust's.
+  - Each has a writer: every wire fixture re-encoded by its own encoder, and a small store it
+    builds itself, two units and an `x.xi/related` edge between them.
+  - `fixtures/wire/rsd/` holds the digest's vectors: an empty set, F13, and F13 reversed then
+    again, which must have F13's digest. The Rust writes them, and each implementation
+    recomputes them in its own suite (`test_export.py`, `export.test.js`, `export_test.go`).
+- **`crates/smysl-lib/tests/cross_impl.rs`** runs each implementation that is installed. It
+  skips one whose toolchain is absent, with a message, unless `SMYSL_XI_REQUIRED` is set,
+  which the GE-T15 job sets.
+  - **Every implementation verifies every export**: F1–F13, F10 and F14 under {`single`,
+    `full`} and {`by-view`, `ref`}, and the five Bibles with their text under `single` and
+    `by-collection`. Each implementation's digest is the Rust's.
+  - **What each writes imports, and P2 holds** for every file of the three.
+- **P2** is `smysl_lib::p2(lib, name)` (§3.9), and `lib verify --p2 FILE…` checks files
+  through scratch libraries; `--keep-scratch` keeps them.
+  - `S_f` is what the import accepted, less checkpoints and less text no manifest may carry.
+    The export is of what `from import:<name>` resolves to, under `single`, `full` and every
+    `--with-*`.
+  - Each file is imported with `--accept --no-join` into a scratch library of its own. The
+    exit is 9 when a file's records do not all come back.
+- **The finding** (the harness, on F12 in all three implementations at once): a store of
+  records that name no unit, F12's three pack infos, exported to no file at all. An export
+  selects units, and a layout with nothing to key wrote nothing.
+  - `single` now always writes its one file, which is what the layout means. Records
+    vacuously closed in it, such as a pack info naming no unit under `--with-packs`, travel
+    there.
+  - P2 lost them before the change and keeps them after.
+- **And one in a gate's own parser**: `tests/dispatch.rs` read `--p2` as `--p`, since it took
+  a flag's name as lowercase letters and hyphens while `make cli-surface` takes digits too.
+  `--p2` was the first flag with one.
+
+*Step 12, done 2026-10-22.* GE-T15 in full: `crates/smysl-lib/tests/ge_t15.rs`, table-driven as
+§5.2 lays it out. **Gate G2 is passed**: P1, P2 and P3 hold on the whole matrix, no record type
+is lost, and `by-expression` duplicates nothing.
+
+- **The matrix.** It is 1,056 cells, and all of them hold. They are every corpus × every layout
+  × {`full`, `ref`} × {`cbor`, `surface`} × {no flags, every `--with-*`}.
+  - **Corpora:** F1–F13 with F8a and F8b merged; every wire fixture; a generated store of F13
+    and F14's unknown codes; the five Bibles with their text (records 14, 15, 18, 19); and the
+    two chats of step 7 with a dating, a commitment, a withdrawal, a resolution and a redaction
+    (11, 12, 13, 17, 19).
+  - **Per CBOR cell:** P1 and P3 in memory, then P1 through a real import into an empty library.
+    Every record type in the export must be among what the import retained, checked per type
+    code and not by digest alone.
+  - **Per surface cell:** `SMY-E424` is never raised, so every file reads back as exactly what
+    it can spell. P3 is CBOR's.
+  - The matrix runs in 6 s. A cell that cannot apply is reported by name and never skipped
+    silently: `by-view` over a store with no corpus view, and the library-only flags over a
+    plain store.
+- **P2** holds for every corpus and wire fixture imported raw.
+- **The duplication factor per layout** (OQ-26) is recorded in `fixtures/ge-t15/duplication.tsv`,
+  under `full`, as records selected summed over files against selected once. The test compares
+  against it, and `SMYSL_BLESS=1` rewrites it.
+
+  | layout | mean | max |
+  |---|---:|---:|
+  | `single`, `by-expression`, `by-collection` | 1.000 | 1.000 |
+  | `by-time` | 1.004 | 1.091 |
+  | `by-view` | 1.482 | 1.893 (F2) |
+  | `by-query` (by `kind`) | 1.951 | 3.828 (F5) |
+
+  - The kill is 3× for `by-expression`, and it is 1.000 on every corpus: no corpus here has an
+    expression's units resting on another expression's.
+  - **OQ-26's answer is to keep `full` as the default.** The structural layouts stay under 2×,
+    and a file that is closed on its own is what a reader without the rest of the collection
+    can use.
+  - `by-query` passes 3× on F2 and F5. Grouping by `kind` cuts across every chain of grounds,
+    so each kind's file brings in the claims it rests on. That is what `ref` is for, and it
+    is the layout a caller choosing a field should be told about, not a reason to change the
+    default.
+- **The scale cells** (`--ignored`, release build, 18 cores) use §2.10's shape: units each
+  grounded on the one before, each with an attestation.
+
+  | records | export | verify (P1, P3) | import (`--accept`) | written | peak RSS |
+  |---:|---:|---:|---:|---:|---:|
+  | 10⁵ | 0.36 s (278k/s) | 0.66 s | 1.6 s (62k/s) | 9.0 MB | 1.35 GB |
+  | 10⁶ | 4.8 s (208k/s) | 8.0 s | 21.4 s (47k/s) | 90.9 MB | 8.0 GB |
+
+  P1 holds through the import at both sizes. Against §2.10, export is about twice as fast as
+  `bundle` was at 10⁵. Import's memory is over §2.10's 3.4 GB estimate for merge at 10⁶.
+  **The cell found two full copies of the library in import**, and both were removed, taking
+  10⁵ from 1.62 GB to 1.35 GB:
+  - `import` cloned the library's snapshot, where every read of it comes before the first
+    write, so a borrow does;
+  - the classifier built the store it checks a second time even when nothing waits, when it is
+    then the store it already has.
+
+  What remains is the incoming records held three ways at once: decoded per file, keyed by
+  hash, and in the candidate store. That is §7's memory risk, measured, and it belongs to
+  TX-P13, where a disk-backed store replaces the in-memory snapshot.
+- **CI.** A `ge-t15` job on Linux x86-64 and macOS arm64 runs the matrix, P2, the 10⁵ cell and
+  the cross-implementation harness with every implementation required (`SMYSL_XI_REQUIRED`).
+  The two platforms agree on every file's BLAKE3 because both compare against the same
+  committed goldens. The 10⁶ cell needs about 8 GB and runs locally.
 
 ---
 

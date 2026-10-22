@@ -165,23 +165,27 @@ pub enum Class {
 /// Classify `incoming` against `library`: every incoming record gets one class.
 ///
 /// `incoming` holds records the library does not, each once. `extra` is held beside the
-/// library: a staged import's own records, when what is promoted belongs to it.
+/// library: a staged import's own records, when what is promoted belongs to it. `parts` is what
+/// the check resolves spans against (§3.2 step 4): a span past its part's end is `SMY-E404` on
+/// its unit, which quarantines it like any error on a unit.
 pub fn classify(
     library: &Store,
     incoming: &BTreeMap<[u8; 32], Record>,
     extra: &BTreeSet<Id>,
+    parts: Option<crate::access::Parts>,
 ) -> BTreeMap<[u8; 32], Class> {
+    let mut opts = CheckOptions::default();
+    opts.parts = parts;
     let base: BTreeSet<Id> = library
         .iter()
         .flat_map(provides)
         .chain(extra.iter().cloned())
         .collect();
-    let lib_store_errors: BTreeSet<(smysl_core::Code, String)> =
-        check(library, CheckOptions::default())
-            .iter()
-            .filter(|d| d.severity == Severity::Error && d.subject == Subject::Store)
-            .map(|d| (d.code, d.message.clone()))
-            .collect();
+    let lib_store_errors: BTreeSet<(smysl_core::Code, String)> = check(library, opts.clone())
+        .iter()
+        .filter(|d| d.severity == Severity::Error && d.subject == Subject::Store)
+        .map(|d| (d.code, d.message.clone()))
+        .collect();
     let introduced: BTreeMap<Uid, [u8; 32]> = incoming
         .iter()
         .filter_map(|(h, r)| r.as_unit().map(|c| (smysl_core::canonical_uid(c), *h)))
@@ -241,20 +245,28 @@ pub fn classify(
             }
         }
 
-        let checked = Store::from_records(
-            library
-                .iter()
-                .cloned()
-                .chain(
-                    incoming
-                        .iter()
-                        .filter(|(h, _)| live(h) && !waiting.contains_key(*h))
-                        .map(|(_, r)| r.clone()),
-                )
-                .collect(),
-        );
+        // What does not wait, checked. When nothing waits that is the candidate itself, and
+        // building it twice would hold two copies of the library at once.
+        let rebuilt;
+        let checked: &Store = if waiting.is_empty() {
+            &candidate
+        } else {
+            rebuilt = Store::from_records(
+                library
+                    .iter()
+                    .cloned()
+                    .chain(
+                        incoming
+                            .iter()
+                            .filter(|(h, _)| live(h) && !waiting.contains_key(*h))
+                            .map(|(_, r)| r.clone()),
+                    )
+                    .collect(),
+            );
+            &rebuilt
+        };
         let mut found: BTreeMap<[u8; 32], Vec<Diagnostic>> = BTreeMap::new();
-        for d in check(&checked, CheckOptions::default()).iter() {
+        for d in check(checked, opts.clone()).iter() {
             if d.severity != Severity::Error {
                 continue;
             }

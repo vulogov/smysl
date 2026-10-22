@@ -2163,17 +2163,43 @@ fn cli() -> Command {
                         .value_name("SQ")
                         .action(ArgAction::Append)
                         .help(
-                            "What to export: `all`, or a unit by uid or label, repeated \
-                             (`export`, required). sq queries arrive with TX-P11 step 8",
+                            "What to export (`export`, required): an sq/1 query, such as \
+                             `from library` or `from import:<name>`; `all`; or a unit by uid \
+                             or label, repeated",
                         ),
                 )
                 .arg(
                     Arg::new("layout")
                         .long("layout")
                         .value_name("LAYOUT")
-                        .value_parser(["single", "by-view"])
+                        .value_parser(["single", "by-view", "by-expression", "by-collection", "by-time", "by-query"])
                         .default_value("single")
-                        .help("One file, or one per corpus view (`export`)"),
+                        .help("One file, or one per corpus view, expression, collection or window of time (`export`)"),
+                )
+                .arg(
+                    Arg::new("budget")
+                        .long("budget")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(u64))
+                        .help("The token budget each file is packed to, for `--format pack` (`export`)"),
+                )
+                .arg(
+                    Arg::new("group-by")
+                        .long("group-by")
+                        .value_name("FIELD")
+                        .help("The `group by` field `by-query` files units by, such as `kind` or `lang` (`export`)"),
+                )
+                .arg(
+                    Arg::new("window")
+                        .long("window")
+                        .value_name("D")
+                        .help("The width of a `by-time` window: `30m`, `6h`, `1d`, `2w` (`export`); a day by default"),
+                )
+                .arg(
+                    Arg::new("as-of")
+                        .long("as-of")
+                        .value_name("EDTF")
+                        .help("Export only what was known before the end of this date (`export`)"),
                 )
                 .arg(
                     Arg::new("closure")
@@ -2193,6 +2219,55 @@ fn cli() -> Command {
                     Arg::new("with-packs")
                         .long("with-packs")
                         .help("Export the pack infos as well (`export`)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("with-text")
+                        .long("with-text")
+                        .help("Export the text of the parts the units are drawn from, where the manifest's carry and licence allow it (`export`, a library)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("with-provenance")
+                        .long("with-provenance")
+                        .help("Export the import manifests the records arrived under (`export`, a library)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("with-staged")
+                        .long("with-staged")
+                        .help("Export staged imports as well (`export`, a library)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("with-quarantine")
+                        .long("with-quarantine")
+                        .help("Export quarantined records as well (`export`, a library)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("p2")
+                        .long("p2")
+                        .value_name("FILE")
+                        .action(ArgAction::Append)
+                        .help("Check P2 for a file: import it into a scratch library and export it again (`verify`)"),
+                )
+                .arg(
+                    Arg::new("keep-scratch")
+                        .long("keep-scratch")
+                        .help("Keep the scratch libraries `--p2` builds, and say where (`verify`)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("no-join")
+                        .long("no-join")
+                        .help("Propose no same-as edges to what the library holds (`import`)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("keep-original")
+                        .long("keep-original")
+                        .help("Keep each file's bytes in the object store under their BLAKE3 (`import`)")
                         .action(ArgAction::SetTrue),
                 )
                 .arg(
@@ -6971,24 +7046,12 @@ fn cmd_assess(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
 #[cfg(feature = "text")]
 fn cmd_lib(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let action = m.get_one::<String>("action").expect("required").as_str();
-    if let Some(want) = global.get_one::<String>("format") {
-        match action {
-            "export" if want == "cbor" => {}
-            "export" => {
-                eprintln!(
-                    "smysl lib export: --format {want} is not in this build yet - a collection \
-                     is written as cbor. surface and pack arrive with TX-P11 step 10."
-                );
-                return ExitCode::Usage;
-            }
-            _ => {
-                eprintln!(
-                    "smysl lib {action}: --format is not honoured here - lib {action} does not \
-                     write a document. Use --json if you are parsing its output."
-                );
-                return ExitCode::Usage;
-            }
-        }
+    if action != "export" && global.get_one::<String>("format").is_some() {
+        eprintln!(
+            "smysl lib {action}: --format is not honoured here - lib {action} does not write a \
+             document. Use --json if you are parsing its output."
+        );
+        return ExitCode::Usage;
     }
     if action != "export" {
         warn_output_is_a_report(global, &format!("lib {action}"));
@@ -7048,9 +7111,14 @@ fn lib_one_target(m: &ArgMatches, action: &str, what: &str) -> Result<String, Ex
 fn lib_error_code(e: &smysl::lib::LibError) -> ExitCode {
     use smysl::lib::LibError as E;
     match e {
-        E::BadName(_) | E::NameTaken(_) | E::NoImport(_) | E::NotStaged(_) | E::NotInStore(_) => {
-            ExitCode::Usage
-        }
+        E::BadName(_)
+        | E::NameTaken(_)
+        | E::NoImport(_)
+        | E::NotStaged(_)
+        | E::NotInStore(_)
+        | E::AsOf(_)
+        | E::Query(_) => ExitCode::Usage,
+        E::Pack(_) => ExitCode::PackInfeasible,
         E::Contentions(_) => ExitCode::Contentions,
         _ => ExitCode::Failure,
     }
@@ -7137,7 +7205,10 @@ fn lib_import(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             Input::File(p.to_path_buf())
         });
     }
-    let mut opts = ImportOptions::new().accept(m.get_flag("accept"));
+    let mut opts = ImportOptions::new()
+        .accept(m.get_flag("accept"))
+        .keep_original(m.get_flag("keep-original"))
+        .join(!m.get_flag("no-join"));
     if let Some(n) = m.get_one::<String>("name") {
         opts = opts.name(n.clone());
     }
@@ -7183,7 +7254,7 @@ fn lib_import(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 format!(
                     "{{\"file\":{},\"mid\":{},\"original\":\"{}\",\"records\":\"{}\",\
                      \"added\":{},\"duplicates\":{},\"accepted\":{},\"staged\":{},\
-                     \"waiting\":{},\"quarantined\":{},\"text\":{},\
+                     \"waiting\":{},\"quarantined\":{},\"text\":{},\"redacted\":{},\
                      \"already_imported\":{},\"rejected\":{}}}",
                     smysl::json_escape(&f.file),
                     f.mid
@@ -7198,16 +7269,18 @@ fn lib_import(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                     f.waiting,
                     f.quarantined,
                     f.text,
+                    f.redacted,
                     f.already_imported,
                     f.rejected
                 )
             })
             .collect();
         println!(
-            "{{\"name\":{},\"files\":[{}],\"contentions\":{}}}",
+            "{{\"name\":{},\"files\":[{}],\"contentions\":{},\"joins\":{}}}",
             smysl::json_escape(&r.name),
             files.join(","),
-            r.contentions.len()
+            r.contentions.len(),
+            r.joins
         );
     } else if !global.get_flag("quiet") {
         println!("import  {}", r.name);
@@ -7218,11 +7291,27 @@ fn lib_import(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 "already imported".to_string()
             } else {
                 format!(
-                    "{} new, {} already held: {} accepted, {} staged, {} waiting, {} quarantined",
-                    f.added, f.duplicates, f.accepted, f.staged, f.waiting, f.quarantined
+                    "{} new, {} already held: {} accepted, {} staged, {} waiting, {} quarantined{}",
+                    f.added,
+                    f.duplicates,
+                    f.accepted,
+                    f.staged,
+                    f.waiting,
+                    f.quarantined,
+                    if f.redacted > 0 {
+                        format!("; {} redacted text record(s) dropped", f.redacted)
+                    } else {
+                        String::new()
+                    }
                 )
             };
             println!("  {}  {what}", f.file);
+        }
+        if r.joins > 0 {
+            println!(
+                "join    {} same-as edge(s) staged as join:{}; `lib accept join:{}` merges them",
+                r.joins, r.name, r.name
+            );
         }
     }
     let bad_input = r.files.iter().any(|f| f.rejected)
@@ -7382,9 +7471,10 @@ fn lib_discard(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 #[cfg(feature = "text")]
 fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     use smysl::lib::{
-        export_store, verify_collection, write_collection, Closure, ExportOptions, Layout,
-        Selection, UnknownRecords, With,
+        export_library, export_store, snapshot, verify_collection, write_collection, Closure,
+        ExportOptions, Layout, Selection, UnknownRecords, With,
     };
+    use smysl::text::library::Library;
     let path = match store_path(m, global, "lib export") {
         Ok(p) => p,
         Err(code) => return code,
@@ -7411,14 +7501,63 @@ fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         );
         return ExitCode::Usage;
     }
-    let (store, _) = match load_store(&path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("smysl lib export: {e}");
-            return ExitCode::Failure;
+    let with = With::new()
+        .views(m.get_flag("with-views"))
+        .packs(m.get_flag("with-packs"))
+        .text(m.get_flag("with-text"))
+        .provenance(m.get_flag("with-provenance"))
+        .staged(m.get_flag("with-staged"))
+        .quarantine(m.get_flag("with-quarantine"));
+    // A library is exported from its snapshot, with its object store for `--with-text` and its
+    // tables and batches for the other three. A plain store has none of those, so asking for
+    // them of one is refused rather than answered with nothing.
+    let library = if Library::is_library(std::path::Path::new(&path)) {
+        match Library::open(std::path::Path::new(&path)) {
+            Ok(l) => Some(l),
+            Err(e) => {
+                eprintln!("smysl lib export: {path}: {e}");
+                return ExitCode::Failure;
+            }
         }
+    } else {
+        None
     };
-    let selection = if scope.iter().any(|s| s.as_str() == "all") {
+    if library.is_none() && (with.text || with.provenance || with.staged || with.quarantine) {
+        eprintln!(
+            "smysl lib export: --with-text, --with-provenance, --with-staged and \
+             --with-quarantine read a library, and {path} is not one"
+        );
+        return ExitCode::Usage;
+    }
+    let store = match &library {
+        Some(l) => match snapshot(l, &with) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("smysl lib export: {e}");
+                return lib_error_code(&e);
+            }
+        },
+        None => match load_store(&path) {
+            Ok((s, _)) => s,
+            Err(e) => {
+                eprintln!("smysl lib export: {e}");
+                return ExitCode::Failure;
+            }
+        },
+    };
+    let query_text = match scope.as_slice() {
+        [one] if one.contains(char::is_whitespace) => Some(one.as_str()),
+        _ => None,
+    };
+    let selection = if let Some(text) = query_text {
+        match lib_query_scope(&path, library.as_ref(), &store, text) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("smysl lib export: {e}");
+                return lib_error_code(&e);
+            }
+        }
+    } else if scope.iter().any(|s| s.as_str() == "all") {
         if scope.len() > 1 {
             eprintln!(
                 "smysl lib export: --scope all selects everything, and takes nothing beside it"
@@ -7441,14 +7580,28 @@ fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     };
     let layout = m.get_one::<String>("layout").expect("defaulted");
     let closure = m.get_one::<String>("closure").expect("defaulted");
+    let selection = match (layout.as_str(), m.get_one::<String>("group-by")) {
+        ("by-query", Some(field)) => match smysl::lib::scope::group(&store, selection, field) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("smysl lib export: --group-by {field}: {e}");
+                return ExitCode::Usage;
+            }
+        },
+        ("by-query", None) => {
+            eprintln!("smysl lib export: --layout by-query files units by --group-by FIELD");
+            return ExitCode::Usage;
+        }
+        (_, Some(_)) => {
+            eprintln!("smysl lib export: --group-by is the field of `--layout by-query`");
+            return ExitCode::Usage;
+        }
+        (_, None) => selection,
+    };
     let mut opts = ExportOptions::new()
         .layout(Layout::parse(layout).expect("the parser's values"))
         .closure(Closure::parse(closure).expect("the parser's values"))
-        .with(
-            With::new()
-                .views(m.get_flag("with-views"))
-                .packs(m.get_flag("with-packs")),
-        );
+        .with(with);
     if m.get_one::<String>("unknown").map(String::as_str) == Some("drop") {
         opts = opts.unknown(UnknownRecords::Drop);
     }
@@ -7458,7 +7611,46 @@ fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             Err(code) => return code,
         }
     }
-    let c = match export_store(&store, &selection, &opts) {
+    if let Some(raw) = m.get_one::<String>("window") {
+        if layout != "by-time" {
+            eprintln!("smysl lib export: --window is the width of a `by-time` window");
+            return ExitCode::Usage;
+        }
+        match window_ms(raw) {
+            Some(ms) => opts = opts.window(ms),
+            None => {
+                eprintln!(
+                    "smysl lib export: --window {raw}: a positive whole number of s, m, h, d or w"
+                );
+                return ExitCode::Usage;
+            }
+        }
+    }
+    if let Some(edtf) = m.get_one::<String>("as-of") {
+        opts = opts.as_of(edtf.clone());
+    }
+    let budget = m.get_one::<u64>("budget").copied();
+    match (
+        global.get_one::<String>("format").map(String::as_str),
+        budget,
+    ) {
+        (Some("surface"), None) => opts = opts.format(smysl::lib::Format::Surface),
+        (Some("pack"), Some(n)) => opts = opts.format(smysl::lib::Format::Pack { budget: n }),
+        (Some("pack"), None) => {
+            eprintln!("smysl lib export: --format pack packs each file to --budget N tokens");
+            return ExitCode::Usage;
+        }
+        (_, Some(_)) => {
+            eprintln!("smysl lib export: --budget is the budget of `--format pack`");
+            return ExitCode::Usage;
+        }
+        _ => {}
+    }
+    let exported = match &library {
+        Some(l) => export_library(l, &store, &selection, &opts),
+        None => export_store(&store, &selection, &opts),
+    };
+    let c = match exported {
         Ok(c) => c,
         Err(e) => {
             eprintln!("smysl lib export: {e}");
@@ -7518,16 +7710,84 @@ fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             println!("  {}  {}", f.path, f.records);
         }
     }
+    // A surface file that does not read back as its selection (`SMY-E424`): written, with the
+    // index saying it is incomplete, and exit 3 (§4.4).
+    if !c.index.complete {
+        return ExitCode::CheckErrors;
+    }
     match strict_threshold(global, &c.report) {
         Some(code) => code,
         None => ExitCode::Success,
     }
 }
 
+/// An `sq/1` scope over what `lib export` reads (TX-P11 step 8).
+///
+/// Over a library, through its own ports, as `q --library` runs one; and `from import:<name>`
+/// alone, for an import of a collection `lib export` wrote, is the union of the roots of that
+/// collection's views (SMYSL-2.7 §3.9) rather than every unit that arrived. Over a plain store,
+/// through `StoreScope` named by the file's stem, as `q` names it.
+#[cfg(feature = "text")]
+fn lib_query_scope(
+    path: &str,
+    library: Option<&smysl::text::library::Library>,
+    store: &Store,
+    text: &str,
+) -> Result<smysl::lib::Selection, smysl::lib::LibError> {
+    use smysl::query::{Env, StoreScope};
+    let name = std::path::Path::new(path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string());
+    match library {
+        Some(lib) => {
+            if let Some(import) = smysl::lib::scope::names_an_import(text) {
+                if let Some(sel) = smysl::lib::scope::import_scope(lib, import)? {
+                    return Ok(sel);
+                }
+            }
+            let scope = smysl::text::scope::LibraryScope::new(name, lib);
+            let env = Env::new(store, &scope)
+                .with_times(&scope)
+                .with_entities(&scope);
+            smysl::lib::scope::query(&env, text)
+        }
+        None => {
+            let scope = StoreScope::new(name, store);
+            let env = Env::new(store, &scope).with_entities(&scope);
+            smysl::lib::scope::query(&env, text)
+        }
+    }
+}
+
+/// A `--window` width in milliseconds: a positive whole number and one unit of s, m, h, d or w.
+#[cfg(feature = "text")]
+fn window_ms(raw: &str) -> Option<u64> {
+    let (n, unit) = raw.split_at(raw.find(|c: char| !c.is_ascii_digit())?);
+    let n: u64 = n.parse().ok().filter(|n| *n > 0)?;
+    let ms = match unit {
+        "s" => 1_000,
+        "m" => 60_000,
+        "h" => 3_600_000,
+        "d" => 86_400_000,
+        "w" => 604_800_000,
+        _ => return None,
+    };
+    n.checked_mul(ms)
+}
+
 /// `lib verify <index|dir>`: every file against the index, then P1 and P3. Exits 9 when a file
 /// or a digest does not match.
 #[cfg(feature = "text")]
 fn lib_verify(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    if let Some(files) = m.get_many::<String>("p2") {
+        let files: Vec<String> = files.cloned().collect();
+        if !lib_targets(m).is_empty() {
+            eprintln!("smysl lib verify: --p2 checks files, not an index; give one or the other");
+            return ExitCode::Usage;
+        }
+        return lib_verify_p2(&files, m.get_flag("keep-scratch"), global);
+    }
     let target = match lib_one_target(m, "verify", "index") {
         Ok(t) => t,
         Err(code) => return code,
@@ -7577,6 +7837,63 @@ fn lib_verify(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         print_verify(&v, false);
     }
     v.exit_code()
+}
+
+/// `lib verify --p2 FILE…` (SMYSL-2.7 §3.9): each file imported with `--accept` into a scratch
+/// library of its own, and exported again from it; P2 holds when everything the import accepted
+/// comes back. Exits 9 when it does not hold for a file, as any failed round trip does.
+#[cfg(feature = "text")]
+fn lib_verify_p2(files: &[String], keep: bool, global: &ArgMatches) -> ExitCode {
+    use smysl::lib::{import, p2, ImportOptions, Input, Property};
+    let mut worst = ExitCode::Success;
+    for (i, file) in files.iter().enumerate() {
+        let scratch = std::env::temp_dir().join(format!("smysl-p2-{}-{i}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let mut lib = match smysl::text::library::Library::create(&scratch) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("smysl lib verify --p2: a scratch library: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        let outcome = import(
+            &mut lib,
+            &[Input::File(std::path::PathBuf::from(file))],
+            &ImportOptions::new().accept(true).join(false),
+        )
+        .and_then(|r| p2(&lib, &r.name).map(|p| (r, p)));
+        let line = match outcome {
+            Ok((r, _)) if r.files.iter().any(|f| f.rejected) => {
+                worst = ExitCode::Failure;
+                format!("{file}: does not decode (SMY-E493)")
+            }
+            Ok((_, Property::Holds)) => format!("{file}: P2 holds"),
+            Ok((_, Property::Fails { missing, .. })) => {
+                worst = ExitCode::HashVerification;
+                format!(
+                    "{file}: P2 fails: {} accepted record(s) do not come back",
+                    missing.len()
+                )
+            }
+            Ok((_, other)) => format!("{file}: P2 {other:?}"),
+            Err(e) => {
+                worst = lib_error_code(&e);
+                format!("{file}: {e}")
+            }
+        };
+        if !global.get_flag("quiet") || worst != ExitCode::Success {
+            println!("{line}");
+        }
+        if keep {
+            eprintln!(
+                "smysl lib verify --p2: {file}: the scratch library is kept at {}",
+                scratch.display()
+            );
+        } else {
+            let _ = std::fs::remove_dir_all(&scratch);
+        }
+    }
+    worst
 }
 
 /// A verify report, one line per file that does not match and one per property.

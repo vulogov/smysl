@@ -293,15 +293,28 @@ fn format_is_refused_where_it_is_not_written() {
     let o = run(&["fmt", "--format", "pack", s(&store)]);
     assert_eq!(code(&o), 2);
     assert!(stderr(&o).contains("only `lib export`"), "{}", stderr(&o));
-    // `lib export` names it, and this build writes cbor only.
-    for form in ["surface", "pack"] {
-        let o = export(&store, &root.join(form), &["--format", form]);
-        assert_eq!(code(&o), 2, "{form}");
-        assert!(!root.join(form).exists(), "{form}");
+    // `lib export` writes all three; `pack` needs a budget, and a budget needs `pack`.
+    for (form, extra) in [
+        ("cbor", &[][..]),
+        ("surface", &[][..]),
+        ("pack", &["--budget", "4000"][..]),
+    ] {
+        let dir = root.join(form);
+        let mut args = vec!["--format", form];
+        args.extend_from_slice(extra);
+        let o = export(&store, &dir, &args);
+        assert_eq!(code(&o), 0, "{form}: {}", stderr(&o));
+        assert_eq!(code(&run(&["lib", "verify", s(&dir)])), 0, "{form}");
     }
+    assert!(root.join("surface").join("all.smy").is_file());
+    assert!(root.join("pack").join("all.pack.cbor").is_file());
     assert_eq!(
-        code(&export(&store, &root.join("cbor"), &["--format", "cbor"])),
-        0
+        code(&export(&store, &root.join("p1"), &["--format", "pack"])),
+        2
+    );
+    assert_eq!(
+        code(&export(&store, &root.join("p2"), &["--budget", "10"])),
+        2
     );
     // The other actions write no document at all.
     let o = run(&[
@@ -329,4 +342,191 @@ fn status_needs_a_library() {
         !root.join("LIBRARY").exists(),
         "status must not create a library"
     );
+}
+
+#[test]
+fn the_library_flags_are_refused_on_a_plain_store() {
+    let root = scratch("plain");
+    let store = repo("fixtures/corpus/F13-canon.smy");
+    for flag in [
+        "--with-text",
+        "--with-provenance",
+        "--with-staged",
+        "--with-quarantine",
+    ] {
+        let dir = root.join(flag.trim_start_matches('-'));
+        let o = export(&store, &dir, &[flag]);
+        assert_eq!(code(&o), 2, "{flag}: {}", stderr(&o));
+        assert!(!dir.exists(), "{flag}");
+    }
+}
+
+#[test]
+fn by_expression_and_by_collection_round_trip_on_the_corpus() {
+    let root = scratch("by-alias");
+    for fixture in corpus() {
+        let stem = fixture.file_stem().unwrap().to_string_lossy().to_string();
+        for layout in ["by-expression", "by-collection"] {
+            let dir = root.join(format!("{stem}-{layout}"));
+            let e = export(&fixture, &dir, &["--layout", layout]);
+            assert_eq!(code(&e), 0, "{stem} {layout}: {}", stderr(&e));
+            let v = run(&["lib", "verify", s(&dir)]);
+            assert_eq!(code(&v), 0, "{stem} {layout}: {}", stdout(&v));
+        }
+    }
+}
+
+#[test]
+fn by_time_and_as_of_on_the_command_line() {
+    let root = scratch("time");
+    let store = repo("fixtures/corpus/F13-canon.smy");
+    let dir = root.join("by-time");
+    let e = export(&store, &dir, &["--layout", "by-time", "--window", "6h"]);
+    assert_eq!(code(&e), 0, "{}", stderr(&e));
+    assert_eq!(code(&run(&["lib", "verify", s(&dir)])), 0);
+    // A window belongs to `by-time`, and is a number and a unit.
+    assert_eq!(
+        code(&export(&store, &root.join("w1"), &["--window", "6h"])),
+        2
+    );
+    let o = export(
+        &store,
+        &root.join("w2"),
+        &["--layout", "by-time", "--window", "6x"],
+    );
+    assert_eq!(code(&o), 2, "{}", stderr(&o));
+    // An `--as-of` long after every clock in the fixture keeps what has an attestation.
+    let dir = root.join("as-of");
+    let e = export(&store, &dir, &["--as-of", "2999"]);
+    assert_eq!(code(&e), 0, "{}", stderr(&e));
+    assert_eq!(code(&run(&["lib", "verify", s(&dir)])), 0);
+    let o = export(&store, &root.join("bad"), &["--as-of", "yesterday"]);
+    assert_eq!(code(&o), 2, "{}", stderr(&o));
+}
+
+#[test]
+fn an_sq_scope_and_by_query_on_the_command_line() {
+    let root = scratch("sq");
+    let store = repo("fixtures/corpus/F13-canon.smy");
+    let dir = root.join("claims");
+    let o = run(&[
+        "lib",
+        "export",
+        "-s",
+        s(&store),
+        "--scope",
+        "from store:F13-canon\nwhere kind = claim",
+        "-o",
+        s(&dir),
+    ]);
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert_eq!(code(&run(&["lib", "verify", s(&dir)])), 0);
+    let o = run(&[
+        "lib",
+        "export",
+        "-s",
+        s(&store),
+        "--scope",
+        "from nowhere at all",
+        "-o",
+        s(&root.join("bad")),
+    ]);
+    assert_eq!(code(&o), 2, "{}", stderr(&o));
+
+    let dir = root.join("by-kind");
+    let e = export(
+        &store,
+        &dir,
+        &["--layout", "by-query", "--group-by", "kind"],
+    );
+    assert_eq!(code(&e), 0, "{}", stderr(&e));
+    assert_eq!(code(&run(&["lib", "verify", s(&dir)])), 0);
+    assert_eq!(
+        code(&export(&store, &root.join("g1"), &["--layout", "by-query"])),
+        2
+    );
+    assert_eq!(
+        code(&export(&store, &root.join("g2"), &["--group-by", "kind"])),
+        2
+    );
+}
+
+#[test]
+fn from_import_gives_the_collection_back_byte_for_byte() {
+    let root = scratch("from-import");
+    let first = root.join("first");
+    assert_eq!(
+        code(&export(
+            &repo("fixtures/corpus/F13-canon.smy"),
+            &first,
+            &["--layout", "by-view"]
+        )),
+        0
+    );
+    let lib = root.join("lib");
+    let o = run(&[
+        "lib",
+        "import",
+        "--accept",
+        "--name",
+        "coll",
+        "-s",
+        s(&lib),
+        s(&first),
+    ]);
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    let again = root.join("again");
+    let o = run(&[
+        "lib",
+        "export",
+        "-s",
+        s(&lib),
+        "--scope",
+        "from import:coll",
+        "--layout",
+        "by-view",
+        "-o",
+        s(&again),
+    ]);
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    for e in std::fs::read_dir(&first).unwrap() {
+        let name = e.unwrap().file_name();
+        if name == "export-index.cbor" {
+            continue;
+        }
+        assert_eq!(
+            std::fs::read(first.join(&name)).unwrap(),
+            std::fs::read(again.join(&name)).unwrap(),
+            "{name:?}"
+        );
+    }
+}
+
+#[test]
+fn verify_p2_checks_files_through_a_scratch_library() {
+    let o = run(&[
+        "lib",
+        "verify",
+        "--p2",
+        s(&repo("fixtures/corpus/F13-canon.smy")),
+        "--p2",
+        s(&repo("fixtures/wire/F12-reserved-pack.cbor")),
+    ]);
+    assert_eq!(code(&o), 0, "{}{}", stdout(&o), stderr(&o));
+    assert_eq!(stdout(&o).matches("P2 holds").count(), 2, "{}", stdout(&o));
+    // An index and --p2 are two questions.
+    let root = scratch("p2");
+    let dir = root.join("out");
+    assert_eq!(
+        code(&export(&repo("fixtures/corpus/F13-canon.smy"), &dir, &[])),
+        0
+    );
+    let o = run(&[
+        "lib",
+        "verify",
+        s(&dir),
+        "--p2",
+        s(&repo("fixtures/corpus/F13-canon.smy")),
+    ]);
+    assert_eq!(code(&o), 2);
 }

@@ -17,7 +17,7 @@
 
 use crate::export::{export_store, options_of, Collection, LibError, Selection};
 use crate::index::{ExportIndex, INDEX_FILE};
-use smysl_core::{from_cbor_seq, Code, Diagnostic, ExitCode, Report};
+use smysl_core::{Code, Diagnostic, ExitCode, Report};
 use smysl_graph::{record_set_digest, Store};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -138,17 +138,17 @@ pub fn verify_files(index: &ExportIndex, files: &BTreeMap<String, Vec<u8>>) -> V
             Some(b) if *blake3::hash(b).as_bytes() != f.blake3 => {
                 Some("its BLAKE3 is not the index's".to_string())
             }
-            Some(b) => match from_cbor_seq(b) {
+            Some(b) => match crate::export::decode_file(&f.path, b) {
                 Err(e) => Some(format!("it does not decode: {e}")),
-                Ok((rs, _)) if rs.len() as u64 != f.records => Some(format!(
+                Ok(rs) if rs.len() as u64 != f.records => Some(format!(
                     "it holds {} records, and the index says {}",
                     rs.len(),
                     f.records
                 )),
-                Ok((rs, _)) if record_set_digest(&rs) != f.rsd => {
+                Ok(rs) if record_set_digest(&rs) != f.rsd => {
                     Some("its record-set digest is not the index's".to_string())
                 }
-                Ok((rs, _)) => {
+                Ok(rs) => {
                     records.extend(rs);
                     None
                 }
@@ -197,6 +197,12 @@ fn p3(index: &ExportIndex, files: &BTreeMap<String, Vec<u8>>, imported: &Store) 
     if index.format != "cbor" || index.derived.is_some() {
         return Property::NotApplicable("only a canonical cbor export is re-exported");
     }
+    // The import manifests `--with-provenance` carried came from the source library's tables,
+    // and a re-export reads the importer's: the manifests it names are the ones its own import
+    // wrote, which are not these. So the flag is outside P3 by construction (§3.9).
+    if index.flags.iter().any(|f| f == "with-provenance") {
+        return Property::NotApplicable("--with-provenance names the source library's imports");
+    }
     let Some(opts) = options_of(index, imported) else {
         return Property::NotApplicable("a layout or closure this build does not know");
     };
@@ -209,7 +215,14 @@ fn p3(index: &ExportIndex, files: &BTreeMap<String, Vec<u8>>, imported: &Store) 
         extra: Vec::new(),
         first_diff,
     };
-    let again = match export_store(imported, &Selection::of(roots), &opts) {
+    let mut sel = Selection::of(roots);
+    if let Some(field) = index.flags.iter().find_map(|f| f.strip_prefix("group-by=")) {
+        sel = match crate::scope::group(imported, sel, field) {
+            Ok(s) => s,
+            Err(_) => return fails(None),
+        };
+    }
+    let again = match export_store(imported, &sel, &opts) {
         Ok(c) => c,
         Err(_) => return fails(None),
     };
@@ -232,4 +245,82 @@ fn p3(index: &ExportIndex, files: &BTreeMap<String, Vec<u8>>, imported: &Store) 
         return fails(None);
     }
     Property::Holds
+}
+
+/// P2 (§3.9): what an import of one file accepted comes back out of an export of it.
+///
+/// `S_f` is the records import `name` accepted, less checkpoints and less text a manifest may
+/// not carry or that has since been redacted. The export is from the library, of the units
+/// `from import:<name>` resolves to (the export roots, for a collection `lib export` wrote; the
+/// units that arrived, otherwise), under `single`, `full` and every `--with-*`. P2 holds when
+/// every record of `S_f` is among the export's records.
+pub fn p2(lib: &impl crate::access::LibraryWrite, name: &str) -> Result<Property, LibError> {
+    use crate::export::{export_library, snapshot, ExportOptions, Selection, With};
+    use crate::tables::{State, Tables};
+    let tables = Tables::load(lib.root())?;
+    let batch = tables
+        .batches
+        .get(name)
+        .ok_or_else(|| LibError::NoImport(name.to_string()))?;
+    let mids: BTreeSet<_> = batch.mids.iter().collect();
+    let accepted: BTreeSet<[u8; 32]> = tables
+        .imported
+        .iter()
+        .filter(|(_, set)| {
+            set.iter()
+                .any(|(m, st)| mids.contains(m) && *st == State::Accepted)
+        })
+        .map(|(h, _)| *h)
+        .collect();
+    let store = lib.snapshot();
+    let carried = |tid: &smysl_core::Tid| {
+        !store.is_redacted(tid)
+            && store.manifests().any(|(_, m)| {
+                m.carry == smysl_core::Carry::Text
+                    && smysl_text::carry_allowed(&m.licence, m.carry).is_ok()
+                    && m.parts.iter().any(|e| &e.tid == tid)
+            })
+    };
+    let s_f: Vec<smysl_core::Record> = crate::import::retained(lib, name)?
+        .into_iter()
+        .filter(|r| accepted.contains(&Store::record_hash(r)))
+        .filter(|r| !crate::export::is_checkpoint(r))
+        .filter(|r| match r {
+            smysl_core::Record::PartText(p) => carried(&p.tid),
+            smysl_core::Record::PartReading(x) => carried(&x.tid),
+            _ => true,
+        })
+        .collect();
+    let sel = match crate::scope::import_scope(lib, name)? {
+        Some(s) => s,
+        None => Selection::of(
+            s_f.iter()
+                .filter_map(|r| r.as_unit().map(smysl_core::canonical_uid))
+                .filter(|u| store.contains_uid(u)),
+        ),
+    };
+    let with = With::new()
+        .views(true)
+        .packs(true)
+        .text(true)
+        .provenance(true)
+        .staged(true)
+        .quarantine(true);
+    let snap = snapshot(lib, &with)?;
+    let e = export_library(lib, &snap, &sel, &ExportOptions::new().with(with))?;
+    let out: BTreeSet<[u8; 32]> = e.records().iter().map(Store::record_hash).collect();
+    let missing: Vec<[u8; 32]> = s_f
+        .iter()
+        .map(Store::record_hash)
+        .filter(|h| !out.contains(h))
+        .collect();
+    Ok(if missing.is_empty() {
+        Property::Holds
+    } else {
+        Property::Fails {
+            missing,
+            extra: Vec::new(),
+            first_diff: None,
+        }
+    })
 }

@@ -814,17 +814,29 @@ lib        --offline
 lib        --no-color
 lib        --scope
 lib        --layout
-lib        [possible values: single, by-view]
+lib        [possible values: single, by-view, by-expression, by-collection, by-time, by-query]
 lib        --noprogress
+lib        --budget
+lib        --json
+lib        --group-by
+lib        --quiet
+lib        --verbose
+lib        --window
+lib        --as-of
+lib        --seed-check
 lib        --closure
 lib        [possible values: full, ref]
-lib        --json
-lib        --quiet
 lib        --with-views
-lib        --verbose
 lib        --with-packs
+lib        --with-text
+lib        --with-provenance
+lib        --with-staged
+lib        --with-quarantine
+lib        --p2
+lib        --keep-scratch
+lib        --no-join
+lib        --keep-original
 lib        --edges
-lib        --seed-check
 lib        --unknown
 lib        [possible values: include, drop]
 lib        --no-verify

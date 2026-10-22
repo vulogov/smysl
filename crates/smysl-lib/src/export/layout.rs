@@ -120,6 +120,46 @@ pub(crate) fn by_view(
     (units, keyed)
 }
 
+/// The key a unit takes under `by-expression` or `by-collection` (§3.4): the alias of the
+/// manifest its source names, or that alias's collection, which is its namespace up to the
+/// first `/` (`kjv` for `kjv/08-rut`, as `collection:kjv` reads it, SMYSL-2.4 scope). A unit
+/// whose source names no manifest the store holds goes to `unkeyed`.
+///
+/// An alias's `/` and `:` become `-`, as a view id's `/` does under `by-view`, so the common
+/// alias is a plain segment and needs no hash suffix. Two aliases that would meet on one key
+/// that way keep their own spelling instead, which [`slugs`] then suffixes apart: two
+/// expressions are never filed together because their names differ only in punctuation.
+pub(crate) fn by_manifest(
+    store: &Store,
+    sel: &BTreeSet<Uid>,
+    collection: bool,
+) -> BTreeMap<Uid, String> {
+    let alias_of = |u: &Uid| -> Option<String> {
+        let mid = store.get(u)?.core.source.as_ref()?.manifest()?;
+        let alias = store.manifest(mid)?.alias.as_str();
+        Some(match (collection, alias.split_once('/')) {
+            (true, Some((head, _))) => head.to_string(),
+            _ => alias.to_string(),
+        })
+    };
+    let raw: BTreeMap<Uid, Option<String>> = sel.iter().map(|u| (*u, alias_of(u))).collect();
+    let plain = |a: &str| a.replace(['/', ':'], "-");
+    let mut meets: BTreeMap<String, BTreeSet<&str>> = BTreeMap::new();
+    for a in raw.values().flatten() {
+        meets.entry(plain(a)).or_default().insert(a);
+    }
+    raw.iter()
+        .map(|(u, a)| {
+            let key = match a {
+                None => "unkeyed".to_string(),
+                Some(a) if meets[&plain(a)].len() > 1 => a.clone(),
+                Some(a) => plain(a),
+            };
+            (*u, key)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

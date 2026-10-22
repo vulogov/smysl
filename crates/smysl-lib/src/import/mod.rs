@@ -14,6 +14,7 @@
 
 pub mod classify;
 mod decode;
+mod join;
 mod manifest;
 
 use crate::access::LibraryWrite;
@@ -55,6 +56,12 @@ pub struct ImportOptions {
     pub licence: String,
     /// Where the files came from, as a URL; otherwise each manifest records its file name.
     pub origin: Option<String>,
+    /// Keep each file's bytes in the object store, at `objects/o3/`, under the BLAKE3 its
+    /// manifest records as `identifiers.original` (§3.2 step 7).
+    pub keep_original: bool,
+    /// Propose `same-as` edges between what this import introduced and what the library holds,
+    /// into the staged batch `join:<name>` (§3.5). On by default; `--no-join` turns it off.
+    pub join: bool,
 }
 
 impl Default for ImportOptions {
@@ -64,6 +71,8 @@ impl Default for ImportOptions {
             accept: false,
             licence: "unknown".to_string(),
             origin: None,
+            keep_original: false,
+            join: true,
         }
     }
 }
@@ -92,6 +101,16 @@ impl ImportOptions {
         self.origin = Some(url.into());
         self
     }
+
+    pub fn keep_original(mut self, on: bool) -> ImportOptions {
+        self.keep_original = on;
+        self
+    }
+
+    pub fn join(mut self, on: bool) -> ImportOptions {
+        self.join = on;
+        self
+    }
 }
 
 /// What became of one file.
@@ -112,8 +131,11 @@ pub struct FileOutcome {
     pub staged: usize,
     pub waiting: usize,
     pub quarantined: usize,
-    /// Records 15 and 18, which a log does not hold; the object store takes them in step 6.
+    /// Records 15 and 18 it holds, which go to the object store rather than the log.
     pub text: usize,
+    /// Records 15 and 18 dropped at the door because their part is redacted, in the library
+    /// or by a record 19 among the files (rule Z, `SMY-W414`).
+    pub redacted: usize,
     /// Its manifest was already in the library: the same bytes, under the same options.
     pub already_imported: bool,
     /// It did not decode (`SMY-E493`), and nothing from it was used.
@@ -128,6 +150,8 @@ pub struct ImportReport {
     pub files: Vec<FileOutcome>,
     /// The manifests this import wrote.
     pub manifests: Vec<Mid>,
+    /// The `same-as` edges its join proposed, staged as `join:<name>` (§3.5).
+    pub joins: usize,
     /// Contentions the appended records gave rise to: detected, reported, not recorded (§2.2).
     pub contentions: Vec<Contention>,
     /// `SMY-E493`, `E494`, `W423` per quarantined record, and `W496` with the waiting count.
@@ -140,6 +164,7 @@ impl ImportReport {
             name: name.to_string(),
             files: Vec::new(),
             manifests: Vec::new(),
+            joins: 0,
             contentions: Vec::new(),
             report: Report::new(),
         }
@@ -148,8 +173,11 @@ impl ImportReport {
 
 // --- Where things are kept (§4.1) -----------------------------------------------------------
 
+/// `lib/staged/<name>.cbor`; a join batch's, `join:<name>`, is `lib/staged/join/<name>.cbor`.
 fn staged_path(root: &Path, name: &str) -> PathBuf {
-    root.join("lib").join("staged").join(format!("{name}.cbor"))
+    root.join("lib")
+        .join("staged")
+        .join(format!("{}.cbor", name.replace(':', "/")))
 }
 
 fn waiting_path(root: &Path, name: &str) -> PathBuf {
@@ -164,6 +192,31 @@ fn quarantine_dir(root: &Path, name: &str) -> PathBuf {
 
 fn hash(r: &Record) -> [u8; 32] {
     Store::record_hash(r)
+}
+
+/// Records 15 and 18: text, which the object store keeps and the log refuses.
+fn is_text(r: &Record) -> bool {
+    matches!(r, Record::PartText(_) | Record::PartReading(_))
+}
+
+/// Where `--keep-original` keeps a file's bytes: `objects/o3/`, fanned out two levels as the
+/// object store fans out `t3/` and `r3/`, under the lowercase hex of their BLAKE3.
+pub fn original_path(root: &Path, blake3: &[u8; 32]) -> PathBuf {
+    let hex: String = blake3.iter().map(|b| format!("{b:02x}")).collect();
+    root.join("objects")
+        .join("o3")
+        .join(&hex[..2])
+        .join(&hex[2..4])
+        .join(&hex[4..])
+}
+
+/// Keep a file's bytes, once: the name is their hash, so a second copy is the first.
+fn keep_original(root: &Path, blake3: &[u8; 32], bytes: &[u8]) -> Result<(), LibError> {
+    let p = original_path(root, blake3);
+    if p.is_file() {
+        return Ok(());
+    }
+    write_atomic(&p, bytes)
 }
 
 /// The records of a file this module wrote; none when there is no file.
@@ -240,7 +293,9 @@ pub fn import(
     };
     let root = lib.root().to_path_buf();
     let mut tables = Tables::load(&root)?;
-    let library = lib.snapshot().clone();
+    // Borrowed, not cloned: everything below that reads the library as it was reads it before
+    // the first write, and a copy of a library of 10⁶ records is gigabytes (GE-T15's scale cell).
+    let library = lib.snapshot();
     let mut out = ImportReport::new(&name);
 
     // Decode, and name each file's manifest.
@@ -265,6 +320,7 @@ pub fn import(
             waiting: 0,
             quarantined: 0,
             text: 0,
+            redacted: 0,
             already_imported: false,
             rejected: false,
         };
@@ -281,12 +337,13 @@ pub fn import(
         let mut seen = BTreeSet::new();
         let mut records = Vec::new();
         for r in decoded {
-            if matches!(r, Record::PartText(_) | Record::PartReading(_)) {
-                outcome.text += 1;
-            } else if seen.insert(hash(&r)) {
+            if seen.insert(hash(&r)) {
                 records.push(r);
             }
         }
+        // Over what the file holds, its text included and before rule Z drops any: the
+        // digest names the file, and the same file is the same file whatever this library has
+        // redacted since.
         outcome.rsd = record_set_digest(&records);
         let alias = if several {
             format!("import:{name}/{}", p.stem)
@@ -315,23 +372,97 @@ pub fn import(
         return Err(LibError::NameTaken(name));
     }
 
-    // What the library does not hold yet, once each, and which files hold it.
+    // Rule Z at the door (§3.2 step 2): no record 15 or 18 of a part the library has redacted,
+    // or that a record 19 among these files redacts, is taken in. Dropped and counted, and
+    // the rest of the file is imported as it is.
+    let redacted: BTreeSet<smysl_core::Tid> = library
+        .redactions()
+        .map(|(t, _)| *t)
+        .chain(live.iter().flat_map(|i| {
+            read[*i]
+                .as_ref()
+                .expect("live")
+                .records
+                .iter()
+                .filter_map(|r| match r {
+                    Record::Redaction(x) => Some(x.tid),
+                    _ => None,
+                })
+        }))
+        .collect();
+    let mut dropped = 0;
+    for &i in &live {
+        let r = read[i].as_mut().expect("live");
+        let before = r.records.len();
+        r.records.retain(|rec| match rec {
+            Record::PartText(t) => !redacted.contains(&t.tid),
+            Record::PartReading(x) => !redacted.contains(&x.tid),
+            _ => true,
+        });
+        let f = &mut out.files[i];
+        f.redacted = before - r.records.len();
+        f.text = r.records.iter().filter(|rec| is_text(rec)).count();
+        dropped += f.redacted;
+    }
+    if dropped > 0 {
+        report.push(Diagnostic::new(Code::W414).with_message(format!(
+            "{dropped} part text(s) or reading(s) of import:{name} dropped: their part is redacted"
+        )));
+    }
+
+    // What the library does not hold yet, once each, and which files hold it. Text is held
+    // in the object store, which `holds` asks, and is classified apart: a part names nothing
+    // it must wait for, and is quarantined only when its bytes do not hash to its tid.
     let mut incoming: BTreeMap<[u8; 32], Record> = BTreeMap::new();
+    let mut text: BTreeMap<[u8; 32], Record> = BTreeMap::new();
     let mut held_by: BTreeMap<[u8; 32], BTreeSet<Mid>> = BTreeMap::new();
+    let mut already: BTreeSet<[u8; 32]> = BTreeSet::new();
     for &i in &live {
         let r = read[i].as_ref().expect("live");
         for rec in &r.records {
             let h = hash(rec);
             held_by.entry(h).or_default().insert(r.mid);
-            if library.contains_record(&h) {
+            if already.contains(&h) || lib.holds(rec) {
+                already.insert(h);
                 out.files[i].duplicates += 1;
             } else {
                 out.files[i].added += 1;
-                incoming.entry(h).or_insert_with(|| rec.clone());
+                let into = if is_text(rec) {
+                    &mut text
+                } else {
+                    &mut incoming
+                };
+                into.entry(h).or_insert_with(|| rec.clone());
             }
         }
     }
-    let classes = classify(&library, &incoming, &BTreeSet::new());
+    let parts = crate::access::ImportParts {
+        library: lib.parts(),
+        incoming: text
+            .values()
+            .filter_map(|r| match r {
+                Record::PartText(p) if p.verify() => Some((p.tid, p.clone())),
+                _ => None,
+            })
+            .collect(),
+    };
+    let mut classes = classify(
+        library,
+        &incoming,
+        &BTreeSet::new(),
+        Some(std::sync::Arc::new(parts)),
+    );
+    for (h, r) in &text {
+        let class = match r {
+            Record::PartText(p) if !p.verify() => {
+                Class::Quarantined(vec![Diagnostic::new(Code::E446)
+                    .with_message(format!("part {} does not hash to its tid", p.tid.short()))])
+            }
+            _ => Class::Accepted,
+        };
+        classes.insert(*h, class);
+    }
+    incoming.extend(text);
 
     let accepted_state = if opts.accept {
         State::Accepted
@@ -401,7 +532,7 @@ pub fn import(
     }
 
     // Write. The log first, in one append: manifests always, accepted records with `accept`.
-    let before = contention_ids(&library);
+    let before = contention_ids(library);
     let manifests: Vec<Record> = live
         .iter()
         .map(|i| read[*i].as_ref().expect("live").manifest.clone())
@@ -411,6 +542,11 @@ pub fn import(
         append.extend(accepted.iter().cloned());
     }
     lib.append(&append)?;
+    if opts.keep_original {
+        for &i in &live {
+            keep_original(&root, &out.files[i].original, &pieces[i].bytes)?;
+        }
+    }
     if !opts.accept {
         write_records(&staged_path(&root, &name), &accepted)?;
     }
@@ -439,7 +575,7 @@ pub fn import(
     // The tables: every record each file holds, under its manifest.
     for (h, mids) in &held_by {
         let state = match classes.get(h) {
-            None | Some(Class::Accepted) if library.contains_record(h) => State::Accepted,
+            None | Some(Class::Accepted) if already.contains(h) => State::Accepted,
             None | Some(Class::Accepted) => accepted_state,
             Some(Class::Waiting(_)) => State::Waiting,
             Some(Class::Quarantined(_)) => State::Quarantined,
@@ -479,6 +615,56 @@ pub fn import(
     );
     if opts.accept {
         promote(lib, &mut tables, &mut report)?;
+    }
+
+    // Joins (§3.5): over the library as it now is, with this import's staged records beside it
+    // when it staged them, for the units it introduced.
+    if opts.join {
+        let introduced: BTreeSet<smysl_core::Uid> = accepted
+            .iter()
+            .filter_map(|r| r.as_unit().map(smysl_core::canonical_uid))
+            .collect();
+        let over = if opts.accept {
+            lib.snapshot().clone()
+        } else {
+            Store::from_records(
+                lib.snapshot()
+                    .iter()
+                    .cloned()
+                    .chain(accepted.iter().cloned())
+                    .collect(),
+            )
+        };
+        let joined = join::propose(&over, &introduced);
+        if !joined.is_empty() {
+            let batch = join::batch(&name);
+            let marker = join::marker(&name);
+            write_records(&staged_path(&root, &batch), &joined)?;
+            for r in &joined {
+                tables
+                    .imported
+                    .entry(hash(r))
+                    .or_default()
+                    .insert((marker, State::Staged));
+            }
+            out.joins = joined
+                .iter()
+                .filter(|r| matches!(r, Record::Relation(_)))
+                .count();
+            tables.batches.insert(
+                batch.clone(),
+                Batch {
+                    name: batch,
+                    mids: vec![marker],
+                    state: State::Staged,
+                    accepted: 0,
+                    staged: joined.len() as u64,
+                    waiting: 0,
+                    quarantined: 0,
+                    tool: crate::TOOL.to_string(),
+                },
+            );
+        }
     }
     tables.save(&root)?;
 
@@ -533,7 +719,7 @@ fn promote(
                 _ => Vec::new(),
             };
             let extra: BTreeSet<Id> = staged.iter().flat_map(provides).collect();
-            let classes = classify(&library, &candidates, &extra);
+            let classes = classify(&library, &candidates, &extra, lib.parts());
 
             let mut accepted = Vec::new();
             let mut quarantined = Vec::new();
@@ -751,6 +937,21 @@ pub fn retained(lib: &impl LibraryWrite, name: &str) -> Result<Vec<Record>, LibE
     read_records(&waiting_path(&root, name))?
         .iter()
         .for_each(&mut take);
+    // Text is in the object store, which is addressed by tid and rdid, not by record hash: the
+    // manifests say which parts and readings there are to look for.
+    let parts: BTreeSet<(smysl_core::Tid, smysl_core::Rdid)> = lib
+        .snapshot()
+        .manifests()
+        .flat_map(|(_, m)| m.parts.iter().map(|e| (e.tid, e.rdid)))
+        .collect();
+    for (tid, rdid) in &parts {
+        if let Some(p) = lib.part(tid) {
+            take(&Record::PartText(p));
+        }
+        if let Some(x) = lib.reading(rdid) {
+            take(&Record::PartReading(x));
+        }
+    }
     let q = quarantine_dir(&root, name);
     if let Ok(entries) = std::fs::read_dir(&q) {
         let mut paths: Vec<PathBuf> = entries

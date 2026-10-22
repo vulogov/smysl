@@ -8,8 +8,8 @@
 use super::{ExportOptions, With};
 use smysl_core::types::record::code;
 use smysl_core::{
-    canonical_uid, ContentionId, DatingTarget, Mid, Record, RelKind, ResolutionTarget, SchemaId,
-    ThreadId, Tid, Uid, ViewId,
+    canonical_uid, Carry, ContentionId, DatingTarget, Mid, Rdid, Record, RelKind, ResolutionTarget,
+    SchemaId, ThreadId, Tid, Uid, ViewId,
 };
 use smysl_graph::merge::contention::detect;
 use smysl_graph::{closure, DetectionContext, EdgeSet, Store};
@@ -34,10 +34,14 @@ pub(crate) struct Entry<'s> {
 /// The snapshot's records, each once.
 ///
 /// Deduplicated by record hash, because a store opened from a log keeps a log's repeats and a
-/// file written from it must not.
+/// file written from it must not. The text a library keeps beside its log, in an object store,
+/// joins them as `extra`: a log holds no record 15 or 18, and an in-memory store may.
 pub(crate) struct Source<'s> {
     pub store: &'s Store,
     pub entries: Vec<Entry<'s>>,
+    /// Per record hash, the import manifests the library's `imported` table lists it under:
+    /// what `--with-provenance` adds (row 14). `None` for a store with no tables.
+    provenance: Option<&'s BTreeMap<[u8; 32], BTreeSet<Mid>>>,
     /// The contentions detection derives over the snapshot, which merge reports and never
     /// records: a resolution may name one by its derived id (row 12).
     detected: Vec<smysl_core::Contention>,
@@ -50,7 +54,11 @@ pub(crate) struct Source<'s> {
 }
 
 impl<'s> Source<'s> {
-    pub(crate) fn new(store: &'s Store) -> Source<'s> {
+    pub(crate) fn new(
+        store: &'s Store,
+        extra: &'s [Record],
+        provenance: Option<&'s BTreeMap<[u8; 32], BTreeSet<Mid>>>,
+    ) -> Source<'s> {
         let mut seen = BTreeSet::new();
         let mut schemas: BTreeMap<SchemaId, (BTreeSet<SchemaId>, BTreeSet<RelKind>)> =
             BTreeMap::new();
@@ -92,7 +100,7 @@ impl<'s> Source<'s> {
             _ => false,
         };
         let mut entries = Vec::new();
-        for r in store.iter() {
+        for r in store.iter().chain(extra.iter()) {
             let hash = Store::record_hash(r);
             if !seen.insert(hash) {
                 continue;
@@ -113,6 +121,7 @@ impl<'s> Source<'s> {
         Source {
             store,
             entries,
+            provenance,
             detected,
             schemas,
         }
@@ -184,9 +193,9 @@ pub(crate) fn close(
 
 /// The records selected over a closed set of units, one rule per type (§3.6's table).
 ///
-/// Records 15 and 18 need `--with-text` and a manifest's carry and licence, which arrive with
-/// TX-P11 step 6; until then they are never selected. Record 9 is never selected, and other
-/// unknown records are the caller's: they go to `unattributed.cbor`, never to a keyed file.
+/// Records 15 and 18 need `--with-text` and a manifest whose carry and licence allow it.
+/// Record 9 is never selected, and other unknown records are the caller's: they go to
+/// `unattributed.cbor`, never to a keyed file.
 ///
 /// `key` is the corpus view a `by-view` file is keyed by. It travels with that file whatever
 /// `--with-views` says, since without it a recipient could not cut the collection the same
@@ -228,6 +237,30 @@ pub(crate) fn pick<'s>(
                 requires.extend(v.requires.iter().cloned());
             }
             _ => {}
+        }
+    }
+    // Rows 15 and 18: the text of the parts the units are drawn from, when `--with-text` is
+    // given, the manifest that lists the part is in the file, its carry is `text` and its
+    // licence permits carrying text, and the part is not redacted. Each test is one the
+    // library itself makes before it will emit somebody else's text (`SMY-E402`, rule Z).
+    let mut text_tids: BTreeSet<Tid> = BTreeSet::new();
+    let mut text_rdids: BTreeSet<Rdid> = BTreeSet::new();
+    if with.text {
+        for mid in &mids {
+            let Some(m) = store.manifest(mid) else {
+                continue;
+            };
+            if m.carry != Carry::Text || smysl_text::carry_allowed(&m.licence, m.carry).is_err() {
+                continue;
+            }
+            for e in m
+                .parts
+                .iter()
+                .filter(|e| tids.contains(&e.tid) && !store.is_redacted(&e.tid))
+            {
+                text_tids.insert(e.tid);
+                text_rdids.insert(e.rdid);
+            }
         }
     }
     let threads: BTreeSet<ThreadId> = src
@@ -379,9 +412,11 @@ pub(crate) fn pick<'s>(
                     }
                     keep
                 }
-                // Text lives in an object store and needs `--with-text` (step 6); unknown records
-                // are the caller's (`unattributed.cbor`); a checkpoint goes nowhere.
-                Record::PartText(_) | Record::PartReading(_) | Record::Unknown { .. } => false,
+                Record::PartText(t) => text_tids.contains(&t.tid),
+                Record::PartReading(x) => text_rdids.contains(&x.rdid()),
+                // Unknown records are the caller's (`unattributed.cbor`); a checkpoint goes
+                // nowhere.
+                Record::Unknown { .. } => false,
                 // A record type added to `smysl-core` after this table was written: never guessed
                 // into a file. The exhaustive arms above are the ones the RFC rules on.
                 #[allow(unreachable_patterns)]
@@ -392,6 +427,27 @@ pub(crate) fn pick<'s>(
                 p.dangling.insert(e.hash);
             }
             p.records.insert((r.type_code(), e.hash), r);
+        }
+    }
+    // Row 14's second half: with `--with-provenance`, the import manifests the library's
+    // `imported` table lists the selected records under. After the rest, since it is a
+    // function of what was selected.
+    if with.provenance {
+        if let Some(table) = src.provenance {
+            let wanted: BTreeSet<Mid> = p
+                .records
+                .keys()
+                .filter_map(|(_, h)| table.get(h))
+                .flatten()
+                .copied()
+                .collect();
+            for e in &src.entries {
+                if let Record::Manifest(m) = e.record {
+                    if wanted.contains(&m.mid()) {
+                        p.records.insert((e.record.type_code(), e.hash), e.record);
+                    }
+                }
+            }
         }
     }
     p
