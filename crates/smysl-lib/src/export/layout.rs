@@ -87,27 +87,37 @@ pub(crate) fn view_id(slug: &str) -> ViewId {
 /// in several views goes to the least view id, in byte order, so the partition is a function of
 /// the store. One in none goes to `unkeyed`. Views under `export/` are an earlier export's own
 /// and are never a key: re-exporting an export must not file units by the files they came in.
-pub(crate) fn by_view(store: &Store, sel: &BTreeSet<Uid>) -> BTreeMap<Uid, String> {
+///
+/// Also returns, per key, the view it names, which travels in that key's file.
+pub(crate) fn by_view(
+    store: &Store,
+    sel: &BTreeSet<Uid>,
+) -> (BTreeMap<Uid, String>, BTreeMap<String, ViewId>) {
     let g = store.adjacency();
     let mut owner: BTreeMap<Uid, String> = BTreeMap::new();
+    let mut keyed: BTreeMap<String, ViewId> = BTreeMap::new();
     let mut views: Vec<_> = store
         .views()
         .filter(|v| !v.id.as_str().starts_with("export/"))
         .collect();
     views.sort_by(|a, b| a.id.cmp(&b.id));
     for v in views {
+        let key = v.id.as_str().replace('/', "-");
         let roots: Vec<_> = v.roots.iter().filter_map(|u| g.id(u)).collect();
         for n in closure(g, &roots, &EdgeSet::support()) {
             if let Some(u) = g.uid(n).filter(|u| sel.contains(u)) {
-                owner
-                    .entry(*u)
-                    .or_insert_with(|| v.id.as_str().replace('/', "-"));
+                if !owner.contains_key(u) {
+                    owner.insert(*u, key.clone());
+                    keyed.entry(key.clone()).or_insert_with(|| v.id.clone());
+                }
             }
         }
     }
-    sel.iter()
+    let units = sel
+        .iter()
         .map(|u| (*u, owner.remove(u).unwrap_or_else(|| "unkeyed".to_string())))
-        .collect()
+        .collect();
+    (units, keyed)
 }
 
 #[cfg(test)]

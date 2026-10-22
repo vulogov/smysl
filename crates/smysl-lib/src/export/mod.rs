@@ -11,9 +11,10 @@ mod write;
 
 pub use layout::slug;
 
+use crate::index::{ExportIndex, IndexError, IndexFile, Role, COUNTED};
 use select::{Picked, Source};
-use smysl_core::{Code, Diagnostic, Record, Report, Uid, ViewId};
-use smysl_graph::{record_set_digest, EdgeSet, Store};
+use smysl_core::{canonical_uid, Code, Diagnostic, Record, RelKind, Report, Uid, ViewId};
+use smysl_graph::{record_set_digest, EdgeKind, EdgeSet, Store};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -40,18 +41,46 @@ impl Layout {
             Layout::ByView => "by-view",
         }
     }
+
+    /// The layout an index names.
+    pub fn parse(s: &str) -> Option<Layout> {
+        match s {
+            "single" => Some(Layout::Single),
+            "by-view" => Some(Layout::ByView),
+            _ => None,
+        }
+    }
 }
 
 /// What a file holds of what its selection needs (§3.7).
-///
-/// `full` in step 2. `ref`, which writes each record once and lists the files a file
-/// requires, arrives with the index in step 3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum Closure {
-    /// Every file holds everything selected for its key.
+    /// Every file holds everything selected for its key, so each file is closed on its own.
     #[default]
     Full,
+    /// Every record is written once, by the file that owns it. A file lists in the index the
+    /// files it takes the rest from, and a collection is imported whole.
+    Ref,
+}
+
+impl Closure {
+    /// The mode's name, as an index records it.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Closure::Full => "full",
+            Closure::Ref => "ref",
+        }
+    }
+
+    /// The mode an index names.
+    pub fn parse(s: &str) -> Option<Closure> {
+        match s {
+            "full" => Some(Closure::Full),
+            "ref" => Some(Closure::Ref),
+            _ => None,
+        }
+    }
 }
 
 /// What happens to records this build cannot interpret (row "other", `SMY-W425`).
@@ -116,6 +145,11 @@ impl ExportOptions {
 
     pub fn layout(mut self, layout: Layout) -> ExportOptions {
         self.layout = layout;
+        self
+    }
+
+    pub fn closure(mut self, closure: Closure) -> ExportOptions {
+        self.closure = closure;
         self
     }
 
@@ -186,6 +220,9 @@ pub struct ExportedFile {
     pub rsd: [u8; 32],
     /// The generated view's id; `None` for `unattributed.cbor`.
     pub view: Option<ViewId>,
+    /// Under `ref`, the files this one takes records from, by path, sorted. It is in the
+    /// index, never in the view (draft 3 §16.7). Empty under `full`.
+    pub requires: Vec<String>,
 }
 
 /// What an export wrote.
@@ -194,17 +231,26 @@ pub struct ExportedFile {
 pub struct Collection {
     /// The files, sorted by path.
     pub files: Vec<ExportedFile>,
-    /// The record-set digest of everything written, every file's records together: `rsd(X)`,
-    /// what P1 compares an import's retained records against.
-    pub rsd: [u8; 32],
-    /// The duplication factor's two terms (§3.7): the records selected summed over files, and
-    /// the records selected counted once. Generated views are in neither.
-    pub duplication: (usize, usize),
+    /// What the collection says about itself, written last as `export-index.cbor`.
+    pub index: ExportIndex,
     /// What the export counted: `SMY-W425`, `W490`, `W495`, `W497`.
     pub report: Report,
 }
 
 impl Collection {
+    /// The record-set digest of everything written, every file's records together: `rsd(X)`,
+    /// what P1 compares an import's retained records against.
+    pub fn rsd(&self) -> [u8; 32] {
+        self.index.rsd
+    }
+
+    /// The duplication factor's two terms (§3.7): the records selected summed over files, and
+    /// the records selected counted once. Generated views are in neither. The same under
+    /// `full` and `ref`, since it measures what the files need, not what they hold.
+    pub fn duplication(&self) -> (u64, u64) {
+        self.index.duplication
+    }
+
     /// The file at this path.
     pub fn file(&self, path: &str) -> Option<&ExportedFile> {
         self.files.iter().find(|f| f.path == path)
@@ -232,6 +278,10 @@ impl Collection {
 pub enum LibError {
     /// The selection names a unit the store does not hold.
     NotInStore(Uid),
+    /// An index that does not decode.
+    Index(IndexError),
+    /// A file could not be read or written. The path, and what the system said.
+    Io(String, String),
 }
 
 impl fmt::Display for LibError {
@@ -244,6 +294,8 @@ impl fmt::Display for LibError {
                     u.short()
                 )
             }
+            LibError::Index(e) => write!(f, "{e}"),
+            LibError::Io(path, e) => write!(f, "{path}: {e}"),
         }
     }
 }
@@ -264,8 +316,11 @@ pub fn export_store(
     }
     let src = Source::new(store);
 
-    let keyed: BTreeMap<Uid, String> = match opts.layout {
-        Layout::Single => sel.units.iter().map(|u| (*u, "all".to_string())).collect(),
+    let (keyed, views): (BTreeMap<Uid, String>, BTreeMap<String, ViewId>) = match opts.layout {
+        Layout::Single => (
+            sel.units.iter().map(|u| (*u, "all".to_string())).collect(),
+            BTreeMap::new(),
+        ),
         Layout::ByView => layout::by_view(store, &sel.units),
     };
     let mut parts: BTreeMap<String, BTreeSet<Uid>> = BTreeMap::new();
@@ -275,14 +330,17 @@ pub fn export_store(
     let keys: BTreeSet<String> = parts.keys().cloned().collect();
     let (slugs, suffixed) = layout::slugs(&keys);
 
-    let mut files = Vec::new();
+    // What each key selects, before anything is written: `ref` needs every file's selection
+    // to decide which file owns a record.
+    let mut cut: Vec<(String, &BTreeSet<Uid>, Picked<'_>)> = Vec::new();
     let mut left_out: BTreeMap<&'static str, usize> = BTreeMap::new();
     let mut dangling = BTreeSet::new();
     let mut summed = 0;
     let mut once: BTreeSet<[u8; 32]> = BTreeSet::new();
     for (key, roots) in &parts {
-        let units = select::close(&src, roots, opts);
-        let picked: Picked<'_> = select::pick(&src, &units, &opts.with);
+        let view = views.get(key);
+        let units = select::close(&src, roots, opts, view);
+        let picked: Picked<'_> = select::pick(&src, &units, &opts.with, view);
         for (t, n) in &picked.left_out {
             *left_out.entry(t).or_default() += n;
         }
@@ -290,7 +348,33 @@ pub fn export_store(
         dangling.extend(picked.dangling.iter().copied());
         summed += picked.records.len();
         once.extend(picked.records.keys().map(|(_, h)| *h));
-        files.push(write::file(store, &slugs[key], roots, &picked));
+        cut.push((format!("{}.cbor", slugs[key]), roots, picked));
+    }
+    let owners = match opts.closure {
+        Closure::Full => BTreeMap::new(),
+        Closure::Ref => owners(&cut),
+    };
+
+    let mut files = Vec::new();
+    for (path, roots, picked) in &cut {
+        let slug = &path[..path.len() - ".cbor".len()];
+        let (written, requires): (Vec<&Record>, Vec<String>) = match opts.closure {
+            Closure::Full => (picked.records.values().copied().collect(), Vec::new()),
+            Closure::Ref => {
+                let mut written = Vec::new();
+                let mut requires = BTreeSet::new();
+                for ((_, h), r) in &picked.records {
+                    match &owners[h] {
+                        o if o == path => written.push(*r),
+                        o => {
+                            requires.insert(o.clone());
+                        }
+                    }
+                }
+                (written, requires.into_iter().collect())
+            }
+        };
+        files.push(write::file(store, slug, roots, picked, &written, requires));
     }
 
     let mut report = Report::new();
@@ -313,6 +397,7 @@ pub fn export_store(
             files.push(write::unattributed(&unknown));
         }
     }
+    let w490: usize = left_out.values().sum();
     for (t, n) in left_out {
         report.push(Diagnostic::new(Code::W490).with_message(format!(
             "{n} {t} record(s) left out of a file that does not hold everything they name"
@@ -335,10 +420,165 @@ pub fn export_store(
         .iter()
         .flat_map(|f| smysl_core::from_cbor_seq(&f.bytes).expect("encoded here").0)
         .collect();
-    Ok(Collection {
+    let schemas: BTreeSet<(String, u32)> = cut
+        .iter()
+        .flat_map(|(_, _, p)| p.records.values())
+        .filter_map(|r| match r {
+            Record::SchemaDecl(d) => Some((d.id.as_str().to_string(), d.version)),
+            _ => None,
+        })
+        .collect();
+    let mut counts: BTreeMap<String, u64> =
+        COUNTED.iter().map(|c: &&str| (c.to_string(), 0)).collect();
+    for (code, n) in [
+        ("SMY-W425", unknown.len()),
+        ("SMY-W490", w490),
+        ("SMY-W495", dangling.len()),
+        ("SMY-W497", suffixed),
+    ] {
+        counts.insert(code.to_string(), n as u64);
+    }
+    let index = ExportIndex {
+        files: files
+            .iter()
+            .map(|f| IndexFile {
+                path: f.path.clone(),
+                blake3: *blake3::hash(&f.bytes).as_bytes(),
+                records: f.records as u64,
+                rsd: f.rsd,
+                view: f.view.as_ref().map(|v| v.as_str().to_string()),
+                requires: f.requires.clone(),
+                role: if f.view.is_some() {
+                    Role::Data
+                } else {
+                    Role::Unattributed
+                },
+            })
+            .collect(),
+        scope: String::new(),
+        sq_version: None,
+        schemas: schemas.into_iter().collect(),
+        lens_chain: None,
+        layout: opts.layout.as_str().to_string(),
+        closure: opts.closure.as_str().to_string(),
+        format: "cbor".to_string(),
+        as_of: None,
+        tool: crate::TOOL.to_string(),
         rsd: record_set_digest(&written),
+        flags: flags(store, opts),
+        derived: None,
+        complete: true,
+        counts,
+        duplication: (summed as u64, once.len() as u64),
+    };
+    Ok(Collection {
         files,
-        duplication: (summed, once.len()),
+        index,
         report,
     })
+}
+
+/// Under `ref`, the file that writes each record (§3.7): for a unit, the file that selects it
+/// as a root, and the layouts give every selected unit one; for anything else, the least path
+/// among the files that select it.
+fn owners(cut: &[(String, &BTreeSet<Uid>, Picked<'_>)]) -> BTreeMap<[u8; 32], String> {
+    let mut owner: BTreeMap<[u8; 32], String> = BTreeMap::new();
+    for (path, roots, picked) in cut {
+        for ((_, h), r) in &picked.records {
+            if matches!(r, Record::Unit(c) if roots.contains(&canonical_uid(c))) {
+                owner.insert(*h, path.clone());
+            }
+        }
+    }
+    let mut paths: Vec<&(String, &BTreeSet<Uid>, Picked<'_>)> = cut.iter().collect();
+    paths.sort_by(|a, b| a.0.cmp(&b.0));
+    for (path, _, picked) in paths {
+        for (_, h) in picked.records.keys() {
+            owner.entry(*h).or_insert_with(|| path.clone());
+        }
+    }
+    owner
+}
+
+/// The options that change what is written, as the index records them (key 12), sorted.
+fn flags(store: &Store, opts: &ExportOptions) -> Vec<String> {
+    let mut out = Vec::new();
+    if opts.with.views {
+        out.push("with-views".to_string());
+    }
+    if opts.with.packs {
+        out.push("with-packs".to_string());
+    }
+    if opts.unknown == UnknownRecords::Drop {
+        out.push("unknown-drop".to_string());
+    }
+    if let Some(e) = &opts.edges {
+        let kinds = EdgeSet::support().union(e);
+        if kinds != EdgeSet::all() {
+            out.push(format!("edges={}", edge_names(store, &kinds).join(",")));
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The kinds of `kinds` this store has edges of, by name: `deps`, `grounds`, then relation
+/// kinds by code, then extensions in their intern order. A kind the store holds no edge of
+/// changes nothing an export follows, so it is not named.
+fn edge_names(store: &Store, kinds: &EdgeSet) -> Vec<String> {
+    let g = store.adjacency();
+    let mut out = Vec::new();
+    for (k, name) in [(EdgeKind::Deps, "deps"), (EdgeKind::Grounds, "grounds")] {
+        if kinds.contains(k) {
+            out.push(name.to_string());
+        }
+    }
+    for c in 0..u8::MAX {
+        let Some(rk) = RelKind::from_code(c) else {
+            break;
+        };
+        if kinds.contains(EdgeKind::Kernel(c)) {
+            out.push(rk.as_str().to_string());
+        }
+    }
+    let mut i = 0;
+    while let Some(name) = g.extension_name(i) {
+        if kinds.contains(EdgeKind::Extension(i)) {
+            out.push(name.to_string());
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The options an index records, over the store a collection was imported into: what P3
+/// re-exports with. `None` for a layout or closure this build does not know.
+pub(crate) fn options_of(index: &ExportIndex, store: &Store) -> Option<ExportOptions> {
+    let mut o = ExportOptions::new()
+        .layout(Layout::parse(&index.layout)?)
+        .closure(Closure::parse(&index.closure)?);
+    for flag in &index.flags {
+        match flag.as_str() {
+            "with-views" => o.with.views = true,
+            "with-packs" => o.with.packs = true,
+            "unknown-drop" => o.unknown = UnknownRecords::Drop,
+            f => {
+                let list = f.strip_prefix("edges=")?;
+                let g = store.adjacency();
+                let mut e = EdgeSet::of([]);
+                for name in list.split(',').filter(|n| !n.is_empty()) {
+                    let kind = match name {
+                        "deps" => Some(EdgeKind::Deps),
+                        "grounds" => Some(EdgeKind::Grounds),
+                        n => RelKind::parse(n).ok().and_then(|k| g.edge_kind(&k)),
+                    };
+                    if let Some(k) = kind {
+                        e = e.with(k);
+                    }
+                }
+                o.edges = Some(e);
+            }
+        }
+    }
+    Some(o)
 }

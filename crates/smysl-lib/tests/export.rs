@@ -91,7 +91,7 @@ fn holds(c: &Collection, r: &Record) -> bool {
 /// What an empty store retains of the files: the in-memory stand-in for `lib import`, which
 /// arrives in step 4. P1 is that its digest is the collection's.
 fn p1(c: &Collection) -> bool {
-    Store::from_records(c.records()).record_set_digest() == c.rsd
+    Store::from_records(c.records()).record_set_digest() == c.rsd()
 }
 
 fn count(c: &Collection, code: smysl_core::Code) -> usize {
@@ -455,7 +455,8 @@ fn by_view_cuts_one_file_per_view_and_one_for_the_rest() {
     assert_eq!(roots("v-beta.cbor"), BTreeSet::from([ub]));
     assert_eq!(roots("unkeyed.cbor"), BTreeSet::from([canonical_uid(&z)]));
     assert_eq!(count(&c, smysl_core::Code::W497), 0);
-    assert_eq!(c.duplication, (3, 3));
+    // The three units, and each file's keying view, which travels with it (step 3).
+    assert_eq!(c.duplication(), (5, 5));
     assert!(p1(&c));
 }
 

@@ -9,7 +9,7 @@ use super::{ExportOptions, With};
 use smysl_core::types::record::code;
 use smysl_core::{
     canonical_uid, ContentionId, DatingTarget, Mid, Record, RelKind, ResolutionTarget, SchemaId,
-    ThreadId, Tid, Uid,
+    ThreadId, Tid, Uid, ViewId,
 };
 use smysl_graph::merge::contention::detect;
 use smysl_graph::{closure, DetectionContext, EdgeSet, Store};
@@ -144,7 +144,12 @@ pub(crate) struct Picked<'s> {
 /// Only units the snapshot holds are in the result. One that is named and not held stays
 /// named, and the record naming it is counted as dangling when it is selected. Retracted units
 /// are kept: export is exact, and a `retracts` edge needs both of its ends.
-pub(crate) fn close(src: &Source<'_>, sel: &BTreeSet<Uid>, opts: &ExportOptions) -> BTreeSet<Uid> {
+pub(crate) fn close(
+    src: &Source<'_>,
+    sel: &BTreeSet<Uid>,
+    opts: &ExportOptions,
+    key: Option<&ViewId>,
+) -> BTreeSet<Uid> {
     let store = src.store;
     let g = store.adjacency();
     let kinds = match &opts.edges {
@@ -163,7 +168,7 @@ pub(crate) fn close(src: &Source<'_>, sel: &BTreeSet<Uid>, opts: &ExportOptions)
         next.extend(units.iter().copied());
         let rebuttals: Vec<Uid> = next.iter().flat_map(|u| store.rebuttals_of(u)).collect();
         next.extend(rebuttals);
-        let picked = pick(src, &next, &opts.with);
+        let picked = pick(src, &next, &opts.with, key);
         next.extend(
             picked
                 .annotations
@@ -182,7 +187,16 @@ pub(crate) fn close(src: &Source<'_>, sel: &BTreeSet<Uid>, opts: &ExportOptions)
 /// Records 15 and 18 need `--with-text` and a manifest's carry and licence, which arrive with
 /// TX-P11 step 6; until then they are never selected. Record 9 is never selected, and other
 /// unknown records are the caller's: they go to `unattributed.cbor`, never to a keyed file.
-pub(crate) fn pick<'s>(src: &Source<'s>, units: &BTreeSet<Uid>, with: &With) -> Picked<'s> {
+///
+/// `key` is the corpus view a `by-view` file is keyed by. It travels with that file whatever
+/// `--with-views` says, since without it a recipient could not cut the collection the same
+/// way again (P3).
+pub(crate) fn pick<'s>(
+    src: &Source<'s>,
+    units: &BTreeSet<Uid>,
+    with: &With,
+    key: Option<&ViewId>,
+) -> Picked<'s> {
     let store = src.store;
     let mut p = Picked::default();
     let held = |u: &Uid| store.contains_uid(u);
@@ -210,7 +224,7 @@ pub(crate) fn pick<'s>(src: &Source<'s>, units: &BTreeSet<Uid>, with: &With) -> 
                 rel.insert(r.uid());
                 kinds.insert(r.kind.clone());
             }
-            Record::View(v) if keeps_view(v, units, with) => {
+            Record::View(v) if keeps_view(v, units, with, key) => {
                 requires.extend(v.requires.iter().cloned());
             }
             _ => {}
@@ -288,7 +302,7 @@ pub(crate) fn pick<'s>(src: &Source<'s>, units: &BTreeSet<Uid>, with: &With) -> 
                     }
                     keep
                 }
-                Record::View(v) => keeps_view(v, units, with),
+                Record::View(v) => keeps_view(v, units, with, key),
                 Record::Contention(c) => {
                     let keep = units.contains(&c.over);
                     if keep {
@@ -417,9 +431,15 @@ fn spans(r: &smysl_core::Relation, units: &BTreeSet<Uid>, store: &Store) -> bool
 }
 
 /// Row 5: a corpus view, with `--with-views`, when every root is in the file and its id is not
-/// an earlier export's (`export/`, OQ-61).
-fn keeps_view(v: &smysl_core::View, units: &BTreeSet<Uid>, with: &With) -> bool {
-    with.views && !v.id.as_str().starts_with("export/") && v.roots.is_subset(units)
+/// an earlier export's (`export/`, OQ-61). And the view a `by-view` file is keyed by, always.
+fn keeps_view(
+    v: &smysl_core::View,
+    units: &BTreeSet<Uid>,
+    with: &With,
+    key: Option<&ViewId>,
+) -> bool {
+    key == Some(&v.id)
+        || (with.views && !v.id.as_str().starts_with("export/") && v.roots.is_subset(units))
 }
 
 /// Row 17: whether a dating's target is in the file.

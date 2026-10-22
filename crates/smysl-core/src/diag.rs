@@ -398,13 +398,15 @@ registry! {
     // builds `smysl-lib`'s exporter, which can leave a record out because what it names is not
     // all in the file (`W490`), export records naming uids the source store does not hold
     // (`W495`), and give a generated view id a hash suffix (`W497`). `W425` is SMYSL-2.0's,
-    // raised only by export, so it sits here. The rest arrive with import (`E493`, `W496`),
-    // the index (`E494`), `--as-of` (`W498`) and `--target-revision` (`W491`, `E492`).
+    // raised only by export, so it sits here. Step 3's index and `verify` bring `E494`, a file
+    // that does not match its index. The rest arrive with import (`E493`, `W496`), `--as-of`
+    // (`W498`) and `--target-revision` (`W491`, `E492`).
     Export => {
         W425 = "SMY-W425", Warn,  "Unknown records were exported to unattributed.cbor, or dropped with --unknown drop; counted";
         W490 = "SMY-W490", Warn,  "A record was left out of an export file: the records it names are not all in it; counted";
         W495 = "SMY-W495", Warn,  "Exported records reference uids the source store does not hold; counted";
         W497 = "SMY-W497", Warn,  "A layout key is not a view-id segment, or two keys collide; the generated id has a hash suffix";
+        E494 = "SMY-E494", Error, "An export collection's file does not match its index (BLAKE3, record count or record-set digest)";
     }
 }
 
@@ -865,9 +867,11 @@ mod tests {
     ///
     /// 118 with `SMY-W425`, `SMY-W490`, `SMY-W495` and `SMY-W497` in TX-P11 step 2, raised by
     /// `smysl-lib`'s exporter, in a twelfth group.
+    ///
+    /// 119 with `SMY-E494` in TX-P11 step 3, raised by `verify` on a file its index disowns.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 118);
+        assert_eq!(Code::ALL.len(), 119);
     }
 
     #[test]

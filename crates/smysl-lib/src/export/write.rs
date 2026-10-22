@@ -31,22 +31,29 @@ pub(crate) fn view(store: &Store, slug: &str, roots: &BTreeSet<Uid>, p: &Picked<
     v
 }
 
-/// One keyed file: its view first, then the records by `(type code, record hash)`.
+/// One keyed file: its view first, then `written` by `(type code, record hash)`.
+///
+/// `written` is everything `p` selected under `full`, and what this file owns of it under
+/// `ref`. The view is built from the selection either way, so it is the same in both.
 pub(crate) fn file(
     store: &Store,
     slug: &str,
     roots: &BTreeSet<Uid>,
     p: &Picked<'_>,
+    written: &[&Record],
+    requires: Vec<String>,
 ) -> ExportedFile {
     let view = Record::View(view(store, slug, roots, p));
     let records: Vec<&Record> = std::iter::once(&view)
-        .chain(p.records.values().copied())
+        .chain(written.iter().copied())
         .collect();
     let id = match &view {
         Record::View(v) => v.id.clone(),
         _ => unreachable!("built above"),
     };
-    encode(format!("{slug}.cbor"), &records, Some(id))
+    let mut f = encode(format!("{slug}.cbor"), &records, Some(id));
+    f.requires = requires;
+    f
 }
 
 /// `unattributed.cbor`: the records this build cannot interpret, by code and then hash.
@@ -68,5 +75,6 @@ fn encode(path: String, records: &[&Record], view: Option<smysl_core::ViewId>) -
         records: records.len(),
         rsd: record_set_digest(records.iter().copied()),
         view,
+        requires: Vec::new(),
     }
 }

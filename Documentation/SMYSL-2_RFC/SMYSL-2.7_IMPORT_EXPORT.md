@@ -930,7 +930,7 @@ Steps 1–4 do not need either and can start once TX-P0 has landed.
 |---|---|---|---|
 | 1 | §4.3 prerequisites: `Subject::Record`, `has_surface_form` (+ `cmd_merge` uses it), `contains_record`, `record_hash`, `pending_attestations` | TX-P0 (`record_set_digest`) | `merge F13 --format surface` reports 0 omitted; existing suite green; `public-api*.txt` updated — **done 2026-10-21**, below |
 | 2 | `smysl-lib` skeleton; `export_store` with `select`, `closure` (fixpoint), `write` (canonical), layouts `single`/`by-view`, `full` | 1 | §5.1 select tests; F1–F13 single-layout exports, in-memory P1 against `rsd(X)` — **done 2026-10-21**, below |
-| 3 | `index`, `verify` (file checks, P1, P3), `ref` mode, duplication factor | 2 | `verify` passes on F1–F13 × {single, by-view} × {full, ref}; a flipped byte gives exit 9 |
+| 3 | `index`, `verify` (file checks, P1, P3), `ref` mode, duplication factor | 2 | `verify` passes on F1–F13 × {single, by-view} × {full, ref}; a flipped byte gives exit 9 — **done 2026-10-21**, below |
 | 4 | import: decode, classify, CBOR staging, quarantine, waiting, tables (CBOR fallback), manifest (without mid until TX-P1 → placeholder hash of the body, replaced by `mid`), `accept`/`discard`/`status` | 3 | idempotence and commutativity property tests; F6 quarantine test; early-attestation promotion test |
 | 5 | CLI `lib` group, global `--format` change, dispatch and cli-surface tests | 4 | `tests/dispatch.rs` with 27 commands; `lib export … && lib verify` exits 0 on F1–F13 |
 | 6 | Manifest-backed parts: real mids, `--keep-original` (o3), `--with-text`, records 14/15/18/19 rows, redaction at the door, layouts `by-expression`/`by-collection` | TX-P1, TX-P2 | Bible corpus cells of GE-T15 pass P1/P3; a redacted tid's 15/18 are dropped on import (`W414`) |
@@ -1043,6 +1043,82 @@ The test is `crates/smysl-lib/tests/export.rs`, 15 tests:
   - and that, with every unit selected, a record is lost only as W490 counts.
 
 `layout.rs`'s unit tests are §5.1's slug table. Every generated id passes `ViewId::new`.
+
+*Step 3, done 2026-10-21.* `ref` closure, the index, `verify`, and the duplication factor in
+the index. `SMY-E494` is registered in the Export group, which makes the registry 119 codes.
+
+- **API.**
+  - `Closure::Ref`, with `as_str` and `parse`. `Layout::parse`.
+  - `ExportedFile.requires`.
+  - `Collection` now holds its `index`. `rsd()` and `duplication()` read from it, as §4.2's
+    sketch has it.
+  - `index.rs`: `ExportIndex` and `IndexFile`, with `to_cbor` and a strict `from_cbor`, plus
+    `INDEX_FILE`.
+  - `verify.rs`:
+    - `verify(index path)`, which reads the files next to the index;
+    - `verify_collection`, in memory, for export's own check from step 5;
+    - `verify_files`;
+    - `write_collection`, which writes the index last;
+    - `VerifyReport` with `holds()` and `exit_code()` (0, or 9 `HashVerification`);
+    - `Property`;
+    - `FileCheck`.
+- **The index.** §4.2's table, field by field.
+  - Keys 3, 5, 9 and 13 are absent until `sq`, lenses, `--as-of` and `--target-revision`
+    arrive. `scope` is empty until step 8, and `format` is `cbor`.
+  - `counts` holds all eight codes every time, zero or not, keyed by code text.
+  - `flags` names the edges by kind as the store holds them (`edges=deps,grounds,…`), so P3
+    can rebuild the set over the store an import makes. Extension kinds are interned per
+    store and have no stable number.
+  - Decoding refuses an unknown key, a missing required key, a digest that is not 32 bytes,
+    and anything that does not re-encode to the same bytes. Encode, decode and encode again
+    is the identity.
+- **`ref`** follows §3.7.
+  - A unit record is owned by the file that selects it as a root. The layouts give every
+    selected unit exactly one.
+  - Any other record is owned by the least path among the files that select it.
+  - `requires` is the sorted set of the other owners' paths, stored in the index and never in
+    the view. The view is built from the selection, so it is the same under both modes.
+  - The duplication factor counts what files *need* (`Σ|R_k|`, `|⋃R_k|`), so it is the same
+    under `full` and `ref`. Generated views and `unattributed.cbor` are in neither term.
+- **`verify`.**
+  - Each file the index names must exist and match its BLAKE3, record count and `rsd`.
+    Otherwise it raises `E494`, and P1 and P3 are not applicable.
+  - P1 compares `Store::from_records` of all the files with `index.rsd`. When it fails, it
+    lists the missing and extra hashes.
+  - P3 re-exports that store with the index's layout, closure and flags. The selection is the
+    union of the roots of its `export/` views (§3.9). It compares every file byte for byte,
+    then the index's `files` and `rsd`. When it fails, it names the first differing file and
+    byte offset.
+  - P2 needs import and arrives with it.
+- **A fourth completion of §3.6, found by P3.**
+  - Under `by-view`, a file's key is the least corpus view holding its units. Without
+    `--with-views`, no corpus view travelled.
+  - So a recipient had nothing to key by: a re-export put everything in `unkeyed`, and P3
+    could not hold.
+  - Now the view a `by-view` file is keyed by travels in that file, whatever `--with-views`
+    says. Row 5 still governs every other view.
+  - The re-export then finds the same least view for every unit. The views a recipient holds
+    are a subset of the source's that contains every view used as a key.
+
+The test is `crates/smysl-lib/tests/verify.rs`, 8 tests:
+- **The exit.** `verify` holds, P1 and P3 included, on F1–F13, F10 and F14 under {`single`,
+  `by-view`} × {`full`, `ref`} × {no `--with-*`, views and packs}. `ref` writes every record
+  once, with the same `rsd` and duplication factor as `full`, and the factor matches what
+  `full` writes.
+- **A flipped byte gives exit 9,** with `E494`, under both closures, through
+  `write_collection` and `verify` on disk. A deleted file does too.
+- **The index decodes to itself on every fixture.** A flipped bit either fails to decode or
+  gives a different index, and a cut-short index is an error.
+- **The index records what the export was**: options, flags, schemas, counts, and per-file
+  digests.
+- **`ref`'s ownership and `requires`** on a grounded pair across two views, with duplication
+  (5, 4) under both modes. A `ref` file verified without the file it requires fails.
+- **P3 fails when an index misstates the closure,** even though every file matches its own
+  entry.
+- **The keying view travels without `--with-views`.**
+
+`tests/export.rs`'s by-view duplication is now (5, 5): the three units plus each file's
+keying view.
 
 ---
 

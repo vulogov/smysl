@@ -1117,7 +1117,7 @@ cannot promise anything about.
 xtask check-purity (rules A, B)
   dependency tree (--no-default-features): 37 crates, none forbidden
   pure crates: 11 checked, at default features and at --all-features
-  source scan: 205 files, 7 symbols, and 6 more in smysl-measure
+  source scan: 207 files, 7 symbols, and 6 more in smysl-measure
   rule A: 2 CLI files reach only the facade
 ok
 ```
