@@ -47,6 +47,8 @@ pub use salience::{
 pub use smysl_core::error::MergeError;
 pub use store::index::{Cached, Entry, Index, IndexError};
 pub use store::{
-    record_set_digest, AppendReport, BundleReport, OpenReport, Store, StoreOptions, UnknownRecords,
+    record_set_digest, AppendReport, BundleReport, Commits, HotKind, HotRecords, OpenReport,
+    Relations, Resolutions, Store, StoreOptions, StoreRead, StoreWrite, Threads, UnknownRecords,
+    Views, Withdrawals,
 };
 pub use traverse::{closure, cycles, rebuttals_of, reverse_closure, topo, Scratch, TopoOrder};

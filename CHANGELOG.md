@@ -58,6 +58,37 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### An append that costs the batch, and a load that hashes once
+
+TX-P13a steps 1–3 (SMYSL-2.8 §6), the in-memory half of the scale work: nothing on disk
+changes, and every derived thread, state hash and record-set digest is byte-identical before
+and after. Measured on `tests/scale_ladder.rs`, new — §5.4's `graph` corpus generated in
+process (its shape, not `gen_graph.py`'s bytes), `--release`, ignored by default:
+
+| at 171k units | `d25ec9e` | before step 2 | now |
+|---|---:|---:|---:|
+| `derive_thread`, per schema | 9.6–19.8 s | 0.33–0.36 s | 0.35–0.37 s |
+| `Store::from_records` | 469 ms | 537 ms | 380 ms ¹ |
+| `append`, one record | 53 ms | 58 ms | **1.3 ms** ² |
+
+¹ Step 2 alone took it to 436 ms (19%, against an exit of 15%); the rest is step 3 moving the
+adjacency out of the load. ² The first read after it pays 56 ms: the rebuild, moved and not
+removed.
+
+- **Step 1** re-measured H-18 rather than redoing it. All ten threads (five schemas, two sizes)
+  hash the same as at `d25ec9e`.
+- **Step 2.** `from_records` encodes a record once and uses the bytes three ways — dedup key,
+  record hash, log hash — where it used to encode three times. `smysl reindex` indexes the
+  store it has just opened instead of absorbing the log a second time; a test pins that a
+  store fresh from its log indexes as its rebuild.
+- **Step 3.** The adjacency and the `unfounded` set are built on the first read after a change,
+  in a `OnceLock`, and `append` only invalidates them. 1.8 declined this because interior
+  mutability would cost `Sync`; `OnceLock` does not, and `Store: Send + Sync` is asserted by a
+  test now. `Store::prepare()` builds them at a moment the caller chooses.
+- **Found on the way:** `check` at 171k units is 58 ms at `d25ec9e` and 181 ms before step 3
+  (238 ms after it, which includes the adjacency it now builds). The growth is the passes TX-P1
+  to TX-P12 added, not this phase; it is recorded, not chased here.
+
 ### The last material TX-P5 owed, and the figure that could not be taken once
 
 GE-T2's corpus is paid, which leaves TX-P5 owing no material at all. It is

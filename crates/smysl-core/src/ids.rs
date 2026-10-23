@@ -207,6 +207,26 @@ impl UidPrefix {
     pub const fn bits(&self) -> usize {
         self.bits
     }
+
+    /// The lowest and the highest uid this prefix matches, inclusive.
+    ///
+    /// Uids order bytewise, so the uids a prefix matches are exactly one contiguous range of
+    /// that order: a store keyed by uid answers [`UidPrefix::matches`] with a range scan
+    /// instead of a filter over every key (SMYSL-2.8 §3.2).
+    pub fn range(&self) -> (Uid, Uid) {
+        let mut lo = [0u8; 32];
+        let mut hi = [0xFFu8; 32];
+        let full = self.bits / 8;
+        let rest = self.bits % 8;
+        lo[..full].copy_from_slice(&self.bytes[..full]);
+        hi[..full].copy_from_slice(&self.bytes[..full]);
+        if rest > 0 {
+            let mask = 0xFFu8 << (8 - rest);
+            lo[full] = self.bytes[full] & mask;
+            hi[full] = (self.bytes[full] & mask) | !mask;
+        }
+        (Uid(lo), Uid(hi))
+    }
 }
 
 // ---------------------------------------------------------------------------

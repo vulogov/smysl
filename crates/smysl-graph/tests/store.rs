@@ -191,6 +191,26 @@ fn a_rebuilt_index_is_byte_identical_to_the_maintained_one() {
     assert_eq!(maintained, rebuilt, "the two index paths disagree");
 }
 
+/// `smysl reindex` indexes the store it has just opened instead of absorbing the log a second
+/// time (TX-P13a step 2). That is only sound if a store fresh from its log already *is* the
+/// rebuild, so this pins it: the same bytes, and the same as a `from_records` load, whose
+/// hashing is now one encoding a record rather than three.
+#[test]
+fn a_store_fresh_from_its_log_indexes_as_its_rebuild() {
+    let path = tmp("fresh");
+    let mut written = Store::open(&path).unwrap();
+    written.append(&corpus()).unwrap();
+    let (mut opened, _) = Store::open_with(&path, StoreOptions::default()).unwrap();
+    let fresh = opened.index().to_bytes();
+    assert_eq!(fresh, opened.reindex().to_bytes());
+
+    let loaded = Store::from_records(corpus());
+    assert_eq!(loaded.log_len(), opened.log_len());
+    assert_eq!(loaded.log_hash(), opened.log_hash());
+    assert_eq!(loaded.record_set_digest(), opened.record_set_digest());
+    assert_eq!(fresh, loaded.index().to_bytes());
+}
+
 #[test]
 fn the_index_survives_a_write_and_read() {
     let path = tmp("sidecar");
@@ -594,4 +614,50 @@ fn arrival_order_does_not_change_the_derived_graph() {
 fn the_index_is_byte_stable_across_repeated_derivation() {
     let s = Store::from_records(corpus());
     assert_eq!(s.index().to_bytes(), s.index().to_bytes());
+}
+
+/// `Store` is `Send + Sync`, and stays so with its derived state built lazily (TX-P13a step 3,
+/// SMYSL-2.8 §2.5). Nothing asserted it before; a pipeline holding one behind an `Arc` would
+/// have been the first to notice it stopping.
+#[test]
+fn a_store_is_send_and_sync() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<Store>();
+}
+
+/// An append invalidates the adjacency and the next read rebuilds it: the lazy path answers
+/// what the eager one did, including a retraction's `unfounded` set.
+#[test]
+fn a_lazy_rebuild_answers_as_an_eager_one() {
+    // The corpus plus a retraction, so `unfounded` is not empty.
+    let mut records = corpus();
+    let uids: Vec<_> = Store::from_records(corpus())
+        .units()
+        .map(|(u, _)| *u)
+        .collect();
+    records.push(Record::Relation(Relation::new(
+        RelKind::Retracts,
+        uids[0],
+        uids[1],
+    )));
+    let corpus = || records.clone();
+    let mut grown = Store::new();
+    for r in corpus() {
+        grown.append(&[r]).unwrap();
+        grown.prepare();
+    }
+    let mut lazy = Store::new();
+    for r in corpus() {
+        lazy.append(&[r]).unwrap();
+    }
+    let whole = Store::from_records(corpus());
+    for s in [&grown, &lazy] {
+        assert_eq!(s.state_hash(), whole.state_hash());
+        assert_eq!(s.index().to_bytes(), whole.index().to_bytes());
+        for (uid, _) in whole.units() {
+            assert_eq!(s.is_unfounded(uid), whole.is_unfounded(uid));
+            assert_eq!(s.rebuttals_of(uid), whole.rebuttals_of(uid));
+        }
+    }
+    assert!(whole.is_unfounded(&uids[1]), "the retraction is seen");
 }

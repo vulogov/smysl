@@ -10779,7 +10779,7 @@ fn cmd_reindex(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
 
-    let (mut store, open) = match Store::open_with(&path, StoreOptions::default()) {
+    let (store, open) = match Store::open_with(&path, StoreOptions::default()) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl reindex: {path}: {e}");
@@ -10790,7 +10790,10 @@ fn cmd_reindex(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eprintln!("{path}: {d}");
     }
 
-    let rebuilt = store.reindex().to_bytes();
+    // `open_with` has just built the store from the log alone, which is everything
+    // `Store::reindex` would do again (TX-P13a step 2): the index of a store fresh from its
+    // log *is* the rebuild. The second absorb doubled the command for nothing.
+    let rebuilt = store.index().to_bytes();
 
     if m.get_flag("verify") {
         let existing = std::fs::read(Store::index_path(std::path::Path::new(&path)));

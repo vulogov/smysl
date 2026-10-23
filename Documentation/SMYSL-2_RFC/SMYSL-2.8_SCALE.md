@@ -1050,6 +1050,51 @@ suite (§5.1) for every implementation that exists by then.
 | P13c.2 | contentions over the union, measured | GE-T7 run; OQ-16 decided from its contention-detection number |
 | **P13d** | primary mode, `lib migrate`, `E505` — **only after GE-T15 passes** | suite implementation 5; export → import round trip reproduces the record-set digest on every GE-T15 corpus; GE-T7 rerun on primary shards |
 
+### 6.1 Progress
+
+Measured on `tests/scale_ladder.rs` (§5.4's `graph` corpus generated in process — its shape and
+proportions, not `gen_graph.py`'s bytes, and without the label bindings the surface step adds;
+`--release`, median of three for `from_records`). 171k units is graph-155510.
+
+- **P13a.1 — done (2026-10-23).** `derive_thread` at 171k units: 9.6–19.8 s per schema at
+  `d25ec9e`, 0.33–0.37 s now (exit: < 1 s). Thread bytes are identical to `d25ec9e`'s for all
+  five schemas at both 34k and 171k units (BLAKE3 of the encoded thread). **Finding:** at
+  `d25ec9e` the same corpus checks in 58 ms; before step 3 it took 181 ms. That is the passes
+  TX-P1 to TX-P12 added, not this phase; it is recorded, not chased.
+- **P13a.2 — done (2026-10-23).** `from_records` encodes each record once and uses the bytes as
+  dedup key, record hash and log-hash input; `absorb` takes the hashes it is handed. 537 ms →
+  436 ms at 171k (−19%; exit −15%). `smysl reindex` indexes the store `open_with` has just
+  built instead of absorbing the log a second time; a test pins that a store fresh from its log
+  indexes byte-identically to its rebuild and to a `from_records` load (SM-P3).
+- **P13a.3 — done (2026-10-23).** `adjacency` and `unfounded` live in one `OnceLock<Derived>`;
+  `append` invalidates it and the first read rebuilds it. One-record append at 171k: 58 ms →
+  **1.3 ms** (exit: < 5 ms). The first read after it pays 56 ms — the rebuild moved, not removed,
+  and so does a load's: `from_records` is 380 ms and the first `check` includes the adjacency.
+  `Store: Send + Sync` is asserted; `Store::prepare()` builds the derived state on demand. The
+  pending-attestation retry stays eager. The `append` doc comment and CHANGELOG carry the new
+  figures. **Finding:** `Store` loses the `Freeze` auto trait (an `UnsafeCell` inside
+  `OnceLock`). `Freeze` is unstable and cannot be named or bounded on stable Rust, and `Store`
+  has no `const` constructor, so nothing downstream can observe it; it is the one line the
+  public-API diff of `smysl-graph` removes.
+- **P13a.4 — done (2026-10-23).** `store/read.rs`: `StoreRead` (sealed, three associated types)
+  with **27 required** methods — §4.2's 24 plus `relation_by_key` (Table B's "over
+  `relation_by_key`", which the sketch left out), `commits` (`units_at_commitment` iterates
+  committed uids, present or not, and nothing else lists them) and `state_hash` (§5.1 compares
+  it) — and the **18 provided** ones; `StoreWrite`; iterator newtypes `Relations`, `Threads`,
+  `Views`, `Withdrawals`, `Resolutions`, `Commits`, `HotRecords`; `HotKind`. `impl` for `Store`
+  overrides every provided method with its inherent one, so generic and concrete callers get
+  one answer at one cost; delegating impls for `&S`, `&mut S`, `Box<S>`, `Rc<S>`, `Arc<S>`.
+  `store/interp.rs` holds the interpretive layer and its fold (`absorb_hot`); the hot records
+  are positions into the log, by kind. `UidPrefix::range` (smysl-core, additive) makes
+  `matching_prefix` a range scan. Exit: the conformance suite (`tests/store_conformance.rs`)
+  compares every method on every mentioned uid and a hundred absent ones, the adjacency, the
+  record-set digest and the state hash, for implementations 1–2 behind every pointer, over
+  F1–F13, the check fixtures, all of them at once and a lifecycle store; a unit test runs every
+  provided *default* body (through a wrapper that forwards only the required methods) against
+  the overrides. Public API: additions only, apart from `Freeze` above. **Not done here:**
+  `Adjacency::from_parts` (§3.2) has no second caller until P13b, and §4.1's `any.rs`,
+  `union.rs` are P13a.10–11 and P13c.
+
 ## 7. Risks and mitigations
 
 | risk | why it is real | mitigation |

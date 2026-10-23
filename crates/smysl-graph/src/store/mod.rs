@@ -10,23 +10,30 @@
 //! join-semilattice (rule U).
 
 pub mod index;
+mod interp;
 mod library;
+mod read;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use smysl_core::diag::{Code, Diagnostic, Report, Subject};
 use smysl_core::types::record;
 use smysl_core::{
     canonical_uid, from_cbor_seq, hash_bytes, to_cbor, AgentId, Attestation, Commit, Commitment,
     Contention, ContentionStatus, DetectionKind, Error, IntegrityError, Record, RelKind, Relation,
-    Resolution, ResolutionTarget, Rolling, Status, Thread, ThreadId, Uid, UidPrefix, Unit, View,
-    ViewId, Withdrawal,
+    Resolution, ResolutionTarget, Rolling, Status, Thread, Uid, UidPrefix, Unit, View, Withdrawal,
 };
 
 use crate::adjacency::{Adjacency, EdgeKind, EdgeSet};
 use crate::traverse;
 use index::{Cached, Entry, Index};
+use interp::Interpretive;
+pub use read::{
+    Commits, HotKind, HotRecords, Relations, Resolutions, StoreRead, StoreWrite, Threads, Views,
+    Withdrawals,
+};
 
 /// How to open a store.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -96,36 +103,43 @@ pub struct Store {
     log_hasher: Rolling,
 
     units: BTreeMap<Uid, Unit>,
-    relations: BTreeMap<(String, Uid, Uid), Relation>,
-    threads: BTreeMap<(ThreadId, AgentId), Thread>,
-    views: BTreeMap<ViewId, View>,
-    contentions: Vec<Contention>,
-    /// Withdrawals by the rid they name, whether or not that relation has arrived (1.4).
-    withdrawals: BTreeMap<Uid, BTreeSet<Withdrawal>>,
-    resolutions: BTreeSet<Resolution>,
-    /// Commitments by the unit they name, whether or not that unit has arrived (1.7).
-    commits: BTreeMap<Uid, BTreeSet<Commit>>,
-    /// Each relation's rid, to its key in `relations`.
-    rids: BTreeMap<Uid, (String, Uid, Uid)>,
+    /// Relations, threads, views, contentions, withdrawals, resolutions and commitments: the
+    /// layer every implementation of [`StoreRead`] folds the same way (SMYSL-2.8 §3.1).
+    interp: Interpretive,
+    /// Where the records with no field of their own sit in `records`, by kind and in log
+    /// order, so [`StoreRead::hot_records`] does not scan the log for them.
+    hot: BTreeMap<HotKind, Vec<usize>>,
     /// BLAKE3 of the canonical encoding of every record the log holds: what `contains` answers
     /// from. One 32-byte hash a record, and structural — a record type added later is recognised
     /// as present without anybody remembering to teach `contains` about it (R10).
     record_hashes: BTreeSet<[u8; 32]>,
-    /// Units whose effective status under the strict policy is `unfounded`: what liveness
-    /// reads (1.4, rule R). Derived on every rebuild, like the adjacency.
-    unfounded: BTreeSet<Uid>,
-    adjacency: Adjacency,
-    /// How many times the adjacency has been rebuilt.
+    /// The adjacency and the `unfounded` set, built on the first read after a change rather
+    /// than on every append (TX-P13a step 3, SMYSL-2.8 §3.4).
     ///
-    /// Here so that "a manifest-only append does not rebuild the adjacency" is a property a
-    /// test can assert rather than a timing a benchmark can suggest. Comparing the adjacency
-    /// before and after cannot do it: a rebuild that changes nothing leaves it equal, so the
-    /// assertion passes whether or not the work was done. Private, and read only by the test
-    /// in this module — a counter in the public surface would be a promise about how often
-    /// this crate rebuilds, which is not a promise worth making.
+    /// `OnceLock`, not `RefCell`: it is `Sync` when its contents are, so `Store` stays `Send +
+    /// Sync` (a test asserts it), which was the reason 1.8 gave for not doing this.
+    derived: OnceLock<Derived>,
+    /// How many times an append has invalidated `derived`.
+    ///
+    /// Here so that "a manifest-only append does not touch the adjacency" is a property a test
+    /// can assert rather than a timing a benchmark can suggest. Comparing the adjacency before
+    /// and after cannot do it: a rebuild that changes nothing leaves it equal, so the assertion
+    /// passes whether or not the work was done. Private, and read only by the test in
+    /// `library.rs` — a counter in the public surface would be a promise about how often this
+    /// crate rebuilds, which is not a promise worth making.
     adjacency_rebuilds: u64,
     /// Manifests, heads and the by-part indexes (RFC SMYSL-2.4 §4.3.2).
     library: library::Library,
+}
+
+/// What a store derives from its units and relations, as one value so that one reset
+/// invalidates both.
+#[derive(Debug, Clone, Default)]
+struct Derived {
+    adjacency: Adjacency,
+    /// Units whose effective status under the strict policy is `unfounded`: what liveness
+    /// reads (1.4, rule R).
+    unfounded: BTreeSet<Uid>,
 }
 
 impl Default for Store {
@@ -187,19 +201,12 @@ impl Store {
             log_hasher: Rolling::new(),
             pending_attestations: Vec::new(),
             units: BTreeMap::new(),
-            relations: BTreeMap::new(),
-            threads: BTreeMap::new(),
-            views: BTreeMap::new(),
-            contentions: Vec::new(),
-            withdrawals: BTreeMap::new(),
-            resolutions: BTreeSet::new(),
-            commits: BTreeMap::new(),
-            rids: BTreeMap::new(),
+            interp: Interpretive::default(),
+            hot: BTreeMap::new(),
             record_hashes: BTreeSet::new(),
-            unfounded: BTreeSet::new(),
+            derived: OnceLock::new(),
             adjacency_rebuilds: 0,
             library: library::Library::default(),
-            adjacency: Adjacency::default(),
         }
     }
 
@@ -210,26 +217,30 @@ impl Store {
     /// can hold them.)
     pub fn from_records(records: Vec<Record>) -> Store {
         let mut s = Store::new();
+        // One encoding a record, used three ways: the dedup key, the record-set hash `absorb`
+        // keeps, and the bytes the log hash runs over (TX-P13a step 2). It used to be three
+        // encodings — the dedup, `absorb` hashing again, and `log_bytes` re-encoding the lot
+        // only so the hasher could read it — which was a quarter of a load at 155k units.
         let mut seen = BTreeSet::new();
         let mut repeated = Vec::new();
-        let records: Vec<Record> = records
-            .into_iter()
-            .filter_map(|r| {
-                if seen.insert(Self::record_hash(&r)) {
-                    Some(r)
-                } else {
-                    repeated.push(r);
-                    None
-                }
-            })
-            .collect();
-        s.absorb(records);
+        let mut hashes = Vec::with_capacity(records.len());
+        let mut kept = Vec::with_capacity(records.len());
+        let mut len = 0u64;
+        for r in records {
+            let encoded = to_cbor(&r);
+            let hash = hash_bytes(&encoded);
+            if seen.insert(hash) {
+                len += encoded.len() as u64;
+                s.log_hasher.update(&encoded);
+                hashes.push(hash);
+                kept.push(r);
+            } else {
+                repeated.push(r);
+            }
+        }
+        s.absorb_hashed(kept, hashes);
         s.union_edge_attestations(&repeated);
-        // Once, over the bytes as they are: `log_bytes` was being built twice here, and the
-        // second one only to hash it.
-        let bytes = s.log_bytes();
-        s.log_len = bytes.len() as u64;
-        s.log_hasher.update(&bytes);
+        s.log_len = len;
         s.log_hash = s.log_hasher.finish();
         s
     }
@@ -320,44 +331,33 @@ impl Store {
     /// the running hash advances over the new bytes only (1.8 — it used to re-encode and rehash
     /// every record in the store, which made an append cost the store).
     ///
-    /// **The derived state is rebuilt once per call, not once per record**, and that is the cost
-    /// model a caller has to plan around. The adjacency is built from every unit and relation the
-    /// store holds, so one call costs `O(store)` however many records it carries. Appending
-    /// twenty thousand records to a growing store, measured:
+    /// **The derived state is not rebuilt here** (TX-P13a step 3). The adjacency and the
+    /// `unfounded` set are invalidated, and the first read that needs them — a traversal,
+    /// `rebuttals_of`, `is_unfounded`, `adjacency` — builds them once, from every unit and
+    /// relation the store holds. So an append is `O(batch)` and the store's cost moves to that
+    /// read: a producer appending one record at a time and reading after each pays what it
+    /// paid before, and one that appends a stream and then reads pays once. [`Store::prepare`]
+    /// pays it at a moment of the caller's choosing.
     ///
-    /// | records per call | per record |
-    /// |---:|---:|
-    /// | 1 | 1336 µs |
-    /// | 10 | 127 µs |
-    /// | 50 | 25 µs |
-    /// | 200 | 8 µs |
-    /// | 1000 | 5 µs |
+    /// Measured on `tests/scale_ladder.rs` (`--release`, one record into the 171k-unit `graph`
+    /// corpus): the append was 58 ms with the rebuild inside it and is 1.3 ms now; the first
+    /// read after it costs 56 ms, which is the rebuild, moved rather than removed. A load moves
+    /// the same way — `from_records` no longer builds the adjacency, and the first `check` on
+    /// the store does.
     ///
-    /// So a producer with a stream of single records — a detector emitting one reading at a time
-    /// — should buffer. Fifty is already within a factor of five of the floor.
+    /// 1.8 recorded the eager cost per record at one record per call — 1336 µs at 20,000
+    /// records, 5 µs in batches of 1000 — and declined to defer it because interior
+    /// mutability would make `Store` no longer `Sync`. That holds for `RefCell`; it does not
+    /// for `std::sync::OnceLock`, which is `Sync` when its contents are. `Store: Send + Sync`
+    /// is asserted by a test now, where before nothing would have noticed it stopping.
     ///
-    /// **Text does not pay for it** (1.10, TX-P1 step 4). A manifest, a part text and a part
-    /// reading name no unit as an endpoint, so they cannot appear in the adjacency or in
-    /// `unfounded`; a batch of nothing but those is `O(batch)` whatever the store holds.
-    /// Everything else rebuilds, which is the exemption stated as what it skips rather than as
-    /// what it catches — a record type added later and forgotten then costs a rebuild it did
-    /// not need, instead of leaving a traversal unable to see an edge. Re-measured on the same
-    /// harness as the table above (`tests/append_timing.rs`, `--release`), one record per call:
-    ///
-    /// | store size | a manifest | a unit |
-    /// |---:|---:|---:|
-    /// | 1,000 | 7.9 µs | 38.0 µs |
-    /// | 5,000 | 5.4 µs | 268.6 µs |
-    /// | 20,000 | 4.0 µs | ~1123 µs |
-    ///
-    /// The manifest column does not grow; the unit column is the cost of the store. That is
-    /// what makes `text add` affordable one text at a time, and the behaviour is pinned by a
-    /// rebuild counter in a test rather than by these figures, which depend on the machine.
-    ///
-    /// Rebuilding lazily instead, on the first read after an append, was considered and not
-    /// done: `adjacency` is `&self`, so deferring the work needs interior mutability, and that
-    /// would make `Store` no longer `Sync` — which a pipeline holding one behind an `Arc` would
-    /// notice far more than it notices this.
+    /// **Text does not invalidate it** (1.10, TX-P1 step 4). A manifest, a part text and a
+    /// part reading name no unit as an endpoint, so they cannot appear in the adjacency or in
+    /// `unfounded`; a batch of nothing but those leaves the derived state built. Everything
+    /// else invalidates, which is the exemption stated as what it skips rather than as what it
+    /// catches — a record type added later and forgotten then costs a rebuild it did not need,
+    /// instead of leaving a traversal unable to see an edge. The behaviour is pinned by a
+    /// counter in a test rather than by timings, which depend on the machine.
     pub fn append(&mut self, records: &[Record]) -> Result<AppendReport, Error> {
         // Before the duplicate check, before a byte is written: a log does not hold text
         // (OQ-39, `SMY-E452`). A part text or a reading in a log would one day have to be
@@ -399,6 +399,7 @@ impl Store {
         }
         let mut report = AppendReport::default();
         let mut fresh = Vec::new();
+        let mut fresh_hashes = Vec::new();
         let mut bytes = Vec::new();
         // Also against the batch itself, so the same record twice in one delivery is one record.
         let mut seen: BTreeSet<[u8; 32]> = BTreeSet::new();
@@ -413,6 +414,7 @@ impl Store {
             }
             bytes.extend_from_slice(&encoded);
             fresh.push(r.clone());
+            fresh_hashes.push(hash);
             report.added += 1;
         }
         if fresh.is_empty() {
@@ -436,7 +438,7 @@ impl Store {
 
         report.bytes_written = bytes.len() as u64;
         self.log_len += report.bytes_written;
-        self.absorb(fresh);
+        self.absorb_hashed(fresh, fresh_hashes);
         self.union_edge_attestations(&repeated);
         // The appended bytes only. `absorb` pushes onto `self.records` in order, so the stream
         // the hasher has seen is the log in log order — which is what `log_bytes` concatenates.
@@ -452,7 +454,7 @@ impl Store {
     fn union_edge_attestations(&mut self, repeated: &[Record]) {
         for r in repeated {
             if let Record::Relation(rel) = r {
-                if let Some(existing) = self.relations.get_mut(&Self::rel_key(rel)) {
+                if let Some(existing) = self.interp.relations.get_mut(&interp::rel_key(rel)) {
                     existing
                         .attestations
                         .extend(rel.attestations.iter().cloned());
@@ -520,23 +522,23 @@ impl Store {
     }
 
     pub fn relations(&self) -> impl Iterator<Item = &Relation> {
-        self.relations.values()
+        self.interp.relations.values()
     }
 
     pub fn threads(&self) -> impl Iterator<Item = &Thread> {
-        self.threads.values()
+        self.interp.threads.values()
     }
 
     pub fn views(&self) -> impl Iterator<Item = &View> {
-        self.views.values()
+        self.interp.views.values()
     }
 
     pub fn contentions(&self) -> &[Contention] {
-        &self.contentions
+        &self.interp.contentions
     }
 
     pub fn adjacency(&self) -> &Adjacency {
-        &self.adjacency
+        &self.derived().adjacency
     }
 
     pub fn len(&self) -> usize {
@@ -583,7 +585,8 @@ impl Store {
     /// Every commitment naming this unit, in record order (1.7).
     pub fn commits_of(&self, uid: &Uid) -> &BTreeSet<Commit> {
         static EMPTY: std::sync::OnceLock<BTreeSet<Commit>> = std::sync::OnceLock::new();
-        self.commits
+        self.interp
+            .commits
             .get(uid)
             .unwrap_or_else(|| EMPTY.get_or_init(BTreeSet::new))
     }
@@ -599,7 +602,8 @@ impl Store {
     /// it makes a commitment impossible to walk back, so `Retconned` could never take effect, and
     /// "the most committed anyone ever was" is not what a ledger means.
     pub fn commitment_of(&self, uid: &Uid) -> Option<Commitment> {
-        self.commits
+        self.interp
+            .commits
             .get(uid)?
             .iter()
             .max_by(|a, b| {
@@ -614,7 +618,8 @@ impl Store {
 
     /// Every unit committed at `level`, in canonical order (1.7).
     pub fn units_at_commitment(&self, level: Commitment) -> Vec<Uid> {
-        self.commits
+        self.interp
+            .commits
             .keys()
             .filter(|u| self.commitment_of(u) == Some(level))
             .copied()
@@ -676,7 +681,7 @@ impl Store {
         include_retracted: bool,
         unknown: UnknownRecords,
     ) -> (Vec<u8>, BundleReport) {
-        let g = &self.adjacency;
+        let g = &self.derived().adjacency;
         let roots: Vec<_> = view.roots.iter().filter_map(|u| g.id(u)).collect();
         let reachable = traverse::closure(g, &roots, &crate::adjacency::EdgeSet::all());
         let mut keep: std::collections::BTreeSet<Uid> = reachable
@@ -752,7 +757,7 @@ impl Store {
         view: &View,
         unknown: UnknownRecords,
     ) -> (Vec<u8>, BundleReport) {
-        let g = &self.adjacency;
+        let g = &self.derived().adjacency;
         let roots: Vec<_> = view.roots.iter().filter_map(|u| g.id(u)).collect();
         let reachable = traverse::closure(g, &roots, &crate::adjacency::EdgeSet::all());
         let mut keep: std::collections::BTreeSet<Uid> = reachable
@@ -796,7 +801,7 @@ impl Store {
     ///
     /// It terminates because `keep` only grows and is bounded by the store.
     fn close_keep_set(&self, view: &View, keep: &mut std::collections::BTreeSet<Uid>) {
-        let g = &self.adjacency;
+        let g = &self.derived().adjacency;
         loop {
             let mut added: Vec<Uid> = Vec::new();
             let want = |u: Option<Uid>, acc: &mut Vec<Uid>| {
@@ -826,6 +831,7 @@ impl Store {
                                 })
                             }
                             ResolutionTarget::Contention(id) => self
+                                .interp
                                 .contentions
                                 .iter()
                                 .any(|c| &c.id == id && keep.contains(&c.over)),
@@ -904,6 +910,7 @@ impl Store {
                         .relation_by_id(rid)
                         .is_some_and(|rel| keep.contains(&rel.from) && keep.contains(&rel.to)),
                     ResolutionTarget::Contention(id) => self
+                        .interp
                         .contentions
                         .iter()
                         .any(|c| &c.id == id && keep.contains(&c.over)),
@@ -981,8 +988,8 @@ impl Store {
 
     /// References that point at no unit in this store.
     pub fn report_dangling(&self, report: &mut Report) {
-        for n in self.adjacency.dangling() {
-            if let Some(uid) = self.adjacency.uid(n) {
+        for n in self.derived().adjacency.dangling() {
+            if let Some(uid) = self.derived().adjacency.uid(n) {
                 report.push(
                     Diagnostic::new(Code::E060)
                         .with_subject(Subject::Unit(*uid))
@@ -1023,7 +1030,7 @@ impl Store {
             offset += len as u64;
         }
 
-        let g = &self.adjacency;
+        let g = &self.derived().adjacency;
         for n in g.nodes() {
             let Some(uid) = g.uid(n) else { continue };
             let fwd: Vec<(EdgeKind, Uid)> = g
@@ -1093,15 +1100,19 @@ impl Store {
         &self.pending_attestations
     }
 
-    fn rel_key(r: &Relation) -> (String, Uid, Uid) {
-        (r.kind.as_str().to_string(), r.from, r.to)
-    }
-
     /// Fold records into the derived structures. Order-independent by construction: this
     /// is the same fold merge performs (rule U).
     fn absorb(&mut self, records: Vec<Record>) {
+        let hashes = records.iter().map(Self::record_hash).collect();
+        self.absorb_hashed(records, hashes);
+    }
+
+    /// [`Store::absorb`], with each record's [`Store::record_hash`] already in hand, in the
+    /// same order: the callers that have just encoded a record do not encode it again.
+    fn absorb_hashed(&mut self, records: Vec<Record>, hashes: Vec<[u8; 32]>) {
+        debug_assert_eq!(records.len(), hashes.len());
+        self.record_hashes.extend(hashes);
         for r in &records {
-            self.record_hashes.insert(Self::record_hash(r));
             match r {
                 Record::Unit(u) => {
                     let uid = canonical_uid(u);
@@ -1115,64 +1126,7 @@ impl Store {
                         self.pending_attestations.push(a.clone());
                     }
                 }
-                Record::Relation(rel) => {
-                    let key = Self::rel_key(rel);
-                    self.rids.insert(rel.uid(), key.clone());
-                    match self.relations.get_mut(&key) {
-                        Some(existing) => {
-                            existing
-                                .attestations
-                                .extend(rel.attestations.iter().cloned());
-                        }
-                        None => {
-                            self.relations.insert(key, rel.clone());
-                        }
-                    }
-                }
-                Record::Thread(t) => {
-                    let key = (t.id.clone(), t.owner.clone());
-                    // Last writer wins *within* the key; across owners there is no
-                    // conflict to resolve (§5.2).
-                    //
-                    // A tie on the HLC is broken by encoded bytes, which makes the
-                    // register a maximum over a *total* order. Without that, two peers
-                    // merging the same pair of simultaneous writes in opposite orders
-                    // would keep different threads, and merge would not be commutative.
-                    let replace = match self.threads.get(&key) {
-                        Some(existing) => match existing.ts.cmp(&t.ts) {
-                            std::cmp::Ordering::Less => true,
-                            std::cmp::Ordering::Greater => false,
-                            std::cmp::Ordering::Equal => {
-                                to_cbor(&Record::Thread(t.clone()))
-                                    > to_cbor(&Record::Thread(existing.clone()))
-                            }
-                        },
-                        None => true,
-                    };
-                    if replace {
-                        self.threads.insert(key, t.clone());
-                    }
-                }
-                Record::View(v) => {
-                    self.views.insert(v.id.clone(), v.clone());
-                }
-                // Idempotent by id: a contention already recorded is not recorded twice,
-                // which is what makes replaying a log a no-op rather than a duplication.
-                Record::Contention(c) if !self.contentions.iter().any(|e| e.id == c.id) => {
-                    self.contentions.push(c.clone());
-                }
-                Record::Withdrawal(w) => {
-                    self.withdrawals
-                        .entry(w.relation)
-                        .or_default()
-                        .insert(w.clone());
-                }
-                Record::Resolution(r) => {
-                    self.resolutions.insert(r.clone());
-                }
-                Record::Commit(c) => {
-                    self.commits.entry(c.unit).or_default().insert(c.clone());
-                }
+                r if self.interp.absorb_hot(r) => {}
                 Record::Manifest(m) => self.library.absorb_manifest(m),
                 Record::Dating(d) => self.library.absorb_dating(d),
                 Record::Redaction(r) => self.library.absorb_redaction(r),
@@ -1223,6 +1177,12 @@ impl Store {
                     | Record::Dating(_)
             )
         });
+        let base = self.records.len();
+        for (i, r) in records.iter().enumerate() {
+            if let Some(kind) = HotKind::of(r) {
+                self.hot.entry(kind).or_default().push(base + i);
+            }
+        }
         self.records.extend(records);
         if moves_edges {
             self.rebuild_adjacency();
@@ -1241,8 +1201,8 @@ impl Store {
             u.attestations.insert(a);
             return true;
         }
-        if let Some(key) = self.rids.get(&a.uid).cloned() {
-            if let Some(rel) = self.relations.get_mut(&key) {
+        if let Some(key) = self.interp.rids.get(&a.uid).cloned() {
+            if let Some(rel) = self.interp.relations.get_mut(&key) {
                 rel.attestations.insert(a);
                 return true;
             }
@@ -1250,6 +1210,11 @@ impl Store {
         false
     }
 
+    /// Invalidate what is derived from units and relations, and retry the attestations still
+    /// waiting for a subject.
+    ///
+    /// The retry stays eager: it is `O(pending)`, and it changes `units`, which readers see
+    /// directly rather than through `derived`.
     fn rebuild_adjacency(&mut self) {
         self.adjacency_rebuilds += 1;
         // Attestations may have arrived before their units; retry the ones still waiting.
@@ -1263,35 +1228,62 @@ impl Store {
                 }
             }
         }
+        self.derived = OnceLock::new();
+    }
+
+    /// The derived state, built now if a change has invalidated it.
+    fn derived(&self) -> &Derived {
+        self.derived.get_or_init(|| self.derive())
+    }
+
+    fn derive(&self) -> Derived {
         // A withdrawn edge is kept and not followed: the adjacency every traversal reads is
         // built without it.
         let relations: Vec<Relation> = self
+            .interp
             .relations
             .values()
             .filter(|r| !self.is_withdrawn(r))
             .cloned()
             .collect();
-        self.adjacency = Adjacency::build(&self.units, &relations);
-
-        self.unfounded.clear();
+        let adjacency = Adjacency::build(&self.units, &relations);
+        // `effective_status` reads units and relations only, never `derived`, so building
+        // inside `get_or_init` cannot re-enter it.
+        let mut unfounded = BTreeSet::new();
         if self
+            .interp
             .relations
             .keys()
             .any(|(k, _, _)| k == RelKind::Retracts.as_str())
         {
             let eff = crate::merge::effective_status(self, crate::merge::RetractionPolicy::Strict);
-            self.unfounded = self
+            unfounded = self
                 .units
                 .keys()
                 .filter(|u| eff.get(u) == Some(Status::Unfounded))
                 .copied()
                 .collect();
         }
+        Derived {
+            adjacency,
+            unfounded,
+        }
+    }
+
+    /// Build the derived state now, so the first read after an append does not pay for it.
+    ///
+    /// The adjacency is built lazily (TX-P13a step 3): an `append` invalidates it and the next
+    /// traversal rebuilds it. A caller that would rather pay that at a moment of its choosing
+    /// — before handing the store to a latency-sensitive reader — calls this. It changes
+    /// nothing a reader can observe.
+    pub fn prepare(&self) {
+        self.derived();
     }
 
     /// Whether this exact edge exists.
     pub fn has_relation(&self, kind: &RelKind, from: &Uid, to: &Uid) -> bool {
-        self.relations
+        self.interp
+            .relations
             .contains_key(&(kind.as_str().to_string(), *from, *to))
     }
 
@@ -1316,28 +1308,28 @@ impl Store {
                 bytes.extend_from_slice(l.as_str().as_bytes());
             }
         }
-        for r in self.relations.values() {
+        for r in self.interp.relations.values() {
             bytes.extend_from_slice(&to_cbor(&Record::Relation(r.clone())));
             for a in &r.attestations {
                 bytes.extend_from_slice(&to_cbor(&Record::Attestation(a.clone())));
             }
         }
-        for t in self.threads.values() {
+        for t in self.interp.threads.values() {
             bytes.extend_from_slice(&to_cbor(&Record::Thread(t.clone())));
         }
-        for v in self.views.values() {
+        for v in self.interp.views.values() {
             bytes.extend_from_slice(&to_cbor(&Record::View(v.clone())));
         }
-        for set in self.withdrawals.values() {
+        for set in self.interp.withdrawals.values() {
             for w in set {
                 bytes.extend_from_slice(&to_cbor(&Record::Withdrawal(w.clone())));
             }
         }
-        for r in &self.resolutions {
+        for r in &self.interp.resolutions {
             bytes.extend_from_slice(&to_cbor(&Record::Resolution(r.clone())));
         }
         // Contentions are keyed by a derived id, so sorting by it is canonical.
-        let mut contentions: Vec<&Contention> = self.contentions.iter().collect();
+        let mut contentions: Vec<&Contention> = self.interp.contentions.iter().collect();
         contentions.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
         for c in contentions {
             bytes.extend_from_slice(&to_cbor(&Record::Contention(c.clone())));
@@ -1435,13 +1427,13 @@ impl Store {
     /// unit is present and not `unfounded` under the strict retraction policy. Until then every
     /// `rebuts` edge counted, so a retracted rebuttal went on pinning its claim into every pack.
     pub fn rebuttals_of(&self, uid: &Uid) -> Vec<Uid> {
-        let Some(id) = self.adjacency.id(uid) else {
+        let Some(id) = self.derived().adjacency.id(uid) else {
             return Vec::new();
         };
-        traverse::rebuttals_of(&self.adjacency, id)
+        traverse::rebuttals_of(&self.derived().adjacency, id)
             .into_iter()
-            .filter_map(|n| self.adjacency.uid(n))
-            .filter(|a| self.contains_uid(a) && !self.unfounded.contains(a))
+            .filter_map(|n| self.derived().adjacency.uid(n))
+            .filter(|a| self.contains_uid(a) && !self.derived().unfounded.contains(a))
             .copied()
             .collect()
     }
@@ -1498,12 +1490,12 @@ impl Store {
     /// `grounds` along their direction, relations against theirs (1.5). `crate::rests_on` is the
     /// transitive form and explains the asymmetry.
     pub fn supports_of(&self, uid: &Uid, edges: &EdgeSet) -> Vec<Uid> {
-        let Some(id) = self.adjacency.id(uid) else {
+        let Some(id) = self.derived().adjacency.id(uid) else {
             return Vec::new();
         };
-        crate::lineage::one_hop(&self.adjacency, id, edges)
+        crate::lineage::one_hop(&self.derived().adjacency, id, edges)
             .into_iter()
-            .filter_map(|n| self.adjacency.uid(n))
+            .filter_map(|n| self.derived().adjacency.uid(n))
             .filter(|u| self.contains_uid(u))
             .copied()
             .collect()
@@ -1512,7 +1504,7 @@ impl Store {
     /// Whether this relation is withdrawn: some withdrawal names its rid, and it is not a
     /// lifecycle edge (`retracts`, `supersedes`), which cannot be withdrawn in 1.4 (`SMY-W056`).
     pub fn is_withdrawn(&self, rel: &Relation) -> bool {
-        !rel.kind.is_lifecycle() && self.withdrawals.contains_key(&rel.uid())
+        !rel.kind.is_lifecycle() && self.interp.withdrawals.contains_key(&rel.uid())
     }
 
     /// Whether `rel` is a live rebuttal: a `rebuts` edge, not withdrawn, from a unit that is
@@ -1521,31 +1513,34 @@ impl Store {
         rel.kind == RelKind::Rebuts
             && !self.is_withdrawn(rel)
             && self.contains_uid(&rel.from)
-            && !self.unfounded.contains(&rel.from)
+            && !self.derived().unfounded.contains(&rel.from)
     }
 
     /// Whether this unit's effective status under the strict policy is `unfounded`.
     pub fn is_unfounded(&self, uid: &Uid) -> bool {
-        self.unfounded.contains(uid)
+        self.derived().unfounded.contains(uid)
     }
 
     /// The relation whose rid this is.
     pub fn relation_by_id(&self, rid: &Uid) -> Option<&Relation> {
-        self.rids.get(rid).and_then(|k| self.relations.get(k))
+        self.interp
+            .rids
+            .get(rid)
+            .and_then(|k| self.interp.relations.get(k))
     }
 
     /// Every withdrawal, grouped by the rid it names.
     pub fn withdrawals(&self) -> impl Iterator<Item = &Withdrawal> {
-        self.withdrawals.values().flatten()
+        self.interp.withdrawals.values().flatten()
     }
 
     pub fn resolutions(&self) -> impl Iterator<Item = &Resolution> {
-        self.resolutions.iter()
+        self.interp.resolutions.iter()
     }
 
     /// Whether a resolution names this target.
     pub fn is_resolved(&self, target: &ResolutionTarget) -> bool {
-        self.resolutions.iter().any(|r| &r.target == target)
+        self.interp.resolutions.iter().any(|r| &r.target == target)
     }
 
     /// What a contention's status reads as in this store (1.4).
@@ -1559,11 +1554,12 @@ impl Store {
         }
         if c.detected.kind == DetectionKind::LiveRebuttal {
             let live = c.positions.iter().any(|a| {
-                self.relations
+                self.interp
+                    .relations
                     .get(&(RelKind::Rebuts.as_str().to_string(), *a, c.over))
                     .is_some_and(|r| self.is_live_rebuttal(r))
             });
-            if !live || self.unfounded.contains(&c.over) {
+            if !live || self.derived().unfounded.contains(&c.over) {
                 return ContentionStatus::Stale;
             }
         }
@@ -1572,14 +1568,16 @@ impl Store {
 
     /// Recorded contentions that read as open, and so pin their positions (constraint C4).
     pub fn open_contentions(&self) -> impl Iterator<Item = &Contention> {
-        self.contentions
+        self.interp
+            .contentions
             .iter()
             .filter(|c| self.contention_status(c) == ContentionStatus::Open)
     }
 
     /// Relations of a given kind, in canonical order, leaving out withdrawn ones (1.4).
     pub fn relations_of_kind(&self, kind: &RelKind) -> Vec<&Relation> {
-        self.relations
+        self.interp
+            .relations
             .values()
             .filter(|r| &r.kind == kind && !self.is_withdrawn(r))
             .collect()
