@@ -30,7 +30,7 @@ pub mod verify;
 pub use access::{LibraryRead, LibraryWrite, NoText, TextSource};
 pub use export::{
     export_library, export_store, slug, snapshot, Closure, Collection, ExportOptions, ExportedFile,
-    Format, Layout, LibError, Selection, UnknownRecords, With,
+    Format, Layout, LibError, Selection, TargetRevision, UnknownRecords, With,
 };
 pub use import::{
     accept, discard, import, original_path, retained, status, FileOutcome, ImportOptions,

@@ -582,8 +582,13 @@ Pure, nothing written to the library.
    attestation the same way, with `parents = {old rid}`. Label bindings, thread steps and the
    view's roots are re-pointed.
 5. Commitments, datings, withdrawals, resolutions and contentions that name a mapped uid or rid
-   are dropped and counted (`SMY-W491`).
-6. Index: `derived = target-revision ID@N`. No P1/P3.
+   are dropped and counted (`SMY-W491`), and so is the resolution of a contention dropped.
+6. Index: `derived = target-revision ID@N`, and key 5 the hash of the chain between `N` and the
+   current revision. No P1/P3.
+
+*Implemented in TX-P12 step 13 (2026-10-22, §6).* U is the selection closed along `deps` and
+`grounds`, and the refusal in item 1 applies to backward paths (a unit older than `N` reads
+forward); both are argued under step 13's note.
 
 ---
 
@@ -940,7 +945,7 @@ Steps 1–4 do not need either and can start once TX-P0 has landed.
 | 10 | `surface` and `pack` formats, W428 exactness | 5 | surface cells of GE-T15 — **done 2026-10-22**, below |
 | 11 | Fuzz targets, cross-implementation additions and harness | 5 | 1 h fuzz on each target with no finding; all three implementations verify every export — **done 2026-10-22**, below |
 | 12 | GE-T15 full run, scale cells at 10⁵/10⁶ | 6–11 | GE-T15 kill criteria (draft 3 §23): no P1/P3 failure, no record type lost; duplication factor per layout recorded (OQ-26) — **done 2026-10-22**, below |
-| 13 (TX-P12) | `--target-revision` | SMYSL-2.5 lens engine | GE-T16's synthetic revisions: a `split-value` lens exports; a `retire` refuses with `E422`; a two-level grounds chain gets new uids in dependency order and every rewritten core references only mapped uids |
+| 13 (TX-P12) | `--target-revision` | SMYSL-2.5 lens engine | GE-T16's synthetic revisions: a `split-value` lens exports; a `retire` refuses with `E422`; a two-level grounds chain gets new uids in dependency order and every rewritten core references only mapped uids — **done 2026-10-22**, below |
 
 *Step 1, done 2026-10-21.* The five prerequisites of §4.3, against the tree as it is now and not
 `d25ec9e`:
@@ -1658,6 +1663,46 @@ is lost, and `by-expression` duplicates nothing.
   What remains is the incoming records held three ways at once: decoded per file, keyed by
   hash, and in the candidate store. That is §7's memory risk, measured, and it belongs to
   TX-P13, where a disk-backed store replaces the in-memory snapshot.
+
+*Step 13, done 2026-10-22.* `--target-revision ID@N`, with `--agent` and `--clock`, in
+`crates/smysl-lib/src/export/target_revision.rs`. It needed SMYSL-2.5's lens engine, which did
+not exist, so TX-P12's steps 1 and 2 were built first (SMYSL-2.5 §6). Like `--as-of`, the
+rewrite builds a store and the normal pipeline exports it: the layouts, closure, formats and
+index are not told. `SMY-W491` and `SMY-E492` complete this RFC's registrations (135 codes).
+The exit holds on GE-T16-style synthetic revisions written in `tests/target_revision.rs`,
+since GE-T16's corpus is TX-P12 step 9's:
+
+- **A `split-value` lens exports.** A unit revision 2 wrote as `half` with `gap: some` is
+  exported at revision 1 as `ajar` with no `gap`, under a new uid with one `Op::Transformed`
+  attestation (`parents` the original, agent `tool:smysl-lib`, clock just after everything
+  rewritten, OQ-63). Its edge is a new relation attested the same way, its label follows it,
+  and the commitment to it is dropped and counted (`W491`). The index records `derived:
+  target-revision x.ge16/v1@1` and the chain's hash in key 5. The export is deterministic, and
+  `verify` holds on the files, with P1 and P3 not applicable.
+- **A `retire` refuses with `E422`** on the way back from revision 3 to 2, naming the key, and
+  nothing is written.
+- **A two-level grounds chain** (`c` grounds on `b`, `b` on `a`, only `c` selected) is rewritten
+  `a`, `b`, `c`. Each gets a new uid: `a` for its payload, the other two because what they ground
+  on moved. Every rewritten core references only uids in the map's image.
+
+Five readings of §3.11, each recorded where it is decided:
+
+- **U is the selection closed along `deps` and `grounds`.** "Restricted to U" taken literally
+  leaves a selected unit's ground outside the rewrite. The closure would then export that ground
+  unchanged under its old uid, and the exit's "references only mapped uids" could not hold. So
+  the rewrite covers what the closure will take.
+- **The refusal is for backward paths.** An inverse is what a backward reading needs. A unit
+  older than `N` is read forward, where a `retire` is simply what revision `N` says: the key
+  reads as absent.
+- **A unit the chain cannot fully carry is kept as written and counted** (`SMY-W420`, in the
+  report and not in the index, whose counts are fixed per §4.2). Lenses never guess, and the
+  key survives verbatim as rule X keeps any key a reader does not know.
+- **An edge's attestation is its own record**, by rid, as the log holds every edge's. The
+  store's inline set is its in-memory join, and an export file does not carry it. The first
+  version wrote it inline and lost it.
+- **`E492` cannot be raised by a store of content-addressed units.** `deps` and `grounds` are
+  in the hashed core, so a cycle among them would need a hash fixed point. The check is kept
+  as a guard, as `E061`'s is, and has no test that could construct its input.
 - **CI.** A `ge-t15` job on Linux x86-64 and macOS arm64 runs the matrix, P2, the 10⁵ cell and
   the cross-implementation harness with every implementation required (`SMYSL_XI_REQUIRED`).
   The two platforms agree on every file's BLAKE3 because both compare against the same

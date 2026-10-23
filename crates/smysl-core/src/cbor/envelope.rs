@@ -297,6 +297,10 @@ fn schema_decl_bytes(d: &SchemaDecl) -> Vec<u8> {
         d.payload_shape.as_ref(),
         |e, p| e.bytes(p),
     );
+    // Written back verbatim: the bytes are what the lens-chain hash is over (Appendix B).
+    m.put_opt(keys::schema_decl::LENSES, d.lenses.as_ref(), |e, l| {
+        e.raw(l)
+    });
     m.put_extra(&d.extra);
     m.into_bytes()
 }
@@ -1341,6 +1345,7 @@ fn dec_schema_decl(d: &mut Dec<'_>) -> Res<SchemaDecl> {
     let mut types = Vec::new();
     let mut relations = Vec::new();
     let mut payload_shape = None;
+    let mut lenses = None;
     let mut extra = Extra::new();
 
     read_map(d, &mut extra, |d, k| match k {
@@ -1364,6 +1369,13 @@ fn dec_schema_decl(d: &mut Dec<'_>) -> Res<SchemaDecl> {
             payload_shape = Some(d.bytes()?.to_vec());
             Ok(true)
         }
+        // Any well-formed item, held as received. Whether it is a lens array is
+        // `schema::decode`'s question, and a mismatch there is `SMY-W430`, not a store that
+        // will not open: the same degradation an unknown key has always had.
+        keys::schema_decl::LENSES => {
+            lenses = Some(d.skip_item()?.to_vec());
+            Ok(true)
+        }
         _ => Ok(false),
     })?;
 
@@ -1373,6 +1385,7 @@ fn dec_schema_decl(d: &mut Dec<'_>) -> Res<SchemaDecl> {
         types,
         relations,
         payload_shape,
+        lenses,
         extra,
     })
 }

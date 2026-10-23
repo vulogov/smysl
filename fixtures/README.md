@@ -22,6 +22,16 @@ count and digest. The last two have one digest, which is the property: order and
 count. The Rust writes them (`crates/smysl-lib/tests/cross_impl.rs`, `SMYSL_BLESS=1` to rewrite)
 and `python/`, `nodejs/` and `go/` each recompute them in their own suite.
 
+`schema/fc9/` holds schema declarations with FC-9's keys 4 and 5 (SMYSL-2.5 §3.8, §5.8):
+`text-v1.cbor` (Appendix C's `x.text/v1`, with its fields), `series.cbor` (three revisions of
+`x.demo/v1` using every closed lens op, a widening among them), `unknown-op.cbor` (an op tag no
+build knows, `SMY-W469`) and `opaque.cbor` (a key 4 and a key 5 that do not match, `SMY-W430`
+twice). `cases.json` names what each declaration decodes to — field count, op tags, each step's
+bytes as received, the codes — and the lens-chain hashes of the series. The Rust writes them
+(`crates/smysl-core/tests/fc9.rs`, `SMYSL_BLESS=1` to rewrite); `python/`, `nodejs/` and `go/`
+decode them, re-encode them byte for byte (L9) and recompute the hashes. They are also the
+`lens_laws` fuzz target's seeds.
+
 Six trees hold **gate material** rather than fixtures, and the difference is who they are
 addressed to: a fixture is an instrument, and these are the things being measured.
 

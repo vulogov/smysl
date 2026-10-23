@@ -512,7 +512,7 @@ live-hosted: ## Live ingest gate against whichever hosted providers have keys se
 # the text a person would type, so the fuzzer starts from every form the grammar has rather
 # than from the minutes a cold run spends discovering that `find` is a word.
 FUZZ_TARGETS := surface cbor merge_algebra pack_constraints pipeline pack_exact readers \
-                redaction_merge edtf time_engine sq_parse lib_roundtrip lib_import
+                redaction_merge edtf time_engine sq_parse lib_roundtrip lib_import lens_laws
 
 # Seeds, not a corpus. The repo already holds inputs worth starting from — the corpus
 # fixtures are real `.smy` documents, and `fuzz/artifacts/` holds every input that has ever
@@ -561,7 +561,10 @@ seed-fuzz: ## Copy the repo's own inputs into each fuzz corpus
 	@# `lib_import` takes a file as `lib import` does, so the corpus fixtures and the wire
 	@# fixtures are its seeds, surface and CBOR both (TX-P11 step 11).
 	@mkdir -p fuzz/corpus/lib_import; cp -f fixtures/corpus/*.smy fixtures/wire/*.cbor fuzz/corpus/lib_import/ 2>/dev/null || true
-	@echo "seeded from fixtures/corpus, fixtures/library/readers, fixtures/sq and fuzz/artifacts"
+	@# `lens_laws` reads an input that decodes as records as records, so the FC-9 fixtures
+	@# are seeds as they stand: every op tag, a widening, an unknown op and an opaque key 5.
+	@mkdir -p fuzz/corpus/lens_laws; cp -f fixtures/schema/fc9/*.cbor fuzz/corpus/lens_laws/ 2>/dev/null || true
+	@echo "seeded from fixtures/corpus, fixtures/library/readers, fixtures/sq, fixtures/schema/fc9 and fuzz/artifacts"
 
 fuzz: seed-fuzz ## Fuzz every target for 60s each, as CI does (nightly)
 	@echo "The parser targets existed from the start and nothing ran them, which is how two"

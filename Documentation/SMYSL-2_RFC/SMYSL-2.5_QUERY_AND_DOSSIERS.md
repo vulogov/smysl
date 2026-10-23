@@ -1598,7 +1598,9 @@ Each step has an exit test. Steps within a phase are ordered.
 **TX-P12 — schema evolution**
 1. FC-9 decode/encode in `smysl-core`, `SchemaDecl.lenses`, `Store::schema_decls`, `W430`, `W429`.
    *Exit:* L9 on fixtures; round-trip suite (`smysl-core/tests/roundtrip.rs`) green.
+   — **done 2026-10-22**, below.
 2. Lens engine and chains. *Exit:* laws L1–L7 at 10,000 seeded cases each; `lens_laws` fuzz.
+   — **done 2026-10-22**, below.
 3. Field resolution, lensed predicates in `sq`, pins, compile-forward, `E421`/`E422`, explain
    lines. *Exit:* §19.5 rewrite printed exactly as in §4.4.
 4. Schema/data effect split. *Exit:* §5.4 §19.5 reproduction.
@@ -1609,6 +1611,69 @@ Each step has an exit test. Steps within a phase are ordered.
    answers `pointer(…)` across the rename.
 9. GE-T16. *Exit:* draft 3 TX-P12 exit — lens path equals migrate path on all 100 saved queries
    and 30 dossiers; the effect split reproduces the injected change; unmappable rate reported.
+
+   *Steps 1 and 2 were taken out of order, on 2026-10-22, before TX-P8 closed:* SMYSL-2.7's
+   `--target-revision` (TX-P11's step 13) needs the lens engine and nothing else of this phase,
+   so the engine was built first and steps 3–9 wait for the phase in its place.
+
+   **Step 1 done 2026-10-22: FC-9 in `smysl-core`.** `smysl_core::schema` is §4.2's sketch:
+   `decode` reads a declaration into a `Revision` (field table, lens steps, the declaration's
+   hash), `encode_lenses` and `encode_shape` write them, `SchemaSet` collects every revision of
+   every id with its current one and its forks, and `Store::schema_decls` saves each caller the
+   filter. `SMY-W430`, `SMY-W429` and `SMY-W469` open a thirteenth registry group, `Schema`.
+   The exit holds: L9 over `fixtures/schema/fc9/` — Appendix C's `x.text/v1` with its fields, a
+   three-revision series using every closed op, an unknown op and an opaque declaration — which
+   the generator test rebuilds and compares (`SMYSL_BLESS=1` rewrites it), and the round-trip
+   suite unchanged. Six findings:
+   - **No byte moved.** Key 5 had always travelled in `extra`, at the same place in the map, so
+     `SchemaDecl.lenses: Option<Vec<u8>>` (the item as received) re-encodes every existing
+     declaration to what it was. §4.3's "minor-API break" is stale: the struct has been
+     `#[non_exhaustive]` since, and the field is additive.
+   - **`W430` covers key 5 too.** §3.8 names it for a key 4 that does not match; a key 5 that
+     is not an array of steps had no code, and it must not be misread either. One warning per
+     key, the revision keeping no usable steps (`lenses_opaque`).
+   - **A known tag with a key this build does not know is unknown** (`W469`, the step
+     unusable), not a mismatch: a later `retire` with an option is not this `retire`, and D-5
+     says an op not understood is not applied.
+   - **A step that does not go up is not a step** (§3.10: `to > from`), and reads as a mismatch.
+   - **An empty op list was not written.** `MapBuilder::put_array` omits an empty sequence, as
+     every optional array in the envelope wants, and a step's key 2 is required — so a step with
+     no ops encoded without it and did not decode. Found by step 2's `E470` test, not by the
+     fixtures, none of which has an empty step.
+   - **Cross-implementation (§5.8).** Python (`python/smysl/schema.py`), JavaScript
+     (`nodejs/src/schema.js`) and Go (`go/schema.go`) decode FC-9 and hold L9 and the four
+     chain hashes on every fixture: each file re-encodes byte for byte, each declaration decodes
+     to the field count, op tags, step bytes and codes `cases.json` records, and key 5 rebuilt
+     from its decoded steps is the bytes that arrived. Lens application stays outside them (D-8).
+
+   **Step 2 done 2026-10-22: the lens engine.** `LensChain` (identity, composition, the chain
+   hash of Appendix B, forward and backward application, widenings, relation renaming),
+   `UnitView`, `Mapped` and `SchemaSet::chain` and `infer_revision`, with `SMY-E470`, `SMY-E471`,
+   `SMY-E422` and `SMY-W420`. `crates/smysl-core/tests/lens_laws.rs` holds L1–L7 at 10,000
+   seeded cases each over generated histories of one to four steps, each history obeying rule N
+   (names never reused, a renamed or retired key marked retired, a widening paired, a default
+   only for a key required from the same revision); the `lens_laws` fuzz target holds L9 and L3
+   over arbitrary bytes (an hour, 80,180,179 runs, cov 6,334, no finding). What the engine decided:
+   - **Revision inference is one rule over the steps: a unit a step would change was written
+     before that step**, beside the field clues A-12.1 lists (a retired key held, a required key
+     lacking). Under rule N a step only ever changes what an earlier revision named, so the rule
+     is sound — L5's test asserts the revision a unit was written at lies in the inferred
+     interval — and it is what makes L5 hold: every step below the inferred revision leaves the
+     unit alone, so lensing from any consistent revision reads it the same. It covers renamed
+     types, renamed and retired keys, mapped and split values and defaulted keys at once.
+   - **A chain carries the field table of the revision each step leaves.** Widening detection
+     needs the source revision's values, and backward application checks its result against
+     the revision it arrives at; a chain built from steps alone (`LensChain::from_steps`) has
+     neither, and applies without the checks.
+   - **Backward is all or nothing.** A path through a `retire`, a many-to-one `map-value` or an
+     unknown op is refused before any op runs, so a refused unit is untouched; `E422` for the
+     first two (SMYSL-2.7 §3.11 gives it every step without an inverse), `W469` for the third.
+     Forward never fails: an unusable step reads the unit as `Mapped::Unusable`, counted under
+     `W420`, and an enum value outside every map and the target's values is reported, never
+     mapped (L7).
+   - **L1 is a law about rule-N histories,** and the fuzz target does not assert it: arbitrary
+     steps are not one (a rename onto a key the unit already holds has no inverse on that unit).
+     The seeded test holds L1; the target searches for panics and for L3 and L9.
 
 ## 7. Risks and mitigations
 

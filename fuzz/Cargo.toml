@@ -118,3 +118,10 @@ name = "lib_import"
 path = "fuzz_targets/lib_import.rs"
 test = false
 doc = false
+
+# Schema evolution (TX-P12 step 2): FC-9 decoding and the lens laws over arbitrary bytes.
+[[bin]]
+name = "lens_laws"
+path = "fuzz_targets/lens_laws.rs"
+test = false
+doc = false

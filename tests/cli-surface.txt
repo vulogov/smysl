@@ -824,6 +824,9 @@ lib        --verbose
 lib        --window
 lib        --as-of
 lib        --seed-check
+lib        --target-revision
+lib        --agent
+lib        --clock
 lib        --closure
 lib        [possible values: full, ref]
 lib        --with-views

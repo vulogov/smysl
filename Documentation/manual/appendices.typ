@@ -957,6 +957,9 @@ part the library has redacted is dropped at the door (`SMY-W414`).
     ([`--with-staged`], [—], [Export staged imports too (`export`, a library).]),
     ([`--with-quarantine`], [—], [Export quarantined records too (`export`, a library).]),
     ([`--as-of`], [`EDTF`], [Export only what was known before the end of this date: a record's own clock, a unit's earliest attestation (`SMY-W415` for one with none), and nothing resting on what was not yet known (`SMY-W498`) (`export`).]),
+    ([`--target-revision`], [`ID@N`], [Export the selection as revision `N` of schema `ID` writes it, through the schema's lenses (`export`).]),
+    ([`--agent`], [`ID`], [The agent of the attestations `--target-revision` adds (`export`); `tool:smysl-lib` by default.]),
+    ([`--clock`], [`MS[.N]`], [The clock of those attestations (`export`); by default just after every attestation of what is rewritten.]),
     ([`--budget`], [`N`], [The token budget each file is packed to, for `--format pack` (`export`).]),
     ([`--edges`], [`LIST`], [Edges the closure follows beside `deps` and `grounds`, as `trace --edges` takes them (`export`). Every edge by default.]),
     ([`--unknown`], [`include|drop`], [Records this build cannot interpret: kept in `unattributed.cbor`, or left out and counted (`export`, `SMY-W425`).]),
@@ -986,6 +989,16 @@ and `lib accept join:<name>` merges them. `--scope "from import:<name>"` over a 
 `lib export` wrote resolves to that collection's export roots, so exporting it again with the
 index's options gives every file back byte for byte (P3 through a library).
 
+`--target-revision ID@N` writes the selection as an older (or newer) revision of one schema
+would have written it. Each unit's revision is inferred from what it holds, and it is read
+through the schema's lenses to revision `N`; a unit that changes becomes a new unit, with an
+attestation saying it was transformed from the original, and so does each edge and each unit
+grounded on one that changed, dependencies first. Commitments, datings, withdrawals,
+resolutions and contentions naming an original are left out and counted (`SMY-W491`). A path
+back through a lens step with no inverse — a `retire`, or a many-to-one value map — refuses the
+export (`SMY-E422`). The index records `derived: target-revision ID@N` and the lens chain's
+hash, and P1 and P3 are not claimed: the collection is a rewrite, not a round trip.
+
 #dtable(
   (auto, 1fr),
   (
@@ -994,7 +1007,7 @@ index's options gives every file back byte for byte (P3 through a library).
     ([`status`], [0. `--json` gives one object per import: its state, manifests and counts.]),
     ([`accept`], [0; 5 under `--fail-on-contention` when the import would give rise to a contention; 2 when the name is not a staged import.]),
     ([`discard`], [0; 2 when the name is not a staged import. The manifests stay, since the files were read, and so does the quarantine.]),
-    ([`export`], [0; 3 when a surface file does not read back (`SMY-E424`, the index written incomplete); 9 when a CBOR collection does not verify; 4 when a pack is infeasible; 2 for a missing `--scope` or `-o`, a scope that does not run, a bad `--as-of`, or an occupied directory without `--force`.]),
+    ([`export`], [0; 3 when a surface file does not read back (`SMY-E424`, the index written incomplete); 9 when a CBOR collection does not verify; 4 when a pack is infeasible; 2 for a missing `--scope` or `-o`, a scope that does not run, a bad `--as-of`, a `--target-revision` revision the store does not declare, or an occupied directory without `--force`; 1 when `--target-revision` refuses (`SMY-E422`).]),
     ([`verify`], [0 when every file matches and P1 and P3 hold, or every `--p2` file comes back; 9 otherwise.]),
   ),
 )

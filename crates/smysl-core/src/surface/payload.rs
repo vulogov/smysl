@@ -155,6 +155,25 @@ fn collect_strings(o: &HObject, prefix: &str, out: &mut BTreeMap<String, BTreeSe
     }
 }
 
+/// One payload value's canonical bytes, for the lens ops that carry values (`crate::schema`).
+pub(crate) fn value_bytes(v: &HValue) -> Vec<u8> {
+    enc(|e| write_value(e, v))
+}
+
+/// A text-keyed map's canonical bytes, keys sorted by encoded bytes as a payload's are.
+pub(crate) fn object_bytes(o: &HObject) -> Vec<u8> {
+    enc(|e| write_object(e, o))
+}
+
+/// Read one payload value or text-keyed map at the decoder's position (`crate::schema`).
+pub(crate) fn dec_value(d: &mut Dec<'_>) -> Result<HValue, CodecError> {
+    read_value(d)
+}
+
+pub(crate) fn dec_object(d: &mut Dec<'_>) -> Result<HObject, CodecError> {
+    read_object(d)
+}
+
 pub fn payload_to_object(bytes: &[u8]) -> Result<HObject, CodecError> {
     let mut d = Dec::new(bytes);
     let o = read_object(&mut d)?;

@@ -12,11 +12,13 @@
 mod format;
 mod layout;
 mod select;
+pub mod target_revision;
 mod time;
 mod write;
 
 pub use layout::slug;
 pub(crate) use select::is_checkpoint;
+pub use target_revision::TargetRevision;
 
 use crate::access::{LibraryRead, NoText, TextSource};
 use crate::index::{ExportIndex, IndexError, IndexFile, Role, COUNTED};
@@ -243,6 +245,8 @@ pub struct ExportOptions {
     pub as_of: Option<String>,
     /// How the keyed files are written (§3.8).
     pub format: Format,
+    /// `--target-revision ID@N` (§3.11): the selection rewritten as revision `N` writes it.
+    pub target_revision: Option<TargetRevision>,
 }
 
 impl ExportOptions {
@@ -288,6 +292,11 @@ impl ExportOptions {
 
     pub fn format(mut self, format: Format) -> ExportOptions {
         self.format = format;
+        self
+    }
+
+    pub fn target_revision(mut self, t: TargetRevision) -> ExportOptions {
+        self.target_revision = Some(t);
         self
     }
 }
@@ -456,6 +465,10 @@ pub enum LibError {
     Query(String),
     /// A file's selection does not pack in the budget given.
     Pack(String),
+    /// `--target-revision` refused (§3.11): the code says why — `SMY-E422` a backward path
+    /// with no inverse, `SMY-E470` no path or no such revision, `SMY-E471` an ill-formed step,
+    /// `SMY-E492` a cycle among the units to rewrite, `SMY-W429` a forked schema.
+    TargetRevision(Code, String),
 }
 
 impl fmt::Display for LibError {
@@ -479,6 +492,7 @@ impl fmt::Display for LibError {
             LibError::AsOf(e) => write!(f, "--as-of {e}"),
             LibError::Query(e) => write!(f, "--scope: {e}"),
             LibError::Pack(e) => write!(f, "--format pack: {e}"),
+            LibError::TargetRevision(c, e) => write!(f, "--target-revision: {c}: {e}"),
         }
     }
 }
@@ -634,6 +648,29 @@ pub(crate) fn export_with(
         }
         None => (store, sel.clone(), (0, 0)),
     };
+    // `--target-revision` (§3.11): the store rewritten at revision N, and the selection carried
+    // to what its units became. Like `--as-of`, the rest of the pipeline is not told.
+    let rewritten = match &opts.target_revision {
+        Some(t) => Some(target_revision::rewrite(store, &sel.units, t)?),
+        None => None,
+    };
+    let (store, sel) = match &rewritten {
+        Some(rw) => {
+            let map = rw.map();
+            let to = |u: &Uid| *map.get(u).unwrap_or(u);
+            let group = sel.group.as_ref().map(|(f, keys)| {
+                let keys = keys.iter().map(|(u, k)| (to(u), k.clone())).collect();
+                (f.clone(), keys)
+            });
+            let sel = Selection {
+                units: sel.units.iter().map(to).collect(),
+                scope: sel.scope.clone(),
+                group,
+            };
+            (&rw.store, sel)
+        }
+        None => (store, sel),
+    };
     let sel = &sel;
     let extra = if opts.with.text {
         text_records(store, text)
@@ -738,6 +775,9 @@ pub(crate) fn export_with(
     }
 
     let mut report = Report::new();
+    if let Some(rw) = &rewritten {
+        report.extend(rw.report.iter().cloned());
+    }
 
     // The derived forms (§3.8), made from each keyed file's CBOR one.
     let mut w428 = 0usize;
@@ -842,6 +882,7 @@ pub(crate) fn export_with(
         ("SMY-W415", w415),
         ("SMY-W498", w498),
         ("SMY-W428", w428),
+        ("SMY-W491", rewritten.as_ref().map_or(0, |rw| rw.dropped)),
     ] {
         counts.insert(code.to_string(), n as u64);
     }
@@ -868,7 +909,7 @@ pub(crate) fn export_with(
             .as_ref()
             .map(|_| crate::scope::SQ_VERSION.to_string()),
         schemas: schemas.into_iter().collect(),
-        lens_chain: None,
+        lens_chain: rewritten.as_ref().map(|rw| rw.chain),
         layout: opts.layout.as_str().to_string(),
         closure: opts.closure.as_str().to_string(),
         format: opts.format.as_str().to_string(),
@@ -883,7 +924,14 @@ pub(crate) fn export_with(
             }
             f
         },
-        derived: matches!(opts.format, Format::Pack { .. }).then(|| "lossy".to_string()),
+        derived: {
+            let mut d: Vec<String> = Vec::new();
+            d.extend(opts.target_revision.as_ref().map(TargetRevision::derived));
+            if matches!(opts.format, Format::Pack { .. }) {
+                d.push("lossy".to_string());
+            }
+            (!d.is_empty()).then(|| d.join(", "))
+        },
         complete,
         counts,
         duplication: (summed as u64, once.len() as u64),

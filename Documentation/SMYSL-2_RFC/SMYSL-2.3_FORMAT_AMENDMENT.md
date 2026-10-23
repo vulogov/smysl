@@ -102,7 +102,7 @@ specific older reader, the amendment says so and states the cost.
 | A-4 | new spec §2.7 | record-set digest | — | TX-P0 |
 | A-5 | spec §3.1 | records 14 manifest, 15 part text, 17 dating, 18 part reading, 19 redaction; 16 reserved | FC-4 | TX-P1 (14, 15, 18), TX-P2 (19), TX-P3 (17, **folded in at step 1**) |
 | A-6 | spec §3.1 | withdrawal and commitment may name a did | — | TX-P3 (**folded in at step 1**; no type change was needed — key 0 is 32 bytes either way and the domain bytes keep the kinds apart) |
-| A-7 | spec §3.1 | schema declaration: key 4 `payload_shape` structure, key 5 `lenses` | FC-9 | TX-P12. Until then, ingest resolves uid-typed payload keys itself (SMYSL-2.4 §3.4). |
+| A-7 | spec §3.1 | schema declaration: key 4 `payload_shape` structure, key 5 `lenses` | FC-9 | TX-P12. Until then, ingest resolves uid-typed payload keys itself (SMYSL-2.4 §3.4). **Decoded from TX-P12 step 1 (2026-10-22):** `smysl_core::schema` reads both keys, keeps key 5 as received, and reports a key 4 *or* key 5 that does not match as `SMY-W430` (A-7 names it for key 4; SMYSL-2.5 §6 records why key 5 gets it too). The `@schema` spelling (A-10 item 4) is step 7's. |
 | A-8 | spec §3.1 | open enumerations: code 255 reserved; new codes for thread schemas, roles, detection kinds | FC-8 | TX-P0 (opening four; reserving 255 in five), TX-P1 (opening `admission`), TX-P8 (codes) |
 | A-9 | spec §3.1 | granularity key 5 `estimator`; estimator registry | FC-6 | TX-P0 |
 | A-10 | spec §4 | surface: reserved words, `lang`, `source` keys, `@schema` fields and lenses, strict `source` | — | per construct |

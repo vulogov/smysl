@@ -530,6 +530,20 @@ jobs:
               exit 1
             }
           done
+      # Schema evolution (TX-P12 step 2): FC-9 decoding over arbitrary bytes, with L9 and L3
+      # held on whatever decodes. Seeded from `fixtures/schema/fc9`, as `make seed-fuzz` is.
+      - name: lens laws
+        run: |
+          mkdir -p fuzz/corpus/lens_laws
+          cp -f fixtures/schema/fc9/*.cbor fuzz/corpus/lens_laws/
+          ls fuzz/artifacts/lens_laws > /tmp/before-lens_laws.txt 2>/dev/null || true
+          cargo +nightly fuzz run lens_laws -- -max_total_time=60 || {
+            ls fuzz/artifacts/lens_laws > /tmp/after-lens_laws.txt 2>/dev/null || true
+            for f in $(comm -13 /tmp/before-lens_laws.txt /tmp/after-lens_laws.txt); do
+              echo "::error title=lens_laws-crash::$f = $(base64 -w0 fuzz/artifacts/lens_laws/$f)"
+            done
+            exit 1
+          }
       # Import and export (TX-P11 step 11): P1 and P3 over generated stores, and arbitrary
       # bytes offered to `lib import`, which must classify every record it decodes once.
       - name: import and export

@@ -193,12 +193,13 @@ pub fn has_surface_form(r: &Record, ctx: &WriteContext, view: Option<&ViewId>) -
 
 /// Whether a declaration can be spelled `@schema` without losing anything.
 ///
-/// `payload_shape` is opaque CBOR and `extra` holds keys a later version added; surface text
-/// has no place for either, so a declaration carrying them stays CBOR-only and is counted with
+/// `payload_shape` and `lenses` (FC-9) have no `@schema` spelling in this build — `fields:` and
+/// `lenses:` are TX-P12 step 7 — and `extra` holds keys a later version added; surface text has
+/// no place for any of them, so a declaration carrying one stays CBOR-only and is counted with
 /// the other records a surface rendering cannot hold, rather than written back smaller than it
 /// was read.
 pub fn schema_decl_has_surface_form(d: &crate::types::annex::SchemaDecl) -> bool {
-    d.payload_shape.is_none() && d.extra.is_empty()
+    d.payload_shape.is_none() && d.lenses.is_none() && d.extra.is_empty()
 }
 
 /// Whether a withdrawal can be spelled `@withdraw` without losing anything: no keys a later version

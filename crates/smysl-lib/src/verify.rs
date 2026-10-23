@@ -174,7 +174,15 @@ pub fn verify_files(index: &ExportIndex, files: &BTreeMap<String, Vec<u8>>) -> V
 
     let written: BTreeSet<[u8; 32]> = records.iter().map(Store::record_hash).collect();
     let imported = Store::from_records(records);
-    let p1 = if imported.record_set_digest() == index.rsd {
+    // A rewrite at another revision is a different selection, not this one carried, so there
+    // is nothing for P1 to compare it with (§3.11: no P1/P3).
+    let p1 = if index
+        .derived
+        .as_deref()
+        .is_some_and(|d| d.starts_with("target-revision"))
+    {
+        Property::NotApplicable("a --target-revision export is a rewrite, not a round trip")
+    } else if imported.record_set_digest() == index.rsd {
         Property::Holds
     } else {
         let retained: BTreeSet<[u8; 32]> = imported.iter().map(Store::record_hash).collect();

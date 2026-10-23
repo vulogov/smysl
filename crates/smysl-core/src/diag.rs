@@ -180,7 +180,7 @@ macro_rules! registry {
 }
 
 registry! {
-    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library, Query, Measure, Export }
+    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library, Query, Measure, Export, Schema }
 
     // --- Parse and encoding ------------------------------------------------
     Parse => {
@@ -405,8 +405,9 @@ registry! {
     // only by import. Step 7's `--as-of` brings `W498`, a unit left out because what it rests
     // on was not yet known. Step 10's surface format brings `W428`, records the surface cannot
     // spell, and `E424`, a file that does not read back as what was selected, both
-    // SMYSL-2.0's and raised only here. The rest arrive with `--target-revision` (`W491`,
-    // `E492`).
+    // SMYSL-2.0's and raised only here. TX-P12 step 13's `--target-revision` brings the last
+    // two: records dropped because they named an original (`W491`), and units that cannot be
+    // rewritten in dependency order (`E492`).
     Export => {
         W425 = "SMY-W425", Warn,  "Unknown records were exported to unattributed.cbor, or dropped with --unknown drop; counted";
         W490 = "SMY-W490", Warn,  "A record was left out of an export file: the records it names are not all in it; counted";
@@ -419,6 +420,28 @@ registry! {
         W498 = "SMY-W498", Warn,  "--as-of excluded units whose deps or grounds were not yet known on that date; counted";
         W428 = "SMY-W428", Warn,  "Records with no surface form were left out of a surface export; counted per type";
         E424 = "SMY-E424", Error, "A surface export file does not read back as the records selected for it; the index is incomplete";
+        W491 = "SMY-W491", Warn,  "--target-revision dropped commitments, datings, withdrawals, resolutions or contentions naming original uids; counted";
+        E492 = "SMY-E492", Error, "--target-revision cannot order the units to rewrite (a cycle in deps or grounds within the selection); export refused";
+    }
+
+    // --- Schema evolution (RFC SMYSL-2.5 §3.8–§3.10, SMYSL-2.3 A-7), in a thirteenth group ------
+    //
+    // Registered with the code that raises them, as every block above. TX-P12 step 1 decodes
+    // FC-9: a shape or lens array that does not match is read as opaque (`W430`), two
+    // declarations of one version are a fork (`W429`), and an op tag this build does not know
+    // makes its step unusable (`W469`). Step 2's lens engine brings the rest: no path between
+    // two revisions (`E470`), a step ill-formed against the revision it leaves (`E471`), a
+    // backward path through `retire` or an op with no inverse (`E422`), and a name or value a
+    // chain cannot carry (`W420`). `E421` (a field no schema in scope declares) and `E426`
+    // (rule N) wait for field resolution and `schema check`, steps 3 and 5.
+    Schema => {
+        W430 = "SMY-W430", Warn,  "A schema declaration's payload_shape or lenses do not match FC-9's structure; read as opaque";
+        W429 = "SMY-W429", Warn,  "Schema fork: two declarations of one id and version with different content; the id has no current revision";
+        W469 = "SMY-W469", Warn,  "A lens step carries an op this build does not know; the step is unusable (units counted under W420)";
+        E470 = "SMY-E470", Error, "No lens path between the requested revisions";
+        E471 = "SMY-E471", Error, "A lens step is ill-formed: a default without its require, an op on an undeclared key, or a widening without its paired key";
+        E422 = "SMY-E422", Error, "A lens path runs backward through a retire or an op with no inverse";
+        W420 = "SMY-W420", Warn,  "A lens could not carry a name or value; the unit is excluded from predicates on that field and counted";
     }
 }
 
@@ -840,7 +863,8 @@ mod tests {
     /// `SMY-E421` and `SMY-E422` stay out for the same reason the four above came in. Field
     /// resolution needs declared field types, and a declaration's `payload_shape` is opaque
     /// CBOR until FC-9 decoding lands in TX-P12 step 1; the planner records that the check did
-    /// not run rather than pretending it passed.
+    /// not run rather than pretending it passed. (`E422` came with the lens engine, TX-P12 step
+    /// 2, which raises it for a backward path; `E421` waits for field resolution, step 3.)
     ///
     /// That leaves `454`–`459` of RFC SMYSL-2.4's `E401`–`W459` range unallocated.
     ///
@@ -887,9 +911,16 @@ mod tests {
     /// readings at the door (rule Z, SMYSL-2.3 A-12.3).
     /// 124 with `SMY-W498` in TX-P11 step 7, raised by `--as-of`.
     /// 126 with `SMY-W428` and `SMY-E424` in TX-P11 step 10, raised by the surface format.
+    ///
+    /// 133 with `SMY-W430`, `SMY-W429` and `SMY-W469` (TX-P12 step 1, FC-9 decoding) and
+    /// `SMY-E470`, `SMY-E471`, `SMY-E422` and `SMY-W420` (step 2, the lens engine), in a
+    /// thirteenth group, `Schema`.
+    ///
+    /// 135 with `SMY-W491` and `SMY-E492` in TX-P12 step 13 (SMYSL-2.7 §3.11), raised by
+    /// `lib export --target-revision`, in the export group with the rest of SMYSL-2.7's.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 126);
+        assert_eq!(Code::ALL.len(), 135);
     }
 
     #[test]
@@ -900,7 +931,7 @@ mod tests {
                 "group {g} has no codes"
             );
         }
-        assert_eq!(Group::ALL.len(), 12);
+        assert_eq!(Group::ALL.len(), 13);
     }
 
     #[test]

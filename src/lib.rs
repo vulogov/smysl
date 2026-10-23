@@ -117,6 +117,11 @@ pub use smysl_core::edtf;
 /// registered schema is not.
 pub use smysl_core::schemas;
 
+/// Schema evolution: FC-9 decoding, schema sets, revision inference and the lens engine (RFC
+/// SMYSL-2.5 §3.8–§3.10, TX-P12). A module beside `schemas`: that one holds the declarations
+/// this build registers, this one reads any declaration a store holds.
+pub use smysl_core::schema;
+
 // ---- check ----------------------------------------------------------------
 pub use smysl_check::{
     check, check_and_fail_on, conformance, fidelity, granularity_distribution, CheckOptions,
@@ -434,8 +439,9 @@ mod tests {
         // kind nothing in scope declares, a `using` pin with no matching declaration in the
         // store, and a scope naming something the environment does not hold. The first three
         // were allocated by SMYSL-2.5 and withheld until a planner could raise them. `E421`
-        // and `E422` are still absent for that same reason: field resolution needs declared
-        // field types, which arrive with FC-9 in TX-P12.
+        // and `E422` were absent for that same reason: field resolution needs declared field
+        // types, which arrive with FC-9 in TX-P12 (`E422` came with its lens engine, step 2;
+        // `E421` waits for field resolution, step 3).
         // 103 with `SMY-W417`, `SMY-E468`, `SMY-E477` and `SMY-W478` (TX-P8 step 3), raised by
         // `ask`: a subject naming two entities, a question no intent rule matches, a template
         // set this build does not carry, and an answer unit grounding outside its dossier.
@@ -451,8 +457,11 @@ mod tests {
         // `SMY-W423` (TX-P11 step 4), raised by its import; 123 with `SMY-W414` (TX-P11
         // step 6), raised when import drops a redacted part's text; 124 with `SMY-W498`
         // (TX-P11 step 7), raised by `--as-of`; 126 with `SMY-W428` and `SMY-E424` (TX-P11
-        // step 10), raised by the surface format.
-        assert_eq!(Code::ALL.len(), 126);
+        // step 10), raised by the surface format; 133 with `SMY-W430`, `SMY-W429` and
+        // `SMY-W469` (TX-P12 step 1, FC-9 decoding) and `SMY-E470`, `SMY-E471`, `SMY-E422` and
+        // `SMY-W420` (step 2, the lens engine), in a thirteenth group; 135 with `SMY-W491` and
+        // `SMY-E492` (TX-P12 step 13), raised by `lib export --target-revision`.
+        assert_eq!(Code::ALL.len(), 135);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

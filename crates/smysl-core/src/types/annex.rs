@@ -432,8 +432,14 @@ pub struct SchemaDecl {
     pub version: u32,
     pub types: Vec<SchemaId>,
     pub relations: Vec<RelKind>,
-    /// Opaque description of the payload shape, as deterministic CBOR.
+    /// The payload shape, as deterministic CBOR. Structured by SMYSL-2.3 A-7 (FC-9) and read by
+    /// [`crate::schema::decode`]; a shape that does not match is kept opaque, as before.
     pub payload_shape: Option<Vec<u8>>,
+    /// Key 5, the lens steps (A-7, Appendix B), as the CBOR array **received**. Kept as bytes
+    /// so a declaration re-encodes to what it was and the lens-chain hash is over exactly what
+    /// arrived; [`crate::schema::decode`] reads the steps out of it. Until TX-P12 the key
+    /// travelled in `extra`, at the same place in the map, so no encoding moved.
+    pub lenses: Option<Vec<u8>>,
     pub extra: Extra,
 }
 
@@ -445,6 +451,7 @@ impl SchemaDecl {
             types: Vec::new(),
             relations: Vec::new(),
             payload_shape: None,
+            lenses: None,
             extra: Extra::new(),
         }
     }

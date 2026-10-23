@@ -56,6 +56,7 @@ export {
   tid,
 } from "./library.js";
 export { Blake3, blake3 } from "./blake3.js";
+export { OP_KEYS, chainHash, decodeSchemaDecl, encodeLenses } from "./schema.js";
 export {
   SOURCE_KIND,
   STATUS,

@@ -530,3 +530,102 @@ fn verify_p2_checks_files_through_a_scratch_library() {
     ]);
     assert_eq!(code(&o), 2);
 }
+
+/// A store declaring `x.ge16/v1` at revisions 1 and 2 (revision 2 splits `ajar` into `half`
+/// with a `gap`) and, with `retire`, a revision 3 that retires `ge:old`; one unit at the last.
+fn revisions_store(path: &Path, retire: bool) {
+    use smysl::schema::{
+        encode_lenses, encode_shape, Field, FieldType, LensOp, LensStep, UnitView,
+    };
+    use smysl::surface::HValue;
+    let id = smysl::SchemaId::parse("x.ge16/v1").unwrap();
+    let ty = smysl::SchemaId::parse("x.ge16/claim").unwrap();
+    let mut f = std::collections::BTreeMap::new();
+    f.insert("ge:state".to_string(), Field::enumeration(["open", "ajar"]));
+    f.insert("ge:old".to_string(), Field::new(FieldType::Text));
+    let mut d1 = smysl::SchemaDecl::new(id.clone(), 1);
+    d1.types = vec![ty.clone()];
+    d1.payload_shape = Some(encode_shape(&f));
+    f.insert("ge:state".to_string(), Field::enumeration(["open", "half"]));
+    f.insert("ge:gap".to_string(), Field::new(FieldType::Text));
+    let mut d2 = smysl::SchemaDecl::new(id.clone(), 2);
+    d2.types = vec![ty.clone()];
+    d2.payload_shape = Some(encode_shape(&f));
+    d2.lenses = Some(encode_lenses(&[LensStep::new(
+        1,
+        2,
+        vec![LensOp::SplitValue {
+            key: "ge:state".into(),
+            from: "ajar".into(),
+            to: "half".into(),
+            add: [("ge:gap".to_string(), HValue::Str("some".into()))].into(),
+        }],
+    )]));
+    let mut records = vec![smysl::Record::SchemaDecl(d1), smysl::Record::SchemaDecl(d2)];
+    if retire {
+        let mut d3 = smysl::SchemaDecl::new(id, 3);
+        d3.types = vec![ty.clone()];
+        d3.lenses = Some(encode_lenses(&[LensStep::new(
+            2,
+            3,
+            vec![LensOp::Retire {
+                key: "ge:old".into(),
+            }],
+        )]));
+        records.push(smysl::Record::SchemaDecl(d3));
+    }
+    let view = UnitView {
+        ty: ty.clone(),
+        payload: [
+            ("ge:state".to_string(), HValue::Str("half".into())),
+            ("ge:gap".to_string(), HValue::Str("some".into())),
+        ]
+        .into(),
+    };
+    let core =
+        smysl::UnitCoreBuilder::new(ty, "the door stands half open", smysl::Status::Speculative)
+            .payload(view.payload_bytes().unwrap())
+            .build()
+            .unwrap();
+    records.push(smysl::Record::Unit(core));
+    std::fs::write(path, smysl::to_cbor_seq(&records)).unwrap();
+}
+
+#[test]
+fn target_revision_on_the_command_line() {
+    let root = scratch("target-revision");
+    let store = root.join("revisions.cbor");
+    revisions_store(&store, false);
+    let dir = root.join("at-1");
+    let e = export(&store, &dir, &["--target-revision", "x.ge16/v1@1"]);
+    assert_eq!(code(&e), 0, "{}", stderr(&e));
+    assert_eq!(code(&run(&["lib", "verify", s(&dir)])), 0);
+    let index = std::fs::read(dir.join("export-index.cbor")).unwrap();
+    let derived = b"target-revision x.ge16/v1@1";
+    assert!(index.windows(derived.len()).any(|w| w == derived));
+
+    // A retire on the way back refuses, and writes nothing.
+    let retired = root.join("retired.cbor");
+    revisions_store(&retired, true);
+    let o = export(
+        &retired,
+        &root.join("at-2"),
+        &["--target-revision", "x.ge16/v1@2"],
+    );
+    assert_eq!(code(&o), 1, "{}", stderr(&o));
+    assert!(stderr(&o).contains("SMY-E422"), "{}", stderr(&o));
+    assert!(!root.join("at-2").join("export-index.cbor").exists());
+
+    // A spec that is not ID@N, a revision the store does not declare, and the attestation
+    // flags without the rewrite they belong to, are usage errors.
+    for extra in [
+        &["--target-revision", "x.ge16/v1"][..],
+        &["--target-revision", "x.ge16/v1@9"],
+        &["--agent", "tool:x"],
+        &["--clock", "5"],
+        &["--target-revision", "x.ge16/v1@1", "--clock", "soon"],
+    ] {
+        let o = export(&store, &root.join("bad"), extra);
+        assert_eq!(code(&o), 2, "{extra:?}: {}", stderr(&o));
+    }
+}

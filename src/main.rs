@@ -2202,6 +2202,24 @@ fn cli() -> Command {
                         .help("Export only what was known before the end of this date (`export`)"),
                 )
                 .arg(
+                    Arg::new("target-revision")
+                        .long("target-revision")
+                        .value_name("ID@N")
+                        .help("Export the selection as revision N of schema ID writes it, through its lenses (`export`)"),
+                )
+                .arg(
+                    Arg::new("agent")
+                        .long("agent")
+                        .value_name("ID")
+                        .help("The agent of the attestations --target-revision adds (`export`); tool:smysl-lib by default"),
+                )
+                .arg(
+                    Arg::new("clock")
+                        .long("clock")
+                        .value_name("MS[.N]")
+                        .help("The clock of those attestations (`export`); by default just after everything selected"),
+                )
+                .arg(
                     Arg::new("closure")
                         .long("closure")
                         .value_name("MODE")
@@ -7120,6 +7138,7 @@ fn lib_error_code(e: &smysl::lib::LibError) -> ExitCode {
         | E::Query(_) => ExitCode::Usage,
         E::Pack(_) => ExitCode::PackInfeasible,
         E::Contentions(_) => ExitCode::Contentions,
+        E::TargetRevision(smysl::Code::E470, _) => ExitCode::Usage,
         _ => ExitCode::Failure,
     }
 }
@@ -7461,6 +7480,48 @@ fn lib_discard(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     }
 }
 
+/// `--target-revision ID@N`, with `--agent` and `--clock` (SMYSL-2.7 §3.11, OQ-63); the last
+/// two mean nothing without the first, and are refused alone.
+#[cfg(feature = "text")]
+fn lib_target_revision(m: &ArgMatches) -> Result<Option<smysl::lib::TargetRevision>, ExitCode> {
+    let Some(spec) = m.get_one::<String>("target-revision") else {
+        if m.get_one::<String>("agent").is_some() || m.get_one::<String>("clock").is_some() {
+            eprintln!(
+                "smysl lib export: --agent and --clock are the attestations --target-revision adds"
+            );
+            return Err(ExitCode::Usage);
+        }
+        return Ok(None);
+    };
+    let mut t = match smysl::lib::TargetRevision::parse(spec) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("smysl lib export: {e}");
+            return Err(ExitCode::Usage);
+        }
+    };
+    if let Some(a) = m.get_one::<String>("agent") {
+        match AgentId::new(a) {
+            Ok(a) => t = t.agent(a),
+            Err(e) => {
+                eprintln!("smysl lib export: --agent {a}: {e}");
+                return Err(ExitCode::Usage);
+            }
+        }
+    }
+    if let Some(c) = m.get_one::<String>("clock") {
+        let (ms, n) = c.split_once('.').unwrap_or((c.as_str(), "0"));
+        match (ms.parse::<u64>(), n.parse::<u32>()) {
+            (Ok(ms), Ok(n)) => t = t.clock(ms, n),
+            _ => {
+                eprintln!("smysl lib export: --clock {c}: milliseconds, then optionally `.` and a counter");
+                return Err(ExitCode::Usage);
+            }
+        }
+    }
+    Ok(Some(t))
+}
+
 /// `lib export --scope … -o DIR`: the store `-s` names, as a collection in `DIR`.
 ///
 /// Verified in memory before anything is written, unless `--no-verify`: a collection whose P1
@@ -7628,6 +7689,11 @@ fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     }
     if let Some(edtf) = m.get_one::<String>("as-of") {
         opts = opts.as_of(edtf.clone());
+    }
+    match lib_target_revision(m) {
+        Ok(Some(t)) => opts = opts.target_revision(t),
+        Ok(None) => {}
+        Err(code) => return code,
     }
     let budget = m.get_one::<u64>("budget").copied();
     match (

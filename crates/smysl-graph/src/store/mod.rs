@@ -510,6 +510,15 @@ impl Store {
         self.units.iter()
     }
 
+    /// Every schema declaration, in log order (RFC SMYSL-2.5 §3.8), so that a caller building a
+    /// `smysl_core::schema::SchemaSet` does not re-filter [`Store::iter`].
+    pub fn schema_decls(&self) -> impl Iterator<Item = &smysl_core::types::SchemaDecl> {
+        self.records.iter().filter_map(|r| match r {
+            Record::SchemaDecl(d) => Some(d),
+            _ => None,
+        })
+    }
+
     pub fn relations(&self) -> impl Iterator<Item = &Relation> {
         self.relations.values()
     }

@@ -87,3 +87,7 @@ name = "cross_impl"
 # at 10⁵ and 10⁶ records are `--ignored`.
 [[test]]
 name = "ge_t15"
+
+# `--target-revision`, of TX-P12 step 13 (SMYSL-2.7 §3.11), over GE-T16-style synthetic revisions.
+[[test]]
+name = "target_revision"

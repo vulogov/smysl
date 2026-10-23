@@ -126,7 +126,9 @@ pub mod schema_decl {
     pub const TYPES: u16 = 2;
     pub const RELATIONS: u16 = 3;
     pub const PAYLOAD_SHAPE: u16 = 4;
-    pub const HIGHEST: u16 = PAYLOAD_SHAPE;
+    /// SMYSL-2.3 A-7 (FC-9), TX-P12: the lens steps, kept as received.
+    pub const LENSES: u16 = 5;
+    pub const HIGHEST: u16 = LENSES;
 }
 
 /// Withdrawal (type code 11, 1.4).
@@ -399,6 +401,7 @@ mod tests {
                     schema_decl::TYPES,
                     schema_decl::RELATIONS,
                     schema_decl::PAYLOAD_SHAPE,
+                    schema_decl::LENSES,
                 ],
             ),
             (
