@@ -58,6 +58,10 @@ pub struct Staged {
     /// Units whose status rule M lowered, and to what. Empty when the model claimed
     /// nothing it could not support.
     pub weakened: Vec<crate::monotone::Weakening>,
+    /// Records proposed for review beside the units — the commitments and datings `migrate`
+    /// proposes for a migrated unit's new uid (`SMY-W472`) — committed only if the reviewed
+    /// text keeps them.
+    pub proposals: Vec<Record>,
 }
 
 impl Staged {
@@ -101,6 +105,7 @@ impl Staged {
                 .map(|(l, u)| Record::LabelBinding(smysl_core::LabelBinding::new(l.clone(), *u))),
         );
         out.extend(self.relations.iter().cloned().map(Record::Relation));
+        out.extend(self.proposals.iter().cloned());
         out.extend(self.attestations.iter().cloned().map(Record::Attestation));
         out
     }
@@ -257,6 +262,7 @@ pub fn prepare_under(
         schemas,
         report,
         weakened: applied.weakened,
+        proposals: Vec::new(),
     }
 }
 

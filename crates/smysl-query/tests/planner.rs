@@ -189,10 +189,6 @@ fn the_stages_that_remain_unavailable_say_what_they_need() {
             "where near(\"x\", 0.8)",
             "`near(…)` compares against an embedding",
         ),
-        (
-            "where x.text/v1@1:mode = quoted",
-            "`x.text/v1@1:mode` is the field as",
-        ),
         ("with holders", "`with holders` and `with speakers`"),
         ("with spans", "`with spans` and `with datings`"),
         ("in reading order", "`in reading order` is span order"),
@@ -215,6 +211,20 @@ fn the_stages_that_remain_unavailable_say_what_they_need() {
             diags[0].message
         );
     }
+}
+
+/// A qualified field is no longer refused as unavailable (TX-P12 step 3 compiles it forward,
+/// `tests/lensed.rs`); over a store with no declaration of the revision it names, it is
+/// `SMY-E466`, the pin's own code.
+#[test]
+fn a_qualified_field_needs_the_revision_it_names() {
+    let (name, store) = corpora().remove(0);
+    let scope = StoreScope::new(name.clone(), &store);
+    let env = Env::new(&store, &scope);
+    let q = format!("from store:{name}\nwhere x.text/v1@1:mode = quoted");
+    let parsed = smysl_query::parse(&q).unwrap();
+    let diags = plan(&parsed.query, &env, &PlanOptions::default()).expect_err("refused");
+    assert_eq!(diags[0].code.as_str(), "SMY-E466", "{}", diags[0].message);
 }
 
 /// A traversal naming a relation kind nothing declares is `SMY-E462`; a kernel kind is not.

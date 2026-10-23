@@ -151,7 +151,7 @@ pub use smysl_render::{
 
 // ---- graph ----------------------------------------------------------------
 pub use smysl_graph::compact::{compact, Compacted};
-pub use smysl_graph::relink::{relink, Relinked};
+pub use smysl_graph::relink::{relink, supersession_heads, Relinked};
 pub use smysl_graph::{
     closure, cycles, dependents, dependents_via, diff, effective_status, hop_diff, label_bindings,
     label_index, labels_of, membership, merge, plan_retraction, rebuttals_of, resolve_label,
@@ -235,7 +235,7 @@ pub use smysl_ingest::text::{Target as TextTarget, TextIngest, TextReport};
 #[cfg(all(feature = "ingest", feature = "text"))]
 pub use smysl_ingest::same_as;
 #[cfg(feature = "stage")]
-pub use smysl_ingest::{stage, Attesting, Staged};
+pub use smysl_ingest::{migrate, stage, Attesting, Staged};
 // The answer step of `ask --answer` (TX-P8 step 3). The module, for `Member`, `render` and
 // `admit` beside `Ingestor::answer`: a caller builds the lines from its own dossier, and rule A
 // says the CLI may not reach past the facade to do it.
@@ -460,8 +460,11 @@ mod tests {
         // step 10), raised by the surface format; 133 with `SMY-W430`, `SMY-W429` and
         // `SMY-W469` (TX-P12 step 1, FC-9 decoding) and `SMY-E470`, `SMY-E471`, `SMY-E422` and
         // `SMY-W420` (step 2, the lens engine), in a thirteenth group; 135 with `SMY-W491` and
-        // `SMY-E492` (TX-P12 step 13), raised by `lib export --target-revision`.
-        assert_eq!(Code::ALL.len(), 135);
+        // `SMY-E492` (TX-P12 step 13), raised by `lib export --target-revision`; 136 with
+        // `SMY-E421` (TX-P12 step 3), raised by field resolution in `sq`; 137 with `SMY-E426`
+        // (step 5), raised by `schema check`; 139 with `SMY-W472` and `SMY-E473` (step 6),
+        // raised by `migrate`; 140 with `SMY-W475` (step 8), raised by `pointer(…)`.
+        assert_eq!(Code::ALL.len(), 140);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

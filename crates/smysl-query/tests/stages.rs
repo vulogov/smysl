@@ -271,10 +271,11 @@ fn an_operator_that_does_not_fit_its_field_is_refused() {
         let (code, _) = refusal(&store, stage);
         assert_eq!(code, "SMY-E512", "{stage}");
     }
-    // A payload key is refused for its own reason: its type is not declared to this build.
+    // A payload key is refused for its own reason: no declaration gives it a type (a key
+    // declared `int` is ordered, `tests/lensed.rs`).
     let (code, message) = refusal(&store, "where holder > \"x\"");
     assert_eq!(code, "SMY-E512");
-    assert!(message.contains("FC-9"), "{message}");
+    assert!(message.contains("no declaration gives"), "{message}");
     // The two ordered fields are not refused.
     let store2 = store;
     assert!(!answer(&store2, "where status > speculative")

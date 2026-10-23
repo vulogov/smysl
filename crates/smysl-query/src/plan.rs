@@ -13,16 +13,14 @@
 //! RFC describes, and the gap is in one place:
 //!
 //! - **Phase 1** resolves `using` pins. `using sq/N` is settled in the parser (`SMY-E427`). A
-//!   schema pin is checked against the declarations the store holds — which is what
-//!   `SMY-E466` says it checks — rather than against the `SchemaSet` of §4.2, because
-//!   `smysl-core` has no `schema/` module yet: that is TX-P12 step 1.
-//! - **Phase 2** resolves names. Relation kinds are resolvable today, from the fourteen kernel
-//!   kinds and the `relations` every declaration carries, so `SMY-E462` is raised here. Field
-//!   names are **not**: a declaration's `payload_shape` is opaque CBOR until FC-9 decoding
-//!   lands, so no field can be refused and `SMY-E421` would be a code with nothing behind it.
-//!   The plan records that the check did not run, because a resolution phase that quietly
-//!   resolves nothing is worse than one that is absent. The typed path is TX-P12 step 3, which
-//!   names `E421`/`E422` as its own.
+//!   schema pin is checked against the declarations the store holds (`SMY-E466`).
+//! - **Phase 2** resolves names. Relation kinds resolve from the fourteen kernel kinds and the
+//!   `relations` every declaration carries (`SMY-E462`). Fields resolve against the store's
+//!   decoded declarations (TX-P12 step 3, [`crate::resolve`]): a pinned or qualified reference is
+//!   compiled forward to the current revision, a name no declaration types is read raw where
+//!   some unit's type is undeclared and refused (`SMY-E421`) where none is, and the pins, the
+//!   chains the candidates are read through and every rewrite are recorded for `--explain`
+//!   ([`PlanStep::Lens`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -43,10 +41,11 @@ use crate::pred::Field;
 
 /// What the planner reads the world through (SMYSL-2.5 §4.2).
 ///
-/// §4.2 sketches six fields. Three of them name types this build does not have — `SchemaSet`
-/// (TX-P12 step 1), `SemanticSource` (TX-P10) and `Witnesses` (TX-P8). `TimeIndex` arrived in
-/// TX-P6 step 6 as [`Times`], with [`Entities`] beside it. They arrive with their phases; the
-/// struct is `#[non_exhaustive]` so each is an addition rather than a break.
+/// §4.2 sketches six fields. Two of them name types this build does not have —
+/// `SemanticSource` (TX-P10) and `Witnesses` (TX-P8). `TimeIndex` arrived in TX-P6 step 6 as
+/// [`Times`], with [`Entities`] beside it, and `SchemaSet` in TX-P12 step 3 inside the
+/// [`Reader`](crate::pred::Reader). They arrive with their phases; the struct is
+/// `#[non_exhaustive]` so each is an addition rather than a break.
 #[non_exhaustive]
 pub struct Env<'a> {
     pub store: &'a Store,
@@ -57,6 +56,9 @@ pub struct Env<'a> {
     pub times: Option<&'a dyn Times>,
     /// Entity resolution for `about entity(…)`, through aliases and same-as.
     pub entities: Option<&'a dyn Entities>,
+    /// §4.2's `SchemaSet`, and the lensed reading of units through it (TX-P12 step 3). Shared,
+    /// so an environment derived from this one reads each unit once.
+    pub reader: std::rc::Rc<crate::pred::Reader<'a>>,
 }
 
 impl<'a> Env<'a> {
@@ -66,6 +68,21 @@ impl<'a> Env<'a> {
             scope,
             times: None,
             entities: None,
+            reader: std::rc::Rc::new(crate::pred::Reader::new(store)),
+        }
+    }
+
+    /// The same environment with another entity port, sharing the reader.
+    pub fn with_entities_of<'b>(&self, entities: &'b dyn Entities) -> Env<'b>
+    where
+        'a: 'b,
+    {
+        Env {
+            store: self.store,
+            scope: self.scope,
+            times: self.times,
+            entities: Some(entities),
+            reader: self.reader.clone(),
         }
     }
 
@@ -158,6 +175,9 @@ pub enum Source {
     /// mentions the entity or it does not — and inventing one, say by counting mentions, would
     /// put a ranking in front of a reader that nothing measured.
     Entity(EntitySource),
+    /// `pointer("…")`: the units whose locator is the pointer, as each snapshot's revision of
+    /// its pointer lens spells it (§3.12). A selection, like an entity's.
+    Pointer(crate::pointer::PointerPlan),
 }
 
 /// `find "…" ~lex` (SMYSL-2.5 §3.3, §3.4).
@@ -229,10 +249,21 @@ pub struct Pin {
 pub enum PlanStep {
     /// Phase 1.
     Header { sq: u32, pins: Vec<Pin> },
-    /// Phase 2. `fields_checked` is false while payload shapes are opaque.
+    /// Phase 2. `fields_checked` is whether any declaration types a field: when none does,
+    /// every payload name is read raw, as before FC-9. `fields` is each payload name the
+    /// pipeline's filters use, as it resolved: the declared key, or the name with `(raw)`.
     Resolve {
         relations: Vec<String>,
         fields_checked: bool,
+        fields: Vec<String>,
+    },
+    /// Phase 2's compile-forward and the lenses the pipeline reads through (§3.9, §4.4): each
+    /// pin with the revision it compiles to, each chain with the units read through it, and
+    /// each predicate a pin rewrote.
+    Lens {
+        pins: Vec<crate::resolve::PinChain>,
+        chains: Vec<LensLine>,
+        rewrites: Vec<crate::resolve::Rewrite>,
     },
     /// Phase 3. `excluded` counts the units [`PlanOptions::exclude`] took out, and is zero
     /// for every plan that is not a rerun.
@@ -249,6 +280,8 @@ pub enum PlanStep {
         partitions: Vec<(String, usize, Option<String>)>,
         idf_scope: IdfScope,
     },
+    /// Phase 5, `pointer("…")`: the pointer each revision of each pointer lens spells it as.
+    Pointer { plan: crate::pointer::PointerPlan },
     /// Phase 6.
     Filter { stages: usize },
     /// Phase 6, the time half. Separate from [`PlanStep::Filter`] because the two fail
@@ -290,6 +323,19 @@ pub enum PlanStep {
         /// one this build fixes.
         rrf_k: f64,
     },
+}
+
+/// One lens chain the candidates are read through, for `--explain` (§3.9: "312 units read
+/// through `x.text/v1` 1→2; 0 unmappable").
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LensLine {
+    pub id: String,
+    pub from: u32,
+    pub to: u32,
+    pub hash: [u8; 32],
+    pub read: usize,
+    pub unmappable: usize,
 }
 
 /// One traversal, lowered (SMYSL-2.5 §3.3, phase 7).
@@ -451,6 +497,12 @@ pub struct Plan {
     pub purity: Purity,
     pub steps: Vec<PlanStep>,
     pub pins: Vec<Pin>,
+    /// The revisions in force (§3.6's `query:schemas`): every pin, and the current revision of
+    /// each schema an unpinned field resolved against, so a saved query reruns at the revision
+    /// it was asked under.
+    pub revisions: Vec<Pin>,
+    /// The chains a pin compiled through, as `id@from->to:hash` (§3.6's `query:lens-chain`).
+    pub lens_chains: Vec<String>,
     /// Phases 3 to 8: a pipeline, or a tree of them joined by set operators.
     pub expr: PlanExpr,
     /// Phase 9, in written order.
@@ -511,12 +563,12 @@ pub fn plan(q: &Query, env: &Env<'_>, opts: &PlanOptions) -> Result<Plan, Vec<Di
         sq,
         pins: pins.clone(),
     }];
-    let expr = lower_expr(&q.expr, env, opts, &mut steps, &mut diags);
+    let expr = lower_expr(&q.expr, env, opts, &pins, &mut steps, &mut diags);
 
     // --- phase 9: ordering, shaping, output --------------------------------------------------
     let mut ordering = Vec::new();
     for o in &q.ordering {
-        if let Some(lowered) = lower_ordering(o, &mut diags) {
+        if let Some(lowered) = lower_ordering(o, env, &pins, &mut diags) {
             ordering.push(lowered);
         }
     }
@@ -544,11 +596,14 @@ pub fn plan(q: &Query, env: &Env<'_>, opts: &PlanOptions) -> Result<Plan, Vec<Di
         });
     }
 
+    let (revisions, lens_chains) = in_force(env, &pins, &steps, &expr, &ordering);
     Ok(Plan {
         sq,
         purity: Purity::Pure,
         steps,
         pins,
+        revisions,
+        lens_chains,
         expr,
         ordering,
         shaping,
@@ -565,21 +620,21 @@ fn lower_expr(
     expr: &Expr,
     env: &Env<'_>,
     opts: &PlanOptions,
+    pins: &[Pin],
     steps: &mut Vec<PlanStep>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<PlanExpr> {
     match expr {
-        Expr::Pipeline(p) => {
-            lower_pipeline(p, env, opts, steps, diags).map(|p| PlanExpr::Pipeline(Box::new(p)))
-        }
+        Expr::Pipeline(p) => lower_pipeline(p, env, opts, pins, steps, diags)
+            .map(|p| PlanExpr::Pipeline(Box::new(p))),
         Expr::Set {
             op,
             left,
             right,
             span,
         } => {
-            let a = lower_expr(left, env, opts, steps, diags);
-            let b = lower_expr(right, env, opts, steps, diags);
+            let a = lower_expr(left, env, opts, pins, steps, diags);
+            let b = lower_expr(right, env, opts, pins, steps, diags);
             steps.push(PlanStep::SetOp {
                 op: set_name(*op),
                 span: *span,
@@ -598,15 +653,58 @@ fn lower_pipeline(
     pipeline: &Pipeline,
     env: &Env<'_>,
     opts: &PlanOptions,
+    pins: &[Pin],
     steps: &mut Vec<PlanStep>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<PipelinePlan> {
     // --- phase 2: resolution -----------------------------------------------------------------
+    //
+    // Relation kinds, then fields: every filter is compiled forward through its pins (§3.9)
+    // and lowered against the store's declarations here, so a field nothing declares is
+    // refused before a scope is resolved. Phase 6 runs what this lowered.
     let relations = resolve_relations(env.store, pipeline, diags);
+    let schemas = env.reader.schemas();
+    let mut compiler = crate::resolve::Compiler::new(schemas, pins);
+    let mut lens_pins = Vec::new();
+    for p in pins {
+        if let Ok(id) = smysl_core::ids::SchemaId::parse(&p.id) {
+            if schemas
+                .set
+                .revisions(&id)
+                .iter()
+                .any(|r| r.fields.typed().is_some())
+            {
+                match compiler.pin_chain(&id, p.revision, Span::new(0, 0)) {
+                    Ok(pc) => lens_pins.push(pc),
+                    Err(d) => diags.push(d),
+                }
+            }
+        }
+    }
+    let mut filters = Vec::new();
+    for f in &pipeline.filters {
+        let compiled = match compiler.compile(&f.pred, f.lens_none) {
+            Ok(p) => p,
+            Err(ds) => {
+                diags.extend(ds);
+                continue;
+            }
+        };
+        if let Some(lowered) = crate::pred::lower_in(&compiled, Some(schemas), f.lens_none, diags) {
+            filters.push(lowered);
+        }
+    }
+    let mut fields = Vec::new();
+    for l in &filters {
+        payload_fields(l, &mut fields);
+    }
     steps.push(PlanStep::Resolve {
         relations,
-        fields_checked: false,
+        fields_checked: schemas.typed(),
+        fields,
     });
+    let lens_at = steps.len();
+    let rewrites = std::mem::take(&mut compiler.rewrites);
 
     // --- phase 3: scope ----------------------------------------------------------------------
     let mut items: Vec<String> = Vec::new();
@@ -671,6 +769,7 @@ fn lower_pipeline(
             limit: opts.limit,
             rrf_k: crate::fuse::RRF_K,
         }),
+        Some(Source::Pointer(pp)) => steps.push(PlanStep::Pointer { plan: pp.clone() }),
         Some(Source::Entity(e)) => steps.push(PlanStep::Source {
             engine: "entity",
             lang: None,
@@ -695,17 +794,18 @@ fn lower_pipeline(
     // together: the observed axis alone is answerable from `Store::observed_at`, and lowering
     // half an axis pair would make `said during …` and `observed during …` differ in whether
     // they were honoured rather than in what they asked.
-    let mut filters = Vec::new();
-    for f in &pipeline.filters {
-        if f.lens_none {
-            // `with lens none` turns off compile-forward for the stage (SMYSL-2.9 §4.7,
-            // OQ-77). This build refuses every qualified reference anyway, so the modifier has
-            // nothing to turn off — but it is not an error, and silently accepting it is right:
-            // a query written for a later build must mean the same thing here or nothing.
-        }
-        if let Some(lowered) = crate::pred::lower(&f.pred, diags) {
-            filters.push(lowered);
-        }
+    // Filters were lowered in phase 2, against the declarations; their lens counts are over
+    // the candidates phase 3 resolved, and go beside the pins and rewrites phase 2 recorded.
+    let chains = lens_lines(env, &filters, &candidates.uids);
+    if !lens_pins.is_empty() || !chains.is_empty() || !rewrites.is_empty() {
+        steps.insert(
+            lens_at,
+            PlanStep::Lens {
+                pins: lens_pins,
+                chains,
+                rewrites,
+            },
+        );
     }
     let mut times = Vec::new();
     for t in &pipeline.times {
@@ -894,9 +994,29 @@ fn edge_set(store: &Store, kind: &str, span: Span, diags: &mut Vec<Diagnostic>) 
 }
 
 /// Phase 9 for one ordering stage.
-fn lower_ordering(o: &Ordering, diags: &mut Vec<Diagnostic>) -> Option<OrderPlan> {
+fn lower_ordering(
+    o: &Ordering,
+    env: &Env<'_>,
+    pins: &[Pin],
+    diags: &mut Vec<Diagnostic>,
+) -> Option<OrderPlan> {
+    let schemas = env.reader.schemas();
+    let mut compiler = crate::resolve::Compiler::new(schemas, pins);
+    let mut field_of =
+        |f: &crate::ast::FieldRef, lens_none: bool, diags: &mut Vec<Diagnostic>| -> Option<Field> {
+            let f = match compiler.field(f, lens_none) {
+                Ok(f) => f,
+                Err(d) => {
+                    diags.push(d);
+                    return None;
+                }
+            };
+            crate::pred::resolve_in(&f, Some(schemas), lens_none, diags)
+        };
     match o {
-        Ordering::OrderBy { keys, .. } => {
+        Ordering::OrderBy {
+            keys, lens_none, ..
+        } => {
             // One key per stage in this build. A multi-key sort is a lexicographic comparator
             // over several typed fields, and the second key only ever breaks a tie in the
             // first — which `order by` already breaks by uid. Refusing the rest by name is
@@ -916,7 +1036,7 @@ fn lower_ordering(o: &Ordering, diags: &mut Vec<Diagnostic>) -> Option<OrderPlan
             match &first.target {
                 SortTarget::Salience => Some(OrderPlan::Salience { dir }),
                 SortTarget::Field(f) => Some(OrderPlan::Field {
-                    field: crate::pred::resolve(f, diags)?,
+                    field: field_of(f, *lens_none, diags)?,
                     dir,
                 }),
             }
@@ -941,11 +1061,15 @@ fn lower_ordering(o: &Ordering, diags: &mut Vec<Diagnostic>) -> Option<OrderPlan
             );
             None
         }
-        Ordering::GroupBy { field, .. } => Some(OrderPlan::GroupBy {
-            field: crate::pred::resolve(field, diags)?,
+        Ordering::GroupBy {
+            field, lens_none, ..
+        } => Some(OrderPlan::GroupBy {
+            field: field_of(field, *lens_none, diags)?,
         }),
-        Ordering::CompareBy { field, .. } => Some(OrderPlan::CompareBy {
-            field: crate::pred::resolve(field, diags)?,
+        Ordering::CompareBy {
+            field, lens_none, ..
+        } => Some(OrderPlan::CompareBy {
+            field: field_of(field, *lens_none, diags)?,
         }),
         Ordering::AlignByClass { span, .. } => {
             diags.push(
@@ -1144,6 +1268,18 @@ fn lower_source(
                 span,
             }))
         }
+        AstSource::Pointer(p) => {
+            if !p.starts_with('/') && !p.is_empty() {
+                diags.push(Diagnostic::at(Code::E460, span).with_message(format!(
+                    "`pointer({p:?})` takes a JSON Pointer, which starts with `/`"
+                )));
+                return None;
+            }
+            Some(Source::Pointer(crate::pointer::compile(
+                &env.reader.schemas().set,
+                p,
+            )))
+        }
         other => {
             let what = match other {
                 AstSource::AboutEntity(_) => {
@@ -1157,7 +1293,7 @@ fn lower_source(
                                       is not lowered yet"
                 }
                 AstSource::View(_) => "`view` needs a saved view",
-                AstSource::Pointer(_) => "`pointer` needs the pointer registry",
+                AstSource::Pointer(_) => unreachable!("handled above"),
                 AstSource::Metric(_) => "`metric` dispatches to the measures of SMYSL-2.6",
                 AstSource::Question(_) => "`question` is the interpretive source of OQ-47",
                 AstSource::Match { .. } => "`match` is refused by SMYSL-2.5 §3.3 in this RFC",
@@ -1226,6 +1362,169 @@ fn lower_time(
 
 /// Phase 2 for relation kinds: the fourteen kernel kinds, plus whatever the declarations in
 /// scope add. An undeclared kind is `SMY-E462`.
+/// The revisions a plan is in force at, and the chains its pins compiled through (§3.6).
+fn in_force(
+    env: &Env<'_>,
+    pins: &[Pin],
+    steps: &[PlanStep],
+    expr: &PlanExpr,
+    ordering: &[OrderPlan],
+) -> (Vec<Pin>, Vec<String>) {
+    let mut ids: BTreeSet<String> = BTreeSet::new();
+    fn walk(l: &crate::pred::Lowered, ids: &mut BTreeSet<String>) {
+        use crate::pred::Lowered;
+        match l {
+            Lowered::And(v) | Lowered::Or(v) => v.iter().for_each(|x| walk(x, ids)),
+            Lowered::Not(x) => walk(x, ids),
+            Lowered::Cmp {
+                field: Field::Declared { id, .. },
+                ..
+            } => {
+                ids.insert(id.clone());
+            }
+            _ => {}
+        }
+    }
+    fn pipes<'p>(e: &'p PlanExpr, out: &mut Vec<&'p PipelinePlan>) {
+        match e {
+            PlanExpr::Pipeline(p) => out.push(p),
+            PlanExpr::Set { left, right, .. } => {
+                pipes(left, out);
+                pipes(right, out);
+            }
+        }
+    }
+    let mut ps = Vec::new();
+    pipes(expr, &mut ps);
+    for p in ps {
+        p.filters.iter().for_each(|l| walk(l, &mut ids));
+    }
+    for o in ordering {
+        if let OrderPlan::Field {
+            field: Field::Declared { id, .. },
+            ..
+        }
+        | OrderPlan::GroupBy {
+            field: Field::Declared { id, .. },
+        }
+        | OrderPlan::CompareBy {
+            field: Field::Declared { id, .. },
+        } = o
+        {
+            ids.insert(id.clone());
+        }
+    }
+    let mut revisions: Vec<Pin> = pins.to_vec();
+    let set = &env.reader.schemas().set;
+    for id in ids {
+        if revisions.iter().any(|p| p.id == id) {
+            continue;
+        }
+        let Ok(sid) = smysl_core::ids::SchemaId::parse(&id) else {
+            continue;
+        };
+        if let Some(cur) = set.current(&sid) {
+            revisions.push(Pin {
+                id,
+                revision: cur.version,
+            });
+        }
+    }
+    revisions.sort_by(|a, b| (&a.id, a.revision).cmp(&(&b.id, b.revision)));
+    revisions.dedup();
+    let mut chains: Vec<String> = Vec::new();
+    for s in steps {
+        if let PlanStep::Lens { pins, .. } = s {
+            for pc in pins {
+                let hex: String = pc.hash.iter().map(|b| format!("{b:02x}")).collect();
+                let line = format!("{}@{}->{}:{hex}", pc.id, pc.from, pc.to);
+                if !chains.contains(&line) {
+                    chains.push(line);
+                }
+            }
+        }
+    }
+    chains.sort();
+    (revisions, chains)
+}
+
+/// Each payload name a lowered predicate reads, as it resolved, in first-use order.
+fn payload_fields(l: &crate::pred::Lowered, out: &mut Vec<String>) {
+    use crate::pred::Lowered;
+    match l {
+        Lowered::And(v) | Lowered::Or(v) => v.iter().for_each(|x| payload_fields(x, out)),
+        Lowered::Not(x) => payload_fields(x, out),
+        Lowered::Cmp { field, .. } => {
+            let name = match field {
+                Field::Payload(k) => format!("{k} (raw)"),
+                Field::Declared { key, .. } => key.clone(),
+                Field::Literal { id, revision, key } => format!("{id}@{revision}:{key} (literal)"),
+                _ => return,
+            };
+            if !out.contains(&name) {
+                out.push(name);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Whether a lowered predicate reads a payload key through declarations.
+fn lensed(l: &crate::pred::Lowered) -> bool {
+    use crate::pred::Lowered;
+    match l {
+        Lowered::And(v) | Lowered::Or(v) => v.iter().any(lensed),
+        Lowered::Not(x) => lensed(x),
+        Lowered::Cmp { field, .. } => {
+            matches!(field, Field::Declared { .. } | Field::Literal { .. })
+        }
+        _ => false,
+    }
+}
+
+/// The chains the candidates are read through, when a filter reads a declared key: per schema
+/// and inferred revision below the current one, how many units, and how many lost something.
+fn lens_lines(
+    env: &Env<'_>,
+    filters: &[crate::pred::Lowered],
+    candidates: &BTreeSet<Uid>,
+) -> Vec<LensLine> {
+    if !filters.iter().any(lensed) {
+        return Vec::new();
+    }
+    let set = &env.reader.schemas().set;
+    let mut lines: BTreeMap<(String, u32), LensLine> = BTreeMap::new();
+    for uid in candidates {
+        let Some(l) = env.reader.lensed(uid) else {
+            continue;
+        };
+        let Some(cur) = set.current(&l.id) else {
+            continue;
+        };
+        if l.hi >= cur.version {
+            continue;
+        }
+        let Some(chain) = env.reader.chain(&l.id, l.hi) else {
+            continue;
+        };
+        let line = lines
+            .entry((l.id.as_str().to_string(), l.hi))
+            .or_insert_with(|| LensLine {
+                id: l.id.as_str().to_string(),
+                from: l.hi,
+                to: cur.version,
+                hash: chain.hash,
+                read: 0,
+                unmappable: 0,
+            });
+        line.read += 1;
+        if l.lost.is_some() {
+            line.unmappable += 1;
+        }
+    }
+    lines.into_values().collect()
+}
+
 fn resolve_relations(store: &Store, p: &Pipeline, diags: &mut Vec<Diagnostic>) -> Vec<String> {
     let mut known: BTreeSet<String> = RelKind::KERNEL.iter().map(|k| k.to_string()).collect();
     for record in store.iter() {

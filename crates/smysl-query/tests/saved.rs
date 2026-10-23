@@ -184,9 +184,11 @@ fn parameters_are_bound_into_the_saved_text() {
     assert_eq!(d.code.as_str(), "SMY-E460");
 }
 
-/// The schema effect waits for the lens engine, and says so by code.
+/// With no declarations nothing changes between the revisions a query was saved at and the
+/// current ones, so `--current` reports an empty schema effect — asked, and answered (TX-P12
+/// step 4; `tests/lensed.rs` has §19.5's, which is not empty).
 #[test]
-fn the_schema_effect_is_refused_until_the_lens_engine_exists() {
+fn a_current_rerun_over_undeclared_data_has_no_schema_effect() {
     let mut store = store_of(NAME);
     let (_, records) = saved_records(&store, QUERY);
     let saved_uid = match &records[0] {
@@ -197,9 +199,9 @@ fn the_schema_effect_is_refused_until_the_lens_engine_exists() {
     let scope = StoreScope::new(NAME, &store);
     let env = Env::new(&store, &scope);
     let saved = load(&store, &saved_uid).expect("loads");
-    let diags = rerun(&saved, &env, &PlanOptions::default(), true).expect_err("refused");
-    assert_eq!(diags[0].code.as_str(), "SMY-E461");
-    assert!(diags[0].message.contains("TX-P12"), "{}", diags[0].message);
+    let again = rerun(&saved, &env, &PlanOptions::default(), true).expect("reruns");
+    assert_eq!(again.schema_effect, Some(saved::SetDiff::between(&[], &[])));
+    assert!(again.data_effect.is_empty());
 }
 
 /// A uid that is not a saved query says what it is instead.

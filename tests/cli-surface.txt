@@ -845,3 +845,39 @@ lib        [possible values: include, drop]
 lib        --no-verify
 lib        --force
 lib        --help
+schema     <ACTION>
+schema     [possible values: show, check]
+schema     [TARGET]
+schema     --config
+schema     --store
+schema     --output
+schema     --format
+schema     [possible values: surface, cbor, pack]
+schema     --strict
+schema     --offline
+schema     --no-color
+schema     --noprogress
+schema     --json
+schema     --quiet
+schema     --verbose
+schema     --seed-check
+schema     --help
+migrate    [PATH]
+migrate    --config
+migrate    --schema
+migrate    --to
+migrate    --agent
+migrate    --output
+migrate    --clock
+migrate    --format
+migrate    [possible values: surface, cbor, pack]
+migrate    --dry-run
+migrate    --strict
+migrate    --offline
+migrate    --no-color
+migrate    --noprogress
+migrate    --json
+migrate    --quiet
+migrate    --verbose
+migrate    --seed-check
+migrate    --help

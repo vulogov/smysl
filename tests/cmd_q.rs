@@ -367,11 +367,14 @@ fn save_then_rerun_reports_the_data_effect() {
     assert!(explained.status.success(), "{}", stderr(&explained));
     assert!(stdout(&explained).starts_with("plan sq/1\n"));
 
-    // The schema effect waits for the lens engine, and a rerun saved again would need it.
+    // `--current` runs under current revisions and reports the schema effect, which over a
+    // store with no typed declarations is nothing (TX-P12 step 4; §19.5's is in
+    // `crates/smysl-query/tests/lensed.rs`). A pinned rerun saved again is refused: it would
+    // be the unit it reran.
     let current = run(&["q", "--rerun", &uid, "--current", &grown]);
-    assert!(!current.status.success());
+    assert!(current.status.success(), "{}", stderr(&current));
     assert!(
-        stderr(&current).contains("SMY-E461"),
+        stderr(&current).contains("schema effect: 0 added, 0 removed"),
         "{}",
         stderr(&current)
     );
@@ -381,6 +384,14 @@ fn save_then_rerun_reports_the_data_effect() {
         stderr(&resave).contains("supersedes"),
         "{}",
         stderr(&resave)
+    );
+    // `--current --save` writes a new saved query superseding the old one (§3.6).
+    let superseded = run(&["q", "--rerun", &uid, "--current", "--save", &grown]);
+    assert!(superseded.status.success(), "{}", stderr(&superseded));
+    assert!(
+        stderr(&superseded).contains(&format!("superseding {uid}")),
+        "{}",
+        stderr(&superseded)
     );
 
     // A uid that is not a saved query is named for what it is.

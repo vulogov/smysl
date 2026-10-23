@@ -187,6 +187,8 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "measure",   about: "Text, graph, channel and dialogue measures as derived data units", purity: Purity::Mixed, phase: "TX-P8"  , impure_when: Some("a model-dependent id (T8, D5's embeddings), none of which this build registers") , forms: NO_DOCUMENT },
     Cmd { name: "assess",    about: "Assessment keys, reader scores and knowledge states",  purity: Purity::Mixed, phase: "TX-P9"  , impure_when: Some("a generated key or a model judge (--generate, --judge model), neither of which this build has") , forms: NO_DOCUMENT },
     Cmd { name: "lib",       about: "Import smysl files into the library; export it as files", purity: Purity::Pure,  phase: "TX-P11" , impure_when: None , forms: LIB_FORMS },
+    Cmd { name: "schema",    about: "Show schema revisions; check the naming rule and lens totality", purity: Purity::Pure,  phase: "TX-P12" , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "migrate",   about: "Re-derive a schema's units under a newer revision; staged", purity: Purity::Pure,  phase: "TX-P12" , impure_when: None , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -870,8 +872,9 @@ fn cli() -> Command {
                     Arg::new("current")
                         .long("current")
                         .help(
-                            "With --rerun: also run under current revisions and report the \
-                             schema effect (needs the lens engine)",
+                            "With --rerun: also run under current revisions, return that \
+                             answer and report the schema effect; with --save, supersede the \
+                             saved query",
                         )
                         .action(ArgAction::SetTrue),
                 )
@@ -2098,6 +2101,66 @@ fn cli() -> Command {
             // not the nested clap subcommands SMYSL-2.7 §4.4 sketched. Nested, `lib --help`
             // would list six names and none of their flags, and `make cli-surface` reads each
             // command's `--help` once: the gate would record `lib` as taking nothing.
+            "migrate" => sub
+                .arg(
+                    Arg::new("schema")
+                        .long("schema")
+                        .value_name("ID")
+                        .required(true)
+                        .help("The schema whose units are re-derived"),
+                )
+                .arg(
+                    Arg::new("to")
+                        .long("to")
+                        .value_name("REV")
+                        .required(true)
+                        .help("The revision to re-derive them under"),
+                )
+                .arg(
+                    Arg::new("agent")
+                        .long("agent")
+                        .value_name("ID")
+                        .help("Who the migration is attributed to [default: tool:smysl-migrate]"),
+                )
+                .arg(
+                    Arg::new("clock")
+                        .long("clock")
+                        .value_name("MS[.N]")
+                        .help("The attestations' clock; otherwise one past the store's latest"),
+                )
+                .arg(
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .help("Report what would be staged, and stage nothing")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("store")
+                        .value_name("PATH")
+                        .help("Store to migrate"),
+                ),
+            "schema" => sub
+                .arg(
+                    Arg::new("action")
+                        .required(true)
+                        .value_name("ACTION")
+                        .value_parser(["show", "check"])
+                        .help(
+                            "show a schema's revisions, fields, lens steps and chains; or check \
+                             rule N over every revision and lens totality over the store",
+                        ),
+                )
+                .arg(
+                    Arg::new("targets")
+                        .value_name("TARGET")
+                        .num_args(0..=2)
+                        .action(ArgAction::Append)
+                        .help(
+                            "`show ID [STORE]`; `check [ID] [STORE]` — one target is the store \
+                             unless --store gives it, then the id; `check` without an id checks \
+                             every schema the store declares",
+                        ),
+                ),
             "lib" => sub
                 .arg(
                     Arg::new("action")
@@ -5686,14 +5749,13 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 
     let job = match (rerun, text) {
         (Some(uid), _) => {
-            if m.get_flag("save") {
+            if m.get_flag("save") && !m.get_flag("current") {
                 // `--current --save` writes a new saved query that supersedes the old one
-                // (SMYSL-2.5 §3.6), and `--current` is TX-P12's; a pinned rerun saved again
-                // would be the same query with the same recipe over the same text, which is
-                // what the old unit already is.
+                // (SMYSL-2.5 §3.6); a pinned rerun saved again would be the same query with the
+                // same recipe over the same text, which is what the old unit already is.
                 eprintln!(
                     "smysl q: --rerun --save supersedes a saved query under current revisions, \
-                     which needs --current and the lens engine (TX-P12)"
+                     which needs --current"
                 );
                 return ExitCode::Usage;
             }
@@ -7061,6 +7123,399 @@ fn cmd_assess(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
 
 /// `lib <ACTION>`. `--format` is decided here, per action: the table lets `lib` through with
 /// every form, because `export` names them all, and the other five write no document.
+/// `smysl schema show|check` (SMYSL-2.5 §3.11, TX-P12 step 5).
+///
+/// Pure: both read the store's declarations through `smysl_core::schema` and nothing else.
+/// `check` holds every revision of an id against every earlier one under rule N (`SMY-E426`),
+/// each lens step against the revision it leaves (`SMY-E471`), reports forks (`SMY-W429`), and
+/// lenses every unit the schema governs to its current revision, listing what does not read
+/// whole (`SMY-W420`). Errors exit 3, as `check`'s do.
+fn cmd_schema(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use smysl::schema::SchemaSet;
+
+    let action = m
+        .get_one::<String>("action")
+        .map(String::as_str)
+        .unwrap_or("");
+    let targets: Vec<String> = m
+        .get_many::<String>("targets")
+        .map(|v| v.cloned().collect())
+        .unwrap_or_default();
+    let flag_store = global.get_one::<String>("store").cloned();
+    let (id, path) = match (action, targets.as_slice(), flag_store) {
+        (_, [id, store], _) => (Some(id.clone()), store.clone()),
+        ("show", [id], Some(store)) => (Some(id.clone()), store),
+        ("show", [_], None) | ("show", [], _) => {
+            eprintln!("smysl schema show: give the schema id and the store");
+            return ExitCode::Usage;
+        }
+        ("check", [id], Some(store)) => (Some(id.clone()), store),
+        ("check", [store], None) => (None, store.clone()),
+        ("check", [], Some(store)) => (None, store),
+        _ => {
+            eprintln!("smysl schema {action}: no store given");
+            return ExitCode::Usage;
+        }
+    };
+    let id = match id
+        .map(|i| SchemaId::parse(&i).map_err(|e| (i, e)))
+        .transpose()
+    {
+        Ok(id) => id,
+        Err((i, e)) => {
+            eprintln!("smysl schema {action}: `{i}` is not a schema id: {e}");
+            return ExitCode::Usage;
+        }
+    };
+    warn_output_is_a_report(global, "schema");
+    let (store, _) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl schema: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let mut decoding = smysl::Report::new();
+    let set = SchemaSet::from_decls(store.schema_decls(), &mut decoding);
+    for d in decoding.iter() {
+        eprintln!("smysl schema: {}: {}", d.code.as_str(), d.message);
+    }
+    let ids: Vec<SchemaId> = match &id {
+        Some(i) => {
+            if set.revisions(i).is_empty() {
+                eprintln!("smysl schema {action}: the store declares no `{i}`");
+                return ExitCode::Failure;
+            }
+            vec![i.clone()]
+        }
+        None => set.ids().filter_map(|i| SchemaId::parse(i).ok()).collect(),
+    };
+    match action {
+        "show" => {
+            for i in &ids {
+                print!("{}", schema_show(&set, i));
+            }
+            ExitCode::Success
+        }
+        _ => {
+            let mut errors = 0;
+            for i in &ids {
+                let mut report = smysl::Report::new();
+                let n = set.check_rule_n(i, &mut report);
+                let t = set.check_units(i, store.units().map(|(u, x)| (u, &x.core)), &mut report);
+                for d in report.iter() {
+                    eprintln!("smysl schema: {}: {}", d.code.as_str(), d.message);
+                }
+                for (uid, lost) in &t.unmappable {
+                    if lost.is_empty() {
+                        eprintln!("  {uid}: nothing reads (no usable path to current)");
+                    } else {
+                        let keys: Vec<&str> = lost.iter().map(String::as_str).collect();
+                        eprintln!("  {uid}: {}", keys.join(", "));
+                    }
+                }
+                let revs = {
+                    let mut v: Vec<u32> = set.revisions(i).iter().map(|r| r.version).collect();
+                    v.dedup();
+                    v.len()
+                };
+                println!(
+                    "{i}: {} over {revs} revision(s); {} unit(s), {} whole, {} unmappable",
+                    if n == 0 {
+                        "rule N holds".to_string()
+                    } else {
+                        format!("{n} error(s)")
+                    },
+                    t.units,
+                    t.whole,
+                    t.unmappable.len()
+                );
+                errors += n;
+            }
+            if errors > 0 {
+                ExitCode::CheckErrors
+            } else {
+                ExitCode::Success
+            }
+        }
+    }
+}
+
+/// `smysl migrate --schema ID --to REV` (SMYSL-2.5 §3.11, TX-P12 step 6).
+///
+/// Deterministic: each unit of the schema written below REV is read forward through the chain
+/// and staged as a new unit, attested `Transformed` from the old one with the chain hash as
+/// recipe, with a `supersedes` edge new → old; rule M caps each at its grounds, commitments and
+/// datings are proposed for the new uids (`SMY-W472`), and nothing is appended — the batch
+/// waits in `.smysl/staged.smy` for `merge --staged`, and `relink` re-points references once
+/// it is accepted. A unit the target requires a key of that no `default` supplies is
+/// `SMY-E473`. Exits 10 when it stages, 11 when rule M lowered a unit, as `ingest` does.
+#[cfg(feature = "stage")]
+fn cmd_migrate(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use smysl::migrate::{migrate, MigrateOptions};
+
+    let path = match store_path(m, global, "migrate") {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+    let id = match m.get_one::<String>("schema").map(|s| SchemaId::parse(s)) {
+        Some(Ok(id)) => id,
+        Some(Err(e)) => {
+            eprintln!("smysl migrate: --schema: {e}");
+            return ExitCode::Usage;
+        }
+        None => return ExitCode::Usage,
+    };
+    let Some(to) = m
+        .get_one::<String>("to")
+        .and_then(|s| s.parse::<u32>().ok())
+    else {
+        eprintln!("smysl migrate: --to takes a revision number");
+        return ExitCode::Usage;
+    };
+    let agent_name = m
+        .get_one::<String>("agent")
+        .map(String::as_str)
+        .unwrap_or("tool:smysl-migrate");
+    let agent = match smysl::AgentId::new(agent_name) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl migrate: --agent {agent_name}: {e}");
+            return ExitCode::Usage;
+        }
+    };
+    let (store, _) = match load_store(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl migrate: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let now = match m.get_one::<String>("clock") {
+        Some(c) => {
+            let (ms, n) = c.split_once('.').unwrap_or((c.as_str(), "0"));
+            match (ms.parse::<u64>(), n.parse::<u32>()) {
+                (Ok(ms), Ok(n)) => smysl::Hlc::new(ms, n, agent.clone()),
+                _ => {
+                    eprintln!(
+                        "smysl migrate: --clock {c}: milliseconds, then optionally `.` and a \
+                         counter"
+                    );
+                    return ExitCode::Usage;
+                }
+            }
+        }
+        // One past every attestation the store holds, so the migration sorts after what it
+        // migrates and is a function of the store, not of when it ran.
+        None => {
+            let latest = store
+                .iter()
+                .filter_map(|r| match r {
+                    Record::Attestation(a) => Some(a.ts.wall_ms),
+                    _ => None,
+                })
+                .max()
+                .unwrap_or(0);
+            smysl::Hlc::new(latest + 1, 0, agent.clone())
+        }
+    };
+    let migration = match migrate(&store, &MigrateOptions::new(id.clone(), to, agent, now)) {
+        Ok(mg) => mg,
+        Err(e) => {
+            let d = e.diagnostic();
+            eprintln!("smysl migrate: {}: {}", d.code.as_str(), d.message);
+            return ExitCode::Failure;
+        }
+    };
+    let staged = &migration.staged;
+    for d in staged.report.iter() {
+        eprintln!("smysl migrate: {}: {}", d.code.as_str(), d.message);
+    }
+    let summary = format!(
+        "{} unit(s) of {id} re-derived under @{to}; {} already there; {} unmappable; {} \
+         commitment(s) and {} dating(s) proposed",
+        migration.pairs.len(),
+        migration.current,
+        migration.unmappable.len(),
+        migration.proposed_commitments,
+        migration.proposed_datings
+    );
+    if m.get_flag("dry-run") {
+        println!("{summary} (dry run: nothing staged)");
+        return ExitCode::Success;
+    }
+    if migration.pairs.is_empty() {
+        println!("{summary}; nothing to stage");
+        return ExitCode::Success;
+    }
+    if staged.has_errors() {
+        eprintln!("smysl migrate: the batch does not check; nothing staged");
+        return ExitCode::CheckErrors;
+    }
+    let root = root_beside(Some(&path));
+    if let Err(e) = smysl::stage::write(&root, staged) {
+        eprintln!("smysl migrate: {e}");
+        return ExitCode::Failure;
+    }
+    println!(
+        "{summary}; staged in {} — review, then `smysl merge --staged`, then `smysl relink`",
+        root.join(smysl::stage::PATH).display()
+    );
+    if staged.weakened.is_empty() {
+        ExitCode::Staged
+    } else {
+        ExitCode::StagedWithCorrections
+    }
+}
+
+#[cfg(not(feature = "stage"))]
+fn cmd_migrate(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl migrate: this build has no staging layer (build with --features stage)");
+    ExitCode::Usage
+}
+
+/// `schema show`'s text for one id: revisions, each revision's field table, the lens steps
+/// with their ops, the chain from each revision to current with its hash, and forks.
+fn schema_show(set: &smysl::schema::SchemaSet, id: &SchemaId) -> String {
+    use smysl::schema::{Cond, Fields};
+    let mut out = String::new();
+    let revs = set.revisions(id);
+    let current = set.current(id).map(|r| r.version);
+    out.push_str(&format!(
+        "{id}\n  current: {}\n",
+        match current {
+            Some(v) => format!("@{v}"),
+            None => "none (forked)".to_string(),
+        }
+    ));
+    let cond = |c: &Option<Cond>| match c {
+        Some(c) => format!(" when {} = {}", c.key, hvalue_text(&c.value)),
+        None => String::new(),
+    };
+    for r in revs {
+        out.push_str(&format!("  @{}", r.version));
+        if !r.types.is_empty() {
+            let t: Vec<&str> = r.types.iter().map(|t| t.as_str()).collect();
+            out.push_str(&format!("  types {}", t.join(", ")));
+        }
+        if !r.relations.is_empty() {
+            out.push_str(&format!("  relations {}", r.relations.len()));
+        }
+        out.push('\n');
+        match &r.fields {
+            Fields::Typed(table) => {
+                for (k, f) in table {
+                    let mut line = format!("      {k}  {}", f.ty.as_string());
+                    if !f.values.is_empty() {
+                        line.push_str(&format!(" [{}]", f.values.join(", ")));
+                    }
+                    if !f.literals.is_empty() {
+                        line.push_str(&format!(" literals [{}]", f.literals.join(", ")));
+                    }
+                    if let Some(v) = f.required_from {
+                        line.push_str(&format!("  required-from {v}{}", cond(&f.required_when)));
+                    }
+                    if let Some(v) = f.retired_in {
+                        line.push_str(&format!("  retired-in {v}"));
+                    }
+                    out.push_str(&line);
+                    out.push('\n');
+                }
+            }
+            Fields::Opaque => out.push_str("      fields: opaque (SMY-W430)\n"),
+            _ => out.push_str("      fields: none declared\n"),
+        }
+    }
+    let steps = set.steps(id);
+    if !steps.is_empty() {
+        out.push_str("  steps:\n");
+        for s in steps {
+            let ops: Vec<String> = s
+                .ops
+                .iter()
+                .map(|o| {
+                    use smysl::schema::LensOp;
+                    match o {
+                        LensOp::RenameType { from, to } => format!("rename-type {from} -> {to}"),
+                        LensOp::RenameRelation { from, to } => {
+                            format!("rename-relation {} -> {}", from.as_str(), to.as_str())
+                        }
+                        LensOp::RenameKey { from, to } => format!("rename-key {from} -> {to}"),
+                        LensOp::MapValue { key, map } => format!(
+                            "map-value {key} {{{}}}",
+                            map.iter()
+                                .map(|(a, b)| format!("{a} -> {b}"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                        LensOp::SplitValue { key, from, to, add } => format!(
+                            "split-value {key} {from} -> {to} + {}",
+                            add.iter()
+                                .map(|(k, v)| format!("{k} = {}", hvalue_text(v)))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                        LensOp::Require { key, when } => format!("require {key}{}", cond(when)),
+                        LensOp::Default { key, value, when } => {
+                            format!("default {key} = {}{}", hvalue_text(value), cond(when))
+                        }
+                        LensOp::Retire { key } => format!("retire {key}"),
+                        other => format!("{} (unknown to this build, SMY-W469)", other.tag()),
+                    }
+                })
+                .collect();
+            out.push_str(&format!("    {}->{}  {}\n", s.from, s.to, ops.join("; ")));
+        }
+    }
+    if let Some(cur) = current {
+        out.push_str("  chains to current:\n");
+        let mut seen = std::collections::BTreeSet::new();
+        for r in revs {
+            if !seen.insert(r.version) {
+                continue;
+            }
+            match set.chain(id, r.version, cur) {
+                Ok(c) => {
+                    let hex: String = c.hash.iter().map(|b| format!("{b:02x}")).collect();
+                    out.push_str(&format!("    @{}->@{cur}  {hex}\n", r.version));
+                }
+                Err(e) => out.push_str(&format!(
+                    "    @{}->@{cur}  {}: {e}\n",
+                    r.version,
+                    e.code().as_str()
+                )),
+            }
+        }
+    }
+    let forks: Vec<String> = set
+        .forks()
+        .into_iter()
+        .filter(|(i, _)| i == id)
+        .map(|(_, v)| format!("@{v}"))
+        .collect();
+    out.push_str(&format!(
+        "  forks: {}\n",
+        if forks.is_empty() {
+            "none".to_string()
+        } else {
+            forks.join(", ")
+        }
+    ));
+    out
+}
+
+/// A payload value as `schema show` writes it.
+fn hvalue_text(v: &smysl::surface::HValue) -> String {
+    use smysl::surface::HValue;
+    match v {
+        HValue::Str(s) => s.clone(),
+        HValue::Int(i) => i.to_string(),
+        HValue::Bool(b) => b.to_string(),
+        HValue::Null => "null".to_string(),
+        other => format!("{other:?}"),
+    }
+}
+
 #[cfg(feature = "text")]
 fn cmd_lib(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let action = m.get_one::<String>("action").expect("required").as_str();
@@ -8168,7 +8623,38 @@ fn q_run(
                     return (ExitCode::Usage, records);
                 }
             };
-            let effect = Some((again.data_effect, again.recipe_matches));
+            if *current && m.get_flag("save") {
+                // The query as `--current` ran it: the saved text with its schema pins
+                // dropped, saved anew and superseding the old unit (§3.6).
+                let mut at_cur = match smysl::query::parse(&saved.text) {
+                    Ok(p) => p.query,
+                    Err(d) => {
+                        eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+                        return (ExitCode::Failure, records);
+                    }
+                };
+                at_cur
+                    .header
+                    .retain(|u| !matches!(u, smysl::query::ast::Using::Schema { .. }));
+                match smysl::query::to_records(&at_cur, &again.plan, &again.run, opts) {
+                    Ok((unit, edges)) => {
+                        let new = smysl::canonical_uid(&unit);
+                        records.push(Record::Unit(unit));
+                        records.extend(edges.into_iter().map(Record::Relation));
+                        records.push(Record::Relation(Relation::new(
+                            RelKind::Supersedes,
+                            new,
+                            uid,
+                        )));
+                        eprintln!("smysl q: saved {new}, superseding {uid}");
+                    }
+                    Err(d) => {
+                        eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+                        return (ExitCode::Failure, records);
+                    }
+                }
+            }
+            let effect = Some((again.data_effect, again.recipe_matches, again.schema_effect));
             (again.plan, again.run, false, effect)
         }
         Job::Run { query, as_view } => {
@@ -8276,7 +8762,7 @@ fn q_run(
     }
     q_print(&first, env.store, m, global);
 
-    if let Some((diff, recipe_matches)) = effect {
+    if let Some((diff, recipe_matches, schema)) = effect {
         // On stderr beside the warnings: the answer is the rerun's result, and the effect is
         // a statement *about* it that a caller piping the result should not have to strip.
         eprintln!(
@@ -8294,6 +8780,20 @@ fn q_run(
         }
         for u in &diff.removed {
             eprintln!("  - {u}");
+        }
+        if let Some(schema) = schema {
+            // `diff(E_pin, E_cur)`: what the declarations' growth changed (§3.6).
+            eprintln!(
+                "smysl q: schema effect: {} added, {} removed",
+                schema.added.len(),
+                schema.removed.len()
+            );
+            for u in &schema.added {
+                eprintln!("  + {u}");
+            }
+            for u in &schema.removed {
+                eprintln!("  - {u}");
+            }
         }
     }
 
@@ -10470,6 +10970,8 @@ fn main() -> ProcExitCode {
         "measure" => cmd_measure(sub, &matches),
         "assess" => cmd_assess(sub, &matches),
         "lib" => cmd_lib(sub, &matches),
+        "schema" => cmd_schema(sub, &matches),
+        "migrate" => cmd_migrate(sub, &matches),
         _ => {
             // Unreachable while every command in `COMMANDS` has an arm above, which
             // `command_table_matches_section_23` enforces. Kept as the honest answer if one
@@ -12632,7 +13134,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 36);
+        assert_eq!(COMMANDS.len(), 38);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -12672,7 +13174,9 @@ mod tests {
                 "ask",
                 "measure",
                 "assess",
-                "lib"
+                "lib",
+                "schema",
+                "migrate"
             ]
         );
     }

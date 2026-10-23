@@ -416,12 +416,7 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
         group: group.clone(),
         inner: port,
     };
-    let scoped = Env {
-        store: env.store,
-        scope: env.scope,
-        times: env.times,
-        entities: Some(&picked),
-    };
+    let scoped = env.with_entities_of(&picked);
     let lang = if classified.lang.is_empty() {
         opts.lang.clone().unwrap_or_default()
     } else {

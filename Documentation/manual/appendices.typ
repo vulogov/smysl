@@ -1015,6 +1015,66 @@ hash, and P1 and P3 are not claimed: the collection is a rewrite, not a round tr
 Importing the same files a second time under the same options changes nothing, and each file
 reports `already imported`.
 
+#section("schema")
+
+*Show schema revisions; check the naming rule and lens totality.* Pure · TX-P12.
+
+A schema id evolves by revision, and since FC-9 a declaration carries a field table and the
+*lens steps* that read one revision's names as the next's (SMYSL-2.3 A-7, Appendix B). `schema
+show` prints an id's revisions, each revision's fields (type, values, `required-from` and its
+condition, `retired-in`), its steps with their ops, the chain from each revision to the current
+one with its hash, and any fork. `schema check` holds every revision against every earlier one
+under rule N: no name given a new meaning except by a declared widening with its paired key,
+no retired name reintroduced (`SMY-E426`); each step well formed against the revision it leaves
+(`SMY-E471`); forks reported (`SMY-W429`); and every unit the schema governs read through to the
+current revision, with any it cannot carry listed (`SMY-W420`).
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`ACTION`], [positional, required], [`show` or `check`.]),
+    ([`TARGET…`], [positional], [`show ID [STORE]`; `check [ID] [STORE]`. One target is the store unless `-s` gives it, and then it is the id. `check` without an id checks every schema the store declares.]),
+  ),
+)
+
+`check` exits 3 when rule N or a step fails, as `check` does, and 0 otherwise; warnings do not
+change the exit. A unit is governed by the schema declaring its type or, when no schema declares
+its type, by the one whose fields declare the payload keys it carries, so a kernel `claim` with a
+`text:mode` is read under `x.text/v1`.
+
+#section("migrate")
+
+*Re-derive a schema's units under a newer revision; staged.* Pure · TX-P12.
+
+A lens is a reading: a query reads an old unit as the current revision names it, and nothing
+is written. `migrate` is the one command that writes such a reading down. Each unit of the
+schema written below the target revision is read through the chain and staged as a new unit,
+attested as `Transformed` from the old one with the chain's hash as its recipe, and joined to it
+by a `supersedes` edge. Rule M caps each new unit at its grounds, as for any staged batch.
+Commitments and datings of the old units are proposed for the new ones, staged with them for
+review rather than carried over (`SMY-W472`). Nothing is changed in place: the old units stay,
+the supersession pass prefers the new heads, and `smysl relink` re-points references once
+`smysl merge --staged` has accepted the batch.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`--schema`], [`ID`], [The schema whose units are re-derived. Required.]),
+    ([`--to`], [`REV`], [The revision to re-derive them under. Required; the store must declare it.]),
+    ([`--agent`], [`ID`], [Whose migration it is; `tool:smysl-migrate` by default.]),
+    ([`--clock`], [`MS[.N]`], [The attestations' clock; by default one past the store's latest.]),
+    ([`--dry-run`], [—], [Report what would be staged and stage nothing.]),
+    ([`STORE`], [positional], [The store to migrate.]),
+  ),
+)
+
+`migrate` exits 10 when it stages, 11 when rule M lowered a unit, 0 when there is nothing to
+migrate or under `--dry-run`, and 1 when the store does not declare the target revision
+(`SMY-E466`) or a unit lacks a key the target requires and no `default` supplies
+(`SMY-E473`, which a model recipe would be needed for and this build does not offer).
+
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix B — Full Diagnostic Code Reference
 // ═══════════════════════════════════════════════════════════════════════

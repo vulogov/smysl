@@ -20,6 +20,12 @@ pub fn partition_name(key: &PartitionKey) -> String {
     }
 }
 
+/// A chain hash as §4.4 abbreviates it: four hex digits, an ellipsis, two.
+pub fn short_hash(h: &[u8; 32]) -> String {
+    let hex: String = h.iter().map(|b| format!("{b:02x}")).collect();
+    format!("{}…{}", &hex[..4], &hex[hex.len() - 2..])
+}
+
 /// The plan as `--explain` prints it.
 pub fn explain(plan: &Plan) -> String {
     let mut out = String::new();
@@ -49,6 +55,7 @@ pub fn explain(plan: &Plan) -> String {
             PlanStep::Resolve {
                 relations,
                 fields_checked,
+                fields,
             } => {
                 out.push_str("  2 resolution: ");
                 if relations.is_empty() {
@@ -56,12 +63,69 @@ pub fn explain(plan: &Plan) -> String {
                 } else {
                     out.push_str(&format!("relations {}", relations.join(", ")));
                 }
-                // Said out loud rather than left to be assumed. A reader who knows the phase
-                // exists would otherwise read silence as "every field checked out".
-                if !fields_checked {
-                    out.push_str("; fields not checked (payload shapes are opaque until FC-9)");
+                // Said out loud rather than left to be assumed: a payload name nothing
+                // declares is read raw, and a reader who knows the phase exists would
+                // otherwise read silence as "every field checked out".
+                if !fields.is_empty() {
+                    out.push_str(&format!("; fields {}", fields.join(", ")));
+                    if !fields_checked {
+                        out.push_str(" (no declaration in this store types a field)");
+                    }
                 }
                 out.push('\n');
+            }
+            PlanStep::Pointer { plan } => {
+                out.push_str(&format!("  5 source: pointer {:?}", plan.pointer));
+                if plan.across.is_empty() {
+                    out.push_str(", no pointer lens names it\n");
+                } else {
+                    let names: Vec<String> = plan
+                        .across
+                        .iter()
+                        .map(|(id, v, n)| match n {
+                            Some(n) => format!("{id}@{v} {n}"),
+                            None => format!("{id}@{v} (retired)"),
+                        })
+                        .collect();
+                    out.push_str(&format!(" across {}\n", names.join(", ")));
+                }
+            }
+            PlanStep::Lens {
+                pins,
+                chains,
+                rewrites,
+            } => {
+                // §4.4's three lines, under the phase that produced them.
+                for (i, p) in pins.iter().enumerate() {
+                    let label = if i == 0 { "pins:" } else { "" };
+                    let to = if p.from == p.to {
+                        "current".to_string()
+                    } else {
+                        format!("compiled forward to @{}", p.to)
+                    };
+                    out.push_str(&format!("      {label:<11}{}@{} ({to})\n", p.id, p.from));
+                }
+                for (i, c) in chains.iter().enumerate() {
+                    let label = if i == 0 { "lenses:" } else { "" };
+                    out.push_str(&format!(
+                        "      {label:<11}{} {}->{}  chain {}  {} units read, {} unmappable\n",
+                        c.id,
+                        c.from,
+                        c.to,
+                        short_hash(&c.hash),
+                        c.read,
+                        c.unmappable
+                    ));
+                }
+                for (i, r) in rewrites.iter().enumerate() {
+                    let label = if i == 0 { "rewrites:" } else { "" };
+                    out.push_str(&format!(
+                        "      {label:<11}{}  =>  {}   ({})\n",
+                        r.before,
+                        r.after,
+                        r.why.join("; ")
+                    ));
+                }
             }
             PlanStep::Scope {
                 scope,

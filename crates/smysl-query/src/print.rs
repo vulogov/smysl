@@ -171,6 +171,11 @@ fn source(s: &Source) -> String {
     }
 }
 
+/// A predicate as the printer writes it, for the planner's rewrite lines.
+pub(crate) fn pred_text(p: &Pred) -> String {
+    pred(p)
+}
+
 fn pred(p: &Pred) -> String {
     match p {
         Pred::And(items) => items.iter().map(nested).collect::<Vec<_>>().join(" and "),

@@ -16,8 +16,41 @@ pub struct RevisionGuess {
 }
 
 impl SchemaSet {
-    /// The revisions a unit is consistent with, or `None` when no single id governs its type
-    /// or that id has no current revision (a fork).
+    /// The schema whose revisions govern a unit: the one declaring its type, or — for a unit
+    /// whose type no schema declares, a kernel unit above all — the one schema whose field
+    /// tables declare the payload keys it carries (rule X lets a kernel `claim` carry
+    /// `text:mode`, and the key means what `x.text/v1` says it means). Keys declared by two
+    /// schemas govern by neither.
+    pub fn governing_unit(&self, core: &UnitCore) -> Option<SchemaId> {
+        if let Some(id) = self.governing(&core.schema) {
+            return Some(id.clone());
+        }
+        let view = UnitView::of(core);
+        if view.payload.is_empty() {
+            return None;
+        }
+        let mut found: Option<SchemaId> = None;
+        for id in self.ids() {
+            let Ok(id) = SchemaId::parse(id) else {
+                continue;
+            };
+            let declares = self.revisions(&id).iter().any(|r| {
+                r.fields
+                    .typed()
+                    .is_some_and(|t| view.payload.keys().any(|k| t.contains_key(k)))
+            });
+            if declares {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(id);
+            }
+        }
+        found
+    }
+
+    /// The revisions a unit is consistent with, or `None` when no single id governs it
+    /// ([`SchemaSet::governing_unit`]) or that id has no current revision (a fork).
     ///
     /// The clues are A-12.1's, over the unit's core:
     /// - a key it holds that a revision retires (field `retired-in`), or that a step renames,
@@ -32,15 +65,26 @@ impl SchemaSet {
     /// The third clue, the revisions an extracted unit's attestation recipe records, is not a
     /// property of the core and is the caller's to intersect.
     pub fn infer_revision(&self, core: &UnitCore) -> Option<RevisionGuess> {
-        let id = self.governing(&core.schema)?.clone();
+        let id = self.governing_unit(core)?;
         let current = self.current(&id)?.version;
         let revs = self.revisions(&id);
+        let view = UnitView::of(core);
+        // No older than the first revision that declares its type — or, for a unit whose type
+        // the schema does not declare, the first that declares one of the keys it carries.
+        let by_type = self.governing(&core.schema) == Some(&id);
         let lo = revs
             .iter()
-            .filter(|r| r.declares_type(&core.schema))
+            .filter(|r| {
+                if by_type {
+                    r.declares_type(&core.schema)
+                } else {
+                    r.fields
+                        .typed()
+                        .is_some_and(|t| view.payload.keys().any(|k| t.contains_key(k)))
+                }
+            })
             .map(|r| r.version)
             .min()?;
-        let view = UnitView::of(core);
         // The highest declared version strictly below `v`, or `lo` when there is none.
         let below = |v: u32| {
             revs.iter()

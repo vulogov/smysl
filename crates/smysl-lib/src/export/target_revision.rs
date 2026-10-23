@@ -238,7 +238,7 @@ pub fn rewrite(
         }
         let core = &store.get(x).expect("U is held").core;
         let mut next = core.clone();
-        if set.governing(&core.schema) == Some(id) {
+        if set.governing_unit(core).as_ref() == Some(id) {
             let rev = set.infer_revision(core).map_or(current, |g| g.hi);
             if rev != t.version {
                 let chain = match chains.get(&rev) {

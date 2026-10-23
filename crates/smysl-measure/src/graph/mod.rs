@@ -72,7 +72,11 @@ pub(crate) fn complete(recipe: &mut Recipe) {
 
 /// The scope's units the store holds, the recipe's filter applied, in uid order.
 pub(crate) fn units(recipe: &Recipe, input: &Input<'_>) -> Result<Vec<Uid>, Refusal> {
-    let filter = lower(&recipe.filter)?;
+    // One reader for the whole scope: the store's declarations decoded once, each unit lensed
+    // once (SMYSL-2.5 §3.9), so a filter on a declared key reads it as the current revision
+    // names it, as `q` does.
+    let reader = pred::Reader::new(input.store);
+    let filter = lower(&recipe.filter, &reader)?;
     let params = BTreeMap::new();
     Ok(input
         .scope
@@ -82,7 +86,7 @@ pub(crate) fn units(recipe: &Recipe, input: &Input<'_>) -> Result<Vec<Uid>, Refu
         .filter(|u| {
             filter
                 .as_ref()
-                .is_none_or(|f| pred::holds(input.store, u, f, &params))
+                .is_none_or(|f| pred::holds_in(&reader, u, f, &params))
         })
         .copied()
         .collect())
@@ -107,7 +111,7 @@ pub(crate) fn admitted(recipe: &Recipe, input: &Input<'_>) -> Result<Vec<Uid>, R
 }
 
 /// A filter as sq lowers a `where`: `None` for the empty one.
-fn lower(filter: &str) -> Result<Option<Lowered>, Refusal> {
+fn lower(filter: &str, reader: &pred::Reader<'_>) -> Result<Option<Lowered>, Refusal> {
     if filter.trim().is_empty() {
         return Ok(None);
     }
@@ -119,7 +123,7 @@ fn lower(filter: &str) -> Result<Option<Lowered>, Refusal> {
     let mut diags = Vec::new();
     let mut all = Vec::new();
     for f in &p.filters {
-        if let Some(l) = pred::lower(&f.pred, &mut diags) {
+        if let Some(l) = pred::lower_in(&f.pred, Some(reader.schemas()), f.lens_none, &mut diags) {
             all.push(l);
         }
     }

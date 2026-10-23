@@ -276,6 +276,7 @@ pub use smysl::schema_definition
 pub use smysl::schemas
 pub use smysl::script_of
 pub use smysl::script_of_lang
+pub use smysl::supersession_heads
 pub use smysl::surface
 pub use smysl::to_cbor
 pub use smysl::to_cbor_seq

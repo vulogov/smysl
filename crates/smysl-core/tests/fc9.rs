@@ -491,10 +491,15 @@ fn smysl_graph_free_store() -> Vec<Record> {
     demo_series().into_iter().map(Record::SchemaDecl).collect()
 }
 
+/// A declaration with lenses has a surface form since TX-P12 step 7 (`fields:` and `lenses:`,
+/// `tests/fc9_surface.rs`); one with an op this build does not know does not.
 #[test]
-fn a_declaration_with_lenses_has_no_surface_form_yet() {
+fn a_declaration_with_known_lenses_has_a_surface_form() {
     let d = &demo_series()[1];
-    assert!(!smysl_core::surface::schema_decl_has_surface_form(d));
+    assert!(smysl_core::surface::schema_decl_has_surface_form(d));
+    assert!(!smysl_core::surface::schema_decl_has_surface_form(
+        &unknown_op()
+    ));
     let bare = SchemaDecl::new(id("x.bare/v1"), 1);
     assert!(smysl_core::surface::schema_decl_has_surface_form(&bare));
 }

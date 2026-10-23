@@ -65,6 +65,9 @@ pub mod answer;
 /// a model's, so this module has no form that compiles without a provider.
 #[cfg(all(feature = "text", feature = "model"))]
 pub mod link;
+/// `migrate` (SMYSL-2.5 §3.11, TX-P12 step 6): a schema's units re-derived under a newer
+/// revision, deterministically, as a staged batch.
+pub mod migrate;
 pub mod recipe;
 /// Reachable for `tests/gate.rs`, which drives `check_local` and the degradation path
 /// directly. No consumer runs the re-ask loop itself — `IngestOptions::repair_attempts` is

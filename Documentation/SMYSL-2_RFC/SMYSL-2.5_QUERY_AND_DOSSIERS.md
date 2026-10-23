@@ -334,7 +334,7 @@ The planner lowers the AST in a fixed order. Each phase has one job and records 
    behind it. The plan records that the check did not run and `--explain` prints it, because a
    resolution phase that quietly resolves nothing is worse than one that is openly absent. The
    typed half, with `E421`, `E422` and compile-forward, is **TX-P12 step 3**, which names them
-   as its own.
+   as its own — **built 2026-10-22** (§6, TX-P12 step 3).
 3. **Scope.** `from` resolves to a set of stores and a candidate uid set, through the `Scope`
    trait (§4.2). Plain `Store`: `store:` and the whole store. `smysl-text` (SMYSL-2.4) adds
    `texts`, `library`, `collection:`, `channel`, `import:` and catalog predicates. Until it
@@ -1399,7 +1399,8 @@ Each step has an exit test. Steps within a phase are ordered.
    (OQ-84): it changes a result as `k` does, so it is hashed, but the payload has no declared
    key to carry it and a rerun under another limit is reported as not comparable. What the
    step did not build is named by code: `--current`, the schema effect, is `SMY-E461` until
-   TX-P12's lens engine lowers a query at two revisions, and with it `--current --save`;
+   TX-P12's lens engine lowers a query at two revisions (lifted by TX-P12 step 4), and with it
+   `--current --save`;
    `SMY-W467` stays withheld with the model-dependent plans that would raise it.
 2. FC-8 tables in `smysl-thread` (after SMYSL-2.1 opens the enumerations and SMYSL-2.3 assigns
    codes); `exposition`/`dialogue` derivation; `dossier` refused by `--derive`. *Exit:* derivation
@@ -1603,14 +1604,21 @@ Each step has an exit test. Steps within a phase are ordered.
    — **done 2026-10-22**, below.
 3. Field resolution, lensed predicates in `sq`, pins, compile-forward, `E421`/`E422`, explain
    lines. *Exit:* §19.5 rewrite printed exactly as in §4.4.
+   — **done 2026-10-22**, below.
 4. Schema/data effect split. *Exit:* §5.4 §19.5 reproduction.
+   — **done 2026-10-22**, below.
 5. `schema show|check`. *Exit:* rule N fixtures.
+   — **done 2026-10-22**, below.
 6. `migrate`. *Exit:* §5.7 migrate tests.
+   — **done 2026-10-22**, below.
 7. `@schema` surface form for `fields:`/`lenses:`. *Exit:* `fmt` round trip of an FC-9 declaration.
+   — **done 2026-10-22**, below.
 8. Pointer lenses (with the `json/1` reader, SMYSL-2.4). *Exit:* a two-version snapshot series
    answers `pointer(…)` across the rename.
+   — **done 2026-10-22**, below.
 9. GE-T16. *Exit:* draft 3 TX-P12 exit — lens path equals migrate path on all 100 saved queries
    and 30 dossiers; the effect split reproduces the injected change; unmappable rate reported.
+   — **done 2026-10-23**, below. **TX-P12 is complete.**
 
    *Steps 1 and 2 were taken out of order, on 2026-10-22, before TX-P8 closed:* SMYSL-2.7's
    `--target-revision` (TX-P11's step 13) needs the lens engine and nothing else of this phase,
@@ -1674,6 +1682,183 @@ Each step has an exit test. Steps within a phase are ordered.
    - **L1 is a law about rule-N histories,** and the fuzz target does not assert it: arbitrary
      steps are not one (a rename onto a key the unit already holds has no inverse on that unit).
      The seeded test holds L1; the target searches for panics and for L3 and L9.
+
+   **Step 3 done 2026-10-22: field resolution and compile-forward in `sq`.** Phase 2's typed
+   half (`smysl_query::resolve`), the lensed reading of units (`pred::Reader`, carried by
+   `Env`), and `--explain`'s §4.4 lines under phase 2. The exit holds
+   (`crates/smysl-query/tests/lensed.rs`): over §19.5's store — Appendix C's `x.text/v1` and a
+   revision 2 that splits `quoted` into `reported` plus `text:verbatim = true`, a widening
+   because `reported` existed at 1 — `using x.text/v1@1 | where mode = reported` prints
+   `rewrites:  mode = reported  =>  mode = reported and text:verbatim = false   (widening,
+   paired key)` byte for byte, with `pins:` and `lenses:` lines as §4.4 spells them, and
+   answers the old, narrow question over lensed units. `SMY-E421` is registered (136 codes).
+   What the step decided:
+   - **A name resolves by its declared key or by the part after its namespace.** §4.4 writes
+     `mode` and Appendix C declares `text:mode`; the example is only readable if the short form
+     resolves. Two keys or two schemas sharing it is `E421` with the candidates listed.
+   - **The schemas in scope are the store's.** Phase 2 runs before phase 3 has a scope; a
+     narrower scope can only have fewer names, so this refuses nothing a narrower reading
+     would accept.
+   - **`E421` only where every unit's type is typed.** Kernel types are never declared, and
+     nothing written before FC-9 has a field table, so refusing a name no table declares in a
+     store holding such units would refuse every query written before this step. There the
+     name is read raw and the plan says `(raw)`; `fields … (no declaration in this store types
+     a field)` replaces the old "fields not checked" line, which is dropped from every plan
+     that names no payload field (the fifteen planner goldens change by that line alone).
+   - **Compile-forward is §3.9's rules over the chain, op by op**: a rename renames, a split
+     value becomes its parts, a widened value gains its paired default (no default is
+     `SMY-E471`), and a predicate on a retired key or on a value the current revision does not
+     admit and no op carried is `SMY-E422`. `in` lists split into an `or` of their parts. A
+     sort key (`order by`, `group by`, `compare by`) takes renames only — it has no value to
+     map — and a retired one is `E422`.
+   - **`with lens none` exposed a limit of inference.** A-12.1's clues place a unit *before* a
+     step that would change it or before a key became required; nothing places a unit *after*
+     a revision except its type. So a unit written at 2 that merely carries a key 2 added is
+     consistent with 1 and reads raw, and only units whose type the named revision does not
+     declare are unmappable (`W420`, counted beside the answer).
+   - **A key declared `int` is ordered.** `SMY-E512` now refuses `<` only on names and on
+     payload keys no declaration types.
+   - **Lens counts are plan-time.** `lenses:` counts the candidates read through each chain
+     below the current revision, so `--explain` says it without running; `W420` comes from
+     the run, per field.
+   - **Owed:** a pinned traversal is not renamed — edges are followed by the kind they were
+     written with, and `rename-relation` reaches `expand` only through phase 2's acceptance of
+     any revision's kinds. §3.9's "edges renamed lazily" waits for a store whose relations
+     carry a schema revision.
+
+   **Step 4 done 2026-10-22: the schema/data effect split.** A save records the revisions in
+   force and the chains applied; `rerun` pins to them and, with `current`, runs again with
+   every schema pin dropped; `q --rerun --current` returns `E_cur` and prints the schema effect
+   beside the data effect, and `--current --save` writes a new saved query with a
+   `supersedes` edge to the old one. The exit holds (`tests/lensed.rs`): a `mode = reported`
+   query saved over revision 1, then revision 2's widening declared and three units appended
+   — a plain `reported` written at 2, a `quoted` written at 1 and a `reported` with
+   `text:verbatim = true` written at 2 — reruns pinned with a data effect of the plain unit
+   alone, and `--current` reports a schema effect of exactly the two quotations. Decided:
+   - **"The revisions in force" includes the unpinned ones.** §19.5's query is unpinned and
+     saved before revision 2 exists; recording only `using` pins would make its rerun ask
+     today's question, and the effect split would vanish. So `query:schemas` holds the pins
+     and the current revision of every schema an unpinned field resolved against, and a
+     pinned rerun adds each as a `using` the text does not already carry.
+   - **`query:lens-chain` is `id@from->to:hash`, space-separated,** one per chain a pin
+     compiled through, and empty when none was. A rerun rebuilds each from the store's
+     declarations and compares hashes; a chain it cannot build to the same hash is `SMY-E466`
+     (§3.6). Not "the chain this rerun compiles through": a revision declared since the save
+     moves the current end, and that is the schema effect, not a reason to refuse.
+   - **The data effect under `--current` is the pinned one,** as §3.6 defines it; the answer
+     returned is `E_cur`.
+
+   **Step 5 done 2026-10-22: `schema show|check`.** `SchemaSet::check_rule_n` and
+   `check_units` in `smysl-core` and `smysl schema <show|check> [ID] [STORE]`, the
+   thirty-seventh command (pure; errors exit 3, as `check`'s do). `SMY-E426` is registered (137
+   codes). The exit holds: `fixtures/schema/rule-n/` — Appendix D's class, generated by
+   `crates/smysl-core/tests/rule_n.rs` (`SMYSL_BLESS=1`) with `cases.json` — is a declared
+   widening that checks clean beside a widening without its paired key (`E426` and `E471`), a
+   retired key reintroduced, a dropped value reintroduced, a key renamed onto an existing
+   one, a key whose type changes (`E426` each) and a fork (`W429`). What it decided:
+   - **"A new meaning" is read from the declarations,** as five shapes: a type change, a
+     rename onto a name the source revision has (the survivor now means both), a `map-value`
+     onto an existing value, a `split-value` onto one that is not a declared widening, and a
+     name reintroduced after it was retired or dropped — in a later table or as a lens target
+     (`rename-key`, `split-value`'s added keys, `require`, `default`). Dropping an enum value
+     is retiring a name (A-12.1 item 1), not a change of meaning.
+   - **A declared widening is checked on both ends:** each paired key required from the
+     widening revision under `k = v'` (or unconditionally) *and* defaulted under the same
+     condition in the step. The step's own `E471` sees only the step, so an unpaired widening
+     is both codes, as §3.9 says.
+   - **`SMY-W431` stays withheld.** It needs the revisions an extracted unit's recipe names,
+     and an attestation's recipe is a hash: nothing in a store says which revisions went into
+     it. The code is registered when recipes carry them, as inference's third clue waits too.
+   - **Rust only.** The ports decode FC-9 and hold L9 (step 1); judging rule N is a producer's
+     obligation (C-Produce, D-8) and the fixtures carry the codes for a port that takes it on.
+
+   **Step 6 done 2026-10-22: `migrate`.** `smysl_ingest::migrate` and `smysl migrate --schema ID
+   --to REV [--agent A] [--clock MS] [--dry-run] [STORE]`, the thirty-eighth command; `SMY-W472`
+   and `SMY-E473` registered (139 codes). The exit holds over the GE-T16 corpus, which did not
+   exist and is built by `tests/ge_t16.rs` (GE-T10's dossier corpus under three typed revisions
+   of `x.text/v1`, with a quoted twin injected beside every `reported` claim, and a synthetic
+   `x.ge16/v1` whose three revisions use every closed op but `rename-relation`, over two
+   hundred units, forty grounded): 97 units of `x.ge16/v1` and 16 of `x.text/v1` re-derived,
+   identically on a second run; each attested `Transformed` from the unit it replaces, the
+   chain hash as recipe; no unit above the one it replaces, and the batch checks clean (rule
+   M); every old unit superseded by its new one once committed; `relink` then leaves no live
+   unit grounded on a superseded one; 9 commitments and 8 datings proposed for the new uids,
+   staged and not transferred (`W472`). Decided:
+   - **A unit is governed by its type's schema or, failing that, by the one schema whose
+     tables declare its payload keys** (`SchemaSet::governing_unit`). GE-T10's corpus carries
+     `text:mode` on kernel `claim`s, as rule X allows; governed by type alone, none of them
+     would be lensed, migrated or counted, and §19.5's question would not reach the units it
+     is about. Keys two schemas declare govern by neither. Field resolution, inference,
+     `schema check`, `migrate` and `--target-revision` all read this one rule.
+   - **A migration is the units, their `supersedes` edges and proposals, and nothing else.**
+     Grounds keep naming the old units, which remain; `relink` re-points them after
+     acceptance, as §3.11 says, so the batch a reviewer reads is the migration and not a
+     cascade.
+   - **The batch carries proposals.** `Staged` gained `proposals`, records committed only if
+     the reviewed text keeps them; commitments and datings have surface forms, so they are
+     reviewed as the units are.
+   - **No `--recipe`.** §3.11's model path — an extraction run through `ingest` to supply what
+     a unit lacks — is not built: without it `migrate` is pure, and `SMY-E473` names the units
+     that would need it. It lands with a provider route, local or hosted, as `ingest` routes.
+
+   **Step 7 done 2026-10-22: `fields:` and `lenses:` at the surface.** `@schema` takes A-7's
+   field table and Appendix B's steps with their keys as names (A-10 item 4) — `type`,
+   `values`, `retired-in`, `note`, `required-from`, `required-when`, `literals`; a step's
+   `from`, `to`, `ops`; an op's `tag` and then `from`/`to`, `key`, `map`, `add`, `value`,
+   `when` — and writes them one entry per line, as Appendix C does. The exit holds at the
+   library (`crates/smysl-core/tests/fc9_surface.rs`: every declaration in `fixtures/schema/`
+   that can be spelled is written, read back and written again byte for byte) and at the
+   command (`smysl fmt` of Appendix C's text, then `fmt --check` of what it wrote); Appendix C
+   as printed in SMYSL-2.3 reads to the bytes `fixtures/schema/fc9/text-v1.cbor` holds. Decided:
+   - **Spelled only when nothing is lost.** A declaration has a surface form when what keys 4
+     and 5 decode to re-encodes to the bytes they hold; one that is opaque, carries an op this
+     build does not know, or arrived in another encoding stays CBOR-only and is counted (F-18).
+     Of the fixtures, two are: the opaque declaration and the unknown op.
+   - **An unknown key or tag is refused** (`SMY-E001`), not carried: a misspelt
+     `required_from` passed over would leave a key unrequired under a file that visibly
+     requires it, and an op the surface cannot name cannot be the op the author meant.
+   - **A declaration without them keeps its one line,** so every `.smy` written before this
+     step formats as it did.
+
+   **Step 8 done 2026-10-22: pointer lenses.** `smysl_query::pointer` and the `pointer("…")`
+   source, which the planner refused since TX-P6; `SMY-W475` registered (140 codes). The exit
+   holds (`crates/smysl-text/tests/pointer.rs`): two configuration snapshots read by `json/1`,
+   the second renaming `/database` to `/db` and `max_size` to `maxSize`, answer
+   `pointer("/database/pool/max_size")` with the value from both, and the new spelling finds
+   both too; `--explain` prints the pointer at each revision; a third snapshot with no marker
+   is matched as written and counted (`W475`). §3.12 is a sketch, and four things it leaves
+   open are decided in the module:
+   - **A pointer lens is a schema declaration whose `rename-key` or `retire` ops name
+     pointers** (keys starting with `/`), with the op set and step machinery of every other
+     lens and no field table; its id is the snapshot family's.
+   - **A rename moves its subtree.** A pointer is a path: renaming `/database` renames every
+     pointer under it, and `retire` takes the subtree.
+   - **The version marker is a manifest field,** `identifiers[<schema id>] = <revision>`, and
+     a unit is in a snapshot by its source's manifest; the shape fingerprint §3.12 offers as
+     the other marker is not built.
+   - **A unit's locator is its source reference after the last `#`.** Matching is by that
+     locator and its prefix (`units_with_source_prefix`'s reading, with the pointer's own
+     boundary at `/`), never by rewriting it. SMYSL-2.4's `locators` table, when it lands,
+     replaces the reading and not the rule.
+
+   **Step 9 done 2026-10-23: GE-T16, and the phase closes.** `tests/ge_t16.rs` over the
+   corpus step 6 built: **the lens path equals the migrate path on all 100 saved queries and
+   all 30 dossiers** (L8) — each query saved, then rerun pinned over the store as it is and
+   over the store with both migrations committed, the migrated result read back through the
+   migration's pairs; each of GE-T10's thirty English questions asked over both, slot by slot.
+   **The effect split reproduces the injected change:** `text:mode = reported` saved before
+   revisions 2 and 3 and the quotations, rerun after, has an empty data effect and a schema
+   effect of exactly the 8 injected quotations. **Unmappable rate: 0 of 254 units** of the two
+   schemas. Two findings, both fixed where found:
+   - **A compiled atom kept its short spelling into a store where it was ambiguous.**
+     `using x.ge16/v1@1 | where mode = quoted` compiled to a `mode = reported and …` that the
+     current revision then refused (`E421`), because `x.text/v1` declares a `mode` too. A
+     short spelling now survives compile-forward only where it still resolves to the same key;
+     otherwise the atom is written with the key in full. §19.5's exit, in a store with one
+     `mode`, prints as before.
+   - **The harness, not the law:** the first L8 comparison set a query's result at save time
+     against its rerun after ninety-nine more saves, and the saved units themselves were the
+     difference. Both paths now rerun over one store.
 
 ## 7. Risks and mitigations
 

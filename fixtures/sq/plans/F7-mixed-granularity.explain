@@ -1,7 +1,7 @@
 plan sq/1
   purity: pure
   1 header: sq/1, no schema pins
-  2 resolution: no relation kinds named; fields not checked (payload shapes are opaque until FC-9)
+  2 resolution: no relation kinds named
   3 scope: store:F7-mixed-granularity via F7-mixed-granularity -> 1 store(s) F7-mixed-granularity, 9 unit(s)
   4 partitions: 1, idf over collection
       (no manifest): 9 unit(s)

@@ -193,13 +193,14 @@ pub fn has_surface_form(r: &Record, ctx: &WriteContext, view: Option<&ViewId>) -
 
 /// Whether a declaration can be spelled `@schema` without losing anything.
 ///
-/// `payload_shape` and `lenses` (FC-9) have no `@schema` spelling in this build — `fields:` and
-/// `lenses:` are TX-P12 step 7 — and `extra` holds keys a later version added; surface text has
-/// no place for any of them, so a declaration carrying one stays CBOR-only and is counted with
-/// the other records a surface rendering cannot hold, rather than written back smaller than it
-/// was read.
+/// `payload_shape` and `lenses` (FC-9) are spelled `fields:` and `lenses:` (A-10 item 4, TX-P12
+/// step 7) when what they decode to re-encodes to the bytes they hold — not when key 4 or 5 is
+/// opaque, carries an op this build does not know, or arrived in another encoding. `extra`
+/// holds keys a later version added, which surface text has no place for. A declaration
+/// failing either stays CBOR-only and is counted with the other records a surface rendering
+/// cannot hold, rather than written back smaller than it was read.
 pub fn schema_decl_has_surface_form(d: &crate::types::annex::SchemaDecl) -> bool {
-    d.payload_shape.is_none() && d.lenses.is_none() && d.extra.is_empty()
+    d.extra.is_empty() && super::schema::spellable(d)
 }
 
 /// Whether a withdrawal can be spelled `@withdraw` without losing anything: no keys a later version
@@ -553,20 +554,39 @@ fn target_text(t: &DatingTarget, ctx: &WriteContext) -> String {
 }
 
 fn write_schema_decl(out: &mut String, d: &crate::types::annex::SchemaDecl) {
+    let ts: Vec<&str> = d.types.iter().map(|t| t.as_str()).collect();
+    let rs: Vec<&str> = d.relations.iter().map(|r| r.as_str()).collect();
+    if d.payload_shape.is_none() && d.lenses.is_none() {
+        // One line, as every declaration was written before A-10 item 4.
+        out.push_str(&format!(
+            "@schema {} {{ version: {}",
+            d.id.as_str(),
+            d.version
+        ));
+        if !ts.is_empty() {
+            out.push_str(&format!(", types: [{}]", ts.join(", ")));
+        }
+        if !rs.is_empty() {
+            out.push_str(&format!(", relations: [{}]", rs.join(", ")));
+        }
+        out.push_str(" }\n\n");
+        return;
+    }
+    // A field table and lens steps do not fit a line, and Appendix C writes them one entry
+    // per line, so a declaration that carries them is written that way.
     out.push_str(&format!(
-        "@schema {} {{ version: {}",
+        "@schema {} {{\n  version: {},\n",
         d.id.as_str(),
         d.version
     ));
-    if !d.types.is_empty() {
-        let ts: Vec<&str> = d.types.iter().map(|t| t.as_str()).collect();
-        out.push_str(&format!(", types: [{}]", ts.join(", ")));
+    if !ts.is_empty() {
+        out.push_str(&format!("  types: [{}],\n", ts.join(", ")));
     }
-    if !d.relations.is_empty() {
-        let rs: Vec<&str> = d.relations.iter().map(|r| r.as_str()).collect();
-        out.push_str(&format!(", relations: [{}]", rs.join(", ")));
+    if !rs.is_empty() {
+        out.push_str(&format!("  relations: [{}],\n", rs.join(", ")));
     }
-    out.push_str(" }\n\n");
+    super::schema::write(out, d, value, quoted_key);
+    out.push_str("}\n\n");
 }
 
 fn write_doc(out: &mut String, v: &View, ctx: &WriteContext) {

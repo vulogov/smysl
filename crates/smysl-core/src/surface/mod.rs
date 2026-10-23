@@ -4,6 +4,7 @@ pub mod hjson;
 pub mod lex;
 pub mod parse;
 pub mod payload;
+mod schema;
 pub mod write;
 
 pub use hjson::{parse_object, parse_object_prefix, parse_value, HError, HObject, HValue, Spanned};

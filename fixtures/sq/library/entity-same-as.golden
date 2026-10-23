@@ -5,7 +5,7 @@ query entity-same-as
 plan sq/1
   purity: pure
   1 header: sq/1, no schema pins
-  2 resolution: no relation kinds named; fields not checked (payload shapes are opaque until FC-9)
+  2 resolution: no relation kinds named
   3 scope: texts via library -> 1 store(s) library, 435 unit(s)
   4 partitions: 11, idf over collection
       (no manifest): 2 unit(s)

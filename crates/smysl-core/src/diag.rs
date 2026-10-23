@@ -432,8 +432,10 @@ registry! {
     // makes its step unusable (`W469`). Step 2's lens engine brings the rest: no path between
     // two revisions (`E470`), a step ill-formed against the revision it leaves (`E471`), a
     // backward path through `retire` or an op with no inverse (`E422`), and a name or value a
-    // chain cannot carry (`W420`). `E421` (a field no schema in scope declares) and `E426`
-    // (rule N) wait for field resolution and `schema check`, steps 3 and 5.
+    // chain cannot carry (`W420`). Step 3's field resolution brings `E421`, a field no schema
+    // in scope declares or one two schemas both declare; step 5's `schema check` brings
+    // `E426` (rule N); step 6's `migrate` brings `W472` and `E473`; step 8's pointer lenses
+    // bring `W475`.
     Schema => {
         W430 = "SMY-W430", Warn,  "A schema declaration's payload_shape or lenses do not match FC-9's structure; read as opaque";
         W429 = "SMY-W429", Warn,  "Schema fork: two declarations of one id and version with different content; the id has no current revision";
@@ -442,6 +444,11 @@ registry! {
         E471 = "SMY-E471", Error, "A lens step is ill-formed: a default without its require, an op on an undeclared key, or a widening without its paired key";
         E422 = "SMY-E422", Error, "A lens path runs backward through a retire or an op with no inverse";
         W420 = "SMY-W420", Warn,  "A lens could not carry a name or value; the unit is excluded from predicates on that field and counted";
+        E421 = "SMY-E421", Error, "A field no schema in scope declares, or one two schemas both declare and the query did not qualify";
+        E426 = "SMY-E426", Error, "Rule N: a schema revision gives a name a new meaning without a declared widening, or reintroduces a retired name";
+        W472 = "SMY-W472", Warn,  "Migration proposed commitments or datings for review instead of transferring them; counts reported";
+        E473 = "SMY-E473", Error, "Migration needs information the old units lack; a model recipe is required";
+        W475 = "SMY-W475", Warn,  "A json/1 snapshot has no version marker; read without a pointer lens; count reported";
     }
 }
 
@@ -864,7 +871,7 @@ mod tests {
     /// resolution needs declared field types, and a declaration's `payload_shape` is opaque
     /// CBOR until FC-9 decoding lands in TX-P12 step 1; the planner records that the check did
     /// not run rather than pretending it passed. (`E422` came with the lens engine, TX-P12 step
-    /// 2, which raises it for a backward path; `E421` waits for field resolution, step 3.)
+    /// 2, which raises it for a backward path; `E421` came with field resolution, step 3.)
     ///
     /// That leaves `454`–`459` of RFC SMYSL-2.4's `E401`–`W459` range unallocated.
     ///
@@ -918,9 +925,14 @@ mod tests {
     ///
     /// 135 with `SMY-W491` and `SMY-E492` in TX-P12 step 13 (SMYSL-2.7 §3.11), raised by
     /// `lib export --target-revision`, in the export group with the rest of SMYSL-2.7's.
+    ///
+    /// 136 with `SMY-E421` in TX-P12 step 3, raised by field resolution in `sq`; 137 with
+    /// `SMY-E426` in step 5, raised by `schema check` (rule N); 139 with `SMY-W472` and
+    /// `SMY-E473` in step 6, raised by `migrate`; 140 with `SMY-W475` in step 8, raised by
+    /// `pointer(…)` over a snapshot with no version marker.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 135);
+        assert_eq!(Code::ALL.len(), 140);
     }
 
     #[test]

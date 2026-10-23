@@ -307,6 +307,7 @@ pub use smysl::measure
 pub use smysl::membership
 pub use smysl::merge
 pub use smysl::merge
+pub use smysl::migrate
 pub use smysl::pack
 pub use smysl::parse_surface
 pub use smysl::payload_strings
@@ -344,6 +345,7 @@ pub use smysl::schemas
 pub use smysl::script_of
 pub use smysl::script_of_lang
 pub use smysl::stage
+pub use smysl::supersession_heads
 pub use smysl::surface
 pub use smysl::text
 pub use smysl::to_cbor

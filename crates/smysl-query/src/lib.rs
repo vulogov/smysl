@@ -46,9 +46,11 @@ pub mod fuse;
 pub mod lex;
 pub mod parse;
 pub mod plan;
+pub mod pointer;
 pub mod ports;
 pub mod pred;
 pub mod print;
+pub mod resolve;
 pub mod saved;
 pub mod store_scope;
 

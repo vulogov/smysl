@@ -24,11 +24,13 @@
 //! decodes to; `Cond` and `Mapped` are `PartialEq` and not `Eq` for the reason `HValue` is not
 //! (a payload float).
 
+mod check;
 mod decode;
 mod infer;
 mod lens;
 mod set;
 
+pub use check::Totality;
 pub use decode::{decode, encode_lenses, encode_shape};
 pub use infer::RevisionGuess;
 pub use lens::{LensChain, LensError, Mapped, UnitView, Widening};

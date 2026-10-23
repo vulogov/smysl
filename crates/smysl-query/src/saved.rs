@@ -20,10 +20,13 @@
 //!
 //! Let `P` be the result the edges record and `E_pin` the same text run again, pinned to the
 //! revisions the unit recorded, over today's data. `data_effect = diff(P, E_pin)`: what the
-//! store's growth changed. The **schema effect** — `diff(E_pin, E_cur)` under current
-//! revisions — needs the lens engine of §3.9 to lower a query at two revisions, and that is
-//! TX-P12's; [`rerun`] refuses `current` with `SMY-E461` until then rather than reporting a
-//! schema effect of nothing, which would be a different claim.
+//! store's growth changed. `E_cur` is the text run under current revisions, every pin
+//! dropped, and the **schema effect** is `diff(E_pin, E_cur)`: what the declarations' growth
+//! changed (TX-P12 step 4). Pinned means the revisions the unit recorded in `query:schemas` —
+//! the query's own `using` pins and the current revision of every schema an unpinned field
+//! resolved against when it was saved — so a query saved before a revision was declared is
+//! compiled forward from the revision it was asked under (§3.9), and its rerun keeps that
+//! question while the data changes under it.
 //!
 //! # The recipe
 //!
@@ -368,16 +371,16 @@ pub fn to_records(
     payload.insert(
         key("query:schemas"),
         list(
-            plan.pins
+            plan.revisions
                 .iter()
                 .map(|p| format!("{}@{}", p.id, p.revision))
                 .collect(),
         ),
     );
-    // No lens chain is applied in this build: compile-forward is TX-P12's (§3.9), and a hash
-    // of nothing applied is the empty string rather than a hash of an empty list, so a reader
+    // The chains a pin compiled through, `id@from->to:hash`, space-separated (§3.6, §3.10).
+    // No chain applied is the empty string rather than a hash of an empty list, so a reader
     // cannot mistake "no chains" for "chains whose hash happens to be this".
-    payload.insert(key("query:lens-chain"), s(""));
+    payload.insert(key("query:lens-chain"), s(&plan.lens_chains.join(" ")));
     let bytes = object_to_payload(&payload).expect("seven keys are not an empty object");
 
     let schema = SchemaId::Extension(schema::SAVED.to_string());
@@ -534,7 +537,8 @@ pub struct Rerun {
     pub run: Run,
     /// `diff(P, E_pin)`: what the data changed.
     pub data_effect: SetDiff,
-    /// `diff(E_pin, E_cur)`: `None` until the lens engine can lower a query at two revisions.
+    /// `diff(E_pin, E_cur)`, for a `--current` rerun: what the declarations' growth changed.
+    /// `None` for a pinned rerun, which does not ask.
     pub schema_effect: Option<SetDiff>,
     /// Whether this run's recipe is the one recorded. A rerun under other options — another
     /// IDF scope, another per-partition limit — is a different question, and its data effect
@@ -542,28 +546,44 @@ pub struct Rerun {
     pub recipe_matches: bool,
 }
 
-/// Run a saved query again, pinned.
+/// Whether a recorded `id@from->to:hash` chain is built, to that hash, by the store's
+/// declarations.
+fn reproduces(env: &Env<'_>, chain: &str) -> bool {
+    let parse = || -> Option<(smysl_core::ids::SchemaId, u32, u32, String)> {
+        let (head, hash) = chain.rsplit_once(':')?;
+        let (id, span) = head.rsplit_once('@')?;
+        let (from, to) = span.split_once("->")?;
+        Some((
+            SchemaId::parse(id).ok()?,
+            from.parse().ok()?,
+            to.parse().ok()?,
+            hash.to_string(),
+        ))
+    };
+    let Some((id, from, to, hash)) = parse() else {
+        return false;
+    };
+    env.reader
+        .schemas()
+        .set
+        .chain(&id, from, to)
+        .is_ok_and(|c| hex(&c.hash) == hash)
+}
+
+/// Run a saved query again, pinned — and, with `current`, under current revisions too.
 ///
-/// Pinned means: the saved text, which carries its own `using` clauses, planned over today's
-/// store. A recorded revision the store no longer declares is `SMY-E466`, which the planner
-/// raises for the pin; a recorded lens-chain hash the declarations do not reproduce would be
-/// the same code, and this build records no chains. `current` asks for the schema effect and
-/// is refused with `SMY-E461` until TX-P12 lowers a query at two revisions.
+/// Pinned means the saved text with every revision the unit recorded (`query:schemas`) as a
+/// `using` pin, planned over today's store: a recorded revision the store no longer declares is
+/// `SMY-E466`, which the planner raises for the pin, and so is a recorded lens-chain hash the
+/// declarations no longer reproduce (§3.6), because the query would then answer from part of
+/// its meaning. `current` plans the text again with every schema pin dropped, returns that
+/// plan and run, and reports `diff(E_pin, E_cur)` as the schema effect.
 pub fn rerun(
     saved: &SavedQuery,
     env: &Env<'_>,
     opts: &PlanOptions,
     current: bool,
 ) -> Result<Rerun, Vec<Diagnostic>> {
-    if current {
-        return Err(vec![Diagnostic::at(Code::E461, Span::new(0, 0))
-            .with_message(
-                "`--current` reports the schema effect, which needs the lens engine to lower the \
-             query under current revisions as well as the recorded ones (SMYSL-2.5 §3.9); that \
-             is TX-P12's"
-                    .to_string(),
-            )]);
-    }
     let parsed = crate::parse(&saved.text).map_err(|d| vec![d])?;
     // The record of the save is not data the query found. A saved query's gist *is* its
     // text, so a lexical source over the same store ranks the saved unit for its own terms
@@ -576,15 +596,64 @@ pub fn rerun(
     // under the caller's options, which is what was saved.
     let mut pinned = opts.clone();
     pinned.exclude.insert(saved.uid);
-    let plan = crate::plan(&parsed.query, env, &pinned)?;
+    let mut at_pin = parsed.query.clone();
+    for r in &saved.schemas {
+        let Some((id, rev)) = r.rsplit_once('@') else {
+            continue;
+        };
+        let Ok(revision) = rev.parse::<u32>() else {
+            continue;
+        };
+        let already = at_pin
+            .header
+            .iter()
+            .any(|u| matches!(u, crate::ast::Using::Schema { id: i, .. } if i == id));
+        if !already {
+            at_pin.header.push(crate::ast::Using::Schema {
+                id: id.to_string(),
+                revision,
+                span: Span::new(0, 0),
+            });
+        }
+    }
+    let plan = crate::plan(&at_pin, env, &pinned)?;
+    // Every chain the save compiled through must still be buildable from this store's
+    // declarations, to the same hash: a declaration that was never merged here leaves the
+    // query answering from part of its meaning (§3.6).
+    for chain in saved.lens_chain.split_whitespace() {
+        if !reproduces(env, chain) {
+            return Err(vec![Diagnostic::at(Code::E466, Span::new(0, 0))
+                .with_message(format!(
+                    "the saved query was compiled through `{chain}`, which this store's \
+                     declarations do not reproduce, so it cannot be pinned"
+                ))]);
+        }
+    }
     let run = crate::run(&plan, env, &pinned)?;
     let now = run.answer.uids();
     let recipe_matches = hex(&Recipe::of(&plan, opts).hash()) == saved.recipe;
+    let data_effect = SetDiff::between(&saved.results, &now);
+    if !current {
+        return Ok(Rerun {
+            data_effect,
+            schema_effect: None,
+            recipe_matches,
+            plan,
+            run,
+        });
+    }
+    let mut at_cur = parsed.query.clone();
+    at_cur
+        .header
+        .retain(|u| !matches!(u, crate::ast::Using::Schema { .. }));
+    let cur_plan = crate::plan(&at_cur, env, &pinned)?;
+    let cur_run = crate::run(&cur_plan, env, &pinned)?;
+    let schema_effect = SetDiff::between(&now, &cur_run.answer.uids());
     Ok(Rerun {
-        data_effect: SetDiff::between(&saved.results, &now),
-        schema_effect: None,
+        data_effect,
+        schema_effect: Some(schema_effect),
         recipe_matches,
-        plan,
-        run,
+        plan: cur_plan,
+        run: cur_run,
     })
 }

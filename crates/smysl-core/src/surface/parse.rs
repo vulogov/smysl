@@ -436,7 +436,8 @@ impl<'a> Parser<'a> {
     // @schema
     // -----------------------------------------------------------------------
 
-    /// `@schema <id> { version: N, types: [...], relations: [...] }`, a `SchemaDecl`.
+    /// `@schema <id> { version: N, types: [...], relations: [...], fields: {...}, lenses: [...] }`,
+    /// a `SchemaDecl` (`fields` and `lenses` since A-10 item 4, TX-P12 step 7).
     ///
     /// The declaration `check` has always consulted for `SMY-W013` and had no surface spelling,
     /// so an extension relation written in a `.smy` file warned on every check forever — the
@@ -487,16 +488,39 @@ impl<'a> Parser<'a> {
         if let Some(v) = header.take("relations") {
             decl.relations = self.strict_list(&v, "relations", |s: &str| RelKind::parse(s).ok())?;
         }
-        // Any other key is an error rather than something to carry or skip. A declaration is
-        // three keys long, and the likeliest stray one is a misspelling — `relation:` for
-        // `relations:` — which, passed over quietly, would leave the kind warning SMY-W013
-        // under a file that visibly declares it: the problem this record exists to solve.
+        // A-7's field table and Appendix B's lens steps, spelled with their keys as names (A-10
+        // item 4), encoded here to the canonical bytes keys 4 and 5 hold.
+        for (key, parse) in [
+            ("fields", super::schema::parse_fields as fn(&_) -> _),
+            ("lenses", super::schema::parse_lenses as fn(&_) -> _),
+        ] {
+            if let Some(v) = header.take(key) {
+                match parse(&v) {
+                    Ok(bytes) => {
+                        if key == "fields" {
+                            decl.payload_shape = Some(bytes);
+                        } else {
+                            decl.lenses = Some(bytes);
+                        }
+                    }
+                    Err(super::schema::Bad(span, message)) => {
+                        self.err(Code::E001, span, message);
+                        return None;
+                    }
+                }
+            }
+        }
+        // Any other key is an error rather than something to carry or skip. The likeliest
+        // stray one is a misspelling — `relation:` for `relations:` — which, passed over
+        // quietly, would leave the kind warning SMY-W013 under a file that visibly declares
+        // it: the problem this record exists to solve.
         if let Some((k, _)) = header.iter().next() {
             self.err(
                 Code::E001,
                 k.span,
                 format!(
-                    "`@schema` has no key `{}`; it takes `version`, `types` and `relations`",
+                    "`@schema` has no key `{}`; it takes `version`, `types`, `relations`, \
+                     `fields` and `lenses`",
                     k.value
                 ),
             );

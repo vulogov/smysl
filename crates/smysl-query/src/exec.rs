@@ -56,7 +56,7 @@ use crate::plan::{
     PlanExpr, PlanOptions, ShapePlan, Source, TimePlan,
 };
 use crate::ports::{Bounds, IdfScope};
-use crate::pred::{holds, Field};
+use crate::pred::{holds_in, Field, Reader};
 
 /// What running a plan produced.
 ///
@@ -112,6 +112,9 @@ pub struct Run {
 /// Run a plan.
 pub fn run(plan: &Plan, env: &Env<'_>, opts: &PlanOptions) -> Result<Run, Vec<Diagnostic>> {
     let mut warnings = Vec::new();
+    // Counts are per run: an earlier run over the same environment (`--seed-check` runs
+    // twice) must not add its units to this one's.
+    env.reader.take_unmappable();
     let result = run_expr(&plan.expr, env, opts, &mut warnings)?;
 
     // --- phase 9 -----------------------------------------------------------------------------
@@ -127,7 +130,20 @@ pub fn run(plan: &Plan, env: &Env<'_>, opts: &PlanOptions) -> Result<Run, Vec<Di
         // `show` are three layouts of the same list, and laying it out is step 7's.
         answer = Answer::Count(count_of(&answer));
     }
+    lens_warnings(env, &mut warnings);
     Ok(Run { answer, warnings })
+}
+
+/// `SMY-W420` for every field a lens could not carry on some unit, with the count (§3.9: the
+/// unit is excluded from predicates on that field, and counted).
+fn lens_warnings(env: &Env<'_>, warnings: &mut Vec<Diagnostic>) {
+    for (key, uids) in env.reader.take_unmappable() {
+        warnings.push(Diagnostic::new(Code::W420).with_message(format!(
+            "{} unit(s) unmappable on `{key}`: no lens path carries it to the current \
+                 revision, so they were excluded from predicates on it",
+            uids.len()
+        )));
+    }
 }
 
 /// How many units an answer is about, which is not always how many it names.
@@ -185,6 +201,17 @@ fn run_pipeline(
     let mut answer = match &p.source {
         Some(Source::Lexical(lex)) => lexical(p, lex, env, opts)?,
         Some(Source::Entity(e)) => entity(p, e, env, opts)?,
+        Some(Source::Pointer(pp)) => {
+            let (uids, unmarked) = crate::pointer::select(env.store, pp, &p.candidates);
+            if unmarked > 0 {
+                warnings.push(Diagnostic::new(Code::W475).with_message(format!(
+                    "{unmarked} unit(s) are from snapshots with no version marker, and were \
+                     matched against `{}` as written, without a pointer lens",
+                    pp.pointer
+                )));
+            }
+            Answer::Scope(uids)
+        }
         None => Answer::Scope(p.candidates.iter().copied().collect()),
     };
 
@@ -200,7 +227,7 @@ fn run_pipeline(
                     .filter(|f| {
                         p.filters
                             .iter()
-                            .all(|pred| holds(env.store, &f.uid, pred, &opts.params))
+                            .all(|pred| holds_in(&env.reader, &f.uid, pred, &opts.params))
                     })
                     .collect(),
             ),
@@ -211,7 +238,7 @@ fn run_pipeline(
                     .filter(|uid| {
                         p.filters
                             .iter()
-                            .all(|pred| holds(env.store, uid, pred, &opts.params))
+                            .all(|pred| holds_in(&env.reader, uid, pred, &opts.params))
                     })
                     .collect(),
             ),
@@ -624,7 +651,7 @@ fn order(answer: Answer, stage: &OrderPlan, env: &Env<'_>) -> Result<Answer, Vec
         OrderPlan::Field { field, dir } => {
             let mut sorted = uids.clone();
             sorted.sort_by(|a, b| {
-                let cmp = key_of(env.store, a, field).cmp(&key_of(env.store, b, field));
+                let cmp = key_of(&env.reader, a, field).cmp(&key_of(&env.reader, b, field));
                 match dir {
                     Dir::Ascending => cmp.then_with(|| a.cmp(b)),
                     Dir::Descending => cmp.reverse().then_with(|| a.cmp(b)),
@@ -636,7 +663,7 @@ fn order(answer: Answer, stage: &OrderPlan, env: &Env<'_>) -> Result<Answer, Vec
             let mut groups: BTreeMap<String, Vec<Uid>> = BTreeMap::new();
             for uid in uids {
                 groups
-                    .entry(group_key(env.store, &uid, field))
+                    .entry(group_key(&env.reader, &uid, field))
                     .or_default()
                     .push(uid);
             }
@@ -651,13 +678,13 @@ fn order(answer: Answer, stage: &OrderPlan, env: &Env<'_>) -> Result<Answer, Vec
 /// and leaves the text empty, an unordered one the reverse. A unit without the field sorts
 /// first under `ascending`, which is where "nothing" belongs on a ladder that starts at
 /// something.
-fn key_of(store: &Store, uid: &Uid, field: &Field) -> (Option<u8>, String) {
-    crate::pred::sort_key(store, uid, field).unwrap_or_default()
+fn key_of(r: &Reader<'_>, uid: &Uid, field: &Field) -> (Option<i64>, String) {
+    crate::pred::sort_key_in(r, uid, field).unwrap_or_default()
 }
 
 /// The value a unit is grouped under, with a name for having none.
-fn group_key(store: &Store, uid: &Uid, field: &Field) -> String {
-    crate::pred::field_text(store, uid, field).unwrap_or_else(|| "(none)".to_string())
+fn group_key(r: &Reader<'_>, uid: &Uid, field: &Field) -> String {
+    crate::pred::field_text_in(r, uid, field).unwrap_or_else(|| "(none)".to_string())
 }
 
 /// Phase 9: one shaping stage.
