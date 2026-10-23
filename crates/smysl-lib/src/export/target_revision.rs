@@ -306,7 +306,7 @@ pub fn rewrite(
             let mut next =
                 Relation::new(kind_at_target(&rel.kind), point(&rel.from), point(&rel.to));
             next.weight = rel.weight;
-            next.note = rel.note.as_ref().map(&point);
+            next.note = rel.note.as_ref().map(point);
             next.extra = rel.extra.clone();
             let old = rel.uid();
             if next.kind == rel.kind
@@ -364,7 +364,7 @@ pub fn rewrite(
             }
             Record::View(v) => {
                 let mut v = v.clone();
-                v.roots = v.roots.iter().map(&point).collect();
+                v.roots = v.roots.iter().map(point).collect();
                 records.push(Record::View(v));
             }
             Record::LabelBinding(b) => {
