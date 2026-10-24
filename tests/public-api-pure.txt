@@ -25,6 +25,7 @@ pub use smysl::AgentKind
 pub use smysl::Allen
 pub use smysl::Analyze
 pub use smysl::AnyError
+pub use smysl::AnyStore
 pub use smysl::AppendReport
 pub use smysl::Artifact
 pub use smysl::Attestation
@@ -82,6 +83,8 @@ pub use smysl::Group
 pub use smysl::Hit
 pub use smysl::Hlc
 pub use smysl::HopDiff
+pub use smysl::HotKind
+pub use smysl::HotRecords
 pub use smysl::IdError
 pub use smysl::Index
 pub use smysl::IndexError
@@ -113,6 +116,7 @@ pub use smysl::NoteKind
 pub use smysl::Op
 pub use smysl::OpenReport
 pub use smysl::Optimality
+pub use smysl::Overlay
 pub use smysl::Pack
 pub use smysl::PackError
 pub use smysl::PackInfo
@@ -184,7 +188,10 @@ pub use smysl::StatusDisplay
 pub use smysl::Step
 pub use smysl::Store
 pub use smysl::StoreDiff
+pub use smysl::StoreLibrary
 pub use smysl::StoreOptions
+pub use smysl::StoreRead
+pub use smysl::StoreWrite
 pub use smysl::Subject
 pub use smysl::SupersessionPolicy
 pub use smysl::Target

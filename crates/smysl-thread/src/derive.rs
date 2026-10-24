@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use smysl_core::{
     tokens, AgentId, Hlc, RelKind, Role, Status, Step, Thread, ThreadId, ThreadSchema, Uid,
 };
-use smysl_graph::{salience, topo, EdgeSet, SalienceReport, SalienceRequest, Store};
+use smysl_graph::{salience, topo, EdgeSet, SalienceReport, SalienceRequest, StoreRead};
 
 use crate::schema::{definition, Matcher, Position, SchemaDef};
 
@@ -93,7 +93,7 @@ pub struct DeriveReport {
 
 /// Derive a thread over a store (§19).
 pub fn derive_thread(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     schema: ThreadSchema,
     opts: &DeriveOptions,
 ) -> (Thread, DeriveReport) {
@@ -140,7 +140,7 @@ pub fn derive_thread(
 
 /// The personalisation vector for derivation: what the schema's most important role is
 /// about, or the view's roots when nothing matches.
-fn seed(store: &Store, scope: &[Uid]) -> BTreeSet<Uid> {
+fn seed(store: &(impl StoreRead + ?Sized), scope: &[Uid]) -> BTreeSet<Uid> {
     let focal: BTreeSet<Uid> = scope
         .iter()
         .copied()
@@ -193,7 +193,7 @@ impl Ordering {
 /// way `precedes` orders a narrative: a reply is later than what it replies to.
 const REPLIES: &str = "x.text/replies";
 
-fn ordering(store: &Store, scope: &[Uid]) -> Ordering {
+fn ordering(store: &(impl StoreRead + ?Sized), scope: &[Uid]) -> Ordering {
     let g = store.adjacency();
     // TX-P8 step 2: a reply edge is an ordering edge in every schema, since "later than what it
     // answers" is true of a reply whatever the thread is for. Added only when the store has the
@@ -255,7 +255,8 @@ fn ordering(store: &Store, scope: &[Uid]) -> Ordering {
     // the chain index left them in uid order, which is no order. Keyed on the manifest first
     // so two texts do not interleave by byte offset.
     let placed = |u: &Uid| -> Option<(String, u64)> {
-        let source = store.get(u)?.core.source.as_ref()?;
+        let unit = store.get(u)?;
+        let source = unit.core.source.as_ref()?;
         let (start, _) = source.span()?;
         Some((source.manifest()?.canonical(), start))
     };
@@ -313,7 +314,7 @@ struct RelEnds {
 }
 
 impl RelEnds {
-    fn for_rules(store: &Store, def: &SchemaDef) -> RelEnds {
+    fn for_rules(store: &(impl StoreRead + ?Sized), def: &SchemaDef) -> RelEnds {
         let mut sources: BTreeMap<RelKind, BTreeSet<Uid>> = BTreeMap::new();
         let mut targets: BTreeMap<RelKind, BTreeSet<Uid>> = BTreeMap::new();
         for (matcher, _) in def.rules {
@@ -362,7 +363,7 @@ impl RelEnds {
 }
 
 fn assign(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     def: &SchemaDef,
     scope: &[Uid],
     sal: &SalienceReport,
@@ -384,7 +385,7 @@ fn assign(
 }
 
 fn matches(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     m: &Matcher,
     uid: &Uid,
     order: &Ordering,
@@ -517,7 +518,7 @@ fn order_steps(
 /// than chosen.
 ///
 /// Repair iterates to a fixpoint, because an inserted dep may itself have deps.
-fn repair(store: &Store, steps: &mut Vec<Step>, report: &mut DeriveReport) {
+fn repair(store: &(impl StoreRead + ?Sized), steps: &mut Vec<Step>, report: &mut DeriveReport) {
     loop {
         let present: BTreeSet<Uid> = steps.iter().map(|s| s.unit).collect();
         let mut insertion: Option<(usize, Step, Uid)> = None;
@@ -552,7 +553,12 @@ fn repair(store: &Store, steps: &mut Vec<Step>, report: &mut DeriveReport) {
 ///
 /// Deliberately unambitious: it concatenates and truncates. Anything better needs a model,
 /// which is what `--refine` is for.
-fn synth_gist(store: &Store, def: &SchemaDef, steps: &[Step], budget: u32) -> String {
+fn synth_gist(
+    store: &(impl StoreRead + ?Sized),
+    def: &SchemaDef,
+    steps: &[Step],
+    budget: u32,
+) -> String {
     // The heaviest roles, not the first ones. Weight is the table's own statement of what
     // a role contributes, so a gist built from the opening roles would summarise an
     // analysis by its definitions rather than by its finding.
@@ -564,17 +570,18 @@ fn synth_gist(store: &Store, def: &SchemaDef, steps: &[Step], budget: u32) -> St
             .then(def.position_of(*a).cmp(&def.position_of(*b)))
     });
 
-    let mut parts: Vec<&str> = Vec::new();
+    // Owned, because a unit may come back as an owned handle from a paged store (SMYSL-2.8).
+    let mut parts: Vec<String> = Vec::new();
     for role in order.iter().take(2) {
         if let Some(step) = steps.iter().find(|s| s.role == *role) {
             if let Some(unit) = store.get(&step.unit) {
-                parts.push(unit.core.gist.trim());
+                parts.push(unit.core.gist.trim().to_string());
             }
         }
     }
     if parts.is_empty() {
         if let Some(first) = steps.first().and_then(|s| store.get(&s.unit)) {
-            parts.push(first.core.gist.trim());
+            parts.push(first.core.gist.trim().to_string());
         }
     }
 
@@ -607,7 +614,7 @@ fn synth_gist(store: &Store, def: &SchemaDef, steps: &[Step], budget: u32) -> St
 ///
 /// The SM-P11 gate asserts this over generated graphs - the repair either works always or
 /// it is not a repair.
-pub fn satisfies_rule_l(store: &Store, thread: &Thread) -> Vec<(Uid, Uid)> {
+pub fn satisfies_rule_l(store: &(impl StoreRead + ?Sized), thread: &Thread) -> Vec<(Uid, Uid)> {
     let present: BTreeSet<Uid> = thread.units().copied().collect();
     let mut out = Vec::new();
     for uid in &present {
@@ -648,6 +655,7 @@ mod tests {
         canonical_uid, KernelType, Record, Relation, SourceKind, SourceRef, UnitCore,
         UnitCoreBuilder,
     };
+    use smysl_graph::Store;
 
     fn unit(t: KernelType, gist: &str, status: Status) -> UnitCore {
         let mut b = UnitCoreBuilder::new(t, gist, status);
@@ -668,7 +676,7 @@ mod tests {
         )
     }
 
-    fn derive(store: &Store, schema: ThreadSchema) -> (Thread, DeriveReport) {
+    fn derive(store: &(impl StoreRead + ?Sized), schema: ThreadSchema) -> (Thread, DeriveReport) {
         derive_thread(store, schema, &opts())
     }
 

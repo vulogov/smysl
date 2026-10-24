@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::{Contention, ContentionId, Lod, RelKind, Role, Status, Thread, Uid};
 use smysl_graph::merge::contention::detect;
-use smysl_graph::{DetectionContext, Store};
+use smysl_graph::{DetectionContext, StoreRead};
 
 use crate::connective;
 use crate::profile::{Connectives, Contentions, Profile, Provenance, StatusDisplay, Verbosity};
@@ -161,7 +161,12 @@ impl Default for BuildOptions {
 }
 
 /// Build the IR from a graph, a thread, and a profile (§20 stage one).
-pub fn build(store: &Store, thread: &Thread, profile: &Profile, opts: &BuildOptions) -> Ir {
+pub fn build(
+    store: &(impl StoreRead + ?Sized),
+    thread: &Thread,
+    profile: &Profile,
+    opts: &BuildOptions,
+) -> Ir {
     let show_contentions = opts.contentions.unwrap_or(profile.show.contentions);
     let rendered: BTreeSet<Uid> = thread.units().copied().collect();
 
@@ -302,7 +307,7 @@ pub fn build(store: &Store, thread: &Thread, profile: &Profile, opts: &BuildOpti
 ///
 /// Only edges *between consecutive steps* count. An edge to some other part of the thread
 /// would produce a connective that promises a transition the text does not make.
-fn joining_kinds(store: &Store, thread: &Thread) -> BTreeMap<Uid, RelKind> {
+fn joining_kinds(store: &(impl StoreRead + ?Sized), thread: &Thread) -> BTreeMap<Uid, RelKind> {
     let mut out = BTreeMap::new();
     for pair in thread.steps.windows(2) {
         let (prev, next) = (pair[0].unit, pair[1].unit);
@@ -393,6 +398,7 @@ mod tests {
         Hlc, KernelType, Op, Record, Relation, Rung, SourceKind, SourceRef, Step, ThreadId,
         ThreadSchema, UnitCore, UnitCoreBuilder,
     };
+    use smysl_graph::Store;
 
     fn core(gist: &str, status: Status) -> UnitCore {
         let mut b = UnitCoreBuilder::new(KernelType::Claim, gist, status);
@@ -422,7 +428,7 @@ mod tests {
         .with_steps(steps)
     }
 
-    fn ir(store: &Store, t: &Thread, p: &Profile) -> Ir {
+    fn ir(store: &(impl StoreRead + ?Sized), t: &Thread, p: &Profile) -> Ir {
         build(store, t, p, &BuildOptions::default())
     }
 

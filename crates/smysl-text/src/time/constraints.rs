@@ -26,7 +26,7 @@
 //! build rather than returning a shorter list.
 
 use smysl_core::types::{RelKind, Status};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 
 use super::{Instant, Subject, TimeStatus};
 
@@ -115,7 +115,7 @@ pub struct Unbuilt {
 /// Sorted by kind and then by subject, so that two runs over the same store produce the same
 /// list and therefore the same constraint ids — which is what makes a why-chain reproducible
 /// (rule U).
-pub fn free(store: &Store) -> (Vec<Free>, Unbuilt) {
+pub fn free(store: &(impl StoreRead + ?Sized)) -> (Vec<Free>, Unbuilt) {
     let mut out = Vec::new();
     let mut unbuilt = Unbuilt {
         dangling_manifests: 0,
@@ -128,7 +128,7 @@ pub fn free(store: &Store) -> (Vec<Free>, Unbuilt) {
         if r.kind != RelKind::Extension(QUOTES.to_string()) {
             continue;
         }
-        let Some(quoting) = store.units().find(|(u, _)| **u == r.from).map(|(_, u)| u) else {
+        let Some(quoting) = store.get(&r.from) else {
             continue;
         };
         out.push(Free::Order {
@@ -140,13 +140,13 @@ pub fn free(store: &Store) -> (Vec<Free>, Unbuilt) {
     }
 
     // Derivation and supersession, between manifests.
-    for (mid, m) in store.manifests() {
+    for (mid, m) in store.library().manifests() {
         for (kind, other) in [
             (FreeKind::Derivation, m.parent.map(|(mid, _)| mid)),
             (FreeKind::Supersession, m.supersedes),
         ] {
             let Some(other) = other else { continue };
-            if store.manifest(&other).is_none() {
+            if store.library().manifest(&other).is_none() {
                 unbuilt.dangling_manifests += 1;
                 continue;
             }
@@ -184,11 +184,11 @@ pub fn free(store: &Store) -> (Vec<Free>, Unbuilt) {
     // published after the store first heard of a unit drawn from one of its parts. This one
     // *does* work without FC-3, because a unit's `source.reference` names the part and the
     // manifest lists the part.
-    for (mid, m) in store.manifests() {
+    for (mid, m) in store.library().manifests() {
         let earliest = m
             .parts
             .iter()
-            .flat_map(|p| store.units_with_tid(&p.tid))
+            .flat_map(|p| store.library().units_with_tid(&p.tid))
             .filter_map(|u| store.attestations_of(&u).iter().map(|a| a.ts.wall_ms).min())
             .min();
         let Some(ms) = earliest else { continue };
@@ -240,6 +240,7 @@ pub fn of_status(s: Status) -> TimeStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smysl_graph::Store;
 
     #[test]
     fn a_units_status_maps_onto_a_time_status() {

@@ -25,7 +25,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::{canonical_uid, Status, Uid, UnitCore};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 
 use crate::ceiling;
 
@@ -62,7 +62,7 @@ fn status_of(
     uid: &Uid,
     rewritten: &BTreeMap<Uid, UnitCore>,
     original: &BTreeMap<Uid, UnitCore>,
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
 ) -> Option<Status> {
     if let Some(u) = rewritten.get(uid) {
         return Some(u.status);
@@ -82,7 +82,7 @@ pub use smysl_graph::relink::resettle;
 
 /// Bring a batch into rule M, weakening what overclaims and rewriting what then points at
 /// a moved identity.
-pub fn apply(store: &Store, units: Vec<UnitCore>) -> Applied {
+pub fn apply(store: &(impl StoreRead + ?Sized), units: Vec<UnitCore>) -> Applied {
     let original: BTreeMap<Uid, UnitCore> = units
         .iter()
         .map(|u| (canonical_uid(u), u.clone()))
@@ -149,6 +149,7 @@ pub fn apply(store: &Store, units: Vec<UnitCore>) -> Applied {
 mod tests {
     use super::*;
     use smysl_core::{KernelType, Record, UnitCoreBuilder};
+    use smysl_graph::Store;
 
     fn unit(kind: KernelType, gist: &str, status: Status, grounds: Vec<Uid>) -> UnitCore {
         let mut b = UnitCoreBuilder::new(kind, gist, status);

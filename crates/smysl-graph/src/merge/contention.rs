@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::{Contention, ContentionId, Detected, DetectionKind, Hlc, Label, RelKind, Uid};
 
-use crate::store::Store;
+use crate::store::{HotKind, StoreRead};
 
 /// Everything detection needs that is not in the store.
 #[derive(Debug, Clone, Default)]
@@ -32,7 +32,7 @@ pub struct DetectionContext {
 }
 
 /// Detect every contention implied by a store (§5.4).
-pub fn detect(store: &Store, ctx: &DetectionContext) -> Vec<Contention> {
+pub fn detect(store: &(impl StoreRead + ?Sized), ctx: &DetectionContext) -> Vec<Contention> {
     let mut out = Vec::new();
     out.extend(supersession_forks(store, ctx));
     out.extend(live_rebuttals(store, ctx));
@@ -48,7 +48,10 @@ pub fn detect(store: &Store, ctx: &DetectionContext) -> Vec<Contention> {
 }
 
 /// (a) Two distinct uids supersede the same target and neither supersedes the other.
-fn supersession_forks(store: &Store, ctx: &DetectionContext) -> Vec<Contention> {
+fn supersession_forks(
+    store: &(impl StoreRead + ?Sized),
+    ctx: &DetectionContext,
+) -> Vec<Contention> {
     let mut by_target: BTreeMap<Uid, BTreeSet<Uid>> = BTreeMap::new();
     for r in store.relations_of_kind(&RelKind::Supersedes) {
         by_target.entry(r.to).or_default().insert(r.from);
@@ -76,7 +79,7 @@ fn supersession_forks(store: &Store, ctx: &DetectionContext) -> Vec<Contention> 
 
 /// Whether every pair among `uids` is related by `supersedes` in one direction or the
 /// other - that is, whether they form a chain rather than a fork.
-fn totally_ordered(store: &Store, uids: &[Uid]) -> bool {
+fn totally_ordered(store: &(impl StoreRead + ?Sized), uids: &[Uid]) -> bool {
     for (i, a) in uids.iter().enumerate() {
         for b in &uids[i + 1..] {
             let ab = store.has_relation(&RelKind::Supersedes, a, b);
@@ -103,7 +106,7 @@ fn totally_ordered(store: &Store, uids: &[Uid]) -> bool {
 /// The contention is *over* the unit and has the unit as its single position. Unlike a
 /// supersession fork there are no rival uids to name — the rival claims are levels, which live in
 /// the commitment records the reviewer reads next.
-fn commitment_forks(store: &Store, ctx: &DetectionContext) -> Vec<Contention> {
+fn commitment_forks(store: &(impl StoreRead + ?Sized), ctx: &DetectionContext) -> Vec<Contention> {
     let mut out = Vec::new();
     for (uid, _) in store.units() {
         let commits = store.commits_of(uid);
@@ -142,7 +145,7 @@ fn commitment_forks(store: &Store, ctx: &DetectionContext) -> Vec<Contention> {
 ///
 /// Live as rule R defines it since 1.4 — not withdrawn, from a unit that is not `unfounded` —
 /// and over a claim that is not `unfounded` either: a disagreement with a retracted claim is over.
-fn live_rebuttals(store: &Store, ctx: &DetectionContext) -> Vec<Contention> {
+fn live_rebuttals(store: &(impl StoreRead + ?Sized), ctx: &DetectionContext) -> Vec<Contention> {
     let mut out = Vec::new();
     for rel in store.relations_of_kind(&RelKind::Rebuts) {
         if !store.is_live_rebuttal(rel) || store.is_unfounded(&rel.to) {
@@ -165,7 +168,7 @@ fn live_rebuttals(store: &Store, ctx: &DetectionContext) -> Vec<Contention> {
 }
 
 /// (c) One label bound to different uids across views in scope.
-fn label_collisions(store: &Store, ctx: &DetectionContext) -> Vec<Contention> {
+fn label_collisions(store: &(impl StoreRead + ?Sized), ctx: &DetectionContext) -> Vec<Contention> {
     let mut bindings: BTreeMap<Label, BTreeSet<Uid>> = BTreeMap::new();
     for map in &ctx.labels {
         for (l, u) in map {
@@ -175,7 +178,7 @@ fn label_collisions(store: &Store, ctx: &DetectionContext) -> Vec<Contention> {
     // The store's own label bindings. A merged store holds each source's bindings as records,
     // and detection read only labels a caller passed in, so a library merge of two stores
     // binding one label to different units found no collision (found with R10).
-    for r in store.iter() {
+    for r in store.hot_records(HotKind::LabelBindings) {
         if let smysl_core::Record::LabelBinding(b) = r {
             bindings.entry(b.label.clone()).or_default().insert(b.uid);
         }
@@ -231,6 +234,7 @@ fn merge_agent() -> smysl_core::AgentId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::Store;
     use smysl_core::{
         canonical_uid, AgentId, KernelType, Record, Relation, Role, Status, Step, Thread, ThreadId,
         ThreadSchema, UnitCore, UnitCoreBuilder,

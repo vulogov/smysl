@@ -25,7 +25,7 @@ use smysl_core::{
     ContentionId, Detected, DetectionKind, Hlc, KernelType, Record, RelKind, Relation,
     ResolutionTarget, Status, Uid, UidPrefix, UnitCoreBuilder, Withdrawal,
 };
-use smysl_graph::{EdgeSet, HotKind, Store, StoreRead};
+use smysl_graph::{AnyStore, EdgeSet, HotKind, Overlay, Store, StoreRead};
 
 fn fixtures(dir: &str) -> Vec<(String, Vec<Record>)> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
@@ -179,6 +179,18 @@ fn observe<S: StoreRead + ?Sized>(s: &S, probes: &[Uid]) -> Vec<String> {
             ),
         );
     }
+    // The library layer whole (its `Debug` is every map it holds), and the derived answers.
+    let lib = s.library();
+    say("library", format!("{lib:?}"));
+    for alias in lib.aliases() {
+        say(&format!("heads {alias}"), format!("{:?}", lib.heads(alias)));
+    }
+    for tid in lib.parts().keys() {
+        say(
+            &format!("units_with_tid {tid:?}"),
+            format!("{:?}", lib.units_with_tid(tid)),
+        );
+    }
     let log: Vec<[u8; 32]> = s.records().map(|r| hash_bytes(&to_cbor(&r))).collect();
     say("records", format!("{log:?}"));
     say("duplicate_records", s.duplicate_records().to_string());
@@ -323,6 +335,59 @@ fn conform(name: &str, records: &[Record]) {
         check(&format!("Box<{label}>"), observe(&Box::new(s.clone()), &p));
         check(&format!("Rc<{label}>"), observe(&Rc::new(s.clone()), &p));
         check(&format!("Arc<{label}>"), observe(&Arc::new(s.clone()), &p));
+        check(
+            &format!("AnyStore<{label}>"),
+            observe(&AnyStore::from(s.clone()), &p),
+        );
+    }
+
+    // Implementation 7, `Overlay` (TX-P13a step 10): the log split at four points, each half
+    // laid over a store of the other — which is `from_records` of the whole, in that order.
+    let log: Vec<Record> = oracle.iter().cloned().collect();
+    let n = log.len();
+    for k in [0, n / 3, 2 * n / 3, n] {
+        let base = Store::from_records(log[..k].to_vec());
+        let over = Overlay::new(&base, log[k..].to_vec());
+        check(&format!("Overlay at {k}/{n}"), observe(&over, &p));
+        check(&format!("&Overlay at {k}/{n}"), observe(&&over, &p));
+    }
+    // Over an opened log, and over another overlay.
+    let (_, opened) = &impls[1];
+    check(
+        "Overlay over open",
+        observe(&Overlay::new(opened, Vec::new()), &p),
+    );
+    let first = Store::from_records(log[..n / 3].to_vec());
+    let inner = Overlay::new(&first, log[n / 3..2 * n / 3].to_vec());
+    let outer = Overlay::new(&inner, log[2 * n / 3..].to_vec());
+    check("Overlay of an Overlay", observe(&outer, &p));
+
+    // Interleaved rather than split: attestations land before their units, and a relation's
+    // attestations arrive on the other side from the relation. The oracle is the store of the
+    // same records in the overlay's order.
+    let (even, odd): (Vec<_>, Vec<_>) = log
+        .iter()
+        .cloned()
+        .enumerate()
+        .partition(|(i, _)| i % 2 == 0);
+    let even: Vec<Record> = even.into_iter().map(|(_, r)| r).collect();
+    let odd: Vec<Record> = odd.into_iter().map(|(_, r)| r).collect();
+    let mut order = even.clone();
+    order.extend(odd.iter().cloned());
+    let reordered = Store::from_records(order);
+    let want_reordered = observe(&reordered, &p);
+    let base = Store::from_records(even);
+    let got = observe(&Overlay::new(&base, odd), &p);
+    assert_eq!(
+        got.len(),
+        want_reordered.len(),
+        "{name}: interleaved: answer count"
+    );
+    for (g, w) in got.iter().zip(&want_reordered) {
+        assert_eq!(
+            g, w,
+            "{name}: an interleaved Overlay disagrees with its store"
+        );
     }
 }
 
@@ -361,4 +426,78 @@ fn the_lifecycle_store_has_something_to_say() {
     assert!(s.units().any(|(u, _)| StoreRead::is_unfounded(&s, u)));
     assert!(StoreRead::units_at_commitment(&s, Commitment::Committed).len() == 1);
     conform("lifecycle", &lifecycle());
+}
+
+/// Two manifests under one alias, the second superseding the first; a unit sourced from a part;
+/// a redaction and a dating. What `StoreRead::library` answers, with something in it.
+fn library_records() -> Vec<Record> {
+    use smysl_core::ids::{LangTag, Rdid, Tid};
+    use smysl_core::types::library::{Dating, DatingTarget, Redaction};
+    use smysl_core::types::{Carry, Manifest, PartEntry, SourceKind, SourceRef};
+
+    let tid = |b: u8| Tid::from_normalised_bytes(&[b]);
+    let manifest = |part: u8| {
+        let mut m = Manifest::new(
+            "bible",
+            LangTag::new("en").unwrap(),
+            "txt/1",
+            "public-domain",
+            "smysl/parts/1 level=line min=65536 max=4194304",
+        );
+        m.carry = Carry::Text;
+        m.parts.push(PartEntry::new(
+            tid(part),
+            128,
+            [part; 32],
+            Rdid::from_bytes([part; 32]),
+        ));
+        m
+    };
+    let first = manifest(1);
+    let mut second = manifest(2);
+    second.supersedes = Some(first.mid());
+    let sourced = UnitCoreBuilder::new(KernelType::Prose, "In the beginning.", Status::Cited)
+        .source(SourceRef::new(
+            SourceKind::Doc,
+            format!("{}#Gen.1.1", tid(2).canonical()),
+        ))
+        .build()
+        .unwrap();
+    let u = canonical_uid(&sourced);
+    vec![
+        Record::Manifest(first),
+        Record::Manifest(second),
+        Record::Unit(sourced),
+        Record::Redaction(Redaction::new(
+            tid(1),
+            agent("tool:conf"),
+            Hlc::new(4, 0, agent("tool:conf")),
+        )),
+        Record::Dating(Dating::offset(
+            DatingTarget::Unit(u),
+            -3_600_000,
+            agent("tool:conf"),
+            Hlc::new(6, 0, agent("tool:conf")),
+        )),
+    ]
+}
+
+#[test]
+fn the_library_layer_answers_alike_everywhere() {
+    let s = Store::from_records(library_records());
+    let lib = StoreRead::library(&s);
+    assert_eq!(lib.manifest_count(), 2);
+    assert_eq!(lib.heads("bible").len(), 1);
+    assert_eq!(lib.redacted_count(), 1);
+    assert_eq!(lib.dating_count(), 1);
+    assert_eq!(lib.parts().len(), 2);
+    assert_eq!(
+        lib.units_with_tid(&smysl_core::ids::Tid::from_normalised_bytes(&[2]))
+            .len(),
+        1
+    );
+    conform("library", &library_records());
+    let mut both = lifecycle();
+    both.extend(library_records());
+    conform("library and lifecycle", &both);
 }

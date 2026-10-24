@@ -13,7 +13,7 @@ use bm25::{
 };
 
 use smysl_core::{SchemaId, Status, Uid};
-use smysl_graph::Store;
+use smysl_graph::{Store, StoreRead};
 
 use crate::{candidates, indexable, Hit, Query, Retriever};
 
@@ -59,7 +59,7 @@ pub(crate) fn repeats(weight: f32) -> usize {
     }
 }
 
-fn document_text(store: &Store, uid: &Uid) -> Option<String> {
+fn document_text(store: &(impl StoreRead + ?Sized), uid: &Uid) -> Option<String> {
     let parts = indexable(store, uid)?;
     let mut out = String::new();
     for (text, weight) in parts {
@@ -77,7 +77,7 @@ impl Bm25 {
     /// Fitting is over the same corpus that is then scored, which is what makes the inverse
     /// document frequencies meaningful: a term common in *this* store is uninformative in
     /// this store, whatever it is worth elsewhere.
-    pub fn index(store: &Store) -> Bm25 {
+    pub fn index(store: &(impl StoreRead + ?Sized)) -> Bm25 {
         Bm25::index_with(store, crate::tokenize::Tokenizer::plain())
     }
 
@@ -91,7 +91,10 @@ impl Bm25 {
     /// The suffixes are English and are applied to any text given, so a caller indexing a store
     /// that is not English wants `Tokenizer::folding_for(&view.lang)`, which folds for `en` and
     /// leaves everything else as written.
-    pub fn index_with(store: &Store, tokenizer: crate::tokenize::Tokenizer) -> Bm25 {
+    pub fn index_with(
+        store: &(impl StoreRead + ?Sized),
+        tokenizer: crate::tokenize::Tokenizer,
+    ) -> Bm25 {
         let facts = candidates(store);
 
         // Deterministic order: `facts` is a BTreeMap, so the corpus is built in uid order on
@@ -117,8 +120,12 @@ impl Bm25 {
             .map(|u| {
                 let strings = store
                     .get(u)
-                    .and_then(|unit| unit.core.payload.as_deref())
-                    .map(smysl_core::surface::payload::payload_strings)
+                    .and_then(|unit| {
+                        unit.core
+                            .payload
+                            .as_deref()
+                            .map(smysl_core::surface::payload::payload_strings)
+                    })
                     .unwrap_or_default();
                 (*u, strings)
             })

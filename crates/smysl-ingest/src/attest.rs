@@ -18,7 +18,7 @@
 //! whether a gist is honest about the body beneath it.
 
 use smysl_core::{AgentId, Attestation, Hlc, Op, Rung, Uid, UnitCore};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 use smysl_provider::{ProviderError, Registry, Request, Task};
 
 use crate::prompt::{Template, FENCE};
@@ -187,7 +187,7 @@ impl AttestOptions {
 /// Units are taken in uid order rather than at random, so two runs over the same store ask
 /// about the same units - a sample that moved would make two reports incomparable.
 pub fn attest(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     registry: &Registry,
     opts: &AttestOptions,
 ) -> Result<AttestReport, ProviderError> {
@@ -195,15 +195,16 @@ pub fn attest(
     let template = opts.what.template();
 
     let mut report = AttestReport::default();
-    let candidates: Vec<(&Uid, &UnitCore)> = store
+    // The unit handles themselves, not borrows of their cores: a paged store hands out owned
+    // handles (SMYSL-2.8 §3.2).
+    let candidates: Vec<_> = store
         .units()
         .filter(|(_, u)| relevant(opts.what, &u.core))
-        .map(|(uid, u)| (uid, &u.core))
         .take(opts.sample.unwrap_or(usize::MAX))
         .collect();
 
-    for (uid, core) in candidates {
-        let request = Request::new("", template.render(&describe(core)))
+    for (uid, unit) in candidates {
+        let request = Request::new("", template.render(&describe(&unit.core)))
             .with_system(&template.system)
             .with_max_output(opts.max_output);
 

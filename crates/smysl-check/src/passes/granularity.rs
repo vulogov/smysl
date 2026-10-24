@@ -12,9 +12,13 @@
 
 use smysl_core::diag::{Code, Diagnostic, Report};
 use smysl_core::{Admission, GranularityProfile, Uid, UnitCore};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 
-pub fn run(store: &Store, granularity: &GranularityProfile, report: &mut Report) {
+pub fn run(
+    store: &(impl StoreRead + ?Sized),
+    granularity: &GranularityProfile,
+    report: &mut Report,
+) {
     for (uid, unit) in store.units() {
         check_unit(uid, &unit.core, granularity, report);
     }
@@ -97,6 +101,7 @@ fn list_items(body: &str) -> usize {
 mod tests {
     use super::*;
     use smysl_core::{canonical_uid, KernelType, Record, Status, UnitCoreBuilder};
+    use smysl_graph::Store;
 
     fn check(body: &str, g: &GranularityProfile) -> Report {
         let core = UnitCoreBuilder::new(KernelType::Claim, "a claim", Status::Speculative)

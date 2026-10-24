@@ -44,7 +44,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::{KernelType, SchemaId, Status, Uid};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 
 pub mod analyze;
 pub mod postings;
@@ -330,7 +330,10 @@ pub trait Retriever {
 ///
 /// Returned as parts rather than one joined string so an implementation can weight them.
 /// Gist first and heaviest: it is the summary the format guarantees exists.
-pub(crate) fn indexable(store: &Store, uid: &Uid) -> Option<Vec<(String, f32)>> {
+pub(crate) fn indexable(
+    store: &(impl StoreRead + ?Sized),
+    uid: &Uid,
+) -> Option<Vec<(String, f32)>> {
     let unit = store.get(uid)?;
     let mut parts = vec![(unit.core.gist.clone(), 1.0)];
     if let Some(b) = &unit.core.body {
@@ -350,7 +353,7 @@ pub(crate) fn indexable(store: &Store, uid: &Uid) -> Option<Vec<(String, f32)>> 
 /// recorded here was that a `KernelType` filter cannot express such a unit, which is true and is
 /// an argument for [`Query::admits_schema`] rather than for dropping it: a query that names no
 /// kind wants everything, and one that names `claim` wants kernel claims.
-pub(crate) fn candidates(store: &Store) -> BTreeMap<Uid, (SchemaId, Status)> {
+pub(crate) fn candidates(store: &(impl StoreRead + ?Sized)) -> BTreeMap<Uid, (SchemaId, Status)> {
     store
         .units()
         .map(|(u, unit)| (*u, (unit.core.schema.clone(), unit.core.status)))

@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::diag::{Code, Diagnostic, Report};
 use smysl_core::{Label, Uid, UidPrefix, UnitCore};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 
 /// Anaphora with no antecedent inside the gist. A gist that opens with one of these is
 /// reaching for something the reader has not been given yet.
@@ -36,7 +36,7 @@ const DANGLING_OPENERS: &[&str] = &[
     "see below",
 ];
 
-pub fn run(store: &Store, labels: &BTreeMap<Label, Uid>, report: &mut Report) {
+pub fn run(store: &(impl StoreRead + ?Sized), labels: &BTreeMap<Label, Uid>, report: &mut Report) {
     for (uid, unit) in store.units() {
         let declared: BTreeSet<Uid> = unit.core.references().copied().collect();
         body_closure(uid, &unit.core, &declared, labels, store, report);
@@ -54,7 +54,7 @@ fn body_closure(
     core: &UnitCore,
     declared: &BTreeSet<Uid>,
     labels: &BTreeMap<Label, Uid>,
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     report: &mut Report,
 ) {
     let Some(body) = &core.body else { return };
@@ -143,6 +143,7 @@ fn tokenise(s: &str) -> impl Iterator<Item = &str> {
 mod tests {
     use super::*;
     use smysl_core::{canonical_uid, KernelType, Record, Status, UnitCoreBuilder};
+    use smysl_graph::Store;
 
     fn store_of(cores: Vec<UnitCore>) -> Store {
         Store::from_records(cores.into_iter().map(Record::Unit).collect())

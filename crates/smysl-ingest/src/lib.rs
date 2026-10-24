@@ -106,7 +106,7 @@ use std::collections::BTreeMap;
 use smysl_core::{Diagnostic, Label, Relation, Uid, UnitCore};
 use smysl_core::{Hlc, Rung};
 #[cfg(feature = "model")]
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 #[cfg(feature = "model")]
 use smysl_provider::{Provider, ProviderError, Registry, Request, Task, Usage};
 
@@ -723,7 +723,7 @@ impl<'a> Ingestor<'a> {
     /// a `Result` per span.
     pub fn ingest(
         &self,
-        store: &Store,
+        store: &(impl StoreRead + ?Sized),
         input: &str,
     ) -> Result<(Staged, IngestReport), ProviderError> {
         // A bad override is a configuration mistake, and it is reported before egress rather

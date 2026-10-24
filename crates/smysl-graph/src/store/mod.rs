@@ -9,10 +9,12 @@
 //! is a new relation - so the store is a grow-only set, which is what makes merge a
 //! join-semilattice (rule U).
 
+mod any;
 pub mod index;
 mod interp;
 mod library;
 mod read;
+mod union;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -28,12 +30,15 @@ use smysl_core::{
 
 use crate::adjacency::{Adjacency, EdgeKind, EdgeSet};
 use crate::traverse;
+pub use any::{AnyRecords, AnyStore, AnyUnit, AnyUnits};
 use index::{Cached, Entry, Index};
 use interp::Interpretive;
+pub use library::StoreLibrary;
 pub use read::{
     Commits, HotKind, HotRecords, Relations, Resolutions, StoreRead, StoreWrite, Threads, Views,
     Withdrawals,
 };
+pub use union::{Overlay, OverlayRecords, OverlayUnit, OverlayUnits};
 
 /// How to open a store.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -129,7 +134,7 @@ pub struct Store {
     /// crate rebuilds, which is not a promise worth making.
     adjacency_rebuilds: u64,
     /// Manifests, heads and the by-part indexes (RFC SMYSL-2.4 §4.3.2).
-    library: library::Library,
+    library: library::StoreLibrary,
 }
 
 /// What a store derives from its units and relations, as one value so that one reset
@@ -206,7 +211,7 @@ impl Store {
             record_hashes: BTreeSet::new(),
             derived: OnceLock::new(),
             adjacency_rebuilds: 0,
-            library: library::Library::default(),
+            library: library::StoreLibrary::default(),
         }
     }
 
@@ -372,7 +377,7 @@ impl Store {
         // catches every 15 and 18 whether anything is redacted or not. Rule Z is enforced
         // where text actually rests — `smysl-text`'s object store — and a store's job here is
         // to hold the redactions so that the object store can ask. See `Store::is_redacted`
-        // and `smysl_text::library::Library::redact`.
+        // and `smysl_text::library::StoreLibrary::redact`.
         for r in records {
             let code = match r {
                 Record::PartText(_) => Some(record::code::PART_TEXT as u8),
@@ -1294,48 +1299,7 @@ impl Store {
     /// derived state - cores, attestations, relations, thread registers, contentions -
     /// which is exactly what §5.1 says the union is component-wise over.
     pub fn state_hash(&self) -> [u8; 32] {
-        let mut bytes = Vec::new();
-
-        for (uid, unit) in &self.units {
-            bytes.extend_from_slice(uid.as_bytes());
-            for a in &unit.attestations {
-                bytes.extend_from_slice(&to_cbor(&Record::Attestation(a.clone())));
-            }
-            if let Some(s) = unit.salience {
-                bytes.extend_from_slice(&s.to_be_bytes());
-            }
-            for l in &unit.labels {
-                bytes.extend_from_slice(l.as_str().as_bytes());
-            }
-        }
-        for r in self.interp.relations.values() {
-            bytes.extend_from_slice(&to_cbor(&Record::Relation(r.clone())));
-            for a in &r.attestations {
-                bytes.extend_from_slice(&to_cbor(&Record::Attestation(a.clone())));
-            }
-        }
-        for t in self.interp.threads.values() {
-            bytes.extend_from_slice(&to_cbor(&Record::Thread(t.clone())));
-        }
-        for v in self.interp.views.values() {
-            bytes.extend_from_slice(&to_cbor(&Record::View(v.clone())));
-        }
-        for set in self.interp.withdrawals.values() {
-            for w in set {
-                bytes.extend_from_slice(&to_cbor(&Record::Withdrawal(w.clone())));
-            }
-        }
-        for r in &self.interp.resolutions {
-            bytes.extend_from_slice(&to_cbor(&Record::Resolution(r.clone())));
-        }
-        // Contentions are keyed by a derived id, so sorting by it is canonical.
-        let mut contentions: Vec<&Contention> = self.interp.contentions.iter().collect();
-        contentions.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
-        for c in contentions {
-            bytes.extend_from_slice(&to_cbor(&Record::Contention(c.clone())));
-        }
-
-        hash_bytes(&bytes)
+        state_hash_of(self.units.iter(), &self.interp)
     }
 
     /// Whether two stores carry the same graph, whatever order they were assembled in.
@@ -1592,8 +1556,58 @@ pub fn record_set_digest<'a>(records: impl IntoIterator<Item = &'a Record>) -> [
     digest_of_hashes(&hashes)
 }
 
+/// [`Store::state_hash`] over any source of units and an interpretive layer: what an
+/// [`Overlay`] answers with, so the two cannot drift apart.
+pub(crate) fn state_hash_of<'a, U: std::ops::Deref<Target = Unit>>(
+    units: impl Iterator<Item = (&'a Uid, U)>,
+    interp: &Interpretive,
+) -> [u8; 32] {
+    let mut bytes = Vec::new();
+
+    for (uid, unit) in units {
+        bytes.extend_from_slice(uid.as_bytes());
+        for a in &unit.attestations {
+            bytes.extend_from_slice(&to_cbor(&Record::Attestation(a.clone())));
+        }
+        if let Some(s) = unit.salience {
+            bytes.extend_from_slice(&s.to_be_bytes());
+        }
+        for l in &unit.labels {
+            bytes.extend_from_slice(l.as_str().as_bytes());
+        }
+    }
+    for r in interp.relations.values() {
+        bytes.extend_from_slice(&to_cbor(&Record::Relation(r.clone())));
+        for a in &r.attestations {
+            bytes.extend_from_slice(&to_cbor(&Record::Attestation(a.clone())));
+        }
+    }
+    for t in interp.threads.values() {
+        bytes.extend_from_slice(&to_cbor(&Record::Thread(t.clone())));
+    }
+    for v in interp.views.values() {
+        bytes.extend_from_slice(&to_cbor(&Record::View(v.clone())));
+    }
+    for set in interp.withdrawals.values() {
+        for w in set {
+            bytes.extend_from_slice(&to_cbor(&Record::Withdrawal(w.clone())));
+        }
+    }
+    for r in &interp.resolutions {
+        bytes.extend_from_slice(&to_cbor(&Record::Resolution(r.clone())));
+    }
+    // Contentions are keyed by a derived id, so sorting by it is canonical.
+    let mut contentions: Vec<&Contention> = interp.contentions.iter().collect();
+    contentions.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
+    for c in contentions {
+        bytes.extend_from_slice(&to_cbor(&Record::Contention(c.clone())));
+    }
+
+    hash_bytes(&bytes)
+}
+
 /// §3.1's framing over a set of record hashes, ascending.
-fn digest_of_hashes(hashes: &BTreeSet<[u8; 32]>) -> [u8; 32] {
+pub(crate) fn digest_of_hashes<'a>(hashes: impl IntoIterator<Item = &'a [u8; 32]>) -> [u8; 32] {
     let mut h = Rolling::new();
     h.update(b"smysl/rsd/1");
     h.update(&[0x00]);

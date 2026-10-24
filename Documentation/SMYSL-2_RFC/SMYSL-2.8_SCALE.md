@@ -1095,6 +1095,81 @@ proportions, not `gen_graph.py`'s bytes, and without the label bindings the surf
   `Adjacency::from_parts` (§3.2) has no second caller until P13b, and §4.1's `any.rs`,
   `union.rs` are P13a.10–11 and P13c.
 
+Steps 5–11 below were measured against the step-4 commit (`6143768`) on the same ladder, median
+of three; "within ±5%" holds for every stage at 171k units except `units_in_observed_order`
+(2.8 → 3.0 ms, a function no step touched). At 34k units `check` read +6.1% and `salience`
++5.7% on that run; an interleaved A/B of seven runs each puts them at +0.0% and +1.1%, so they are
+recorded as noise rather than as regressions. Derived thread bytes are unchanged throughout.
+
+**One decision taken for all seven steps: `impl StoreRead` in argument position, not a named
+type parameter.** §3.2 wrote `fn f<S: StoreRead + ?Sized>(store: &S)`. `cargo-semver-checks`
+0.50 reports that form as **major** — `function_requires_different_generic_type_params`, "0 → 1
+generic types" — because a caller naming the type parameters by turbofish would break, and
+`make semver` gates on it. `store: &(impl StoreRead + ?Sized)` admits exactly the same callers
+and has no nameable parameter, and the tool reports it as needing no version change. It is used
+in every ported signature; §3.2's sketch and §5.2's shapes are otherwise unchanged.
+
+- **P13a.5 — done (2026-10-23).** `labels`, `lineage`, `salience` ported. `labels.rs` reads
+  `hot_records(LabelBindings)` instead of scanning the log. `tests/downstream_shapes.rs` (§5.2)
+  is new: every ported function through `&Store`, `&&Store`, a reborrowed `&mut Store`,
+  `&Box`, `&Arc`, `&Rc` (and, from step 10, an `Overlay`), each answer compared with the
+  `&Store` one, plus the function-pointer and higher-order shapes. `make semver`: smysl-graph
+  needs no version change.
+- **P13a.6 — done (2026-10-23).** `merge/*` (`merge`'s second argument only, §3.3), `relink`,
+  `compact` ported; `contention.rs`'s label scan reads hot records. `plan_retraction` simulates
+  a retraction on a copy of the store, which a generic store cannot make: the sealed supertrait
+  gained a crate-private `owned() -> Cow<Store>` — the in-memory store lends itself, so the
+  clone is the one it always paid. `merge_algebra` fuzzed 601 s clean (286,431 runs).
+- **P13a.7 — done (2026-10-23).** `smysl-check` ported, `extension.rs` on hot records. **Two
+  things Table B predates.** (1) The library pass reads manifests, heads, datings and parts
+  (SMYSL-2.4): the store's library state became a public `StoreLibrary` with the read methods
+  `Store` already had, `StoreRead` gained a 28th required method `library()`, and `Store`'s
+  inherent methods delegate to it with their signatures unchanged. It is interpretive — sized by
+  manifests, not text — so every implementation holds one. (2) The time pass calls
+  `smysl_text::time::engine::effective`, so the engine and `constraints::free` were ported too
+  (`smysl-text` is unpublished; two linear `units().find` lookups became `get`). `check`'s
+  output is byte-identical to step 6's binary on every fixture store under `fixtures/` (text and
+  `--json`, 189 invocations, 63 with diagnostics). The conformance suite compares
+  `library()` and gained a store with manifests, a supersession, a redaction and a dating.
+- **P13a.8 — done (2026-10-23).** `smysl-pack` ported, the cache's `required` included.
+  `pack_constraints` and `pack_exact` fuzzed 600 s each, clean.
+- **P13a.9 — done (2026-10-23).** `smysl-thread`, `smysl-retrieve`, `smysl-embed`,
+  `smysl-render` ported. **Not ported: `Bm25View` and `Bm25::over`**, which hold a
+  `&'p Store`; generalising the struct would add a type parameter to a public type, which is a
+  break, and neither is on §4.3's list. Three sites that borrowed through a unit handle now
+  copy a gist or nest the borrow, since a paged store's handle is owned.
+- **P13a.10 — done (2026-10-23).** `Overlay` (`store/union.rs`) and `smysl-ingest` ported, with
+  `stage` checking a batch through an overlay instead of `from_records` over a copy of the
+  store. The batch becomes a small store, less what the base holds; the interpretive layer and
+  the library are the base's cloned with the batch folded in by the same `absorb_hot`; units read
+  through, except batch units and base units a batch attestation lands on; the adjacency and
+  `unfounded` are derived lazily over the union. This gave `Adjacency::from_parts` (§3.2) its
+  second caller, so it landed here rather than in P13b: `build` delegates to it, and presence
+  is a binary search over the sorted units. The sealed supertrait carries what an overlay needs
+  of its base (the interpretive layer, pending attestations, record hashes), crate-private.
+  Conformance: implementation 7 at four split points, over an opened base, nested, and
+  interleaved (attestations before their units); `tests/store_conformance_ops.rs` (new, the
+  facade half of §5.1) runs `check`, salience, pack at three budgets, five threads with rule L
+  and render IR, trace, effective status, detect, review, compact, relink and BM25 on an overlay
+  and on the store it stands for. `ingest/tests/gate.rs` passes unchanged. **Staging 50 units:
+  670 → 312 ms at 171k units, 110 → 49 ms at 34k. The < 50 ms exit is not met at 171k, and
+  cannot be by this design:** staging checks the batch against the whole union, and `check` at
+  171k is 254 ms on its own. The figure was written when `check` there was 58 ms, and even
+  then it and the adjacency (56 ms) exceeded it. What step 10 removed is the copy; what is left
+  is `check`, which is the finding P13a.1 already recorded. An incremental check is the way
+  under 50 ms and is not in this RFC.
+- **P13a.11 — done (2026-10-23).** `AnyStore` (`store/any.rs`), in-memory only: its unit,
+  units and records types are newtypes over a private enum, so the redb variant changes no type
+  a caller can name, and the enum is `#[non_exhaustive]`. `App::with_store(AnyStore)` (additive).
+  `smysl-eval` ported except the three functions that call `smysl-measure`, which takes
+  `&Store` and is not in P13a. The facade re-exports `StoreRead`, `StoreWrite`, `Overlay`,
+  `AnyStore` and `StoreLibrary`; the public-API diff is those five lines. The CLI's
+  `load_store` returns `AnyStore`; commands that append, bundle, or hand the store to the
+  unported library, query and measure layers load through `load_memory`. No flag is added, so
+  `tests/cli-surface.txt` does not change. **What P13a leaves on `&Store`:** `smysl-text`
+  outside the time engine, `smysl-query`, `smysl-measure`, `smysl-lib`, `Bm25View` — the crates
+  that postdate §2.6's inventory — for whichever phase gives them a second backend to serve.
+
 ## 7. Risks and mitigations
 
 | risk | why it is real | mitigation |

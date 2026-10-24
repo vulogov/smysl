@@ -33,7 +33,7 @@ use smysl_core::diag::{Code, Diagnostic, Report, Subject};
 use smysl_core::ids::{Did, Mid, Rdid, Tid};
 use smysl_core::types::{PartResolver, Resolved, SourceRef};
 use smysl_core::Record;
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 
 /// The codes this pass is allocated and does not raise, with the reason.
 ///
@@ -48,7 +48,7 @@ pub const SKIPPED: &[(&str, &str)] = &[];
 
 /// Run the pass. `parts` is the object store, when the caller has one.
 pub fn run(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     parts: Option<&(dyn PartResolver + Send + Sync + core::panic::RefUnwindSafe)>,
     report: &mut Report,
 ) {
@@ -73,7 +73,7 @@ pub fn run(
 /// bytes that are there and wrong, and a redacted part has no bytes by design. Neither is a span
 /// this pass can check, and reporting one would name the wrong thing.
 fn spans(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     parts: &(dyn PartResolver + Send + Sync + core::panic::RefUnwindSafe),
     report: &mut Report,
 ) {
@@ -147,7 +147,7 @@ fn spans(
 /// rather than borrowed because this crate may not depend on `smysl-graph`'s private modules —
 /// `Store::part_of_reference` is the public form and this pass has a `Store`, so it uses that.
 fn part_of_reference(reference: &str) -> Option<Tid> {
-    Store::part_of_reference(reference)
+    smysl_graph::Store::part_of_reference(reference)
 }
 
 /// `SMY-E403` - a reference that names an identity and is not one.
@@ -164,7 +164,7 @@ fn part_of_reference(reference: &str) -> Option<Tid> {
 ///
 /// `source.manifest` is the other carrier §4.3.3 names. It is `Option<Mid>` from TX-P5, so it
 /// cannot be malformed by then and cannot exist now; the reference is the whole of it here.
-fn malformed_identities(store: &Store, report: &mut Report) {
+fn malformed_identities(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     for (uid, unit) in store.units() {
         if let Some(source) = unit.core.source.as_ref() {
             if let Some(claimed) = ill_formed(source) {
@@ -185,7 +185,7 @@ fn malformed_identities(store: &Store, report: &mut Report) {
     }
     // A manifest's `origin` is a `SourceRef` too, and a manifest that recorded where its text
     // came from with a malformed identity is the same defect with no unit to hang it on.
-    for (mid, manifest) in store.manifests() {
+    for (mid, manifest) in store.library().manifests() {
         if let Some(claimed) = manifest.origin.as_ref().and_then(ill_formed) {
             report.push(Diagnostic::new(Code::E403).with_message(format!(
                 "the origin of manifest `{}` ({}) names `{claimed}`, which claims to be {} \
@@ -250,7 +250,7 @@ fn kind_of(claimed: &str) -> &'static str {
 /// `smysl_core::schemas::text::rule_7_violations` is the one implementation, shared with the
 /// producer: this crate may not depend on `smysl-text`, so a copy here would be the same rule
 /// read twice.
-fn entities(store: &Store, report: &mut Report) {
+fn entities(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     for (uid, unit) in store.units() {
         let broken = smysl_core::schemas::text::rule_7_violations(&unit.core);
         if broken.is_empty() {
@@ -288,9 +288,9 @@ fn entities(store: &Store, report: &mut Report) {
 /// manifest to arrive may be the one that supersedes one of them, and then the record would be
 /// a stale finding with a hash chain behind it. The same argument keeps a contention a
 /// detection rather than a record (§5.4).
-fn forks(store: &Store, report: &mut Report) {
-    for alias in store.aliases() {
-        let heads = store.heads(alias);
+fn forks(store: &(impl StoreRead + ?Sized), report: &mut Report) {
+    for alias in store.library().aliases() {
+        let heads = store.library().heads(alias);
         if heads.len() > 1 {
             let names: Vec<String> = heads.iter().map(Mid::canonical).collect();
             report.push(
@@ -319,9 +319,9 @@ fn forks(store: &Store, report: &mut Report) {
 ///
 /// One diagnostic per record rather than one for the store: each names a tid, and the tid is
 /// what an operator needs to move the bytes into the object store where they belong.
-fn text_in_the_log(store: &Store, report: &mut Report) {
-    for record in store.iter() {
-        let (which, id) = match record {
+fn text_in_the_log(store: &(impl StoreRead + ?Sized), report: &mut Report) {
+    for record in store.records() {
+        let (which, id) = match &*record {
             Record::PartText(p) => ("a part text (record 15)", p.tid.canonical()),
             Record::PartReading(r) => ("a reading (record 18)", r.rdid().canonical()),
             _ => continue,
@@ -352,11 +352,11 @@ fn text_in_the_log(store: &Store, report: &mut Report) {
 /// re-read" is exactly what this is, and C-Library forbids it, so leaving it unraisable would
 /// have made that row of the conformance table decorative.
 fn objects(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     parts: &(dyn PartResolver + Send + Sync + core::panic::RefUnwindSafe),
     report: &mut Report,
 ) {
-    for (mid, manifest) in store.manifests() {
+    for (mid, manifest) in store.library().manifests() {
         for entry in &manifest.parts {
             let where_ = || {
                 format!(

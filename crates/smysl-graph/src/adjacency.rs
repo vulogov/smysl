@@ -250,6 +250,20 @@ impl Adjacency {
     /// Every uid mentioned anywhere becomes a node, present or not, so the dense id space
     /// covers the whole reference graph and dangling edges stay observable.
     pub fn build(units: &BTreeMap<Uid, Unit>, relations: &[Relation]) -> Adjacency {
+        let units: Vec<(Uid, &Unit)> = units.iter().map(|(u, x)| (*u, x)).collect();
+        Adjacency::from_parts(&units, relations)
+    }
+
+    /// [`Adjacency::build`] from units in **ascending uid order**, however they are held.
+    ///
+    /// The one constructor every store implementation uses (SMYSL-2.8 §3.2), so dense ids are
+    /// assigned and edge lists sorted the same way whether the units sit in a map, behind an
+    /// overlay or on disk. A unit is present when it is in `units`.
+    pub(crate) fn from_parts<U: std::ops::Deref<Target = Unit>>(
+        units: &[(Uid, U)],
+        relations: &[Relation],
+    ) -> Adjacency {
+        debug_assert!(units.windows(2).all(|w| w[0].0 < w[1].0));
         let mut all: BTreeSet<Uid> = BTreeSet::new();
         for (uid, u) in units {
             all.insert(*uid);
@@ -270,7 +284,10 @@ impl Adjacency {
             .map(|(i, u)| (*u, i as NodeId))
             .collect();
         let n = order.len();
-        let present: Vec<bool> = order.iter().map(|u| units.contains_key(u)).collect();
+        let present: Vec<bool> = order
+            .iter()
+            .map(|u| units.binary_search_by(|(x, _)| x.cmp(u)).is_ok())
+            .collect();
 
         let mut extensions: Vec<String> = relations
             .iter()

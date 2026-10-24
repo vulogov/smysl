@@ -58,6 +58,32 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### Every operation takes any store, and staging stops copying one
+
+TX-P13a steps 4–11 (SMYSL-2.8 §6): the rest of the in-memory half. Nothing on disk changes, no
+command gains a flag, and every derived thread and `check` report is byte-identical before and
+after.
+
+- **`StoreRead` and `StoreWrite`** (step 4, in the previous commit), sealed, with delegating
+  impls for `&`, `&mut`, `Box`, `Rc` and `Arc`, and a conformance suite that compares every
+  answer of every implementation with `Store::from_records` of the same records.
+- **Every operation §4.3 lists takes `&(impl StoreRead + ?Sized)`** where it took `&Store` —
+  lineage, labels, salience, merge, review, retraction, relink, compact, every check pass,
+  pack, threads, BM25, semantic indexing, render and ingest staging. A caller's `&Store`,
+  `&Arc<Store>` or `&mut Store` compiles as before; `tests/downstream_shapes.rs` calls each
+  function each way. The argument-position form rather than §3.2's named parameter, because
+  `cargo-semver-checks` reports a new named type parameter as a major change and this as none.
+- **`StoreLibrary`**, the store's manifests, heads, datings and parts, now public as what
+  `StoreRead::library()` answers; `Store`'s methods of those names delegate to it, unchanged.
+- **`Overlay`**: a store and a batch read as their union, without copying the store.
+  `smysl_ingest::stage` checks a batch through one. Staging fifty units against a 171k-unit
+  store went from 670 to 312 ms; the RFC's 50 ms is not reachable while staging checks the
+  whole union, because `check` alone takes 254 ms there.
+- **`AnyStore`**, the backend chosen at run time, in memory only until the redb store arrives.
+  The CLI loads through it; `App::with_store` takes one.
+- **What stays on `&Store`:** the library, query and measure crates, the rest of `smysl-text`,
+  and `Bm25View`, whose struct holds the reference. They postdate the RFC's inventory.
+
 ### An append that costs the batch, and a load that hashes once
 
 TX-P13a steps 1–3 (SMYSL-2.8 §6), the in-memory half of the scale work: nothing on disk

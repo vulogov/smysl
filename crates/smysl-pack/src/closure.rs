@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 
 use smysl_core::{Lod, Uid};
-use smysl_graph::{EdgeSet, Store};
+use smysl_graph::{EdgeSet, StoreRead};
 
 use crate::constraints::{warrants_of, Selection};
 
@@ -19,7 +19,7 @@ use crate::constraints::{warrants_of, Selection};
 ///
 /// Includes `(uid, level)` itself. Levels already met by `selected` are still reported, so
 /// a caller can see the whole obligation; use [`delta`] for what it would actually cost.
-pub fn required(store: &Store, uid: Uid, level: Lod) -> Selection {
+pub fn required(store: &(impl StoreRead + ?Sized), uid: Uid, level: Lod) -> Selection {
     required_via(store, uid, level, &EdgeSet::of([]))
 }
 
@@ -30,7 +30,12 @@ pub fn required(store: &Store, uid: Uid, level: Lod) -> Selection {
 /// resting on it — states the dependency in a relation instead, and nothing reading `grounds`
 /// alone can see it: the decision packed without the prerequisite it rests on. `support` is that
 /// caller's edge set, `EdgeSet::premises()` normally, and it binds at L1+ as C1 and C2 do.
-pub fn required_via(store: &Store, uid: Uid, level: Lod, support: &EdgeSet) -> Selection {
+pub fn required_via(
+    store: &(impl StoreRead + ?Sized),
+    uid: Uid,
+    level: Lod,
+    support: &EdgeSet,
+) -> Selection {
     let mut need: Selection = Selection::new();
     let mut work: Vec<(Uid, Lod)> = vec![(uid, level)];
 
@@ -92,13 +97,18 @@ pub fn required_via(store: &Store, uid: Uid, level: Lod, support: &EdgeSet) -> S
 ///
 /// Only the shortfall: a requirement already met costs nothing, which is what makes the
 /// second unit from a cluster so much cheaper than the first.
-pub fn delta(store: &Store, selected: &Selection, uid: Uid, level: Lod) -> Selection {
+pub fn delta(
+    store: &(impl StoreRead + ?Sized),
+    selected: &Selection,
+    uid: Uid,
+    level: Lod,
+) -> Selection {
     keep_shortfall(required(store, uid, level), selected)
 }
 
 /// [`delta`] over a caller's support edges (1.5).
 pub fn delta_via(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     selected: &Selection,
     uid: Uid,
     level: Lod,
@@ -151,7 +161,12 @@ impl Needs {
     }
 
     /// The obligation for `(uid, level)`, walking the graph at most once per pair.
-    pub fn required(&mut self, store: &Store, uid: Uid, level: Lod) -> &Selection {
+    pub fn required(
+        &mut self,
+        store: &(impl StoreRead + ?Sized),
+        uid: Uid,
+        level: Lod,
+    ) -> &Selection {
         self.cache
             .entry((uid, level))
             .or_insert_with(|| required_via(store, uid, level, &self.support))
@@ -164,7 +179,7 @@ impl Needs {
     /// put a `BTreeMap` copy back into the inner loop the memo exists to empty.
     pub fn delta(
         &mut self,
-        store: &Store,
+        store: &(impl StoreRead + ?Sized),
         selected: &Selection,
         uid: Uid,
         level: Lod,
@@ -246,13 +261,13 @@ impl core::fmt::Display for Reason {
 }
 
 /// Attribute each unit a closure pulled in to the unit that pulled it.
-pub fn reasons(store: &Store, uid: Uid, level: Lod) -> BTreeMap<Uid, Reason> {
+pub fn reasons(store: &(impl StoreRead + ?Sized), uid: Uid, level: Lod) -> BTreeMap<Uid, Reason> {
     reasons_via(store, uid, level, &EdgeSet::of([]))
 }
 
 /// [`reasons`] over a caller's support edges (1.5).
 pub fn reasons_via(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     uid: Uid,
     level: Lod,
     support: &EdgeSet,
@@ -298,6 +313,7 @@ pub fn reasons_via(
             }
             if store
                 .open_contentions()
+                .into_iter()
                 .any(|k| k.pins(holder) && k.positions.contains(x))
             {
                 reason = Some(Reason::Contests(*holder));
@@ -317,6 +333,7 @@ mod tests {
         canonical_uid, AgentId, Contention, ContentionId, Detected, DetectionKind, Hlc, KernelType,
         Record, RelKind, Relation, SourceKind, SourceRef, Status, UnitCore, UnitCoreBuilder,
     };
+    use smysl_graph::Store;
 
     fn evidence(gist: &str) -> UnitCore {
         UnitCoreBuilder::new(KernelType::Evidence, gist, Status::Measured)

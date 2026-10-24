@@ -16,7 +16,7 @@ use smysl_core::{
 };
 
 use crate::merge::contention::{detect, DetectionContext};
-use crate::store::Store;
+use crate::store::StoreRead;
 
 /// What a review item is about.
 #[derive(Debug, Clone, PartialEq)]
@@ -96,7 +96,7 @@ impl ReviewItem {
 /// Stale contentions are left out, and so are rebuttals that are no longer live or whose claim
 /// is `unfounded` — there is nothing left to review. A caller wanting the open queue filters on
 /// `resolved`.
-pub fn review(store: &Store, ctx: &DetectionContext) -> Vec<ReviewItem> {
+pub fn review(store: &(impl StoreRead + ?Sized), ctx: &DetectionContext) -> Vec<ReviewItem> {
     review_with(
         store,
         &ReviewOptions {
@@ -111,7 +111,7 @@ pub fn review(store: &Store, ctx: &DetectionContext) -> Vec<ReviewItem> {
 /// A tool that proposes edges — a model linking a test to the claim it verifies — needs them in
 /// the queue until somebody stands behind them, and an attestation on an edge is how the format
 /// records who did (§2.4). A withdrawn edge is not an item: it has been dealt with.
-pub fn review_with(store: &Store, opts: &ReviewOptions) -> Vec<ReviewItem> {
+pub fn review_with(store: &(impl StoreRead + ?Sized), opts: &ReviewOptions) -> Vec<ReviewItem> {
     let ctx = &opts.detection;
     let mut contentions: Vec<Contention> = Vec::new();
     for c in store
@@ -187,6 +187,7 @@ pub fn review_with(store: &Store, opts: &ReviewOptions) -> Vec<ReviewItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::Store;
     use smysl_core::{
         canonical_uid, AgentId, Hlc, KernelType, Record, Resolution, Role, Status, Step, Thread,
         ThreadId, ThreadSchema, UnitCoreBuilder, Withdrawal,

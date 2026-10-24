@@ -14,7 +14,7 @@
 use std::collections::BTreeSet;
 
 use smysl_core::{Lod, Uid};
-use smysl_graph::{salience, SalienceRequest, Store};
+use smysl_graph::{salience, SalienceRequest, Store, StoreRead};
 use smysl_pack::{pack, Estimator, PackRequest, Selection};
 
 /// Which side of the comparison a run belongs to.
@@ -144,7 +144,12 @@ impl Run {
 /// sent - and would report no saving on a corpus where the saving is exactly the bodies
 /// that were left behind. Measured with the same estimator `pack` budgets against, so E1 is
 /// in the units the budget was spent in.
-pub fn unit_tokens(store: &Store, uid: &Uid, level: Lod, est: &Estimator) -> u64 {
+pub fn unit_tokens(
+    store: &(impl StoreRead + ?Sized),
+    uid: &Uid,
+    level: Lod,
+    est: &Estimator,
+) -> u64 {
     store
         .get(uid)
         .map(|u| est.unit(&u.core, level))
@@ -152,7 +157,7 @@ pub fn unit_tokens(store: &Store, uid: &Uid, level: Lod, est: &Estimator) -> u64
 }
 
 /// Tokens for a whole selection, at each unit's own level.
-fn selection_tokens(store: &Store, sel: &Selection, est: &Estimator) -> u64 {
+fn selection_tokens(store: &(impl StoreRead + ?Sized), sel: &Selection, est: &Estimator) -> u64 {
     sel.iter()
         .map(|(uid, level)| unit_tokens(store, uid, *level, est))
         .sum()
@@ -168,7 +173,7 @@ pub use smysl_measure::graph::rd::{floor_tokens, full_tokens};
 /// `honoured` counts those whose rebutter survived with them. Rule R is the claim that
 /// these two numbers are equal, so measuring them apart is what makes the claim falsifiable
 /// rather than assumed.
-fn rebuttal_pairs(store: &Store, surviving: &BTreeSet<Uid>) -> (usize, usize) {
+fn rebuttal_pairs(store: &(impl StoreRead + ?Sized), surviving: &BTreeSet<Uid>) -> (usize, usize) {
     let mut possible = 0;
     let mut honoured = 0;
     for uid in surviving {

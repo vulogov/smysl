@@ -16,7 +16,7 @@ use std::fmt;
 
 use smysl_core::{Label, Record, Uid};
 
-use crate::Store;
+use crate::store::{HotKind, StoreRead};
 
 /// Why a label does not name exactly one unit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,9 +45,9 @@ impl std::error::Error for LabelError {}
 ///
 /// Repeats are collapsed because a store merged from two copies of one document carries the
 /// same binding twice, and one name for one unit is not an ambiguity.
-pub fn label_bindings(store: &Store, label: &Label) -> Vec<Uid> {
+pub fn label_bindings(store: &(impl StoreRead + ?Sized), label: &Label) -> Vec<Uid> {
     store
-        .iter()
+        .hot_records(HotKind::LabelBindings)
         .filter_map(|r| match r {
             Record::LabelBinding(b) if &b.label == label => Some(b.uid),
             _ => None,
@@ -66,9 +66,9 @@ pub fn label_bindings(store: &Store, label: &Label) -> Vec<Uid> {
 ///
 /// A unit may carry more than one label: identity is content, so two declarations with the same
 /// gist, status and grounds are one unit under two names.
-pub fn labels_of(store: &Store, uid: &Uid) -> Vec<Label> {
+pub fn labels_of(store: &(impl StoreRead + ?Sized), uid: &Uid) -> Vec<Label> {
     store
-        .iter()
+        .hot_records(HotKind::LabelBindings)
         .filter_map(|r| match r {
             Record::LabelBinding(b) if &b.uid == uid => Some(b.label.clone()),
             _ => None,
@@ -81,9 +81,9 @@ pub fn labels_of(store: &Store, uid: &Uid) -> Vec<Label> {
 /// Every binding in the store, uid to labels, in one pass (1.5).
 ///
 /// For a printer that needs them all: one walk of the log rather than one per unit.
-pub fn label_index(store: &Store) -> BTreeMap<Uid, Vec<Label>> {
+pub fn label_index(store: &(impl StoreRead + ?Sized)) -> BTreeMap<Uid, Vec<Label>> {
     let mut out: BTreeMap<Uid, BTreeSet<Label>> = BTreeMap::new();
-    for r in store.iter() {
+    for r in store.hot_records(HotKind::LabelBindings) {
         if let Record::LabelBinding(b) = r {
             out.entry(b.uid).or_default().insert(b.label.clone());
         }
@@ -94,7 +94,7 @@ pub fn label_index(store: &Store) -> BTreeMap<Uid, Vec<Label>> {
 }
 
 /// The one uid this label names, or why there is not exactly one.
-pub fn resolve_label(store: &Store, label: &Label) -> Result<Uid, LabelError> {
+pub fn resolve_label(store: &(impl StoreRead + ?Sized), label: &Label) -> Result<Uid, LabelError> {
     match label_bindings(store, label).as_slice() {
         [] => Err(LabelError::Unbound),
         [only] => Ok(*only),

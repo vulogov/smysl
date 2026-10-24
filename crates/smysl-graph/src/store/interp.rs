@@ -17,8 +17,11 @@ use smysl_core::{
 /// A relation's key: `(kind, from, to)`, the canonical relation order.
 pub(crate) type RelKey = (String, Uid, Uid);
 
+///
+/// `pub` only so the crate-private `sealed::Sealed` can hand it between implementations; the
+/// module is private, so nothing outside the crate can name it.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct Interpretive {
+pub struct Interpretive {
     pub(crate) relations: BTreeMap<RelKey, Relation>,
     /// Each relation's rid, to its key in `relations`.
     pub(crate) rids: BTreeMap<Uid, RelKey>,
@@ -104,6 +107,25 @@ impl Interpretive {
             _ => return false,
         }
         true
+    }
+
+    /// Whether a relation has been withdrawn. Lifecycle kinds are never withdrawable (1.4).
+    pub(crate) fn is_withdrawn(&self, rel: &Relation) -> bool {
+        !rel.kind.is_lifecycle() && self.withdrawals.contains_key(&rel.uid())
+    }
+
+    /// Attach an attestation to the relation whose rid it names, and say whether it landed.
+    pub(crate) fn attach_to_relation(&mut self, a: &smysl_core::Attestation) -> bool {
+        let Some(key) = self.rids.get(&a.uid) else {
+            return false;
+        };
+        match self.relations.get_mut(key) {
+            Some(rel) => {
+                rel.attestations.insert(a.clone());
+                true
+            }
+            None => false,
+        }
     }
 
     /// The relation whose rid this is.

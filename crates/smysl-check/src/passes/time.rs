@@ -33,12 +33,12 @@
 use smysl_core::diag::{Code, Diagnostic, Report, Subject};
 use smysl_core::edtf;
 use smysl_core::types::{Axis, DatingTarget, DatingValue};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 use smysl_text::time::engine::{effective, hold_contention, Unresolved};
 use smysl_text::time::{edtf as extent, Instant, Subject as TimeSubject};
 
 /// Run the pass.
-pub fn run(store: &Store, report: &mut Report) {
+pub fn run(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     values(store, report);
     observed_outside_published(store, report);
     consequences(store, report);
@@ -50,7 +50,7 @@ pub fn run(store: &Store, report: &mut Report) {
 /// `published` (key 8) is what units copy under A-2.4 rule 2, so a malformed one there becomes
 /// a malformed one on every unit drawn from it, and finding it once at the catalog entry is
 /// the difference between one diagnostic and ten thousand.
-fn values(store: &Store, report: &mut Report) {
+fn values(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     for (uid, unit) in store.units() {
         let Some(published) = unit
             .core
@@ -62,7 +62,7 @@ fn values(store: &Store, report: &mut Report) {
         };
         judge(published, Subject::Unit(*uid), "`source.published`", report);
     }
-    for (mid, m) in store.manifests() {
+    for (mid, m) in store.library().manifests() {
         let Some(published) = m.published.as_deref() else {
             continue;
         };
@@ -73,7 +73,7 @@ fn values(store: &Store, report: &mut Report) {
             report,
         );
     }
-    for (did, dating) in store.datings() {
+    for (did, dating) in store.library().datings() {
         let DatingValue::Absolute(text) = &dating.value else {
             continue;
         };
@@ -117,7 +117,7 @@ fn judge(text: &str, subject: Subject, carrier: &str, report: &mut Report) {
 /// was published, and when this reading was taken — and a reading taken before its own source
 /// was published is a pair of records that cannot both be right. Reported rather than refused,
 /// because which of the two is wrong is not a thing a checker can know.
-fn observed_outside_published(store: &Store, report: &mut Report) {
+fn observed_outside_published(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     for (uid, unit) in store.units() {
         let Some(source) = unit.core.source.as_ref() else {
             continue;
@@ -154,7 +154,7 @@ fn observed_outside_published(store: &Store, report: &mut Report) {
 ///
 /// All three axes, because a dating on *composed* that cannot apply is as much a finding as one
 /// on *said*, and the axis is in the message so a reader knows which graph to look at.
-fn consequences(store: &Store, report: &mut Report) {
+fn consequences(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     for axis in Axis::ALL.iter().copied() {
         let e = effective(store, axis);
         for c in &e.inconsistent {
@@ -209,6 +209,7 @@ fn consequences(store: &Store, report: &mut Report) {
             // "a resolution releases it" and stopped there sent a reader looking for something
             // no command can show them.
             let id = store
+                .library()
                 .dating(did)
                 .and_then(|d| hold_contention(did, d))
                 .map(|id| format!(" ({id})"))
@@ -279,6 +280,7 @@ mod tests {
         UnitCoreBuilder,
     };
     use smysl_core::{canonical_uid, Did, KernelType, Op, Rung};
+    use smysl_graph::Store;
 
     fn agent() -> AgentId {
         AgentId::new("human:vu").expect("an agent")

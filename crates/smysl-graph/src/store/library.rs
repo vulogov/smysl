@@ -21,8 +21,13 @@ use super::Store;
 
 /// The library state a store derives, kept in one struct so `Store`'s field list says what the
 /// library part of it is rather than scattering five maps through thirty.
+///
+/// Public since TX-P13a step 7 (SMYSL-2.8), as what [`crate::StoreRead::library`] answers: it is
+/// part of the interpretive layer — proportional to manifests and datings, not to text — so
+/// every implementation of the trait holds one and answers these questions the same way.
+/// `Store`'s inherent methods of the same names delegate here and keep their signatures.
 #[derive(Debug, Clone, Default)]
-pub(super) struct Library {
+pub struct StoreLibrary {
     /// Every manifest, by its mid.
     pub(super) manifests: BTreeMap<Mid, Manifest>,
     /// The manifests of each expression alias.
@@ -65,7 +70,7 @@ pub(super) struct Library {
     // it, in the same commit, where it can be tested.
 }
 
-impl Library {
+impl StoreLibrary {
     /// Record a manifest. Idempotent: the same manifest twice is one manifest.
     pub(super) fn absorb_manifest(&mut self, m: &Manifest) {
         let mid = m.mid();
@@ -137,25 +142,25 @@ pub(super) fn part_of(reference: &str) -> Option<Tid> {
     Tid::parse(&text).ok()
 }
 
-impl Store {
+impl StoreLibrary {
     /// The manifest with this mid.
     pub fn manifest(&self, mid: &Mid) -> Option<&Manifest> {
-        self.library.manifests.get(mid)
+        self.manifests.get(mid)
     }
 
     /// Every manifest the store holds, in mid order.
     pub fn manifests(&self) -> impl Iterator<Item = (&Mid, &Manifest)> + '_ {
-        self.library.manifests.iter()
+        self.manifests.iter()
     }
 
     /// How many manifests the store holds.
     pub fn manifest_count(&self) -> usize {
-        self.library.manifests.len()
+        self.manifests.len()
     }
 
     /// Every redaction the store holds, by the part each names (rule Z).
     pub fn redactions(&self) -> impl Iterator<Item = (&Tid, &BTreeSet<Redaction>)> + '_ {
-        self.library.redactions.iter()
+        self.redactions.iter()
     }
 
     /// Whether any redaction in this store names this part.
@@ -164,27 +169,27 @@ impl Store {
     /// rather than about a record: a part is redacted if *anybody* whose records reached here
     /// said so, and a merge only ever adds to that.
     pub fn is_redacted(&self, tid: &Tid) -> bool {
-        self.library.redactions.contains_key(tid)
+        self.redactions.contains_key(tid)
     }
 
     /// How many parts this store holds a redaction for.
     pub fn redacted_count(&self) -> usize {
-        self.library.redactions.len()
+        self.redactions.len()
     }
 
     /// The dating with this did.
     pub fn dating(&self, did: &Did) -> Option<&Dating> {
-        self.library.datings.get(did)
+        self.datings.get(did)
     }
 
     /// Every dating the store holds, in did order.
     pub fn datings(&self) -> impl Iterator<Item = (&Did, &Dating)> + '_ {
-        self.library.datings.iter()
+        self.datings.iter()
     }
 
     /// How many datings the store holds.
     pub fn dating_count(&self) -> usize {
-        self.library.datings.len()
+        self.datings.len()
     }
 
     /// The datings written against exactly this target, in did order.
@@ -193,8 +198,7 @@ impl Store {
     /// reverse. Rule E asks both questions and they are different questions; answering the
     /// narrow one here keeps the engine's seeding step explicit about which it meant.
     pub fn datings_of(&self, target: &DatingTarget) -> Vec<Did> {
-        self.library
-            .datings_by_target
+        self.datings_by_target
             .get(target)
             .map(|set| set.iter().copied().collect())
             .unwrap_or_default()
@@ -202,13 +206,12 @@ impl Store {
 
     /// Every expression alias the store has a manifest for, in order.
     pub fn aliases(&self) -> impl Iterator<Item = &str> + '_ {
-        self.library.by_alias.keys().map(String::as_str)
+        self.by_alias.keys().map(String::as_str)
     }
 
     /// The manifests recorded under an alias, in mid order.
     pub fn manifests_of(&self, alias: &str) -> Vec<Mid> {
-        self.library
-            .by_alias
+        self.by_alias
             .get(alias)
             .map(|set| set.iter().copied().collect())
             .unwrap_or_default()
@@ -216,7 +219,7 @@ impl Store {
 
     /// Whether some other manifest names this one in `supersedes`.
     pub fn is_superseded(&self, mid: &Mid) -> bool {
-        self.library.superseded.contains(mid)
+        self.superseded.contains(mid)
     }
 
     /// The heads of an alias: its manifests that nothing supersedes.
@@ -230,16 +233,132 @@ impl Store {
     /// another the store does not hold: a truncated chain has no head, and saying so is better
     /// than inventing one.
     pub fn heads(&self, alias: &str) -> Vec<Mid> {
-        self.library
-            .by_alias
+        self.by_alias
             .get(alias)
             .map(|set| {
                 set.iter()
-                    .filter(|mid| !self.library.superseded.contains(mid))
+                    .filter(|mid| !self.superseded.contains(mid))
                     .copied()
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// The units whose source names this part, exactly.
+    ///
+    /// The exact answer to the question `units_with_source_prefix` answers approximately. That
+    /// method stays as it is — it has been public contract since 1.5 — but a prefix match over
+    /// every unit is both a scan and a guess, and this is neither.
+    pub fn units_with_tid(&self, tid: &Tid) -> Vec<Uid> {
+        self.by_tid
+            .get(tid)
+            .map(|set| set.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    /// Every part any manifest records, in tid order, with the length it was recorded at.
+    ///
+    /// The length comes from the manifest's part entry, so a caller asking whether a span fits
+    /// (`SMY-E404`) needs no object store and no text. A tid recorded by two manifests with two
+    /// different lengths appears once per length, because that disagreement is exactly what a
+    /// check is for — collapsing it here would hide it.
+    pub fn parts(&self) -> BTreeMap<Tid, BTreeSet<u64>> {
+        let mut out: BTreeMap<Tid, BTreeSet<u64>> = BTreeMap::new();
+        for m in self.manifests.values() {
+            for part in &m.parts {
+                out.entry(part.tid).or_default().insert(part.length);
+            }
+        }
+        out
+    }
+}
+
+impl Store {
+    /// The manifest with this mid.
+    pub fn manifest(&self, mid: &Mid) -> Option<&Manifest> {
+        self.library.manifest(mid)
+    }
+
+    /// Every manifest the store holds, in mid order.
+    pub fn manifests(&self) -> impl Iterator<Item = (&Mid, &Manifest)> + '_ {
+        self.library.manifests()
+    }
+
+    /// How many manifests the store holds.
+    pub fn manifest_count(&self) -> usize {
+        self.library.manifest_count()
+    }
+
+    /// Every redaction the store holds, by the part each names (rule Z).
+    pub fn redactions(&self) -> impl Iterator<Item = (&Tid, &BTreeSet<Redaction>)> + '_ {
+        self.library.redactions()
+    }
+
+    /// Whether any redaction in this store names this part.
+    ///
+    /// The question rule Z is enforced by, and the reason it is a question about the **store**
+    /// rather than about a record: a part is redacted if *anybody* whose records reached here
+    /// said so, and a merge only ever adds to that.
+    pub fn is_redacted(&self, tid: &Tid) -> bool {
+        self.library.is_redacted(tid)
+    }
+
+    /// How many parts this store holds a redaction for.
+    pub fn redacted_count(&self) -> usize {
+        self.library.redacted_count()
+    }
+
+    /// The dating with this did.
+    pub fn dating(&self, did: &Did) -> Option<&Dating> {
+        self.library.dating(did)
+    }
+
+    /// Every dating the store holds, in did order.
+    pub fn datings(&self) -> impl Iterator<Item = (&Did, &Dating)> + '_ {
+        self.library.datings()
+    }
+
+    /// How many datings the store holds.
+    pub fn dating_count(&self) -> usize {
+        self.library.dating_count()
+    }
+
+    /// The datings written against exactly this target, in did order.
+    ///
+    /// *Exactly*: a dating on a part is not returned for a window over that part, nor the
+    /// reverse. Rule E asks both questions and they are different questions; answering the
+    /// narrow one here keeps the engine's seeding step explicit about which it meant.
+    pub fn datings_of(&self, target: &DatingTarget) -> Vec<Did> {
+        self.library.datings_of(target)
+    }
+
+    /// Every expression alias the store has a manifest for, in order.
+    pub fn aliases(&self) -> impl Iterator<Item = &str> + '_ {
+        self.library.aliases()
+    }
+
+    /// The manifests recorded under an alias, in mid order.
+    pub fn manifests_of(&self, alias: &str) -> Vec<Mid> {
+        self.library.manifests_of(alias)
+    }
+
+    /// Whether some other manifest names this one in `supersedes`.
+    pub fn is_superseded(&self, mid: &Mid) -> bool {
+        self.library.is_superseded(mid)
+    }
+
+    /// The heads of an alias: its manifests that nothing supersedes.
+    ///
+    /// Usually one. **Two is a fork**, and this returns both: a fork is a fact about a corpus,
+    /// and `check` reports it as `SMY-W418`. Refusing to open a forked library, or picking a
+    /// winner here, would make the fact unreportable — which is the same argument that keeps a
+    /// contention a record rather than an error.
+    ///
+    /// Empty when the alias is unknown, or when every manifest under it is superseded by
+    /// another the store does not hold: a truncated chain has no head, and saying so is better
+    /// than inventing one.
+    pub fn heads(&self, alias: &str) -> Vec<Mid> {
+        self.library.heads(alias)
     }
 
     /// The part a unit's `source.reference` names, if it names one.
@@ -258,11 +377,7 @@ impl Store {
     /// method stays as it is — it has been public contract since 1.5 — but a prefix match over
     /// every unit is both a scan and a guess, and this is neither.
     pub fn units_with_tid(&self, tid: &Tid) -> Vec<Uid> {
-        self.library
-            .by_tid
-            .get(tid)
-            .map(|set| set.iter().copied().collect())
-            .unwrap_or_default()
+        self.library.units_with_tid(tid)
     }
 
     /// Every part any manifest records, in tid order, with the length it was recorded at.
@@ -272,13 +387,7 @@ impl Store {
     /// different lengths appears once per length, because that disagreement is exactly what a
     /// check is for — collapsing it here would hide it.
     pub fn parts(&self) -> BTreeMap<Tid, BTreeSet<u64>> {
-        let mut out: BTreeMap<Tid, BTreeSet<u64>> = BTreeMap::new();
-        for m in self.library.manifests.values() {
-            for part in &m.parts {
-                out.entry(part.tid).or_default().insert(part.length);
-            }
-        }
-        out
+        self.library.parts()
     }
 }
 
@@ -331,7 +440,7 @@ mod tests {
         let mut second = manifest("kjv", 2);
         second.supersedes = Some(first.mid());
 
-        let mut library = Library::default();
+        let mut library = StoreLibrary::default();
         library.absorb_manifest(&first);
         library.absorb_manifest(&second);
 
@@ -344,7 +453,7 @@ mod tests {
     #[test]
     fn absorbing_a_manifest_twice_is_absorbing_it_once() {
         let m = manifest("kjv", 1);
-        let mut library = Library::default();
+        let mut library = StoreLibrary::default();
         library.absorb_manifest(&m);
         let after_one = library.clone();
         library.absorb_manifest(&m);

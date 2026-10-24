@@ -6,10 +6,10 @@
 //! are legitimate.
 
 use smysl_core::diag::{Code, Diagnostic, Report, Subject};
-use smysl_graph::{cycles, Adjacency, EdgeKind, EdgeSet, Store};
+use smysl_graph::{cycles, Adjacency, EdgeKind, EdgeSet, StoreRead};
 
 /// Run the pass.
-pub fn run(store: &Store, report: &mut Report) {
+pub fn run(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     dangling(store, report);
     repeated_records(store, report);
     unwithdrawable(store, report);
@@ -28,7 +28,7 @@ pub fn run(store: &Store, report: &mut Report) {
 /// A warning rather than an error, and one diagnostic rather than one per repeat: nothing is
 /// *wrong* with such a store — it means the same thing it always did — it is merely larger than
 /// it needs to be, and the fix is a command.
-fn repeated_records(store: &Store, report: &mut Report) {
+fn repeated_records(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     let n = store.duplicate_records();
     if n > 0 {
         report.push(Diagnostic::new(Code::W111).with_message(format!(
@@ -42,7 +42,7 @@ fn repeated_records(store: &Store, report: &mut Report) {
 /// Honouring one would un-retract a unit or change what a superseded unit's dependents rebind
 /// to, and 1.4 has rules for neither. The withdrawal is kept and ignored, which a reader would
 /// otherwise have no way to learn: the edge simply goes on applying.
-fn unwithdrawable(store: &Store, report: &mut Report) {
+fn unwithdrawable(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     for w in store.withdrawals() {
         if let Some(rel) = store.relation_by_id(&w.relation) {
             if rel.kind.is_lifecycle() {
@@ -60,7 +60,7 @@ fn unwithdrawable(store: &Store, report: &mut Report) {
 }
 
 /// `SMY-E060` - a reference that points at nothing in this store.
-fn dangling(store: &Store, report: &mut Report) {
+fn dangling(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     store.report_dangling(report);
 }
 
@@ -142,6 +142,7 @@ mod tests {
         canonical_uid, KernelType, Record, RelKind, Relation, Status, Uid, UnitCore,
         UnitCoreBuilder,
     };
+    use smysl_graph::Store;
 
     fn claim(gist: &str, deps: Vec<Uid>) -> UnitCore {
         UnitCoreBuilder::new(KernelType::Claim, gist, Status::Speculative)

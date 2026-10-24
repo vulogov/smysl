@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use smysl_core::types::PartResolver;
 use smysl_core::{Error, GranularityProfile, Label, ProfileEstimator, Severity, Uid};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 
 pub use passes::extension::{fidelity, ConsumerProfile, FidelityReport};
 pub use smysl_core::diag::{Code, Diagnostic, Report, Span, Subject};
@@ -256,7 +256,7 @@ impl CheckOptions {
 /// `l1_min`, the largest `l1_max`, and `topical` admission if any view uses it. A unit outside
 /// that is outside every profile present, which is a warning worth having; a unit inside it is
 /// not flagged on the strength of a sort order.
-fn store_granularity(store: &Store) -> GranularityProfile {
+fn store_granularity(store: &(impl StoreRead + ?Sized)) -> GranularityProfile {
     let mut distinct: Vec<&GranularityProfile> = Vec::new();
     for v in store.views() {
         if !distinct.contains(&&v.granularity) {
@@ -295,7 +295,7 @@ fn store_granularity(store: &Store) -> GranularityProfile {
 /// Run the pipeline.
 ///
 /// Never short-circuits: every requested pass runs, whatever the earlier ones found.
-pub fn check(store: &Store, opts: CheckOptions) -> Report {
+pub fn check(store: &(impl StoreRead + ?Sized), opts: CheckOptions) -> Report {
     let mut granularity = opts
         .granularity
         .clone()
@@ -384,7 +384,7 @@ pub fn conformance(report: &Report, class: ConformanceClass) -> ConformanceVerdi
 
 /// `check` plus the failure decision, for callers that want one call.
 pub fn check_and_fail_on(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     opts: CheckOptions,
     severity: Severity,
 ) -> Result<Report, Error> {
@@ -398,7 +398,7 @@ pub fn check_and_fail_on(
 /// Mixed granularity in a merged store is legal, not an error (D-5). `check --granularity`
 /// reports the distribution so a reader can see what they are looking at rather than being
 /// told off for it.
-pub fn granularity_distribution(store: &Store) -> BTreeMap<String, usize> {
+pub fn granularity_distribution(store: &(impl StoreRead + ?Sized)) -> BTreeMap<String, usize> {
     let mut out = BTreeMap::new();
     for v in store.views() {
         *out.entry(v.granularity.profile.clone()).or_insert(0) += 1;
@@ -671,6 +671,7 @@ mod conformance_table {
 mod tests {
     use super::*;
     use smysl_core::{KernelType, Record, Status, UnitCoreBuilder, View, ViewId};
+    use smysl_graph::Store;
 
     fn claim(gist: &str) -> Record {
         Record::Unit(

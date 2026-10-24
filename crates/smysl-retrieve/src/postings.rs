@@ -53,7 +53,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::Uid;
-use smysl_graph::Store;
+use smysl_graph::{Store, StoreRead};
 
 use crate::{indexable, Analyze, Hit, Query, Retriever};
 
@@ -179,7 +179,7 @@ impl MemPostings {
     /// holds, in uid order, with the gist repeated four times, the body twice and the detail
     /// once. The repetition is BM25's only way to express field weight, and it has to be here
     /// too or the lengths and the term frequencies would both be different numbers.
-    pub fn index(store: &Store, analyzer: &dyn Analyze) -> MemPostings {
+    pub fn index(store: &(impl StoreRead + ?Sized), analyzer: &dyn Analyze) -> MemPostings {
         let mut out = MemPostings::new(analyzer);
         for (uid, _) in store.units() {
             if let Some(text) = document_text(store, uid) {
@@ -413,7 +413,7 @@ impl Postings for Subset<'_> {
 /// `postings` table in `smysl_text::index` does — and a second implementation of "the gist four
 /// times, the body twice, the detail once" is how two tables come to score the same corpus
 /// differently. `None` for a uid the store does not hold.
-pub fn document_text(store: &Store, uid: &Uid) -> Option<String> {
+pub fn document_text(store: &(impl StoreRead + ?Sized), uid: &Uid) -> Option<String> {
     let parts = indexable(store, uid)?;
     let mut out = String::new();
     for (text, weight) in parts {

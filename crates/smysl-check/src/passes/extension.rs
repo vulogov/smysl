@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 
 use smysl_core::diag::{Code, Diagnostic, Report};
 use smysl_core::{Fidelity, RelKind, SchemaId};
-use smysl_graph::Store;
+use smysl_graph::{HotKind, StoreRead};
 
 /// What a consumer implements, for `check --as` (§23.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,9 +66,13 @@ pub struct FidelityReport {
     pub missing: BTreeSet<SchemaId>,
 }
 
-pub fn run(store: &Store, profile: Option<&ConsumerProfile>, report: &mut Report) {
+pub fn run(
+    store: &(impl StoreRead + ?Sized),
+    profile: Option<&ConsumerProfile>,
+    report: &mut Report,
+) {
     // `SMY-E012` - an extension that redefines a kernel type or relation kind.
-    for r in store.iter() {
+    for r in store.hot_records(HotKind::SchemaDecls) {
         if let smysl_core::Record::SchemaDecl(d) = r {
             if d.redefines_kernel() {
                 report.push(Diagnostic::new(Code::E012).with_message(format!(
@@ -98,7 +102,7 @@ pub fn run(store: &Store, profile: Option<&ConsumerProfile>, report: &mut Report
     // record was preserved in perfect silence: a reader was never told the store held
     // something it could not interpret. Preservation is rule X working; saying nothing
     // about it is how a reader comes to believe they have seen the whole document.
-    for r in store.iter() {
+    for r in store.hot_records(HotKind::Unknown) {
         if let smysl_core::Record::Unknown { code, payload } = r {
             report.push(Diagnostic::new(Code::W014).with_message(format!(
                 "record type {code} is not known to this build; \
@@ -117,8 +121,8 @@ pub fn run(store: &Store, profile: Option<&ConsumerProfile>, report: &mut Report
     // carrying the language in two hashed places is a unit whose language nothing can agree on.
     // The code stays rather than being retired: a store written before this release still holds
     // such units, and the advice is still the advice.
-    for r in store.iter() {
-        if let smysl_core::Record::Unit(u) = r {
+    for r in store.records() {
+        if let smysl_core::Record::Unit(u) = &*r {
             if let Some(bytes) = &u.payload {
                 if let Ok(o) = smysl_core::surface::payload_to_object(bytes) {
                     if o.iter().any(|(k, _)| k.value == "lang") {
@@ -141,8 +145,8 @@ pub fn run(store: &Store, profile: Option<&ConsumerProfile>, report: &mut Report
     //
     // The code is reported, not the value: `Unknown` is what the build calls it, and the raw
     // byte is the only thing that identifies which future kind was meant.
-    for r in store.iter() {
-        match r {
+    for r in store.records() {
+        match &*r {
             smysl_core::Record::Unit(u) => {
                 if let Some(s) = u.source.as_ref() {
                     if s.kind == smysl_core::SourceKind::Unknown {
@@ -221,15 +225,15 @@ pub fn run(store: &Store, profile: Option<&ConsumerProfile>, report: &mut Report
 }
 
 /// Whether a `SchemaDecl` in this store declares the kind.
-fn declared(store: &Store, kind: &RelKind) -> bool {
-    store.iter().any(|r| match r {
+fn declared(store: &(impl StoreRead + ?Sized), kind: &RelKind) -> bool {
+    store.hot_records(HotKind::SchemaDecls).any(|r| match r {
         smysl_core::Record::SchemaDecl(d) => d.relations.contains(kind),
         _ => false,
     })
 }
 
 /// What `check --as` reports (§23.1).
-pub fn fidelity(store: &Store, profile: &ConsumerProfile) -> FidelityReport {
+pub fn fidelity(store: &(impl StoreRead + ?Sized), profile: &ConsumerProfile) -> FidelityReport {
     let mut degraded = Vec::new();
     for (uid, unit) in store.units() {
         if !profile.understands(&unit.core.schema) {
@@ -277,6 +281,7 @@ mod tests {
         canonical_uid, KernelType, Record, Relation, SchemaDecl, Status, Uid, UnitCoreBuilder,
         View, ViewId,
     };
+    use smysl_graph::Store;
 
     fn ext(id: &str) -> SchemaId {
         SchemaId::parse(id).unwrap()

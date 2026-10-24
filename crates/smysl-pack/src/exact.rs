@@ -16,7 +16,7 @@
 use std::collections::BTreeMap;
 
 use smysl_core::{Lod, Uid};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 
 use crate::bound;
 use crate::closure;
@@ -50,7 +50,7 @@ pub struct Exact {
 /// incumbent prunes hard, so seeding is worth far more than it costs.
 #[allow(clippy::too_many_arguments)]
 pub fn solve(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     scope: &[Uid],
     salience: &BTreeMap<Uid, f32>,
     e: &CostModel,
@@ -93,7 +93,7 @@ pub fn solve(
 /// Returns true if the node limit was reached, meaning the search is not exhaustive.
 #[allow(clippy::too_many_arguments)]
 fn descend(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     scope: &[Uid],
     salience: &BTreeMap<Uid, f32>,
     e: &CostModel,
@@ -219,7 +219,7 @@ fn descend(
     limited
 }
 
-fn cost_of(store: &Store, selection: &Selection, e: &CostModel) -> u64 {
+fn cost_of(store: &(impl StoreRead + ?Sized), selection: &Selection, e: &CostModel) -> u64 {
     selection
         .iter()
         .filter_map(|(u, l)| store.get(u).map(|unit| e.unit(&unit.core, *l)))
@@ -233,6 +233,7 @@ mod tests {
         canonical_uid, KernelType, Record, RelKind, Relation, SourceKind, SourceRef, Status,
         UnitCore, UnitCoreBuilder,
     };
+    use smysl_graph::Store;
     use smysl_graph::{salience as compute, SalienceRequest};
 
     fn evidence(gist: &str, body: Option<&str>) -> UnitCore {
@@ -248,14 +249,14 @@ mod tests {
         l
     }
 
-    fn setup(store: &Store) -> (Vec<Uid>, BTreeMap<Uid, f32>) {
+    fn setup(store: &(impl StoreRead + ?Sized)) -> (Vec<Uid>, BTreeMap<Uid, f32>) {
         let scope: Vec<Uid> = store.units().map(|(u, _)| *u).collect();
         let s = compute(store, &SalienceRequest::default());
         let local = s.renormalise(&scope);
         (scope, local)
     }
 
-    fn run(store: &Store, budget: u64) -> Exact {
+    fn run(store: &(impl StoreRead + ?Sized), budget: u64) -> Exact {
         let (scope, sal) = setup(store);
         solve(
             store,

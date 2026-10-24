@@ -26,7 +26,7 @@ use smysl_core::{
     canonical_uid, Attestation, Diagnostic, Hlc, Label, Op, Record, Relation, Report, Rung,
     SchemaDecl, Uid, UnitCore,
 };
-use smysl_graph::Store;
+use smysl_graph::{Overlay, StoreRead};
 
 use std::collections::BTreeMap;
 
@@ -123,7 +123,7 @@ impl Staged {
 /// `now` is supplied rather than read, so a caller replaying an ingest gets the same
 /// attestations (guarantee A2).
 pub fn prepare(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     units: Vec<UnitCore>,
     relations: Vec<Relation>,
     labels: BTreeMap<Label, Uid>,
@@ -138,7 +138,7 @@ pub fn prepare(
 /// reports `SMY-W013`. The declaration is staged with the batch rather than appended to the
 /// store first, because appending outside staging is the thing rule S forbids.
 pub fn prepare_declared(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     units: Vec<UnitCore>,
     relations: Vec<Relation>,
     labels: BTreeMap<Label, Uid>,
@@ -156,7 +156,7 @@ pub fn prepare_declared(
 /// batch. `Attest` implements [`Attesting`] and answers the same thing for everything, which is
 /// what `prepare_declared` passes.
 pub fn prepare_attested(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     units: Vec<UnitCore>,
     relations: Vec<Relation>,
     labels: BTreeMap<Label, Uid>,
@@ -177,7 +177,7 @@ pub fn prepare_attested(
 /// fine` was accepted, hashed into the recipe, and then checked under the store's profile, so
 /// `l0_max` and the single-assertion admission were not the ones the caller asked for.
 pub fn prepare_under(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     units: Vec<UnitCore>,
     relations: Vec<Relation>,
     labels: BTreeMap<Label, Uid>,
@@ -214,11 +214,14 @@ pub fn prepare_under(
     // union. The staged units are still only the batch's.
     // A throwaway union, never written: staging must not touch the store, which is exactly
     // what rule S is about.
-    let mut records: Vec<Record> = store.iter().cloned().collect();
-    records.extend(schemas.iter().cloned().map(Record::SchemaDecl));
-    records.extend(applied.units.iter().cloned().map(Record::Unit));
-    records.extend(relations.iter().cloned().map(Record::Relation));
-    let merged = Store::from_records(records);
+    //
+    // An `Overlay` since TX-P13a step 10 (SMYSL-2.8 §3.7): it answers as the store of every
+    // record of both would, and costs the batch and the interpretive layer rather than a copy of
+    // the store.
+    let mut batch: Vec<Record> = schemas.iter().cloned().map(Record::SchemaDecl).collect();
+    batch.extend(applied.units.iter().cloned().map(Record::Unit));
+    batch.extend(relations.iter().cloned().map(Record::Relation));
+    let merged = Overlay::new(store, batch);
 
     let mut opts = CheckOptions::default().with_labels(labels.clone());
     if let Some(g) = granularity {
@@ -422,6 +425,7 @@ pub fn discard(root: impl AsRef<Path>) -> Result<(), std::io::Error> {
 mod tests {
     use super::*;
     use smysl_core::{AgentId, KernelType, SourceKind, SourceRef, Status, UnitCoreBuilder};
+    use smysl_graph::Store;
 
     fn agent() -> AgentId {
         AgentId::new("tool:smysl-ingest").unwrap()

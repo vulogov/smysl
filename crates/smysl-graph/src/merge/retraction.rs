@@ -19,7 +19,7 @@ use smysl_core::diag::{Code, Diagnostic, Report};
 use smysl_core::{AgentId, RelKind, Status, Uid};
 
 use crate::merge::policy::{RetractionAuthority, RetractionPolicy};
-use crate::store::Store;
+use crate::store::StoreRead;
 
 /// What a store's units are worth once retractions are taken into account.
 ///
@@ -67,7 +67,10 @@ impl EffectiveStatus {
 ///
 /// A fixpoint over `grounds`, and therefore order-independent - which is what lets merge
 /// run it as its last step without breaking rule U.
-pub fn effective_status(store: &Store, policy: RetractionPolicy) -> EffectiveStatus {
+pub fn effective_status(
+    store: &(impl StoreRead + ?Sized),
+    policy: RetractionPolicy,
+) -> EffectiveStatus {
     let mut out = EffectiveStatus::default();
     for (uid, unit) in store.units() {
         out.map.insert(*uid, unit.core.status);
@@ -124,7 +127,11 @@ pub fn effective_status(store: &Store, policy: RetractionPolicy) -> EffectiveSta
 }
 
 /// Report what a retraction did (§5.3).
-pub fn report_retractions(store: &Store, policy: RetractionPolicy, report: &mut Report) {
+pub fn report_retractions(
+    store: &(impl StoreRead + ?Sized),
+    policy: RetractionPolicy,
+    report: &mut Report,
+) {
     let eff = effective_status(store, policy);
 
     if policy == RetractionPolicy::Advisory {
@@ -172,7 +179,7 @@ impl RetractionPlan {
 /// retraction produces - a property the SM-P6 gate asserts directly, because a dry run
 /// that disagrees with the real thing is worse than no dry run.
 pub fn plan_retraction(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     target: Uid,
     agents: &[AgentId],
     policy: RetractionPolicy,
@@ -189,9 +196,9 @@ pub fn plan_retraction(
             distinct.len()
         ));
     } else if authority.requires_origin() {
-        let attestors: BTreeSet<&AgentId> = store
+        let attestors: BTreeSet<AgentId> = store
             .get(&target)
-            .map(|u| u.attestations.iter().map(|a| &a.agent).collect())
+            .map(|u| u.attestations.iter().map(|a| a.agent.clone()).collect())
             .unwrap_or_default();
         if !distinct.iter().any(|a| attestors.contains(*a)) {
             refusal = Some(format!(
@@ -202,7 +209,7 @@ pub fn plan_retraction(
     }
 
     // Simulate: what would effective status be with this retraction in place?
-    let mut simulated = store.clone();
+    let mut simulated = store.owned().into_owned();
     let relation = smysl_core::Relation::new(RelKind::Retracts, target, target);
     let _ = simulated.append(&[smysl_core::Record::Relation(relation)]);
     let eff = effective_status(&simulated, policy);
@@ -223,6 +230,7 @@ pub fn plan_retraction(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::Store;
     use smysl_core::{
         canonical_uid, Attestation, Hlc, KernelType, Op, Record, Relation, Rung, SourceKind,
         SourceRef, UnitCore, UnitCoreBuilder,

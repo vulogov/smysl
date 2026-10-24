@@ -13,9 +13,13 @@
 
 use smysl_core::diag::{Code, Diagnostic, Report};
 use smysl_core::{GranularityProfile, ProfileEstimator, Uid, UnitCore};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 
-pub fn run(store: &Store, granularity: &GranularityProfile, report: &mut Report) {
+pub fn run(
+    store: &(impl StoreRead + ?Sized),
+    granularity: &GranularityProfile,
+    report: &mut Report,
+) {
     for (uid, unit) in store.units() {
         check_unit(uid, &unit.core, granularity, report);
     }
@@ -100,6 +104,7 @@ pub fn check_unit(
 mod tests {
     use super::*;
     use smysl_core::{KernelType, Record, SourceKind, SourceRef, Status, UnitCoreBuilder};
+    use smysl_graph::Store;
 
     fn check(core: UnitCore, g: &GranularityProfile) -> Report {
         let store = Store::from_records(vec![Record::Unit(core)]);

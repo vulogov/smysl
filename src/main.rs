@@ -18,12 +18,12 @@ use progress::{Bar, Spinner, Style};
 use smysl::ExitCode;
 use smysl::{
     check, conformance, effective_status, fidelity, granularity_distribution, merge, parse_surface,
-    plan_retraction, write_surface, AgentId, BuildOptions, CheckOptions, Code, ConformanceClass,
-    ConsumerProfile, Contentions, DeriveOptions, Estimator, Hlc, Lod, MergeOptions, PackRequest,
-    Pass, Profile, ProfileEstimator, Record, RelKind, Relation, RetractionAuthority,
-    RetractionPolicy, Role, SalienceRequest, SalienceWeights, SchemaId, Severity, Store,
-    StoreOptions, SupersessionPolicy, Target, TokenEstimator, TraceKind, Uid, UidPrefix, View,
-    ViewId, WriteContext,
+    plan_retraction, write_surface, AgentId, AnyStore, BuildOptions, CheckOptions, Code,
+    ConformanceClass, ConsumerProfile, Contentions, DeriveOptions, Estimator, Hlc, Lod,
+    MergeOptions, PackRequest, Pass, Profile, ProfileEstimator, Record, RelKind, Relation,
+    RetractionAuthority, RetractionPolicy, Role, SalienceRequest, SalienceWeights, SchemaId,
+    Severity, Store, StoreOptions, StoreRead, SupersessionPolicy, Target, TokenEstimator,
+    TraceKind, Uid, UidPrefix, View, ViewId, WriteContext,
 };
 
 /// Purity classification of a command (§23). `Pure` commands are bit-reproducible
@@ -2920,9 +2920,14 @@ fn store_file(path: &str) -> Result<std::path::PathBuf, String> {
 }
 
 /// Read a store from surface text or a CBOR log, whichever it turns out to be.
+///
+/// An [`AnyStore`] since TX-P13a step 11 (SMYSL-2.8 §4.4): the in-memory backend today, and the
+/// type `--backend` will choose between. Commands that only read take it as it is — every
+/// operation takes a `StoreRead` — and the ones that need the log's own methods ask it for the
+/// in-memory store with [`memory`].
 fn load_store(
     path: &str,
-) -> Result<(Store, std::collections::BTreeMap<smysl::Label, Uid>), String> {
+) -> Result<(AnyStore, std::collections::BTreeMap<smysl::Label, Uid>), String> {
     let bytes = if path == "-" {
         let mut b = Vec::new();
         std::io::stdin()
@@ -2937,7 +2942,7 @@ fn load_store(
     if looks_like_surface(&bytes) {
         let src = String::from_utf8(bytes).map_err(|e| e.to_string())?;
         let out = parse_surface(&src).map_err(|e| e.to_string())?;
-        Ok((Store::from_records(out.records.clone()), out.labels))
+        Ok((Store::from_records(out.records.clone()).into(), out.labels))
     } else {
         let (records, _) = smysl::from_cbor_seq(&bytes).map_err(|e| e.to_string())?;
         // Recover the labels from their bindings. This is the whole point of the record
@@ -2950,8 +2955,17 @@ fn load_store(
                 _ => None,
             })
             .collect();
-        Ok((Store::from_records(records), labels))
+        Ok((Store::from_records(records).into(), labels))
     }
+}
+
+/// [`load_store`], for a command that needs the in-memory store: one that appends, bundles,
+/// or hands the store to a crate whose operations take `&Store` (the library, query and
+/// measure layers, which TX-P13a does not port).
+fn load_memory(
+    path: &str,
+) -> Result<(Store, std::collections::BTreeMap<smysl::Label, Uid>), String> {
+    load_store(path).map(|(s, labels)| (s.into_memory(), labels))
 }
 
 /// Why a unit argument names no unit, with the exit code that says so.
@@ -2981,7 +2995,7 @@ impl std::fmt::Display for Unresolved {
 ///
 /// Unambiguous by construction: a uid is spelled `b3:…` and a label never contains `:`. One
 /// helper for every command that takes a unit, so none can disagree with another.
-fn resolve(store: &Store, raw: &str) -> Result<Uid, Unresolved> {
+fn resolve(store: &(impl StoreRead + ?Sized), raw: &str) -> Result<Uid, Unresolved> {
     if let Ok(label) = smysl::Label::new(raw) {
         return smysl::resolve_label(store, &label).map_err(|e| match e {
             smysl::LabelError::Ambiguous(uids) => Unresolved {
@@ -2995,8 +3009,8 @@ fn resolve(store: &Store, raw: &str) -> Result<Uid, Unresolved> {
                             u.canonical(),
                             store
                                 .get(u)
-                                .map(|x| x.core.gist.as_str())
-                                .unwrap_or("(not in this store)")
+                                .map(|x| x.core.gist.clone())
+                                .unwrap_or_else(|| "(not in this store)".into())
                         ))
                         .collect::<String>()
                 ),
@@ -3202,7 +3216,7 @@ fn engine_for(m: &ArgMatches, cmd: &str) -> Result<(Engine, Option<String>), Exi
 /// Rank `query` against `store` with the chosen engine.
 #[cfg(feature = "semantic")]
 fn ranked(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     query: &smysl::Query,
     engine: Engine,
     model: Option<&str>,
@@ -3231,7 +3245,7 @@ fn ranked(
 /// The same, for a build with no embedder compiled in.
 #[cfg(not(feature = "semantic"))]
 fn ranked(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     query: &smysl::Query,
     engine: Engine,
     _model: Option<&str>,
@@ -3446,7 +3460,7 @@ fn library_chain(library: &smysl::text::library::Library) -> Chosen {
 /// The same, for a build with no library layer compiled in./// The same, for a build with no library layer compiled in.
 #[cfg(not(feature = "text"))]
 fn find_with_chosen(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     q: &smysl::Query,
     m: &ArgMatches,
     _path: &str,
@@ -3507,7 +3521,11 @@ fn payload_filter(raw: &str, cmd: &str) -> Result<(String, Vec<String>), ExitCod
 ///
 /// Extension kinds are interned per store, so the store resolves them; a kind nothing in the store
 /// uses is refused rather than silently matching nothing, which would read as "no dependencies".
-fn edge_set(store: &Store, raw: &str, cmd: &str) -> Result<smysl::EdgeSet, ExitCode> {
+fn edge_set(
+    store: &(impl StoreRead + ?Sized),
+    raw: &str,
+    cmd: &str,
+) -> Result<smysl::EdgeSet, ExitCode> {
     let mut out = smysl::EdgeSet::of([]);
     for word in raw.split(',').map(str::trim).filter(|w| !w.is_empty()) {
         match word {
@@ -3712,7 +3730,7 @@ fn cmd_bundle(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eprintln!("smysl bundle: no store given");
         return ExitCode::Usage;
     };
-    let (store, _) = match load_store(&path) {
+    let (store, _) = match load_memory(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl bundle: {e}");
@@ -3994,7 +4012,7 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 ///
 /// The impact a retraction does not show: they keep other support, so they are not unfounded,
 /// but part of what they rest on is gone. Measured over the same edges retraction follows.
-fn partly_resting(store: &Store, target: Uid, unfounded: &[Uid]) -> Vec<Uid> {
+fn partly_resting(store: &(impl StoreRead + ?Sized), target: Uid, unfounded: &[Uid]) -> Vec<Uid> {
     let mut v: Vec<Uid> = smysl::dependents(store, target)
         .into_iter()
         .filter(|u| !unfounded.contains(u))
@@ -4019,7 +4037,7 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
     warn_output_is_a_report(global, "retract");
-    let (mut store, labels) = match load_store(&path) {
+    let (mut store, labels) = match load_memory(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl retract: {e}");
@@ -4135,7 +4153,7 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 fn persist(
     path: &str,
     records: &[Record],
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     labels: &std::collections::BTreeMap<smysl::Label, Uid>,
 ) -> Result<(), String> {
     if path == "-" {
@@ -4208,7 +4226,7 @@ fn commit_staged(
     path: &str,
     root: &std::path::Path,
     records: &[Record],
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     labels: &std::collections::BTreeMap<smysl::Label, Uid>,
 ) -> Result<(), ExitCode> {
     if let Ok(bytes) = std::fs::read(path) {
@@ -4259,7 +4277,7 @@ fn store_path(m: &ArgMatches, global: &ArgMatches, cmd: &str) -> Result<String, 
 
 /// An edge argument: a rid or its display prefix, or `FROM --KIND--> TO` with each end a uid
 /// or a label.
-fn resolve_edge(store: &Store, raw: &str) -> Result<Relation, Unresolved> {
+fn resolve_edge(store: &(impl StoreRead + ?Sized), raw: &str) -> Result<Relation, Unresolved> {
     let fail = |message: String| Unresolved {
         code: ExitCode::Failure,
         message,
@@ -4332,7 +4350,7 @@ fn edge_text(labels: &std::collections::BTreeMap<smysl::Label, Uid>, r: &Relatio
 
 /// Items open for review in `store`, under the labels the store binds.
 fn review_items(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     labels: &std::collections::BTreeMap<smysl::Label, Uid>,
 ) -> Vec<smysl::ReviewItem> {
     review_items_with(store, labels, &[], None)
@@ -4340,7 +4358,7 @@ fn review_items(
 
 /// The queue, with the edge kinds a caller expects somebody to stand behind (1.5).
 fn review_items_with(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     labels: &std::collections::BTreeMap<smysl::Label, Uid>,
     confirm: &[RelKind],
     confirmed_by: Option<smysl::AgentKind>,
@@ -4471,7 +4489,7 @@ fn cmd_withdraw(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         Err(code) => return code,
     };
     warn_output_is_a_report(global, "withdraw");
-    let (store, labels) = match load_store(&path) {
+    let (store, labels) = match load_memory(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl withdraw: {e}");
@@ -4653,12 +4671,16 @@ fn cmd_withdraw(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 /// Returns the id itself and how it reads in a report, so the caller records the same bytes it
 /// matched rather than re-deriving them.
 #[cfg(feature = "text")]
-fn derived_time_contention(store: &Store, raw: &str) -> Option<(smysl::ContentionId, String)> {
+fn derived_time_contention(
+    store: &(impl StoreRead + ?Sized),
+    raw: &str,
+) -> Option<(smysl::ContentionId, String)> {
     use smysl::text::time::engine;
     for axis in [smysl::Axis::Said, smysl::Axis::Composed, smysl::Axis::About] {
         let e = engine::effective(store, axis);
         for did in &e.held {
             let Some(id) = store
+                .library()
                 .dating(did)
                 .and_then(|d| engine::hold_contention(did, d))
             else {
@@ -4681,7 +4703,10 @@ fn derived_time_contention(store: &Store, raw: &str) -> Option<(smysl::Contentio
 
 /// Without the time engine there are no derived contentions to find.
 #[cfg(not(feature = "text"))]
-fn derived_time_contention(_store: &Store, _raw: &str) -> Option<(smysl::ContentionId, String)> {
+fn derived_time_contention(
+    _store: &(impl StoreRead + ?Sized),
+    _raw: &str,
+) -> Option<(smysl::ContentionId, String)> {
     None
 }
 
@@ -5340,7 +5365,7 @@ fn parse_budget(s: &str) -> Option<u64> {
 /// The uid is carried as the label, so identity survives truncation even though the text
 /// does not - a consumer can always ask the origin store for the rest.
 fn emit_pack_surface(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     packed: &smysl::Pack,
     labels: &std::collections::BTreeMap<smysl::Label, Uid>,
 ) -> String {
@@ -5532,7 +5557,7 @@ fn cmd_find(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Usage;
     };
     warn_output_is_a_report(global, "find");
-    let (store, _) = match load_store(&path) {
+    let (store, _) = match load_memory(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl find: {e}");
@@ -5659,8 +5684,8 @@ fn cmd_find(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     for h in &hits {
         let gist = store
             .get(&h.uid)
-            .map(|u| u.core.gist.as_str())
-            .unwrap_or("");
+            .map(|u| u.core.gist.clone())
+            .unwrap_or_default();
         println!("{:.4}  {}  {}", h.score, h.uid, gist);
         if why {
             // On stderr with the uid repeated, so a caller piping stdout still gets the ranking
@@ -5846,7 +5871,7 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             code
         }
     } else {
-        let (store, labels) = match load_store(&path) {
+        let (store, labels) = match load_memory(&path) {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("smysl q: {e}");
@@ -7168,7 +7193,7 @@ fn cmd_schema(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
     warn_output_is_a_report(global, "schema");
-    let (store, _) = match load_store(&path) {
+    let (store, _) = match load_memory(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl schema: {e}");
@@ -7284,7 +7309,7 @@ fn cmd_migrate(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             return ExitCode::Usage;
         }
     };
-    let (store, _) = match load_store(&path) {
+    let (store, _) = match load_memory(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl migrate: {e}");
@@ -8053,7 +8078,7 @@ fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 return lib_error_code(&e);
             }
         },
-        None => match load_store(&path) {
+        None => match load_memory(&path) {
             Ok((s, _)) => s,
             Err(e) => {
                 eprintln!("smysl lib export: {e}");
@@ -8557,9 +8582,9 @@ enum Job {
 
 /// Whether the store already declares `x.query/v1`, so a save declares it once and not with
 /// every saved query (A-11; the same rule `ingest` applies to `x.text/v1`).
-fn declares_query(store: &Store) -> bool {
+fn declares_query(store: &(impl StoreRead + ?Sized)) -> bool {
     store
-        .iter()
+        .hot_records(smysl::HotKind::SchemaDecls)
         .any(|r| matches!(r, Record::SchemaDecl(d) if d.id.as_str() == smysl::schemas::query::ID))
 }
 
@@ -8904,7 +8929,7 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eprintln!("smysl thread: no store given");
         return ExitCode::Usage;
     };
-    let (store, labels) = match load_store(&path) {
+    let (store, labels) = match load_memory(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl thread: {e}");
@@ -9093,14 +9118,14 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     code
 }
 
-fn show_thread(store: &Store, t: &smysl::Thread) -> ExitCode {
+fn show_thread(store: &(impl StoreRead + ?Sized), t: &smysl::Thread) -> ExitCode {
     println!("{}  {}", t.id, t.schema);
     println!("~ {}", t.gist);
     for (i, step) in t.steps.iter().enumerate() {
         let gist = store
             .get(&step.unit)
-            .map(|u| u.core.gist.as_str())
-            .unwrap_or("(not in this store)");
+            .map(|u| u.core.gist.clone())
+            .unwrap_or_else(|| "(not in this store)".into());
         println!("{:>3}. {:<12} {}  {}", i + 1, step.role, step.unit, gist);
     }
     let broken = smysl::satisfies_rule_l(store, t);
@@ -9839,7 +9864,7 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Usage;
     }
     let (store, store_labels) = match &store_target {
-        Some(path) => match load_store(path) {
+        Some(path) => match load_memory(path) {
             Ok((s, l)) => (s, l),
             Err(e) => {
                 eprintln!("smysl ingest: {e}");
@@ -10455,7 +10480,7 @@ fn cmd_compact(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let loaded = if is_log {
         Store::open(&path).map_err(|e| format!("{path}: {e}"))
     } else {
-        load_store(&path).map(|(s, _)| s)
+        load_memory(&path).map(|(s, _)| s)
     };
     let store = match loaded {
         Ok(s) => s,
@@ -10541,7 +10566,7 @@ fn cmd_relink(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             return ExitCode::Usage;
         }
     };
-    let (store, _) = match load_store(&path) {
+    let (store, _) = match load_memory(&path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("smysl relink: {e}");
@@ -10731,7 +10756,7 @@ fn cmd_ui(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
 
-    match smysl::tui::run(smysl::tui::App::new(store, labels)) {
+    match smysl::tui::run(smysl::tui::App::with_store(store, labels)) {
         Ok(()) => ExitCode::Success,
         Err(e) => {
             eprintln!("smysl ui: {e}");
@@ -11913,7 +11938,7 @@ fn parse_window(raw: &str) -> Result<(u64, u64), String> {
 /// A target, in the three spellings a dating's target has.
 #[cfg(feature = "text")]
 fn date_target(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     raw: &str,
     window: Option<&String>,
 ) -> Result<smysl::DatingTarget, Unresolved> {
@@ -11960,7 +11985,10 @@ fn date_target(
 /// date-time carries two of them (`1984-01-01T12:30:00Z`), so a looser test would read a
 /// perfectly good absolute value as a malformed offset.
 #[cfg(feature = "text")]
-fn date_value(store: &Store, raw: &str) -> Result<smysl::DatingValue, Unresolved> {
+fn date_value(
+    store: &(impl StoreRead + ?Sized),
+    raw: &str,
+) -> Result<smysl::DatingValue, Unresolved> {
     use smysl::{Allen, DatingValue};
     let usage = |message: String| Unresolved {
         code: ExitCode::Usage,
@@ -12051,7 +12079,7 @@ fn write_dating(
         Err(code) => return code,
     };
     warn_output_is_a_report(global, "date");
-    let (store, labels) = match load_store(&path) {
+    let (store, labels) = match load_memory(&path) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("smysl date {action}: {e}");
@@ -12371,7 +12399,7 @@ impl Corpus {
                 .map(|l| Corpus::Library(Box::new(l)))
                 .map_err(|e| e.to_string());
         }
-        load_store(path).map(|(s, l)| Corpus::Store(Box::new(s), l))
+        load_memory(path).map(|(s, l)| Corpus::Store(Box::new(s), l))
     }
 
     fn store(&self) -> &Store {

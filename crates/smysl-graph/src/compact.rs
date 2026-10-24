@@ -19,11 +19,12 @@
 //! So this drops exactly what a replacement has made redundant: a superseded unit whose
 //! successor is present and which nothing surviving still points at. Everything else stays.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::{canonical_uid, hash_bytes, to_cbor, Record, RelKind, Uid};
 
-use crate::store::Store;
+use crate::store::StoreRead;
 
 /// What compaction dropped, and what it refused to.
 #[derive(Debug, Clone, Default)]
@@ -58,7 +59,7 @@ impl Compacted {
 }
 
 /// Units that some `retracts` edge names, either end.
-fn retracted(store: &Store) -> BTreeSet<Uid> {
+fn retracted(store: &(impl StoreRead + ?Sized)) -> BTreeSet<Uid> {
     store
         .relations_of_kind(&RelKind::Retracts)
         .iter()
@@ -70,17 +71,17 @@ fn retracted(store: &Store) -> BTreeSet<Uid> {
 ///
 /// The result is a new record set. It is never written in place by this function, because a
 /// compaction that turned out to be wrong is not undoable from the compacted store.
-pub fn compact(store: &Store) -> Compacted {
+pub fn compact(store: &(impl StoreRead + ?Sized)) -> Compacted {
     let mut out = Compacted {
-        records_before: store.iter().count(),
+        records_before: store.records().count(),
         ..Compacted::default()
     };
     // Exact repeats first: the same record twice is one record, whatever else is dropped.
     let mut seen = BTreeSet::new();
     let base: Vec<Record> = store
-        .iter()
+        .records()
         .filter(|r| seen.insert(hash_bytes(&to_cbor(r))))
-        .cloned()
+        .map(Cow::into_owned)
         .collect();
     out.duplicates = out.records_before - base.len();
 
@@ -166,7 +167,7 @@ pub fn ratio(c: &Compacted) -> f64 {
 
 /// Units grouped by how many supersession steps stand behind them, for a caller that wants
 /// to know how much history a store is carrying before deciding to drop any.
-pub fn depth_by_unit(store: &Store) -> BTreeMap<Uid, usize> {
+pub fn depth_by_unit(store: &(impl StoreRead + ?Sized)) -> BTreeMap<Uid, usize> {
     let mut successor: BTreeMap<Uid, Uid> = BTreeMap::new();
     for r in store.relations_of_kind(&RelKind::Supersedes) {
         successor.insert(r.to, r.from);
@@ -191,6 +192,7 @@ pub fn depth_by_unit(store: &Store) -> BTreeMap<Uid, usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::Store;
     use smysl_core::{KernelType, Relation, Status, UnitCoreBuilder};
 
     fn unit(gist: &str, grounds: Vec<Uid>) -> smysl_core::UnitCore {

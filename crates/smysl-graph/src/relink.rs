@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::{canonical_uid, Record, RelKind, Relation, Uid, UnitCore};
 
-use crate::store::Store;
+use crate::store::StoreRead;
 
 /// Batch units ordered so a unit's grounds inside the batch come before it.
 ///
@@ -162,7 +162,7 @@ impl Relinked {
 /// implementations of "which unit is the newest head" would answer a forked history
 /// differently in a query and in a repair, which is the kind of disagreement nobody finds
 /// until it matters.
-pub fn supersession_heads(store: &Store) -> (BTreeMap<Uid, Uid>, Vec<Uid>) {
+pub fn supersession_heads(store: &(impl StoreRead + ?Sized)) -> (BTreeMap<Uid, Uid>, Vec<Uid>) {
     let mut direct: BTreeMap<Uid, BTreeSet<Uid>> = BTreeMap::new();
     for r in store.relations_of_kind(&RelKind::Supersedes) {
         direct.entry(r.to).or_default().insert(r.from);
@@ -220,7 +220,7 @@ pub fn supersession_heads(store: &Store) -> (BTreeMap<Uid, Uid>, Vec<Uid>) {
 /// Emits new records rather than editing: the store is append-only, and the units this
 /// rewrites are themselves replaced, so each carries a `supersedes` edge back to the version
 /// it corrects. Nothing is lost and the old reading stays available.
-pub fn relink(store: &Store) -> Relinked {
+pub fn relink(store: &(impl StoreRead + ?Sized)) -> Relinked {
     let mut out = Relinked::default();
     let (newest, forked) = supersession_heads(store);
     out.forked = forked;
@@ -294,6 +294,7 @@ pub fn relink(store: &Store) -> Relinked {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::Store;
     use smysl_core::{KernelType, Status, UnitCoreBuilder};
 
     fn unit(gist: &str, grounds: Vec<Uid>) -> UnitCore {

@@ -156,12 +156,13 @@ pub use smysl_graph::{
     closure, cycles, dependents, dependents_via, diff, effective_status, hop_diff, label_bindings,
     label_index, labels_of, membership, merge, plan_retraction, rebuttals_of, resolve_label,
     rests_on, reverse_closure, review, review_with, salience, topo, trace, trace_via, view_roots,
-    Adjacency, AgentActivity, AppendReport, BundleReport, Cached, DetectionContext, Edge, EdgeKind,
-    EdgeSet, EffectiveStatus, Entry, HopDiff, Index, IndexError, LabelError, Lineage, LineageNode,
-    MergeError, MergeOptions, MergeReport, NodeId, OpenReport, RecipeChange, RecipeChangeKind,
-    RetractionAuthority, RetractionPlan, RetractionPolicy, ReviewItem, ReviewOptions,
-    ReviewSubject, SalienceReport, SalienceRequest, SalienceTerms, SalienceWeights, Scratch, Store,
-    StoreDiff, StoreOptions, SupersessionPolicy, TopoOrder, TraceKind, UnknownRecords, Via,
+    Adjacency, AgentActivity, AnyStore, AppendReport, BundleReport, Cached, DetectionContext, Edge,
+    EdgeKind, EdgeSet, EffectiveStatus, Entry, HopDiff, HotKind, HotRecords, Index, IndexError,
+    LabelError, Lineage, LineageNode, MergeError, MergeOptions, MergeReport, NodeId, OpenReport,
+    Overlay, RecipeChange, RecipeChangeKind, RetractionAuthority, RetractionPlan, RetractionPolicy,
+    ReviewItem, ReviewOptions, ReviewSubject, SalienceReport, SalienceRequest, SalienceTerms,
+    SalienceWeights, Scratch, Store, StoreDiff, StoreLibrary, StoreOptions, StoreRead, StoreWrite,
+    SupersessionPolicy, TopoOrder, TraceKind, UnknownRecords, Via,
 };
 
 /// Proposition classes (SMYSL-2.3 A-12.4, SMYSL-2.4 §3.6).

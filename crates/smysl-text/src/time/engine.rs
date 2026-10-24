@@ -45,7 +45,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::types::{Axis, Commitment, Dating, DatingTarget, DatingValue, Manifest};
 use smysl_core::{Allen, ContentionId, DetectionKind, Did, Mid, Uid};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 
 use super::constraints::{self, Free, FreeKind};
 use super::edtf;
@@ -169,7 +169,7 @@ impl Effective {
 /// Over the whole store rather than over one component, which costs nothing: the network is
 /// sparse, disconnected subjects simply keep their seeds, and the alternative — finding
 /// components first — would be a second traversal to save a few relaxations.
-pub fn effective(store: &Store, axis: Axis) -> Effective {
+pub fn effective(store: &(impl StoreRead + ?Sized), axis: Axis) -> Effective {
     let mut out = Effective {
         axis_said: axis == Axis::Said,
         ..Default::default()
@@ -178,7 +178,12 @@ pub fn effective(store: &Store, axis: Axis) -> Effective {
     // 1. Subjects, in a fixed order. Units before manifests, each in identity order, so a
     //    variable index is a function of the store's contents and not of its iteration order.
     let mut subjects: Vec<Subject> = store.units().map(|(u, _)| Subject::Unit(*u)).collect();
-    subjects.extend(store.manifests().map(|(m, _)| Subject::Manifest(*m)));
+    subjects.extend(
+        store
+            .library()
+            .manifests()
+            .map(|(m, _)| Subject::Manifest(*m)),
+    );
     subjects.sort_unstable();
     let index: BTreeMap<Subject, usize> =
         subjects.iter().enumerate().map(|(i, s)| (*s, i)).collect();
@@ -359,10 +364,10 @@ struct Live {
 /// Liveness is A-12.2: a dating is live unless a withdrawal names its did, its basis is
 /// unfounded (rule R), or a lock holds it. The first two are questions a store answers
 /// directly. The third is the interesting one — see [`held_by_lock`].
-fn live_datings(store: &Store, axis: Axis, out: &mut Effective) -> Vec<Live> {
+fn live_datings(store: &(impl StoreRead + ?Sized), axis: Axis, out: &mut Effective) -> Vec<Live> {
     let withdrawn: BTreeSet<Uid> = store.withdrawals().map(|w| w.relation).collect();
     let mut live = Vec::new();
-    for (did, dating) in store.datings() {
+    for (did, dating) in store.library().datings() {
         if dating.axis != axis {
             continue;
         }
@@ -416,13 +421,13 @@ fn live_datings(store: &Store, axis: Axis, out: &mut Effective) -> Vec<Live> {
 /// words the condition as "the new dating would change the effective value", which is a
 /// question about the result; comparing the values is a cheap sufficient test for the answer
 /// being *no*, and erring towards holding is what a lock is for.
-fn held_by_lock(store: &Store, did: &Did, dating: &Dating) -> bool {
+fn held_by_lock(store: &(impl StoreRead + ?Sized), did: &Did, dating: &Dating) -> bool {
     let as_uid = Uid::from_bytes(*did.as_bytes());
     if store.commitment_of(&as_uid) == Some(Commitment::Canonical) {
         // Unless a resolution has named the contention the hold derives.
         return !resolved(store, did, dating);
     }
-    for (other_did, other) in store.datings() {
+    for (other_did, other) in store.library().datings() {
         if other_did == did || other.target != dating.target || other.axis != dating.axis {
             continue;
         }
@@ -474,7 +479,7 @@ pub fn hold_contention(did: &Did, dating: &Dating) -> Option<ContentionId> {
 }
 
 /// Whether a resolution names the kind-4 contention a hold on this dating derives.
-fn resolved(store: &Store, did: &Did, dating: &Dating) -> bool {
+fn resolved(store: &(impl StoreRead + ?Sized), did: &Did, dating: &Dating) -> bool {
     let Some(id) = hold_contention(did, dating) else {
         return false;
     };
@@ -485,14 +490,15 @@ fn resolved(store: &Store, did: &Did, dating: &Dating) -> bool {
 }
 
 /// Why a target named nothing: the thing is absent, or it is here and selects nothing.
-fn why_unresolved(store: &Store, target: &DatingTarget) -> Unresolved {
+fn why_unresolved(store: &(impl StoreRead + ?Sized), target: &DatingTarget) -> Unresolved {
     let present = match target {
         DatingTarget::Unit(u) => store.units().any(|(x, _)| x == u),
-        DatingTarget::Manifest(m) => store.manifest(m).is_some(),
+        DatingTarget::Manifest(m) => store.library().manifest(m).is_some(),
         // A store holds no parts; a part exists if some manifest lists it. Asking the catalog
         // is the only question available, and it is the right one: a tid no manifest names is
         // a tid this store has never heard of.
         DatingTarget::Part(t) | DatingTarget::Window { tid: t, .. } => store
+            .library()
             .manifests()
             .any(|(_, m)| m.parts.iter().any(|p| p.tid == *t)),
         _ => false,
@@ -512,22 +518,27 @@ fn why_unresolved(store: &Store, target: &DatingTarget) -> Unresolved {
 /// this one the first time a target kind gained a rule. The `inexact_scopes` count a manifest
 /// target can raise is dropped here: it is a property of a derivation, and nothing is being
 /// derived.
-pub fn subjects(store: &Store, target: &DatingTarget) -> Vec<Subject> {
+pub fn subjects(store: &(impl StoreRead + ?Sized), target: &DatingTarget) -> Vec<Subject> {
     let mut sink = Effective::default();
     resolve(store, target, &mut sink)
 }
 
 /// The subjects a target names.
-fn resolve(store: &Store, target: &DatingTarget, out: &mut Effective) -> Vec<Subject> {
+fn resolve(
+    store: &(impl StoreRead + ?Sized),
+    target: &DatingTarget,
+    out: &mut Effective,
+) -> Vec<Subject> {
     let mut v: Vec<Subject> = match target {
         DatingTarget::Unit(u) => vec![Subject::Unit(*u)],
         DatingTarget::Part(t) => store
+            .library()
             .units_with_tid(t)
             .into_iter()
             .map(Subject::Unit)
             .collect(),
         DatingTarget::Manifest(m) => {
-            let Some(manifest) = store.manifest(m) else {
+            let Some(manifest) = store.library().manifest(m) else {
                 return Vec::new();
             };
             if shares_a_part(store, m, manifest) {
@@ -536,7 +547,7 @@ fn resolve(store: &Store, target: &DatingTarget, out: &mut Effective) -> Vec<Sub
             manifest
                 .parts
                 .iter()
-                .flat_map(|p| store.units_with_tid(&p.tid))
+                .flat_map(|p| store.library().units_with_tid(&p.tid))
                 .map(Subject::Unit)
                 .collect()
         }
@@ -545,6 +556,7 @@ fn resolve(store: &Store, target: &DatingTarget, out: &mut Effective) -> Vec<Sub
             from_ms,
             to_ms,
         } => store
+            .library()
             .units_with_tid(tid)
             .into_iter()
             .filter(|u| {
@@ -552,10 +564,8 @@ fn resolve(store: &Store, target: &DatingTarget, out: &mut Effective) -> Vec<Sub
                 // the datings it selects took effect would select a different set on every
                 // pass, and the solve would not converge.
                 store
-                    .units()
-                    .find(|(x, _)| *x == u)
-                    .and_then(|(_, unit)| unit.core.source.as_ref())
-                    .and_then(|s| s.observed)
+                    .get(u)
+                    .and_then(|unit| unit.core.source.as_ref().and_then(|s| s.observed))
                     .is_some_and(|ms| ms >= *from_ms && ms < *to_ms)
             })
             .map(Subject::Unit)
@@ -568,8 +578,8 @@ fn resolve(store: &Store, target: &DatingTarget, out: &mut Effective) -> Vec<Sub
 }
 
 /// Whether another manifest lists one of this one's parts.
-fn shares_a_part(store: &Store, mid: &Mid, m: &Manifest) -> bool {
-    store.manifests().any(|(other, om)| {
+fn shares_a_part(store: &(impl StoreRead + ?Sized), mid: &Mid, m: &Manifest) -> bool {
+    store.library().manifests().any(|(other, om)| {
         other != mid
             && om
                 .parts
@@ -587,11 +597,11 @@ fn shares_a_part(store: &Store, mid: &Mid, m: &Manifest) -> bool {
 /// says why that is true — "disconnected subjects simply keep their seeds" — and a second
 /// implementation of seeding in the index would be a second answer to what a unit's own fields
 /// say about its time.
-pub fn seed_of(store: &Store, s: &Subject, axis: Axis) -> Interval {
+pub fn seed_of(store: &(impl StoreRead + ?Sized), s: &Subject, axis: Axis) -> Interval {
     seed(store, s, axis).interval
 }
 
-fn seed(store: &Store, s: &Subject, axis: Axis) -> Dated {
+fn seed(store: &(impl StoreRead + ?Sized), s: &Subject, axis: Axis) -> Dated {
     let undated = |lo_status: TimeStatus| Dated {
         interval: Interval::UNDATED,
         lo_status,
@@ -675,7 +685,7 @@ fn seed(store: &Store, s: &Subject, axis: Axis) -> Dated {
             undated(TimeStatus::Speculative)
         }
         Subject::Manifest(mid) => {
-            let Some(m) = store.manifest(mid) else {
+            let Some(m) = store.library().manifest(mid) else {
                 return undated(TimeStatus::Speculative);
             };
             let Some(published) = m.published.as_deref() else {
@@ -720,7 +730,7 @@ fn apply_offsets(
     index: &BTreeMap<Subject, usize>,
     state: &mut [Dated],
     out: &mut Effective,
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     axis: Axis,
 ) {
     // Group by subject so that two offsets disagreeing about one subject is a finding rather

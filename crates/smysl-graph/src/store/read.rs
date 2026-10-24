@@ -31,13 +31,40 @@ use smysl_core::{
     UidPrefix, Unit, View, ViewId, Withdrawal,
 };
 
-use super::interp::RelKey;
+use super::interp::{Interpretive, RelKey};
+use super::library::StoreLibrary;
 use super::{AppendReport, Store};
 use crate::adjacency::{Adjacency, EdgeSet};
 use crate::traverse;
 
 pub(crate) mod sealed {
-    pub trait Sealed {}
+    use std::borrow::Cow;
+
+    use smysl_core::Attestation;
+
+    use crate::store::interp::Interpretive;
+    use crate::Store;
+
+    /// Seals [`super::StoreRead`]; and, because nothing outside this crate can name it, a place
+    /// for what the crate's own operations need of a store that callers must not reach.
+    pub trait Sealed {
+        /// The store as an in-memory [`Store`] that can be changed, for an operation that
+        /// simulates one (`plan_retraction`). The in-memory store lends itself, so the caller's
+        /// `into_owned()` is the clone it always paid; a paged store builds one from its records.
+        fn owned(&self) -> Cow<'_, Store>;
+
+        /// The interpretive layer, for an [`crate::Overlay`] to start its own from.
+        fn interp(&self) -> &Interpretive;
+
+        /// Attestations whose subject has not arrived: a batch laid over this store may hold it.
+        fn pending_attestations(&self) -> &[Attestation];
+
+        /// Whether a record with this hash ([`Store::record_hash`]) is in the store.
+        fn has_record(&self, h: &[u8; 32]) -> bool;
+
+        /// Every record hash, ascending: the input of the record-set digest.
+        fn record_hashes(&self) -> Box<dyn Iterator<Item = &[u8; 32]> + '_>;
+    }
 }
 
 /// Records that have no field of their own in a store, by kind (§3.2's typed accessors).
@@ -140,19 +167,31 @@ impl<'a> Iterator for Commits<'a> {
 pub struct HotRecords<'a> {
     pub(crate) records: &'a [Record],
     pub(crate) at: std::slice::Iter<'a, usize>,
+    /// What follows, for an [`crate::Overlay`]: its base's records of the kind, then its batch's.
+    pub(crate) then: Option<Box<HotRecords<'a>>>,
 }
 
 impl<'a> Iterator for HotRecords<'a> {
     type Item = &'a Record;
     fn next(&mut self) -> Option<&'a Record> {
-        self.at.next().map(|&i| &self.records[i])
+        match self.at.next() {
+            Some(&i) => Some(&self.records[i]),
+            None => self.then.as_mut()?.next(),
+        }
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.at.size_hint()
+        let (lo, hi) = self.at.size_hint();
+        match &self.then {
+            None => (lo, hi),
+            Some(t) => {
+                let (l, h) = t.size_hint();
+                (lo + l, hi.zip(h).map(|(a, b)| a + b))
+            }
+        }
     }
 }
 
-fn empty_commits() -> &'static BTreeSet<Commit> {
+pub(crate) fn empty_commits() -> &'static BTreeSet<Commit> {
     static EMPTY: std::sync::OnceLock<BTreeSet<Commit>> = std::sync::OnceLock::new();
     EMPTY.get_or_init(BTreeSet::new)
 }
@@ -205,6 +244,8 @@ pub trait StoreRead: sealed::Sealed {
     fn is_unfounded(&self, uid: &Uid) -> bool;
     /// Schema declarations, label bindings, pack infos or unknown records, in log order.
     fn hot_records(&self, kind: HotKind) -> HotRecords<'_>;
+    /// The library layer: manifests, heads, redactions, datings, parts (SMYSL-2.4 §4.3.2).
+    fn library(&self) -> &StoreLibrary;
 
     // -- required: the log
 
@@ -378,7 +419,23 @@ pub trait StoreWrite: StoreRead {
 // The in-memory store
 // ---------------------------------------------------------------------------
 
-impl sealed::Sealed for Store {}
+impl sealed::Sealed for Store {
+    fn owned(&self) -> Cow<'_, Store> {
+        Cow::Borrowed(self)
+    }
+    fn interp(&self) -> &Interpretive {
+        &self.interp
+    }
+    fn pending_attestations(&self) -> &[Attestation] {
+        &self.pending_attestations
+    }
+    fn has_record(&self, h: &[u8; 32]) -> bool {
+        self.record_hashes.contains(h)
+    }
+    fn record_hashes(&self) -> Box<dyn Iterator<Item = &[u8; 32]> + '_> {
+        Box::new(self.record_hashes.iter())
+    }
+}
 
 fn borrowed(r: &Record) -> Cow<'_, Record> {
     Cow::Borrowed(r)
@@ -470,7 +527,11 @@ impl StoreRead for Store {
         HotRecords {
             records: &self.records,
             at: self.hot.get(&kind).unwrap_or(&NONE).iter(),
+            then: None,
         }
+    }
+    fn library(&self) -> &StoreLibrary {
+        &self.library
     }
 
     fn records(&self) -> Self::Records<'_> {
@@ -548,7 +609,15 @@ impl StoreWrite for Store {
 
 macro_rules! delegate {
     ($($ptr:ty),*) => {$(
-        impl<S: StoreRead + ?Sized> sealed::Sealed for $ptr {}
+        impl<S: StoreRead + ?Sized> sealed::Sealed for $ptr {
+            fn owned(&self) -> Cow<'_, Store> { (**self).owned() }
+            fn interp(&self) -> &Interpretive { (**self).interp() }
+            fn pending_attestations(&self) -> &[Attestation] { (**self).pending_attestations() }
+            fn has_record(&self, h: &[u8; 32]) -> bool { (**self).has_record(h) }
+            fn record_hashes(&self) -> Box<dyn Iterator<Item = &[u8; 32]> + '_> {
+                (**self).record_hashes()
+            }
+        }
 
         impl<S: StoreRead + ?Sized> StoreRead for $ptr {
             type UnitRef<'a> = S::UnitRef<'a> where Self: 'a;
@@ -588,6 +657,7 @@ macro_rules! delegate {
             fn is_withdrawn(&self, rel: &Relation) -> bool { (**self).is_withdrawn(rel) }
             fn is_unfounded(&self, uid: &Uid) -> bool { (**self).is_unfounded(uid) }
             fn hot_records(&self, kind: HotKind) -> HotRecords<'_> { (**self).hot_records(kind) }
+            fn library(&self) -> &StoreLibrary { (**self).library() }
             fn records(&self) -> Self::Records<'_> { (**self).records() }
             fn duplicate_records(&self) -> usize { (**self).duplicate_records() }
             fn record_set_digest(&self) -> [u8; 32] { (**self).record_set_digest() }
@@ -660,7 +730,23 @@ mod tests {
     /// default body.
     struct Bare<'s>(&'s Store);
 
-    impl sealed::Sealed for Bare<'_> {}
+    impl sealed::Sealed for Bare<'_> {
+        fn owned(&self) -> Cow<'_, Store> {
+            Cow::Borrowed(self.0)
+        }
+        fn interp(&self) -> &Interpretive {
+            sealed::Sealed::interp(self.0)
+        }
+        fn pending_attestations(&self) -> &[Attestation] {
+            sealed::Sealed::pending_attestations(self.0)
+        }
+        fn has_record(&self, h: &[u8; 32]) -> bool {
+            sealed::Sealed::has_record(self.0, h)
+        }
+        fn record_hashes(&self) -> Box<dyn Iterator<Item = &[u8; 32]> + '_> {
+            sealed::Sealed::record_hashes(self.0)
+        }
+    }
 
     impl<'s> StoreRead for Bare<'s> {
         type UnitRef<'a>
@@ -744,6 +830,9 @@ mod tests {
         }
         fn hot_records(&self, kind: HotKind) -> HotRecords<'_> {
             self.0.hot_records(kind)
+        }
+        fn library(&self) -> &StoreLibrary {
+            self.0.library()
         }
         fn records(&self) -> Self::Records<'_> {
             StoreRead::records(self.0)

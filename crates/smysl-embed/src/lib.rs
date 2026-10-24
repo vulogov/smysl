@@ -58,7 +58,7 @@ use std::path::Path;
 
 use model2vec_rs::model::StaticModel;
 use smysl_core::{KernelType, SchemaId, Status, Uid};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 use smysl_retrieve::{Hit, Query, Retriever};
 
 /// A model, loaded.
@@ -146,7 +146,7 @@ pub struct Semantic {
 
 impl Semantic {
     /// Embed every unit in `store`.
-    pub fn index(store: &Store, model: Model) -> Semantic {
+    pub fn index(store: &(impl StoreRead + ?Sized), model: Model) -> Semantic {
         // Every unit since 1.7, extension schemas included: they were absent from the index
         // rather than filtered from a result, so a corpus authored under one was unreachable.
         let facts: BTreeMap<Uid, (SchemaId, Status)> = store
@@ -171,8 +171,12 @@ impl Semantic {
             .map(|u| {
                 let strings = store
                     .get(u)
-                    .and_then(|unit| unit.core.payload.as_deref())
-                    .map(smysl_core::surface::payload::payload_strings)
+                    .and_then(|unit| {
+                        unit.core
+                            .payload
+                            .as_deref()
+                            .map(smysl_core::surface::payload::payload_strings)
+                    })
                     .unwrap_or_default();
                 (*u, strings)
             })
