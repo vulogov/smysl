@@ -58,6 +58,93 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### A writer for the store on disk, and a flag to use it
+
+TX-P13b step 2 (SMYSL-2.8 §3.5.5, §3.8, §4.4): the unit store can be written as well as read,
+and the CLI takes it. Off by default as before — `store-redb` is still a feature, `--backend`
+still defaults to `memory` — and nothing changes for a build or a command that does not ask.
+
+- **`smysl::redb::RedbShard`**, the writer: the shard's lock file first (`SMY-E445`, naming
+  the holder, to a second writer in any process), then the log, `fsync`ed, then one commit.
+  Readers are snapshots of it (`reader()`), which answer from the moment they were taken while
+  it goes on appending. A torn tail left by a killed writer is cut at `open_rw`, with `W110`.
+  `AnyStore` now appends to the unit store too, holding the shard for the one append.
+- **One open database per file per process.** redb 2.6 locks a file per open, and a second open
+  in the same process collided with the first as another process's would — so a reader and the
+  writer of one store could not coexist in one process. They share it now.
+- **`--backend memory|redb`**, global. Under `redb` a CBOR log is read through
+  `.smysl/store/<name>.redb` (built on first use, `SMY-W501`) by every command that loads a
+  store and by `check`, and every write goes through the writer. `reindex --backend redb` builds
+  the store; `--verify` compares it with an in-memory rebuild and exits 9 on a difference. A
+  build without the feature refuses the flag by name.
+- **At 10⁶ units the ladder completes on the redb backend in 3.3 GB**, never building the
+  in-memory store; `check` peaks at 686 MB against 2.86 GB in memory (24%). The run's peak is
+  `Bm25::index`'s own index, 2.39 GB, which either backend holds. A single-record append is
+  6–8 ms against 0.1 ms in memory, which does not sync.
+- **Fixed: planning a retraction wrote one.** `plan_retraction` simulated the retraction by
+  appending it to a copy of the store, and a copy of a store opened from a log appends to that
+  log — so on any `Store::open`ed store a plan, refused or authorised, retracted the unit on
+  disk. The CLI was spared because its stores had no path, until `--backend redb` gave them one
+  and a refused `retract` wrote its record. The simulation is an `Overlay` now: it writes
+  nothing and copies nothing.
+- **Fixed: a lock could be caught half-written.** `Lock` (moved from `smysl-text` to
+  `smysl_graph::lock`, re-exported where it was) created the file and then wrote the holder,
+  so a writer arriving between the two was refused by "pid 0". It is written beside itself and
+  linked into place now; two processes racing for one shard found it.
+- **Tests.** §5.3 whole: one of two writing processes refused, eight snapshot readers during
+  appends, a reader in another process during a write, a killed writer through the real write
+  path, `check_integrity` after each. The conformance suite gains the log written by appends,
+  against the in-memory store given the same appends; the CLI gains `tests/cmd_backend.rs`.
+
+### A store whose text stays in its log
+
+TX-P13b step 1 (SMYSL-2.8 §3.5): `smysl::redb::RedbStore`, behind feature `store-redb`, off by
+default. A `StoreRead` like any other — every operation takes it — whose resident part is its
+headers, its interpretive layer and its adjacency; the cores stay in the CBOR log and are read
+from it by offset when asked for. No command gains a flag yet (`--backend redb` is step 2's),
+and nothing on disk changes for anybody who does not turn it on.
+
+- **Index mode.** The log is the authority, exactly as for the sidecar. The store records the
+  length and hash of the log it describes: an open that finds that log longer folds in the tail
+  (`OpenReport::replayed`, new), and one that finds a different log, a file that will not open
+  as a database, or an older layout rebuilds (`SMY-W501`). A newer layout is refused rather
+  than rewritten (`SMY-E503`, exit 8). Deleting `.smysl/store/<name>.redb` loses nothing.
+- **redb 2.6.4, not 4.** The workspace's existing pin, so one redb version writes both the
+  substrate index and this; 4.x declares Rust 1.90, and because every crate depends on
+  `smysl-graph`, taking it would have raised the whole workspace's floor from 1.85.
+- **Held by another process: wait, then read the log** (OQ-67). redb 2.6 locks a store's file
+  for every open, readers included, so `AnyStore::open_redb` (new) waits up to
+  `reader_wait_ms` and then opens the log into memory with `SMY-W504`.
+- **Which cores stay in memory** (OQ-69): those of judgements (`speculative`, `inferred`,
+  `derived`) and relation endpoints, once read; the rest in a byte-budgeted tier that `get`
+  fills and scans read through. **Default 32 MiB, not the RFC's 64**: the resident set follows
+  the budget, and on graph-155510 `check` peaked at 164 MB with 32 and 205 MB with 64 — 35% and
+  43% of the in-memory store, either side of the step's 40%.
+- **Peak RSS of `check` on graph-155510: 474 MB in memory, 165 MB on redb (35%).** Open is
+  36 ms against 369 ms for `Store::open` once built; building from the log is 1.4 s. The price
+  is time: `check` 2.1 s against 175 ms, `derive_thread` 1.25 s against 0.36 s, because every
+  scan decodes the cores it reads and a 32 MiB tier holds a third of them. On graph-31102 the
+  ratio is 55%: at that size the fixed costs — the binary, redb's page cache, the tier — are
+  most of a small resident set.
+- **`check`'s `Time` pass no longer solves rule E when there is nothing to solve.** It was
+  most of `check`'s working set at 155k units — a subject list, an index and a network over
+  every unit, on each axis, on a store with no dating — about 140 MB on either backend, and the
+  reason the first measurement read 61%. `smysl_text::time::engine::quiescent` (new) says when
+  the solve could find nothing, and a property test holds it to the solve on 200 generated
+  stores and the corpora. The in-memory backend gains as much: 609 → 473 MB.
+- **Three codes**, in a fourteenth group, `Store`: `SMY-W501`, `SMY-E503`, `SMY-W504` (143).
+- **Found: a cache charged by encoded length holds everything.** The first version charged a
+  core its CBOR length; a decoded unit is several times that, so a 64 MiB tier held all 155k
+  cores while believing it held 12 MB. It charges an estimate of the decoded size now.
+- **Tests.** The conformance suite runs the store with its cache off and on, reopened, caught
+  up after the log grew, under an overlay, and on a log with repeats and a torn tail, against
+  `Store::open`; the operations suite runs every operation on it with the cache off. Faults
+  injected through redb's `StorageBackend` — a failed and a torn write at every write point of
+  a 1,000-record append sequence (1,558 of them, on request; 42 by default) — and a writer
+  `SIGKILL`ed at 20 seeded moments all reopen as their log, reporting nothing worse than
+  `W110` or `W501`. A crash between the log's `fsync` and the store's commit folds in exactly
+  the tail.
+
 ### Every operation takes any store, and staging stops copying one
 
 TX-P13a steps 4–11 (SMYSL-2.8 §6): the rest of the in-memory half. Nothing on disk changes, no

@@ -126,7 +126,8 @@ const NOT_IN_THE_CORE: &[(&str, &str)] = &[
     // crate. The workspace manifest's pin records why the version is the one it is.
     (
         "redb",
-        "only through `substrate-redb` of `smysl-text` (SMYSL-2.4 §3.8)",
+        "only through `substrate-redb` of `smysl-text` (SMYSL-2.4 §3.8) and `store-redb` of \
+         `smysl-graph` (SMYSL-2.8 §3.5)",
     ),
 ];
 

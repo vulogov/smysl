@@ -15,6 +15,7 @@ pub mod adjacency;
 pub mod compact;
 pub mod labels;
 pub mod lineage;
+pub mod lock;
 pub mod merge;
 /// Proposition classes (SMYSL-2.3 A-12.4). Here rather than in `smysl-text`, where SMYSL-2.4's
 /// tree puts the engines that propose the edges: counting the classes needs only a `Store`, and
@@ -46,6 +47,9 @@ pub use salience::{
 };
 pub use smysl_core::error::MergeError;
 pub use store::index::{Cached, Entry, Index, IndexError};
+/// The unit store on disk (SMYSL-2.8 §3.5), behind feature `store-redb`.
+#[cfg(feature = "store-redb")]
+pub use store::redb;
 pub use store::{
     record_set_digest, AnyRecords, AnyStore, AnyUnit, AnyUnits, AppendReport, BundleReport,
     Commits, HotKind, HotRecords, OpenReport, Overlay, OverlayRecords, OverlayUnit, OverlayUnits,

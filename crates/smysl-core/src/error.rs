@@ -835,6 +835,14 @@ pub enum LibError {
     /// relative to the library root, never absolutely, so a diagnostic can be pasted into a
     /// bug report.
     Io { at: String, message: String },
+    /// `SMY-E503` - a unit store (SMYSL-2.8 §3.5.3) written by a later build, in a layout this
+    /// one cannot read.
+    ///
+    /// Refused rather than rebuilt, even in index mode where rebuilding loses nothing: the
+    /// store may be shared with the newer build that wrote it, and quietly rewriting it in an
+    /// older layout would make *that* build rebuild in turn, each undoing the other. The
+    /// message says how to rebuild deliberately.
+    StoreLayout { found: u16, supported: u16 },
 }
 
 impl LibError {
@@ -855,6 +863,7 @@ impl LibError {
             | LibError::BadParam { .. }
             | LibError::Redacted { .. }
             | LibError::Io { .. } => None,
+            LibError::StoreLayout { .. } => Some(Code::E503),
         }
     }
 
@@ -865,6 +874,7 @@ impl LibError {
             LibError::ObjectCorrupt { .. } | LibError::StructureChanged { .. } => {
                 ExitCode::HashVerification
             }
+            LibError::StoreLayout { .. } => ExitCode::UnsupportedVersion,
             _ => ExitCode::Failure,
         }
     }
@@ -948,6 +958,12 @@ impl fmt::Display for LibError {
                 write!(f, "{reader}: parameter `{key}`: {reason}")
             }
             LibError::Io { at, message } => write!(f, "{at}: {message}"),
+            LibError::StoreLayout { found, supported } => write!(
+                f,
+                "{}: the unit store has layout {found} and this build reads up to {supported}; \
+                 it is derived from the log, so deleting it and opening again rebuilds it",
+                Code::E503
+            ),
         }
     }
 }

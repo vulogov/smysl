@@ -4,10 +4,10 @@
 //! `dyn StoreRead`. The CLI picks a backend from a flag, and an enum that answers by `match` is
 //! all that needs: it is a `StoreRead` like any other, so every operation takes it.
 //!
-//! **In memory only, today.** The redb backend arrives in TX-P13b with a second variant. The
-//! associated types are newtypes over a private enum from the start, so that variant changes no
-//! type a caller can name, and the enum is `#[non_exhaustive]` so a `match` outside this crate
-//! already has to say what it does with a backend it does not know.
+//! **Two backends**: the in-memory store, and with feature `store-redb` the unit store on disk
+//! (TX-P13b step 1). The associated types are newtypes over a private enum, so the second
+//! variant changed no type a caller can name, and the enum is `#[non_exhaustive]` so a `match`
+//! outside this crate already says what it does with a backend it does not know.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -25,11 +25,19 @@ use super::{
 use crate::adjacency::Adjacency;
 
 /// A store of whichever backend was opened.
+///
+/// Not boxed, although the in-memory store is two and a half kilobytes of map headers and the
+/// unit store a pointer: an `AnyStore` is made once per command and moved a handful of times,
+/// and boxing the common case would add an indirection to every call for a copy nobody makes.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
 pub enum AnyStore {
     /// The in-memory store, from surface text or a CBOR log.
     Memory(Store),
+    /// The unit store on disk, whose cores stay in the log until asked for.
+    #[cfg(feature = "store-redb")]
+    Redb(super::redb::RedbStore),
 }
 
 impl AnyStore {
@@ -37,6 +45,8 @@ impl AnyStore {
     pub fn as_memory(&self) -> Option<&Store> {
         match self {
             AnyStore::Memory(s) => Some(s),
+            #[cfg(feature = "store-redb")]
+            AnyStore::Redb(_) => None,
         }
     }
 
@@ -44,6 +54,8 @@ impl AnyStore {
     pub fn as_memory_mut(&mut self) -> Option<&mut Store> {
         match self {
             AnyStore::Memory(s) => Some(s),
+            #[cfg(feature = "store-redb")]
+            AnyStore::Redb(_) => None,
         }
     }
 
@@ -51,6 +63,58 @@ impl AnyStore {
     pub fn into_memory(self) -> Store {
         match self {
             AnyStore::Memory(s) => s,
+            #[cfg(feature = "store-redb")]
+            AnyStore::Redb(s) => sealed::Sealed::owned(&s).into_owned(),
+        }
+    }
+
+    /// Records in the log, duplicates included, as `Store::len`.
+    pub fn len(&self) -> usize {
+        match self {
+            AnyStore::Memory(s) => s.len(),
+            #[cfg(feature = "store-redb")]
+            AnyStore::Redb(s) => s.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The unit store for a log, or the log itself when another process holds the store
+    /// (SMYSL-2.8 §3.8, OQ-67).
+    ///
+    /// redb 2.6 locks a store's file for every open, so a second process cannot read one the
+    /// first has open. This waits up to `opts.reader_wait_ms` for it, then opens the log into
+    /// memory with `SMY-W504`: the same answers, at the cost of the in-memory load — slower,
+    /// correct, and never blocked for longer than the wait.
+    #[cfg(feature = "store-redb")]
+    pub fn open_redb(
+        log: impl AsRef<std::path::Path>,
+        opts: super::redb::RedbOptions,
+    ) -> Result<(AnyStore, super::OpenReport), Error> {
+        let log = log.as_ref();
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_millis(opts.reader_wait_ms);
+        loop {
+            match super::redb::RedbStore::open(log, opts.clone()) {
+                Ok((s, report)) => return Ok((AnyStore::Redb(s), report)),
+                Err(e) if super::redb::is_held(&e) && std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                Err(e) if super::redb::is_held(&e) => {
+                    let (s, mut report) = Store::open_with(log, super::StoreOptions::default())?;
+                    report.report.push(
+                        smysl_core::diag::Diagnostic::new(smysl_core::diag::Code::W504)
+                            .with_message(format!(
+                                "{e}; read the log into memory after waiting {} ms",
+                                opts.reader_wait_ms
+                            )),
+                    );
+                    return Ok((AnyStore::Memory(s), report));
+                }
+                Err(e) => return Err(e),
+            }
         }
     }
 }
@@ -68,6 +132,8 @@ pub struct AnyUnit<'a>(AnyUnitInner<'a>);
 #[derive(Debug, Clone)]
 enum AnyUnitInner<'a> {
     Memory(&'a Unit),
+    #[cfg(feature = "store-redb")]
+    Redb(std::sync::Arc<Unit>),
 }
 
 impl Deref for AnyUnit<'_> {
@@ -75,6 +141,8 @@ impl Deref for AnyUnit<'_> {
     fn deref(&self) -> &Unit {
         match &self.0 {
             AnyUnitInner::Memory(u) => u,
+            #[cfg(feature = "store-redb")]
+            AnyUnitInner::Redb(u) => u,
         }
     }
 }
@@ -84,6 +152,8 @@ pub struct AnyUnits<'a>(AnyUnitsInner<'a>);
 
 enum AnyUnitsInner<'a> {
     Memory(<Store as StoreRead>::Units<'a>),
+    #[cfg(feature = "store-redb")]
+    Redb(super::redb::RedbUnits<'a>),
 }
 
 impl<'a> Iterator for AnyUnits<'a> {
@@ -93,11 +163,15 @@ impl<'a> Iterator for AnyUnits<'a> {
             AnyUnitsInner::Memory(it) => it
                 .next()
                 .map(|(u, x)| (u, AnyUnit(AnyUnitInner::Memory(x)))),
+            #[cfg(feature = "store-redb")]
+            AnyUnitsInner::Redb(it) => it.next().map(|(u, x)| (u, AnyUnit(AnyUnitInner::Redb(x)))),
         }
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         match &self.0 {
             AnyUnitsInner::Memory(it) => it.size_hint(),
+            #[cfg(feature = "store-redb")]
+            AnyUnitsInner::Redb(it) => it.size_hint(),
         }
     }
 }
@@ -107,6 +181,8 @@ pub struct AnyRecords<'a>(AnyRecordsInner<'a>);
 
 enum AnyRecordsInner<'a> {
     Memory(<Store as StoreRead>::Records<'a>),
+    #[cfg(feature = "store-redb")]
+    Redb(super::redb::RedbRecords<'a>),
 }
 
 impl<'a> Iterator for AnyRecords<'a> {
@@ -114,11 +190,15 @@ impl<'a> Iterator for AnyRecords<'a> {
     fn next(&mut self) -> Option<Cow<'a, Record>> {
         match &mut self.0 {
             AnyRecordsInner::Memory(it) => it.next(),
+            #[cfg(feature = "store-redb")]
+            AnyRecordsInner::Redb(it) => it.next(),
         }
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         match &self.0 {
             AnyRecordsInner::Memory(it) => it.size_hint(),
+            #[cfg(feature = "store-redb")]
+            AnyRecordsInner::Redb(it) => it.size_hint(),
         }
     }
 }
@@ -128,6 +208,8 @@ macro_rules! by_backend {
     ($self:ident, $s:ident => $e:expr) => {
         match $self {
             AnyStore::Memory($s) => $e,
+            #[cfg(feature = "store-redb")]
+            AnyStore::Redb($s) => $e,
         }
     };
 }
@@ -156,13 +238,21 @@ impl StoreRead for AnyStore {
     type Records<'a> = AnyRecords<'a>;
 
     fn get(&self, uid: &Uid) -> Option<AnyUnit<'_>> {
-        by_backend!(self, s => StoreRead::get(s, uid).map(|u| AnyUnit(AnyUnitInner::Memory(u))))
+        match self {
+            AnyStore::Memory(s) => StoreRead::get(s, uid).map(|u| AnyUnit(AnyUnitInner::Memory(u))),
+            #[cfg(feature = "store-redb")]
+            AnyStore::Redb(s) => StoreRead::get(s, uid).map(|u| AnyUnit(AnyUnitInner::Redb(u))),
+        }
     }
     fn contains_uid(&self, uid: &Uid) -> bool {
         by_backend!(self, s => StoreRead::contains_uid(s, uid))
     }
     fn units(&self) -> AnyUnits<'_> {
-        by_backend!(self, s => AnyUnits(AnyUnitsInner::Memory(StoreRead::units(s))))
+        match self {
+            AnyStore::Memory(s) => AnyUnits(AnyUnitsInner::Memory(StoreRead::units(s))),
+            #[cfg(feature = "store-redb")]
+            AnyStore::Redb(s) => AnyUnits(AnyUnitsInner::Redb(StoreRead::units(s))),
+        }
     }
     fn unit_count(&self) -> usize {
         by_backend!(self, s => StoreRead::unit_count(s))
@@ -228,7 +318,11 @@ impl StoreRead for AnyStore {
         by_backend!(self, s => StoreRead::library(s))
     }
     fn records(&self) -> AnyRecords<'_> {
-        by_backend!(self, s => AnyRecords(AnyRecordsInner::Memory(StoreRead::records(s))))
+        match self {
+            AnyStore::Memory(s) => AnyRecords(AnyRecordsInner::Memory(StoreRead::records(s))),
+            #[cfg(feature = "store-redb")]
+            AnyStore::Redb(s) => AnyRecords(AnyRecordsInner::Redb(StoreRead::records(s))),
+        }
     }
     fn duplicate_records(&self) -> usize {
         by_backend!(self, s => StoreRead::duplicate_records(s))
@@ -259,8 +353,24 @@ impl StoreRead for AnyStore {
     }
 }
 
+/// Appends to whichever backend the store is.
+///
+/// The unit store is written as §3.8 says the CLI writes it: its shard opened for writing for
+/// the one append — the lock taken, the log and then the store written, the lock released —
+/// and the store replaced by a snapshot that includes what was appended. A second writer
+/// meanwhile is refused with `SMY-E445`, and nothing holds the lock between appends.
 impl StoreWrite for AnyStore {
     fn append(&mut self, records: &[Record]) -> Result<AppendReport, Error> {
-        by_backend!(self, s => StoreWrite::append(s, records))
+        match self {
+            AnyStore::Memory(s) => StoreWrite::append(s, records),
+            #[cfg(feature = "store-redb")]
+            AnyStore::Redb(s) => {
+                let (mut shard, _) =
+                    super::redb::RedbShard::open_rw(s.log_path(), s.options().clone())?;
+                let report = shard.append(records)?;
+                *s = shard.reader()?;
+                Ok(report)
+            }
+        }
     }
 }

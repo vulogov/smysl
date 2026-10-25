@@ -40,6 +40,7 @@ These apply to every subcommand, in any position on the command line.
     ([`--offline`], [Hard-fail rather than send anything off the machine.]),
     ([`--no-color`], [Disable colour.]),
     ([`--noprogress`], [Disable progress bars, whatever the terminal is.]),
+    ([`--backend BACKEND`], [`memory` (default) or `redb`: which store a CBOR log is read and written through. `redb` needs a build with `--features store-redb`.]),
     ([`--json`], [Machine-readable output.]),
     ([`-q, --quiet`], [Suppress non-error output.]),
     ([`-v, --verbose`], [Increase verbosity; repeatable (`-vv`, `-vvv`, …).]),
@@ -548,6 +549,12 @@ command says so rather than pretending.
     ([`PATH`], [positional], [Store to reindex.]),
   ),
 )
+
+With `--backend redb` it builds the unit store, `.smysl/store/<name>.redb`, from the log instead,
+and `--verify` compares the store already there against an in-memory rebuild — record-set digest,
+units, state and adjacency, not the file's bytes, which are not reproducible. A store that had to
+be rebuilt to open did not describe its log, and fails the verify with exit 9 as a mismatched
+sidecar does. TX-P13b step 2.
 
 #section("text")
 

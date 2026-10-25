@@ -38,6 +38,8 @@ fmt        --noprogress
 fmt        --json
 fmt        --quiet
 fmt        --verbose
+fmt        --backend
+fmt        [possible values: memory, redb]
 fmt        --seed-check
 fmt        --help
 check      [FILE]
@@ -59,6 +61,8 @@ check      --noprogress
 check      --json
 check      --quiet
 check      --verbose
+check      --backend
+check      [possible values: memory, redb]
 check      --seed-check
 check      --help
 pack       [PATH]
@@ -86,6 +90,8 @@ pack       --query-limit
 pack       --lod
 pack       [possible values: auto, L0, L1, L2]
 pack       --verbose
+pack       --backend
+pack       [possible values: memory, redb]
 pack       --explain
 pack       --seed-check
 pack       --tokenizer
@@ -112,6 +118,8 @@ merge      --noprogress
 merge      --json
 merge      --quiet
 merge      --verbose
+merge      --backend
+merge      [possible values: memory, redb]
 merge      --seed-check
 merge      --help
 diff       <STORE>
@@ -130,6 +138,8 @@ diff       --noprogress
 diff       --json
 diff       --quiet
 diff       --verbose
+diff       --backend
+diff       [possible values: memory, redb]
 diff       --seed-check
 diff       --help
 trace      <UID>
@@ -151,6 +161,8 @@ trace      --noprogress
 trace      --json
 trace      --quiet
 trace      --verbose
+trace      --backend
+trace      [possible values: memory, redb]
 trace      --seed-check
 trace      --help
 view       [PATH]
@@ -169,6 +181,8 @@ view       --noprogress
 view       --json
 view       --quiet
 view       --verbose
+view       --backend
+view       [possible values: memory, redb]
 view       --seed-check
 view       --help
 bundle     [PATH]
@@ -187,6 +201,8 @@ bundle     --noprogress
 bundle     --json
 bundle     --quiet
 bundle     --verbose
+bundle     --backend
+bundle     [possible values: memory, redb]
 bundle     --seed-check
 bundle     --help
 thread     [PATH]
@@ -213,6 +229,8 @@ thread     --json
 thread     --explain
 thread     --quiet
 thread     --verbose
+thread     --backend
+thread     [possible values: memory, redb]
 thread     --seed-check
 thread     --help
 salience   [PATH]
@@ -232,6 +250,8 @@ salience   --noprogress
 salience   --json
 salience   --quiet
 salience   --verbose
+salience   --backend
+salience   [possible values: memory, redb]
 salience   --seed-check
 salience   --help
 find       <QUERY>
@@ -259,8 +279,10 @@ find       --analyzer
 find       --quiet
 find       --library
 find       --verbose
-find       --seed-check
+find       --backend
+find       [possible values: memory, redb]
 find       --why
+find       --seed-check
 find       --help
 retract    <UID>
 retract    [PATH]
@@ -279,6 +301,8 @@ retract    --noprogress
 retract    --json
 retract    --quiet
 retract    --verbose
+retract    --backend
+retract    [possible values: memory, redb]
 retract    --seed-check
 retract    --help
 withdraw   <EDGE>
@@ -299,6 +323,8 @@ withdraw   --noprogress
 withdraw   --json
 withdraw   --quiet
 withdraw   --verbose
+withdraw   --backend
+withdraw   [possible values: memory, redb]
 withdraw   --seed-check
 withdraw   --help
 resolve    <ITEM>
@@ -318,6 +344,8 @@ resolve    --noprogress
 resolve    --json
 resolve    --quiet
 resolve    --verbose
+resolve    --backend
+resolve    [possible values: memory, redb]
 resolve    --seed-check
 resolve    --help
 review     [PATH]
@@ -336,6 +364,8 @@ review     --noprogress
 review     --json
 review     --quiet
 review     --verbose
+review     --backend
+review     [possible values: memory, redb]
 review     --seed-check
 review     --help
 commit     <UID>
@@ -357,6 +387,8 @@ commit     --noprogress
 commit     --json
 commit     --quiet
 commit     --verbose
+commit     --backend
+commit     [possible values: memory, redb]
 commit     --seed-check
 commit     --help
 render     [PATH]
@@ -381,6 +413,8 @@ render     --noprogress
 render     --json
 render     --quiet
 render     --verbose
+render     --backend
+render     [possible values: memory, redb]
 render     --seed-check
 render     --help
 import     <PATH>
@@ -399,6 +433,8 @@ import     --noprogress
 import     --json
 import     --quiet
 import     --verbose
+import     --backend
+import     [possible values: memory, redb]
 import     --seed-check
 import     --help
 relink     [PATH]
@@ -415,6 +451,8 @@ relink     --noprogress
 relink     --json
 relink     --quiet
 relink     --verbose
+relink     --backend
+relink     [possible values: memory, redb]
 relink     --seed-check
 relink     --help
 compact    [PATH]
@@ -431,6 +469,8 @@ compact    --noprogress
 compact    --json
 compact    --quiet
 compact    --verbose
+compact    --backend
+compact    [possible values: memory, redb]
 compact    --seed-check
 compact    --help
 ingest     [FILE]
@@ -461,9 +501,11 @@ ingest     --quiet
 ingest     --repair
 ingest     --prompt
 ingest     --verbose
-ingest     --seed-check
+ingest     --backend
+ingest     [possible values: memory, redb]
 ingest     --yes
 ingest     --dry-run
+ingest     --seed-check
 ingest     --text
 ingest     --window-level
 ingest     --digest-budget
@@ -486,6 +528,8 @@ attest     --noprogress
 attest     --json
 attest     --quiet
 attest     --verbose
+attest     --backend
+attest     [possible values: memory, redb]
 attest     --seed-check
 attest     --help
 providers  --config
@@ -503,6 +547,8 @@ providers  --noprogress
 providers  --json
 providers  --quiet
 providers  --verbose
+providers  --backend
+providers  [possible values: memory, redb]
 providers  --seed-check
 providers  --help
 usage      --by
@@ -521,6 +567,8 @@ usage      --noprogress
 usage      --json
 usage      --quiet
 usage      --verbose
+usage      --backend
+usage      [possible values: memory, redb]
 usage      --seed-check
 usage      --help
 reindex    [PATH]
@@ -536,6 +584,8 @@ reindex    --noprogress
 reindex    --json
 reindex    --quiet
 reindex    --verbose
+reindex    --backend
+reindex    [possible values: memory, redb]
 reindex    --seed-check
 reindex    --help
 ui         [PATH]
@@ -551,6 +601,8 @@ ui         --noprogress
 ui         --json
 ui         --quiet
 ui         --verbose
+ui         --backend
+ui         [possible values: memory, redb]
 ui         --seed-check
 ui         --help
 text       <ACTION>
@@ -582,8 +634,10 @@ text       --quiet
 text       --as
 text       --verbose
 text       --at
-text       --seed-check
+text       --backend
+text       [possible values: memory, redb]
 text       --reason
+text       --seed-check
 text       --forks
 text       --rebuild
 text       --raw
@@ -616,6 +670,8 @@ date       --noprogress
 date       --json
 date       --quiet
 date       --verbose
+date       --backend
+date       [possible values: memory, redb]
 date       --seed-check
 date       --help
 same-as    <ACTION>
@@ -641,6 +697,8 @@ same-as    --noprogress
 same-as    --json
 same-as    --quiet
 same-as    --verbose
+same-as    --backend
+same-as    [possible values: memory, redb]
 same-as    --seed-check
 same-as    --help
 link       --config
@@ -663,6 +721,8 @@ link       --yes
 link       --json
 link       --quiet
 link       --verbose
+link       --backend
+link       [possible values: memory, redb]
 link       --seed-check
 link       --help
 summarise  --config
@@ -681,6 +741,8 @@ summarise  --noprogress
 summarise  --json
 summarise  --quiet
 summarise  --verbose
+summarise  --backend
+summarise  [possible values: memory, redb]
 summarise  --seed-check
 summarise  --help
 q          [SQ]
@@ -708,6 +770,8 @@ q          --quiet
 q          --save
 q          --rerun
 q          --verbose
+q          --backend
+q          [possible values: memory, redb]
 q          --current
 q          --seed-check
 q          --help
@@ -737,6 +801,8 @@ ask        --at
 ask        --quiet
 ask        --verbose
 ask        --yes
+ask        --backend
+ask        [possible values: memory, redb]
 ask        --seed-check
 ask        --help
 measure    <IDS>
@@ -763,9 +829,11 @@ measure    --quiet
 measure    --seed
 measure    --allow-lossy
 measure    --verbose
+measure    --backend
+measure    [possible values: memory, redb]
 measure    --dry-run
-measure    --seed-check
 measure    --at
+measure    --seed-check
 measure    --help
 assess     <ACTION>
 assess     [possible values: key, score, state, diff]
@@ -793,6 +861,8 @@ assess     --noprogress
 assess     --json
 assess     --quiet
 assess     --verbose
+assess     --backend
+assess     [possible values: memory, redb]
 assess     --seed-check
 assess     --help
 lib        <ACTION>
@@ -823,6 +893,8 @@ lib        --quiet
 lib        --verbose
 lib        --window
 lib        --as-of
+lib        --backend
+lib        [possible values: memory, redb]
 lib        --seed-check
 lib        --target-revision
 lib        --agent
@@ -860,6 +932,8 @@ schema     --noprogress
 schema     --json
 schema     --quiet
 schema     --verbose
+schema     --backend
+schema     [possible values: memory, redb]
 schema     --seed-check
 schema     --help
 migrate    [PATH]
@@ -879,5 +953,7 @@ migrate    --noprogress
 migrate    --json
 migrate    --quiet
 migrate    --verbose
+migrate    --backend
+migrate    [possible values: memory, redb]
 migrate    --seed-check
 migrate    --help

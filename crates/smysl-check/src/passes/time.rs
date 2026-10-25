@@ -34,7 +34,7 @@ use smysl_core::diag::{Code, Diagnostic, Report, Subject};
 use smysl_core::edtf;
 use smysl_core::types::{Axis, DatingTarget, DatingValue};
 use smysl_graph::StoreRead;
-use smysl_text::time::engine::{effective, hold_contention, Unresolved};
+use smysl_text::time::engine::{effective, hold_contention, quiescent, Unresolved};
 use smysl_text::time::{edtf as extent, Instant, Subject as TimeSubject};
 
 /// Run the pass.
@@ -156,6 +156,10 @@ fn observed_outside_published(store: &(impl StoreRead + ?Sized), report: &mut Re
 /// on *said*, and the axis is in the message so a reader knows which graph to look at.
 fn consequences(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     for axis in Axis::ALL.iter().copied() {
+        // Nothing for rule E to find: the solve would report nothing, and it is not cheap.
+        if quiescent(store, axis) {
+            continue;
+        }
         let e = effective(store, axis);
         for c in &e.inconsistent {
             let datings = if c.datings.is_empty() {

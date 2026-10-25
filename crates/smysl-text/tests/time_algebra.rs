@@ -28,7 +28,7 @@ use smysl_core::types::{
 };
 use smysl_core::{Did, KernelType, Status, Uid, UnitCoreBuilder};
 use smysl_graph::Store;
-use smysl_text::time::engine::{effective, Cause};
+use smysl_text::time::engine::{effective, quiescent, Cause};
 use smysl_text::time::{Bound, Instant, Interval, Subject, TimeStatus};
 
 struct Rng(u64);
@@ -620,4 +620,64 @@ fn composed_and_about_start_undated() {
             );
         }
     }
+}
+
+/// `quiescent` is a promise about `effective`: where it says rule E has nothing to do, the solve
+/// finds no contention and touches no dating. The `Time` check pass skips the solve on that
+/// promise (TX-P13b step 1), so it is checked against the solve on the generated stores with
+/// their datings taken out, and on the corpora.
+#[test]
+fn quiescent_means_the_solve_would_find_nothing() {
+    let mut rng = Rng(0x51A5_1A5E_5EED_0011);
+    let mut quiet = 0;
+    let mut stores: Vec<Store> = Vec::new();
+    for _ in 0..200 {
+        let units = 2 + rng.below(12);
+        let sc = consistent(&mut rng, units);
+        let undated: Vec<Record> = sc
+            .records
+            .iter()
+            .filter(|r| !matches!(r, Record::Dating(_)))
+            .cloned()
+            .collect();
+        let dated_store = store_of(&sc.records);
+        if !sc.datings.is_empty() {
+            assert!(Axis::ALL.iter().all(|a| !quiescent(&dated_store, *a)));
+        }
+        stores.push(store_of(&undated));
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/corpus");
+    for e in std::fs::read_dir(root).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x == "smy") {
+            if let Ok(doc) =
+                smysl_core::surface::parse_surface(&std::fs::read_to_string(&p).unwrap())
+            {
+                stores.push(Store::from_records(doc.records));
+            }
+        }
+    }
+    for s in &stores {
+        for axis in Axis::ALL.iter().copied() {
+            if !quiescent(s, axis) {
+                continue;
+            }
+            quiet += 1;
+            let e = effective(s, axis);
+            assert!(e.inconsistent.is_empty() && e.not_applied.is_empty());
+            assert!(e.held.is_empty() && e.not_live.is_empty() && e.unresolved.is_empty());
+            assert_eq!(e.inexact_scopes, 0);
+            // Every bound is as recorded: nothing but the subject's own value explains one.
+            assert!(e
+                .dated
+                .values()
+                .flat_map(|d| [d.why_lo, d.why_hi])
+                .flatten()
+                .all(|w| w.cause == Cause::AsRecorded));
+        }
+    }
+    assert!(
+        quiet > 300,
+        "only {quiet} quiescent axes: the promise is barely exercised"
+    );
 }

@@ -7,6 +7,9 @@
 //! records, in the same order. `smysl_ingest::stage` checks every batch through an overlay since
 //! step 10, so the `check` comparison here is the property ingest relies on.
 //!
+//! With feature `store-redb`, the unit store on disk is compared too, with its core cache off:
+//! every operation here then reads every core it touches from the log.
+//!
 //! Compared in `Debug` form, which for every result type here is its whole content.
 
 use smysl::{
@@ -148,6 +151,28 @@ fn conform(name: &str, records: &[Record]) {
         for (g, w) in got.iter().zip(&want) {
             assert_eq!(g, w, "{name}: an Overlay at {k}/{n} disagrees");
         }
+    }
+    #[cfg(feature = "store-redb")]
+    {
+        let dir = std::env::temp_dir().join(format!(
+            "smysl-ops-redb-{}-{}",
+            std::process::id(),
+            name.replace(['/', '.', ' '], "-")
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("store.smy");
+        std::fs::write(&path, smysl::to_cbor_seq(&log)).unwrap();
+        let mut opts = smysl::redb::RedbOptions::default();
+        opts.core_cache_bytes = 0;
+        let (s, _) = smysl::redb::RedbStore::open(&path, opts).unwrap();
+        let got = operations(&s);
+        assert_eq!(got.len(), want.len(), "{name}: RedbStore: answer count");
+        for (g, w) in got.iter().zip(&want) {
+            assert_eq!(g, w, "{name}: the unit store disagrees");
+        }
+        drop(s);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

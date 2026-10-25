@@ -164,6 +164,36 @@ impl Effective {
     }
 }
 
+/// Whether rule E has nothing to do on this axis: no dating anywhere in the store, no free
+/// constraint, and no subject whose as-recorded interval is already empty.
+///
+/// Then [`effective`] finds no contention, holds and resolves no dating, and leaves every
+/// interval as recorded — because the only constraints its network would hold are each
+/// subject's own two bounds, and those contradict only when the interval between them is
+/// empty, which is the third condition. So a caller that wants what rule E *found* rather than
+/// the intervals themselves can skip the solve. The `Time` check pass is that caller, and at
+/// 155k units the solve is most of `check`'s working set: a subject list, an index and a
+/// network over every unit, for each axis, on a store with nothing dated (TX-P13b step 1).
+///
+/// Streams the store: one seed at a time, nothing kept.
+pub fn quiescent(store: &(impl StoreRead + ?Sized), axis: Axis) -> bool {
+    if store.library().dating_count() > 0 || !constraints::free(store).0.is_empty() {
+        return false;
+    }
+    // Only the said axis seeds anything; the others start undated, which is never empty.
+    if axis != Axis::Said {
+        return true;
+    }
+    store
+        .units()
+        .all(|(u, _)| !seed(store, &Subject::Unit(*u), axis).interval.is_empty())
+        && store.library().manifests().all(|(m, _)| {
+            !seed(store, &Subject::Manifest(*m), axis)
+                .interval
+                .is_empty()
+        })
+}
+
 /// Compute effective time for one axis.
 ///
 /// Over the whole store rather than over one component, which costs nothing: the network is

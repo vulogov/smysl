@@ -177,6 +177,10 @@ pub use smysl_graph::{
 /// reach it: `C-Library` is obliged to derive `strict` classes and may not depend on
 /// `smysl-text`.
 pub use smysl_graph::proposition;
+/// The unit store on disk (SMYSL-2.8 §3.5): `RedbStore`, a `StoreRead` whose cores stay in the
+/// log until asked for, and its options. Feature `store-redb`.
+#[cfg(feature = "store-redb")]
+pub use smysl_graph::redb;
 
 // ---- retrieve -------------------------------------------------------------
 // Pure, and deliberately so: the default engine is BM25 with one transitive dependency, no
@@ -464,8 +468,10 @@ mod tests {
         // `SMY-E492` (TX-P12 step 13), raised by `lib export --target-revision`; 136 with
         // `SMY-E421` (TX-P12 step 3), raised by field resolution in `sq`; 137 with `SMY-E426`
         // (step 5), raised by `schema check`; 139 with `SMY-W472` and `SMY-E473` (step 6),
-        // raised by `migrate`; 140 with `SMY-W475` (step 8), raised by `pointer(…)`.
-        assert_eq!(Code::ALL.len(), 140);
+        // raised by `migrate`; 140 with `SMY-W475` (step 8), raised by `pointer(…)`; 143 with
+        // `SMY-W501`, `SMY-E503` and `SMY-W504` (TX-P13b step 1), raised by the redb unit
+        // store, in a fourteenth group.
+        assert_eq!(Code::ALL.len(), 143);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

@@ -14,6 +14,8 @@ pub mod index;
 mod interp;
 mod library;
 mod read;
+#[cfg(feature = "store-redb")]
+pub mod redb;
 mod union;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -71,6 +73,10 @@ pub struct OpenReport {
     pub index_rebuilt: bool,
     /// Bytes after the last complete record, left by a writer mid-append.
     pub trailing_bytes: u64,
+    /// Records a unit store on disk folded in from its log at open (SMYSL-2.8 §3.5.5): the
+    /// whole log on a rebuild, the tail it had not seen when catching up, and none when it
+    /// already described the log. Always 0 for the in-memory store, which reads the whole log.
+    pub replayed: u64,
 }
 
 /// What happened during `append`.
@@ -83,6 +89,37 @@ pub struct AppendReport {
     /// delivery be duplicated without consequence (rule U).
     pub duplicates: usize,
     pub bytes_written: u64,
+}
+
+/// The records no log accepts, refused before anything is written: text (`SMY-E452`) and a
+/// derived time contention. One door for every writer — `Store::append` and the unit store's
+/// `RedbShard::append` — so neither can accept what the other refuses.
+pub(crate) fn refuse_unloggable(records: &[Record]) -> Result<(), Error> {
+    for r in records {
+        let code = match r {
+            Record::PartText(_) => Some(record::code::PART_TEXT as u8),
+            Record::PartReading(_) => Some(record::code::PART_READING as u8),
+            _ => None,
+        };
+        if let Some(code) = code {
+            return Err(Error::Lib(smysl_core::error::LibError::TextInLog {
+                record: code,
+            }));
+        }
+        // And a time contention is derived, never written (SMYSL-2.3 A-8.2). Refused at
+        // the same door and for a related reason: the records a store accepts decide what
+        // it can be asked to hold, and a MUST NOT enforced anywhere else is a MUST NOT
+        // some other caller will reach around. A resolution naming the derived id is
+        // accepted as it always was — that is the record a reviewer writes.
+        if let Record::Contention(c) = r {
+            if c.detected.kind.is_derived_only() {
+                return Err(Error::Lib(smysl_core::error::LibError::DerivedContention {
+                    kind: c.detected.kind.as_u8(),
+                }));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// An append-only log plus its derived view of the graph.
@@ -300,13 +337,8 @@ impl Store {
             }
         }
 
-        let mut store = Store::new();
-        store.path = Some(path);
-        store.absorb(records);
-        store.log_len = log_len;
-        store.log_hash = log_hash;
-        store.log_hasher = Rolling::new();
-        store.log_hasher.update(&bytes[..consumed]);
+        let store = Store::of_log(Some(path), records, &bytes[..consumed]);
+        debug_assert_eq!((store.log_len, store.log_hash), (log_len, log_hash));
 
         if opts.verify_hashes {
             if let Some(ix) = sidecar.as_ref().filter(|_| current) {
@@ -315,6 +347,20 @@ impl Store {
         }
 
         Ok((store, open))
+    }
+
+    /// The store of a log's complete records, as [`Store::open_with`] builds it: every record
+    /// kept, duplicates included, with `log` — the bytes they were decoded from — as its length
+    /// and hash. What a store on disk hands an operation that needs one it can change.
+    pub(crate) fn of_log(path: Option<PathBuf>, records: Vec<Record>, log: &[u8]) -> Store {
+        let mut store = Store::new();
+        store.path = path;
+        store.absorb(records);
+        store.log_len = log.len() as u64;
+        store.log_hash = hash_bytes(log);
+        store.log_hasher = Rolling::new();
+        store.log_hasher.update(log);
+        store
     }
 
     /// Where the sidecar for a log lives: `.smysl/index/<name>.idx` beside it (§7.3).
@@ -378,30 +424,7 @@ impl Store {
         // where text actually rests — `smysl-text`'s object store — and a store's job here is
         // to hold the redactions so that the object store can ask. See `Store::is_redacted`
         // and `smysl_text::library::StoreLibrary::redact`.
-        for r in records {
-            let code = match r {
-                Record::PartText(_) => Some(record::code::PART_TEXT as u8),
-                Record::PartReading(_) => Some(record::code::PART_READING as u8),
-                _ => None,
-            };
-            if let Some(code) = code {
-                return Err(Error::Lib(smysl_core::error::LibError::TextInLog {
-                    record: code,
-                }));
-            }
-            // And a time contention is derived, never written (SMYSL-2.3 A-8.2). Refused at
-            // the same door and for a related reason: the records a store accepts decide what
-            // it can be asked to hold, and a MUST NOT enforced anywhere else is a MUST NOT
-            // some other caller will reach around. A resolution naming the derived id is
-            // accepted as it always was — that is the record a reviewer writes.
-            if let Record::Contention(c) = r {
-                if c.detected.kind.is_derived_only() {
-                    return Err(Error::Lib(smysl_core::error::LibError::DerivedContention {
-                        kind: c.detected.kind.as_u8(),
-                    }));
-                }
-            }
-        }
+        refuse_unloggable(records)?;
         let mut report = AppendReport::default();
         let mut fresh = Vec::new();
         let mut fresh_hashes = Vec::new();

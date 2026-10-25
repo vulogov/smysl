@@ -593,7 +593,8 @@ with `from_parts`, and derives `unfounded`. Cores and attestations stay on disk.
   operation reads. Loaded on first touch, never evicted.
 - **Paged:** cores of `measured` and `cited` units (text extractions, telemetry readings).
   An LRU of `Arc<Unit>` bounded by a byte budget (`RedbOptions::core_cache_bytes`, default
-  64 MiB), on top of redb's page cache (`Builder::set_cache_size`).
+  64 MiB), on top of redb's page cache (`Builder::set_cache_size`). *As built (P13b.1): 32 MiB,
+  scan-resistant — scans read through and `get` fills — both measured; §6.1.*
 - The policy is a function of the header only, so it is deterministic and does not change
   answers, only latency. Which statuses are pinned is OQ-69.
 
@@ -689,7 +690,12 @@ D-10 assigns the library lock to SMYSL-2.4 and asks this RFC to revisit it for r
   question was still open. A second writer fails fast with `SMY-E445` (SMYSL-2.4's "shard locked
   by another writer"; one meaning, one code), naming the holder's pid, host and command — which
   the lock file records, and which is half the reason the answer went that way, since the kernel
-  will not tell you who holds a flock.
+  will not tell you who holds a flock. *As built (P13b.2): `.smysl/store/<name>.lock` for a
+  standalone log; the `Lock` type moved from `smysl-text` to `smysl_graph::lock` so the writer
+  below it can take one, and is now written whole and linked into place — created and then
+  written, a racing writer read an empty lock and was refused by nobody (§6.1). Within one
+  process every open of a store shares one database, because redb 2.6's `flock` conflicts with
+  a second open in the same process as with another's.*
 - **Readers in the same process**: redb read transactions are MVCC snapshots. A `RedbStore`
   opened for reading holds one read transaction for its lifetime, so every answer it gives is
   from one snapshot (one moment, in `NodeId`'s sense). Writers in the same process do not
@@ -878,7 +884,9 @@ Integration with the `Cmd` table in `src/main.rs`; no new subcommand in this RFC
 `lib` (SMYSL-2.4 owns `lib`).
 
 - Global `--backend <memory|redb>` (default `memory`), honoured by `load_store`, which returns
-  `AnyStore`. Surface input and stdin always load into memory.
+  `AnyStore`. Surface input and stdin always load into memory. *As built (P13b.2): also by
+  `check`, which reads its own input, and by every command's write, which goes through
+  `RedbShard`; a build without `store-redb` refuses `redb` with exit 2, by name.*
 - Global `--shard <ALIAS>` (repeatable) on read commands inside a library: the union of the
   named shards; `--shard all` is every shard.
 - `smysl reindex --backend redb` builds or rebuilds the unit store; `--verify` compares the
@@ -893,7 +901,9 @@ Integration with the `Cmd` table in `src/main.rs`; no new subcommand in this RFC
 - `smysl-graph`: feature `store-redb = ["dep:redb"]`. Facade: feature `store-redb =
   ["smysl-graph/store-redb"]`, not in `default`.
 - `[workspace.dependencies] redb = { version = "4", default-features = false, features =
-  ["std"] }` — shared with SMYSL-2.4's `substrate-redb`.
+  ["std"] }` — shared with SMYSL-2.4's `substrate-redb`. *As built (P13b.1): the existing
+  `=2.6.4` pin, which declares 1.85; 4.x's 1.90 would have raised every crate that depends on
+  `smysl-graph`, which is all of them. §6.1 and OQ-67 record what 2.6 does not have.*
 - **Purity gate**: redb is synchronous, opens no sockets and links no runtime; it is not in
   `FORBIDDEN_DEPS` and the source grep finds nothing. `cargo tree -p smysl-graph -e normal`
   (default features) is unchanged. `make purity` must pass with `--features store-redb` added
@@ -1169,6 +1179,136 @@ in every ported signature; §3.2's sketch and §5.2's shapes are otherwise uncha
   `tests/cli-surface.txt` does not change. **What P13a leaves on `&Store`:** `smysl-text`
   outside the time engine, `smysl-query`, `smysl-measure`, `smysl-lib`, `Bm25View` — the crates
   that postdate §2.6's inventory — for whichever phase gives them a second backend to serve.
+- **P13b.1 — done (2026-10-24).** `store::redb` behind `store-redb`: `RedbStore`,
+  `RedbOptions`, `CacheStats`, `AnyStore::Redb` and `AnyStore::open_redb`, re-exported as
+  `smysl::redb`. Index mode only. What changed from §3.5, each for a reason measured or found:
+  - **redb 2.6.4, not 4** (§4.5). The workspace's existing pin, shared with `substrate-redb`.
+    4.x declares 1.90, and since every crate depends on `smysl-graph` it would have raised the
+    whole workspace's floor, not one crate's. 2.6 has no read-only handle — every open takes
+    `flock(LOCK_EX)` — so OQ-67's fallback serves readers too, not only readers of a writer.
+  - **Tables** (§3.5.3): `meta`, `record_hash`, `header`, `deps`, `attest`, `interp`,
+    `observed`, `source_ref`. No `log` table: index mode reads the log sequentially, and the
+    table returns with primary mode, where it holds the bytes. No `core` table: the header holds
+    the core's offset and length, which is 32 bytes rather than 24 and saves a b-tree descent
+    on every `get`. No `schema_intern`: nothing reads a schema without its core yet.
+  - **No `verify_hashes` option**: every open hashes the log prefix the store describes, so a
+    core cannot change under a store without a rebuild.
+  - **Tiering** (OQ-69, as recommended): cores of `speculative`, `inferred` and `derived` units
+    and of relation endpoints are pinned once read; the rest go to a byte-budgeted tier that
+    `get` fills and `units()` scans read through. Scan-resistance was measured in: a 64 MiB
+    LRU that scans filled made `check` slower than no cache (2.51 s against 2.19 s at 155k),
+    because each scan evicted every core before the next reached it. **Default 32 MiB, not
+    64**, because resident size tracks the budget: on graph-155510, open + `check` was 2.45 s
+    and 110 MB with the cache off, 2.35 s / 144 MB at 16 MiB, 2.25 s / 164 MB at 32, 1.99 s /
+    205 MB at 64, and 1.07 s / 228 MB with everything cached (256 MiB).
+  - **`OpenReport::replayed`** (additive): records folded in from the log at open.
+  - **Exit: peak RSS of `check` on graph-155510, 165 MB against 474 MB in memory — 35%.** Met
+    at the default budget, and only after a finding outside this crate. The first measurement
+    read 61%, and with the cache off the floor was still 41%: `check`'s `Time` pass ran rule E's
+    solve on every axis over every unit — a subject list, an index and a network each — on a
+    store with no dating, about 140 MB at 155k on *either* backend. `quiescent` (new, in
+    `smysl-text`'s engine) says when the solve could find nothing — no dating, no free
+    constraint, no as-recorded interval already empty — and the pass skips it then. A property
+    test holds `quiescent` to the solve on 200 generated stores and the corpora. In memory the
+    same fix takes `check`'s peak from 609 to 473 MB. Open with the adjacency alone is 109 MB,
+    23%. A second finding: the first cache charged a core its encoded length, and a decoded
+    unit is several times that, so a 64 MiB tier held all 155k cores while accounting 12 MB.
+  - **Conformance**: implementations 3 and 4 — the cache at 0 and at its default — on every
+    corpus, fixture and the lifecycle and library stores; reopened (no rebuild), caught up
+    after the log grew (exactly the tail), under `AnyStore`, under an `Overlay` with no batch
+    and with half the log as its batch, and through `into_memory`; a log with repeats and a
+    torn tail against `Store::open`, byte for byte; `Send + Sync`. The operations suite runs
+    every operation on the store with the cache off.
+  - **§5.3** (what applies without a writer): faults through redb's `StorageBackend`, a failed
+    write and a torn one, at every write point of a 1,000-record append sequence — all recovered,
+    each reopening as `Store::open` of its log with nothing worse than `W501`/`W110`, and redb's
+    `check_integrity` clean wherever the file still opened: 1,558 write points, 3,116 cases
+    (`--ignored`, 33 min); by default 41 seeded points and the last, 82 cases, two of which left
+    a file redb would not open and were rebuilt. A writer `SIGKILL`ed at 20 seeded moments, the same. The crash between
+    the log's `fsync` and the commit folds in exactly the tail. A store held elsewhere is read
+    from the log after `reader_wait_ms` with `W504`; one released within the wait is opened.
+    The 8-reader and single-writer cases need the writer, and are P13b.2's.
+  - **Codes**: `SMY-W501`, `SMY-E503`, `SMY-W504`, in a fourteenth group, `Store` (143).
+  - **What it costs**, at 155k (`--release`, the `backends` ladder): building from the log
+    1.4 s (`Store::open` 0.37 s); opening a current store 36 ms; `check` 2.1 s against 175 ms,
+    salience 280 against 51 ms, `derive_thread` 1.25 s against 0.36 s, `Bm25::index` 1.57
+    against 1.26 s — every scan decodes the cores it reads, and the 32 MiB tier held 59k of
+    155k (42% of reads hit). That is the trade this step was for, and the first thing to look
+    at when a scan's latency matters: decoding only the fields a pass reads would cut it, and
+    is not in this RFC. On graph-31102 the RSS ratio is 55%, the fixed costs being most of a
+    small resident set. The file is 68 MB for a 15.7 MB log — redb pages, three indexes and the
+    attestations — and, as §3.5.6 says, not byte-reproducible.
+
+- **P13b.2 — done (2026-10-25).** The writer, `--backend`, and the rest of §5.3:
+  - **`RedbShard`** (`open_rw`, `append`, `reader`): the shard's lock file, taken before
+    anything is opened, so a second writer fails with `SMY-E445` naming the holder; then the
+    log, `fsync`ed; then one commit with `Durability::Immediate` carrying `log_len`/`log_hash`.
+    Duplicates are dropped against `record_hash` and within the batch, as `Store::append` drops
+    them, and the same records are refused, by one function both call (`refuse_unloggable`).
+    `open_rw` waits `reader_wait_ms` for a store another process is reading and then fails —
+    a writer has nothing to fall back to that leaves the store describing its log. A torn tail
+    found at `open_rw` (a killed writer whose lock was broken) is cut, with `W110` saying so,
+    because a record appended after it could never be read; one found mid-session is refused,
+    since this writer did not write it and somebody is appending without the lock.
+  - **One database per file per process** (`redb/shared.rs`). redb 2.6's `flock` conflicts
+    with a second open in the same process as with another process's, so a reader and the
+    writer in one process could not both hold a store — §3.8 says they do not block each
+    other, and on redb's side they do not. Opens now share one `Database` through a registry of
+    weak handles, with a lock around each catch-up so two cannot fold the same tail at once.
+  - **`AnyStore`'s `StoreWrite` for the unit store**: the shard opened for the one append, the
+    lock released, the store replaced by a snapshot that includes what was appended — §3.8's
+    "writers keep sessions short". `AnyStore::len` and `is_empty` (additive).
+  - **CLI**: global `--backend memory|redb`. `load_store` and `check` read a CBOR log through
+    the unit store (`W501` on the first open, nothing after); surface text and stdin still load
+    into memory; every command's write goes through `RedbShard`. `reindex --backend redb`
+    builds the store; `--verify` compares record-set digest, units, state and adjacency against
+    an in-memory rebuild and exits 9 on a difference, or on a store that had to be rebuilt to
+    open. A build without the feature refuses `--backend redb` by name, exit 2.
+    `make crate-features` gains `smysl-graph --features store-redb`.
+  - **Found: a plan wrote.** `plan_retraction` simulated a retraction by appending it to a copy
+    of the store — and a copy of a store opened from a log keeps its path, so the copy's
+    `append` wrote the retraction to the log. A plan, authorised or refused, retracted the unit
+    on disk, on any store from `Store::open`, since the simulation was written. The CLI never
+    met it because its stores came from `from_records`, with no path, until `--backend redb`
+    gave them one: a refused `retract` then wrote its record. The simulation is an `Overlay`
+    now, which writes nothing and does not copy the store; the redb store's in-memory copy has
+    no path, as `from_records`'s has none (it would otherwise also have written the record
+    twice, once by the writer and once by the copy). A test holds a plan to the log's bytes,
+    and fails on the old simulation.
+  - **Found: a lock caught half-written.** `Lock::acquire` created the file and then wrote the
+    holder; a second writer between the two read an empty file and was refused by "pid 0 on
+    running ``". Two processes racing for a shard hit it on the first run. The lock is written
+    beside itself and hard-linked into place, which fails if the lock exists, exactly as
+    `create_new` did. Eight threads racing fifty times now each see a named holder.
+  - **§5.3, now whole**: two processes `open_rw` the same shard, exactly one gets `E445` and is
+    told the other's pid; eight reader snapshots taken at different points of a writer's
+    appends each answer from their moment — record-set digest, units, and the attestations of
+    a unit that later records attest, read from the store's table with the cache off — and
+    each equals an in-memory open of exactly its log prefix; a reader in another process while
+    a writer writes falls back within the wait with `W504` and answers as an in-memory open of
+    the prefix it read; a store held by another process, and one released within the wait,
+    across real processes now that one process shares its opens. The kill test kills the real
+    writer at even points and a lock-less writer at odd ones; a killed writer leaves its lock
+    naming its pid, the next `open_rw` gets `E445`, and after `break_lock` the next append
+    reads back. `check_integrity` after every kill.
+  - **Conformance, implementation 5**: the log written by three appends through `RedbShard`
+    and through `AnyStore`'s append — the second carrying repeats — answers as the in-memory
+    store given the same appends, append by append, with the same reports and the same log
+    bytes, and reopens with nothing to fold.
+  - **Exit: the ladder at 10⁶ units completes on the redb backend in 3.3 GB** (`SMYSL_BACKENDS=redb`,
+    which never builds the in-memory store; 1.1 M units, a 102 MB log, a 540 MB store). The
+    whole run's peak is `Bm25::index`'s own index, 2.39 GB measured alone, which the in-memory
+    backend would hold as well. On redb: build from the log 14 s (535 MB peak), open 0.29 s
+    (528 MB, the headers and adjacency), `check` 17 s at 686 MB peak against 2.86 GB for the
+    in-memory store — 24% — salience 2.1 s (1.0 GB), `derive_thread` 9.7 s (1.4 GB),
+    `Bm25::index` 11.5 s; the core cache hit 36%.
+  - **Single-record append: 6–8 ms** on redb at 31k, 155k and 10⁶ units, against 0.1 ms for the
+    in-memory store, which does not sync. The two syncs — the log, then redb's commit — are the
+    cost; GE-T7's < 5 ms on a 10⁵-unit shard is not met here, and is GE-T7's to decide.
+  - **Noted: a rebuild in place does not shrink the file.** Clearing the tables leaves their
+    pages free, not returned, so a store rebuilt over itself is about twice its size (1.08 GB
+    at 10⁶); redb reuses the pages on the next writes, so it does not grow past that.
+    Compacting needs the database alone (`&mut`), which a shared one is not.
 
 ## 7. Risks and mitigations
 
@@ -1212,6 +1352,6 @@ SMY-*506–509 are unallocated.
 | **OQ-16** (draft 3) | Virtual union: are contentions computed lazily per query enough, or does the library need a materialised contention index? | Lazy. Detection reads only the interpretive layer, which the union materialises (§3.7). Materialise only if GE-T7 measures detection over the full union above 1 s at 10⁶ units. |
 | **OQ-65** | Generalise the public entry points in place (`fn check<S: StoreRead + ?Sized>`), accepting that a caller's own `Deref<Target = Store>` type stops coercing, or add `_in` twins for the twelve contract operations and leave their signatures alone? | In place, with blanket impls and the §5.2 compile test; twins only if `make semver` flags it or the owner rules the `Deref` case a break. |
 | ~~**OQ-66**~~ | **Answered 1.10.0 by measurement, and the second option never existed.** There was no 1.79 build to keep: a 1.79 Cargo cannot resolve this tree at all — the last sentence of the old answer asked exactly that, and the answer is no, and not because of an *optional* dependency but because of `blake3`, via `constant_time_eq` 0.4.2 at edition 2024. Measured floors: 1.85 for the nine pure-path crates, 1.86 for `smysl-provider` and `smysl-ingest` (`icu_*` 2.2 under `ureq`), 1.88 for `smysl-tui` and the facade (`instability`, `darling` under `ratatui`). Each is declared on its own crate, since Cargo has no per-feature MSRV and a package's number must be its maximum. `make msrv` compares each declaration against what its dependencies require and fails in both directions; a CI job runs it and compiles the base tier at 1.85. redb 4.x's 1.90 is now a one-line bump on `smysl-graph` when `store-redb` lands. |
-| **OQ-67** | Cross-process readers: wait-then-read-the-log (this RFC), or adopt redb's `experimental-multiprocess` single-writer mode? | Wait and fall back now; revisit when the feature leaves `experimental`. |
-| **OQ-68** | Where do library-wide derived tables live: `uid_shard` and the `observed` instant index (draft 3 §14.2 lists `observed` in `index.redb`; this RFC has a per-shard `observed` table for `StoreRead`)? | Per-shard tables are the source; SMYSL-2.4's library-wide `observed` and this RFC's `uid_shard` are derived from them, in `index.redb`. SMYSL-2.4 to confirm. |
-| **OQ-69** | Tiering policy: pin interpretive cores by status (`speculative`/`inferred`/`derived` + relation endpoints, §3.5.4), by source kind (`doc`/`file`/`node` cold), or by kernel type? And GE-T7's "library build" — does it include model extraction or only readers, segmentation and indexes? | Status-based pinning, default core cache 64 MiB; GE-T7 build excludes model extraction (it is measured by TX-P5's cost report). Both to be revisited after the first GE-T7 run. |
+| ~~**OQ-67**~~ | **Answered 2026-10-24 (P13b.1): wait, then read the log. Revisited at P13b.2 and kept**: the CLI's writer holds the store for one append (6–8 ms), so a reader meets it rarely, and in one process readers and the writer share the database and never meet it at all; at 10⁶ units the fallback costs a 2.9 GB in-memory open against 0.3 s, which is what redb 4's read-only handles would buy, still at Rust 1.90. On redb 2.6.4, which the workspace pins, there is no shared lock to adopt — every open takes `flock(LOCK_EX)`, readers included — so the fallback serves any second process, not only one meeting a writer. `AnyStore::open_redb` waits `reader_wait_ms` (2 s), then opens the log into memory with `W504`. redb 4's read-only handles are the way out and cost Rust 1.90 for the whole workspace; revisit at P13b.2, where a writer makes collisions likelier and the 10⁶ ladder shows what the fallback costs. | *(was: wait and fall back now; revisit when the feature leaves `experimental`)* |
+| **OQ-68** | Where do library-wide derived tables live: `uid_shard` and the `observed` instant index (draft 3 §14.2 lists `observed` in `index.redb`; this RFC has a per-shard `observed` table for `StoreRead`)? | **Half answered 2026-10-24.** Per-shard tables are the source, and P13b.1 has them (`observed`, `source_ref`). The library-wide ones go in **a file of their own, `store/library.redb`**, not `index.redb`: `smysl-text` owns that file's layout and writes it only under `substrate-redb`, and `smysl-graph` sits below `smysl-text`, so writing into it would be a crate writing a file whose layout belongs to one above it — and a library without text indexing would have no file to write to. Derived from the shards' `header` tables and rebuildable. Decided for P13c, which first needs them; SMYSL-2.4 to confirm. |
+| **OQ-69** | Tiering policy: pin interpretive cores by status (`speculative`/`inferred`/`derived` + relation endpoints, §3.5.4), by source kind (`doc`/`file`/`node` cold), or by kernel type? And GE-T7's "library build" — does it include model extraction or only readers, segmentation and indexes? | **Tiering answered 2026-10-24 (P13b.1): by status and relation endpoint**, a pure function of the header, as proposed; the paged tier is scan-resistant (scans read through, `get` fills), and its default is **32 MiB**, not 64, measured (§6.1 P13b.1). The cache at 0 bytes is a test mode beside the default, so answers are shown not to depend on it. GE-T7's build definition stays open: it does not bear on 13b, and the proposal (exclude model extraction) stands until the first GE-T7 run. |

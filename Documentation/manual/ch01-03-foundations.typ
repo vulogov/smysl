@@ -394,6 +394,7 @@ it builds to what the enabled features permit. That's the mechanism Chapter
     ([`-v, --verbose`], [Increases verbosity; repeatable (`-vv`, `-vvv`) for progressively more diagnostic detail.], [Debugging any command]),
     ([`--no-color`], [Disables ANSI colour, for logs and terminals that don't want it.], [Scripted use]),
     ([`--noprogress`], [Disables progress bars unconditionally, whatever the terminal thinks it can render.], [Large stores, CI logs]),
+    ([`--backend`], [Which store a CBOR log goes through: `memory`, the default, reads it whole; `redb` reads it through the unit store beside it, `.smysl/store/<name>.redb`, built on first use (`SMY-W501`), and writes through the store's writer, which holds `.smysl/store/<name>.lock` for the one append and refuses a second writer with `SMY-E445`. Surface text and stdin are read into memory either way. Needs a build with `--features store-redb`; one without it refuses the flag by name. Since 1.10.], [Stores past a few hundred thousand units]),
     ([`--seed-check`], [Asserts this exact invocation is bit-reproducible — the command-line hook onto rule D, the same determinism `cargo xtask determinism` checks in CI. From 1.9 the assertion is checked: an invocation that reaches a model or an embedding exits 2 before running, and the refusal names which invocations are the impure ones. The decision is per invocation rather than per command, so `find` is refused with `--engine semantic` and runs with the default lexical engine.], [Ch. 21]),
   ),
 )

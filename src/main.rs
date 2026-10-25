@@ -257,6 +257,13 @@ fn cli() -> Command {
             .global(true)
             .help("Increase verbosity")
             .action(ArgAction::Count),
+        Arg::new("backend")
+            .long("backend")
+            .global(true)
+            .help("Which store a CBOR log is read through; `redb` needs --features store-redb")
+            .value_name("BACKEND")
+            .value_parser(["memory", "redb"])
+            .default_value("memory"),
         Arg::new("seed-check")
             .long("seed-check")
             .global(true)
@@ -2674,15 +2681,26 @@ fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         // A store is surface text or a CBOR log, and `merge -o` writes the latter - so
         // `merge … | check` would be a documented pipeline that did not work if this only
         // read one of them.
-        let out = match read_store(&path) {
-            Ok(o) => o,
-            Err(code) => {
+        // `--backend redb`: the unit store, with nothing to parse — a log carries no parse
+        // diagnostics and no labels outside its binding records, which `check` reads itself.
+        let (out, store) = match open_backend(&path) {
+            Some(Ok(store)) => (smysl::ParseOutcome::default(), store),
+            Some(Err(e)) => {
                 bar.abandon();
-                return code;
+                eprintln!("smysl check: {e}");
+                return ExitCode::Failure;
             }
+            None => match read_store(&path) {
+                Ok(o) => {
+                    let store = AnyStore::from(Store::from_records(o.records.clone()));
+                    (o, store)
+                }
+                Err(code) => {
+                    bar.abandon();
+                    return code;
+                }
+            },
         };
-
-        let store = Store::from_records(out.records.clone());
         let mut opts = CheckOptions::default().with_labels(out.labels.clone());
         if !passes.is_empty() {
             opts = opts.only(passes.clone());
@@ -2919,6 +2937,74 @@ fn store_file(path: &str) -> Result<std::path::PathBuf, String> {
     Ok(p.to_path_buf())
 }
 
+/// The store `--backend` chose. Memory unless set; set once, in `main`.
+static BACKEND: std::sync::OnceLock<Backend> = std::sync::OnceLock::new();
+
+enum Backend {
+    /// The unit store, and the command's name for its writer's lock file.
+    #[cfg_attr(not(feature = "store-redb"), allow(dead_code))]
+    Redb(String),
+}
+
+/// With `--backend redb`, the options a unit store is opened with: the defaults, and the
+/// command's name for the lock a writer takes. `None` for the in-memory backend.
+#[cfg(feature = "store-redb")]
+fn redb_options() -> Option<smysl::redb::RedbOptions> {
+    let Backend::Redb(command) = BACKEND.get()?;
+    let mut opts = smysl::redb::RedbOptions::default();
+    opts.command = command.clone();
+    Some(opts)
+}
+
+/// Whether a file is a CBOR log rather than surface text, from its first byte.
+///
+/// A record sequence opens with an array head, which is never the first byte of UTF-8 text;
+/// see [`looks_like_surface`]. One byte rather than the file, because the point of the unit
+/// store is not to read the log.
+#[cfg(feature = "store-redb")]
+fn is_cbor_log(path: &std::path::Path) -> bool {
+    let mut b = [0u8; 1];
+    std::fs::File::open(path)
+        .and_then(|mut f| f.read(&mut b))
+        .map(|n| n == 1 && b[0] >= 0x80)
+        .unwrap_or(false)
+}
+
+/// With `--backend redb` and a CBOR log, the unit store for it (SMYSL-2.8 §4.4). `None` when
+/// the log is to be read into memory as before: the in-memory backend, stdin, surface text,
+/// or a build without the unit store. What the open had to say — a rebuild, a torn tail, a
+/// store another process held — goes to stderr.
+fn open_backend(path: &str) -> Option<Result<AnyStore, String>> {
+    #[cfg(feature = "store-redb")]
+    {
+        let opts = redb_options()?;
+        if path == "-" {
+            return None;
+        }
+        let file = match store_file(path) {
+            Ok(f) => f,
+            Err(e) => return Some(Err(format!("{path}: {e}"))),
+        };
+        if !is_cbor_log(&file) {
+            return None;
+        }
+        Some(match AnyStore::open_redb(&file, opts) {
+            Ok((store, report)) => {
+                for d in report.report.iter() {
+                    eprintln!("{path}: {d}");
+                }
+                Ok(store)
+            }
+            Err(e) => Err(format!("{path}: {e}")),
+        })
+    }
+    #[cfg(not(feature = "store-redb"))]
+    {
+        let _ = path;
+        None
+    }
+}
+
 /// Read a store from surface text or a CBOR log, whichever it turns out to be.
 ///
 /// An [`AnyStore`] since TX-P13a step 11 (SMYSL-2.8 §4.4): the in-memory backend today, and the
@@ -2928,6 +3014,17 @@ fn store_file(path: &str) -> Result<std::path::PathBuf, String> {
 fn load_store(
     path: &str,
 ) -> Result<(AnyStore, std::collections::BTreeMap<smysl::Label, Uid>), String> {
+    if let Some(store) = open_backend(path) {
+        let store = store?;
+        let labels = store
+            .hot_records(smysl::HotKind::LabelBindings)
+            .filter_map(|r| match r {
+                smysl::Record::LabelBinding(b) => Some((b.label.clone(), b.uid)),
+                _ => None,
+            })
+            .collect();
+        return Ok((store, labels));
+    }
     let bytes = if path == "-" {
         let mut b = Vec::new();
         std::io::stdin()
@@ -4200,6 +4297,15 @@ fn persist(
             .and_then(|_| f.write_all(b"\n"))
             .map_err(|e| format!("{path}: {e}"))
     } else {
+        // Through the unit store's writer under `--backend redb`, so the store describes the
+        // log it was written to and a second writer meanwhile is refused (`SMY-E445`).
+        #[cfg(feature = "store-redb")]
+        if let Some(opts) = redb_options() {
+            let (mut shard, _) =
+                smysl::redb::RedbShard::open_rw(path, opts).map_err(|e| format!("{path}: {e}"))?;
+            shard.append(records).map_err(|e| format!("{path}: {e}"))?;
+            return Ok(());
+        }
         let mut log = Store::open(path).map_err(|e| format!("{path}: {e}"))?;
         log.append(records).map_err(|e| format!("{path}: {e}"))?;
         Ok(())
@@ -10804,6 +10910,11 @@ fn cmd_reindex(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
 
+    #[cfg(feature = "store-redb")]
+    if let Some(opts) = redb_options() {
+        return reindex_redb(&path, opts, m.get_flag("verify"));
+    }
+
     let (store, open) = match Store::open_with(&path, StoreOptions::default()) {
         Ok(v) => v,
         Err(e) => {
@@ -10849,6 +10960,81 @@ fn cmd_reindex(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         rebuilt.len()
     );
     ExitCode::Success
+}
+
+/// `smysl reindex --backend redb`: build the unit store from the log, or with `--verify` check
+/// the one there against an in-memory rebuild (SMYSL-2.8 §4.4).
+///
+/// The verify compares what a store is for — the record-set digest, the units and their
+/// state, the adjacency — not the file, which is not byte-reproducible (§3.5.6). A store that
+/// had to be rebuilt to open did not describe its log, and fails the verify the way a sidecar
+/// that does not match its rebuild does: exit 9.
+#[cfg(feature = "store-redb")]
+fn reindex_redb(path: &str, mut opts: smysl::redb::RedbOptions, verify: bool) -> ExitCode {
+    use smysl::redb::RedbStore;
+    opts.force_rebuild = !verify;
+    let (store, report) = match RedbStore::open(path, opts) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("smysl reindex: {path}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    if !verify {
+        println!(
+            "{path}: {} records, {} units, unit store rebuilt",
+            store.len(),
+            store.unit_count()
+        );
+        return ExitCode::Success;
+    }
+    for d in report.report.iter() {
+        eprintln!("{path}: {d}");
+    }
+    if report.index_rebuilt {
+        eprintln!("{path}: the unit store did not describe the log, and was rebuilt to open");
+        return ExitCode::HashVerification;
+    }
+    let memory = match Store::open(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("smysl reindex: {path}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let differs: Vec<&str> = [
+        (
+            "record-set digest",
+            store.record_set_digest() == memory.record_set_digest(),
+        ),
+        (
+            "units",
+            store.unit_count() == StoreRead::unit_count(&memory),
+        ),
+        ("state", store.state_hash() == memory.state_hash()),
+        (
+            "adjacency",
+            store.adjacency() == StoreRead::adjacency(&memory),
+        ),
+    ]
+    .into_iter()
+    .filter(|(_, same)| !same)
+    .map(|(what, _)| what)
+    .collect();
+    if differs.is_empty() {
+        println!(
+            "{path}: unit store matches a rebuild ({} records, {} units)",
+            store.len(),
+            store.unit_count()
+        );
+        ExitCode::Success
+    } else {
+        eprintln!(
+            "{path}: the unit store differs from a rebuild from the log in: {}",
+            differs.join(", ")
+        );
+        ExitCode::HashVerification
+    }
 }
 
 /// Gated to match its only caller, `cmd_ingest`. Without the gate this is dead code in
@@ -10897,6 +11083,19 @@ fn main() -> ProcExitCode {
         eprintln!("smysl: unknown command `{name}`");
         return ProcExitCode::from(ExitCode::Usage.as_i32() as u8);
     };
+
+    // `--backend`, read once and kept, because the functions that load a store are called from
+    // thirty places that were never handed the global matches (SMYSL-2.8 §4.4).
+    if matches.get_one::<String>("backend").map(String::as_str) == Some("redb") {
+        if !cfg!(feature = "store-redb") {
+            eprintln!(
+                "smysl {name}: --backend redb needs a build with `--features store-redb`; \
+                 this one reads every log into memory"
+            );
+            return ProcExitCode::from(ExitCode::Usage.as_i32() as u8);
+        }
+        let _ = BACKEND.set(Backend::Redb(name.to_string()));
+    }
 
     // Rule D, asserted per invocation and refused before anything runs. A caller passing
     // `--seed-check` is saying "I am about to depend on these bytes"; the useful moment to be

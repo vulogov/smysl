@@ -1822,6 +1822,7 @@ dependencies = [
 name = "smysl-graph"
 version = "1.10.0"
 dependencies = [
+ "redb",
  "smysl-core",
 ]
 

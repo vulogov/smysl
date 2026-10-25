@@ -219,6 +219,9 @@ lang-detect = ["text", "smysl-text/detect"]
 # the sidecar, and `find --library` scores it there; a build without it says so, by name, rather
 # than reporting a library whose postings are written down as having none.
 substrate-redb = ["text", "smysl-text/substrate-redb"]
+# The unit store on disk (SMYSL-2.8 §3.5): `smysl::redb::RedbStore`, a `StoreRead` whose cores
+# stay in the log until asked for. Off by default for the reason `substrate-redb` is.
+store-redb = ["smysl-graph/store-redb"]
 tui       = ["dep:smysl-tui", "cli"]
 # Semantic retrieval. Off by default: it needs a model file the operator supplies, and a
 # build that cannot use one should not pay for `tokenizers` in its dependency tree.

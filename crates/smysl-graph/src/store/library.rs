@@ -110,10 +110,15 @@ impl StoreLibrary {
     /// exists and is public contract, but it is a scan of every unit and a *prefix* match —
     /// which answers "looks like this text" when the question is "is this text".
     pub(super) fn absorb_unit(&mut self, uid: Uid, source: Option<&smysl_core::types::SourceRef>) {
-        let Some(source) = source else {
-            return;
-        };
-        if let Some(tid) = part_of(&source.reference) {
+        if let Some(source) = source {
+            self.absorb_reference(uid, &source.reference);
+        }
+    }
+
+    /// [`StoreLibrary::absorb_unit`] from the reference alone: what a store on disk has of a
+    /// unit's source without reading its core.
+    pub(super) fn absorb_reference(&mut self, uid: Uid, reference: &str) {
+        if let Some(tid) = part_of(reference) {
             self.by_tid.entry(tid).or_default().insert(uid);
         }
     }

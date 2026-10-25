@@ -323,7 +323,7 @@ test-matrix: ## Every feature combination CI builds
 		RUSTFLAGS="-D warnings" $(CARGO) test --workspace $$args; \
 	done
 
-FEATURED := smysl-provider smysl-ingest smysl-render smysl-pack smysl-text
+FEATURED := smysl-graph smysl-provider smysl-ingest smysl-render smysl-pack smysl-text
 
 crate-features: ## Each crate with features, alone, at its defaults and with none
 	@set -e; for c in $(FEATURED); do \
@@ -355,6 +355,10 @@ crate-features: ## Each crate with features, alone, at its defaults and with non
 		echo "==> cargo test -p smysl-text --no-default-features --features $$f"; \
 		RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-text --no-default-features --features $$f; \
 	done
+	@# `smysl-graph`'s `store-redb` alone (SMYSL-2.8 §4.5): the unit store is the only module of
+	@# that crate behind a feature, which is the shape the `substrate-redb` note above is about.
+	@echo "==> cargo test -p smysl-graph --features store-redb"
+	@RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-graph --features store-redb
 	@# `smysl-ingest`'s `text`, without `model`. The same argument as `substrate-redb` above,
 	@# and the same shape: `src/text/` is entirely behind a feature, so a `use` it needs from a
 	@# sibling module compiles at `--all-features` and nowhere else. Without `model` as well as
