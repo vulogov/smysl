@@ -331,6 +331,87 @@ fn a_torn_tail_in_a_shard_is_cut_before_the_next_write() {
         .any(|r| matches!(r, Record::Unit(x) if x == &next)));
 }
 
+/// A shard's uid list as it lies on disk: the log length it is stamped with, and its uids.
+fn uid_file(root: &Path, shard: &str) -> (u64, Vec<[u8; 32]>) {
+    let path = root
+        .join(shards::UIDS_DIR)
+        .join(format!("{}.uids", shards::stem(shard)));
+    let bytes = std::fs::read(path).expect("a uid list");
+    let rest = bytes
+        .strip_prefix(b"smysl/uids/1\n".as_slice())
+        .expect("the magic");
+    let (len, body) = rest.split_at(8);
+    (
+        u64::from_be_bytes(len.try_into().unwrap()),
+        body.chunks_exact(32)
+            .map(|c| c.try_into().unwrap())
+            .collect(),
+    )
+}
+
+/// TX-P13c step 2: an append grows a shard's uid list in place — the new uids after the old and
+/// the stamp moved on — and a batch with no unit for the shard still moves the stamp, so the
+/// list stays current; a list made stale behind the library's back is rewritten whole. The
+/// index a reopen reads from the lists is the one the appends built.
+#[test]
+fn an_append_grows_the_uid_list_in_place_and_keeps_it_current() {
+    let dir = Scratch::new("uids");
+    let mut lib = Library::create(dir.path()).expect("created");
+    let fx = grow(&mut lib);
+    let shard = "chat/replies";
+    let log_len = |_: &Library| {
+        std::fs::metadata(dir.path().join(shards::log_path(shard)))
+            .unwrap()
+            .len()
+    };
+    let (stamp, before) = uid_file(dir.path(), shard);
+    assert_eq!(stamp, log_len(&lib));
+
+    let tid = tid_of(&lib, shard);
+    let more = unit_from(&tid, "L1", "one more from the reply");
+    lib.append_records(&[Record::Unit(more.clone())]).unwrap();
+    let (stamp, after) = uid_file(dir.path(), shard);
+    assert_eq!(stamp, log_len(&lib));
+    assert_eq!(after.len(), before.len() + 1);
+    assert_eq!(
+        &after[..before.len()],
+        &before[..],
+        "the old uids are not rewritten"
+    );
+    assert_eq!(after.last().unwrap(), canonical_uid(&more).as_bytes());
+
+    // A relation from the reply: the shard's log grows, its uids do not, and its list follows.
+    let backs = Relation::new(
+        RelKind::Backs,
+        canonical_uid(&more),
+        canonical_uid(&fx.reply),
+    );
+    lib.append_records(&[Record::Relation(backs)]).unwrap();
+    let (stamp, same) = uid_file(dir.path(), shard);
+    assert_eq!(
+        stamp,
+        log_len(&lib),
+        "a stale list after a relation-only batch"
+    );
+    assert_eq!(same, after);
+
+    // Stale behind its back: the next append rewrites it whole, and it is current again.
+    let path = dir
+        .path()
+        .join(shards::UIDS_DIR)
+        .join(format!("{}.uids", shards::stem(shard)));
+    std::fs::write(&path, b"smysl/uids/1\n\0\0\0\0\0\0\0\x01").unwrap();
+    let last = unit_from(&tid, "L1", "and the last");
+    lib.append_records(&[Record::Unit(last)]).unwrap();
+    let (stamp, whole) = uid_file(dir.path(), shard);
+    assert_eq!(stamp, log_len(&lib));
+    assert_eq!(whole.len(), after.len() + 1);
+
+    let reopened = Library::open(dir.path()).expect("reopened");
+    assert_eq!(reopened.uid_shards(), lib.uid_shards());
+    assert_eq!(&shards::uid_index(dir.path()).unwrap(), lib.uid_shards());
+}
+
 fn tid_of(lib: &Library, alias: &str) -> Tid {
     let mid = lib.store().heads(alias)[0];
     lib.store().manifest(&mid).unwrap().parts[0].tid

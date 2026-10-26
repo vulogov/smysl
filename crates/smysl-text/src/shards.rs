@@ -330,7 +330,54 @@ pub(crate) fn write_uids(root: &Path, shard: &str, log_len: u64, uids: &[Uid]) {
     }
 }
 
-fn read_uids(root: &Path, shard: &str, log_len: u64) -> Option<Vec<Uid>> {
+/// Grow a shard's uid list by one append: the batch's uids written after the others and the
+/// header restamped with the log's new length, where the file lists the log as it was (`was`).
+/// Anything else — no file, a stale one, a torn one — is rewritten whole from `all`.
+///
+/// The list is in the order written, not sorted: rewriting a 10⁵-unit shard's 3.2 MB to add one
+/// uid was what an append cost after the index itself (SMYSL-2.8 §6.1, P13c.2), and every
+/// reader sorts what it reads. The uids go first and the stamp last, so a crash between the
+/// two leaves a file stamped for a log it no longer describes, which is read as stale.
+pub(crate) fn append_uids(
+    root: &Path,
+    shard: &str,
+    was: u64,
+    now: u64,
+    uids: &[Uid],
+    all: impl FnOnce() -> Vec<Uid>,
+) {
+    use std::io::{Read, Seek, SeekFrom};
+    let target = root.join(uids_path(shard));
+    let grown = (|| -> std::io::Result<bool> {
+        let mut f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&target)?;
+        let mut head = vec![0u8; UIDS_MAGIC.len() + 8];
+        f.read_exact(&mut head)?;
+        let size = f.metadata()?.len();
+        let stamped = u64::from_be_bytes(head[UIDS_MAGIC.len()..].try_into().expect("8 bytes"));
+        if !head.starts_with(UIDS_MAGIC) || stamped != was || (size - head.len() as u64) % 32 != 0 {
+            return Ok(false);
+        }
+        if !uids.is_empty() {
+            let mut bytes = Vec::with_capacity(uids.len() * 32);
+            for u in uids {
+                bytes.extend_from_slice(u.as_bytes());
+            }
+            f.seek(SeekFrom::End(0))?;
+            f.write_all(&bytes)?;
+        }
+        f.seek(SeekFrom::Start(UIDS_MAGIC.len() as u64))?;
+        f.write_all(&now.to_be_bytes())?;
+        Ok(true)
+    })();
+    if !matches!(grown, Ok(true)) {
+        write_uids(root, shard, now, &all());
+    }
+}
+
+pub(crate) fn read_uids(root: &Path, shard: &str, log_len: u64) -> Option<Vec<Uid>> {
     let bytes = std::fs::read(root.join(uids_path(shard))).ok()?;
     let rest = bytes.strip_prefix(UIDS_MAGIC)?;
     if rest.len() < 8 || (rest.len() - 8) % 32 != 0 {
@@ -352,7 +399,7 @@ fn read_uids(root: &Path, shard: &str, log_len: u64) -> Option<Vec<Uid>> {
 /// From each shard's uid list where it is current — stamped with the length its log has now,
 /// which for an append-only log is the log — and from the log itself where it is not.
 pub fn uid_index(root: &Path) -> Result<UidShards, LibError> {
-    let mut index = UidShards::new();
+    let mut lists = Vec::new();
     for (name, path) in list(root)? {
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         let uids = match read_uids(root, &name, len) {
@@ -375,7 +422,7 @@ pub fn uid_index(root: &Path) -> Result<UidShards, LibError> {
                 uids
             }
         };
-        index.set(&name, uids);
+        lists.push((name, uids));
     }
-    Ok(index)
+    Ok(UidShards::from_lists(lists))
 }

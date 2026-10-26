@@ -63,20 +63,27 @@ pub fn rebuild(lib: &Library) -> Vec<Row> {
         .collect();
     out.sort_unstable();
     // A uid is content-addressed, so a duplicate row is the same unit twice and carries the same
-    // status; `dedup` after a sort is the same answer `insert_sorted`'s `Err` arm gave.
+    // status; `dedup` after a sort is the same answer `merge_sorted`'s gives.
     out.dedup();
     out
 }
 
 /// Bring the coverage half forward over an appended batch.
 pub fn on_append(table: &mut Vec<Row>, _lib: &Library, records: &[Record]) {
-    for record in records {
-        let Record::Unit(core) = record else { continue };
-        let uid = smysl_core::canonical_uid(core);
-        if let Some(row) = row_of(uid, core.source.as_ref(), core.status) {
-            insert_sorted(table, row);
-        }
-    }
+    let mut rows: Vec<Row> = records
+        .iter()
+        .filter_map(|record| {
+            let Record::Unit(core) = record else {
+                return None;
+            };
+            row_of(
+                smysl_core::canonical_uid(core),
+                core.source.as_ref(),
+                core.status,
+            )
+        })
+        .collect();
+    merge_sorted(table, &mut rows);
 }
 
 /// The row a unit contributes, if its source names a part.
@@ -90,14 +97,64 @@ fn row_of(uid: Uid, source: Option<&smysl_core::types::SourceRef>, status: Statu
     Some(Row { tid, uid, status })
 }
 
-/// Insert in `(tid, uid)` order, ignoring a duplicate.
+/// Merge a batch into the table in `(tid, uid)` order, ignoring a duplicate.
 ///
 /// A uid is content-addressed, so the same unit delivered twice is one row with one status and
 /// the dedup needs no tie-break. Which is also why this is sorted rather than appended: a
 /// rebuild walks units in uid order and an append walks them in arrival order, and §3.8's byte
 /// comparison is written against what reaches the disk.
-fn insert_sorted(v: &mut Vec<Row>, row: Row) {
-    if let Err(at) = v.binary_search(&row) {
-        v.insert(at, row);
+///
+/// One sort of the batch and one pass over the table from its end, not an insert per row: each
+/// insert moved every row after it, and a thousand-unit batch into a million-row table was
+/// 0.68 s of a 0.69 s append, most of building GE-T7's stand-in (SMYSL-2.8 §6.1, P13c.2). Here
+/// each row of the table moves at most once, by `copy_within`, and only the rows after the
+/// batch's first: a single row costs what one insert did.
+fn merge_sorted(v: &mut Vec<Row>, batch: &mut Vec<Row>) {
+    batch.sort_unstable();
+    batch.dedup();
+    batch.retain(|row| v.binary_search(row).is_err());
+    let Some(&first) = batch.first() else {
+        return;
+    };
+    let mut end = v.len();
+    v.resize(end + batch.len(), first);
+    for (j, row) in batch.iter().enumerate().rev() {
+        // Rows of the table greater than this one move up past the j batch rows before it.
+        let at = v[..end].partition_point(|r| r < row);
+        v.copy_within(at..end, at + j + 1);
+        v[at + j] = *row;
+        end = at;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A batch merged in is the table sorted and deduplicated with it, whatever the batch
+    /// repeats of itself or of the table, and wherever its rows fall.
+    #[test]
+    fn a_merged_batch_is_the_sorted_union() {
+        let row = |i: u32| Row {
+            tid: crate::ids::tid(&crate::norm::Normalised::of(&format!("part {}", i % 7))),
+            uid: Uid::from_bytes(smysl_core::hash_bytes(&i.to_be_bytes())),
+            status: Status::Cited,
+        };
+        let mut table: Vec<Row> = Vec::new();
+        let mut want: Vec<Row> = Vec::new();
+        let mut x = 7u32;
+        for size in [0usize, 1, 1, 5, 40, 3, 200, 1, 0, 17] {
+            let mut batch: Vec<Row> = (0..size)
+                .map(|_| {
+                    x = x.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                    row(x % 500)
+                })
+                .collect();
+            want.extend(batch.iter().copied());
+            want.sort_unstable();
+            want.dedup();
+            merge_sorted(&mut table, &mut batch);
+            assert_eq!(table, want, "after a batch of {size}");
+        }
     }
 }

@@ -108,9 +108,11 @@ fn totally_ordered(store: &(impl StoreRead + ?Sized), uids: &[Uid]) -> bool {
 /// the commitment records the reviewer reads next.
 fn commitment_forks(store: &(impl StoreRead + ?Sized), ctx: &DetectionContext) -> Vec<Contention> {
     let mut out = Vec::new();
-    for (uid, _) in store.units() {
-        let commits = store.commits_of(uid);
-        if commits.is_empty() {
+    // The commitments, not the units: the layer holds them by unit, so this reads no core, and
+    // a store of a million units with a thousand commitments looks at a thousand (SMYSL-2.8
+    // §3.7, OQ-16). A commitment to a unit not here waits for it, as `commits_of` does.
+    for (uid, commits) in store.commits() {
+        if commits.is_empty() || !store.contains_uid(uid) {
             continue;
         }
         // Each agent's latest word, by the same total order `commitment_of` uses.
@@ -147,14 +149,26 @@ fn commitment_forks(store: &(impl StoreRead + ?Sized), ctx: &DetectionContext) -
 /// and over a claim that is not `unfounded` either: a disagreement with a retracted claim is over.
 fn live_rebuttals(store: &(impl StoreRead + ?Sized), ctx: &DetectionContext) -> Vec<Contention> {
     let mut out = Vec::new();
-    for rel in store.relations_of_kind(&RelKind::Rebuts) {
+    let rebuttals = store.relations_of_kind(&RelKind::Rebuts);
+    if rebuttals.is_empty() {
+        return out;
+    }
+    // Each unit's threads, by position, built once: asking every thread about every rebuttal
+    // was threads × rebuttals, a million at a thousand of each.
+    let mut threads_of: BTreeMap<&Uid, BTreeSet<usize>> = BTreeMap::new();
+    for (i, t) in store.threads().enumerate() {
+        for u in t.units() {
+            threads_of.entry(u).or_default().insert(i);
+        }
+    }
+    for rel in rebuttals {
         if !store.is_live_rebuttal(rel) || store.is_unfounded(&rel.to) {
             continue;
         }
-        let together = store.threads().any(|t| {
-            let units: BTreeSet<&Uid> = t.units().collect();
-            units.contains(&rel.from) && units.contains(&rel.to)
-        });
+        let together = match (threads_of.get(&rel.from), threads_of.get(&rel.to)) {
+            (Some(a), Some(b)) => !a.is_disjoint(b),
+            _ => false,
+        };
         if together {
             out.push(contention(
                 DetectionKind::LiveRebuttal,
@@ -183,12 +197,9 @@ fn label_collisions(store: &(impl StoreRead + ?Sized), ctx: &DetectionContext) -
             bindings.entry(b.label.clone()).or_default().insert(b.uid);
         }
     }
-    // Labels carried on units themselves count too, where a store has them.
-    for (uid, unit) in store.units() {
-        for l in &unit.labels {
-            bindings.entry(l.clone()).or_default().insert(*uid);
-        }
-    }
+    // Not the units' own `labels`: a store builds every unit from its core (`Unit::new`), and
+    // labels have no wire record, so a stored unit carries none. Reading them visited every
+    // unit — every core, on a store that pages them — to find nothing (SMYSL-2.8 §3.7).
 
     bindings
         .into_iter()

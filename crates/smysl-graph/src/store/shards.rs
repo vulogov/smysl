@@ -78,6 +78,7 @@ pub struct Union<S: StoreRead> {
     repeats: bool,
     index: Option<Arc<UidShards>>,
     derived: OnceLock<Derived>,
+    detected: OnceLock<Vec<Contention>>,
 }
 
 #[derive(Clone)]
@@ -227,6 +228,7 @@ impl<S: StoreRead> Union<S> {
             repeats,
             index: None,
             derived: OnceLock::new(),
+            detected: OnceLock::new(),
         }
     }
 
@@ -234,6 +236,21 @@ impl<S: StoreRead> Union<S> {
     pub fn with_index(mut self, index: Arc<UidShards>) -> Union<S> {
         self.index = Some(index);
         self
+    }
+
+    /// Every contention the union implies, detected on the first call and kept (§3.7, OQ-16).
+    ///
+    /// [`crate::merge::contention::detect`] with no labels and no clock, as every reader of a
+    /// library calls it. Lazy, not an index: the detectors read only the interpretive layer,
+    /// which the union already holds, so there is nothing to keep but the answer. A union is
+    /// immutable, so the answer cannot go stale; a different set of shards is a different union.
+    pub fn detected(&self) -> &[Contention] {
+        self.detected.get_or_init(|| {
+            crate::merge::contention::detect(
+                self,
+                &crate::merge::contention::DetectionContext::default(),
+            )
+        })
     }
 
     /// The shards, in the order they are read.
@@ -618,13 +635,32 @@ impl<S: StoreRead> StoreRead for Union<S> {
 /// Derived from the shards' uid lists and rebuildable from them; a library keeps one so that a
 /// union of some of its shards can tell a reference that waits on another shard (`SMY-W500`)
 /// from one that points at nothing (`SMY-E060`) without opening the others.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+///
+/// A sorted run and a small sorted delta beside it. An append adds a few uids to a library of a
+/// million, and re-sorting the million for them was 34 ms of a 36 ms append (SMYSL-2.8 §6.1,
+/// P13c.2); the delta takes them in `O(log n)` each and is folded into the run, in one linear
+/// merge, when it reaches a sixteenth of it.
+#[derive(Debug, Clone, Default)]
 pub struct UidShards {
     /// Shard names, ascending; a pair's second field is a position here.
     names: Vec<ShardId>,
     /// `(uid, shard)`, ascending.
     pairs: Vec<(Uid, u32)>,
+    /// `(uid, shard)` pairs not in `pairs`, waiting to be folded in.
+    delta: BTreeSet<(Uid, u32)>,
 }
+
+impl PartialEq for UidShards {
+    /// By what it says, not by how much of it is still in the delta.
+    fn eq(&self, other: &UidShards) -> bool {
+        self.names == other.names && self.len() == other.len() && self.merged().eq(other.merged())
+    }
+}
+
+impl Eq for UidShards {}
+
+/// Below this, the delta is not worth a merge.
+const DELTA_FLOOR: usize = 4096;
 
 impl UidShards {
     pub fn new() -> UidShards {
@@ -635,32 +671,40 @@ impl UidShards {
     pub fn of<'s, S: StoreRead + ?Sized + 's>(
         shards: impl IntoIterator<Item = (&'s str, &'s S)>,
     ) -> UidShards {
-        let mut ix = UidShards::new();
-        for (id, s) in shards {
-            ix.set(id, all_uids(s));
+        UidShards::from_lists(shards.into_iter().map(|(id, s)| (id, all_uids(s))))
+    }
+
+    /// The index of shards given as their uid lists, in any order and with repeats: one sort
+    /// for all of them, where a [`UidShards::set`] per shard re-sorts what came before it.
+    pub fn from_lists<N: AsRef<str>>(
+        lists: impl IntoIterator<Item = (N, impl IntoIterator<Item = Uid>)>,
+    ) -> UidShards {
+        let mut given: BTreeMap<String, Vec<Uid>> = BTreeMap::new();
+        for (name, uids) in lists {
+            given
+                .entry(name.as_ref().to_string())
+                .or_default()
+                .extend(uids);
         }
-        ix
+        let names: Vec<ShardId> = given.keys().cloned().collect();
+        let mut pairs: Vec<(Uid, u32)> = Vec::with_capacity(given.values().map(Vec::len).sum());
+        for (i, uids) in given.into_values().enumerate() {
+            pairs.extend(uids.into_iter().map(|u| (u, i as u32)));
+        }
+        pairs.sort_unstable();
+        pairs.dedup();
+        UidShards {
+            names,
+            pairs,
+            delta: BTreeSet::new(),
+        }
     }
 
     /// Say that `shard` holds exactly `uids`, replacing what was said of it before.
     pub fn set(&mut self, shard: &str, uids: impl IntoIterator<Item = Uid>) {
-        let at = match self.names.binary_search_by(|n| n.as_str().cmp(shard)) {
-            Ok(i) => {
-                let i = i as u32;
-                self.pairs.retain(|(_, s)| *s != i);
-                i
-            }
-            Err(i) => {
-                // Positions after the new name move up by one.
-                for (_, s) in &mut self.pairs {
-                    if *s >= i as u32 {
-                        *s += 1;
-                    }
-                }
-                self.names.insert(i, shard.to_string());
-                i as u32
-            }
-        };
+        self.fold();
+        let at = self.position(shard);
+        self.pairs.retain(|(_, s)| *s != at);
         self.pairs.extend(uids.into_iter().map(|u| (u, at)));
         self.pairs.sort_unstable();
         self.pairs.dedup();
@@ -668,6 +712,7 @@ impl UidShards {
 
     /// Forget a shard.
     pub fn remove(&mut self, shard: &str) {
+        self.fold();
         if let Ok(i) = self.names.binary_search_by(|n| n.as_str().cmp(shard)) {
             let i = i as u32;
             self.pairs.retain(|(_, s)| *s != i);
@@ -684,19 +729,23 @@ impl UidShards {
     pub fn shards_of<'a>(&'a self, uid: &Uid) -> impl Iterator<Item = &'a str> + 'a {
         let a = self.pairs.partition_point(|(u, _)| u < uid);
         let b = self.pairs.partition_point(|(u, _)| u <= uid);
-        self.pairs[a..b]
-            .iter()
-            .map(|(_, s)| self.names[*s as usize].as_str())
+        let mut at: Vec<u32> = self.pairs[a..b].iter().map(|(_, s)| *s).collect();
+        at.extend(
+            self.delta
+                .range((*uid, 0)..=(*uid, u32::MAX))
+                .map(|(_, s)| *s),
+        );
+        at.sort_unstable();
+        at.into_iter().map(|s| self.names[s as usize].as_str())
     }
 
     /// The uids this shard holds, ascending.
     pub fn uids_of(&self, shard: &str) -> Vec<Uid> {
         match self.names.binary_search_by(|n| n.as_str().cmp(shard)) {
             Ok(i) => self
-                .pairs
-                .iter()
+                .merged()
                 .filter(|(_, s)| *s == i as u32)
-                .map(|(u, _)| *u)
+                .map(|(u, _)| u)
                 .collect(),
             Err(_) => Vec::new(),
         }
@@ -704,9 +753,15 @@ impl UidShards {
 
     /// Add these uids to what `shard` holds.
     pub fn extend(&mut self, shard: &str, uids: impl IntoIterator<Item = Uid>) {
-        let mut all = self.uids_of(shard);
-        all.extend(uids);
-        self.set(shard, all);
+        let at = self.position(shard);
+        for u in uids {
+            if self.pairs.binary_search(&(u, at)).is_err() {
+                self.delta.insert((u, at));
+            }
+        }
+        if self.delta.len() > DELTA_FLOOR.max(self.pairs.len() / 16) {
+            self.fold();
+        }
     }
 
     /// Every shard named, in name order.
@@ -716,18 +771,70 @@ impl UidShards {
 
     /// How many `(uid, shard)` pairs it holds.
     pub fn len(&self) -> usize {
-        self.pairs.len()
+        self.pairs.len() + self.delta.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.pairs.is_empty()
+        self.pairs.is_empty() && self.delta.is_empty()
     }
 
     /// The pairs, for a caller that persists the index: `(uid, shard name)`, ascending.
     pub fn pairs(&self) -> impl Iterator<Item = (&Uid, &str)> {
-        self.pairs
-            .iter()
+        self.merged_refs()
             .map(|(u, s)| (u, self.names[*s as usize].as_str()))
+    }
+
+    /// A shard's position in `names`, added if it is new; positions after it move up by one.
+    fn position(&mut self, shard: &str) -> u32 {
+        match self.names.binary_search_by(|n| n.as_str().cmp(shard)) {
+            Ok(i) => i as u32,
+            Err(i) => {
+                self.fold();
+                for (_, s) in &mut self.pairs {
+                    if *s >= i as u32 {
+                        *s += 1;
+                    }
+                }
+                self.names.insert(i, shard.to_string());
+                i as u32
+            }
+        }
+    }
+
+    /// The delta merged into the run: one pass over both, both being sorted and disjoint.
+    fn fold(&mut self) {
+        if self.delta.is_empty() {
+            return;
+        }
+        let delta = std::mem::take(&mut self.delta);
+        let run = std::mem::take(&mut self.pairs);
+        let mut out = Vec::with_capacity(run.len() + delta.len());
+        let (mut a, mut b) = (run.into_iter().peekable(), delta.into_iter().peekable());
+        loop {
+            let take_a = match (a.peek(), b.peek()) {
+                (Some(x), Some(y)) => x < y,
+                (Some(_), None) => true,
+                (None, Some(_)) => false,
+                (None, None) => break,
+            };
+            out.push(if take_a { a.next() } else { b.next() }.expect("peeked"));
+        }
+        self.pairs = out;
+    }
+
+    fn merged(&self) -> impl Iterator<Item = (Uid, u32)> + '_ {
+        self.merged_refs().map(|(u, s)| (*u, *s))
+    }
+
+    fn merged_refs(&self) -> impl Iterator<Item = (&Uid, &u32)> + '_ {
+        let mut a = self.pairs.iter().map(|(u, s)| (u, s)).peekable();
+        let mut b = self.delta.iter().map(|(u, s)| (u, s)).peekable();
+        std::iter::from_fn(move || match (a.peek(), b.peek()) {
+            (Some(x), Some(y)) if x <= y => a.next(),
+            (Some(_), Some(_)) => b.next(),
+            (Some(_), None) => a.next(),
+            (None, _) => b.next(),
+        })
     }
 }
 
@@ -740,6 +847,60 @@ mod tests {
         UnitCoreBuilder::new(KernelType::Claim, gist, Status::Speculative)
             .build()
             .unwrap()
+    }
+
+    /// OQ-16 (SMYSL-2.8 §3.7): contentions over a union are the store's, found though no one
+    /// shard holds what makes them — a fork whose two successors sit in two shards, and a
+    /// commitment fork whose two agents' words sit beside the unit in a third — and detected once.
+    #[test]
+    fn a_union_detects_what_only_its_shards_together_hold_and_keeps_the_answer() {
+        use crate::merge::contention::{detect, DetectionContext};
+        use smysl_core::{AgentId, Commit, Commitment, DetectionKind, Hlc};
+
+        let (t, a, b) = (unit("the target"), unit("one successor"), unit("another"));
+        let (ut, ua, ub) = (canonical_uid(&t), canonical_uid(&a), canonical_uid(&b));
+        let agent = |n: &str| AgentId::new(n).unwrap();
+        let commit = |who: &str, level| {
+            Record::Commit(Commit::new(
+                ut,
+                level,
+                agent(who),
+                Hlc::new(1, 0, agent(who)),
+            ))
+        };
+        let one = vec![
+            Record::Unit(t),
+            Record::Unit(a),
+            Record::Relation(Relation::new(RelKind::Supersedes, ua, ut)),
+            commit("human:one", Commitment::Drafted),
+        ];
+        let two = vec![
+            Record::Unit(b),
+            Record::Relation(Relation::new(RelKind::Supersedes, ub, ut)),
+            commit("human:two", Commitment::Canonical),
+        ];
+        let (s1, s2) = (
+            Store::from_records(one.clone()),
+            Store::from_records(two.clone()),
+        );
+        let ctx = DetectionContext::default();
+        assert!(detect(&s1, &ctx).is_empty() && detect(&s2, &ctx).is_empty());
+
+        let union = Union::new([("a".to_string(), &s1), ("b".to_string(), &s2)]);
+        let whole = Store::from_records(one.into_iter().chain(two).collect());
+        let kinds: BTreeSet<DetectionKind> =
+            union.detected().iter().map(|c| c.detected.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                DetectionKind::SupersessionFork,
+                DetectionKind::CommitmentFork
+            ]
+            .into()
+        );
+        assert_eq!(union.detected(), detect(&whole, &ctx).as_slice());
+        // Kept: the second call is the first's answer, not a second detection.
+        assert!(std::ptr::eq(union.detected(), union.detected()));
     }
 
     /// The step's exit (SMYSL-2.8 §6, P13c.1): a cross-shard `quotes` edge waits on the shard
@@ -807,5 +968,42 @@ mod tests {
         ix.set("b", []);
         assert_eq!(ix.shards_of(&ua).collect::<Vec<_>>(), ["c"]);
         assert_eq!(ix.len(), 1);
+    }
+
+    /// Appends grow the index through its delta, across folds, and it answers as the index
+    /// built in one go from the same lists — a new shard named in the middle included.
+    #[test]
+    fn an_index_grown_an_append_at_a_time_is_the_index_built_at_once() {
+        let uid = |i: u32| Uid::from_bytes(smysl_core::hash_bytes(&i.to_be_bytes()));
+        let mut grown =
+            UidShards::from_lists([("a", (0..3000).map(uid)), ("c", (3000..6000).map(uid))]);
+        let mut lists: Vec<(String, Vec<Uid>)> = vec![
+            ("a".into(), (0..3000).map(uid).collect()),
+            ("c".into(), (3000..6000).map(uid).collect()),
+        ];
+        for step in 0..40u32 {
+            let shard = ["a", "b", "c"][step as usize % 3];
+            let batch: Vec<Uid> = (6000 + step * 250..6000 + (step + 1) * 250)
+                .map(uid)
+                .collect();
+            // A repeat of what the shard holds already is no new pair.
+            let again = lists
+                .iter()
+                .find(|(n, _)| n == shard)
+                .and_then(|(_, u)| u.first().copied());
+            grown.extend(shard, batch.iter().copied().chain(again));
+            match lists.iter_mut().find(|(n, _)| n == shard) {
+                Some((_, u)) => u.extend(batch),
+                None => lists.push((shard.into(), batch)),
+            }
+            let built = UidShards::from_lists(lists.iter().map(|(n, u)| (n, u.iter().copied())));
+            assert_eq!(grown, built, "after append {step}");
+            assert_eq!(grown.len(), built.len());
+            assert!(grown.pairs().eq(built.pairs()));
+        }
+        // One uid in two shards, the second through the delta.
+        grown.extend("b", [uid(0)]);
+        assert_eq!(grown.shards_of(&uid(0)).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(grown.uids_of("a").len(), 3000 + 14 * 250);
     }
 }

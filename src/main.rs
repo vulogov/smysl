@@ -2993,13 +2993,22 @@ fn open_library_union(root: &std::path::Path) -> Result<AnyStore, String> {
         _ => all.clone(),
     };
     let subset = want.len() < all.len();
+    // One budget for the union, not one per shard: a thousand shards each given the default
+    // would between them cache every core, which is the memory backend with extra steps
+    // (GE-T7's stand-in measured 3.7 GB for `check` that way, SMYSL-2.8 §6.1 P13c.2).
+    #[cfg(feature = "store-redb")]
+    let shared = redb_options().map(|mut opts| {
+        opts.core_cache_bytes /= want.len().max(1);
+        opts.page_cache_bytes /= want.len().max(1);
+        opts
+    });
     let mut stores = Vec::new();
     for (name, log) in want {
         if !log.is_file() {
             continue;
         }
         #[cfg(feature = "store-redb")]
-        if let Some(opts) = redb_options() {
+        if let Some(opts) = shared.clone() {
             let (store, report) =
                 AnyStore::open_redb(&log, opts).map_err(|e| format!("{at}: {name}: {e}"))?;
             for d in report.report.iter() {

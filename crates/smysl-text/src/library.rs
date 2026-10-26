@@ -315,20 +315,26 @@ impl Library {
         // Every shard, in name order, into one store: the order a union of them reads in, so
         // the store is the union's answer whichever way it is built.
         let mut shards = BTreeMap::new();
-        let mut uid_shards = UidShards::new();
+        let mut lists = Vec::new();
         let mut all = Vec::new();
         for (name, _) in crate::shards::list(root)? {
             let (log, records) = ShardLog::read(root, &name)?;
-            uid_shards.set(
-                &name,
-                records.iter().filter_map(|r| match r {
-                    Record::Unit(u) => Some(smysl_core::canonical_uid(u)),
-                    _ => None,
-                }),
-            );
+            // The shard's uid list where it lists this log, rather than hashing every unit a
+            // second time (`from_records` hashes them once); one sort for every shard after.
+            let uids = crate::shards::read_uids(root, &name, log.len()).unwrap_or_else(|| {
+                records
+                    .iter()
+                    .filter_map(|r| match r {
+                        Record::Unit(u) => Some(smysl_core::canonical_uid(u)),
+                        _ => None,
+                    })
+                    .collect()
+            });
+            lists.push((name.clone(), uids));
             all.extend(records);
             shards.insert(name, log);
         }
+        let uid_shards = UidShards::from_lists(lists);
         let store = Store::from_records(all);
         let objects = ObjectStore::open(&root.join("objects"))?;
         let mut library = Library {
@@ -1106,12 +1112,14 @@ impl Library {
                 .map_err(|e| io(MARKER, &e))?;
             self.layout = LAYOUT;
         }
+        let mut was = BTreeMap::new();
         for (shard, (bytes, uids)) in &batches {
             if !self.shards.contains_key(shard) {
                 let (log, _) = ShardLog::read(&self.root, shard)?;
                 self.shards.insert(shard.clone(), log);
             }
             let log = self.shards.get_mut(shard).expect("inserted above");
+            was.insert(shard, log.len());
             log.append(bytes)?;
             if !uids.is_empty() {
                 self.uid_shards.extend(shard, uids.iter().copied());
@@ -1123,11 +1131,13 @@ impl Library {
             at: CATALOG.to_string(),
             message: e.to_string(),
         })?;
+        // Every shard the batch grew, uids or not: a list stamped with the old length would be
+        // stale, and read past at the next open.
         for (shard, (_, uids)) in &batches {
-            if !uids.is_empty() {
-                let len = self.shards[shard].len();
-                crate::shards::write_uids(&self.root, shard, len, &self.uid_shards.uids_of(shard));
-            }
+            let now = self.shards[shard].len();
+            crate::shards::append_uids(&self.root, shard, was[shard], now, uids, || {
+                self.uid_shards.uids_of(shard)
+            });
         }
         // Every path that grows a library comes through here - `add`, `append` and `redact`
         // all call it rather than reaching the store - so the index is maintained in one

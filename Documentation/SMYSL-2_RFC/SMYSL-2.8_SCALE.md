@@ -694,6 +694,17 @@ query time, cached on the union instance. A materialised contention index is add
 GE-T7 shows detection over the union's interpretive layer above 1 s at 10⁶ units. Position on
 OQ-16 recorded in §9.
 
+*As built (P13c.2):* two of the four detectors did not read only the interpretive layer.
+Commitment forks walked every unit to ask each for its commitments, and label collisions read
+every unit's own `labels` — which a stored unit never has, every store building its units from
+their cores, and labels having no wire record. On a store that pages its cores both were a scan
+of every core to find nothing. Commitment forks now walk the commitments, which the layer keys
+by unit; the unit loop is gone from label collisions; and live rebuttals build each unit's
+threads once instead of asking every thread about every rebuttal. `Union::detected()` is the
+cache: `detect` with no labels and no clock, run on the first call and kept. GE-T7's stand-in
+measured detection at 10⁶ units under the threshold on every implementation (§6.1, P13c.2), so
+there is no contention index.
+
 **`Overlay<'s, S>`** is a union of one store and an in-memory batch. `smysl_ingest::stage`
 currently copies every record of the store into a new `Store` to check a batch against the
 union (`stage.rs`, `store.iter().cloned().collect()` then `Store::from_records`); `relink` in
@@ -1051,6 +1062,17 @@ open("graph-%d.smy" % n, "w").write("\n".join(out))
   over the full union < 1 s (decides OQ-16); single-record append to a 10⁵-unit shard < 5 ms;
 - reported: every §2.8 stage for memory, redb (index), redb (primary) and the union.
 
+*As built (P13c.2): a stand-in, `tests/ge_t7.rs`*, run by hand
+(`cargo test --release --all-features --test ge_t7 -- --ignored --nocapture`). The repository
+carries ten public-domain works, not a thousand: Ruth and Jude in five languages. Each of the
+thousand works is one language's 110 verses, rotated by its number and headed by it, so the
+readers, the segmenter and the indexes read a thousand distinct texts — about 12 MB, where a
+thousand books would be hundreds. Its units are built, not extracted, at §5.4's proportions plus
+every shape a contention detector looks for, once per thousand units, some reaching into the
+next work's shard; one work holds 10⁵ units, for the append threshold. Its build is readers,
+segmentation, the records and the indexes — OQ-69's proposal, which the stand-in adopts and
+GE-T7 proper can still revise. GE-T7 on a real corpus remains owed.
+
 ### 5.5 Cross-implementation
 
 The Python, JavaScript and Go implementations read CBOR logs, not redb files. Nothing in this
@@ -1084,7 +1106,8 @@ suite (§5.1) for every implementation that exists by then.
 | **P13b.1** | `store::redb` index mode: tables, open/rebuild, `RedbStore` read path, tiering, caches | suite with implementations 3–4; §5.3 fault-injection and kill tests; peak RSS of `check` on graph-155510 ≤ 40% of the memory backend |
 | P13b.2 | `RedbShard` write path, lock file, reader fallback; `--backend redb`; `reindex --backend redb` | §5.3 concurrency tests; ladder at 10⁶ units completes on a 7 GB machine with the redb backend |
 | **P13c.1** | shards in a library (with SMYSL-2.4), `uid_shard`, `Union`, `--shard` | suite implementation 6; `store_union` fuzz target 10 min clean; `W500` on a two-shard fixture with a cross-shard `quotes` edge, resolved when the second shard is added |
-| P13c.2 | contentions over the union, measured | GE-T7 run; OQ-16 decided from its contention-detection number |
+| **P13c.2** | contentions over the union, measured | GE-T7 run; OQ-16 decided from its contention-detection number |
+| P13c.3 | one redb database per library, a set of tables per shard (OQ-90) — **before P13d** | `check` over GE-T7's stand-in on redb ≤ 1 GB; the library's unit store at most 2× its logs on disk; §5.3 and the conformance suite (implementations 4–6) on the new layout; the stand-in's other GE-T7 numbers no worse |
 | **P13d** | primary mode, `lib migrate`, `E505` — **only after GE-T15 passes** | suite implementation 5; export → import round trip reproduces the record-set digest on every GE-T15 corpus; GE-T7 rerun on primary shards |
 
 ### 6.1 Progress
@@ -1373,6 +1396,57 @@ in every ported signature; §3.2's sketch and §5.2's shapes are otherwise uncha
     slow for the `fsync`s. Recorded rather than chased: the open reads each shard and builds one
     store from all their records, where it used to open one log.
 
+- **P13c.2 — done (2026-10-26).** Contentions over the union, and GE-T7 run — on a stand-in:
+  - **Detection reads the interpretive layer only** (§3.7's as-built note): commitment forks
+    walk the commitments, label collisions no longer read units' own (always empty) labels,
+    live rebuttals index threads once. `Union::detected()` runs `detect` once and keeps it. A
+    test builds a fork whose two successors are in two shards and a commitment fork whose two
+    agents' words are in two, finds neither in either shard, both in the union, and the union's
+    answer equal to the materialised store's.
+  - **GE-T7's stand-in** (`tests/ge_t7.rs`, §5.4's as-built note): 1,000 works in five
+    languages, 1,001 shards with the catalog, 1,004,595 units, 1,155,458 records; 1,099 of
+    each contention kind, every one found by the materialised store, the in-memory union and
+    the redb union alike, and nothing else found. Release, one run:
+
+    | GE-T7 threshold | measured | |
+    |---|---|---|
+    | library build < 1 h | 528 s (read and segment 8.5 s; the records 521 s in 1,000 appends) | met |
+    | a measure (A1 A2 A4 A5 A7) within 2× of linear on 10⁵, 3·10⁵, 10⁶ | 3.84 s, 7.95 s, 33.6 s; 1.25× off the line | met |
+    | scoped query p95 < 1 s | 11.7 s over a twenty-work shelf, 20.1 s over a language, 154 s over the library | **not met** |
+    | `check` peak RSS on redb ≤ 1 GB | 2.7 GB (memory 4.0 GB) | **not met** |
+    | `derive_thread` over 10⁵ units < 2 s | 361 ms in one shard, 368 ms across 111 | met |
+    | contention detection over the union < 1 s | 444 ms store, 638 ms union, 638 ms redb union; kept: 0 | met — **OQ-16 decided: lazy** |
+    | single-record append to a 10⁵-unit shard < 5 ms | 5.01 ms through the library, 7.04 ms through the shard's redb store | **not met**, by 0.01 ms |
+
+    `Library::open` of it: 5.6 s.
+  - **Found and fixed, all in the library's write path, all quadratic in the library:**
+    `UidShards::extend` re-sorted every pair to add a batch's, and `write_uids` rewrote the
+    shard's whole list — 34 ms of a 36 ms single-record append at 10⁶ units. The index is now a
+    sorted run and a sorted delta folded in at a sixteenth of the run; a uid list is grown in
+    place, the uids after the others and the stamp last, and every shard a batch grows is
+    restamped, so a relation-only batch no longer leaves its list stale. `Library::open` built
+    the index with a `set` per shard, each re-sorting all before it, and hashed every unit a
+    second time: it now reads each current uid list and sorts once (`UidShards::from_lists`),
+    20.5 s to 5.6 s. The text journal inserted a batch's rows one at a time into a sorted
+    million-row table, 0.68 s of a 0.69 s batch append; it merges in place from the end now.
+    Building the stand-in went from 832 s to 528 s.
+  - **Found and not changed: the time axes are rebuilt by any append that carries a relation,
+    attestation, commitment or withdrawal** (`index/ranges.rs`, `bears_on_time`), which at 10⁶
+    units is most of what a build batch now costs. The list is a deny-list on purpose, failing
+    towards a rebuild, and the time engine does read several of those kinds — `quotes` edges,
+    attestations, withdrawals, rule R's unfounded units — so narrowing it is SMYSL-2.4's
+    question, not a scale fix. A batch of units alone does not rebuild.
+  - **Changed: a redb union shares one cache budget.** `--backend redb` on a library gave each
+    of its shards the default core and page caches, which across a thousand shards cached every
+    core; each now gets its share. `check` went from 3.7 GB to 2.7 GB.
+  - **The two thresholds not met are decided as steps of their own.** `check` on redb: the
+    floor is the stores, not their caches — the union opens at 1.85 GB where one 10⁶-unit store
+    opens at 528 MB, and each small shard's store is 3.7 MB on disk for a 168 KB log; one
+    database per library is OQ-90 and step P13c.3, before P13d. The scoped query: `find` builds
+    its postings over the whole store, per query and per analyzer, and reads none of the
+    library's; that is SMYSL-2.5's OQ-91 and its step.
+  - **Single-record append:** 5.01 ms through the library, by the median of five, against GE-T7's 5 ms, and 7.04 ms through redb, which syncs twice (P13b.2). A bare 200-byte write and `sync_data` on the machine measured is 3.6–4.1 ms, so the threshold is within a millisecond of the disk's own; the library's part is about 1 ms. Recorded as not met rather than rounded.
+
 ## 7. Risks and mitigations
 
 | risk | why it is real | mitigation |
@@ -1412,9 +1486,10 @@ SMY-*506–509 are unallocated.
 
 | id | question | proposal |
 |---|---|---|
-| **OQ-16** (draft 3) | Virtual union: are contentions computed lazily per query enough, or does the library need a materialised contention index? | Lazy. Detection reads only the interpretive layer, which the union materialises (§3.7). Materialise only if GE-T7 measures detection over the full union above 1 s at 10⁶ units. |
+| ~~**OQ-16**~~ (draft 3) | Virtual union: are contentions computed lazily per query enough, or does the library need a materialised contention index? | **Decided 2026-10-26 (P13c.2): lazy**, as proposed. Detection reads only the interpretive layer, which the union materialises (§3.7, after two detectors were made to); GE-T7's stand-in measured it at 10⁶ units in 1,001 shards at 444 ms over the materialised store, 638 ms over the in-memory union and 638 ms over the redb union — under the 1 s that would have called for an index. `Union::detected()` keeps the answer. |
 | **OQ-65** | Generalise the public entry points in place (`fn check<S: StoreRead + ?Sized>`), accepting that a caller's own `Deref<Target = Store>` type stops coercing, or add `_in` twins for the twelve contract operations and leave their signatures alone? | In place, with blanket impls and the §5.2 compile test; twins only if `make semver` flags it or the owner rules the `Deref` case a break. |
 | ~~**OQ-66**~~ | **Answered 1.10.0 by measurement, and the second option never existed.** There was no 1.79 build to keep: a 1.79 Cargo cannot resolve this tree at all — the last sentence of the old answer asked exactly that, and the answer is no, and not because of an *optional* dependency but because of `blake3`, via `constant_time_eq` 0.4.2 at edition 2024. Measured floors: 1.85 for the nine pure-path crates, 1.86 for `smysl-provider` and `smysl-ingest` (`icu_*` 2.2 under `ureq`), 1.88 for `smysl-tui` and the facade (`instability`, `darling` under `ratatui`). Each is declared on its own crate, since Cargo has no per-feature MSRV and a package's number must be its maximum. `make msrv` compares each declaration against what its dependencies require and fails in both directions; a CI job runs it and compiles the base tier at 1.85. redb 4.x's 1.90 is now a one-line bump on `smysl-graph` when `store-redb` lands. |
 | ~~**OQ-67**~~ | **Answered 2026-10-24 (P13b.1): wait, then read the log. Revisited at P13b.2 and kept**: the CLI's writer holds the store for one append (6–8 ms), so a reader meets it rarely, and in one process readers and the writer share the database and never meet it at all; at 10⁶ units the fallback costs a 2.9 GB in-memory open against 0.3 s, which is what redb 4's read-only handles would buy, still at Rust 1.90. On redb 2.6.4, which the workspace pins, there is no shared lock to adopt — every open takes `flock(LOCK_EX)`, readers included — so the fallback serves any second process, not only one meeting a writer. `AnyStore::open_redb` waits `reader_wait_ms` (2 s), then opens the log into memory with `W504`. redb 4's read-only handles are the way out and cost Rust 1.90 for the whole workspace; revisit at P13b.2, where a writer makes collisions likelier and the 10⁶ ladder shows what the fallback costs. | *(was: wait and fall back now; revisit when the feature leaves `experimental`)* |
 | **OQ-68** | Where do library-wide derived tables live: `uid_shard` and the `observed` instant index (draft 3 §14.2 lists `observed` in `index.redb`; this RFC has a per-shard `observed` table for `StoreRead`)? | **Half answered 2026-10-24.** Per-shard tables are the source, and P13b.1 has them (`observed`, `source_ref`). The library-wide ones go in **a file of their own, `store/library.redb`**, not `index.redb`: `smysl-text` owns that file's layout and writes it only under `substrate-redb`, and `smysl-graph` sits below `smysl-text`, so writing into it would be a crate writing a file whose layout belongs to one above it — and a library without text indexing would have no file to write to. Derived from the shards' `header` tables and rebuildable. Decided for P13c, which first needs them; SMYSL-2.4 to confirm. **Answered at P13c.1 (2026-10-25), differently:** `uid_shard` is a file **per shard**, `index/shards/<alias>.uids`, not a table in `store/library.redb`. A library must answer it without `store-redb` too, so it cannot live in redb alone; a write touches one shard, so one file per shard is rewritten and the others are not; and a reader merges the lists, which is the multimap. Each is stamped with the length of the log it lists — append-only, so the length is the log — and one that is stale or missing is rebuilt from its log. The `observed` index stays per shard, where P13b.1 put it; a union merges it (`units_in_observed_order`). |
 | **OQ-69** | Tiering policy: pin interpretive cores by status (`speculative`/`inferred`/`derived` + relation endpoints, §3.5.4), by source kind (`doc`/`file`/`node` cold), or by kernel type? And GE-T7's "library build" — does it include model extraction or only readers, segmentation and indexes? | **Tiering answered 2026-10-24 (P13b.1): by status and relation endpoint**, a pure function of the header, as proposed; the paged tier is scan-resistant (scans read through, `get` fills), and its default is **32 MiB**, not 64, measured (§6.1 P13b.1). The cache at 0 bytes is a test mode beside the default, so answers are shown not to depend on it. GE-T7's build definition stays open: it does not bear on 13b, and the proposal (exclude model extraction) stands until the first GE-T7 run. |
+| **OQ-90** | One redb unit store per shard, beside its log (P13c.1's as-built), or one per library? | **Decided 2026-10-26 (P13c.2), from GE-T7's stand-in: one per library**, with a set of tables per shard, as step P13c.3 and before P13d makes these files the record. Per shard, a store's fixed cost is paid a thousand times: over 1,001 shards the union opens at 1.85 GB where one 10⁶-unit store opens at 528 MB, `check` peaks at 2.7 GB (GE-T7: ≤ 1 GB), and the stores are 3.5 GB on disk for 164 MB of logs, 3.7 MB each for a 168 KB log. It grows with the number of expressions, not units, so a library of small ones — a chat import, a channel per expression — is the worst case. The cost of one database: redb takes one write transaction per database and its file lock admits one process, so two shards can no longer be written at once from two processes, where each has its own lock file today; a reader in another process already falls back to the logs (`SMY-W504`). Packing only the small shards together was the cheaper alternative, and leaves two layouts to keep. |

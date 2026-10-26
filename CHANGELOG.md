@@ -58,6 +58,34 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### Contentions over a union, and a library of a million units measured
+
+TX-P13c step 2 (SMYSL-2.8 §3.7, §5.4, §6.1). Contentions over shards are detected as they are
+over one store, lazily and once; GE-T7 ran, on a stand-in of a thousand works; and the library's
+write path stopped costing the size of the library.
+
+- **Contention detection reads only what it needs.** Commitment forks walk the commitments
+  rather than every unit; label collisions stop reading units' own labels, which a stored unit
+  never has; live rebuttals index threads once rather than asking every thread about every
+  rebuttal. The answers are unchanged. **`Union::detected()`** runs detection on its first call
+  and keeps it. OQ-16 is decided: no contention index.
+- **GE-T7's stand-in**, `tests/ge_t7.rs` (`--ignored`, release): 1,000 works in five
+  languages from the Bible slice, one shard each, 10⁶ units carrying every contention shape.
+  Met: the build (528 s against an hour), detection (638 ms at worst against 1 s), a
+  measure's growth (1.25× of linear), `derive_thread` over 10⁵ units (368 ms).
+  Not met: the single-record append, 5.01 ms against 5, most of it the disk's `fsync`; and, each
+  now a step of its own, a scoped query (154 s over the library: `find` builds
+  its postings per query, SMYSL-2.5 OQ-91) and `check` on redb (2.7 GB against 1 GB: a store
+  per shard, SMYSL-2.8 OQ-90, one per library in step 13c.3).
+- **Faster:** a single-record append to a library of 10⁶ units, 36 ms to 5.01 ms — the uid
+  index takes appends through a delta, `UidShards::from_lists` builds it in one sort, and a
+  shard's uid list grows in place; opening it, 20.5 s to 5.6 s; a thousand-unit append,
+  0.69 s to 26 ms, the text journal merging rather than inserting row by row.
+- **Fixed:** a relation-only batch left its shard's uid list stamped for the old log, so the
+  next open read the log again.
+- **Changed:** `--backend redb` on a library gives its shards one cache budget between them,
+  not one each.
+
 ### A library in shards, and a store that is several of them
 
 TX-P13c step 1 (SMYSL-2.8 §3.6–§3.7, with SMYSL-2.4 §14.2): a library keeps one log per
