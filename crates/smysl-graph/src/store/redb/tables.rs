@@ -8,28 +8,41 @@ use smysl_core::{Status, Uid};
 
 /// The layout this build writes and reads. A store with a larger one is refused (`SMY-E503`);
 /// a smaller one is rebuilt (`SMY-W501`), since in index mode the store is derived.
-pub(super) const LAYOUT: u16 = 1;
+///
+/// 2 since TX-P13c step 3: a store describes several logs, and every row says which.
+pub(super) const LAYOUT: u16 = 2;
 
-/// `layout`, `mode`, `log_len`, `log_hash`, `records`.
+/// A log's position among a store's, as its rows carry it: two bytes, big-endian. Assigned in
+/// the order the store first saw the logs, not their name order; the name order is `LOGS`'s.
+pub(super) type LogIx = u16;
+
+/// `layout`, `mode`, `logs` (`one` or `many`).
 pub(super) const META: TableDefinition<'static, &str, &[u8]> = TableDefinition::new("meta");
-/// A record's [`crate::Store::record_hash`] to its ordinal in the log: what `append` dedups on
-/// and the record-set digest is computed over.
-pub(super) const RECORD_HASH: TableDefinition<'static, &[u8; 32], u64> =
+/// A log's name to its [`LogRow`]: which position it has and what of it the store describes.
+pub(super) const LOGS: TableDefinition<'static, &str, &[u8; LOG_ROW_LEN]> =
+    TableDefinition::new("logs");
+/// `(record hash, log)` to the record's ordinal in that log: what `append` dedups on and the
+/// record-set digest is computed over. A record two logs hold has a row in each.
+pub(super) const RECORD_HASH: TableDefinition<'static, &[u8; 34], u64> =
     TableDefinition::new("record_hash");
 /// A unit's uid to its [`Header`].
 pub(super) const HEADER: TableDefinition<'static, &[u8; 32], &[u8; HEADER_LEN]> =
     TableDefinition::new("header");
+/// `(uid, log)` for every log holding the unit, in a store of several: what opens the store for
+/// some of them, and what says which log a reference into one not opened waits on (`SMY-W500`).
+pub(super) const HOLDS: TableDefinition<'static, &[u8; 34], ()> = TableDefinition::new("holds");
 /// `(uid, 0 for deps or 1 for grounds, target)`: the edges of every core, so the adjacency is
 /// built without reading one.
 pub(super) const DEPS: TableDefinition<'static, &[u8; 65], ()> = TableDefinition::new("deps");
-/// `(subject, record hash)` to the attestation's bytes as the log holds them. The subject is a
-/// unit's uid, a relation's rid, or a uid nothing in the store has yet.
-pub(super) const ATTEST: TableDefinition<'static, &[u8; 64], &[u8]> =
+/// `(subject, record hash, log)` to the attestation's bytes as the log holds them. The subject
+/// is a unit's uid, a relation's rid, or a uid nothing in the store has yet.
+pub(super) const ATTEST: TableDefinition<'static, &[u8; 66], &[u8]> =
     TableDefinition::new("attest");
-/// Every record that is neither a unit nor an attestation, by ordinal, as the log holds it:
-/// the interpretive layer, the library's records and the hot kinds. Proportional to
+/// Every record that is neither a unit nor an attestation, by `(log, ordinal)`, as the log holds
+/// it: the interpretive layer, the library's records and the hot kinds. Proportional to
 /// judgements, not to text, which is why it is read whole at open.
-pub(super) const INTERP: TableDefinition<'static, u64, &[u8]> = TableDefinition::new("interp");
+pub(super) const INTERP: TableDefinition<'static, &[u8; 10], &[u8]> =
+    TableDefinition::new("interp");
 /// `(observed ms, uid)`, so `units_in_observed_order` is a scan.
 pub(super) const OBSERVED: TableDefinition<'static, &[u8; 40], ()> =
     TableDefinition::new("observed");
@@ -37,17 +50,77 @@ pub(super) const OBSERVED: TableDefinition<'static, &[u8; 40], ()> =
 pub(super) const SOURCE_REF: TableDefinition<'static, &[u8], ()> =
     TableDefinition::new("source_ref");
 
+pub(super) const LOG_ROW_LEN: usize = 50;
+
+/// What a store describes of one of its logs: its position, and the length, hash and record
+/// count of the prefix it has folded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct LogRow {
+    pub(super) ix: LogIx,
+    pub(super) log_len: u64,
+    pub(super) log_hash: [u8; 32],
+    pub(super) records: u64,
+}
+
+impl LogRow {
+    pub(super) fn encode(&self) -> [u8; LOG_ROW_LEN] {
+        let mut b = [0u8; LOG_ROW_LEN];
+        b[0..2].copy_from_slice(&self.ix.to_be_bytes());
+        b[2..10].copy_from_slice(&self.log_len.to_be_bytes());
+        b[10..42].copy_from_slice(&self.log_hash);
+        b[42..50].copy_from_slice(&self.records.to_be_bytes());
+        b
+    }
+
+    pub(super) fn decode(b: &[u8; LOG_ROW_LEN]) -> LogRow {
+        LogRow {
+            ix: u16::from_be_bytes([b[0], b[1]]),
+            log_len: u64::from_be_bytes(b[2..10].try_into().expect("8 bytes")),
+            log_hash: b[10..42].try_into().expect("32 bytes"),
+            records: u64::from_be_bytes(b[42..50].try_into().expect("8 bytes")),
+        }
+    }
+}
+
+/// A 32-byte key followed by a log's position: `record_hash`'s and `holds`' keys.
+pub(super) fn with_log(k: &[u8; 32], log: LogIx) -> [u8; 34] {
+    let mut out = [0u8; 34];
+    out[..32].copy_from_slice(k);
+    out[32..].copy_from_slice(&log.to_be_bytes());
+    out
+}
+
+/// The first and last keys [`with_log`] can make of `k`.
+pub(super) fn log_range(k: &[u8; 32]) -> ([u8; 34], [u8; 34]) {
+    (with_log(k, 0), with_log(k, LogIx::MAX))
+}
+
+/// The log position at the end of a key.
+pub(super) fn log_of(k: &[u8]) -> LogIx {
+    let n = k.len();
+    u16::from_be_bytes([k[n - 2], k[n - 1]])
+}
+
+pub(super) fn interp_key(log: LogIx, seq: u64) -> [u8; 10] {
+    let mut k = [0u8; 10];
+    k[..2].copy_from_slice(&log.to_be_bytes());
+    k[2..].copy_from_slice(&seq.to_be_bytes());
+    k
+}
+
 pub(super) const HEADER_LEN: usize = 32;
 
 /// What the store keeps of a unit without its core.
 ///
-/// 32 bytes on disk: the core's place in the log, its status, when it was observed, and how
+/// 32 bytes on disk: the core's log and place in it, its status, when it was observed, and how
 /// many attestations it has with the newest hop among them. Not the RFC's 24: the core's
 /// offset and length are here rather than in a `core` table of their own, because the only
 /// question that table answered was "where is it", and asking it cost a b-tree descent on
 /// every `get`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Header {
+    /// The log the core is read from: the first to hold the unit.
+    pub(super) log: LogIx,
     pub(super) offset: u64,
     pub(super) len: u32,
     pub(super) status: u8,
@@ -66,6 +139,7 @@ impl Header {
         b[16..24].copy_from_slice(&self.observed.unwrap_or(0).to_be_bytes());
         b[24] = self.status;
         b[25] = u8::from(self.observed.is_some());
+        b[26..28].copy_from_slice(&self.log.to_be_bytes());
         b[28..32].copy_from_slice(&self.attested.to_be_bytes());
         b
     }
@@ -74,6 +148,7 @@ impl Header {
         let u64_at = |i: usize| u64::from_be_bytes(b[i..i + 8].try_into().expect("8 bytes"));
         let u32_at = |i: usize| u32::from_be_bytes(b[i..i + 4].try_into().expect("4 bytes"));
         Header {
+            log: u16::from_be_bytes([b[26], b[27]]),
             offset: u64_at(0),
             len: u32_at(8),
             hop: u32_at(12),
@@ -101,18 +176,19 @@ pub(super) fn deps_key(uid: &Uid, grounds: bool, target: &Uid) -> [u8; 65] {
     k
 }
 
-pub(super) fn attest_key(subject: &Uid, hash: &[u8; 32]) -> [u8; 64] {
-    let mut k = [0u8; 64];
+pub(super) fn attest_key(subject: &Uid, hash: &[u8; 32], log: LogIx) -> [u8; 66] {
+    let mut k = [0u8; 66];
     k[..32].copy_from_slice(subject.as_bytes());
-    k[32..].copy_from_slice(hash);
+    k[32..64].copy_from_slice(hash);
+    k[64..].copy_from_slice(&log.to_be_bytes());
     k
 }
 
 /// The first and last `attest` keys a subject can have.
-pub(super) fn attest_range(subject: &Uid) -> ([u8; 64], [u8; 64]) {
+pub(super) fn attest_range(subject: &Uid) -> ([u8; 66], [u8; 66]) {
     (
-        attest_key(subject, &[0; 32]),
-        attest_key(subject, &[0xff; 32]),
+        attest_key(subject, &[0; 32], 0),
+        attest_key(subject, &[0xff; 32], LogIx::MAX),
     )
 }
 
@@ -148,6 +224,7 @@ mod tests {
     fn a_header_round_trips_with_and_without_a_time() {
         for observed in [None, Some(0), Some(1_700_000_000_000)] {
             let h = Header {
+                log: 513,
                 offset: 1 << 40,
                 len: 77,
                 status: Status::Cited.as_u8(),
@@ -166,6 +243,7 @@ mod tests {
             .copied()
             .filter(|s| {
                 Header {
+                    log: 0,
                     offset: 0,
                     len: 0,
                     status: s.as_u8(),

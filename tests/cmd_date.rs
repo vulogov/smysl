@@ -402,3 +402,21 @@ fn an_empty_window_is_refused_rather_than_written() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A pass that does not exist is refused by name, with the passes there are, rather than
+/// dropped: dropped, `--pass typo` asked for no pass, ran every one, and reported success.
+#[test]
+fn a_pass_that_does_not_exist_is_refused() {
+    let dir = scratch("no-pass");
+    let doc = document(&dir);
+    let store = doc.to_str().unwrap();
+    let o = run(&["check", "-s", store, "--pass", "tiem"]);
+    assert_eq!(o.status.code(), Some(2), "{}", out(&o));
+    assert!(out(&o).contains("no pass `tiem`"), "{}", out(&o));
+    assert!(
+        out(&o).contains("`time`"),
+        "it lists the passes: {}",
+        out(&o)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

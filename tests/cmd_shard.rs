@@ -157,7 +157,7 @@ fn a_shard_that_is_not_there_and_a_store_that_is_not_a_library_are_refused() {
 
 #[cfg(feature = "store-redb")]
 #[test]
-fn under_the_unit_store_each_shard_is_read_through_its_own() {
+fn under_the_unit_store_the_library_is_one_store_opened_for_the_shards_asked_for() {
     let dir = scratch("redb");
     a_library(&dir.join("lib"));
     let o = run(
@@ -178,5 +178,9 @@ fn under_the_unit_store_each_shard_is_read_through_its_own() {
     let o = run(&dir, &["--backend", "redb", "check", "-s", "lib"]);
     assert!(o.status.success(), "{}", text(&o));
     assert!(!text(&o).contains("SMY-W500"), "{}", text(&o));
+    // One store for the library (TX-P13c step 3), and none beside any shard's log.
+    assert!(dir.join("lib/index/units.redb").is_file());
+    assert!(!dir.join("lib/log/shards/.smysl").exists());
+    assert!(!dir.join("lib/log/.smysl/store").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }

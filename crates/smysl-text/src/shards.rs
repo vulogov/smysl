@@ -44,6 +44,11 @@ pub const DIR: &str = "log/shards";
 /// Where each shard's uid list lives, relative to the root.
 pub const UIDS_DIR: &str = "index/shards";
 
+/// Where the library's one unit store lives, relative to the root (`--backend redb`, TX-P13c
+/// step 3): every shard's log indexed by a single store, beside the substrate's
+/// `index/substrate.redb`. Derived, as both are: deleting it loses nothing.
+pub const UNIT_STORE: &str = "index/units.redb";
+
 const UIDS_MAGIC: &[u8] = b"smysl/uids/1\n";
 
 /// A shard's file stem: its name with `/` as `~` and `:` as `+`.

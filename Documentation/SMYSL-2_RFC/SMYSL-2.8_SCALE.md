@@ -564,10 +564,34 @@ rebuildable and discardable on its own (draft 3 §14.4).
 A standalone store (no library) is `x.smy` plus `.smysl/store/x.redb`, beside the existing
 `.smysl/index/x.idx` (`Store::index_path`).
 
+*As built (P13c.3, OQ-90): one store for the whole library, `index/units.redb`*, beside the
+substrate's `index/substrate.redb`, describing every shard's log; not a store per shard. P13c.1
+put one beside each log, and GE-T7's stand-in showed what that cost at a thousand shards: each
+store's fixed part paid a thousand times, and a `Union` over them holding its own uid list,
+layers and adjacency on top of theirs — 1.19 GB to open where one store of the same units opens
+in 277 MB, and 3.5 GB on disk for 164 MB of logs, where one store is 540 MB. The argument above
+for a file per shard was per-file locking, and in index mode it does not bind: the library's
+writer is the library, which writes the shards' logs under their own lock files, and the unit
+store folds what they gained the next time it is opened. What one file costs is that two
+processes cannot both have the store open — which redb 2.6 already refused per file — and the
+second reads the logs into memory after `reader_wait_ms` (`SMY-W504`), as for one log.
+
 #### 3.5.3 Tables
 
 All keys big-endian; all values deterministic CBOR or fixed-width. `seq` is the record's
 ordinal in the log.
+
+*As built (P13c.3): layout 2, every row naming its log.* A `logs` table maps a log's name to
+its position and the length, hash and record count the store describes of it; `record_hash`
+is keyed `(hash, log)`, `attest` `(subject, hash, log)`, `interp` `(log, seq)`; a header names
+the log its core is read from (two of its spare bytes); `holds` lists `(uid, log)` for every
+log holding a unit. A log is folded on its own, so one that grows moves no other log's rows,
+and what the store answers is decided when it is read: over several logs, the logs in name
+order and each record once (`Store::from_records`, which drops repeats); over one, as
+`Store::open`, repeats kept. Opened for some logs, the store reads only their headers,
+interpretive rows and attestations, and `holds` says which unopened log a dangling reference
+waits on (`SMY-W500`), so the redb path needs no `Union` and no uid index of its own. A layout-1
+store is rebuilt (`SMY-W501`).
 
 | table | key → value | layer | notes |
 |---|---|---|---|
@@ -924,7 +948,9 @@ Integration with the `Cmd` table in `src/main.rs`; no new subcommand in this RFC
   `--backend` chose; under `--backend redb` a library is always read as a union of its shards,
   each through its own unit store. A union of some shards reads the library's uid lists for
   `W500`. Without either flag a library is read as one log, every shard's records in shard-id
-  order. A write under `--shard` is refused.*
+  order. A write under `--shard` is refused.* *As built (P13c.3): under `--backend redb` a
+  library is the one unit store at `index/units.redb`, opened for the shards named; the memory
+  backend keeps the union.*
 - `smysl reindex --backend redb` builds or rebuilds the unit store; `--verify` compares the
   redb store's record-set digest and adjacency against an in-memory rebuild.
 - `smysl lib migrate --primary <shard>` and `--index <shard>` (§3.9), registered by SMYSL-2.4's
@@ -971,7 +997,12 @@ Integration with the `Cmd` table in `src/main.rs`; no new subcommand in this RFC
    order for k ≤ 3 and 5 seeded orders for k = 7; *as built (P13c.1), with about one unit in
    eight dealt into two shards, over opened logs (one holding repeats), through `AnyStore`, under
    an `Overlay`, and with `store-redb` over `RedbStore` shards with the core cache off;*
-7. `Overlay` of `Store::from_records(R₁)` and batch R₂ (R = R₁ ⊎ R₂, three split points).
+7. `Overlay` of `Store::from_records(R₁)` and batch R₂ (R = R₁ ⊎ R₂, three split points);
+8. *as built (P13c.3):* one `RedbStore` over the same k logs (`open_shards`), the first holding
+   repeats, against `from_records` of their records in shard-id order; reopened with the cache
+   on and nothing to fold; opened for every other shard, against a `Union` of those shards
+   given the index of all (so a reference into another is `W500` in both); and after the last
+   shard's log grows, folded without a rebuild.
 
 **What must be identical** across all seven (byte-for-byte where the output is bytes):
 - every `StoreRead` method, on every uid in R and on 100 seeded absent uids;
@@ -1107,7 +1138,7 @@ suite (§5.1) for every implementation that exists by then.
 | P13b.2 | `RedbShard` write path, lock file, reader fallback; `--backend redb`; `reindex --backend redb` | §5.3 concurrency tests; ladder at 10⁶ units completes on a 7 GB machine with the redb backend |
 | **P13c.1** | shards in a library (with SMYSL-2.4), `uid_shard`, `Union`, `--shard` | suite implementation 6; `store_union` fuzz target 10 min clean; `W500` on a two-shard fixture with a cross-shard `quotes` edge, resolved when the second shard is added |
 | **P13c.2** | contentions over the union, measured | GE-T7 run; OQ-16 decided from its contention-detection number |
-| P13c.3 | one redb database per library, a set of tables per shard (OQ-90) — **before P13d** | `check` over GE-T7's stand-in on redb ≤ 1 GB; the library's unit store at most 2× its logs on disk; §5.3 and the conformance suite (implementations 4–6) on the new layout; the stand-in's other GE-T7 numbers no worse |
+| **P13c.3** | one redb unit store per library, every row naming its shard's log (OQ-90) — **before P13d** | `check` over GE-T7's stand-in on redb ≤ 1 GB; the library's unit store at most 2× its logs on disk; §5.3 and the conformance suite (implementations 4–6) on the new layout; the stand-in's other GE-T7 numbers no worse |
 | **P13d** | primary mode, `lib migrate`, `E505` — **only after GE-T15 passes** | suite implementation 5; export → import round trip reproduces the record-set digest on every GE-T15 corpus; GE-T7 rerun on primary shards |
 
 ### 6.1 Progress
@@ -1447,6 +1478,45 @@ in every ported signature; §3.2's sketch and §5.2's shapes are otherwise uncha
     library's; that is SMYSL-2.5's OQ-91 and its step.
   - **Single-record append:** 5.01 ms through the library, by the median of five, against GE-T7's 5 ms, and 7.04 ms through redb, which syncs twice (P13b.2). A bare 200-byte write and `sync_data` on the machine measured is 3.6–4.1 ms, so the threshold is within a millisecond of the disk's own; the library's part is about 1 ms. Recorded as not met rather than rounded.
 
+- **P13c.3 — done (2026-10-26).** One unit store for a library (OQ-90):
+  - **Measured before building.** The redb union's open floor at 1,001 shards was its parts: the
+    shard stores held open, 868 MB, and the union over them, +323 MB, before its adjacency
+    (+456 MB) and `check`. A single store of the same 10⁶ units opens at 528 MB. So the step
+    became one store over the logs, not one database of per-shard stores, which would have
+    saved only part of the first number.
+  - **`RedbStore::open_shards`**: every row names its log (layout 2, §3.5.3), each log is
+    folded on its own, and what the store answers is decided at open — over several logs,
+    `from_records` of theirs in name order; over one, `Store::open`, unchanged. Opened for some
+    shards it reads only theirs, and `holds` gives `SMY-W500` for a reference into another.
+    `AnyStore::open_redb_shards` waits for a store another process holds and then reads the
+    logs into a union (`SMY-W504`). Under `--backend redb` the CLI reads a library through it,
+    at `index/units.redb` (`smysl_text::shards::UNIT_STORE`); appending through it is refused,
+    the library being the writer. Conformance implementation 8 (§5.1).
+  - **Found and fixed while measuring: a pool of logs.** A store of 1,001 logs read in uid
+    order reads them all over and over; with 64 kept open, `check` spent 132 s of 168 opening
+    files. The pool now holds as many as the process allows, up to 4,096, and halves when the
+    system refuses an open for want of a descriptor; `check` took 43 s.
+  - **GE-T7's stand-in on the new layout** (one run, release): `check` on redb **1.69 GB** in
+    44 s (2.69 GB before; memory 4.08 GB); open 277 MB; the store 540 MB on disk (3.5 GB of
+    per-shard stores before), built from the 1,001 logs in 75.6 s; contention detection on it
+    374 ms; every other GE-T7 number as at P13c.2 (§6.1 above), the single-record append
+    4.99 ms against 5 — under it this run, over it by 0.01 ms the last, so at the disk's
+    `fsync`, not under it.
+  - **The exit's ≤ 1 GB is not met, and the store is not what misses it.** Of `check`'s peak,
+    opening the store is 277 MB, its adjacency +345 MB and the cores it pins +153 MB, about
+    775 MB; `check` with the core cache off still peaks at 1.42 GB. The `time` pass alone peaks
+    at 1.41 GB and takes 28 of the 44 s: rule E (`smysl_text::time::engine::effective`) builds a
+    subject, a seed and a row of its network for every unit, reading every core to list them,
+    to solve the stand-in's five thousand quotation constraints. The passes but `time` peak
+    between 0.47 and 0.85 GB. Recorded for SMYSL-2.4 beside P13c.2's finding about the time
+    axes, not changed here.
+  - **Found and fixed: `check --pass` with a name that is no pass** dropped it, so the list was
+    empty and every pass ran, exit 0. Refused now with the names there are, exit 2
+    (`tests/cmd_date.rs`).
+  - **Superseded, not removed:** P13c.1's per-shard stores, `log/shards/.smysl/store/*.redb`,
+    which only this release's development builds wrote; nothing reads them now, and deleting
+    them loses nothing.
+
 ## 7. Risks and mitigations
 
 | risk | why it is real | mitigation |
@@ -1492,4 +1562,4 @@ SMY-*506–509 are unallocated.
 | ~~**OQ-67**~~ | **Answered 2026-10-24 (P13b.1): wait, then read the log. Revisited at P13b.2 and kept**: the CLI's writer holds the store for one append (6–8 ms), so a reader meets it rarely, and in one process readers and the writer share the database and never meet it at all; at 10⁶ units the fallback costs a 2.9 GB in-memory open against 0.3 s, which is what redb 4's read-only handles would buy, still at Rust 1.90. On redb 2.6.4, which the workspace pins, there is no shared lock to adopt — every open takes `flock(LOCK_EX)`, readers included — so the fallback serves any second process, not only one meeting a writer. `AnyStore::open_redb` waits `reader_wait_ms` (2 s), then opens the log into memory with `W504`. redb 4's read-only handles are the way out and cost Rust 1.90 for the whole workspace; revisit at P13b.2, where a writer makes collisions likelier and the 10⁶ ladder shows what the fallback costs. | *(was: wait and fall back now; revisit when the feature leaves `experimental`)* |
 | **OQ-68** | Where do library-wide derived tables live: `uid_shard` and the `observed` instant index (draft 3 §14.2 lists `observed` in `index.redb`; this RFC has a per-shard `observed` table for `StoreRead`)? | **Half answered 2026-10-24.** Per-shard tables are the source, and P13b.1 has them (`observed`, `source_ref`). The library-wide ones go in **a file of their own, `store/library.redb`**, not `index.redb`: `smysl-text` owns that file's layout and writes it only under `substrate-redb`, and `smysl-graph` sits below `smysl-text`, so writing into it would be a crate writing a file whose layout belongs to one above it — and a library without text indexing would have no file to write to. Derived from the shards' `header` tables and rebuildable. Decided for P13c, which first needs them; SMYSL-2.4 to confirm. **Answered at P13c.1 (2026-10-25), differently:** `uid_shard` is a file **per shard**, `index/shards/<alias>.uids`, not a table in `store/library.redb`. A library must answer it without `store-redb` too, so it cannot live in redb alone; a write touches one shard, so one file per shard is rewritten and the others are not; and a reader merges the lists, which is the multimap. Each is stamped with the length of the log it lists — append-only, so the length is the log — and one that is stale or missing is rebuilt from its log. The `observed` index stays per shard, where P13b.1 put it; a union merges it (`units_in_observed_order`). |
 | **OQ-69** | Tiering policy: pin interpretive cores by status (`speculative`/`inferred`/`derived` + relation endpoints, §3.5.4), by source kind (`doc`/`file`/`node` cold), or by kernel type? And GE-T7's "library build" — does it include model extraction or only readers, segmentation and indexes? | **Tiering answered 2026-10-24 (P13b.1): by status and relation endpoint**, a pure function of the header, as proposed; the paged tier is scan-resistant (scans read through, `get` fills), and its default is **32 MiB**, not 64, measured (§6.1 P13b.1). The cache at 0 bytes is a test mode beside the default, so answers are shown not to depend on it. GE-T7's build definition stays open: it does not bear on 13b, and the proposal (exclude model extraction) stands until the first GE-T7 run. |
-| **OQ-90** | One redb unit store per shard, beside its log (P13c.1's as-built), or one per library? | **Decided 2026-10-26 (P13c.2), from GE-T7's stand-in: one per library**, with a set of tables per shard, as step P13c.3 and before P13d makes these files the record. Per shard, a store's fixed cost is paid a thousand times: over 1,001 shards the union opens at 1.85 GB where one 10⁶-unit store opens at 528 MB, `check` peaks at 2.7 GB (GE-T7: ≤ 1 GB), and the stores are 3.5 GB on disk for 164 MB of logs, 3.7 MB each for a 168 KB log. It grows with the number of expressions, not units, so a library of small ones — a chat import, a channel per expression — is the worst case. The cost of one database: redb takes one write transaction per database and its file lock admits one process, so two shards can no longer be written at once from two processes, where each has its own lock file today; a reader in another process already falls back to the logs (`SMY-W504`). Packing only the small shards together was the cheaper alternative, and leaves two layouts to keep. |
+| **OQ-90** | One redb unit store per shard, beside its log (P13c.1's as-built), or one per library? | **Decided 2026-10-26 (P13c.2), from GE-T7's stand-in: one per library**, with a set of tables per shard, as step P13c.3 and before P13d makes these files the record. Per shard, a store's fixed cost is paid a thousand times: over 1,001 shards the union opens at 1.85 GB where one 10⁶-unit store opens at 528 MB, `check` peaks at 2.7 GB (GE-T7: ≤ 1 GB), and the stores are 3.5 GB on disk for 164 MB of logs, 3.7 MB each for a 168 KB log. It grows with the number of expressions, not units, so a library of small ones — a chat import, a channel per expression — is the worst case. The cost of one database: redb takes one write transaction per database and its file lock admits one process, so two shards can no longer be written at once from two processes, where each has its own lock file today; a reader in another process already falls back to the logs (`SMY-W504`). Packing only the small shards together was the cheaper alternative, and leaves two layouts to keep. **Done at P13c.3 (2026-10-26), and narrowed by measuring first: one *store* per library, not one database of per-shard tables.** Split across 1,001 shards the redb side opened at 1.19 GB, of which the shard stores were 868 MB (one store of the same units: 528 MB) and the `Union` over them the rest — its own uid list, joined layers and an adjacency built over theirs. Tables per shard in one file would have saved part of the 340 MB; one store saves the union too. Built: `index/units.redb`, layout 2 (§3.5.3's as-built note); 277 MB to open, 540 MB on disk, `check` 1.69 GB. Not ≤ 1 GB: of that peak the store is about 775 MB and the `time` pass alone 1.41 GB (§6.1). |

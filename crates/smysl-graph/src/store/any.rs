@@ -25,6 +25,8 @@ use super::{
     AppendReport, Commits, HotKind, HotRecords, Relations, Resolutions, Store, StoreRead,
     StoreWrite, Threads, Views, Withdrawals,
 };
+#[cfg(feature = "store-redb")]
+use super::{ShardId, UidShards};
 use super::{Union, UnionRecords, UnionUnit, UnionUnits};
 use crate::adjacency::Adjacency;
 
@@ -138,6 +140,57 @@ impl AnyStore {
                             )),
                     );
                     return Ok((AnyStore::Memory(s), report));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+}
+
+impl AnyStore {
+    /// One unit store over a library's shard logs, or some of them (TX-P13c step 3): what
+    /// [`super::redb::RedbStore::open_shards`] opens, waiting for one another process holds as
+    /// [`AnyStore::open_redb`] waits. After the wait, the logs read are opened into memory as
+    /// a union, with `index` saying where a reference into another waits (`SMY-W504`).
+    #[cfg(feature = "store-redb")]
+    pub fn open_redb_shards(
+        store: &std::path::Path,
+        shards: &[(ShardId, std::path::PathBuf)],
+        only: Option<&[ShardId]>,
+        index: Option<std::sync::Arc<UidShards>>,
+        opts: super::redb::RedbOptions,
+    ) -> Result<(AnyStore, super::OpenReport), Error> {
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_millis(opts.reader_wait_ms);
+        loop {
+            match super::redb::RedbStore::open_shards(store, shards, only, opts.clone()) {
+                Ok((s, report)) => return Ok((AnyStore::Redb(s), report)),
+                Err(e) if super::redb::is_held(&e) && std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                Err(e) if super::redb::is_held(&e) => {
+                    let mut stores = Vec::new();
+                    for (name, log) in shards {
+                        if only.is_some_and(|o| !o.contains(name)) {
+                            continue;
+                        }
+                        let bytes = match std::fs::read(log) {
+                            Ok(b) => b,
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+                            Err(e) => return Err(Error::Io(e)),
+                        };
+                        let (records, _) = smysl_core::from_cbor_seq(&bytes)?;
+                        stores.push((name.clone(), AnyStore::from(Store::from_records(records))));
+                    }
+                    let mut report = super::OpenReport::default();
+                    report.report.push(
+                        smysl_core::diag::Diagnostic::new(smysl_core::diag::Code::W504)
+                            .with_message(format!(
+                                "{e}; read the shards into memory after waiting {} ms",
+                                opts.reader_wait_ms
+                            )),
+                    );
+                    return Ok((AnyStore::shards(stores, index), report));
                 }
                 Err(e) => return Err(e),
             }
@@ -413,6 +466,11 @@ impl StoreWrite for AnyStore {
     fn append(&mut self, records: &[Record]) -> Result<AppendReport, Error> {
         match self {
             AnyStore::Memory(s) => StoreWrite::append(s, records),
+            #[cfg(feature = "store-redb")]
+            AnyStore::Redb(s) if s.is_shards() => Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "a unit store of several shards is read-only: write through the library",
+            ))),
             #[cfg(feature = "store-redb")]
             AnyStore::Redb(s) => {
                 let (mut shard, _) =

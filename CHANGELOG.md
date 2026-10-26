@@ -58,6 +58,24 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### One unit store for a library
+
+TX-P13c step 3 (SMYSL-2.8 §3.5, OQ-90). Under `--backend redb` a library is one store over all
+its shards' logs, not a store per shard read through a union.
+
+- **`RedbStore::open_shards`** and **`AnyStore::open_redb_shards`**: one store at
+  `index/units.redb` describing every shard's log, answering as `Store::from_records` of their
+  records in name order; opened for some shards with `--shard`, a reference into another is
+  `SMY-W500` from the store itself. A store of one log answers as before. Store layout 2: an
+  older store is rebuilt on its next open (`SMY-W501`).
+- On GE-T7's stand-in, 10⁶ units in 1,001 shards: `check` on redb 2.69 GB to 1.69 GB, the open
+  1.19 GB to 277 MB, the stores on disk 3.5 GB to 540 MB. GE-T7's 1 GB is still not met: the
+  `time` pass alone peaks at 1.41 GB, which is rule E's engine, not the store.
+- A store over many logs keeps them open in a pool as large as the process allows, and halves
+  it when an open is refused for want of a descriptor.
+- **Fixed:** `smysl check --pass <name>` with a name that is no pass ran every pass and
+  succeeded; it is refused now, exit 2, with the passes listed.
+
 ### Contentions over a union, and a library of a million units measured
 
 TX-P13c step 2 (SMYSL-2.8 §3.7, §5.4, §6.1). Contentions over shards are detected as they are

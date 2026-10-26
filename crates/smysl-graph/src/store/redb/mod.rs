@@ -24,6 +24,13 @@
 //! **The writer** is [`RedbShard`] (TX-P13b step 2): the shard's lock file, then the log,
 //! `fsync`ed, then one commit. Its readers are snapshots of it, [`RedbShard::reader`].
 //!
+//! **Several logs** (TX-P13c step 3, OQ-90). [`RedbStore::open_shards`] opens one store over a
+//! library's shard logs, every row naming its log, and answers as `Store::from_records` of all
+//! their records in name order — or of some of them, with a reference into another reported as
+//! waiting on it (`SMY-W500`). Nothing writes through it: the library writes its shards' logs,
+//! and the store folds each log's new tail on its own when it is next opened. Logs are opened
+//! as cores are read, in a pool as large as the process's descriptors allow.
+//!
 //! **What answers cost.** Header questions — `contains_uid`, `observed_at`, `hop_of`, ranges,
 //! counts — cost what they cost in memory. `get` costs one positioned read of the log and a
 //! decode, unless the core is cached, plus a range of `attest` for a unit with attestations.
@@ -46,7 +53,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use ::redb::{ReadOnlyTable, ReadTransaction, ReadableTable, ReadableTableMetadata};
+use ::redb::{ReadOnlyTable, ReadTransaction, ReadableTable};
 use smysl_core::ids::Tid;
 use smysl_core::{
     from_cbor, from_cbor_seq, Attestation, Commit, Contention, Error, Record, RelKind, Relation,
@@ -56,12 +63,14 @@ use smysl_core::{
 pub use cache::CacheStats;
 pub use shard::RedbShard;
 
-use self::build::Described;
+use smysl_core::diag::{Code, Diagnostic, Report, Subject};
+
+use self::build::{Described, Given, Kind};
 use self::cache::Cache;
 use self::shared::Shared;
 use self::tables::{
-    attest_range, split_source_key, uid_of, Header, ATTEST, DEPS, HEADER, INTERP, OBSERVED,
-    RECORD_HASH, SOURCE_REF,
+    attest_range, interp_key, log_of, log_range, split_source_key, uid_of, Header, LogIx, ATTEST,
+    DEPS, HEADER, HOLDS, INTERP, OBSERVED, RECORD_HASH, SOURCE_REF,
 };
 use super::interp::Interpretive;
 use super::library::StoreLibrary;
@@ -141,7 +150,11 @@ pub(crate) fn is_held(e: &Error) -> bool {
     matches!(e, Error::Io(io) if io.kind() == std::io::ErrorKind::WouldBlock)
 }
 
-/// A store whose cores stay in its CBOR log until asked for (SMYSL-2.8 §3.5).
+/// A store whose cores stay in its CBOR logs until asked for (SMYSL-2.8 §3.5).
+///
+/// Over one log ([`RedbStore::open`]) it answers as `Store::open` of the log. Over several
+/// ([`RedbStore::open_shards`], TX-P13c step 3) it answers as `Store::from_records` of all their
+/// records in name order — a library's shards as one store — and can be opened for some of them.
 ///
 /// Cheap to clone: a clone is the same open store, its snapshot and its cache.
 #[derive(Clone)]
@@ -155,20 +168,76 @@ struct Head {
     attested: u32,
     hop: u32,
     observed: Option<u64>,
+    log: LogIx,
     pinned: bool,
+}
+
+/// One of the logs a store reads.
+struct LogFile {
+    name: String,
+    ix: LogIx,
+    path: PathBuf,
+    described: Described,
+}
+
+/// How many logs a store keeps open at first. A store of a thousand logs read in uid order
+/// touches every one of them over and over, so the pool holds them all if the process may —
+/// with a pool smaller than the logs, `check` on GE-T7's stand-in opened a file for nearly every
+/// core it read, 132 s of system time. A process may also have as few as 256 descriptors, so an
+/// open the system refuses for want of one halves the pool and is tried again.
+const OPEN_LOGS: usize = 4096;
+
+struct Open {
+    files: Vec<(LogIx, Arc<File>, u64)>,
+    tick: u64,
+    cap: usize,
+}
+
+impl Default for Open {
+    fn default() -> Open {
+        Open {
+            files: Vec::new(),
+            tick: 0,
+            cap: OPEN_LOGS,
+        }
+    }
+}
+
+impl Open {
+    fn evict_oldest(&mut self) {
+        if let Some(oldest) = (0..self.files.len()).min_by_key(|&i| self.files[i].2) {
+            self.files.swap_remove(oldest);
+        }
+    }
+}
+
+/// Whether an open failed because the process has no descriptor left (`EMFILE`, `ENFILE`).
+fn out_of_descriptors(e: &std::io::Error) -> bool {
+    matches!(e.raw_os_error(), Some(23 | 24))
 }
 
 // Field order is drop order: the table and the transaction before the database they read.
 struct Inner {
-    attest: ReadOnlyTable<&'static [u8; 64], &'static [u8]>,
+    attest: ReadOnlyTable<&'static [u8; 66], &'static [u8]>,
     txn: ReadTransaction,
     /// The database the transaction reads, shared with every other open of it in this
     /// process; held so the file stays open as long as the snapshot does.
     _shared: Arc<Shared>,
     opts: RedbOptions,
-    log: Option<File>,
-    log_path: PathBuf,
-    described: Described,
+    kind: Kind,
+    /// Every log the store reads, in name order.
+    logs: Vec<LogFile>,
+    /// A log's place in `logs`, by its position in the store.
+    at: Vec<Option<usize>>,
+    /// The name of every log the store describes, read or not, by position: what a reference
+    /// into one not read waits on.
+    names: Vec<Option<String>>,
+    /// Where every log given lives, read or not, by position: a unit's core is read from the
+    /// first log to bring it, which a store opened for some logs may not read.
+    paths: Vec<Option<PathBuf>>,
+    /// Whether the store was opened for some of its logs only.
+    subset: bool,
+    open: Mutex<Open>,
     uids: Vec<Uid>,
     heads: Vec<Head>,
     interp: Interpretive,
@@ -177,10 +246,10 @@ struct Inner {
     hot: BTreeMap<HotKind, Vec<usize>>,
     library: StoreLibrary,
     pending: Vec<Attestation>,
-    /// Distinct records: `described.records` less the repeats.
-    distinct: u64,
     cache: Mutex<Cache>,
     hashes: OnceLock<Vec<[u8; 32]>>,
+    /// Over several logs: the length and hash of their records as one log, each once.
+    joined: OnceLock<(u64, [u8; 32])>,
     derived: OnceLock<Derived>,
 }
 
@@ -208,11 +277,14 @@ impl std::fmt::Debug for RedbStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RedbStore")
             .field("units", &self.0.uids.len())
-            .field("records", &self.0.described.records)
-            .field("log_len", &self.0.described.log_len)
+            .field("logs", &self.0.logs.len())
+            .field("records", &self.len())
             .finish_non_exhaustive()
     }
 }
+
+/// The name a store of one log gives it.
+const ONE: &str = "";
 
 impl RedbStore {
     /// Where the unit store for a log lives: `.smysl/store/<name>.redb` beside it, next to the
@@ -245,7 +317,37 @@ impl RedbStore {
         }
         let mut report = OpenReport::default();
         let shared = shared::open(&path, &opts, &mut report)?;
-        Self::open_shared(shared, log, &opts, report)
+        Self::open_shared(
+            shared,
+            Kind::One,
+            &[(ONE.to_string(), log.to_path_buf())],
+            None,
+            &opts,
+            report,
+        )
+    }
+
+    /// Open one unit store over several logs — a library's shards (TX-P13c step 3, OQ-90) —
+    /// at `store`, building it, rebuilding it or folding in each log's tail as the logs
+    /// require. `shards` names every log the store describes, a name each; with `only`, the
+    /// store answers for those logs alone, as `Store::from_records` of their records would, and
+    /// a reference into one of the others is `SMY-W500` naming it, not `SMY-E060`.
+    ///
+    /// One store, not one a log: a store's fixed cost paid a thousand times was most of a
+    /// thousand-shard library's resident set (SMYSL-2.8 §6.1, P13c.2). Fails at once with
+    /// `WouldBlock` when another process holds the store, as [`RedbStore::open`] does.
+    pub fn open_shards(
+        store: &Path,
+        shards: &[(String, PathBuf)],
+        only: Option<&[String]>,
+        opts: RedbOptions,
+    ) -> Result<(RedbStore, OpenReport), Error> {
+        if let Some(dir) = store.parent() {
+            std::fs::create_dir_all(dir).map_err(Error::Io)?;
+        }
+        let mut report = OpenReport::default();
+        let shared = shared::open(store, &opts, &mut report)?;
+        Self::open_shared(shared, Kind::Many, shards, only, &opts, report)
     }
 
     /// [`RedbStore::open`] over a database already opened, whatever its backend: the seam the
@@ -257,41 +359,112 @@ impl RedbStore {
         opts: &RedbOptions,
         report: OpenReport,
     ) -> Result<(RedbStore, OpenReport), Error> {
-        Self::open_shared(Arc::new(Shared::new(db)), log_path, opts, report)
+        Self::open_shared(
+            Arc::new(Shared::new(db)),
+            Kind::One,
+            &[(ONE.to_string(), log_path.to_path_buf())],
+            None,
+            opts,
+            report,
+        )
     }
 
     fn open_shared(
         shared: Arc<Shared>,
-        log_path: &Path,
+        kind: Kind,
+        logs: &[(String, PathBuf)],
+        only: Option<&[String]>,
         opts: &RedbOptions,
         mut report: OpenReport,
     ) -> Result<(RedbStore, OpenReport), Error> {
-        let log = match File::open(log_path) {
-            Ok(f) => Some(f),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => return Err(Error::Io(e)),
-        };
-        let described = {
+        let given: Vec<Given<'_>> = logs
+            .iter()
+            .map(|(name, path)| Given {
+                name,
+                path,
+                file: None,
+            })
+            .collect();
+        let caught = {
             let _folding = shared.folding();
-            build::catch_up(&shared.db, log.as_ref(), opts.force_rebuild, &mut report)?.0
+            build::catch_up(&shared.db, kind, &given, opts.force_rebuild, &mut report)?
         };
-        let store = Self::load(shared, log, log_path, described, opts)?;
+        let mut paths: Vec<Option<PathBuf>> = Vec::new();
+        for ((_, path), c) in logs.iter().zip(&caught) {
+            let i = c.ix as usize;
+            if paths.len() <= i {
+                paths.resize(i + 1, None);
+            }
+            paths[i] = Some(path.clone());
+        }
+        let read: Vec<LogFile> = logs
+            .iter()
+            .zip(caught)
+            .filter(|((name, _), _)| only.is_none_or(|o| o.iter().any(|n| n == name)))
+            .map(|((name, path), c)| LogFile {
+                name: name.clone(),
+                ix: c.ix,
+                path: path.clone(),
+                described: c.described,
+            })
+            .collect();
+        let store = Self::load(shared, kind, read, paths, only.is_some(), opts)?;
         Ok((store, report))
     }
 
-    /// Read what stays in memory: headers, the interpretive layer and the library.
+    /// Read what stays in memory: headers, the interpretive layer and the library, of the logs
+    /// in `logs`.
     fn load(
         shared: Arc<Shared>,
-        log: Option<File>,
-        log_path: &Path,
-        described: Described,
+        kind: Kind,
+        mut logs: Vec<LogFile>,
+        paths: Vec<Option<PathBuf>>,
+        subset: bool,
         opts: &RedbOptions,
     ) -> Result<RedbStore, Error> {
+        logs.sort_by(|a, b| a.name.cmp(&b.name));
         let txn = shared.db.begin_read().map_err(backend)?;
+        let width = logs.iter().map(|l| l.ix as usize + 1).max().unwrap_or(0);
+        let mut at = vec![None; width];
+        for (i, l) in logs.iter().enumerate() {
+            at[l.ix as usize] = Some(i);
+        }
+        let read = |ix: LogIx| at.get(ix as usize).copied().flatten().is_some();
+        let mut names: Vec<Option<String>> = Vec::new();
+        if let Some(m) = build::meta(&shared.db)? {
+            for (name, row) in m.logs {
+                let i = row.ix as usize;
+                if names.len() <= i {
+                    names.resize(i + 1, None);
+                }
+                names[i] = Some(name);
+            }
+        }
 
+        // The units of the logs read: every unit, or those some log read holds.
+        let members: Option<Vec<Uid>> = if subset {
+            let mut v: Vec<Uid> = Vec::new();
+            for row in txn
+                .open_table(HOLDS)
+                .map_err(backend)?
+                .iter()
+                .map_err(backend)?
+            {
+                let (k, _) = row.map_err(backend)?;
+                let k = k.value();
+                let uid = uid_of(k);
+                if read(log_of(k)) && v.last() != Some(&uid) {
+                    v.push(uid);
+                }
+            }
+            Some(v)
+        } else {
+            None
+        };
         let mut uids = Vec::new();
         let mut heads = Vec::new();
         let mut by_status = Vec::new();
+        let mut next_member = 0usize;
         for row in txn
             .open_table(HEADER)
             .map_err(backend)?
@@ -299,8 +472,17 @@ impl RedbStore {
             .map_err(backend)?
         {
             let (k, v) = row.map_err(backend)?;
+            let uid = Uid::from_bytes(*k.value());
+            if let Some(m) = &members {
+                while next_member < m.len() && m[next_member] < uid {
+                    next_member += 1;
+                }
+                if m.get(next_member) != Some(&uid) {
+                    continue;
+                }
+            }
             let h = Header::decode(v.value());
-            uids.push(Uid::from_bytes(*k.value()));
+            uids.push(uid);
             by_status.push(h.pinned_by_status());
             heads.push(Head {
                 offset: h.offset,
@@ -308,37 +490,45 @@ impl RedbStore {
                 attested: h.attested,
                 hop: h.hop,
                 observed: h.observed,
+                log: h.log,
                 pinned: false,
             });
         }
 
-        // The rest of the log, in log order, folded as `absorb` folds it.
+        // The rest of each log, the logs in name order and each in log order, folded as
+        // `absorb` folds it. Over several logs a record is read once, where it first appears:
+        // `from_records`, which drops repeats; over one, every record, as `Store::open` keeps
+        // them.
         let mut interp = Interpretive::default();
         let mut library = StoreLibrary::default();
         let mut hot_records = Vec::new();
         let mut hot: BTreeMap<HotKind, Vec<usize>> = BTreeMap::new();
-        for row in txn
-            .open_table(INTERP)
-            .map_err(backend)?
-            .iter()
-            .map_err(backend)?
-        {
-            let (_, v) = row.map_err(backend)?;
-            let r = from_cbor(v.value())?.0;
-            if interp.absorb_hot(&r) {
-                continue;
-            }
-            match &r {
-                Record::Manifest(m) => library.absorb_manifest(m),
-                Record::Dating(d) => library.absorb_dating(d),
-                Record::Redaction(x) => library.absorb_redaction(x),
-                _ => {}
-            }
-            if let Some(kind) = HotKind::of(&r) {
-                hot.entry(kind).or_default().push(hot_records.len());
-                hot_records.push(r);
+        let mut seen: BTreeSet<[u8; 32]> = BTreeSet::new();
+        let table = txn.open_table(INTERP).map_err(backend)?;
+        for l in &logs {
+            let (lo, hi) = (interp_key(l.ix, 0), interp_key(l.ix, u64::MAX));
+            for row in table.range::<&[u8; 10]>(&lo..=&hi).map_err(backend)? {
+                let (_, v) = row.map_err(backend)?;
+                let r = from_cbor(v.value())?.0;
+                if kind == Kind::Many && !seen.insert(Store::record_hash(&r)) {
+                    continue;
+                }
+                if interp.absorb_hot(&r) {
+                    continue;
+                }
+                match &r {
+                    Record::Manifest(m) => library.absorb_manifest(m),
+                    Record::Dating(d) => library.absorb_dating(d),
+                    Record::Redaction(x) => library.absorb_redaction(x),
+                    _ => {}
+                }
+                if let Some(kind) = HotKind::of(&r) {
+                    hot.entry(kind).or_default().push(hot_records.len());
+                    hot_records.push(r);
+                }
             }
         }
+        drop((table, seen));
         let source = txn.open_table(SOURCE_REF).map_err(backend)?;
         for row in source.range(Tid::PREFIX.as_bytes()..).map_err(backend)? {
             let (k, _) = row.map_err(backend)?;
@@ -346,23 +536,57 @@ impl RedbStore {
             if !reference.starts_with(Tid::PREFIX.as_bytes()) {
                 break;
             }
+            if subset && uids.binary_search(&uid).is_err() {
+                continue;
+            }
             if let Ok(reference) = std::str::from_utf8(reference) {
                 library.absorb_reference(uid, reference);
             }
         }
 
         // An attestation whose subject is a unit stays on disk until the unit is read; one
-        // naming a relation joins it now; one naming nothing here waits, as in memory.
+        // naming a relation joins it now; one naming nothing here waits, as in memory. Each
+        // once, however many logs hold it, and only the logs read. A unit's count and newest
+        // hop are the store's over every log; opened for some, they are counted again.
         let attest = txn.open_table(ATTEST).map_err(backend)?;
         let mut pending = Vec::new();
+        if subset {
+            for h in &mut heads {
+                h.attested = 0;
+                h.hop = 0;
+            }
+        }
+        let mut last: Option<[u8; 64]> = None;
         for row in attest.iter().map_err(backend)? {
             let (k, v) = row.map_err(backend)?;
-            if uids.binary_search(&uid_of(k.value())).is_ok() {
+            let k = k.value();
+            if !read(log_of(k)) {
                 continue;
             }
-            if let Record::Attestation(a) = from_cbor(v.value())?.0 {
-                if !interp.attach_to_relation(&a) {
-                    pending.push(a);
+            let id: [u8; 64] = k[..64].try_into().expect("64 bytes");
+            if last == Some(id) {
+                continue;
+            }
+            last = Some(id);
+            match uids.binary_search(&uid_of(k)) {
+                Ok(i) if subset => {
+                    if let Record::Attestation(a) = from_cbor(v.value())?.0 {
+                        let h = &mut heads[i];
+                        h.hop = if h.attested == 0 {
+                            a.hop
+                        } else {
+                            h.hop.max(a.hop)
+                        };
+                        h.attested += 1;
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    if let Record::Attestation(a) = from_cbor(v.value())?.0 {
+                        if !interp.attach_to_relation(&a) {
+                            pending.push(a);
+                        }
+                    }
                 }
             }
         }
@@ -379,19 +603,18 @@ impl RedbStore {
             }
         }
 
-        let distinct = txn
-            .open_table(RECORD_HASH)
-            .map_err(backend)?
-            .len()
-            .map_err(backend)?;
         Ok(RedbStore(Arc::new(Inner {
             attest,
             txn,
             _shared: shared,
             opts: opts.clone(),
-            log,
-            log_path: log_path.to_path_buf(),
-            described,
+            kind,
+            logs,
+            at,
+            names,
+            paths,
+            subset,
+            open: Mutex::new(Open::default()),
             uids,
             heads,
             interp,
@@ -399,44 +622,82 @@ impl RedbStore {
             hot,
             library,
             pending,
-            distinct,
             cache: Mutex::new(Cache::new(opts.core_cache_bytes)),
             hashes: OnceLock::new(),
+            joined: OnceLock::new(),
             derived: OnceLock::new(),
         })))
     }
 
-    /// Records in the log this store describes, duplicates included, as `Store::len`.
+    /// Records, as `Store::len`: over one log, duplicates included; over several, each once, as
+    /// `Store::from_records` keeps them.
     pub fn len(&self) -> usize {
-        self.0.described.records as usize
+        match self.0.kind {
+            Kind::One => self.0.logs.iter().map(|l| l.described.records).sum::<u64>() as usize,
+            Kind::Many => self.hashes().len(),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.0.described.records == 0
+        self.len() == 0
     }
 
     /// The length of the log this store describes, in bytes: the end of its last complete
-    /// record.
+    /// record. Over several logs, the length of their records as one log, each once.
     pub fn log_len(&self) -> u64 {
-        self.0.described.log_len
+        match self.0.kind {
+            Kind::One => self.one().described.log_len,
+            Kind::Many => self.joined().0,
+        }
     }
 
     /// The hash of those bytes, as `Store::log_hash`.
     pub fn log_hash(&self) -> &[u8; 32] {
-        &self.0.described.log_hash
+        match self.0.kind {
+            Kind::One => &self.one().described.log_hash,
+            Kind::Many => &self.joined().1,
+        }
     }
 
-    /// The log this store describes.
+    /// The log this store describes; over several, the first it reads, in name order.
     pub fn log_path(&self) -> &Path {
-        &self.0.log_path
+        self.0
+            .logs
+            .first()
+            .map(|l| l.path.as_path())
+            .unwrap_or_else(|| Path::new(""))
+    }
+
+    /// The names of the logs it reads, in name order: empty for a store of one log.
+    pub fn shards(&self) -> impl Iterator<Item = &str> {
+        self.0
+            .logs
+            .iter()
+            .filter(|_| self.0.kind == Kind::Many)
+            .map(|l| l.name.as_str())
+    }
+
+    /// Whether it is a store of several logs, which nothing appends to through it: choosing the
+    /// log a record goes to is the library's routing.
+    pub fn is_shards(&self) -> bool {
+        self.0.kind == Kind::Many
     }
 
     /// The log's bytes up to [`RedbStore::log_len`], as `Store::log_bytes` gives them.
     pub fn log_bytes(&self) -> Vec<u8> {
-        match &self.0.log {
-            Some(f) => log::read_at(f, 0, self.0.described.log_len as usize)
-                .unwrap_or_else(|e| log_moved(e)),
-            None => Vec::new(),
+        match self.0.kind {
+            Kind::One => match self.file(self.one().ix) {
+                Some(f) => log::read_at(&f, 0, self.one().described.log_len as usize)
+                    .unwrap_or_else(|e| log_moved(e)),
+                None => Vec::new(),
+            },
+            Kind::Many => {
+                let mut out = Vec::new();
+                for r in self.records() {
+                    out.extend_from_slice(&smysl_core::to_cbor(&r));
+                }
+                out
+            }
         }
     }
 
@@ -454,6 +715,58 @@ impl RedbStore {
         self.0.cache.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    fn one(&self) -> &LogFile {
+        &self.0.logs[0]
+    }
+
+    fn joined(&self) -> &(u64, [u8; 32]) {
+        self.0.joined.get_or_init(|| {
+            let mut h = Rolling::new();
+            let mut n = 0u64;
+            for r in self.records() {
+                let b = smysl_core::to_cbor(&r);
+                n += b.len() as u64;
+                h.update(&b);
+            }
+            (n, h.finish())
+        })
+    }
+
+    /// A log the store was given, open: from the pool, or opened into it.
+    fn file(&self, ix: LogIx) -> Option<Arc<File>> {
+        let path = self.0.paths.get(ix as usize)?.as_ref()?;
+        let mut open = self.0.open.lock().unwrap_or_else(|e| e.into_inner());
+        open.tick += 1;
+        let tick = open.tick;
+        if let Some(e) = open.files.iter_mut().find(|e| e.0 == ix) {
+            e.2 = tick;
+            return Some(e.1.clone());
+        }
+        if open.files.len() >= open.cap {
+            open.evict_oldest();
+        }
+        let f = loop {
+            match File::open(path) {
+                Ok(f) => break Arc::new(f),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+                Err(e) if out_of_descriptors(&e) && open.files.len() > 1 => {
+                    open.cap = (open.files.len() / 2).max(1);
+                    while open.files.len() > open.cap {
+                        open.evict_oldest();
+                    }
+                }
+                Err(e) => log_moved(e),
+            }
+        };
+        open.files.push((ix, f.clone(), tick));
+        Some(f)
+    }
+
+    /// Whether a row of log `ix` belongs to what this store answers.
+    fn reads(&self, ix: LogIx) -> bool {
+        self.0.at.get(ix as usize).copied().flatten().is_some()
+    }
+
     /// The unit at index `i` of the uid order: from the cache, or from the log and `attest`.
     ///
     /// `scan` is a read on the way through `units()`. It is answered from the cache, and keeps
@@ -466,8 +779,10 @@ impl RedbStore {
             return u;
         }
         let h = self.0.heads[i];
-        let file = self.0.log.as_ref().unwrap_or_else(|| log_moved("no log"));
-        let bytes = log::read_at(file, h.offset, h.len as usize).unwrap_or_else(|e| log_moved(e));
+        // Its core is the same in every log that holds it, so any will do; a store opened for
+        // some logs reads it from the first to bring it, read or not.
+        let file = self.file(h.log).unwrap_or_else(|| log_moved("no log"));
+        let bytes = log::read_at(&file, h.offset, h.len as usize).unwrap_or_else(|e| log_moved(e));
         let core = match from_cbor(&bytes) {
             Ok((Record::Unit(core), _)) => core,
             Ok(_) => log_moved("a unit's offset holds another record"),
@@ -479,10 +794,13 @@ impl RedbStore {
             let rows = self
                 .0
                 .attest
-                .range::<&[u8; 64]>(&lo..=&hi)
+                .range::<&[u8; 66]>(&lo..=&hi)
                 .unwrap_or_else(|e| log_moved(e));
             for row in rows {
-                let (_, v) = row.unwrap_or_else(|e| log_moved(e));
+                let (k, v) = row.unwrap_or_else(|e| log_moved(e));
+                if !self.reads(log_of(k.value())) {
+                    continue;
+                }
                 if let Ok((Record::Attestation(a), _)) = from_cbor(v.value()) {
                     unit.attestations.insert(a);
                 }
@@ -523,8 +841,12 @@ impl RedbStore {
                 let (k, _) = row.unwrap_or_else(|e| log_moved(e));
                 let k = k.value();
                 let uid = uid_of(&k[..32]);
-                while units[at].0 < uid {
+                while at < units.len() && units[at].0 < uid {
                     at += 1;
+                }
+                // A unit of a log this store was not opened for.
+                if at == units.len() || units[at].0 != uid {
+                    continue;
                 }
                 let target = uid_of(&k[33..]);
                 if k[32] == 0 {
@@ -570,6 +892,7 @@ impl RedbStore {
         })
     }
 
+    /// Every distinct record hash of the logs read, ascending.
     fn hashes(&self) -> &[[u8; 32]] {
         self.0.hashes.get_or_init(|| {
             let t = self
@@ -577,10 +900,18 @@ impl RedbStore {
                 .txn
                 .open_table(RECORD_HASH)
                 .unwrap_or_else(|e| log_moved(e));
-            t.iter()
-                .unwrap_or_else(|e| log_moved(e))
-                .map(|row| *row.unwrap_or_else(|e| log_moved(e)).0.value())
-                .collect()
+            let mut out: Vec<[u8; 32]> = Vec::new();
+            for row in t.iter().unwrap_or_else(|e| log_moved(e)) {
+                let k = *row.unwrap_or_else(|e| log_moved(e)).0.value();
+                if !self.reads(log_of(&k)) {
+                    continue;
+                }
+                let h: [u8; 32] = k[..32].try_into().expect("32 bytes");
+                if out.last() != Some(&h) {
+                    out.push(h);
+                }
+            }
+            out
         })
     }
 }
@@ -615,27 +946,65 @@ impl<'a> Iterator for RedbUnits<'a> {
     }
 }
 
-/// A [`RedbStore`]'s log, in log order, read as it is walked.
-pub struct RedbRecords<'a>(log::LogReader<'a>);
+/// A [`RedbStore`]'s log, in log order, read as it is walked: over several logs, each in name
+/// order, and each record once.
+pub struct RedbRecords<'a> {
+    /// The logs to walk, in name order, each to the length the store describes: owned, so a walk
+    /// holds nothing of the store (and is as unwind-safe as a file).
+    logs: Vec<(PathBuf, u64)>,
+    /// The next log in `logs` to start.
+    next: usize,
+    reader: Option<log::LogReader<'static>>,
+    seen: Option<BTreeSet<[u8; 32]>>,
+    _store: std::marker::PhantomData<&'a ()>,
+}
 
 impl<'a> Iterator for RedbRecords<'a> {
     type Item = Cow<'a, Record>;
     fn next(&mut self) -> Option<Cow<'a, Record>> {
-        match self.0.next() {
-            Ok(r) => r.map(|(_, _, r)| Cow::Owned(r)),
-            Err(e) => log_moved(e),
+        loop {
+            if let Some(reader) = &mut self.reader {
+                match reader.next() {
+                    Ok(Some((_, _, r))) => {
+                        if let Some(seen) = &mut self.seen {
+                            if !seen.insert(Store::record_hash(&r)) {
+                                continue;
+                            }
+                        }
+                        return Some(Cow::Owned(r));
+                    }
+                    Ok(None) => self.reader = None,
+                    Err(e) => log_moved(e),
+                }
+            }
+            let (path, len) = self.logs.get(self.next)?;
+            self.next += 1;
+            // Its own descriptor, not the pool's: a walk holds its log for as long as it takes.
+            match File::open(path) {
+                Ok(f) => self.reader = Some(log::LogReader::owning(f, 0, *len, Rolling::new())),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => log_moved(e),
+            }
         }
     }
 }
 
 impl sealed::Sealed for RedbStore {
     fn owned(&self) -> Cow<'_, Store> {
-        let bytes = self.log_bytes();
-        let (records, consumed) = from_cbor_seq(&bytes).unwrap_or_else(|e| log_moved(e));
-        // With no path, as `Store::from_records` has none: an in-memory copy is for reading,
-        // and one that kept the log's path would write to it on `append` — once more after the
-        // writer had, which is what `--backend redb retract` did before this said so.
-        Cow::Owned(Store::of_log(None, records, &bytes[..consumed]))
+        match self.0.kind {
+            Kind::One => {
+                let bytes = self.log_bytes();
+                let (records, consumed) = from_cbor_seq(&bytes).unwrap_or_else(|e| log_moved(e));
+                // With no path, as `Store::from_records` has none: an in-memory copy is for
+                // reading, and one that kept the log's path would write to it on `append` — once
+                // more after the writer had, which is what `--backend redb retract` did before
+                // this said so.
+                Cow::Owned(Store::of_log(None, records, &bytes[..consumed]))
+            }
+            Kind::Many => Cow::Owned(Store::from_records(
+                self.records().map(Cow::into_owned).collect(),
+            )),
+        }
     }
     fn interp(&self) -> &Interpretive {
         &self.0.interp
@@ -703,7 +1072,9 @@ impl StoreRead for RedbStore {
                 break;
             }
             let (reference, uid) = split_source_key(k);
-            if reference.starts_with(prefix.as_bytes()) {
+            if reference.starts_with(prefix.as_bytes())
+                && (!self.0.subset || self.index_of(&uid).is_some())
+            {
                 out.push(uid);
             }
         }
@@ -719,6 +1090,7 @@ impl StoreRead for RedbStore {
         t.iter()
             .unwrap_or_else(|e| log_moved(e))
             .map(|row| uid_of(&row.unwrap_or_else(|e| log_moved(e)).0.value()[8..]))
+            .filter(|u| !self.0.subset || self.index_of(u).is_some())
             .collect()
     }
 
@@ -786,21 +1158,74 @@ impl StoreRead for RedbStore {
     }
 
     fn records(&self) -> RedbRecords<'_> {
-        RedbRecords(log::LogReader::new(
-            self.0.log.as_ref(),
-            0,
-            self.0.described.log_len,
-            Rolling::new(),
-        ))
+        RedbRecords {
+            logs: self
+                .0
+                .logs
+                .iter()
+                .map(|l| (l.path.clone(), l.described.log_len))
+                .collect(),
+            next: 0,
+            reader: None,
+            seen: (self.0.kind == Kind::Many).then(BTreeSet::new),
+            _store: std::marker::PhantomData,
+        }
     }
     fn duplicate_records(&self) -> usize {
-        (self.0.described.records - self.0.distinct) as usize
+        match self.0.kind {
+            Kind::One => self.len() - self.hashes().len(),
+            // `from_records` keeps one of each.
+            Kind::Many => 0,
+        }
     }
     fn record_set_digest(&self) -> [u8; 32] {
         digest_of_hashes(self.hashes())
     }
     fn state_hash(&self) -> [u8; 32] {
         state_hash_of(self.units(), &self.0.interp)
+    }
+
+    /// Opened for some of its logs, a reference into another that holds the uid waits on it
+    /// (`SMY-W500`), as a union of shards given their index says.
+    fn report_dangling(&self, report: &mut Report) {
+        let g = self.adjacency();
+        let holds = self.0.subset.then(|| {
+            self.0
+                .txn
+                .open_table(HOLDS)
+                .unwrap_or_else(|e| log_moved(e))
+        });
+        for n in g.dangling() {
+            let Some(uid) = g.uid(n) else { continue };
+            let mut waits: Vec<&str> = Vec::new();
+            if let Some(t) = &holds {
+                let (lo, hi) = log_range(uid.as_bytes());
+                for row in t
+                    .range::<&[u8; 34]>(&lo..=&hi)
+                    .unwrap_or_else(|e| log_moved(e))
+                {
+                    let ix = log_of(row.unwrap_or_else(|e| log_moved(e)).0.value());
+                    if let Some(Some(name)) = self.0.names.get(ix as usize) {
+                        if !self.reads(ix) {
+                            waits.push(name);
+                        }
+                    }
+                }
+            }
+            if waits.is_empty() {
+                report.push(
+                    Diagnostic::new(Code::E060)
+                        .with_subject(Subject::Unit(*uid))
+                        .with_message("referenced by this store but not present in it"),
+                );
+            } else {
+                report.push(
+                    Diagnostic::new(Code::W500)
+                        .with_subject(Subject::Unit(*uid))
+                        .with_message(format!("waits on shard {}", waits.join(", "))),
+                );
+            }
+        }
     }
 }
 

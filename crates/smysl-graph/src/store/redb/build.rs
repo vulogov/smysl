@@ -1,11 +1,19 @@
 //! Folding log records into the unit store's tables (SMYSL-2.8 §3.5.5).
 //!
-//! One fold for both of index mode's writes: a rebuild is the fold of the whole log into empty
-//! tables, and catching up is the fold of the tail the store does not describe yet. The fold is
-//! the store's `absorb` restated over tables — a unit's first core wins, an attestation is kept
-//! under its subject whether or not the subject has arrived, every other record goes to
-//! `interp` — so the two cannot drift: the conformance suite compares what each produces
-//! against `Store::open` of the same log.
+//! One fold for both of index mode's writes: a rebuild is the fold of every log into empty
+//! tables, and catching up is the fold of the tail of each log the store does not describe yet.
+//! The fold is the store's `absorb` restated over tables — a unit's first core wins, an
+//! attestation is kept under its subject whether or not the subject has arrived, every other
+//! record goes to `interp` — so the two cannot drift: the conformance suite compares what each
+//! produces against `Store::open` of the same log, and a store of several logs against
+//! `Store::from_records` of theirs.
+//!
+//! **Several logs** (TX-P13c step 3, OQ-90). A library's shards are one store: every row says
+//! which log it came from, a log is folded on its own, and what the store answers — the logs in
+//! name order, each record once — is decided when it is read (`load`), not when it is written,
+//! so a log that grows does not move the rows of any other.
+
+use std::collections::BTreeMap;
 
 use ::redb::{Database, Durability, ReadableTable, TableHandle};
 use smysl_core::diag::{Code, Diagnostic};
@@ -13,13 +21,14 @@ use smysl_core::{canonical_uid, Error, LibError, Record, Rolling};
 
 use super::log::{self, LogReader};
 use super::tables::{
-    attest_key, attest_range, deps_key, observed_key, source_key, Header, ATTEST, DEPS, HEADER,
-    INTERP, LAYOUT, META, OBSERVED, RECORD_HASH, SOURCE_REF,
+    attest_key, attest_range, deps_key, interp_key, log_range, observed_key, source_key, with_log,
+    Header, LogIx, LogRow, ATTEST, DEPS, HEADER, HOLDS, INTERP, LAYOUT, LOGS, META, OBSERVED,
+    RECORD_HASH, SOURCE_REF,
 };
 use super::{backend, OpenReport};
 use crate::Store;
 
-/// What a store's `meta` says it describes.
+/// What a store says it describes of one log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Described {
     pub(super) layout: u16,
@@ -40,8 +49,33 @@ impl Described {
     }
 }
 
-/// What `meta` says, or `None` for a store that has never been written.
-pub(super) fn described(db: &Database) -> Result<Option<Described>, Error> {
+/// One store over one log (`Store::open`'s answer, repeats kept), or over several (the answer
+/// of `Store::from_records` of all their records in name order, each record once).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Kind {
+    One,
+    Many,
+}
+
+impl Kind {
+    fn tag(self) -> &'static [u8] {
+        match self {
+            Kind::One => b"one",
+            Kind::Many => b"many",
+        }
+    }
+}
+
+/// What a store says of itself: its layout and kind, and what it describes of each log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Meta {
+    pub(super) layout: u16,
+    pub(super) kind: Option<Vec<u8>>,
+    pub(super) logs: BTreeMap<String, LogRow>,
+}
+
+/// What `meta` and `logs` say, or `None` for a store that has never been written.
+pub(super) fn meta(db: &Database) -> Result<Option<Meta>, Error> {
     let txn = db.begin_read().map_err(backend)?;
     let meta = match txn.open_table(META) {
         Ok(t) => t,
@@ -54,31 +88,47 @@ pub(super) fn described(db: &Database) -> Result<Option<Described>, Error> {
     let Some(layout) = get("layout")? else {
         return Ok(None);
     };
-    let fixed = |v: Option<Vec<u8>>, what: &str| -> Result<Vec<u8>, Error> {
-        v.ok_or_else(|| backend(format!("meta has a layout and no {what}")))
-    };
     let layout = u16::from_be_bytes(
         layout
             .as_slice()
             .try_into()
             .map_err(|_| backend("meta.layout is not two bytes"))?,
     );
-    let n = |v: Vec<u8>, what: &str| -> Result<u64, Error> {
-        Ok(u64::from_be_bytes(v.as_slice().try_into().map_err(
-            |_| backend(format!("meta.{what} is not eight bytes")),
-        )?))
-    };
-    let log_len = n(fixed(get("log_len")?, "log_len")?, "log_len")?;
-    let records = n(fixed(get("records")?, "records")?, "records")?;
-    let log_hash: [u8; 32] = fixed(get("log_hash")?, "log_hash")?
-        .as_slice()
-        .try_into()
-        .map_err(|_| backend("meta.log_hash is not 32 bytes"))?;
-    Ok(Some(Described {
+    let mut logs = BTreeMap::new();
+    // A store of an older layout has no `logs`; it is rebuilt, and needs nothing more read.
+    if layout == LAYOUT {
+        match txn.open_table(LOGS) {
+            Ok(t) => {
+                for row in t.iter().map_err(backend)? {
+                    let (k, v) = row.map_err(backend)?;
+                    logs.insert(k.value().to_string(), LogRow::decode(v.value()));
+                }
+            }
+            Err(::redb::TableError::TableDoesNotExist(_)) => {}
+            Err(e) => return Err(backend(e)),
+        }
+    }
+    Ok(Some(Meta {
         layout,
-        log_len,
-        log_hash,
-        records,
+        kind: get("logs")?,
+        logs,
+    }))
+}
+
+/// What the store describes of the log called `name`, if anything.
+pub(super) fn described(db: &Database, name: &str) -> Result<Option<(LogIx, Described)>, Error> {
+    Ok(meta(db)?.and_then(|m| {
+        m.logs.get(name).map(|r| {
+            (
+                r.ix,
+                Described {
+                    layout: m.layout,
+                    log_len: r.log_len,
+                    log_hash: r.log_hash,
+                    records: r.records,
+                },
+            )
+        })
     }))
 }
 
@@ -104,55 +154,113 @@ pub(super) struct Folded {
     pub(super) trailing: u64,
 }
 
-/// Bring the store up to its log: nothing if it describes the log already, the tail if the log
-/// has grown, a rebuild if it describes some other log, an older layout, or nothing.
+/// A log as a catch-up is given it: its name, and the file open already (a writer's) or a path
+/// to open it from, one log at a time — a store of a thousand logs must not need a thousand
+/// descriptors at once.
+pub(super) struct Given<'f> {
+    pub(super) name: &'f str,
+    pub(super) path: &'f std::path::Path,
+    pub(super) file: Option<&'f std::fs::File>,
+}
+
+impl Given<'_> {
+    /// The log, open; `None` if it does not exist yet, which reads as empty.
+    fn open(&self) -> Result<Option<Held<'_>>, Error> {
+        if let Some(f) = self.file {
+            return Ok(Some(Held::Borrowed(f)));
+        }
+        match std::fs::File::open(self.path) {
+            Ok(f) => Ok(Some(Held::Owned(f))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(Error::Io(e)),
+        }
+    }
+}
+
+/// A log open for a catch-up: the writer's own, or one opened for it and closed after.
+enum Held<'f> {
+    Borrowed(&'f std::fs::File),
+    Owned(std::fs::File),
+}
+
+impl std::ops::Deref for Held<'_> {
+    type Target = std::fs::File;
+    fn deref(&self) -> &std::fs::File {
+        match self {
+            Held::Borrowed(f) => f,
+            Held::Owned(f) => f,
+        }
+    }
+}
+
+/// A log as the store now describes it, after a catch-up: its position, what is described, and
+/// the hash up to there, still open.
+pub(super) struct CaughtUp {
+    pub(super) ix: LogIx,
+    pub(super) described: Described,
+    pub(super) hasher: Rolling,
+}
+
+/// Bring the store up to its logs: nothing for a log it describes already, the tail of one that
+/// has grown, a rebuild of all of them if it describes some other log, a log it was not given,
+/// an older layout, another kind, or nothing.
 ///
-/// Returns what the store now describes and the log's hash up to there, still open. The
-/// caller holds the database's fold lock.
+/// Returns each given log's [`CaughtUp`], in the order given. The caller holds the database's
+/// fold lock.
 pub(super) fn catch_up(
     db: &Database,
-    log: Option<&std::fs::File>,
+    kind: Kind,
+    logs: &[Given<'_>],
     force_rebuild: bool,
     report: &mut OpenReport,
-) -> Result<(Described, Rolling), Error> {
-    let end = match log {
-        Some(f) => f.metadata().map_err(Error::Io)?.len(),
-        None => 0,
-    };
-    // Current, behind, or not this log's at all.
-    let held_now = described(db)?;
+) -> Result<Vec<CaughtUp>, Error> {
+    let held_now = meta(db)?;
     let mut rebuild = None;
-    let mut hasher = Rolling::new();
-    match held_now {
+    let mut hashers: BTreeMap<&str, Rolling> = BTreeMap::new();
+    match &held_now {
         None => rebuild = Some("no unit store described this log; built it from the log"),
-        Some(d) if d.layout > LAYOUT => {
+        Some(m) if m.layout > LAYOUT => {
             return Err(Error::Lib(LibError::StoreLayout {
-                found: d.layout,
+                found: m.layout,
                 supported: LAYOUT,
             }))
         }
-        Some(d) if d.layout < LAYOUT => {
+        Some(m) if m.layout < LAYOUT => {
             rebuild = Some("the unit store is in an older layout; rebuilt from the log")
         }
         Some(_) if force_rebuild => rebuild = Some("rebuilt from the log, as asked"),
-        Some(d) => {
-            let prefix = match log {
-                Some(f) => log::hash_prefix(f, d.log_len).map_err(Error::Io)?,
-                None if d.log_len == 0 => Some(Rolling::new()),
-                None => None,
-            };
-            match prefix {
-                Some(h) if h.finish() == d.log_hash => hasher = h,
-                _ => {
-                    rebuild = Some(
-                        "the unit store does not describe this log (its length or hash \
-                         differs); rebuilt from the log",
-                    )
+        Some(m) if m.kind.as_deref() != Some(kind.tag()) => {
+            rebuild = Some("the unit store was built for another set of logs; rebuilt")
+        }
+        Some(m) if m.logs.keys().any(|n| !logs.iter().any(|g| g.name == n)) => {
+            rebuild = Some("the unit store describes a log it was not given; rebuilt")
+        }
+        Some(m) => {
+            for g in logs {
+                let Some(row) = m.logs.get(g.name) else {
+                    continue;
+                };
+                let prefix = match g.open()? {
+                    Some(f) => log::hash_prefix(&f, row.log_len).map_err(Error::Io)?,
+                    None if row.log_len == 0 => Some(Rolling::new()),
+                    None => None,
+                };
+                match prefix {
+                    Some(h) if h.finish() == row.log_hash => {
+                        hashers.insert(g.name, h);
+                    }
+                    _ => {
+                        rebuild = Some(
+                            "the unit store does not describe this log (its length or hash \
+                             differs); rebuilt from the log",
+                        );
+                        break;
+                    }
                 }
             }
         }
     }
-    let from = match (rebuild, held_now) {
+    let mut rows: BTreeMap<String, LogRow> = match (rebuild, held_now) {
         (Some(why), held) => {
             if held.is_some() {
                 clear(db)?;
@@ -161,36 +269,85 @@ pub(super) fn catch_up(
                 .report
                 .push(Diagnostic::new(Code::W501).with_message(why));
             report.index_rebuilt = true;
-            Described::empty()
+            hashers.clear();
+            BTreeMap::new()
         }
-        (None, Some(d)) => d,
+        (None, Some(m)) => m.logs,
         (None, None) => unreachable!("a store with no description is rebuilt"),
     };
-    if rebuild.is_none() && end <= from.log_len {
-        return Ok((from, hasher));
+    let mut out = Vec::with_capacity(logs.len());
+    for g in logs {
+        let file = g.open()?;
+        let end = match &file {
+            Some(f) => f.metadata().map_err(Error::Io)?.len(),
+            None => 0,
+        };
+        let (ix, from) = match rows.get(g.name) {
+            Some(r) => (
+                r.ix,
+                Described {
+                    layout: LAYOUT,
+                    log_len: r.log_len,
+                    log_hash: r.log_hash,
+                    records: r.records,
+                },
+            ),
+            None => {
+                let ix = rows.values().map(|r| r.ix + 1).max().unwrap_or(0);
+                (ix, Described::empty())
+            }
+        };
+        let hasher = hashers.remove(g.name).unwrap_or_default();
+        let known = rows.contains_key(g.name);
+        if known && end <= from.log_len {
+            out.push(CaughtUp {
+                ix,
+                described: from,
+                hasher,
+            });
+            continue;
+        }
+        let (now, folded, hasher) = fold(db, kind, g.name, ix, file.as_deref(), from, end, hasher)?;
+        rows.insert(
+            g.name.to_string(),
+            LogRow {
+                ix,
+                log_len: now.log_len,
+                log_hash: now.log_hash,
+                records: now.records,
+            },
+        );
+        report.replayed += folded.records;
+        report.trailing_bytes += folded.trailing;
+        if folded.trailing > 0 {
+            report
+                .report
+                .push(Diagnostic::new(Code::W110).with_message(format!(
+                    "{} trailing bytes after the last complete record",
+                    folded.trailing
+                )));
+        }
+        out.push(CaughtUp {
+            ix,
+            described: now,
+            hasher,
+        });
     }
-    let (now, folded, hasher) = fold(db, log, from, end, hasher)?;
-    report.replayed += folded.records;
-    report.trailing_bytes = folded.trailing;
-    if folded.trailing > 0 {
-        report
-            .report
-            .push(Diagnostic::new(Code::W110).with_message(format!(
-                "{} trailing bytes after the last complete record",
-                folded.trailing
-            )));
-    }
-    Ok((now, hasher))
+    Ok(out)
 }
 
-/// Fold the log's complete records after `from` into the tables, in one transaction, and
-/// record that the store now describes the log up to the last of them.
+/// Fold one log's complete records after `from` into the tables, in one transaction, and
+/// record that the store now describes that log up to the last of them.
 ///
 /// `hasher` holds the hash of the log before `from.log_len`. The transaction commits with
 /// `Durability::Immediate`: the log was written first, so a crash leaves the store behind its
 /// log, never ahead of it, and behind is a tail to fold again.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn fold(
     db: &Database,
+    kind: Kind,
+    name: &str,
+    ix: LogIx,
     log: Option<&std::fs::File>,
     from: Described,
     end: u64,
@@ -203,6 +360,7 @@ pub(super) fn fold(
     {
         let mut hashes = txn.open_table(RECORD_HASH).map_err(backend)?;
         let mut header = txn.open_table(HEADER).map_err(backend)?;
+        let mut holds = txn.open_table(HOLDS).map_err(backend)?;
         let mut deps = txn.open_table(DEPS).map_err(backend)?;
         let mut attest = txn.open_table(ATTEST).map_err(backend)?;
         let mut interp = txn.open_table(INTERP).map_err(backend)?;
@@ -211,22 +369,44 @@ pub(super) fn fold(
 
         while let Some((offset, len, record)) = reader.next()? {
             let hash = Store::record_hash(&record);
-            let fresh = hashes.get(&hash).map_err(backend)?.is_none();
+            let here = with_log(&hash, ix);
+            // New to this log, and new to the store: a record two logs hold is one record.
+            let fresh = hashes.get(&here).map_err(backend)?.is_none();
+            let first = fresh && {
+                let (lo, hi) = log_range(&hash);
+                hashes
+                    .range::<&[u8; 34]>(&lo..=&hi)
+                    .map_err(backend)?
+                    .next()
+                    .is_none()
+            };
             if fresh {
-                hashes.insert(&hash, seq).map_err(backend)?;
+                hashes.insert(&here, seq).map_err(backend)?;
             }
             match &record {
                 // A unit's first core wins, as `absorb`'s `or_insert` keeps it; a repeat
-                // changes nothing.
+                // changes nothing. Its core is the same in every log that holds it — the uid is
+                // the core's — so which log it is read from is the first to bring it.
                 Record::Unit(core) if fresh => {
                     let uid = canonical_uid(core);
+                    if kind == Kind::Many {
+                        holds
+                            .insert(&with_log(uid.as_bytes(), ix), ())
+                            .map_err(backend)?;
+                    }
                     if header.get(uid.as_bytes()).map_err(backend)?.is_none() {
-                        // Attestations that reached the log before the unit did.
+                        // Attestations that reached a log before the unit did, each once.
                         let (lo, hi) = attest_range(&uid);
                         let mut attested = 0u32;
                         let mut hop = 0u32;
-                        for row in attest.range::<&[u8; 64]>(&lo..=&hi).map_err(backend)? {
-                            let (_, v) = row.map_err(backend)?;
+                        let mut last: Option<[u8; 32]> = None;
+                        for row in attest.range::<&[u8; 66]>(&lo..=&hi).map_err(backend)? {
+                            let (k, v) = row.map_err(backend)?;
+                            let h: [u8; 32] = k.value()[32..64].try_into().expect("32 bytes");
+                            if last == Some(h) {
+                                continue;
+                            }
+                            last = Some(h);
                             if let Record::Attestation(a) = smysl_core::from_cbor(v.value())?.0 {
                                 attested += 1;
                                 hop = hop.max(a.hop);
@@ -234,6 +414,7 @@ pub(super) fn fold(
                         }
                         let observed_ms = core.source.as_ref().and_then(|s| s.observed);
                         let h = Header {
+                            log: ix,
                             offset,
                             len,
                             status: core.status.as_u8(),
@@ -265,17 +446,18 @@ pub(super) fn fold(
                 }
                 Record::Unit(_) => {}
                 // Kept under its subject whatever the subject turns out to be. A unit's count
-                // and newest hop move now if the unit is here; if it arrives later, its header
-                // is written with the attestations already waiting.
+                // and newest hop move now if the unit is here and the attestation is new to the
+                // store; if the unit arrives later, its header is written with the attestations
+                // already waiting.
                 Record::Attestation(a) if fresh => {
                     attest
-                        .insert(&attest_key(&a.uid, &hash), reader.raw())
+                        .insert(&attest_key(&a.uid, &hash, ix), reader.raw())
                         .map_err(backend)?;
                     let held = header
                         .get(a.uid.as_bytes())
                         .map_err(backend)?
                         .map(|v| Header::decode(v.value()));
-                    if let Some(mut h) = held {
+                    if let (Some(mut h), true) = (held, first) {
                         h.hop = if h.attested == 0 {
                             a.hop
                         } else {
@@ -289,9 +471,11 @@ pub(super) fn fold(
                 }
                 Record::Attestation(_) => {}
                 // Repeats included: `Store::open` keeps a log as it is, and a hot record given
-                // twice is listed twice.
+                // twice is listed twice. A store of several logs drops them when it is read.
                 _ => {
-                    interp.insert(seq, reader.raw()).map_err(backend)?;
+                    interp
+                        .insert(&interp_key(ix, seq), reader.raw())
+                        .map_err(backend)?;
                 }
             }
             seq += 1;
@@ -308,12 +492,15 @@ pub(super) fn fold(
         meta.insert("layout", LAYOUT.to_be_bytes().as_slice())
             .map_err(backend)?;
         meta.insert("mode", b"index".as_slice()).map_err(backend)?;
-        meta.insert("log_len", now.log_len.to_be_bytes().as_slice())
-            .map_err(backend)?;
-        meta.insert("log_hash", now.log_hash.as_slice())
-            .map_err(backend)?;
-        meta.insert("records", now.records.to_be_bytes().as_slice())
-            .map_err(backend)?;
+        meta.insert("logs", kind.tag()).map_err(backend)?;
+        let mut logs = txn.open_table(LOGS).map_err(backend)?;
+        let row = LogRow {
+            ix,
+            log_len: now.log_len,
+            log_hash: now.log_hash,
+            records: now.records,
+        };
+        logs.insert(name, &row.encode()).map_err(backend)?;
     }
     txn.commit().map_err(backend)?;
     let folded = Folded {

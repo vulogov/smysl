@@ -583,6 +583,86 @@ fn union_conforms(name: &str, log: &[Record], whole: &Store, p: &[Uid]) {
             }
             drop(u);
             drop(redb);
+
+            // Implementation 8 (TX-P13c step 3): the shards as one unit store, not a union of
+            // stores — with the first shard holding some of its records twice, which a store of
+            // several logs reads once, as `from_records` does.
+            let logs: Vec<(String, std::path::PathBuf)> = ids
+                .iter()
+                .enumerate()
+                .map(|(i, id)| {
+                    let path = dir.join(format!("m{i}.smy"));
+                    let mut bytes = to_cbor_seq(&parts[i]);
+                    if i == 0 {
+                        bytes.extend(to_cbor_seq(&parts[i][..parts[i].len().min(3)]));
+                    }
+                    std::fs::write(&path, bytes).unwrap();
+                    (id.clone(), path)
+                })
+                .collect();
+            let at = dir.join("library.redb");
+            let (one, _) = RedbStore::open_shards(&at, &logs, None, off.clone()).unwrap();
+            for (g, w) in observe(&one, p).iter().zip(&want) {
+                assert_eq!(g, w, "{name}: one RedbStore over k={k} logs disagrees");
+            }
+            assert_eq!(one.record_set_digest(), want_store.record_set_digest());
+            assert_eq!(one.log_hash(), want_store.log_hash());
+            drop(one);
+            // Reopened, with the cache on: nothing to fold, the same answers.
+            let (again, report) =
+                RedbStore::open_shards(&at, &logs, None, RedbOptions::default()).unwrap();
+            assert_eq!(report.replayed, 0, "{name}: k={k}: reopened and folded");
+            for (g, w) in observe(&again, p).iter().zip(&want) {
+                assert_eq!(g, w, "{name}: one RedbStore reopened, k={k}, disagrees");
+            }
+            drop(again);
+
+            // Some of the shards: `from_records` of theirs alone, with a reference into one of
+            // the others waiting on it — what a union of them given the shards' index answers.
+            let some: Vec<String> = ids.iter().step_by(2).cloned().collect();
+            let index = std::sync::Arc::new(smysl_graph::UidShards::of(
+                ids.iter().map(String::as_str).zip(stores.iter()),
+            ));
+            let want_some = observe(
+                &Union::new(ids.iter().cloned().zip(stores.iter()).step_by(2)).with_index(index),
+                p,
+            );
+            let (sub, _) = RedbStore::open_shards(&at, &logs, Some(&some), off.clone()).unwrap();
+            for (g, w) in observe(&sub, p).iter().zip(&want_some) {
+                assert_eq!(
+                    g, w,
+                    "{name}: one RedbStore opened for {some:?} of k={k} disagrees"
+                );
+            }
+            drop(sub);
+
+            // A shard that grows in the middle of the order is folded on its own, and the store
+            // answers for the new whole.
+            if k > 1 {
+                let more = &parts[0][..parts[0].len().min(2)];
+                let mut bytes = std::fs::read(&logs[k - 1].1).unwrap();
+                bytes.extend(to_cbor_seq(more));
+                std::fs::write(&logs[k - 1].1, bytes).unwrap();
+                let mut grown: Vec<Record> = Vec::new();
+                for (i, part) in parts.iter().enumerate() {
+                    grown.extend(part.iter().cloned());
+                    if i == k - 1 {
+                        grown.extend(more.iter().cloned());
+                    }
+                }
+                let want_grown = observe(&Store::from_records(grown), p);
+                let (g2, report) = RedbStore::open_shards(&at, &logs, None, off.clone()).unwrap();
+                assert!(
+                    !report.index_rebuilt,
+                    "{name}: k={k}: a grown shard rebuilt"
+                );
+                for (g, w) in observe(&g2, p).iter().zip(&want_grown) {
+                    assert_eq!(
+                        g, w,
+                        "{name}: one RedbStore after a shard grew, k={k}, disagrees"
+                    );
+                }
+            }
             let _ = std::fs::remove_dir_all(&dir);
         }
     }

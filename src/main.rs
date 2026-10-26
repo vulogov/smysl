@@ -2612,10 +2612,25 @@ fn finish_over(bar: Bar, n: usize, verb: &str) {
 fn cmd_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let strict = global.get_flag("strict");
     let json = global.get_flag("json");
-    let passes: Vec<Pass> = m
-        .get_many::<String>("pass")
-        .map(|v| v.filter_map(|s| Pass::parse(s)).collect())
-        .unwrap_or_default();
+    // A name that is not a pass is refused, not dropped: dropped, `--pass typo` left no pass
+    // named and so ran them all, and reported a clean store for the pass it was asked for.
+    let mut passes: Vec<Pass> = Vec::new();
+    for name in m.get_many::<String>("pass").into_iter().flatten() {
+        match Pass::parse(name) {
+            Some(p) => passes.push(p),
+            None => {
+                eprintln!(
+                    "smysl check: no pass `{name}`; the passes are {}",
+                    Pass::ALL
+                        .iter()
+                        .map(|p| format!("`{}`", p.as_str()))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                return ExitCode::Usage;
+            }
+        }
+    }
 
     let files: Vec<String> = m
         .get_many::<String>("files")
@@ -2993,35 +3008,6 @@ fn open_library_union(root: &std::path::Path) -> Result<AnyStore, String> {
         _ => all.clone(),
     };
     let subset = want.len() < all.len();
-    // One budget for the union, not one per shard: a thousand shards each given the default
-    // would between them cache every core, which is the memory backend with extra steps
-    // (GE-T7's stand-in measured 3.7 GB for `check` that way, SMYSL-2.8 §6.1 P13c.2).
-    #[cfg(feature = "store-redb")]
-    let shared = redb_options().map(|mut opts| {
-        opts.core_cache_bytes /= want.len().max(1);
-        opts.page_cache_bytes /= want.len().max(1);
-        opts
-    });
-    let mut stores = Vec::new();
-    for (name, log) in want {
-        if !log.is_file() {
-            continue;
-        }
-        #[cfg(feature = "store-redb")]
-        if let Some(opts) = shared.clone() {
-            let (store, report) =
-                AnyStore::open_redb(&log, opts).map_err(|e| format!("{at}: {name}: {e}"))?;
-            for d in report.report.iter() {
-                eprintln!("{at}: {name}: {d}");
-            }
-            stores.push((name, store));
-            continue;
-        }
-        let bytes = std::fs::read(&log).map_err(|e| format!("{at}: {name}: {e}"))?;
-        let (records, _) =
-            smysl::from_cbor_seq(&bytes).map_err(|e| format!("{at}: {name}: {e}"))?;
-        stores.push((name, AnyStore::from(Store::from_records(records))));
-    }
     let index = if subset {
         Some(std::sync::Arc::new(
             shards::uid_index(root).map_err(|e| format!("{at}: {e}"))?,
@@ -3029,6 +3015,36 @@ fn open_library_union(root: &std::path::Path) -> Result<AnyStore, String> {
     } else {
         None
     };
+    // One unit store for every shard, not one a shard: a thousand stores' fixed costs were most
+    // of a thousand-shard library's resident set (SMYSL-2.8 §6.1, P13c.2), and the union over
+    // them held a second copy of what they held. Opened for the shards asked for.
+    #[cfg(feature = "store-redb")]
+    if let Some(opts) = redb_options() {
+        let only: Option<Vec<String>> =
+            subset.then(|| want.iter().map(|(n, _)| n.clone()).collect());
+        let (store, report) = AnyStore::open_redb_shards(
+            &root.join(shards::UNIT_STORE),
+            &all,
+            only.as_deref(),
+            index,
+            opts,
+        )
+        .map_err(|e| format!("{at}: {e}"))?;
+        for d in report.report.iter() {
+            eprintln!("{at}: {d}");
+        }
+        return Ok(store);
+    }
+    let mut stores = Vec::new();
+    for (name, log) in want {
+        if !log.is_file() {
+            continue;
+        }
+        let bytes = std::fs::read(&log).map_err(|e| format!("{at}: {name}: {e}"))?;
+        let (records, _) =
+            smysl::from_cbor_seq(&bytes).map_err(|e| format!("{at}: {name}: {e}"))?;
+        stores.push((name, AnyStore::from(Store::from_records(records))));
+    }
     Ok(AnyStore::shards(stores, index))
 }
 

@@ -40,7 +40,7 @@ pub(super) fn read_at(file: &File, offset: u64, len: usize) -> io::Result<Vec<u8
 /// The complete records of a log from one offset, in order, with where each one sits.
 pub(super) struct LogReader<'f> {
     /// `None` for a log that does not exist yet, which reads as empty, as `Store::open` reads it.
-    file: Option<&'f File>,
+    file: Option<Src<'f>>,
     /// The file offset of `buf[0]`.
     base: u64,
     /// Where the next read from the file starts.
@@ -58,6 +58,30 @@ pub(super) struct LogReader<'f> {
     last: std::ops::Range<usize>,
 }
 
+/// A log a reader borrows, or one it owns: a record walk over several logs opens each in turn.
+enum Src<'f> {
+    Borrowed(&'f File),
+    Owned(File),
+}
+
+impl Src<'_> {
+    fn file(&self) -> &File {
+        match self {
+            Src::Borrowed(f) => f,
+            Src::Owned(f) => f,
+        }
+    }
+}
+
+impl LogReader<'static> {
+    /// [`LogReader::new`] over a file it keeps.
+    pub(super) fn owning(file: File, from: u64, end: u64, hasher: Rolling) -> LogReader<'static> {
+        let mut r = LogReader::new(None, from, end, hasher);
+        r.file = Some(Src::Owned(file));
+        r
+    }
+}
+
 impl<'f> LogReader<'f> {
     /// Records from `from` (a record boundary) up to `end`, with `hasher` holding the hash of
     /// everything before `from`.
@@ -68,7 +92,7 @@ impl<'f> LogReader<'f> {
         hasher: Rolling,
     ) -> LogReader<'f> {
         LogReader {
-            file,
+            file: file.map(Src::Borrowed),
             base: from,
             pos: from,
             end,
@@ -136,8 +160,9 @@ impl<'f> LogReader<'f> {
         let want = CHUNK.min((self.end - self.pos) as usize);
         let file = self
             .file
+            .as_ref()
             .ok_or_else(|| Error::Io(io::ErrorKind::NotFound.into()))?;
-        let more = read_at(file, self.pos, want).map_err(Error::Io)?;
+        let more = read_at(file.file(), self.pos, want).map_err(Error::Io)?;
         self.pos += more.len() as u64;
         self.buf.extend_from_slice(&more);
         Ok(())

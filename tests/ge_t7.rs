@@ -344,22 +344,37 @@ fn counts(found: &[smysl_core::Contention]) -> Expected {
 
 /// The shards of `root` named by `keep`, each read as the CLI's `--shard` reads it.
 fn union(root: &Path, keep: impl Fn(&str) -> bool, redb: bool) -> AnyStore {
+    let all = smysl_text::shards::list(root).unwrap();
+    if redb {
+        // The library's one unit store, opened for the shards kept (TX-P13c step 3).
+        let only: Vec<String> = all
+            .iter()
+            .filter(|(n, _)| keep(n))
+            .map(|(n, _)| n.clone())
+            .collect();
+        let subset = only.len() < all.len();
+        return AnyStore::open_redb_shards(
+            &root.join(smysl_text::shards::UNIT_STORE),
+            &all,
+            subset.then_some(only.as_slice()),
+            None,
+            smysl_graph::redb::RedbOptions::default(),
+        )
+        .unwrap()
+        .0;
+    }
     let mut stores = Vec::new();
-    for (name, log) in smysl_text::shards::list(root).unwrap() {
+    for (name, log) in all {
         if !keep(&name) || !log.is_file() {
             continue;
         }
-        let store = if redb {
-            AnyStore::open_redb(&log, smysl_graph::redb::RedbOptions::default())
-                .unwrap()
-                .0
-        } else {
-            let bytes = std::fs::read(&log).unwrap();
+        let bytes = std::fs::read(&log).unwrap();
+        stores.push((
+            name,
             AnyStore::from(Store::from_records(
                 smysl_core::from_cbor_seq(&bytes).unwrap().0,
-            ))
-        };
-        stores.push((name, store));
+            )),
+        ));
     }
     AnyStore::shards(stores, None)
 }
@@ -425,6 +440,12 @@ fn ge_t7_stand_in() {
     });
     let root = dir.join("lib");
     let works = works(n, big, total);
+    // `SMYSL_GE_T7_ONLY=check,append`: those stages alone (the build always, if there is none).
+    let only = std::env::var("SMYSL_GE_T7_ONLY").ok();
+    let want = |stage: &str| {
+        only.as_deref()
+            .is_none_or(|v| v.split(',').any(|s| s == stage))
+    };
     println!("GE-T7 stand-in: {n} works, the first of {big} units, {total} in all");
 
     // --- the build: readers and segmentation, the records, the indexes ---------------------
@@ -499,309 +520,321 @@ fn ge_t7_stand_in() {
     );
 
     // --- contention detection (OQ-16) -------------------------------------------------------
-    let ctx = DetectionContext::default();
-    let t = Instant::now();
-    let whole = detect(store, &ctx);
-    let on_store = ms(t);
-    assert_eq!(counts(&whole), expected, "the store's contentions");
-    let t = Instant::now();
-    let mem = union(&root, |_| true, false);
-    let mem_open = ms(t);
-    let u = mem.as_union().unwrap();
-    let t = Instant::now();
-    let first = u.detected().to_vec();
-    let on_union = ms(t);
-    let t = Instant::now();
-    let again = u.detected().len();
-    let kept = ms(t);
-    assert_eq!(first, whole, "a union detects what its store does");
-    assert_eq!(again, whole.len());
-    let t = Instant::now();
-    let redb = union(&root, |_| true, true);
-    let redb_open = ms(t);
-    let t = Instant::now();
-    let on_redb = detect(&redb, &ctx);
-    let on_redb_ms = ms(t);
-    assert_eq!(on_redb, whole, "the redb union detects what the store does");
-    println!(
-        "  contentions: {} forks, {} rebuttals, {} labels, {} commitments",
-        expected.forks, expected.rebuttals, expected.labels, expected.commitments
-    );
-    println!(
-        "  {:<44} {:>10.1} ms",
-        "detect: the materialised store", on_store
-    );
-    println!(
-        "  {:<44} {:>10.1} ms  (union built in {:.1} s)",
-        "detect: the union, memory shards",
-        on_union,
-        mem_open / 1000.0
-    );
-    println!(
-        "  {:<44} {:>10.3} ms",
-        "detect: the union again (kept)", kept
-    );
-    println!(
-        "  {:<44} {:>10.1} ms  (union opened in {:.1} s)",
-        "detect: the union, redb shards",
-        on_redb_ms,
-        redb_open / 1000.0
-    );
-    let worst = on_store.max(on_union).max(on_redb_ms);
-    println!(
-        "  {:<44} {:>10.1} ms  < 1000 ms: {}",
-        "contention detection, worst",
-        worst,
-        verdict(worst < 1000.0)
-    );
-    drop((mem, redb));
+    if want("detect") {
+        let ctx = DetectionContext::default();
+        let t = Instant::now();
+        let whole = detect(store, &ctx);
+        let on_store = ms(t);
+        assert_eq!(counts(&whole), expected, "the store's contentions");
+        let t = Instant::now();
+        let mem = union(&root, |_| true, false);
+        let mem_open = ms(t);
+        let u = mem.as_union().unwrap();
+        let t = Instant::now();
+        let first = u.detected().to_vec();
+        let on_union = ms(t);
+        let t = Instant::now();
+        let again = u.detected().len();
+        let kept = ms(t);
+        assert_eq!(first, whole, "a union detects what its store does");
+        assert_eq!(again, whole.len());
+        let t = Instant::now();
+        let redb = union(&root, |_| true, true);
+        let redb_open = ms(t);
+        let t = Instant::now();
+        let on_redb = detect(&redb, &ctx);
+        let on_redb_ms = ms(t);
+        assert_eq!(on_redb, whole, "the redb union detects what the store does");
+        println!(
+            "  contentions: {} forks, {} rebuttals, {} labels, {} commitments",
+            expected.forks, expected.rebuttals, expected.labels, expected.commitments
+        );
+        println!(
+            "  {:<44} {:>10.1} ms",
+            "detect: the materialised store", on_store
+        );
+        println!(
+            "  {:<44} {:>10.1} ms  (union built in {:.1} s)",
+            "detect: the union, memory shards",
+            on_union,
+            mem_open / 1000.0
+        );
+        println!(
+            "  {:<44} {:>10.3} ms",
+            "detect: the union again (kept)", kept
+        );
+        println!(
+            "  {:<44} {:>10.1} ms  (opened in {:.1} s)",
+            "detect: the library's unit store (redb)",
+            on_redb_ms,
+            redb_open / 1000.0
+        );
+        let worst = on_store.max(on_union).max(on_redb_ms);
+        println!(
+            "  {:<44} {:>10.1} ms  < 1000 ms: {}",
+            "contention detection, worst",
+            worst,
+            verdict(worst < 1000.0)
+        );
+        drop((mem, redb));
+    }
 
     // --- a measure over 10⁵, 3·10⁵ and 10⁶ units --------------------------------------------
-    let mut order: Vec<Uid> = Vec::new();
-    for name in lib.shards() {
-        order.extend(lib.uid_shards().uids_of(&name));
-    }
-    let mut seen = BTreeSet::new();
-    order.retain(|u| store.contains_uid(u) && seen.insert(*u));
-    let sizes: Vec<usize> = [100_000, 300_000, 1_000_000]
-        .into_iter()
-        .map(|s| s.min(order.len()))
-        .collect();
-    let mut points = Vec::new();
-    for &size in &sizes {
-        let scope =
-            smysl_measure::Resolved::of_uids("ge-t7", order[..size].iter().copied().collect());
-        let input = smysl_measure::Input::new(store, &scope).with_library(&lib);
-        let mut recipe = smysl_measure::Recipe::new("", 0, "ge-t7");
-        recipe.policy = Some(smysl_measure::ClassPolicy::Strict);
-        recipe.profile = Some("default".into());
-        // Five languages in one scope: their words counted in one vocabulary, as `E489` asks.
-        recipe.analyzer = Some("smysl/an/1:surface".into());
-        let t = Instant::now();
-        let results = smysl_measure::run(&["A1", "A2", "A4", "A5", "A7"], &recipe, &input);
-        let secs = t.elapsed().as_secs_f64();
-        for r in &results {
-            assert!(
-                matches!(r.outcome, smysl_measure::Outcome::Value(_)),
-                "{} at {size}: {:?}",
-                r.recipe.id,
-                r.outcome
-            );
+    if want("measure") {
+        let mut order: Vec<Uid> = Vec::new();
+        for name in lib.shards() {
+            order.extend(lib.uid_shards().uids_of(&name));
         }
+        let mut seen = BTreeSet::new();
+        order.retain(|u| store.contains_uid(u) && seen.insert(*u));
+        let sizes: Vec<usize> = [100_000, 300_000, 1_000_000]
+            .into_iter()
+            .map(|s| s.min(order.len()))
+            .collect();
+        let mut points = Vec::new();
+        for &size in &sizes {
+            let scope =
+                smysl_measure::Resolved::of_uids("ge-t7", order[..size].iter().copied().collect());
+            let input = smysl_measure::Input::new(store, &scope).with_library(&lib);
+            let mut recipe = smysl_measure::Recipe::new("", 0, "ge-t7");
+            recipe.policy = Some(smysl_measure::ClassPolicy::Strict);
+            recipe.profile = Some("default".into());
+            // Five languages in one scope: their words counted in one vocabulary, as `E489` asks.
+            recipe.analyzer = Some("smysl/an/1:surface".into());
+            let t = Instant::now();
+            let results = smysl_measure::run(&["A1", "A2", "A4", "A5", "A7"], &recipe, &input);
+            let secs = t.elapsed().as_secs_f64();
+            for r in &results {
+                assert!(
+                    matches!(r.outcome, smysl_measure::Outcome::Value(_)),
+                    "{} at {size}: {:?}",
+                    r.recipe.id,
+                    r.outcome
+                );
+            }
+            println!(
+                "  {:<44} {:>10.2} s  ({size} units)",
+                "measure: A1 A2 A4 A5 A7", secs
+            );
+            points.push((size as f64, secs));
+        }
+        // Linear through the origin, by least squares; every point within 2× of the line.
+        let slope = points.iter().map(|(x, y)| x * y).sum::<f64>()
+            / points.iter().map(|(x, _)| x * x).sum::<f64>();
+        let off = points
+            .iter()
+            .map(|(x, y)| (y / (slope * x)).max(slope * x / y))
+            .fold(0.0f64, f64::max);
         println!(
-            "  {:<44} {:>10.2} s  ({size} units)",
-            "measure: A1 A2 A4 A5 A7", secs
+            "  {:<44} {:>10.2} ×  ≤ 2: {}",
+            "measure: furthest from linear",
+            off,
+            verdict(off <= 2.0)
         );
-        points.push((size as f64, secs));
     }
-    // Linear through the origin, by least squares; every point within 2× of the line.
-    let slope = points.iter().map(|(x, y)| x * y).sum::<f64>()
-        / points.iter().map(|(x, _)| x * x).sum::<f64>();
-    let off = points
-        .iter()
-        .map(|(x, y)| (y / (slope * x)).max(slope * x / y))
-        .fold(0.0f64, f64::max);
-    println!(
-        "  {:<44} {:>10.2} ×  ≤ 2: {}",
-        "measure: furthest from linear",
-        off,
-        verdict(off <= 2.0)
-    );
 
     // --- a scoped query --------------------------------------------------------------------
-    let scope = smysl_text::scope::LibraryScope::new("library", &lib);
-    let qenv = smysl_query::Env::new(store, &scope)
-        .with_times(&scope)
-        .with_entities(&scope);
-    let opts = smysl_query::PlanOptions::default();
-    let vocab: Vec<Vec<String>> = LANGS.iter().map(|(_, e)| words(&verses(e))).collect();
-    let mut all_times = Vec::new();
-    // A shelf without the large work, where there is more than one shelf.
-    let shelf = format!(
-        "collection:\"en/s{:02}\"",
-        usize::from(n / LANGS.len() > SHELF)
-    );
-    for (item, lang) in [
-        (shelf.as_str(), Some(0)),
-        ("collection:de", Some(1)),
-        ("library", None),
-    ] {
-        let mut times = Vec::new();
-        for k in 0..20 {
-            let word = match lang {
-                Some(l) => vocab[l][k].clone(),
-                None => vocab[k % LANGS.len()][k / LANGS.len()].clone(),
-            };
-            let q = format!("from {item}\nfind \"{word}\"\nlimit 10");
-            let t = Instant::now();
-            let parsed = smysl_query::parse(&q).unwrap();
-            let plan = smysl_query::plan(&parsed.query, &qenv, &opts)
-                .unwrap_or_else(|d| panic!("{q}: {}", d[0].message));
-            let run = smysl_query::run(&plan, &qenv, &opts)
-                .unwrap_or_else(|d| panic!("{q}: {}", d[0].message));
-            std::hint::black_box(run);
-            times.push(ms(t));
-            // Twenty samples, unless three already took a minute: past the threshold that far,
-            // more samples would not change the verdict and would cost the run an hour.
-            if times.len() >= 3 && times.iter().sum::<f64>() > 60_000.0 {
-                break;
-            }
-        }
-        times.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        println!(
-            "  {:<44} {:>10.1} ms p50, {:.1} ms p95 of {}",
-            format!("query: from {item} | find | limit 10"),
-            p(&times, 0.5),
-            p(&times, 0.95),
-            times.len()
+    if want("query") {
+        let scope = smysl_text::scope::LibraryScope::new("library", &lib);
+        let qenv = smysl_query::Env::new(store, &scope)
+            .with_times(&scope)
+            .with_entities(&scope);
+        let opts = smysl_query::PlanOptions::default();
+        let vocab: Vec<Vec<String>> = LANGS.iter().map(|(_, e)| words(&verses(e))).collect();
+        let mut all_times = Vec::new();
+        // A shelf without the large work, where there is more than one shelf.
+        let shelf = format!(
+            "collection:\"en/s{:02}\"",
+            usize::from(n / LANGS.len() > SHELF)
         );
-        all_times.extend(times);
+        for (item, lang) in [
+            (shelf.as_str(), Some(0)),
+            ("collection:de", Some(1)),
+            ("library", None),
+        ] {
+            let mut times = Vec::new();
+            for k in 0..20 {
+                let word = match lang {
+                    Some(l) => vocab[l][k].clone(),
+                    None => vocab[k % LANGS.len()][k / LANGS.len()].clone(),
+                };
+                let q = format!("from {item}\nfind \"{word}\"\nlimit 10");
+                let t = Instant::now();
+                let parsed = smysl_query::parse(&q).unwrap();
+                let plan = smysl_query::plan(&parsed.query, &qenv, &opts)
+                    .unwrap_or_else(|d| panic!("{q}: {}", d[0].message));
+                let run = smysl_query::run(&plan, &qenv, &opts)
+                    .unwrap_or_else(|d| panic!("{q}: {}", d[0].message));
+                std::hint::black_box(run);
+                times.push(ms(t));
+                // Twenty samples, unless three already took a minute: past the threshold that far,
+                // more samples would not change the verdict and would cost the run an hour.
+                if times.len() >= 3 && times.iter().sum::<f64>() > 60_000.0 {
+                    break;
+                }
+            }
+            times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            println!(
+                "  {:<44} {:>10.1} ms p50, {:.1} ms p95 of {}",
+                format!("query: from {item} | find | limit 10"),
+                p(&times, 0.5),
+                p(&times, 0.95),
+                times.len()
+            );
+            all_times.extend(times);
+        }
+        all_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let p95 = p(&all_times, 0.95);
+        println!(
+            "  {:<44} {:>10.1} ms  < 1000 ms: {}",
+            "scoped query p95, all scopes",
+            p95,
+            verdict(p95 < 1000.0)
+        );
+        drop(qenv);
+        drop(scope);
     }
-    all_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let p95 = p(&all_times, 0.95);
-    println!(
-        "  {:<44} {:>10.1} ms  < 1000 ms: {}",
-        "scoped query p95, all scopes",
-        p95,
-        verdict(p95 < 1000.0)
-    );
-    drop(qenv);
-    drop(scope);
 
     // --- derive_thread over 10⁵ units --------------------------------------------------------
-    let opts = smysl_thread::DeriveOptions::new(
-        ThreadId::new("t/ge-t7").unwrap(),
-        AgentId::new("tool:ge-t7").unwrap(),
-    );
-    let first_alias = works[0].alias.clone();
-    let big_shard = union(&root, |name| name == first_alias, false);
-    let t = Instant::now();
-    std::hint::black_box(smysl_thread::derive_thread(
-        &big_shard,
-        ThreadSchema::Analysis,
-        &opts,
-    ));
-    let one = ms(t);
-    println!(
-        "  {:<44} {:>10.1} ms  ({} units)",
-        "derive_thread: the 10⁵-unit shard",
-        one,
-        big_shard.unit_count()
-    );
-    drop(big_shard);
-    let small: BTreeSet<String> = works[1..]
-        .iter()
-        .scan(0usize, |sum, w| {
-            *sum += w.units;
-            (*sum <= big).then(|| w.alias.clone())
-        })
-        .collect();
-    let many = union(&root, |name| small.contains(name), false);
-    let t = Instant::now();
-    std::hint::black_box(smysl_thread::derive_thread(
-        &many,
-        ThreadSchema::Analysis,
-        &opts,
-    ));
-    let across = ms(t);
-    println!(
-        "  {:<44} {:>10.1} ms  ({} units in {} shards)",
-        "derive_thread: a union of small shards",
-        across,
-        many.unit_count(),
-        small.len()
-    );
-    drop(many);
-    println!(
-        "  {:<44} {:>10.1} ms  < 2000 ms: {}",
-        "derive_thread over 10⁵ units, worst",
-        one.max(across),
-        verdict(one.max(across) < 2000.0)
-    );
-    drop(lib);
+    if want("thread") {
+        let opts = smysl_thread::DeriveOptions::new(
+            ThreadId::new("t/ge-t7").unwrap(),
+            AgentId::new("tool:ge-t7").unwrap(),
+        );
+        let first_alias = works[0].alias.clone();
+        let big_shard = union(&root, |name| name == first_alias, false);
+        let t = Instant::now();
+        std::hint::black_box(smysl_thread::derive_thread(
+            &big_shard,
+            ThreadSchema::Analysis,
+            &opts,
+        ));
+        let one = ms(t);
+        println!(
+            "  {:<44} {:>10.1} ms  ({} units)",
+            "derive_thread: the 10⁵-unit shard",
+            one,
+            big_shard.unit_count()
+        );
+        drop(big_shard);
+        let small: BTreeSet<String> = works[1..]
+            .iter()
+            .scan(0usize, |sum, w| {
+                *sum += w.units;
+                (*sum <= big).then(|| w.alias.clone())
+            })
+            .collect();
+        let many = union(&root, |name| small.contains(name), false);
+        let t = Instant::now();
+        std::hint::black_box(smysl_thread::derive_thread(
+            &many,
+            ThreadSchema::Analysis,
+            &opts,
+        ));
+        let across = ms(t);
+        println!(
+            "  {:<44} {:>10.1} ms  ({} units in {} shards)",
+            "derive_thread: a union of small shards",
+            across,
+            many.unit_count(),
+            small.len()
+        );
+        drop(many);
+        println!(
+            "  {:<44} {:>10.1} ms  < 2000 ms: {}",
+            "derive_thread over 10⁵ units, worst",
+            one.max(across),
+            verdict(one.max(across) < 2000.0)
+        );
+        drop(lib);
+    }
 
     // --- check: the peak on each backend ----------------------------------------------------
-    let at = root.to_str().unwrap();
-    let (mem_rss, mem_ms, mem_err) = peak(&["check", "-s", at]);
-    let (redb_rss, redb_ms, redb_err) = peak(&["--backend", "redb", "check", "-s", at]);
-    let mb = |b: Option<u64>| b.map_or("?".into(), |b| format!("{:.0} MB", b as f64 / 1e6));
-    println!(
-        "  {:<44} {:>10}  in {:.1} s {mem_err}",
-        "check: peak RSS, memory",
-        mb(mem_rss),
-        mem_ms / 1000.0
-    );
-    println!(
-        "  {:<44} {:>10}  in {:.1} s {redb_err}",
-        "check: peak RSS, redb",
-        mb(redb_rss),
-        redb_ms / 1000.0
-    );
-    println!(
-        "  {:<44} {:>10}  ≤ 1 GB: {}",
-        "check over the union on redb",
-        mb(redb_rss),
-        verdict(redb_rss.is_some_and(|b| b <= 1_000_000_000))
-    );
+    if want("check") {
+        let at = root.to_str().unwrap();
+        let (mem_rss, mem_ms, mem_err) = peak(&["check", "-s", at]);
+        let (redb_rss, redb_ms, redb_err) = peak(&["--backend", "redb", "check", "-s", at]);
+        let mb = |b: Option<u64>| b.map_or("?".into(), |b| format!("{:.0} MB", b as f64 / 1e6));
+        println!(
+            "  {:<44} {:>10}  in {:.1} s {mem_err}",
+            "check: peak RSS, memory",
+            mb(mem_rss),
+            mem_ms / 1000.0
+        );
+        println!(
+            "  {:<44} {:>10}  in {:.1} s {redb_err}",
+            "check: peak RSS, redb",
+            mb(redb_rss),
+            redb_ms / 1000.0
+        );
+        println!(
+            "  {:<44} {:>10}  ≤ 1 GB: {}",
+            "check over the union on redb",
+            mb(redb_rss),
+            verdict(redb_rss.is_some_and(|b| b <= 1_000_000_000))
+        );
+    }
 
     // --- a single-record append to the 10⁵-unit shard ---------------------------------------
-    let mut lib = Library::open(&root).unwrap();
-    let tid = lib
-        .store()
-        .manifests()
-        .find(|(_, m)| m.alias == works[0].alias)
-        .map(|(_, m)| m.parts[0].tid)
-        .unwrap();
-    let fresh = |tag: &str| {
-        let n = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        UnitCoreBuilder::new(KernelType::Claim, format!("{tag} at {n}"), Status::Cited)
-            .source(SourceRef::new(
-                SourceKind::Doc,
-                format!("{}#L2", tid.canonical()),
-            ))
-            .build()
-            .unwrap()
-    };
-    let mut lib_ms = Vec::new();
-    for _ in 0..5 {
-        let r = [Record::Unit(fresh("appended through the library"))];
-        let t = Instant::now();
-        lib.append_records(&r).unwrap();
-        lib_ms.push(ms(t));
-    }
-    lib_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    drop(lib);
-    let log = root.join(smysl_text::shards::log_path(&works[0].alias));
-    let (mut shard, _) =
-        smysl_graph::redb::RedbShard::open_rw(&log, smysl_graph::redb::RedbOptions::default())
+    if want("append") {
+        let mut lib = Library::open(&root).unwrap();
+        let tid = lib
+            .store()
+            .manifests()
+            .find(|(_, m)| m.alias == works[0].alias)
+            .map(|(_, m)| m.parts[0].tid)
             .unwrap();
-    let mut redb_ms = Vec::new();
-    for _ in 0..5 {
-        let r = [Record::Unit(fresh("appended through redb"))];
-        let t = Instant::now();
-        assert_eq!(shard.append(&r).unwrap().added, 1);
-        redb_ms.push(ms(t));
+        let fresh = |tag: &str| {
+            let n = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            UnitCoreBuilder::new(KernelType::Claim, format!("{tag} at {n}"), Status::Cited)
+                .source(SourceRef::new(
+                    SourceKind::Doc,
+                    format!("{}#L2", tid.canonical()),
+                ))
+                .build()
+                .unwrap()
+        };
+        let mut lib_ms = Vec::new();
+        for _ in 0..5 {
+            let r = [Record::Unit(fresh("appended through the library"))];
+            let t = Instant::now();
+            lib.append_records(&r).unwrap();
+            lib_ms.push(ms(t));
+        }
+        lib_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        drop(lib);
+        let log = root.join(smysl_text::shards::log_path(&works[0].alias));
+        let (mut shard, _) =
+            smysl_graph::redb::RedbShard::open_rw(&log, smysl_graph::redb::RedbOptions::default())
+                .unwrap();
+        let mut redb_ms = Vec::new();
+        for _ in 0..5 {
+            let r = [Record::Unit(fresh("appended through redb"))];
+            let t = Instant::now();
+            assert_eq!(shard.append(&r).unwrap().added, 1);
+            redb_ms.push(ms(t));
+        }
+        redb_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        drop(shard);
+        println!(
+            "  {:<44} {:>10.2} ms  (median of 5)",
+            "append: through the library", lib_ms[2]
+        );
+        println!(
+            "  {:<44} {:>10.2} ms  (median of 5)",
+            "append: through the shard's redb store", redb_ms[2]
+        );
+        let best = lib_ms[2].min(redb_ms[2]);
+        println!(
+            "  {:<44} {:>10.2} ms  < 5 ms: {}",
+            "single-record append to the 10⁵-unit shard",
+            best,
+            verdict(best < 5.0)
+        );
     }
-    redb_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    drop(shard);
-    println!(
-        "  {:<44} {:>10.2} ms  (median of 5)",
-        "append: through the library", lib_ms[2]
-    );
-    println!(
-        "  {:<44} {:>10.2} ms  (median of 5)",
-        "append: through the shard's redb store", redb_ms[2]
-    );
-    let best = lib_ms[2].min(redb_ms[2]);
-    println!(
-        "  {:<44} {:>10.2} ms  < 5 ms: {}",
-        "single-record append to the 10⁵-unit shard",
-        best,
-        verdict(best < 5.0)
-    );
 
     if keep.is_none() {
         let _ = std::fs::remove_dir_all(&dir);

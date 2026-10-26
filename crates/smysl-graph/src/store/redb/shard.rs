@@ -20,10 +20,10 @@ use std::time::{Duration, Instant};
 use smysl_core::diag::{Code, Diagnostic};
 use smysl_core::{hash_bytes, to_cbor, Error, Record, Rolling};
 
-use super::build::{self, Described};
+use super::build::{self, Described, Kind};
 use super::shared::{self, Shared};
-use super::tables::RECORD_HASH;
-use super::{backend, is_held, RedbOptions, RedbStore};
+use super::tables::{with_log, LogIx, RECORD_HASH};
+use super::{backend, is_held, RedbOptions, RedbStore, ONE};
 use crate::lock::Lock;
 use crate::store::{refuse_unloggable, AppendReport, OpenReport};
 
@@ -32,6 +32,8 @@ pub struct RedbShard {
     shared: Arc<Shared>,
     log: File,
     log_path: PathBuf,
+    /// The log's position in its store: always the first, a store of one log having one.
+    ix: LogIx,
     described: Described,
     /// The log's hash up to `described.log_len`, kept open so an append hashes what it adds.
     hasher: Rolling,
@@ -104,14 +106,28 @@ impl RedbShard {
             .open(&log_path)
             .map_err(Error::Io)?;
         let mut caught = OpenReport::default();
-        let (described, hasher) = {
+        let (ix, described, hasher) = {
             let _folding = shared.folding();
-            build::catch_up(&shared.db, Some(&log), opts.force_rebuild, &mut caught)?
+            let given = [build::Given {
+                name: ONE,
+                path: &log_path,
+                file: Some(&log),
+            }];
+            let c = build::catch_up(
+                &shared.db,
+                Kind::One,
+                &given,
+                opts.force_rebuild,
+                &mut caught,
+            )?
+            .remove(0);
+            (c.ix, c.described, c.hasher)
         };
         let mut shard = RedbShard {
             shared,
             log,
             log_path,
+            ix,
             described,
             hasher,
             opts,
@@ -154,7 +170,12 @@ impl RedbShard {
             for r in records {
                 let encoded = to_cbor(r);
                 let hash = hash_bytes(&encoded);
-                if hashes.get(&hash).map_err(backend)?.is_some() || !seen.insert(hash) {
+                if hashes
+                    .get(&with_log(&hash, self.ix))
+                    .map_err(backend)?
+                    .is_some()
+                    || !seen.insert(hash)
+                {
                     report.duplicates += 1;
                     continue;
                 }
@@ -173,6 +194,9 @@ impl RedbShard {
         let end = self.described.log_len + report.bytes_written;
         let (now, _, hasher) = build::fold(
             &shared.db,
+            Kind::One,
+            ONE,
+            self.ix,
             Some(&self.log),
             self.described,
             end,
@@ -185,12 +209,19 @@ impl RedbShard {
 
     /// A snapshot of the store as it is now. Later appends do not change what it answers.
     pub fn reader(&self) -> Result<RedbStore, Error> {
-        let log = File::open(&self.log_path).map_err(Error::Io)?;
+        let mut paths = vec![None; self.ix as usize + 1];
+        paths[self.ix as usize] = Some(self.log_path.clone());
         RedbStore::load(
             self.shared.clone(),
-            Some(log),
-            &self.log_path,
-            self.described,
+            Kind::One,
+            vec![super::LogFile {
+                name: ONE.to_string(),
+                ix: self.ix,
+                path: self.log_path.clone(),
+                described: self.described,
+            }],
+            paths,
+            false,
             &self.opts,
         )
     }
@@ -227,7 +258,7 @@ impl RedbShard {
     /// on the same log). Both are a tail to read, never a rebuild: the store and the log
     /// agreed at open, and both only grow.
     fn settle(&mut self) -> Result<(), Error> {
-        if let Some(d) = build::described(&self.shared.db)? {
+        if let Some((_, d)) = build::described(&self.shared.db, ONE)? {
             if d.log_len > self.described.log_len {
                 let more = super::log::read_at(
                     &self.log,
@@ -243,6 +274,9 @@ impl RedbShard {
         if end > self.described.log_len {
             let (now, folded, hasher) = build::fold(
                 &self.shared.db,
+                Kind::One,
+                ONE,
+                self.ix,
                 Some(&self.log),
                 self.described,
                 end,
