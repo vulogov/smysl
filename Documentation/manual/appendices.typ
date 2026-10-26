@@ -952,7 +952,7 @@ part the library has redacted is dropped at the door (`SMY-W414`).
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
-    ([`ACTION`], [positional, required], [`import`, `status`, `accept`, `discard`, `export` or `verify`.]),
+    ([`ACTION`], [positional, required], [`import`, `status`, `accept`, `discard`, `export`, `verify` or `migrate`.]),
     ([`TARGET…`], [positional], [The files, directories and export indexes to `import` (`-` reads stdin; a directory with an index is a collection, checked against it first); the import's name for `accept` and `discard` (`join:<name>` for its joins); the index, or its directory, for `verify`.]),
     ([`--name`], [`N`], [The import's name (`import`). The first input's stem by default.]),
     ([`--accept`], [—], [Append what passes rather than stage it (`import`). Staging is the default for every source.]),
@@ -984,6 +984,9 @@ part the library has redacted is dropped at the door (`SMY-W414`).
     ([`--force`], [—], [Write into an output directory that is not empty (`export`). Files the new index does not name are left alone.]),
     ([`--p2`], [`FILE`], [Check P2 for a file, repeated: import it into a scratch library and export it again (`verify`).]),
     ([`--keep-scratch`], [—], [Keep the scratch libraries `--p2` builds (`verify`).]),
+    ([`--primary-shards`], [—], [Verify the library's primary shards against their exports instead of a collection (`verify`; `SMY-E505`).]),
+    ([`--primary`], [`SHARD`], [Make the shard primary, repeated: its records into the library's unit store (`migrate`; needs `--features store-redb`).]),
+    ([`--index`], [`SHARD`], [Make a primary shard an index-mode one again, its log written back out of the unit store (`migrate`).]),
   ),
 )
 
@@ -998,6 +1001,18 @@ file for file). A CBOR collection that fails either is not written, and `export`
 `surface`, which writes `<slug>.smy` and counts what the surface cannot spell (`SMY-W428`), and
 writes an incomplete index if a file does not read back as exactly the rest (`SMY-E424`); or
 `pack`, a budgeted, lossy selection per file, outside P1 and P3.
+
+`migrate --primary SHARD` moves a shard's records from its log into the library's unit store,
+`index/units.redb`, which is where they are written from then on: an append to the shard is one
+transaction in the store, and no log is written. It does so only after a round trip — the
+shard's log, its records read back out of the store, and the store's own record hashes must give
+one record-set digest — and otherwise puts the store back and exits 9 (`SMY-E505`). The log is
+kept, set aside as `<stem>.cbor.pre-primary`, and `log/shards/<stem>.primary` marks the shard.
+`migrate --index SHARD` writes the log back out of the store, byte for byte, and removes the
+marker. A library with a primary shard opens only in a build with `--features store-redb`, and
+any reader of it — in memory, through the unit store, under `--shard` — reads the shard from the
+store. `verify --primary-shards` checks each primary shard's export against the store's record
+hashes again. Since 1.10.
 
 An import proposes `same-as` edges between the units it brought and the library's: the same
 bytes of one part read under two manifests with one gist (`identical-span`), and one entity name
@@ -1025,7 +1040,8 @@ hash, and P1 and P3 are not claimed: the collection is a rewrite, not a round tr
     ([`accept`], [0; 5 under `--fail-on-contention` when the import would give rise to a contention; 2 when the name is not a staged import.]),
     ([`discard`], [0; 2 when the name is not a staged import. The manifests stay, since the files were read, and so does the quarantine.]),
     ([`export`], [0; 3 when a surface file does not read back (`SMY-E424`, the index written incomplete); 9 when a CBOR collection does not verify; 4 when a pack is infeasible; 2 for a missing `--scope` or `-o`, a scope that does not run, a bad `--as-of`, a `--target-revision` revision the store does not declare, or an occupied directory without `--force`; 1 when `--target-revision` refuses (`SMY-E422`).]),
-    ([`verify`], [0 when every file matches and P1 and P3 hold, or every `--p2` file comes back; 9 otherwise.]),
+    ([`verify`], [0 when every file matches and P1 and P3 hold, or every `--p2` file comes back, or every primary shard agrees with its export (`--primary-shards`); 9 otherwise.]),
+    ([`migrate`], [0; 9 when a shard's round trip does not reproduce its digest (`SMY-E505`, nothing changed); 2 without `--primary` or `--index`, or in a build without `store-redb`; 1 for a shard the library does not have.]),
   ),
 )
 

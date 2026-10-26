@@ -2179,11 +2179,12 @@ fn cli() -> Command {
                     Arg::new("action")
                         .required(true)
                         .value_name("ACTION")
-                        .value_parser(["import", "status", "accept", "discard", "export", "verify"])
+                        .value_parser(["import", "status", "accept", "discard", "export", "verify", "migrate"])
                         .help(
                             "import files into the library, list its imports, accept or \
-                             discard a staged one, export the library as a collection, or \
-                             verify a collection against its index",
+                             discard a staged one, export the library as a collection, \
+                             verify a collection against its index, or move a shard's \
+                             records between its log and the unit store",
                         ),
                 )
                 .arg(
@@ -2337,6 +2338,26 @@ fn cli() -> Command {
                     Arg::new("with-quarantine")
                         .long("with-quarantine")
                         .help("Export quarantined records as well (`export`, a library)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("primary")
+                        .long("primary")
+                        .value_name("SHARD")
+                        .action(ArgAction::Append)
+                        .help("Make this shard primary: its records into the library's unit store, its log set aside, after a round trip that must reproduce its record-set digest (`migrate`)"),
+                )
+                .arg(
+                    Arg::new("index")
+                        .long("index")
+                        .value_name("SHARD")
+                        .action(ArgAction::Append)
+                        .help("Make this primary shard an index-mode one again, writing its log back out of the unit store (`migrate`)"),
+                )
+                .arg(
+                    Arg::new("primary-shards")
+                        .long("primary-shards")
+                        .help("Verify the library's primary shards against their exports instead of a collection; exits 9 on SMY-E505 (`verify`)")
                         .action(ArgAction::SetTrue),
                 )
                 .arg(
@@ -3035,12 +3056,13 @@ fn open_library_union(root: &std::path::Path) -> Result<AnyStore, String> {
         }
         return Ok(store);
     }
+    let names: Vec<String> = want.iter().map(|(n, _)| n.clone()).collect();
+    let all_bytes = shards::read_all_bytes(root, &names).map_err(|e| format!("{at}: {e}"))?;
     let mut stores = Vec::new();
-    for (name, log) in want {
-        if !log.is_file() {
+    for (name, bytes) in names.into_iter().zip(all_bytes) {
+        if bytes.is_empty() {
             continue;
         }
-        let bytes = std::fs::read(&log).map_err(|e| format!("{at}: {name}: {e}"))?;
         let (records, _) =
             smysl::from_cbor_seq(&bytes).map_err(|e| format!("{at}: {name}: {e}"))?;
         stores.push((name, AnyStore::from(Store::from_records(records))));
@@ -3052,18 +3074,16 @@ fn open_library_union(root: &std::path::Path) -> Result<AnyStore, String> {
 /// order the library reads them in — so a reader of one log reads a library unchanged.
 #[cfg(feature = "text")]
 fn library_bytes(root: &std::path::Path) -> Result<Vec<u8>, String> {
-    let mut out = Vec::new();
-    for (_, log) in smysl::text::shards::list(root).map_err(|e| e.to_string())? {
-        let bytes = match std::fs::read(&log) {
-            Ok(b) => b,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(e) => return Err(e.to_string()),
-        };
-        // A torn tail stays out, as one log's reader leaves it out.
-        let (_, consumed) = smysl::from_cbor_seq(&bytes).map_err(|e| e.to_string())?;
-        out.extend_from_slice(&bytes[..consumed]);
-    }
-    Ok(out)
+    // A torn tail stays out, as one log's reader leaves it out; a primary shard's records come
+    // from the unit store (TX-P13d).
+    let names: Vec<String> = smysl::text::shards::list(root)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|(n, _)| n)
+        .collect();
+    Ok(smysl::text::shards::read_all_bytes(root, &names)
+        .map_err(|e| e.to_string())?
+        .concat())
 }
 
 /// `--shard` named a store that is not a library.
@@ -7823,11 +7843,13 @@ fn cmd_lib(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "accept" => lib_accept(m, global),
         "discard" => lib_discard(m, global),
         "export" => lib_export(m, global),
+        "verify" if m.get_flag("primary-shards") => lib_verify_primary(m, global),
         "verify" => lib_verify(m, global),
+        "migrate" => lib_migrate(m, global),
         other => {
             eprintln!(
                 "smysl lib: `{other}` is not an action; it is import, status, accept, discard, \
-                 export or verify"
+                 export, verify or migrate"
             );
             ExitCode::Usage
         }
@@ -7924,6 +7946,102 @@ fn with_library<T>(
         ExitCode::Failure
     })?;
     Ok(f(&mut library))
+}
+
+/// `lib migrate --primary <shard>` / `--index <shard>` (SMYSL-2.8 §3.9, TX-P13d): a shard's
+/// records into the library's unit store, after a round trip that must reproduce its record-set
+/// digest (exit 9, `SMY-E505`, when it does not), or back out into its log.
+#[cfg(feature = "text")]
+fn lib_migrate(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let named = |id: &str| -> Vec<String> {
+        m.get_many::<String>(id)
+            .map(|v| v.cloned().collect())
+            .unwrap_or_default()
+    };
+    let (primary, index) = (named("primary"), named("index"));
+    if primary.is_empty() && index.is_empty() {
+        eprintln!("smysl lib migrate: name a shard with --primary or --index");
+        return ExitCode::Usage;
+    }
+    #[cfg(not(feature = "store-redb"))]
+    {
+        let _ = global;
+        eprintln!(
+            "smysl lib migrate: a primary shard's records live in the unit store, and this build \
+             has no `store-redb` feature"
+        );
+        ExitCode::Usage
+    }
+    #[cfg(feature = "store-redb")]
+    {
+        let outcome = with_library(m, global, "migrate", false, |lib| {
+            let digests = if primary.is_empty() {
+                Vec::new()
+            } else {
+                lib.migrate_primary_all(&primary)?
+            };
+            for (shard, digest) in primary.iter().zip(digests) {
+                println!(
+                    "lib migrate: {shard} is primary; its record-set digest is {}, and its log is \
+                     set aside as {}",
+                    hex32(&digest),
+                    smysl::text::shards::set_aside(shard).display()
+                );
+            }
+            for shard in &index {
+                lib.migrate_index(shard)?;
+                println!(
+                    "lib migrate: {shard} is an index shard again; its log is {}",
+                    smysl::text::shards::log_path(shard).display()
+                );
+            }
+            Ok::<(), smysl::text::LibError>(())
+        });
+        match outcome {
+            Ok(Ok(())) => ExitCode::Success,
+            Ok(Err(e)) => {
+                eprintln!("smysl lib migrate: {e}");
+                e.code_exit()
+            }
+            Err(code) => code,
+        }
+    }
+}
+
+/// `lib verify --primary-shards`: each primary shard's export against what the unit store's
+/// tables hold (`SMY-E505`, exit 9, on a difference).
+#[cfg(feature = "text")]
+fn lib_verify_primary(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    #[cfg(not(feature = "store-redb"))]
+    {
+        let _ = (m, global);
+        eprintln!(
+            "smysl lib verify: a primary shard's records live in the unit store, and this build \
+             has no `store-redb` feature"
+        );
+        ExitCode::Usage
+    }
+    #[cfg(feature = "store-redb")]
+    {
+        let outcome = with_library(m, global, "verify", false, |lib| {
+            let shards = lib.primary_shards();
+            let mut worst = ExitCode::Success;
+            if shards.is_empty() {
+                println!("lib verify: this library has no primary shard");
+            }
+            for shard in shards {
+                match lib.primary_digest(&shard) {
+                    Ok(d) => println!("lib verify: {shard}: holds ({})", hex32(&d)),
+                    Err(e) => {
+                        eprintln!("lib verify: {shard}: {e}");
+                        worst = worst.max(e.code_exit());
+                    }
+                }
+            }
+            worst
+        });
+        outcome.unwrap_or_else(|code| code)
+    }
 }
 
 #[cfg(feature = "text")]

@@ -58,6 +58,26 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### Primary shards: a library whose records the unit store holds
+
+TX-P13d (SMYSL-2.8 §3.5.5, §3.9). GE-T15 passed on 2026-10-22, which was the gate.
+
+- **`smysl lib migrate --primary <shard>`** moves a shard's records from its log into the
+  library's unit store, `index/units.redb`, after a round trip — the log, the records read back
+  out of the store, and the store's own record hashes giving one record-set digest — and exits 9
+  with **`SMY-E505`** if they do not, changing nothing. From then on an append to the shard is one
+  transaction in the store and writes no log. The log is kept, set aside as
+  `<stem>.cbor.pre-primary`; `log/shards/<stem>.primary` marks the shard. **`--index <shard>`**
+  writes the log back out of the store, byte for byte. **`lib verify --primary-shards`** checks
+  each primary shard against its export again.
+- A library with a primary shard opens only in a build with `--features store-redb`, and every
+  reader of it — in memory, through the store, under `--shard` — reads the shard from the store.
+  An open finishes or undoes a migration a crash interrupted.
+- `smysl::redb::RedbShards`, `LogState`; store layout 3, so an existing unit store is rebuilt on
+  its next open (`SMY-W501`). A store holding a primary shard refuses to be rebuilt from logs.
+- On GE-T7's stand-in with every shard primary: `check` on redb 889 MB; a single-record append
+  5.91 ms, over GE-T7's 5 (one redb commit); the default stays index mode.
+
 ### Rule E over the subjects it bears on, and a contradiction that stays where it is
 
 With SMYSL-2.4 §3.3 and SMYSL-2.8 §6.1: the time engine at a million units.

@@ -92,7 +92,8 @@ pub fn list(root: &Path) -> Result<Vec<(String, PathBuf)>, LibError> {
             for e in entries {
                 let e = e.map_err(|e| io(DIR, &e))?;
                 let p = e.path();
-                if p.extension().is_some_and(|x| x == "cbor") {
+                // A log, or the marker of a shard whose records the unit store holds instead.
+                if p.extension().is_some_and(|x| x == "cbor" || x == "primary") {
                     if let Some(s) = p.file_stem() {
                         names.insert(name_of_stem(&s.to_string_lossy()));
                     }
@@ -111,6 +112,84 @@ pub fn list(root: &Path) -> Result<Vec<(String, PathBuf)>, LibError> {
         .collect())
 }
 
+/// Where the marker of a primary shard is, relative to the root: beside where its log was,
+/// `<stem>.primary` (TX-P13d). Present exactly when the shard's records are the unit store's.
+pub fn primary_marker(shard: &str) -> PathBuf {
+    log_path(shard).with_extension("primary")
+}
+
+/// Where a shard's log is set aside when the shard becomes primary: `<stem>.cbor.pre-primary`,
+/// kept and never read again (TX-P13d).
+pub fn set_aside(shard: &str) -> PathBuf {
+    log_path(shard).with_extension("cbor.pre-primary")
+}
+
+/// A shard's records as one log's bytes: the log, less a torn tail; or, for a primary shard,
+/// the records the unit store holds, as its log would hold them. What a reader that takes a
+/// library's shards as logs reads (TX-P13d).
+pub fn read_bytes(root: &Path, shard: &str) -> Result<Vec<u8>, LibError> {
+    let (log, records) = ShardLog::read(root, shard)?;
+    if log.is_primary() {
+        return Ok(smysl_core::to_cbor_seq(&records));
+    }
+    let rel = log_path(shard);
+    let mut bytes = match std::fs::read(root.join(&rel)) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(io(&rel, &e)),
+    };
+    bytes.truncate(log.len() as usize);
+    Ok(bytes)
+}
+
+/// The library's unit store for its primary shards, waiting as a reader does for one another
+/// process holds (`reader_wait_ms`) before giving up: a primary shard has no log to fall back to.
+#[cfg(feature = "store-redb")]
+fn open_store(store: &Path) -> Result<smysl_graph::redb::RedbShards, smysl_core::Error> {
+    let opts = smysl_graph::redb::RedbOptions::default();
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_millis(opts.reader_wait_ms);
+    loop {
+        match smysl_graph::redb::RedbShards::open(store, &opts) {
+            Err(smysl_core::Error::Io(e))
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            other => return other,
+        }
+    }
+}
+
+/// [`read_bytes`] for several shards, with the unit store held open across them: what a reader
+/// of a whole library calls, so a primary shard's read finds the store open (TX-P13d).
+pub fn read_all_bytes(root: &Path, shards: &[String]) -> Result<Vec<Vec<u8>>, LibError> {
+    #[cfg(feature = "store-redb")]
+    let _held = hold_store(root);
+    shards.iter().map(|s| read_bytes(root, s)).collect()
+}
+
+/// The library's unit store, open, for as long as the caller keeps it, if any shard is primary:
+/// while one handle is alive, every other open of the store in this process shares it.
+#[cfg(feature = "store-redb")]
+pub(crate) fn hold_store(root: &Path) -> Option<smysl_graph::redb::RedbShards> {
+    let any = std::fs::read_dir(root.join(DIR))
+        .ok()?
+        .flatten()
+        .any(|e| e.path().extension().is_some_and(|x| x == "primary"))
+        || is_primary(root, CATALOG);
+    if !any {
+        return None;
+    }
+    open_store(&root.join(UNIT_STORE)).ok()
+}
+
+/// Whether a shard's records are the unit store's rather than a log's.
+pub fn is_primary(root: &Path, shard: &str) -> bool {
+    root.join(primary_marker(shard)).is_file()
+}
+
 /// One shard's log as the library writes it.
 #[derive(Debug)]
 pub(crate) struct ShardLog {
@@ -123,6 +202,25 @@ pub(crate) struct ShardLog {
     /// Bytes after the last complete record: a writer killed mid-append left them, and the next
     /// append cuts them before writing, so the log stays a sequence of whole records.
     torn: u64,
+    /// A primary shard (TX-P13d): the unit store holds its records, there is no file, and its
+    /// hash is the store's chain rather than `hasher`'s.
+    primary: Option<Primary>,
+}
+
+/// What a primary shard's log is instead of a file: its name, the store holding it, and the
+/// store's hash of it.
+#[derive(Debug)]
+// Read only by a build that can read the store; one without it refuses a primary shard at open.
+#[cfg_attr(not(feature = "store-redb"), allow(dead_code))]
+struct Primary {
+    shard: String,
+    store: PathBuf,
+    hash: [u8; 32],
+    /// The store, open, once the shard has been written through it: an append that opened the
+    /// database afresh each time paid the open on top of the commit. Unwind-safe as asserted:
+    /// every write to it is one redb transaction, so a panic in one leaves the store as it was.
+    #[cfg(feature = "store-redb")]
+    open: Option<std::panic::AssertUnwindSafe<std::sync::Arc<smysl_graph::redb::RedbShards>>>,
 }
 
 impl ShardLog {
@@ -130,6 +228,9 @@ impl ShardLog {
     pub(crate) fn read(root: &Path, shard: &str) -> Result<(ShardLog, Vec<Record>), LibError> {
         let rel = log_path(shard);
         let path = root.join(&rel);
+        if is_primary(root, shard) {
+            return Self::read_primary(root, shard, rel, path);
+        }
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
@@ -148,9 +249,80 @@ impl ShardLog {
                 len: consumed as u64,
                 hasher,
                 torn: (bytes.len() - consumed) as u64,
+                primary: None,
             },
             records,
         ))
+    }
+
+    /// A primary shard's records, from the library's unit store.
+    #[cfg(feature = "store-redb")]
+    fn read_primary(
+        root: &Path,
+        shard: &str,
+        rel: PathBuf,
+        path: PathBuf,
+    ) -> Result<(ShardLog, Vec<Record>), LibError> {
+        let store = root.join(UNIT_STORE);
+        let at = |e: smysl_core::Error| LibError::Io {
+            at: UNIT_STORE.to_string(),
+            message: format!("primary shard `{shard}`: {e}"),
+        };
+        let writer = open_store(&store).map_err(at)?;
+        let state = writer
+            .log(shard)
+            .map_err(at)?
+            .filter(|l| l.primary)
+            .ok_or_else(|| LibError::Io {
+                at: UNIT_STORE.to_string(),
+                message: format!(
+                    "shard `{shard}` is marked primary and the unit store holds no records of it"
+                ),
+            })?;
+        let bytes = writer.bytes(shard).map_err(at)?;
+        let (records, _) = from_cbor_seq(&bytes).map_err(|e| LibError::Io {
+            at: UNIT_STORE.to_string(),
+            message: format!("primary shard `{shard}`: {e}"),
+        })?;
+        Ok((
+            ShardLog {
+                rel,
+                path,
+                len: state.len,
+                hasher: Rolling::new(),
+                torn: 0,
+                primary: Some(Primary {
+                    shard: shard.to_string(),
+                    store,
+                    hash: state.hash,
+                    open: None,
+                }),
+            },
+            records,
+        ))
+    }
+
+    /// A build without the unit store cannot read a primary shard, and says so rather than open
+    /// the library without it.
+    #[cfg(not(feature = "store-redb"))]
+    fn read_primary(
+        _root: &Path,
+        shard: &str,
+        _rel: PathBuf,
+        _path: PathBuf,
+    ) -> Result<(ShardLog, Vec<Record>), LibError> {
+        Err(LibError::Io {
+            at: primary_marker(shard).display().to_string(),
+            message: format!(
+                "shard `{shard}` is primary: its records are in the unit store, which this build \
+                 cannot read (it has no `store-redb` feature)"
+            ),
+        })
+    }
+
+    /// Whether the unit store holds this shard's records.
+    pub(crate) fn is_primary(&self) -> bool {
+        self.primary.is_some()
     }
 
     pub(crate) fn len(&self) -> u64 {
@@ -158,11 +330,41 @@ impl ShardLog {
     }
 
     pub(crate) fn hash(&self) -> [u8; 32] {
-        self.hasher.finish()
+        match &self.primary {
+            Some(p) => p.hash,
+            None => self.hasher.finish(),
+        }
     }
 
-    /// Append encoded records, cutting a torn tail first, and sync them.
+    /// Append encoded records, cutting a torn tail first, and sync them. A primary shard's go
+    /// into the unit store, in one transaction.
     pub(crate) fn append(&mut self, bytes: &[u8]) -> Result<(), LibError> {
+        if let Some(p) = &mut self.primary {
+            #[cfg(feature = "store-redb")]
+            {
+                let at = |e: smysl_core::Error| LibError::Io {
+                    at: UNIT_STORE.to_string(),
+                    message: format!("primary shard `{}`: {e}", p.shard),
+                };
+                let writer = match &p.open {
+                    Some(w) => w.0.clone(),
+                    None => {
+                        let w = std::sync::Arc::new(open_store(&p.store).map_err(at)?);
+                        p.open = Some(std::panic::AssertUnwindSafe(w.clone()));
+                        w
+                    }
+                };
+                let state = writer.append(&p.shard, bytes).map_err(at)?;
+                self.len = state.len;
+                p.hash = state.hash;
+                return Ok(());
+            }
+            #[cfg(not(feature = "store-redb"))]
+            {
+                let _ = p;
+                unreachable!("a primary shard is not read without the store");
+            }
+        }
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| io(&self.rel, &e))?;
         }

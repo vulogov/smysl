@@ -416,3 +416,111 @@ fn tid_of(lib: &Library, alias: &str) -> Tid {
     let mid = lib.store().heads(alias)[0];
     lib.store().manifest(&mid).unwrap().parts[0].tid
 }
+
+/// TX-P13d: a shard made primary — its records into the library's unit store, its log set aside
+/// — is the same shard: the library reopens to the same store, an append to it goes into the
+/// unit store and no log comes back, the store and its export agree, and made an index-mode shard
+/// again it has a log holding everything it was given, appends included.
+#[cfg(feature = "store-redb")]
+#[test]
+fn a_primary_shard_is_the_shard_it_was_and_goes_back_to_a_log() {
+    let dir = Scratch::new("primary");
+    let mut lib = Library::create(dir.path()).expect("created");
+    let fx = grow(&mut lib);
+    let shard = "chat/replies";
+    let before = lib.store().record_set_digest();
+    let log = dir.path().join(shards::log_path(shard));
+    let was = std::fs::read(&log).unwrap();
+
+    let digest = lib.migrate_primary(shard).expect("made primary");
+    assert!(shards::is_primary(dir.path(), shard));
+    assert!(!log.exists(), "the log is set aside");
+    assert_eq!(
+        std::fs::read(dir.path().join(shards::set_aside(shard))).unwrap(),
+        was,
+        "set aside as it was"
+    );
+    assert_eq!(lib.primary_shards(), [shard]);
+    assert_eq!(lib.primary_digest(shard).unwrap(), digest);
+    // Again is nothing new.
+    assert_eq!(lib.migrate_primary(shard).unwrap(), digest);
+
+    let reopened = Library::open(dir.path()).expect("reopened");
+    assert_eq!(reopened.store().record_set_digest(), before);
+    assert_eq!(reopened.shards(), lib.shards());
+    drop(reopened);
+
+    // An append routed to the primary shard goes into the store.
+    let tid = tid_of(&lib, shard);
+    let more = unit_from(&tid, "L1", "another from the reply");
+    let backs = Relation::new(
+        RelKind::Backs,
+        canonical_uid(&more),
+        canonical_uid(&fx.reply),
+    );
+    lib.append_records(&[Record::Unit(more.clone()), Record::Relation(backs)])
+        .expect("appended");
+    assert!(!log.exists(), "an append to a primary shard wrote no log");
+    let grown = lib.store().record_set_digest();
+    let reopened = Library::open(dir.path()).expect("reopened");
+    assert_eq!(reopened.store().record_set_digest(), grown);
+    assert!(reopened.store().contains_uid(&canonical_uid(&more)));
+    assert_eq!(reopened.uid_shards(), lib.uid_shards());
+    drop(reopened);
+    assert!(lib.primary_digest(shard).is_ok());
+
+    // And back: a log again, holding what the shard was given, appends included.
+    lib.migrate_index(shard).expect("an index shard again");
+    assert!(!shards::is_primary(dir.path(), shard));
+    let records = read_log(dir.path(), shard);
+    assert!(records.contains(&Record::Unit(more.clone())));
+    assert!(records.contains(&Record::Unit(fx.reply.clone())));
+    let reopened = Library::open(dir.path()).expect("reopened");
+    assert_eq!(reopened.store().record_set_digest(), grown);
+}
+
+/// A migration a crash interrupted is finished or undone by the next open, whichever loses
+/// nothing: a shard the store holds with no marker goes back to its log; a marked shard whose log
+/// is still there has it set aside; a marked shard the store no longer holds loses its marker.
+#[cfg(feature = "store-redb")]
+#[test]
+fn an_interrupted_migration_is_settled_at_the_next_open() {
+    let dir = Scratch::new("settle");
+    let mut lib = Library::create(dir.path()).expect("created");
+    grow(&mut lib);
+    let shard = "chat/messages";
+    let digest = lib.store().record_set_digest();
+    let log = dir.path().join(shards::log_path(shard));
+    let marker = dir.path().join(shards::primary_marker(shard));
+    let aside = dir.path().join(shards::set_aside(shard));
+
+    // The store holds it, and the crash came before the marker: back to index mode.
+    lib.migrate_primary(shard).expect("made primary");
+    drop(lib);
+    std::fs::remove_file(&marker).unwrap();
+    std::fs::rename(&aside, &log).unwrap();
+    let lib = Library::open(dir.path()).expect("opened");
+    assert!(lib.primary_shards().is_empty(), "not finished, so undone");
+    assert_eq!(lib.store().record_set_digest(), digest);
+    drop(lib);
+    let mut lib = Library::open(dir.path()).expect("opened again");
+    // And it can be made primary again from there.
+    lib.migrate_primary(shard).expect("made primary again");
+    drop(lib);
+
+    // Marked, and the crash came before the log was set aside: set aside now.
+    std::fs::rename(&aside, &log).unwrap();
+    let mut lib = Library::open(dir.path()).expect("opened");
+    assert_eq!(lib.primary_shards(), [shard]);
+    assert!(!log.exists() && aside.is_file(), "the log is set aside");
+    assert_eq!(lib.store().record_set_digest(), digest);
+
+    // Going back, and the crash came before the marker went: the marker goes.
+    lib.migrate_index(shard).expect("index again");
+    drop(lib);
+    std::fs::write(&marker, b"smysl/primary/1\n").unwrap();
+    let lib = Library::open(dir.path()).expect("opened");
+    assert!(lib.primary_shards().is_empty());
+    assert!(!marker.exists());
+    assert_eq!(lib.store().record_set_digest(), digest);
+}

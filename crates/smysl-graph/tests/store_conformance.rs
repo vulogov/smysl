@@ -637,6 +637,103 @@ fn union_conforms(name: &str, log: &[Record], whole: &Store, p: &[Uid]) {
             }
             drop(sub);
 
+            // Implementation 5 (TX-P13d): primary mode, over copies of the logs and a store of
+            // their own. Every other shard's records moved into the store and its log set
+            // aside: the store answers as before, without the files.
+            {
+                use smysl_graph::redb::RedbShards;
+                let copies: Vec<(String, std::path::PathBuf)> = logs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (id, path))| {
+                        let copy = dir.join(format!("p{i}.smy"));
+                        std::fs::copy(path, &copy).unwrap();
+                        (id.clone(), copy)
+                    })
+                    .collect();
+                let at = dir.join("primary.redb");
+                drop(RedbStore::open_shards(&at, &copies, None, off.clone()).unwrap());
+                let aside = |i: usize| copies[i].1.with_extension("pre-primary");
+                let writer = RedbShards::open(&at, &off).unwrap();
+                let primary: Vec<usize> = (0..k).step_by(2).collect();
+                for &i in &primary {
+                    writer.make_primary(&copies[i].0, &copies[i].1).unwrap();
+                    std::fs::rename(&copies[i].1, aside(i)).unwrap();
+                }
+                drop(writer);
+                let (p_store, report) =
+                    RedbStore::open_shards(&at, &copies, None, off.clone()).unwrap();
+                assert!(
+                    !report.index_rebuilt,
+                    "{name}: k={k}: a primary store rebuilt"
+                );
+                for (g, w) in observe(&p_store, p).iter().zip(&want) {
+                    assert_eq!(g, w, "{name}: k={k}: primary shards {primary:?} disagree");
+                }
+                drop(p_store);
+
+                // A rebuild from the logs would lose the primary shards' records: refused.
+                let mut force = off.clone();
+                force.force_rebuild = true;
+                let refused = RedbStore::open_shards(&at, &copies, None, force).unwrap_err();
+                assert!(
+                    refused.to_string().contains("primary"),
+                    "{name}: k={k}: {refused}"
+                );
+
+                // An append to a primary shard goes into the store, and answers as the records
+                // would, appended where that shard's are.
+                let extra: Vec<Record> = parts[(k - 1).min(1)].iter().take(2).cloned().collect();
+                let mut grown: Vec<Record> = Vec::new();
+                for (i, part) in parts.iter().enumerate() {
+                    grown.extend(part.iter().cloned());
+                    if i == 0 {
+                        grown.extend(extra.iter().cloned());
+                    }
+                }
+                let want_grown = observe(&Store::from_records(grown), p);
+                let writer = RedbShards::open(&at, &off).unwrap();
+                writer.append(&copies[0].0, &to_cbor_seq(&extra)).unwrap();
+                let mut expect = std::fs::read(aside(0)).unwrap();
+                expect.extend(to_cbor_seq(&extra));
+                assert_eq!(
+                    writer.bytes(&copies[0].0).unwrap(),
+                    expect,
+                    "{name}: k={k}: the primary shard's bytes"
+                );
+                drop(writer);
+                let (g3, _) = RedbStore::open_shards(&at, &copies, None, off.clone()).unwrap();
+                for (g, w) in observe(&g3, p).iter().zip(&want_grown) {
+                    assert_eq!(g, w, "{name}: k={k}: after an append to a primary shard");
+                }
+                drop(g3);
+
+                // And back: each log written out as the store holds it, and index mode again.
+                let writer = RedbShards::open(&at, &off).unwrap();
+                for &i in &primary {
+                    writer.make_index(&copies[i].0, &copies[i].1).unwrap();
+                    let mut was = std::fs::read(aside(i)).unwrap();
+                    if i == 0 {
+                        was.extend(to_cbor_seq(&extra));
+                    }
+                    assert_eq!(
+                        std::fs::read(&copies[i].1).unwrap(),
+                        was,
+                        "{name}: k={k}: shard {i}'s log came back different"
+                    );
+                }
+                drop(writer);
+                let (back, report) =
+                    RedbStore::open_shards(&at, &copies, None, off.clone()).unwrap();
+                assert!(
+                    !report.index_rebuilt,
+                    "{name}: k={k}: back in index mode, rebuilt"
+                );
+                for (g, w) in observe(&back, p).iter().zip(&want_grown) {
+                    assert_eq!(g, w, "{name}: k={k}: back in index mode, disagrees");
+                }
+            }
+
             // A shard that grows in the middle of the order is folded on its own, and the store
             // answers for the new whole.
             if k > 1 {

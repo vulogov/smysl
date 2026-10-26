@@ -74,6 +74,10 @@ stem = ["dep:rust-stemmers"]
 # It does not move the floor: redb 2.6.4 declares 1.85, this workspace's base. See the
 # workspace manifest's pin for why that is 2.6 and not 4.3.
 substrate-redb = ["dep:redb"]
+# Primary shards (SMYSL-2.8 §3.5.5, TX-P13d): a shard whose records the library's unit store
+# holds rather than a log. A library with one opens only in a build that can read the store;
+# one without it says so, by name, rather than opening a library with a shard missing.
+store-redb = ["smysl-graph/store-redb"]
 
 [dependencies]
 smysl-core            = { workspace = true }

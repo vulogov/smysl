@@ -635,6 +635,27 @@ cache at 0 bytes and at "everything fits" (§5.1).
   conformance oracle: `export → import into an empty Store` must reproduce the redb store's
   record-set digest. A mismatch on `lib verify` is `SMY-E505`.
 
+*As built (P13d), per library shard, in the library's one unit store (P13c.3).* A primary
+log's records are in a `records` table keyed `(log, offset)` — the offset each record has in
+the log — so making a log primary changes no header: a unit's offset finds its core in
+`records` as it found it in the file, and the records in key order are the file's bytes, which
+is what going back writes. Its `logs` row says it is primary (layout 3) and carries, for a
+hash, a chain over its appends rather than the hash of a file. An append to a primary shard is
+one redb transaction and writes no log. The store's *export* of a shard is its records written
+out as a log and read into an empty `Store`; `lib migrate --primary` makes a shard primary only
+when that, the log it had, and the store's own record hashes give one record-set digest, and
+otherwise puts the store back and exits 9 with `SMY-E505`; `lib verify --primary-shards`
+compares the export with the store's hashes again. A store holding a primary log refuses to be
+rebuilt from logs (it would lose the records) and says how to write the log back first. The
+library marks a primary shard with `log/shards/<stem>.primary`, written before the log is set
+aside as `<stem>.cbor.pre-primary`, and an open finishes or undoes a migration a crash
+interrupted: the store holding a shard with no marker and the log still there goes back to index
+mode; a marked shard beside its log has the log set aside; a marked shard the store no longer
+holds loses the marker. Every reader of the library — in memory, through the store, under
+`--shard` — reads a primary shard from the store, so a library with one needs `store-redb`;
+without it the open names the feature. Only library shards: a standalone log's store stays index
+mode, its `.redb` a cache.
+
 The order of writes in index mode is **log first, then redb**: append the CBOR bytes and
 `fsync`, then commit a redb transaction (`Durability::Immediate`) carrying the new
 `log_len`/`log_hash`. After a crash, redb is either current or behind, never ahead; behind
@@ -777,7 +798,9 @@ D-10 assigns the library lock to SMYSL-2.4 and asks this RFC to revisit it for r
 3. **After GE-T15 passes** (SMYSL-2.7): `smysl lib migrate --primary <shard>` switches a shard
    to primary mode, after an export round trip that must match the record-set digest. `smysl
    lib export` turns it back into a CBOR log at any time. The default stays index mode until
-   GE-T7 has run on primary shards too.
+   GE-T7 has run on primary shards too. *As built (P13d): `lib migrate --index <shard>` is the
+   way back, writing the shard's log out of the store byte for byte; a shard is index mode until
+   migrated, and a new one starts in index mode.*
 4. A store written by a later `layout` version is refused with `SMY-E503`; in index mode the
    remedy (delete and rebuild) is printed with it.
 
@@ -954,7 +977,8 @@ Integration with the `Cmd` table in `src/main.rs`; no new subcommand in this RFC
 - `smysl reindex --backend redb` builds or rebuilds the unit store; `--verify` compares the
   redb store's record-set digest and adjacency against an in-memory rebuild.
 - `smysl lib migrate --primary <shard>` and `--index <shard>` (§3.9), registered by SMYSL-2.4's
-  `lib` table; exit 9 (`HashVerification`) on a digest mismatch.
+  `lib` table; exit 9 (`HashVerification`) on a digest mismatch. *As built (P13d): an action of
+  `lib`, beside `lib verify --primary-shards`.*
 - `tests/cli-surface.txt` is regenerated (`make cli-surface`) in the step that adds the flags,
   and `COMMAND_NAMES` in the Makefile is unchanged.
 
@@ -992,7 +1016,10 @@ Integration with the `Cmd` table in `src/main.rs`; no new subcommand in this RFC
 2. `Store::open` on a log of R;
 3. `RedbStore` in index mode, core cache 0 bytes (every `get` hits disk);
 4. `RedbStore`, cache large enough for everything;
-5. `RedbStore` in primary mode (from P13d);
+5. `RedbStore` in primary mode (from P13d); *as built: the store of k logs with every other
+   log made primary and its file set aside, against `from_records` of them all; a forced
+   rebuild refused; an append to a primary log, against the records with it appended; and each
+   log written back, byte for byte, then read in index mode again;*
 6. `Union` of R partitioned into k shards by a seeded partition (k = 1, 2, 7), in every shard
    order for k ≤ 3 and 5 seeded orders for k = 7; *as built (P13c.1), with about one unit in
    eight dealt into two shards, over opened logs (one holding repeats), through `AnyStore`, under
@@ -1139,7 +1166,7 @@ suite (§5.1) for every implementation that exists by then.
 | **P13c.1** | shards in a library (with SMYSL-2.4), `uid_shard`, `Union`, `--shard` | suite implementation 6; `store_union` fuzz target 10 min clean; `W500` on a two-shard fixture with a cross-shard `quotes` edge, resolved when the second shard is added |
 | **P13c.2** | contentions over the union, measured | GE-T7 run; OQ-16 decided from its contention-detection number |
 | **P13c.3** | one redb unit store per library, every row naming its shard's log (OQ-90) — **before P13d** | `check` over GE-T7's stand-in on redb ≤ 1 GB; the library's unit store at most 2× its logs on disk; §5.3 and the conformance suite (implementations 4–6) on the new layout; the stand-in's other GE-T7 numbers no worse |
-| **P13d** | primary mode, `lib migrate`, `E505` — **only after GE-T15 passes** | suite implementation 5; export → import round trip reproduces the record-set digest on every GE-T15 corpus; GE-T7 rerun on primary shards |
+| **P13d** | primary mode, `lib migrate`, `E505` — **only after GE-T15 passes** (done 2026-10-26) | suite implementation 5; export → import round trip reproduces the record-set digest on every GE-T15 corpus; GE-T7 rerun on primary shards |
 
 ### 6.1 Progress
 
@@ -1538,6 +1565,34 @@ in every ported signature; §3.2's sketch and §5.2's shapes are otherwise uncha
     83 ms (835 ms); single-record append 4.92 ms; every other number as before. Six of GE-T7's
     seven thresholds are met on the stand-in; the scoped query (SMYSL-2.5 OQ-91) is the one
     left.
+
+- **P13d — done (2026-10-26).** Primary mode, per library shard (§3.5.5's as-built note):
+  - **Decided with the owner:** per shard, as §3.9 says, not per library; a shard's log set
+    aside as `<stem>.cbor.pre-primary`, not deleted; library shards only, a standalone log's
+    `.redb` staying a cache.
+  - **Built:** store layout 3 (a `records` table keyed by offset, a mode in each log's row);
+    `RedbShards`, the writer of primary shards and the switch between modes (`make_primary`,
+    `make_index`, `abandon_primary`, one-pass `digests`); the library's marker, its reads and
+    appends through the store, and its settling of an interrupted migration at open;
+    `lib migrate --primary/--index` and `lib verify --primary-shards`; `SMY-E505` (registry 145).
+    A library with a primary shard opens only with `store-redb`, and says so otherwise.
+  - **Conformance implementation 5** (§5.1's as-built note), the library's own cycle — made
+    primary, reopened, appended to, verified, made index again, reopened — the three states a
+    crash can leave a migration in, each settled at the next open, and the CLI end to end.
+  - **Found and fixed while measuring:** a primary shard's read looked its log up among every
+    log's rows, and dropped the store after, so a 10⁶-unit library of 1,001 primary shards
+    reopened a 750 MB database 1,001 times: `Library::open` 17.8 s, now 5.3 s with the store
+    held open while the shards are read. A record walk read every primary shard's bytes before
+    it started, which put `check` at 1.08 GB; it reads each when it reaches it, to the snapshot's
+    length. An append reopened the store each time: 21 ms on a small library, 4 ms now.
+  - **GE-T7's stand-in on primary shards** (every shard made primary, one run, release): making
+    1,001 shards primary 97 s; `Library::open` 5.3 s (index 4.9 s); contention detection 385 ms;
+    **`check` on redb 889 MB** in 33 s (index 885 MB in 20 s) — **met**; `check` in memory 7.4 s;
+    every other number as in index mode; the store 753 MB on disk with the shards' records in it,
+    the 164 MB of logs set aside. **The single-record append is 5.91 ms against 5** — one redb
+    commit with its syncs, where an index-mode append is one log `fsync` (4.92 ms) — **not met**,
+    recorded; a smaller store's is 4 ms. The scoped query is OQ-91's, as in index mode.
+  - The default stays index mode: a shard is primary only when `lib migrate` makes it so.
 
 ## 7. Risks and mitigations
 

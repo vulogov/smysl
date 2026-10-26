@@ -21,6 +21,7 @@ use smysl_core::diag::{Code, Diagnostic};
 use smysl_core::{hash_bytes, to_cbor, Error, Record, Rolling};
 
 use super::build::{self, Described, Kind};
+use super::log::LogReader;
 use super::shared::{self, Shared};
 use super::tables::{with_log, LogIx, RECORD_HASH};
 use super::{backend, is_held, RedbOptions, RedbStore, ONE};
@@ -192,15 +193,20 @@ impl RedbShard {
         self.log.sync_data().map_err(Error::Io)?;
         report.bytes_written = bytes.len() as u64;
         let end = self.described.log_len + report.bytes_written;
+        let reader = LogReader::new(
+            Some(&self.log),
+            self.described.log_len,
+            end,
+            self.hasher.clone(),
+        );
         let (now, _, hasher) = build::fold(
             &shared.db,
             Kind::One,
             ONE,
             self.ix,
-            Some(&self.log),
+            reader,
             self.described,
-            end,
-            self.hasher.clone(),
+            false,
         )?;
         self.described = now;
         self.hasher = hasher;
@@ -219,8 +225,10 @@ impl RedbShard {
                 ix: self.ix,
                 path: self.log_path.clone(),
                 described: self.described,
+                primary: false,
             }],
             paths,
+            vec![false; self.ix as usize + 1],
             false,
             &self.opts,
         )
@@ -272,15 +280,20 @@ impl RedbShard {
         }
         let end = self.log.metadata().map_err(Error::Io)?.len();
         if end > self.described.log_len {
+            let reader = LogReader::new(
+                Some(&self.log),
+                self.described.log_len,
+                end,
+                self.hasher.clone(),
+            );
             let (now, folded, hasher) = build::fold(
                 &self.shared.db,
                 Kind::One,
                 ONE,
                 self.ix,
-                Some(&self.log),
+                reader,
                 self.described,
-                end,
-                self.hasher.clone(),
+                false,
             )?;
             self.described = now;
             self.hasher = hasher;

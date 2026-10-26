@@ -843,6 +843,16 @@ pub enum LibError {
     /// older layout would make *that* build rebuild in turn, each undoing the other. The
     /// message says how to rebuild deliberately.
     StoreLayout { found: u16, supported: u16 },
+    /// `SMY-E505` - a primary shard (SMYSL-2.8 §3.5.5) and its export disagree on the record-set
+    /// digest: what the store's tables say it holds and what its records give when read into an
+    /// empty store, or what the shard held before it became primary.
+    PrimaryDisagrees {
+        shard: String,
+        /// The record-set digest the shard should have, in hex.
+        expected: String,
+        /// The one its export gives, in hex.
+        export: String,
+    },
 }
 
 impl LibError {
@@ -864,6 +874,7 @@ impl LibError {
             | LibError::Redacted { .. }
             | LibError::Io { .. } => None,
             LibError::StoreLayout { .. } => Some(Code::E503),
+            LibError::PrimaryDisagrees { .. } => Some(Code::E505),
         }
     }
 
@@ -871,9 +882,9 @@ impl LibError {
     /// the CLI already has a number for and which scripts already watch for.
     pub const fn code_exit(&self) -> ExitCode {
         match self {
-            LibError::ObjectCorrupt { .. } | LibError::StructureChanged { .. } => {
-                ExitCode::HashVerification
-            }
+            LibError::ObjectCorrupt { .. }
+            | LibError::StructureChanged { .. }
+            | LibError::PrimaryDisagrees { .. } => ExitCode::HashVerification,
             LibError::StoreLayout { .. } => ExitCode::UnsupportedVersion,
             _ => ExitCode::Failure,
         }
@@ -963,6 +974,16 @@ impl fmt::Display for LibError {
                 "{}: the unit store has layout {found} and this build reads up to {supported}; \
                  it is derived from the log, so deleting it and opening again rebuilds it",
                 Code::E503
+            ),
+            LibError::PrimaryDisagrees {
+                shard,
+                expected,
+                export,
+            } => write!(
+                f,
+                "{}: primary shard `{shard}` should have record-set digest {expected}, and its \
+                 export gives {export}",
+                Code::E505
             ),
         }
     }

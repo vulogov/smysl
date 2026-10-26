@@ -471,8 +471,9 @@ mod tests {
         // raised by `migrate`; 140 with `SMY-W475` (step 8), raised by `pointer(…)`; 143 with
         // `SMY-W501`, `SMY-E503` and `SMY-W504` (TX-P13b step 1), raised by the redb unit
         // store, in a fourteenth group; 144 with `SMY-W500` (TX-P13c step 1), raised by a
-        // union of shards when a reference waits on one not loaded.
-        assert_eq!(Code::ALL.len(), 144);
+        // union of shards when a reference waits on one not loaded; 145 with `SMY-E505` (TX-P13d),
+        // raised by `lib migrate` and `lib verify --primary`.
+        assert_eq!(Code::ALL.len(), 145);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

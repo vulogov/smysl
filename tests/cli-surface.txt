@@ -901,7 +901,7 @@ assess     --shard
 assess     --seed-check
 assess     --help
 lib        <ACTION>
-lib        [possible values: import, status, accept, discard, export, verify]
+lib        [possible values: import, status, accept, discard, export, verify, migrate]
 lib        [TARGET]
 lib        --config
 lib        --name
@@ -943,6 +943,9 @@ lib        --with-text
 lib        --with-provenance
 lib        --with-staged
 lib        --with-quarantine
+lib        --primary
+lib        --index
+lib        --primary-shards
 lib        --p2
 lib        --keep-scratch
 lib        --no-join

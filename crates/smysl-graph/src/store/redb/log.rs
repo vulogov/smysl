@@ -59,16 +59,29 @@ pub(super) struct LogReader<'f> {
 }
 
 /// A log a reader borrows, or one it owns: a record walk over several logs opens each in turn.
+/// Or bytes that would be a log's from `base` on: what a primary log's append folds, which no
+/// file holds (TX-P13d).
 enum Src<'f> {
     Borrowed(&'f File),
     Owned(File),
+    Bytes { base: u64, bytes: Vec<u8> },
 }
 
 impl Src<'_> {
-    fn file(&self) -> &File {
+    fn read(&self, offset: u64, len: usize) -> io::Result<Vec<u8>> {
         match self {
-            Src::Borrowed(f) => f,
-            Src::Owned(f) => f,
+            Src::Borrowed(f) => read_at(f, offset, len),
+            Src::Owned(f) => read_at(f, offset, len),
+            Src::Bytes { base, bytes } => {
+                let at = offset
+                    .checked_sub(*base)
+                    .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))?
+                    as usize;
+                bytes
+                    .get(at..at + len)
+                    .map(<[u8]>::to_vec)
+                    .ok_or_else(|| io::ErrorKind::UnexpectedEof.into())
+            }
         }
     }
 }
@@ -78,6 +91,14 @@ impl LogReader<'static> {
     pub(super) fn owning(file: File, from: u64, end: u64, hasher: Rolling) -> LogReader<'static> {
         let mut r = LogReader::new(None, from, end, hasher);
         r.file = Some(Src::Owned(file));
+        r
+    }
+
+    /// The records in `bytes`, read as though they were a log's from offset `base`.
+    pub(super) fn over_bytes(base: u64, bytes: Vec<u8>) -> LogReader<'static> {
+        let end = base + bytes.len() as u64;
+        let mut r = LogReader::new(None, base, end, Rolling::new());
+        r.file = Some(Src::Bytes { base, bytes });
         r
     }
 }
@@ -162,7 +183,7 @@ impl<'f> LogReader<'f> {
             .file
             .as_ref()
             .ok_or_else(|| Error::Io(io::ErrorKind::NotFound.into()))?;
-        let more = read_at(file.file(), self.pos, want).map_err(Error::Io)?;
+        let more = file.read(self.pos, want).map_err(Error::Io)?;
         self.pos += more.len() as u64;
         self.buf.extend_from_slice(&more);
         Ok(())

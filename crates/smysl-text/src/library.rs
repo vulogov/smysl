@@ -312,6 +312,13 @@ impl Library {
                 message: format!("layout `{version}` is not `{LAYOUT}`; this library was written by another release"),
             });
         }
+        #[cfg(feature = "store-redb")]
+        Self::settle_migrations(root)?;
+        // The unit store held open while the shards are read, so that each primary shard's read
+        // finds it open rather than opening a database of every shard's records afresh: 1,001
+        // opens were 13 s of a 10⁶-unit library's open (TX-P13d).
+        #[cfg(feature = "store-redb")]
+        let _held = crate::shards::hold_store(root);
         // Every shard, in name order, into one store: the order a union of them reads in, so
         // the store is the union's answer whichever way it is built.
         let mut shards = BTreeMap::new();
@@ -737,6 +744,218 @@ impl Library {
     /// writer holds the library lock first — so the set taken at the start is enough.
     pub fn shards(&self) -> Vec<String> {
         self.shards.keys().cloned().collect()
+    }
+
+    /// The shards whose records the unit store holds rather than a log (TX-P13d), in name order.
+    pub fn primary_shards(&self) -> Vec<String> {
+        self.shards
+            .iter()
+            .filter(|(_, l)| l.is_primary())
+            .map(|(n, _)| n.clone())
+            .collect()
+    }
+
+    /// Make a shard primary (SMYSL-2.8 §3.5.5, §3.9; TX-P13d): its records move into the
+    /// library's unit store, which is where they are written from then on, and its log is set
+    /// aside as `<stem>.cbor.pre-primary`, kept and never read again.
+    ///
+    /// Only after a round trip: the record-set digest of the shard's log, of its records read
+    /// back out of the store into an empty store, and of what the store's own tables hold, all
+    /// three equal. Otherwise the store is put back as it was, the log is left where it is, and
+    /// the answer is `SMY-E505`. Returns the digest. A shard already primary is left so.
+    #[cfg(feature = "store-redb")]
+    pub fn migrate_primary(&mut self, shard: &str) -> Result<[u8; 32], LibError> {
+        Ok(self.migrate_primary_all(&[shard.to_string()])?[0])
+    }
+
+    /// [`Library::migrate_primary`] for several shards: the store brought up to the logs once
+    /// and the digests taken in one pass, rather than a whole store's open per shard. Each shard
+    /// is migrated or not on its own; the first that fails stops the rest, the ones before it
+    /// staying primary.
+    #[cfg(feature = "store-redb")]
+    pub fn migrate_primary_all(&mut self, names: &[String]) -> Result<Vec<[u8; 32]>, LibError> {
+        use crate::shards::{self, UNIT_STORE};
+        use smysl_graph::redb::{RedbShards, RedbStore};
+        let at = |e: smysl_core::Error| LibError::Io {
+            at: UNIT_STORE.to_string(),
+            message: e.to_string(),
+        };
+        for shard in names {
+            if !self.shards.contains_key(shard) {
+                return Err(LibError::Io {
+                    at: crate::shards::DIR.to_string(),
+                    message: format!("this library has no shard `{shard}`"),
+                });
+            }
+        }
+        let root = self.root.clone();
+        let store = root.join(UNIT_STORE);
+        let opts = smysl_graph::redb::RedbOptions::default();
+        // The store brought up to every log, so it describes each of these whole.
+        let all = shards::list(&root)?;
+        drop(RedbStore::open_shards(&store, &all, None, opts.clone()).map_err(at)?);
+        let writer = RedbShards::open(&store, &opts).map_err(at)?;
+        let mut moved = Vec::new();
+        let mut before = Vec::new();
+        for shard in names {
+            if self.shards[shard].is_primary() {
+                before.push(None);
+                continue;
+            }
+            let (_, records) = ShardLog::read(&root, shard)?;
+            before.push(Some(Store::from_records(records).record_set_digest()));
+            writer
+                .make_primary(shard, &root.join(shards::log_path(shard)))
+                .map_err(at)?;
+            moved.push(shard.clone());
+        }
+        let tables = writer.digests().map_err(at)?;
+        let mut out = Vec::with_capacity(names.len());
+        for (shard, before) in names.iter().zip(before) {
+            let held = tables.get(shard).copied().unwrap_or_default();
+            let Some(before) = before else {
+                out.push(held);
+                continue;
+            };
+            let back = smysl_core::from_cbor_seq(&writer.bytes(shard).map_err(at)?)
+                .map(|(r, _)| Store::from_records(r).record_set_digest())
+                .map_err(|e| at(e.into()))?;
+            if back != before || held != before {
+                // This one back as it was, and every one after it not begun.
+                for later in moved.iter().skip_while(|m| *m != shard) {
+                    writer
+                        .abandon_primary(later, &root.join(shards::log_path(later)))
+                        .map_err(at)?;
+                }
+                return Err(LibError::PrimaryDisagrees {
+                    shard: shard.clone(),
+                    expected: hex(&before),
+                    export: hex(if back != before { &back } else { &held }),
+                });
+            }
+            // The marker first: a crash before the log is set aside leaves a marked shard beside
+            // a log, which the next open sets aside; the other order would leave a primary
+            // shard with no marker, which the next open puts back in index mode.
+            let marker = root.join(shards::primary_marker(shard));
+            let mut f = std::fs::File::create(&marker).map_err(|e| io(marker_rel(shard), &e))?;
+            std::io::Write::write_all(&mut f, b"smysl/primary/1\n")
+                .and_then(|()| f.sync_all())
+                .map_err(|e| io(marker_rel(shard), &e))?;
+            std::fs::rename(
+                root.join(shards::log_path(shard)),
+                root.join(shards::set_aside(shard)),
+            )
+            .map_err(|e| io(marker_rel(shard), &e))?;
+            let (now, _) = ShardLog::read(&root, shard)?;
+            self.shards.insert(shard.clone(), now);
+            out.push(before);
+        }
+        Ok(out)
+    }
+
+    /// Make a primary shard an index-mode one again: its records written out as its log, from
+    /// the store, byte for byte as the store holds them, and the marker removed. The log set
+    /// aside when it became primary is left where it is.
+    #[cfg(feature = "store-redb")]
+    pub fn migrate_index(&mut self, shard: &str) -> Result<(), LibError> {
+        use crate::shards::{self, UNIT_STORE};
+        let at = |e: smysl_core::Error| LibError::Io {
+            at: UNIT_STORE.to_string(),
+            message: e.to_string(),
+        };
+        if !self.shards.get(shard).is_some_and(ShardLog::is_primary) {
+            return Ok(());
+        }
+        let root = self.root.clone();
+        let writer =
+            smysl_graph::redb::RedbShards::open(&root.join(UNIT_STORE), &Default::default())
+                .map_err(at)?;
+        writer
+            .make_index(shard, &root.join(shards::log_path(shard)))
+            .map_err(at)?;
+        drop(writer);
+        std::fs::remove_file(root.join(shards::primary_marker(shard)))
+            .map_err(|e| io(marker_rel(shard), &e))?;
+        let (now, _) = ShardLog::read(&root, shard)?;
+        self.shards.insert(shard.to_string(), now);
+        Ok(())
+    }
+
+    /// `SMY-E505`, or the digest: a primary shard's records read out of the store into an empty
+    /// store, against what the store's own tables hold.
+    #[cfg(feature = "store-redb")]
+    pub fn primary_digest(&self, shard: &str) -> Result<[u8; 32], LibError> {
+        use crate::shards::UNIT_STORE;
+        let at = |e: smysl_core::Error| LibError::Io {
+            at: UNIT_STORE.to_string(),
+            message: e.to_string(),
+        };
+        let writer =
+            smysl_graph::redb::RedbShards::open(&self.root.join(UNIT_STORE), &Default::default())
+                .map_err(at)?;
+        let export = smysl_core::from_cbor_seq(&writer.bytes(shard).map_err(at)?)
+            .map(|(r, _)| Store::from_records(r).record_set_digest())
+            .map_err(|e| at(e.into()))?;
+        let tables = writer
+            .digests()
+            .map_err(at)?
+            .get(shard)
+            .copied()
+            .unwrap_or_default();
+        if export != tables {
+            return Err(LibError::PrimaryDisagrees {
+                shard: shard.to_string(),
+                expected: hex(&tables),
+                export: hex(&export),
+            });
+        }
+        Ok(tables)
+    }
+
+    /// Finish or undo a migration a crash interrupted (TX-P13d), before the shards are read.
+    ///
+    /// A migration to primary writes the store, then the marker, then sets the log aside; one
+    /// back writes the log, then the store, then removes the marker. So: a shard the store holds
+    /// with no marker and its log still there was not finished, and is put back in index mode,
+    /// losing nothing, since the log holds every record; a marked shard whose log is still there
+    /// was, but for setting the log aside; and a marked shard the store no longer holds was
+    /// going back, and its marker goes.
+    #[cfg(feature = "store-redb")]
+    fn settle_migrations(root: &Path) -> Result<(), LibError> {
+        use crate::shards::{self, UNIT_STORE};
+        let store = root.join(UNIT_STORE);
+        if !store.is_file() {
+            return Ok(());
+        }
+        let at = |e: smysl_core::Error| LibError::Io {
+            at: UNIT_STORE.to_string(),
+            message: e.to_string(),
+        };
+        // Another process holding the store has opened the library before this one, and settled
+        // it: nothing to do now that it could not.
+        let writer = match smysl_graph::redb::RedbShards::open(&store, &Default::default()) {
+            Ok(w) => w,
+            Err(smysl_core::Error::Io(e)) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                return Ok(())
+            }
+            Err(e) => return Err(at(e)),
+        };
+        let logs = writer.logs().map_err(at)?;
+        for l in &logs {
+            let marked = shards::is_primary(root, &l.name);
+            let log = root.join(shards::log_path(&l.name));
+            match (l.primary, marked, log.is_file()) {
+                (true, false, true) => writer.abandon_primary(&l.name, &log).map_err(at)?,
+                (true, true, true) => std::fs::rename(&log, root.join(shards::set_aside(&l.name)))
+                    .map_err(|e| io(marker_rel(&l.name), &e))?,
+                (false, true, true) => {
+                    std::fs::remove_file(root.join(shards::primary_marker(&l.name)))
+                        .map_err(|e| io(marker_rel(&l.name), &e))?
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     /// Which shards hold each uid.
@@ -1370,4 +1589,16 @@ impl PartResolver for Library {
         let loc = crate::locator::parse(locator).ok()?;
         self.resolve(mid, &loc, &Caps::DEFAULT).ok().flatten()
     }
+}
+
+/// A digest in hex, for a message.
+#[cfg(feature = "store-redb")]
+fn hex(d: &[u8; 32]) -> String {
+    d.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A shard's marker, relative to the root, for a message.
+#[cfg(feature = "store-redb")]
+fn marker_rel(shard: &str) -> String {
+    crate::shards::primary_marker(shard).display().to_string()
 }

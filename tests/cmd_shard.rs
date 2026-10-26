@@ -184,3 +184,79 @@ fn under_the_unit_store_the_library_is_one_store_opened_for_the_shards_asked_for
     assert!(!dir.join("lib/log/.smysl/store").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// TX-P13d from the command line: a shard made primary is read as before, through memory, the
+/// unit store and `--shard`; `lib verify --primary-shards` holds; and `lib migrate --index`
+/// writes its log back.
+#[cfg(feature = "store-redb")]
+#[test]
+fn a_shard_made_primary_reads_as_it_did_and_goes_back() {
+    let dir = scratch("primary");
+    a_library(&dir.join("lib"));
+    let before = run(&dir, &["check", "-s", "lib"]);
+    assert!(before.status.success(), "{}", text(&before));
+
+    let o = run(
+        &dir,
+        &["lib", "migrate", "--primary", "chat/messages", "-s", "lib"],
+    );
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(
+        text(&o).contains("chat/messages is primary"),
+        "{}",
+        text(&o)
+    );
+    assert!(!dir.join("lib/log/shards/chat~messages.cbor").exists());
+    assert!(dir.join("lib/log/shards/chat~messages.primary").is_file());
+    assert!(dir
+        .join("lib/log/shards/chat~messages.cbor.pre-primary")
+        .is_file());
+
+    // Read as before: in memory, through the unit store, and one shard waiting on it.
+    let o = run(&dir, &["check", "-s", "lib"]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert_eq!(text(&o), text(&before), "the library reads as it did");
+    let o = run(&dir, &["--backend", "redb", "check", "-s", "lib"]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(!text(&o).contains("SMY-W500"), "{}", text(&o));
+    let o = run(
+        &dir,
+        &[
+            "--backend",
+            "redb",
+            "--shard",
+            "chat/replies",
+            "check",
+            "-s",
+            "lib",
+        ],
+    );
+    assert!(text(&o).contains("SMY-W500"), "{}", text(&o));
+    assert!(text(&o).contains("chat/messages"), "{}", text(&o));
+
+    let o = run(&dir, &["lib", "verify", "--primary-shards", "-s", "lib"]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(text(&o).contains("chat/messages: holds"), "{}", text(&o));
+
+    // A shard that is not there is refused, and nothing changes.
+    let o = run(
+        &dir,
+        &["lib", "migrate", "--primary", "chat/nobody", "-s", "lib"],
+    );
+    assert!(!o.status.success(), "{}", text(&o));
+
+    let o = run(
+        &dir,
+        &["lib", "migrate", "--index", "chat/messages", "-s", "lib"],
+    );
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(dir.join("lib/log/shards/chat~messages.cbor").is_file());
+    assert!(!dir.join("lib/log/shards/chat~messages.primary").exists());
+    let o = run(&dir, &["check", "-s", "lib"]);
+    assert_eq!(
+        text(&o),
+        text(&before),
+        "back in index mode, the library reads as it did"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

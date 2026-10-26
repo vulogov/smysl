@@ -9,8 +9,9 @@ use smysl_core::{Status, Uid};
 /// The layout this build writes and reads. A store with a larger one is refused (`SMY-E503`);
 /// a smaller one is rebuilt (`SMY-W501`), since in index mode the store is derived.
 ///
-/// 2 since TX-P13c step 3: a store describes several logs, and every row says which.
-pub(super) const LAYOUT: u16 = 2;
+/// 2 since TX-P13c step 3: a store describes several logs, and every row says which. 3 since
+/// TX-P13d: a log can be primary, its records held by the store in `records`.
+pub(super) const LAYOUT: u16 = 3;
 
 /// A log's position among a store's, as its rows carry it: two bytes, big-endian. Assigned in
 /// the order the store first saw the logs, not their name order; the name order is `LOGS`'s.
@@ -43,6 +44,11 @@ pub(super) const ATTEST: TableDefinition<'static, &[u8; 66], &[u8]> =
 /// judgements, not to text, which is why it is read whole at open.
 pub(super) const INTERP: TableDefinition<'static, &[u8; 10], &[u8]> =
     TableDefinition::new("interp");
+/// A primary log's records (TX-P13d), by `(log, offset)` — the offset each would have in the log,
+/// so a header's offset finds its core here as it finds it in a file, and the records in key
+/// order are the log's bytes. A log in index mode has no rows.
+pub(super) const RECORDS: TableDefinition<'static, &[u8; 10], &[u8]> =
+    TableDefinition::new("records");
 /// `(observed ms, uid)`, so `units_in_observed_order` is a scan.
 pub(super) const OBSERVED: TableDefinition<'static, &[u8; 40], ()> =
     TableDefinition::new("observed");
@@ -50,16 +56,21 @@ pub(super) const OBSERVED: TableDefinition<'static, &[u8; 40], ()> =
 pub(super) const SOURCE_REF: TableDefinition<'static, &[u8], ()> =
     TableDefinition::new("source_ref");
 
-pub(super) const LOG_ROW_LEN: usize = 50;
+pub(super) const LOG_ROW_LEN: usize = 51;
 
 /// What a store describes of one of its logs: its position, and the length, hash and record
-/// count of the prefix it has folded.
+/// count of the prefix it has folded, and whether the store is where its records are.
+///
+/// For a primary log `log_hash` is not the hash of a file — there is none — but a chain: each
+/// append's hash is BLAKE3 of the last one and the bytes appended. It changes exactly when the log
+/// does, which is all a stamp needs; a log written back out (`make_index`) is hashed again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct LogRow {
     pub(super) ix: LogIx,
     pub(super) log_len: u64,
     pub(super) log_hash: [u8; 32],
     pub(super) records: u64,
+    pub(super) primary: bool,
 }
 
 impl LogRow {
@@ -69,6 +80,7 @@ impl LogRow {
         b[2..10].copy_from_slice(&self.log_len.to_be_bytes());
         b[10..42].copy_from_slice(&self.log_hash);
         b[42..50].copy_from_slice(&self.records.to_be_bytes());
+        b[50] = u8::from(self.primary);
         b
     }
 
@@ -78,6 +90,7 @@ impl LogRow {
             log_len: u64::from_be_bytes(b[2..10].try_into().expect("8 bytes")),
             log_hash: b[10..42].try_into().expect("32 bytes"),
             records: u64::from_be_bytes(b[42..50].try_into().expect("8 bytes")),
+            primary: b[50] == 1,
         }
     }
 }
@@ -99,6 +112,11 @@ pub(super) fn log_range(k: &[u8; 32]) -> ([u8; 34], [u8; 34]) {
 pub(super) fn log_of(k: &[u8]) -> LogIx {
     let n = k.len();
     u16::from_be_bytes([k[n - 2], k[n - 1]])
+}
+
+/// A `records` key: the same shape as `interp`'s, a log's position and an offset in it.
+pub(super) fn records_key(log: LogIx, offset: u64) -> [u8; 10] {
+    interp_key(log, offset)
 }
 
 pub(super) fn interp_key(log: LogIx, seq: u64) -> [u8; 10] {

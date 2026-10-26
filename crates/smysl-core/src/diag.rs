@@ -457,13 +457,14 @@ registry! {
     // store that did not describe its log and was rebuilt from it (`W501`), one written in a
     // layout this build cannot read (`E503`), and a store another process holds, read from
     // the log instead (`W504`). TX-P13c step 1's union of shards brings `W500`, a reference that
-    // waits on a shard not loaded; `E505` waits for primary mode (TX-P13d), and `E502` is
-    // withdrawn in favour of `E445`.
+    // waits on a shard not loaded; TX-P13d's primary mode brings `E505`, a primary shard and its
+    // export disagreeing; `E502` is withdrawn in favour of `E445`.
     Store => {
         W500 = "SMY-W500", Warn,  "A reference names a uid in a shard not loaded in this union; it waits on that shard";
         W501 = "SMY-W501", Warn,  "The unit store does not describe this log (length, hash or layout); rebuilt from the log";
         E503 = "SMY-E503", Error, "The unit store's layout is newer than this build reads; it is derived, so delete it to rebuild";
         W504 = "SMY-W504", Warn,  "The unit store is held by another process; read from the CBOR log instead";
+        E505 = "SMY-E505", Error, "A primary shard and its export disagree on the record-set digest";
     }
 }
 
@@ -948,10 +949,11 @@ mod tests {
     ///
     /// 143 with `SMY-W501`, `SMY-E503` and `SMY-W504` in TX-P13b step 1, raised by the redb
     /// unit store, in a fourteenth group, `Store`; 144 with `SMY-W500` in TX-P13c step 1,
-    /// raised by a union of shards for a reference that waits on one not loaded.
+    /// raised by a union of shards for a reference that waits on one not loaded; 145 with
+    /// `SMY-E505` in TX-P13d, a primary shard and its export disagreeing.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 144);
+        assert_eq!(Code::ALL.len(), 145);
     }
 
     #[test]

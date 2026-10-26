@@ -6,6 +6,7 @@
 //!
 //! ```text
 //! cargo test --release --all-features --test ge_t7 -- --ignored --nocapture
+//! SMYSL_GE_T7_PRIMARY=1 cargo test --release --all-features --test ge_t7 -- --ignored --nocapture
 //! SMYSL_GE_T7_WORKS=50 SMYSL_GE_T7_BIG=5000 SMYSL_GE_T7_UNITS=50000 \
 //!     cargo test --release --all-features --test ge_t7 -- --ignored --nocapture
 //! ```
@@ -364,11 +365,15 @@ fn union(root: &Path, keep: impl Fn(&str) -> bool, redb: bool) -> AnyStore {
         .0;
     }
     let mut stores = Vec::new();
-    for (name, log) in all {
-        if !keep(&name) || !log.is_file() {
+    for (name, _) in all {
+        if !keep(&name) {
             continue;
         }
-        let bytes = std::fs::read(&log).unwrap();
+        // The log, or a primary shard's records from the unit store.
+        let bytes = smysl_text::shards::read_bytes(root, &name).unwrap();
+        if bytes.is_empty() {
+            continue;
+        }
         stores.push((
             name,
             AnyStore::from(Store::from_records(
@@ -506,6 +511,23 @@ fn ge_t7_stand_in() {
         for w in 0..n {
             records(w, &works, &tids, &mut expected);
         }
+    }
+
+    // `SMYSL_GE_T7_PRIMARY=1` (TX-P13d's exit): every shard made primary before anything is
+    // measured, so the run is over the unit store holding the records rather than the logs.
+    let primary = std::env::var_os("SMYSL_GE_T7_PRIMARY").is_some();
+    if primary {
+        let mut lib = Library::open(&root).unwrap();
+        let names = lib.shards();
+        let t = Instant::now();
+        let digests = lib.migrate_primary_all(&names).unwrap();
+        println!(
+            "  {:<44} {:>10.1} s  ({} shards)",
+            "migrate: every shard made primary",
+            t.elapsed().as_secs_f64(),
+            digests.len()
+        );
+        assert_eq!(lib.primary_shards().len(), names.len());
     }
 
     let t = Instant::now();
@@ -806,19 +828,26 @@ fn ge_t7_stand_in() {
         }
         lib_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
         drop(lib);
-        let log = root.join(smysl_text::shards::log_path(&works[0].alias));
-        let (mut shard, _) =
-            smysl_graph::redb::RedbShard::open_rw(&log, smysl_graph::redb::RedbOptions::default())
-                .unwrap();
-        let mut redb_ms = Vec::new();
-        for _ in 0..5 {
-            let r = [Record::Unit(fresh("appended through redb"))];
-            let t = Instant::now();
-            assert_eq!(shard.append(&r).unwrap().added, 1);
-            redb_ms.push(ms(t));
+        // A one-log writer on the shard's log; not for a primary shard, whose library append
+        // above is already the store's.
+        let mut redb_ms = vec![f64::INFINITY; 5];
+        if !primary {
+            let log = root.join(smysl_text::shards::log_path(&works[0].alias));
+            let (mut shard, _) = smysl_graph::redb::RedbShard::open_rw(
+                &log,
+                smysl_graph::redb::RedbOptions::default(),
+            )
+            .unwrap();
+            redb_ms.clear();
+            for _ in 0..5 {
+                let r = [Record::Unit(fresh("appended through redb"))];
+                let t = Instant::now();
+                assert_eq!(shard.append(&r).unwrap().added, 1);
+                redb_ms.push(ms(t));
+            }
+            redb_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            drop(shard);
         }
-        redb_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        drop(shard);
         println!(
             "  {:<44} {:>10.2} ms  (median of 5)",
             "append: through the library", lib_ms[2]

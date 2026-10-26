@@ -21,9 +21,9 @@ use smysl_core::{canonical_uid, Error, LibError, Record, Rolling};
 
 use super::log::{self, LogReader};
 use super::tables::{
-    attest_key, attest_range, deps_key, interp_key, log_range, observed_key, source_key, with_log,
-    Header, LogIx, LogRow, ATTEST, DEPS, HEADER, HOLDS, INTERP, LAYOUT, LOGS, META, OBSERVED,
-    RECORD_HASH, SOURCE_REF,
+    attest_key, attest_range, deps_key, interp_key, log_range, observed_key, records_key,
+    source_key, with_log, Header, LogIx, LogRow, ATTEST, DEPS, HEADER, HOLDS, INTERP, LAYOUT, LOGS,
+    META, OBSERVED, RECORDS, RECORD_HASH, SOURCE_REF,
 };
 use super::{backend, OpenReport};
 use crate::Store;
@@ -199,6 +199,8 @@ pub(super) struct CaughtUp {
     pub(super) ix: LogIx,
     pub(super) described: Described,
     pub(super) hasher: Rolling,
+    /// Whether the store holds the log's records (TX-P13d).
+    pub(super) primary: bool,
 }
 
 /// Bring the store up to its logs: nothing for a log it describes already, the tail of one that
@@ -240,6 +242,10 @@ pub(super) fn catch_up(
                 let Some(row) = m.logs.get(g.name) else {
                     continue;
                 };
+                // A primary log's records are the store's: there is no file to describe.
+                if row.primary {
+                    continue;
+                }
                 let prefix = match g.open()? {
                     Some(f) => log::hash_prefix(&f, row.log_len).map_err(Error::Io)?,
                     None if row.log_len == 0 => Some(Rolling::new()),
@@ -260,6 +266,16 @@ pub(super) fn catch_up(
             }
         }
     }
+    // A store that is where some log's records are cannot be rebuilt from the logs: that would
+    // be losing them. Refused, with what to do, rather than done.
+    if let (Some(why), Some(m)) = (rebuild, &held_now) {
+        if let Some((name, _)) = m.logs.iter().find(|(_, r)| r.primary) {
+            return Err(super::backend(format!(
+                "{why} — but it holds the records of primary shard `{name}`, which no log \
+                 has; not rebuilt. `lib migrate --index` writes a primary shard's log back first"
+            )));
+        }
+    }
     let mut rows: BTreeMap<String, LogRow> = match (rebuild, held_now) {
         (Some(why), held) => {
             if held.is_some() {
@@ -277,6 +293,21 @@ pub(super) fn catch_up(
     };
     let mut out = Vec::with_capacity(logs.len());
     for g in logs {
+        if let Some(r) = rows.get(g.name).filter(|r| r.primary) {
+            // Nothing to fold: a primary log grows by `append_primary`, in the store.
+            out.push(CaughtUp {
+                ix: r.ix,
+                described: Described {
+                    layout: LAYOUT,
+                    log_len: r.log_len,
+                    log_hash: r.log_hash,
+                    records: r.records,
+                },
+                hasher: Rolling::new(),
+                primary: true,
+            });
+            continue;
+        }
         let file = g.open()?;
         let end = match &file {
             Some(f) => f.metadata().map_err(Error::Io)?.len(),
@@ -304,10 +335,12 @@ pub(super) fn catch_up(
                 ix,
                 described: from,
                 hasher,
+                primary: false,
             });
             continue;
         }
-        let (now, folded, hasher) = fold(db, kind, g.name, ix, file.as_deref(), from, end, hasher)?;
+        let reader = LogReader::new(file.as_deref(), from.log_len, end, hasher);
+        let (now, folded, hasher) = fold(db, kind, g.name, ix, reader, from, false)?;
         rows.insert(
             g.name.to_string(),
             LogRow {
@@ -315,6 +348,7 @@ pub(super) fn catch_up(
                 log_len: now.log_len,
                 log_hash: now.log_hash,
                 records: now.records,
+                primary: false,
             },
         );
         report.replayed += folded.records;
@@ -331,6 +365,7 @@ pub(super) fn catch_up(
             ix,
             described: now,
             hasher,
+            primary: false,
         });
     }
     Ok(out)
@@ -342,18 +377,20 @@ pub(super) fn catch_up(
 /// `hasher` holds the hash of the log before `from.log_len`. The transaction commits with
 /// `Durability::Immediate`: the log was written first, so a crash leaves the store behind its
 /// log, never ahead of it, and behind is a tail to fold again.
-#[allow(clippy::too_many_arguments)]
+///
+/// With `primary`, the records are a primary log's (TX-P13d): each is kept in `records` under its
+/// offset as well, and the log's hash is the chain [`LogRow`] describes rather than the bytes'.
 pub(super) fn fold(
     db: &Database,
     kind: Kind,
     name: &str,
     ix: LogIx,
-    log: Option<&std::fs::File>,
+    mut reader: LogReader<'_>,
     from: Described,
-    end: u64,
-    hasher: Rolling,
+    primary: bool,
 ) -> Result<(Described, Folded, Rolling), Error> {
-    let mut reader = LogReader::new(log, from.log_len, end, hasher);
+    let mut chain = Rolling::new();
+    chain.update(&from.log_hash);
     let mut txn = db.begin_write().map_err(backend)?;
     txn.set_durability(Durability::Immediate);
     let mut seq = from.records;
@@ -366,8 +403,14 @@ pub(super) fn fold(
         let mut interp = txn.open_table(INTERP).map_err(backend)?;
         let mut observed = txn.open_table(OBSERVED).map_err(backend)?;
         let mut source = txn.open_table(SOURCE_REF).map_err(backend)?;
+        let mut held = txn.open_table(RECORDS).map_err(backend)?;
 
         while let Some((offset, len, record)) = reader.next()? {
+            if primary {
+                held.insert(&records_key(ix, offset), reader.raw())
+                    .map_err(backend)?;
+                chain.update(reader.raw());
+            }
             let hash = Store::record_hash(&record);
             let here = with_log(&hash, ix);
             // New to this log, and new to the store: a record two logs hold is one record.
@@ -484,7 +527,11 @@ pub(super) fn fold(
     let now = Described {
         layout: LAYOUT,
         log_len: reader.consumed(),
-        log_hash: reader.hash(),
+        log_hash: if primary {
+            chain.finish()
+        } else {
+            reader.hash()
+        },
         records: seq,
     };
     {
@@ -499,6 +546,7 @@ pub(super) fn fold(
             log_len: now.log_len,
             log_hash: now.log_hash,
             records: now.records,
+            primary,
         };
         logs.insert(name, &row.encode()).map_err(backend)?;
     }

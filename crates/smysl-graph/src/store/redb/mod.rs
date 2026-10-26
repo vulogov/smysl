@@ -43,6 +43,7 @@
 mod build;
 mod cache;
 mod log;
+mod primary;
 mod shard;
 mod shared;
 mod tables;
@@ -61,6 +62,7 @@ use smysl_core::{
 };
 
 pub use cache::CacheStats;
+pub use primary::{LogState, RedbShards};
 pub use shard::RedbShard;
 
 use smysl_core::diag::{Code, Diagnostic, Report, Subject};
@@ -69,8 +71,8 @@ use self::build::{Described, Given, Kind};
 use self::cache::Cache;
 use self::shared::Shared;
 use self::tables::{
-    attest_range, interp_key, log_of, log_range, split_source_key, uid_of, Header, LogIx, ATTEST,
-    DEPS, HEADER, HOLDS, INTERP, OBSERVED, RECORD_HASH, SOURCE_REF,
+    attest_range, interp_key, log_of, log_range, records_key, split_source_key, uid_of, Header,
+    LogIx, ATTEST, DEPS, HEADER, HOLDS, INTERP, OBSERVED, RECORDS, RECORD_HASH, SOURCE_REF,
 };
 use super::interp::Interpretive;
 use super::library::StoreLibrary;
@@ -178,6 +180,8 @@ struct LogFile {
     ix: LogIx,
     path: PathBuf,
     described: Described,
+    /// Its records are the store's (TX-P13d): read from `records`, not from `path`.
+    primary: bool,
 }
 
 /// How many logs a store keeps open at first. A store of a thousand logs read in uid order
@@ -235,6 +239,8 @@ struct Inner {
     /// Where every log given lives, read or not, by position: a unit's core is read from the
     /// first log to bring it, which a store opened for some logs may not read.
     paths: Vec<Option<PathBuf>>,
+    /// Which of them are primary, by position: their cores and records are in `records`.
+    primary: Vec<bool>,
     /// Whether the store was opened for some of its logs only.
     subset: bool,
     open: Mutex<Open>,
@@ -390,12 +396,15 @@ impl RedbStore {
             build::catch_up(&shared.db, kind, &given, opts.force_rebuild, &mut report)?
         };
         let mut paths: Vec<Option<PathBuf>> = Vec::new();
+        let mut primary: Vec<bool> = Vec::new();
         for ((_, path), c) in logs.iter().zip(&caught) {
             let i = c.ix as usize;
             if paths.len() <= i {
                 paths.resize(i + 1, None);
+                primary.resize(i + 1, false);
             }
             paths[i] = Some(path.clone());
+            primary[i] = c.primary;
         }
         let read: Vec<LogFile> = logs
             .iter()
@@ -406,19 +415,22 @@ impl RedbStore {
                 ix: c.ix,
                 path: path.clone(),
                 described: c.described,
+                primary: c.primary,
             })
             .collect();
-        let store = Self::load(shared, kind, read, paths, only.is_some(), opts)?;
+        let store = Self::load(shared, kind, read, paths, primary, only.is_some(), opts)?;
         Ok((store, report))
     }
 
     /// Read what stays in memory: headers, the interpretive layer and the library, of the logs
     /// in `logs`.
+    #[allow(clippy::too_many_arguments)]
     fn load(
         shared: Arc<Shared>,
         kind: Kind,
         mut logs: Vec<LogFile>,
         paths: Vec<Option<PathBuf>>,
+        primary: Vec<bool>,
         subset: bool,
         opts: &RedbOptions,
     ) -> Result<RedbStore, Error> {
@@ -613,6 +625,7 @@ impl RedbStore {
             at,
             names,
             paths,
+            primary,
             subset,
             open: Mutex::new(Open::default()),
             uids,
@@ -781,8 +794,21 @@ impl RedbStore {
         let h = self.0.heads[i];
         // Its core is the same in every log that holds it, so any will do; a store opened for
         // some logs reads it from the first to bring it, read or not.
-        let file = self.file(h.log).unwrap_or_else(|| log_moved("no log"));
-        let bytes = log::read_at(&file, h.offset, h.len as usize).unwrap_or_else(|e| log_moved(e));
+        let bytes = if self.0.primary.get(h.log as usize).copied().unwrap_or(false) {
+            let held = self
+                .0
+                .txn
+                .open_table(RECORDS)
+                .unwrap_or_else(|e| log_moved(e));
+            let row = held
+                .get(&records_key(h.log, h.offset))
+                .unwrap_or_else(|e| log_moved(e))
+                .unwrap_or_else(|| log_moved("a primary shard's record is not in the store"));
+            row.value().to_vec()
+        } else {
+            let file = self.file(h.log).unwrap_or_else(|| log_moved("no log"));
+            log::read_at(&file, h.offset, h.len as usize).unwrap_or_else(|e| log_moved(e))
+        };
         let core = match from_cbor(&bytes) {
             Ok((Record::Unit(core), _)) => core,
             Ok(_) => log_moved("a unit's offset holds another record"),
@@ -950,13 +976,24 @@ impl<'a> Iterator for RedbUnits<'a> {
 /// order, and each record once.
 pub struct RedbRecords<'a> {
     /// The logs to walk, in name order, each to the length the store describes: owned, so a walk
-    /// holds nothing of the store (and is as unwind-safe as a file).
-    logs: Vec<(PathBuf, u64)>,
+    /// holds nothing of the store (and is as unwind-safe as a file). A primary log's bytes are
+    /// read out of the store when the walk reaches it.
+    logs: Vec<Walk>,
     /// The next log in `logs` to start.
     next: usize,
     reader: Option<log::LogReader<'static>>,
     seen: Option<BTreeSet<[u8; 32]>>,
+    /// The database, to read a primary log out of when the walk reaches it, one log at a time.
+    /// Unwind-safe as asserted: it is only read, through transactions of its own.
+    shared: std::panic::AssertUnwindSafe<Arc<Shared>>,
     _store: std::marker::PhantomData<&'a ()>,
+}
+
+/// One log of a record walk: a file to read, or a primary log to read out of the store, each to
+/// the length the store's snapshot describes.
+enum Walk {
+    File(PathBuf, u64),
+    Held(LogIx, u64),
 }
 
 impl<'a> Iterator for RedbRecords<'a> {
@@ -977,13 +1014,20 @@ impl<'a> Iterator for RedbRecords<'a> {
                     Err(e) => log_moved(e),
                 }
             }
-            let (path, len) = self.logs.get(self.next)?;
+            let walk = self.logs.get(self.next)?;
             self.next += 1;
-            // Its own descriptor, not the pool's: a walk holds its log for as long as it takes.
-            match File::open(path) {
-                Ok(f) => self.reader = Some(log::LogReader::owning(f, 0, *len, Rolling::new())),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => log_moved(e),
+            match walk {
+                Walk::Held(ix, len) => {
+                    let bytes =
+                        primary::bytes_of(&self.shared, *ix, *len).unwrap_or_else(|e| log_moved(e));
+                    self.reader = Some(log::LogReader::over_bytes(0, bytes));
+                }
+                // Its own descriptor, not the pool's: a walk holds its log for as long as it takes.
+                Walk::File(path, len) => match File::open(path) {
+                    Ok(f) => self.reader = Some(log::LogReader::owning(f, 0, *len, Rolling::new())),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => log_moved(e),
+                },
             }
         }
     }
@@ -1172,8 +1216,15 @@ impl StoreRead for RedbStore {
                 .0
                 .logs
                 .iter()
-                .map(|l| (l.path.clone(), l.described.log_len))
+                .map(|l| {
+                    if l.primary {
+                        Walk::Held(l.ix, l.described.log_len)
+                    } else {
+                        Walk::File(l.path.clone(), l.described.log_len)
+                    }
+                })
                 .collect(),
+            shared: std::panic::AssertUnwindSafe(self.0._shared.clone()),
             next: 0,
             reader: None,
             seen: (self.0.kind == Kind::Many).then(BTreeSet::new),
