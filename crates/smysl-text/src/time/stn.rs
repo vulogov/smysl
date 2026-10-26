@@ -131,12 +131,27 @@ impl Network {
         // cannot all hold: "A strictly before B, B strictly before A" is unsatisfiable whether
         // or not anybody also said when A was. A search from the reference never visits those
         // nodes, so it reported them consistent, which the Floyd–Warshall reference caught.
+        //
+        // The reference is a constant, not a subject, and is no part of either pass's cycles.
+        // A cycle through it is a subject whose bounds cross — its lower bound above its upper —
+        // and it names that subject, and every other subject on the cycle, by their own bounds
+        // crossing; it names nobody else. Spreading from the reference instead, as this did
+        // until TX-P13c's time-engine step, reached every subject with a bound, so one date
+        // that contradicted one unit's own instant reported every dated unit in the store as
+        // contested.
         let mut inconsistent: Vec<usize> = self
             .negative_cycles(n)
             .into_iter()
             .filter(|v| *v != REFERENCE)
             .map(|v| v - 1)
             .collect();
+        for v in 1..n {
+            if let (Some(lo), Some(hi)) = (lower[v], upper[v]) {
+                if lo > hi {
+                    inconsistent.push(v - 1);
+                }
+            }
+        }
         inconsistent.sort_unstable();
         inconsistent.dedup();
         Solution {
@@ -154,9 +169,12 @@ impl Network {
     /// to zero is the same thing as a source joined to every node by a zero-weight edge, and it
     /// is what makes the search reach a cycle nobody dated.
     fn negative_cycles(&self, n: usize) -> Vec<usize> {
+        // Edges between subjects only: a bound is no edge of a cycle among them (see `solve`).
         let mut out: Vec<Vec<usize>> = vec![Vec::new(); n];
         for (i, e) in self.edges.iter().enumerate() {
-            out[e.from].push(i);
+            if e.from != REFERENCE && e.to != REFERENCE {
+                out[e.from].push(i);
+            }
         }
         let mut dist: Vec<i64> = vec![0; n];
         let mut relaxations: Vec<usize> = vec![0; n];
@@ -207,7 +225,9 @@ impl Network {
         // pair is named rather than whichever one the queue happened to relax first.
         let mut into: Vec<Vec<usize>> = vec![Vec::new(); n];
         for e in &self.edges {
-            into[e.to].push(e.from);
+            if e.from != REFERENCE && e.to != REFERENCE {
+                into[e.to].push(e.from);
+            }
         }
         let mut stack: Vec<usize> = on_cycle.clone();
         while let Some(u) = stack.pop() {
@@ -258,6 +278,12 @@ impl Network {
             for &i in &out[u] {
                 let e = &self.edges[i];
                 let v = if reverse { e.from } else { e.to };
+                // The reference is where a search starts, never somewhere it returns to: a path
+                // back through it is never tighter when the bounds are consistent, and when they
+                // are not it is what carried one subject's contradiction to every other.
+                if v == REFERENCE {
+                    continue;
+                }
                 let cand = du.saturating_add(e.weight);
                 match dist[v] {
                     Some(d) if cand > d => continue,
@@ -356,7 +382,12 @@ fn is_on_cycle(edges: &[Edge], start: usize, n: usize) -> bool {
         if steps > n * n {
             return false;
         }
-        for e in edges.iter().filter(|e| e.from == u) {
+        // Between subjects only, as the search that called this: every bounded subject is on a
+        // cycle through the reference, which is no cycle of theirs.
+        for e in edges
+            .iter()
+            .filter(|e| e.from == u && e.from != REFERENCE && e.to != REFERENCE)
+        {
             if e.to == start {
                 return true;
             }

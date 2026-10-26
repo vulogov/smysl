@@ -21,7 +21,7 @@ use smysl_core::ids::{AgentId, LangTag, Mid, Tid};
 use smysl_core::types::library::Axis;
 use smysl_core::types::provenance::Hlc;
 use smysl_core::types::{
-    Carry, Dating, DatingTarget, DatingValue, PartEntry, Record, SourceKind, SourceRef,
+    Carry, Dating, DatingTarget, DatingValue, PartEntry, Record, SourceKind, SourceRef, Withdrawal,
 };
 use smysl_core::{KernelType, Status, UnitCoreBuilder};
 use smysl_text::index::{Built, Index, Table};
@@ -279,6 +279,67 @@ fn rebuild_and_incremental_agree_byte_for_byte() {
             "{table} is empty, so the comparison did not exercise it"
         );
     }
+}
+
+/// The axis tables, kept across appends that bear on time — datings, a relative one, their
+/// withdrawals — are after every append the tables rebuilt from scratch. The kept tables
+/// rewrite only the rows of the subjects a solve found anything bearing on (TX-P13c's
+/// time-engine step), so a subject a withdrawal frees has to go back to its seed, which only a
+/// comparison after the withdrawal shows.
+#[test]
+fn axis_tables_kept_across_datings_and_withdrawals_are_the_tables_rebuilt() {
+    let (_dir, mut lib) = grown("axis-steps");
+    let uids: Vec<smysl_core::Uid> = lib.store().units().map(|(u, _)| *u).take(3).collect();
+    assert_eq!(uids.len(), 3, "the fixture has units to date");
+    let date = |u: smysl_core::Uid, value: DatingValue, ms: u64| {
+        Dating::new(
+            DatingTarget::Unit(u),
+            Axis::Said,
+            value,
+            agent(),
+            Hlc::new(1_726_200_000_000 + ms, 0, agent()),
+        )
+    };
+    let a = date(uids[0], DatingValue::Absolute("1901".into()), 1);
+    let b = date(uids[1], DatingValue::Absolute("1902-03".into()), 2);
+    let c = date(
+        uids[2],
+        DatingValue::Relative {
+            allen: smysl_core::Allen::After,
+            target: DatingTarget::Unit(uids[0]),
+        },
+        3,
+    );
+    let withdraw = |d: &Dating, ms: u64| {
+        Record::Withdrawal(Withdrawal::new(
+            smysl_core::Uid::from_bytes(*d.did().as_bytes()),
+            agent(),
+            Hlc::new(1_726_300_000_000 + ms, 0, agent()),
+        ))
+    };
+    let steps: Vec<Vec<Record>> = vec![
+        vec![Record::Dating(a.clone())],
+        vec![Record::Dating(b.clone()), Record::Dating(c.clone())],
+        vec![withdraw(&a, 1)],
+        vec![withdraw(&b, 2)],
+        vec![withdraw(&c, 3)],
+    ];
+    for (i, batch) in steps.iter().enumerate() {
+        lib.append_records(batch).expect("appended");
+        let rebuilt = Index::rebuild(&lib);
+        assert_eq!(
+            lib.index().said,
+            rebuilt.said,
+            "step {i}: the kept `said` table is not the rebuilt one"
+        );
+        assert_eq!(
+            lib.index().composed,
+            rebuilt.composed,
+            "step {i}: `composed`"
+        );
+    }
+    // Not vacuous: the datings put rows in the table, and the withdrawals took them out again.
+    assert_eq!(lib.index().said, Index::rebuild(&lib).said);
 }
 
 /// The same, with a redaction in the middle — rule Z is the one event that *removes* rows.

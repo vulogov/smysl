@@ -1053,6 +1053,15 @@ impl StoreRead for RedbStore {
         let h = self.0.heads[self.index_of(uid)?];
         (h.attested > 0).then_some(h.hop)
     }
+    fn attested_units(&self) -> Vec<Uid> {
+        self.0
+            .uids
+            .iter()
+            .zip(&self.0.heads)
+            .filter(|(_, h)| h.attested > 0)
+            .map(|(u, _)| *u)
+            .collect()
+    }
     fn units_with_source_prefix(&self, prefix: &str) -> Vec<Uid> {
         let t = self
             .0

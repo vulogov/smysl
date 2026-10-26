@@ -208,6 +208,7 @@ fn observe<S: StoreRead + ?Sized>(s: &S, probes: &[Uid]) -> Vec<String> {
         format!("{:?}", s.units_in_observed_order()),
     );
     say("hops", format!("{:?} {:?}", s.hops(), s.latest_hop()));
+    say("attested_units", format!("{:?}", s.attested_units()));
     say("open_contentions", format!("{:?}", s.open_contentions()));
     say(
         "contention_status",

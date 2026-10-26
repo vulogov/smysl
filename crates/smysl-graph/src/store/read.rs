@@ -408,6 +408,17 @@ pub trait StoreRead: sealed::Sealed {
     fn latest_hop(&self) -> Option<u32> {
         self.hops().last().copied()
     }
+
+    /// The units with at least one attestation, ascending: those [`StoreRead::hop_of`] answers
+    /// `Some` for. A store that keeps the count with the unit answers without reading a core;
+    /// rule E's first-seen constraint asks it, where it asked every unit (TX-P13c's time-engine
+    /// step).
+    fn attested_units(&self) -> Vec<Uid> {
+        self.units_in_range(&Uid::from_bytes([0; 32]), &Uid::from_bytes([0xff; 32]))
+            .into_iter()
+            .filter(|u| self.hop_of(u).is_some())
+            .collect()
+    }
 }
 
 /// A store that takes records (SMYSL-2.8 §3.3).
@@ -595,6 +606,12 @@ impl StoreRead for Store {
     fn latest_hop(&self) -> Option<u32> {
         Store::latest_hop(self)
     }
+    fn attested_units(&self) -> Vec<Uid> {
+        Store::units(self)
+            .filter(|(_, u)| !u.attestations.is_empty())
+            .map(|(uid, _)| *uid)
+            .collect()
+    }
 }
 
 impl StoreWrite for Store {
@@ -701,6 +718,7 @@ macro_rules! delegate {
             fn agreement(&self, uid: &Uid, n: usize) -> bool { (**self).agreement(uid, n) }
             fn hops(&self) -> BTreeSet<u32> { (**self).hops() }
             fn latest_hop(&self) -> Option<u32> { (**self).latest_hop() }
+            fn attested_units(&self) -> Vec<Uid> { (**self).attested_units() }
         }
     )*};
 }

@@ -694,9 +694,29 @@ graph, OQ-11), what rule E specifies. Implementation:
    is a plain STN, whose shortest-path solution is unique, so the result does not depend on
    record order (rule U).
 5. **Inconsistency.** A negative cycle or empty interval in a stratum marks every node on it
-   `Contested` with the datings involved as positions; nothing is chosen.
+   `Contested` with the datings involved as positions; nothing is chosen. *As built (with
+   SMYSL-2.8 TX-P13c, 2026-10-26): the reference variable is on no cycle.* A cycle through it
+   is a subject whose bounds cross, and marks that subject and the others on the cycle, by
+   their own bounds; a cycle among subjects marks them and what they reach, as before. Until
+   then the search spread from the reference along every unary bound, so one date that
+   contradicted one unit's own instant marked every dated subject in the store contested
+   (`time_algebra.rs`, `a_contradiction_contests_its_own_subject_and_no_bystander`). P-E6's
+   agreement with Floyd–Warshall on whether a network is consistent is unchanged.
 6. **Why-chains.** Each bound carries the dating or constraint that set it, so `date show --why`
    prints the chain of draft 3 §6.7.
+
+*As built (2026-10-26): the network holds only the subjects anything bears on* — a live
+dating's scope or relative target, a free constraint's endpoint, or a subject whose recorded
+interval is already empty. Every other subject has only its own two bounds, so its answer is
+its seed and nothing it is in can contradict it; leaving it out changes no answer, and
+`effective()` still returns every subject. `findings()` is the same solve without the map of
+every subject, for a caller that reports what rule E found (the `time` check pass), and
+`findings_among()` the same again, told which subjects' seeds can be empty, for the `said` and
+`composed` tables, which re-solve on an append that bears on time and now rewrite only the rows
+of the subjects involved before or after it. Measured on SMYSL-2.8's GE-T7 stand-in (10⁶
+units, 5,495 free constraints): `check`'s `time` pass 1.41 GB and 28 s → 554 MB and 5.2 s on
+redb; a 1,000-unit append with relations 835 ms → 83 ms. The first-seen constraint reads the
+store's attested units (`StoreRead::attested_units`), not every unit's attestations.
 
 This stratification is rule E as SMYSL-2.3 A-12.2 words it: a chain tightens at its weakest
 link's status (OQ-42, resolved there). The property

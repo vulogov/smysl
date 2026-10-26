@@ -58,6 +58,23 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### Rule E over the subjects it bears on, and a contradiction that stays where it is
+
+With SMYSL-2.4 §3.3 and SMYSL-2.8 §6.1: the time engine at a million units.
+
+- **Fixed:** one dating that contradicted one unit's own instant marked **every dated subject
+  in the store** contested, each with its own `SMY-W413`. The solver's cycle search spread from
+  the reference variable along every bound. Now a contradiction contests the subjects whose
+  bounds it crosses, and a cycle among subjects what it reaches, as before.
+- **Faster, same answers:** the network holds only the subjects a dating or a free constraint
+  touches, or whose recorded interval is empty; every other subject keeps its seed, as the solve
+  always gave it. **`smysl_text::time::engine::findings`** reports what rule E found without the
+  map of every subject (`check` uses it), and **`findings_among`** re-solves told which seeds
+  can be empty (the `said` and `composed` tables use it, rewriting only the rows a solve
+  involved). **`StoreRead::attested_units`** lists the units with attestations without reading
+  a core. On GE-T7's stand-in of 10⁶ units: `check` on redb 1.69 GB → 885 MB, under GE-T7's
+  1 GB; building the library 528 s → 68 s.
+
 ### One unit store for a library
 
 TX-P13c step 3 (SMYSL-2.8 §3.5, OQ-90). Under `--backend redb` a library is one store over all

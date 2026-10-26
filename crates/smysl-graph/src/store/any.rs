@@ -363,6 +363,9 @@ impl StoreRead for AnyStore {
     fn hop_of(&self, uid: &Uid) -> Option<u32> {
         by_backend!(self, s => StoreRead::hop_of(s, uid))
     }
+    fn attested_units(&self) -> Vec<Uid> {
+        by_backend!(self, s => StoreRead::attested_units(s))
+    }
     fn units_with_source_prefix(&self, prefix: &str) -> Vec<Uid> {
         by_backend!(self, s => StoreRead::units_with_source_prefix(s, prefix))
     }

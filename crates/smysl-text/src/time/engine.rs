@@ -196,42 +196,148 @@ pub fn quiescent(store: &(impl StoreRead + ?Sized), axis: Axis) -> bool {
 
 /// Compute effective time for one axis.
 ///
-/// Over the whole store rather than over one component, which costs nothing: the network is
-/// sparse, disconnected subjects simply keep their seeds, and the alternative — finding
-/// components first — would be a second traversal to save a few relaxations.
+/// Every subject's: those nothing bears on keep their seeds, as the solve gives them. The
+/// network holds only the subjects a dating or a free constraint touches, or whose recorded
+/// interval is already empty (`solve`), which is exact — a subject with no constraint but its
+/// own two bounds has nothing to tighten it and nothing to contradict it but itself.
 pub fn effective(store: &(impl StoreRead + ?Sized), axis: Axis) -> Effective {
+    solve(store, axis, None, true)
+}
+
+/// What rule E finds on one axis, without the times of the subjects nothing bears on.
+///
+/// The same `not_applied`, `inconsistent`, `held`, `not_live`, `inexact_scopes` and
+/// `unresolved` as [`effective`], and `dated` holding **only** the subjects a dating or a free
+/// constraint involves, or whose recorded interval is empty: every other subject's effective
+/// time is its seed ([`seed_of`]). What a caller that reports findings wants — the `time`
+/// check pass — without a map of every unit: on GE-T7's stand-in of 10⁶ units that map and the
+/// network over all of them were most of `check`'s peak (TX-P13c's time-engine step).
+pub fn findings(store: &(impl StoreRead + ?Sized), axis: Axis) -> Effective {
+    solve(store, axis, None, false)
+}
+
+/// [`findings`], told which subjects' seeds can be empty: every other subject's is known not to
+/// be, so no seed but theirs is read.
+///
+/// For a caller that has solved this store before and kept what that solve involved: a seed is
+/// a function of its subject's own record, which does not change, and an empty one makes its
+/// subject involved — so the subjects whose seed can be empty now are those the last solve
+/// involved and those that arrived since. The axis tables re-solve this way on every append
+/// that bears on time, where reading every seed again was most of an append to a 10⁶-unit
+/// library (TX-P13c's time-engine step). Given the wrong set it misses an empty seed outside
+/// it, and nothing else.
+pub fn findings_among(
+    store: &(impl StoreRead + ?Sized),
+    axis: Axis,
+    maybe_empty: &BTreeSet<Subject>,
+) -> Effective {
+    solve(store, axis, Some(maybe_empty), false)
+}
+
+/// Rule E over the subjects anything bears on; `every` fills in the rest from their seeds, and
+/// `among`, when given, is the only subjects whose seeds can be empty.
+fn solve(
+    store: &(impl StoreRead + ?Sized),
+    axis: Axis,
+    among: Option<&BTreeSet<Subject>>,
+    every: bool,
+) -> Effective {
     let mut out = Effective {
         axis_said: axis == Axis::Said,
         ..Default::default()
     };
 
-    // 1. Subjects, in a fixed order. Units before manifests, each in identity order, so a
-    //    variable index is a function of the store's contents and not of its iteration order.
-    let mut subjects: Vec<Subject> = store.units().map(|(u, _)| Subject::Unit(*u)).collect();
-    subjects.extend(
-        store
-            .library()
-            .manifests()
-            .map(|(m, _)| Subject::Manifest(*m)),
-    );
-    subjects.sort_unstable();
+    // The datings that bear on this axis, with their status and liveness, and the free
+    // constraints. Neither reads a subject's seed, so they can say first which subjects the
+    // network needs.
+    let live = live_datings(store, axis, &mut out);
+    let (frees, _unbuilt) = constraints::free(store);
+    let mut involved: BTreeSet<Subject> = BTreeSet::new();
+    for l in &live {
+        involved.extend(l.scope.iter().copied());
+        if let DatingValue::Relative {
+            target: DatingTarget::Unit(u),
+            ..
+        } = &l.dating.value
+        {
+            involved.insert(Subject::Unit(*u));
+        }
+    }
+    for f in &frees {
+        match f {
+            Free::Order { earlier, later, .. } => {
+                involved.insert(*earlier);
+                involved.insert(*later);
+            }
+            Free::NoLater { subject, .. } => {
+                involved.insert(*subject);
+            }
+        }
+    }
+    // Only what the store holds is a subject: a dating can name a uid that is not here.
+    involved.retain(|s| match s {
+        Subject::Unit(u) => store.contains_uid(u),
+        Subject::Manifest(m) => store.library().manifest(m).is_some(),
+    });
+
+    // 1. Every other subject, streamed: its seed is its answer, unless the seed is already
+    //    empty, which is a contradiction the network has to report. Uids from the store's order
+    //    rather than `units()`, which on a store that pages its cores would read every one —
+    //    and only the said axis seeds from a core at all.
+    let uids = match among {
+        Some(_) => Vec::new(),
+        None => store.units_in_range(&Uid::from_bytes([0; 32]), &Uid::from_bytes([0xff; 32])),
+    };
+    let others: Box<dyn Iterator<Item = Subject> + '_> = match among {
+        Some(candidates) => Box::new(candidates.iter().copied().filter(|s| match s {
+            Subject::Unit(u) => store.contains_uid(u),
+            Subject::Manifest(m) => store.library().manifest(m).is_some(),
+        })),
+        None => Box::new(
+            uids.iter().map(|u| Subject::Unit(*u)).chain(
+                store
+                    .library()
+                    .manifests()
+                    .map(|(m, _)| Subject::Manifest(*m)),
+            ),
+        ),
+    };
+    for s in others {
+        if involved.contains(&s) {
+            continue;
+        }
+        if axis != Axis::Said && !every {
+            continue;
+        }
+        let d = seed(store, &s, axis);
+        if d.interval.is_empty() {
+            involved.insert(s);
+        } else if every {
+            out.dated.insert(s, d);
+        }
+    }
+    drop(uids);
+
+    // In a fixed order: a variable index is a function of the store's contents and not of its
+    // iteration order, and the involved subjects keep the relative order all of them had.
+    let subjects: Vec<Subject> = involved.into_iter().collect();
     let index: BTreeMap<Subject, usize> =
         subjects.iter().enumerate().map(|(i, s)| (*s, i)).collect();
     if subjects.is_empty() {
+        out.held.sort_unstable();
+        out.held.dedup();
+        out.not_live.sort_unstable();
+        out.not_live.dedup();
+        out.unresolved.sort_unstable();
+        out.unresolved.dedup();
         return out;
     }
 
     // 2. Seeds: the as-recorded interval and the status of the value that set it.
     let mut state: Vec<Dated> = subjects.iter().map(|s| seed(store, s, axis)).collect();
 
-    // 3. The datings that bear on this axis, with their status and liveness.
-    let live = live_datings(store, axis, &mut out);
-
-    // 4. Offsets, applied to the as-recorded instant before propagation (step 4).
+    // 3. Offsets, applied to the as-recorded instant before propagation (step 4).
     apply_offsets(&live, &index, &mut state, &mut out, store, axis);
-
-    // 5. The free constraints.
-    let (frees, _unbuilt) = constraints::free(store);
 
     // 6. Stratified tightening.
     for s in TimeStatus::STRATA.iter().copied() {
@@ -361,7 +467,7 @@ pub fn effective(store: &(impl StoreRead + ?Sized), axis: Axis) -> Effective {
     out.not_live.dedup();
     out.unresolved.sort_unstable();
     out.unresolved.dedup();
-    out.dated = subjects.into_iter().zip(state).collect();
+    out.dated.extend(subjects.into_iter().zip(state));
     out
 }
 
@@ -428,9 +534,10 @@ fn live_datings(store: &(impl StoreRead + ?Sized), axis: Axis, out: &mut Effecti
             // D-4: a dating takes the status of its basis unit, and `speculative` without one.
             // That is the whole mechanism by which "the export header says so" outranks "it
             // must have been about then" without anybody ranking them by hand.
+            // Looked up, not found by a scan of every unit, which was a scan per dating.
             status: dating
                 .basis
-                .and_then(|b| store.units().find(|(u, _)| **u == b).map(|(_, u)| u))
+                .and_then(|b| store.get(&b))
                 .map_or(TimeStatus::Speculative, |u| {
                     constraints::of_status(u.core.status)
                 }),
@@ -522,7 +629,7 @@ fn resolved(store: &(impl StoreRead + ?Sized), did: &Did, dating: &Dating) -> bo
 /// Why a target named nothing: the thing is absent, or it is here and selects nothing.
 fn why_unresolved(store: &(impl StoreRead + ?Sized), target: &DatingTarget) -> Unresolved {
     let present = match target {
-        DatingTarget::Unit(u) => store.units().any(|(x, _)| x == u),
+        DatingTarget::Unit(u) => store.contains_uid(u),
         DatingTarget::Manifest(m) => store.library().manifest(m).is_some(),
         // A store holds no parts; a part exists if some manifest lists it. Asking the catalog
         // is the only question available, and it is the right one: a tid no manifest names is

@@ -44,12 +44,15 @@
 //! subjects. It was 64 s before the step started, and the one-line reason is recorded on
 //! `crate::time::engine`'s `seed`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::types::library::Axis;
 use smysl_core::types::Record;
 
-use crate::time::engine::effective;
+use smysl_core::Uid;
+use smysl_graph::{Store, StoreRead};
+
+use crate::time::engine::{findings, findings_among, seed_of, Effective};
 use crate::time::Interval;
 pub use crate::time::{Bound, Instant, Subject};
 
@@ -101,7 +104,7 @@ fn before(lo: Bound, hi: Bound) -> bool {
 /// The tree is **derived from the rows** and is not persisted: it is `O(rows)` to build and would
 /// be a second thing to keep in agreement for no gain. [`Ranges::rows`] is what the dump holds
 /// and what §3.8's byte comparison compares.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct Ranges {
     rows: Vec<Row>,
     /// Whether the corpus held an unresolved dating or an unbuilt constraint when this was built.
@@ -112,7 +115,22 @@ pub struct Ranges {
     /// `max(hi)` per node of a segment tree over `rows`, `None` meaning unbounded and therefore
     /// maximal. Derived; never written down.
     maxhi: Vec<Bound>,
+    /// The subjects the last solve found anything bearing on, when this process solved for the
+    /// table: every other row is its subject's seed. What lets an append that bears on time
+    /// re-solve and rewrite only those rows (see `axis_on_append`). Never written down; a table
+    /// read from the sidecar has none, and its first such append solves the whole axis.
+    involved: Option<std::sync::Arc<BTreeSet<Subject>>>,
 }
+
+/// Equal by what a table answers: its rows and whether anything dangled. The tree is derived
+/// from the rows, and what a solve remembers is how the table was built, not what it holds.
+impl PartialEq for Ranges {
+    fn eq(&self, other: &Ranges) -> bool {
+        self.rows == other.rows && self.danglers == other.danglers
+    }
+}
+
+impl Eq for Ranges {}
 
 impl Ranges {
     /// The rows, in `lo` order. What the dump writes.
@@ -152,6 +170,44 @@ impl Ranges {
             rows,
             danglers,
             maxhi,
+            involved: None,
+        }
+    }
+
+    /// This table with the rows of `drop`'s subjects replaced by `add`: one pass over the rows,
+    /// the new ones merged in where they sort, rather than sorting every row again.
+    fn spliced(&self, drop: &BTreeSet<Subject>, add: Vec<Row>, danglers: bool) -> Ranges {
+        let mut add: Vec<Row> = add
+            .into_iter()
+            .filter(|r| !(r.lo == Bound::Open && r.hi == Bound::Open))
+            .collect();
+        add.sort_unstable();
+        add.dedup();
+        let kept = self.rows.iter().filter(|r| !drop.contains(&r.subject));
+        let mut rows = Vec::with_capacity(self.rows.len() + add.len());
+        let (mut a, mut b) = (kept.peekable(), add.into_iter().peekable());
+        loop {
+            let from_kept = match (a.peek(), b.peek()) {
+                (Some(x), Some(y)) => *x <= y,
+                (Some(_), None) => true,
+                (None, Some(_)) => false,
+                (None, None) => break,
+            };
+            let next = if from_kept {
+                *a.next().expect("peeked")
+            } else {
+                b.next().expect("peeked")
+            };
+            if rows.last() != Some(&next) {
+                rows.push(next);
+            }
+        }
+        let maxhi = build_tree(&rows);
+        Ranges {
+            rows,
+            danglers,
+            maxhi,
+            involved: self.involved.clone(),
         }
     }
 
@@ -257,54 +313,104 @@ fn later(a: Bound, b: Bound) -> Bound {
 // ---------------------------------------------------------------------------
 
 /// Build an axis table by solving for effective time.
+///
+/// [`findings`] for the subjects anything bears on, and every other subject's seed: what
+/// [`crate::time::engine::effective`] answers, without a map of every subject beside the rows.
 pub fn axis_rebuild(lib: &crate::library::Library, axis: Axis) -> Ranges {
-    let eff = effective(lib.store(), axis);
-    let danglers = !eff.unresolved.is_empty();
-    Ranges::of(
-        eff.dated.iter().map(|(subject, dated)| Row {
-            lo: dated.interval.lo,
-            hi: dated.interval.hi,
-            subject: *subject,
-        }),
-        danglers,
-    )
+    let store = lib.store();
+    let found = findings(store, axis);
+    let everything = store.units_in_range(&Uid::from_bytes([0; 32]), &Uid::from_bytes([0xff; 32]));
+    let subjects = everything.iter().map(|u| Subject::Unit(*u)).chain(
+        store
+            .library()
+            .manifests()
+            .map(|(m, _)| Subject::Manifest(*m)),
+    );
+    let rows: Vec<Row> = subjects
+        .map(|subject| row_of(store, &found, subject, axis))
+        .collect();
+    let mut table = Ranges::of(rows, !found.unresolved.is_empty());
+    table.involved = Some(std::sync::Arc::new(found.dated.keys().copied().collect()));
+    table
+}
+
+/// A subject's row: what the solve found for it, or its seed.
+fn row_of(store: &Store, found: &Effective, subject: Subject, axis: Axis) -> Row {
+    let interval = found
+        .dated
+        .get(&subject)
+        .map(|d| d.interval)
+        .unwrap_or_else(|| seed_of(store, &subject, axis));
+    Row {
+        lo: interval.lo,
+        hi: interval.hi,
+        subject,
+    }
 }
 
 /// Bring an axis table forward over an appended batch.
 ///
-/// Local when the batch can only seed new subjects and the corpus has nothing dangling;
-/// otherwise a recompute, which is the only correct answer for a quantity a single dating can
-/// move anywhere. See the module note.
+/// Local when the batch can only seed new subjects and the corpus has nothing dangling.
+/// Otherwise the axis is solved again — one dating can move any subject's interval, and only the
+/// solve knows which — but only the rows that can have changed are rewritten: those of the
+/// subjects this solve or the last one found anything bearing on, and the batch's own. Every
+/// other row was its subject's seed before and is after. Rewriting every row instead was most
+/// of a 10⁶-unit library's build, a solve and a row per unit for each of a thousand appends
+/// (GE-T7's stand-in, TX-P13c's time-engine step). See the module note.
 pub fn axis_on_append(
     table: &mut Ranges,
     lib: &crate::library::Library,
     axis: Axis,
     records: &[Record],
 ) {
+    let batch: BTreeSet<Subject> = records
+        .iter()
+        .filter_map(|record| match record {
+            Record::Unit(core) => Some(Subject::Unit(smysl_core::canonical_uid(core))),
+            Record::Manifest(m) => Some(Subject::Manifest(m.mid())),
+            _ => None,
+        })
+        .collect();
+    let store = lib.store();
     if table.danglers() || records.iter().any(bears_on_time) {
-        *table = axis_rebuild(lib, axis);
+        let Some(before) = table.involved.clone() else {
+            *table = axis_rebuild(lib, axis);
+            return;
+        };
+        // Only the subjects the last solve involved, and the batch's, can have an empty seed.
+        let maybe_empty: BTreeSet<Subject> = before.iter().chain(&batch).copied().collect();
+        let found = findings_among(store, axis, &maybe_empty);
+        let now: BTreeSet<Subject> = found.dated.keys().copied().collect();
+        let touched: BTreeSet<Subject> = before.iter().chain(&now).chain(&batch).copied().collect();
+        let add: Vec<Row> = touched
+            .iter()
+            .filter(|s| match s {
+                Subject::Unit(u) => store.contains_uid(u),
+                Subject::Manifest(m) => store.library().manifest(m).is_some(),
+            })
+            .map(|s| row_of(store, &found, *s, axis))
+            .collect();
+        let mut next = table.spliced(&touched, add, !found.unresolved.is_empty());
+        next.involved = Some(std::sync::Arc::new(now));
+        *table = next;
         return;
     }
-    let mut rows: Vec<Row> = table.rows().to_vec();
-    let mut touched = false;
-    for record in records {
-        let subject = match record {
-            Record::Unit(core) => Subject::Unit(smysl_core::canonical_uid(core)),
-            Record::Manifest(m) => Subject::Manifest(m.mid()),
-            _ => continue,
-        };
-        touched = true;
-        let seeded = crate::time::engine::seed_of(lib.store(), &subject, axis);
-        rows.retain(|r| r.subject != subject);
-        rows.push(Row {
-            lo: seeded.lo,
-            hi: seeded.hi,
-            subject,
-        });
+    if batch.is_empty() {
+        return;
     }
-    if touched {
-        *table = Ranges::of(rows, false);
-    }
+    // Seeds alone: nothing bears on a subject that only arrived.
+    let add: Vec<Row> = batch
+        .iter()
+        .map(|subject| {
+            let seeded = crate::time::engine::seed_of(store, subject, axis);
+            Row {
+                lo: seeded.lo,
+                hi: seeded.hi,
+                subject: *subject,
+            }
+        })
+        .collect();
+    *table = table.spliced(&batch, add, false);
 }
 
 /// Whether a record can move a subject's effective time other than by seeding its own.

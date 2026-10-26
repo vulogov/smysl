@@ -28,7 +28,7 @@ use smysl_core::types::{
 };
 use smysl_core::{Did, KernelType, Status, Uid, UnitCoreBuilder};
 use smysl_graph::Store;
-use smysl_text::time::engine::{effective, quiescent, Cause};
+use smysl_text::time::engine::{effective, findings, quiescent, seed_of, Cause};
 use smysl_text::time::{Bound, Instant, Interval, Subject, TimeStatus};
 
 struct Rng(u64);
@@ -680,4 +680,88 @@ fn quiescent_means_the_solve_would_find_nothing() {
         quiet > 300,
         "only {quiet} quiescent axes: the promise is barely exercised"
     );
+}
+
+/// One date that contradicts one unit's own instant contests that unit and no other. The
+/// solver's cycle search reached every bounded subject through the reference until the
+/// time-engine step of TX-P13c, so three bystanders were reported contested beside it.
+#[test]
+fn a_contradiction_contests_its_own_subject_and_no_bystander() {
+    let mut records = Vec::new();
+    let mut uids = Vec::new();
+    for i in 0..4u64 {
+        let core = UnitCoreBuilder::new(
+            KernelType::Evidence,
+            format!("a reading {i} long enough to clear the gist check"),
+            Status::Cited,
+        )
+        .source(
+            SourceRef::new(SourceKind::Metric, format!("m/{i}"))
+                .observed_at(1_726_500_000_000 + i * 60_000),
+        )
+        .build()
+        .expect("a unit");
+        uids.push(smysl_core::canonical_uid(&core));
+        records.push(Record::Unit(core));
+    }
+    // Cited, by its basis, so it may move a cited bound, and contradicts the instant.
+    let d = Dating::new(
+        DatingTarget::Unit(uids[0]),
+        Axis::Said,
+        DatingValue::Absolute("1066".to_string()),
+        agent(),
+        Hlc::new(9, 0, agent()),
+    )
+    .with_basis(uids[3]);
+    records.push(Record::Dating(d));
+    let store = store_of(&records);
+    let e = effective(&store, Axis::Said);
+    let contested: Vec<&Subject> = e.contested().collect();
+    assert_eq!(contested, [&Subject::Unit(uids[0])], "{:?}", e.inconsistent);
+    assert_eq!(e.inconsistent.len(), 1);
+}
+
+/// `findings` is `effective` without the subjects nothing bears on: the same findings, the
+/// same answer for every subject it keeps, and every subject it leaves out is its seed.
+#[test]
+fn findings_are_the_effective_answer_less_the_subjects_nothing_bears_on() {
+    let mut rng = Rng(0x51A5_1A5E_5EED_0010);
+    for case in 0..24 {
+        let mut s = consistent(&mut rng, 3 + case % 5);
+        // Bystanders: units nothing dates or orders.
+        for i in 0..3u64 {
+            let core = UnitCoreBuilder::new(
+                KernelType::Evidence,
+                format!("a bystander {case}.{i} long enough to clear the check"),
+                Status::Cited,
+            )
+            .source(
+                SourceRef::new(SourceKind::Metric, format!("b/{case}/{i}"))
+                    .observed_at(1_726_400_000_000 + i),
+            )
+            .build()
+            .expect("a unit");
+            s.records.push(Record::Unit(core));
+        }
+        let store = store_of(&s.records);
+        for axis in [Axis::Said, Axis::Composed] {
+            let all = effective(&store, axis);
+            let some = findings(&store, axis);
+            assert_eq!(all.not_applied, some.not_applied, "case {case}");
+            assert_eq!(all.inconsistent, some.inconsistent, "case {case}");
+            assert_eq!(all.held, some.held, "case {case}");
+            assert_eq!(all.not_live, some.not_live, "case {case}");
+            assert_eq!(all.unresolved, some.unresolved, "case {case}");
+            for (subject, d) in &all.dated {
+                match some.dated.get(subject) {
+                    Some(kept) => assert_eq!(kept, d, "case {case}: {subject}"),
+                    None => {
+                        assert_eq!(d.interval, seed_of(&store, subject, axis), "case {case}");
+                        assert!(!d.contested, "case {case}: {subject}");
+                    }
+                }
+            }
+            assert!(some.dated.len() <= all.dated.len());
+        }
+    }
 }

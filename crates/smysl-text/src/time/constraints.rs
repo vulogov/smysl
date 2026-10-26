@@ -25,7 +25,10 @@
 //! between the two arrives with the field that names it. [`free`] reports what it could not
 //! build rather than returning a shorter list.
 
+use std::collections::BTreeMap;
+
 use smysl_core::types::{RelKind, Status};
+use smysl_core::Uid;
 use smysl_graph::StoreRead;
 
 use super::{Instant, Subject, TimeStatus};
@@ -162,14 +165,24 @@ pub fn free(store: &(impl StoreRead + ?Sized)) -> (Vec<Free>, Unbuilt) {
     // First seen. A unit was not said after the store first heard of it, and the store's own
     // record of first hearing is the earliest `ts` among its attestations — which is the
     // *known* axis, the one rule E never corrects, used here as a ceiling on *said*.
-    for (uid, _) in store.units() {
-        let earliest = store
-            .attestations_of(uid)
-            .iter()
-            .map(|a| a.ts.wall_ms)
-            .min();
-        let Some(ms) = earliest else { continue };
-        let Ok(ms) = i64::try_from(ms) else { continue };
+    // The attested units, from the store's own count, not a question to every unit: a scan of
+    // `units()` read every core, asking each unit for its attestations read it again, and in the
+    // usual corpus nobody had attested any (GE-T7's stand-in, TX-P13c's time-engine step). Each
+    // one's earliest attestation, which the manifest ceiling below reads too.
+    let earliest: BTreeMap<Uid, u64> = store
+        .attested_units()
+        .into_iter()
+        .filter_map(|uid| {
+            let ms = store
+                .attestations_of(&uid)
+                .iter()
+                .map(|a| a.ts.wall_ms)
+                .min()?;
+            Some((uid, ms))
+        })
+        .collect();
+    for (uid, ms) in &earliest {
+        let Ok(ms) = i64::try_from(*ms) else { continue };
         out.push(Free::NoLater {
             kind: FreeKind::FirstSeen,
             subject: Subject::Unit(*uid),
@@ -183,15 +196,18 @@ pub fn free(store: &(impl StoreRead + ?Sized)) -> (Vec<Free>, Unbuilt) {
     // And the same ceiling for a manifest, through the parts it lists: a catalog entry was not
     // published after the store first heard of a unit drawn from one of its parts. This one
     // *does* work without FC-3, because a unit's `source.reference` names the part and the
-    // manifest lists the part.
+    // manifest lists the part. Nothing to do where nothing is attested.
     for (mid, m) in store.library().manifests() {
-        let earliest = m
+        if earliest.is_empty() {
+            break;
+        }
+        let first = m
             .parts
             .iter()
             .flat_map(|p| store.library().units_with_tid(&p.tid))
-            .filter_map(|u| store.attestations_of(&u).iter().map(|a| a.ts.wall_ms).min())
+            .filter_map(|u| earliest.get(&u).copied())
             .min();
-        let Some(ms) = earliest else { continue };
+        let Some(ms) = first else { continue };
         let Ok(ms) = i64::try_from(ms) else { continue };
         out.push(Free::NoLater {
             kind: FreeKind::FirstSeen,
