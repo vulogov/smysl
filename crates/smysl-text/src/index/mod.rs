@@ -631,8 +631,8 @@ impl Index {
     /// analysis of every unit or I/O per part.
     pub fn rebuild_catalog(lib: &Library) -> Index {
         Index {
-            catalog_len: lib.store().log_len(),
-            catalog_hash: *lib.store().log_hash(),
+            catalog_len: lib.stamp().0,
+            catalog_hash: lib.stamp().1,
             built: Built::of(Table::ON_OPEN),
             manifests: tables::manifests_rebuild(lib),
             parts: tables::parts_rebuild(lib),
@@ -661,8 +661,7 @@ impl Index {
     /// records as well is what keeps it `O(batch)` rather than `O(corpus)` — they say which
     /// mid, which tid and which rdid moved.
     pub fn on_append(&mut self, lib: &Library, records: &[Record]) {
-        self.catalog_len = lib.store().log_len();
-        self.catalog_hash = *lib.store().log_hash();
+        (self.catalog_len, self.catalog_hash) = lib.stamp();
         tables::manifests_on_append(&mut self.manifests, lib, records);
         tables::parts_on_append(&mut self.parts, lib, records);
         tables::by_part_on_append(&mut self.by_part, lib, records);

@@ -41,6 +41,7 @@ These apply to every subcommand, in any position on the command line.
     ([`--no-color`], [Disable colour.]),
     ([`--noprogress`], [Disable progress bars, whatever the terminal is.]),
     ([`--backend BACKEND`], [`memory` (default) or `redb`: which store a CBOR log is read and written through. `redb` needs a build with `--features store-redb`.]),
+    ([`--shard ALIAS`], [On a library: read only these shards, as one store; repeatable, `all` for every shard. A reference into a shard not named is `SMY-W500`, naming the shard it waits on, rather than `SMY-E060`. For commands that read; a write is refused.]),
     ([`--json`], [Machine-readable output.]),
     ([`-q, --quiet`], [Suppress non-error output.]),
     ([`-v, --verbose`], [Increase verbosity; repeatable (`-vv`, `-vvv`, …).]),
@@ -562,8 +563,17 @@ sidecar does. TX-P13b step 2.
 
 The store argument is a **library root** rather than a log — a directory with a `LIBRARY`
 marker file in it, which `text add` creates. There is no separate flag for it: every command
-that takes `-s/--store` accepts a library root and reads its catalogue, and a plain file path
-keeps the meaning it has always had.
+that takes `-s/--store` accepts a library root and reads every one of its logs as one store, and
+a plain file path keeps the meaning it has always had.
+
+A library keeps one log per expression (layout `smysl/library/2`, since TX-P13c step 1): an
+expression's units, and the relations, attestations and commitments on them, go to
+`log/shards/<alias>.cbor` — `/` in an alias spelled `~`, `:` spelled `+` — and manifests,
+redactions, datings and anything about no expression's unit stay in `log/catalog.cbor`. A
+library written before shards opens unchanged, as one whose only shard is its catalogue, and
+becomes layout 2 with the first write that creates a shard. `--shard ALIAS` reads some shards
+alone; `index/shards/<alias>.uids` lists each shard's units, so a reference into a shard not
+read says which one it waits on (`SMY-W500`).
 
 #dtable(
   (auto, auto, 1fr),

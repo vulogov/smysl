@@ -264,6 +264,12 @@ fn cli() -> Command {
             .value_name("BACKEND")
             .value_parser(["memory", "redb"])
             .default_value("memory"),
+        Arg::new("shard")
+            .long("shard")
+            .global(true)
+            .help("Read only this shard of a library, with the others' references waiting (repeatable; `all` for every shard)")
+            .value_name("ALIAS")
+            .action(ArgAction::Append),
         Arg::new("seed-check")
             .long("seed-check")
             .global(true)
@@ -2896,6 +2902,10 @@ fn read_bytes(path: &str) -> Result<Vec<u8>, String> {
             .map_err(|e| e.to_string())?;
         return Ok(b);
     }
+    #[cfg(feature = "text")]
+    if smysl::text::library::Library::is_library(std::path::Path::new(path)) {
+        return library_bytes(std::path::Path::new(path));
+    }
     std::fs::read(store_file(path)?).map_err(|e| e.to_string())
 }
 
@@ -2940,6 +2950,114 @@ fn store_file(path: &str) -> Result<std::path::PathBuf, String> {
 /// The store `--backend` chose. Memory unless set; set once, in `main`.
 static BACKEND: std::sync::OnceLock<Backend> = std::sync::OnceLock::new();
 
+/// The shards `--shard` named, for a store that is a library (SMYSL-2.8 §4.4). Set once, in
+/// `main`; unset means every shard, read as the library reads them.
+static SHARDS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// Whether `--backend redb` was asked for.
+fn redb_chosen() -> bool {
+    BACKEND.get().is_some()
+}
+
+/// A library's shards as one store (TX-P13c step 1): the ones `--shard` named, or all of them,
+/// each through the backend `--backend` chose.
+///
+/// A union of **some** shards consults the library's uid lists, so a reference into a shard not
+/// named says `SMY-W500` and which shard it waits on, rather than `SMY-E060`.
+#[cfg(feature = "text")]
+fn open_library_union(root: &std::path::Path) -> Result<AnyStore, String> {
+    use smysl::text::shards;
+    let at = root.display();
+    let all = shards::list(root).map_err(|e| format!("{at}: {e}"))?;
+    let want: Vec<(String, std::path::PathBuf)> = match SHARDS.get() {
+        Some(names) if !names.iter().any(|n| n == "all") => {
+            let mut picked = Vec::new();
+            for n in names {
+                match all.iter().find(|(name, _)| name == n) {
+                    Some(found) => picked.push(found.clone()),
+                    None => {
+                        return Err(format!(
+                            "{at}: no shard `{n}`; this library has {}",
+                            all.iter()
+                                .map(|(name, _)| format!("`{name}`"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ))
+                    }
+                }
+            }
+            picked.sort();
+            picked.dedup();
+            picked
+        }
+        _ => all.clone(),
+    };
+    let subset = want.len() < all.len();
+    let mut stores = Vec::new();
+    for (name, log) in want {
+        if !log.is_file() {
+            continue;
+        }
+        #[cfg(feature = "store-redb")]
+        if let Some(opts) = redb_options() {
+            let (store, report) =
+                AnyStore::open_redb(&log, opts).map_err(|e| format!("{at}: {name}: {e}"))?;
+            for d in report.report.iter() {
+                eprintln!("{at}: {name}: {d}");
+            }
+            stores.push((name, store));
+            continue;
+        }
+        let bytes = std::fs::read(&log).map_err(|e| format!("{at}: {name}: {e}"))?;
+        let (records, _) =
+            smysl::from_cbor_seq(&bytes).map_err(|e| format!("{at}: {name}: {e}"))?;
+        stores.push((name, AnyStore::from(Store::from_records(records))));
+    }
+    let index = if subset {
+        Some(std::sync::Arc::new(
+            shards::uid_index(root).map_err(|e| format!("{at}: {e}"))?,
+        ))
+    } else {
+        None
+    };
+    Ok(AnyStore::shards(stores, index))
+}
+
+/// A library's logs as one byte sequence: every shard's complete records, in name order — the
+/// order the library reads them in — so a reader of one log reads a library unchanged.
+#[cfg(feature = "text")]
+fn library_bytes(root: &std::path::Path) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    for (_, log) in smysl::text::shards::list(root).map_err(|e| e.to_string())? {
+        let bytes = match std::fs::read(&log) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e.to_string()),
+        };
+        // A torn tail stays out, as one log's reader leaves it out.
+        let (_, consumed) = smysl::from_cbor_seq(&bytes).map_err(|e| e.to_string())?;
+        out.extend_from_slice(&bytes[..consumed]);
+    }
+    Ok(out)
+}
+
+/// `--shard` named a store that is not a library.
+fn refuse_shard_without_library(path: &str) -> Option<String> {
+    SHARDS.get()?;
+    #[cfg(feature = "text")]
+    if path != "-" && smysl::text::library::Library::is_library(std::path::Path::new(path)) {
+        return None;
+    }
+    Some(format!(
+        "{path}: --shard reads the shards of a library, and this is not one{}",
+        if cfg!(feature = "text") {
+            ""
+        } else {
+            " (reading a library needs --features text)"
+        }
+    ))
+}
+
 enum Backend {
     /// The unit store, and the command's name for its writer's lock file.
     #[cfg_attr(not(feature = "store-redb"), allow(dead_code))]
@@ -2975,6 +3093,18 @@ fn is_cbor_log(path: &std::path::Path) -> bool {
 /// or a build without the unit store. What the open had to say — a rebuild, a torn tail, a
 /// store another process held — goes to stderr.
 fn open_backend(path: &str) -> Option<Result<AnyStore, String>> {
+    if let Some(e) = refuse_shard_without_library(path) {
+        return Some(Err(e));
+    }
+    // A library under `--shard` or `--backend redb`: its shards as a union, each through the
+    // backend. Without either it is read as one log, below, which is what it always was.
+    #[cfg(feature = "text")]
+    if path != "-"
+        && smysl::text::library::Library::is_library(std::path::Path::new(path))
+        && (SHARDS.get().is_some() || redb_chosen())
+    {
+        return Some(open_library_union(std::path::Path::new(path)));
+    }
     #[cfg(feature = "store-redb")]
     {
         let opts = redb_options()?;
@@ -3025,16 +3155,13 @@ fn load_store(
             .collect();
         return Ok((store, labels));
     }
-    let bytes = if path == "-" {
-        let mut b = Vec::new();
-        std::io::stdin()
-            .read_to_end(&mut b)
-            .map_err(|e| e.to_string())?;
-        b
-    } else {
-        let file = store_file(path).map_err(|e| format!("{path}: {e}"))?;
-        std::fs::read(&file).map_err(|e| format!("{path}: {e}"))?
-    };
+    let bytes = read_bytes(path).map_err(|e| {
+        if path == "-" {
+            e
+        } else {
+            format!("{path}: {e}")
+        }
+    })?;
 
     if looks_like_surface(&bytes) {
         let src = String::from_utf8(bytes).map_err(|e| e.to_string())?;
@@ -4255,6 +4382,11 @@ fn persist(
 ) -> Result<(), String> {
     if path == "-" {
         return Err("a store read from stdin cannot be written back; name the file".into());
+    }
+    if SHARDS.get().is_some() {
+        return Err(format!(
+            "{path}: --shard reads some of a library's shards; a write goes to the library whole"
+        ));
     }
     let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
     if looks_like_surface(&bytes) {
@@ -11095,6 +11227,9 @@ fn main() -> ProcExitCode {
             return ProcExitCode::from(ExitCode::Usage.as_i32() as u8);
         }
         let _ = BACKEND.set(Backend::Redb(name.to_string()));
+    }
+    if let Some(shards) = matches.get_many::<String>("shard") {
+        let _ = SHARDS.set(shards.cloned().collect());
     }
 
     // Rule D, asserted per invocation and refused before anything runs. A caller passing

@@ -84,6 +84,42 @@ impl StoreLibrary {
         self.manifests.entry(mid).or_insert_with(|| m.clone());
     }
 
+    /// Fold another store's library layer into this one (a union of shards). Every map here is
+    /// a set or keyed by a content hash, so the order of the join does not matter.
+    pub(super) fn join(&mut self, other: &StoreLibrary) {
+        for (mid, m) in &other.manifests {
+            self.manifests.entry(*mid).or_insert_with(|| m.clone());
+        }
+        for (alias, mids) in &other.by_alias {
+            self.by_alias
+                .entry(alias.clone())
+                .or_default()
+                .extend(mids.iter().copied());
+        }
+        self.superseded.extend(other.superseded.iter().copied());
+        for (tid, uids) in &other.by_tid {
+            self.by_tid
+                .entry(*tid)
+                .or_default()
+                .extend(uids.iter().copied());
+        }
+        for (tid, rs) in &other.redactions {
+            self.redactions
+                .entry(*tid)
+                .or_default()
+                .extend(rs.iter().cloned());
+        }
+        for (did, d) in &other.datings {
+            self.datings.entry(*did).or_insert_with(|| d.clone());
+        }
+        for (target, dids) in &other.datings_by_target {
+            self.datings_by_target
+                .entry(target.clone())
+                .or_default()
+                .extend(dids.iter().copied());
+        }
+    }
+
     /// Record a redaction. Idempotent, and the set only ever grows.
     ///
     /// Which is the whole of rule Z's algebra: the union of two stores' redactions does not

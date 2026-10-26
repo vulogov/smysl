@@ -58,6 +58,33 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### A library in shards, and a store that is several of them
+
+TX-P13c step 1 (SMYSL-2.8 §3.6–§3.7, with SMYSL-2.4 §14.2): a library keeps one log per
+expression, and some of them can be read as one store, with the references into the rest
+waiting rather than dangling. Everything that read a library before reads it the same way.
+
+- **`smysl::Union`**: shards read as `Store::from_records` of their records in shard-id order —
+  whatever order they were handed over in. Cores are read through from the shard that holds
+  them; the uid list, the interpretive and library layers, the hot records and units two
+  shards share are materialised; the adjacency is built from the shards' own, reading no core.
+  It owns its shards (pass `&Store` to borrow), so `AnyStore::Shards` can hold one.
+- **`smysl::UidShards`**, which shards hold each uid, and **`SMY-W500`**: a union given one says
+  "waits on shard S" for a reference into a shard it does not hold, instead of `SMY-E060`.
+- **Library layout 2.** `log/shards/<alias>.cbor` per expression beside `log/catalog.cbor`;
+  `Library::append_records` routes an expression's units, and what is said of them, to its
+  shard, and the rest to the catalog. A layout-1 library opens unchanged and is raised to 2 by
+  the first write that shards it. The substrate index's stamp is the catalog's while the catalog
+  is the only shard, so existing sidecars stay current. `index/shards/<alias>.uids` lists each
+  shard's uids (OQ-68, answered: per shard, not in `store/library.redb`).
+- **`--shard ALIAS`**, global and repeatable (`all` for every shard): a library's named shards as
+  one union, each through the backend `--backend` chose; `--backend redb` on a library reads
+  every shard through its own unit store. Read commands only.
+- **Tests.** Conformance implementation 6 (k = 1, 2, 7 seeded partitions with units dealt twice,
+  every order for k ≤ 3, over opened logs, `AnyStore`, an `Overlay` and `RedbStore` shards); a
+  `store_union` fuzz target, run 10 minutes clean; `W500` on a two-shard `quotes` fixture,
+  resolved when the second shard loads, in the graph, the library and the CLI.
+
 ### A writer for the store on disk, and a flag to use it
 
 TX-P13b step 2 (SMYSL-2.8 §3.5.5, §3.8, §4.4): the unit store can be written as well as read,

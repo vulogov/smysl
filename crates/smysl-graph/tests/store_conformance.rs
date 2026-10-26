@@ -401,6 +401,191 @@ fn conform(name: &str, records: &[Record]) {
             "{name}: an interleaved Overlay disagrees with its store"
         );
     }
+
+    union_conforms(name, &log, oracle, &p);
+}
+
+/// A small seeded generator, so a partition is the same on every run.
+struct Seeded(u64);
+
+impl Seeded {
+    fn next(&mut self) -> u64 {
+        // xorshift64*
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
+    }
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+}
+
+/// `log` dealt into `k` shards by a seed. About one unit in eight is dealt twice, so two shards
+/// hold it — one unit by content, and the union must read it once with both shards'
+/// attestations.
+fn partition(log: &[Record], k: usize, seed: u64) -> Vec<Vec<Record>> {
+    let mut rng = Seeded(seed | 1);
+    let mut shards = vec![Vec::new(); k];
+    for r in log {
+        let a = rng.below(k);
+        shards[a].push(r.clone());
+        if k > 1 && matches!(r, Record::Unit(_)) && rng.below(8) == 0 {
+            let b = (a + 1 + rng.below(k - 1)) % k;
+            shards[b].push(r.clone());
+        }
+    }
+    shards
+}
+
+fn permutations(n: usize) -> Vec<Vec<usize>> {
+    if n == 0 {
+        return vec![Vec::new()];
+    }
+    let mut out = Vec::new();
+    for rest in permutations(n - 1) {
+        for at in 0..=rest.len() {
+            let mut p = rest.clone();
+            p.insert(at, n - 1);
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// Implementation 6 (TX-P13c step 1): `Union` of the log dealt into k = 1, 2 and 7 shards, in
+/// every order for k ≤ 3 and five seeded orders for k = 7.
+///
+/// The oracle for a partition is `from_records` of the shards' records concatenated in shard-id
+/// order: what a union is defined to answer. The answers that do not depend on order at all —
+/// the record-set digest, every unit and its attestations, the relations — must also be the
+/// whole log's.
+fn union_conforms(name: &str, log: &[Record], whole: &Store, p: &[Uid]) {
+    use smysl_graph::Union;
+
+    for (k, seed) in [(1usize, 11u64), (2, 12), (2, 13), (7, 14)] {
+        let parts = partition(log, k, seed);
+        let ids: Vec<String> = (0..k).map(|i| format!("s{i}")).collect();
+        let stores: Vec<Store> = parts.iter().cloned().map(Store::from_records).collect();
+        let concat: Vec<Record> = parts.iter().flatten().cloned().collect();
+        let want_store = Store::from_records(concat);
+        let want = observe(&want_store, p);
+        assert_eq!(
+            want_store.record_set_digest(),
+            whole.record_set_digest(),
+            "{name}: k={k}: the partition lost or gained a record"
+        );
+
+        let orders: Vec<Vec<usize>> = if k <= 3 {
+            permutations(k)
+        } else {
+            let mut rng = Seeded(seed);
+            (0..5)
+                .map(|_| {
+                    let mut o: Vec<usize> = (0..k).collect();
+                    for i in (1..k).rev() {
+                        o.swap(i, rng.below(i + 1));
+                    }
+                    o
+                })
+                .collect()
+        };
+        for order in orders {
+            let u = Union::new(order.iter().map(|&i| (ids[i].clone(), &stores[i])));
+            let got = observe(&u, p);
+            assert_eq!(
+                got.len(),
+                want.len(),
+                "{name}: k={k} {order:?}: answer count"
+            );
+            for (g, w) in got.iter().zip(&want) {
+                assert_eq!(g, w, "{name}: Union k={k} order {order:?} disagrees");
+            }
+            let units = |s: &dyn Fn() -> Vec<(Uid, usize)>| s();
+            assert_eq!(
+                units(&|| u
+                    .units()
+                    .map(|(id, x)| (*id, x.attestations.len()))
+                    .collect()),
+                units(&|| whole
+                    .units()
+                    .map(|(id, x)| (*id, x.attestations.len()))
+                    .collect()),
+                "{name}: k={k}: units and their attestations are the whole log's"
+            );
+            assert_eq!(
+                u.relations().collect::<Vec<_>>(),
+                whole.relations().collect::<Vec<_>>(),
+                "{name}: k={k}: relations are the whole log's"
+            );
+        }
+
+        // Over opened logs, and with one shard's units held twice within it.
+        let dir = std::env::temp_dir().join(format!(
+            "smysl-conformance-union-{}-{}-{k}",
+            std::process::id(),
+            name.replace(['/', '.', ' '], "-")
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let opened: Vec<Store> = parts
+            .iter()
+            .enumerate()
+            .map(|(i, recs)| {
+                let path = dir.join(format!("s{i}.smy"));
+                let mut bytes = to_cbor_seq(recs);
+                if i == 0 {
+                    bytes.extend(to_cbor_seq(&recs[..recs.len().min(3)]));
+                }
+                std::fs::write(&path, bytes).unwrap();
+                Store::open(&path).unwrap()
+            })
+            .collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        let u = Union::new(ids.iter().cloned().zip(opened.iter()));
+        let got = observe(&u, p);
+        for (g, w) in got.iter().zip(&want) {
+            assert_eq!(g, w, "{name}: Union of opened logs, k={k}, disagrees");
+        }
+        // A union is a store like any other: an overlay lies over it, and `AnyStore` holds one.
+        let over = Overlay::new(&u, Vec::new());
+        for (g, w) in observe(&over, p).iter().zip(&want) {
+            assert_eq!(g, w, "{name}: Overlay over a Union, k={k}, disagrees");
+        }
+        let any = AnyStore::shards(
+            ids.iter()
+                .cloned()
+                .zip(stores.iter().cloned().map(AnyStore::from)),
+            None,
+        );
+        for (g, w) in observe(&any, p).iter().zip(&want) {
+            assert_eq!(g, w, "{name}: AnyStore::shards, k={k}, disagrees");
+        }
+
+        #[cfg(feature = "store-redb")]
+        {
+            use smysl_graph::redb::{RedbOptions, RedbStore};
+            let dir = scratch(name, &format!("union-redb-{k}"));
+            let mut off = RedbOptions::default();
+            off.core_cache_bytes = 0;
+            let redb: Vec<RedbStore> = parts
+                .iter()
+                .enumerate()
+                .map(|(i, recs)| {
+                    let path = dir.join(format!("s{i}.smy"));
+                    std::fs::write(&path, to_cbor_seq(recs)).unwrap();
+                    RedbStore::open(&path, off.clone()).unwrap().0
+                })
+                .collect();
+            let u = Union::new(ids.iter().cloned().zip(redb.iter()));
+            for (g, w) in observe(&u, p).iter().zip(&want) {
+                assert_eq!(g, w, "{name}: Union of RedbStores, k={k}, disagrees");
+            }
+            drop(u);
+            drop(redb);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
 }
 
 /// A fresh directory for one fixture's logs.
@@ -721,6 +906,17 @@ fn the_unit_store_reads_a_log_with_repeats_and_a_torn_tail_as_open_does() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `Send + Sync` for the in-memory store and what lies over it (SMYSL-2.8 §5.1).
+#[test]
+fn the_views_over_a_store_are_send_and_sync() {
+    fn both<T: Send + Sync>() {}
+    both::<Store>();
+    both::<Overlay<'_, Store>>();
+    both::<smysl_graph::Union<&Store>>();
+    both::<smysl_graph::Union<Store>>();
+    both::<smysl_graph::UidShards>();
+}
+
 /// `Send + Sync` for what the RFC asks it of (SMYSL-2.8 §5.1).
 #[cfg(feature = "store-redb")]
 #[test]
@@ -730,4 +926,5 @@ fn the_unit_store_is_send_and_sync() {
     both::<smysl_graph::redb::RedbStore>();
     both::<AnyStore>();
     both::<Overlay<'_, smysl_graph::redb::RedbStore>>();
+    both::<smysl_graph::Union<smysl_graph::redb::RedbStore>>();
 }

@@ -125,3 +125,9 @@ name = "lens_laws"
 path = "fuzz_targets/lens_laws.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "store_union"
+path = "fuzz_targets/store_union.rs"
+test = false
+doc = false

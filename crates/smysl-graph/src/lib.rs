@@ -53,7 +53,8 @@ pub use store::redb;
 pub use store::{
     record_set_digest, AnyRecords, AnyStore, AnyUnit, AnyUnits, AppendReport, BundleReport,
     Commits, HotKind, HotRecords, OpenReport, Overlay, OverlayRecords, OverlayUnit, OverlayUnits,
-    Relations, Resolutions, Store, StoreLibrary, StoreOptions, StoreRead, StoreWrite, Threads,
-    UnknownRecords, Views, Withdrawals,
+    Relations, Resolutions, ShardId, Store, StoreLibrary, StoreOptions, StoreRead, StoreWrite,
+    Threads, UidShards, Union, UnionRecords, UnionUnit, UnionUnits, UnknownRecords, Views,
+    Withdrawals,
 };
 pub use traverse::{closure, cycles, rebuttals_of, reverse_closure, topo, Scratch, TopoOrder};

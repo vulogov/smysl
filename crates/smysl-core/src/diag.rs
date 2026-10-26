@@ -456,9 +456,11 @@ registry! {
     // Registered with the code that raises them. TX-P13b step 1's redb store brings three: a
     // store that did not describe its log and was rebuilt from it (`W501`), one written in a
     // layout this build cannot read (`E503`), and a store another process holds, read from
-    // the log instead (`W504`). `W500` waits for the union of shards (TX-P13c) and `E505` for
-    // primary mode (TX-P13d); `E502` is withdrawn in favour of `E445`.
+    // the log instead (`W504`). TX-P13c step 1's union of shards brings `W500`, a reference that
+    // waits on a shard not loaded; `E505` waits for primary mode (TX-P13d), and `E502` is
+    // withdrawn in favour of `E445`.
     Store => {
+        W500 = "SMY-W500", Warn,  "A reference names a uid in a shard not loaded in this union; it waits on that shard";
         W501 = "SMY-W501", Warn,  "The unit store does not describe this log (length, hash or layout); rebuilt from the log";
         E503 = "SMY-E503", Error, "The unit store's layout is newer than this build reads; it is derived, so delete it to rebuild";
         W504 = "SMY-W504", Warn,  "The unit store is held by another process; read from the CBOR log instead";
@@ -945,10 +947,11 @@ mod tests {
     /// `pointer(…)` over a snapshot with no version marker.
     ///
     /// 143 with `SMY-W501`, `SMY-E503` and `SMY-W504` in TX-P13b step 1, raised by the redb
-    /// unit store, in a fourteenth group, `Store`.
+    /// unit store, in a fourteenth group, `Store`; 144 with `SMY-W500` in TX-P13c step 1,
+    /// raised by a union of shards for a reference that waits on one not loaded.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 143);
+        assert_eq!(Code::ALL.len(), 144);
     }
 
     #[test]

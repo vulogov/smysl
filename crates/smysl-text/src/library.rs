@@ -1,4 +1,4 @@
-//! The library handle: a catalog log and an object store, opened together (SMYSL-2.4 §4.2).
+//! The library handle: its logs and an object store, opened together (SMYSL-2.4 §4.2).
 //!
 //! Everything else in this crate is a function of its arguments. This is the one module that
 //! touches a directory, and it exists because the two halves of a library are useless apart: a
@@ -10,17 +10,22 @@
 //!
 //! ```text
 //! <root>/LIBRARY                 the marker, holding the layout version
-//! <root>/log/catalog.cbor        records 14 and 19, and the units ingest stages later
+//! <root>/log/catalog.cbor        records 14 and 19, and what names no expression's unit
+//! <root>/log/shards/<alias>.cbor an expression's units and what is said of them
 //! <root>/objects/t3/ab/cd/…      part texts   (record 15 envelopes)
 //! <root>/objects/r3/ab/cd/…      readings     (record 18 envelopes)
 //! <root>/objects/tmp/            where an object is written before it is renamed into place
 //! <root>/lock                    the library lock; `log/<shard>.lock` are the shard locks
 //! ```
 //!
-//! **One log, not one per shard.** §14.2's layout is per-shard and SMYSL-2.8 owns the sharded
-//! virtual union; what TX-P1 needs is a catalog, and a sharding scheme written now would be a
-//! scheme chosen before anything can measure it. The marker file carries a layout version so
-//! that the release which shards can tell an unsharded library apart from a corrupt one.
+//! **One log per expression, since TX-P13c step 1** (layout 2; [`crate::shards`] has the
+//! layout and the routing). Until then it was one log: what TX-P1 needed was a catalog, and a
+//! sharding scheme written then would have been one chosen before anything could measure it.
+//! The library still opens every shard into one in-memory [`Store`], so every reader of
+//! [`Library::store`] sees exactly what it saw; what the shards buy is a reader that wants some
+//! of them — `--shard`, a union of shards on disk — and a log per expression to write to. A
+//! layout-1 library opens as a library whose only shard is its catalog, and becomes layout 2
+//! with the first write that creates another.
 //!
 //! # What `add` has to get right
 //!
@@ -39,7 +44,7 @@ use smysl_core::ids::{AgentId, LangTag, Mid, Rdid, Tid, Uid};
 use smysl_core::types::library::{PartResolver, Redaction, Resolved};
 use smysl_core::types::provenance::Hlc;
 use smysl_core::types::{Carry, PartEntry, PartText, Record};
-use smysl_graph::Store;
+use smysl_graph::{Store, UidShards};
 
 use crate::index::{self, Index};
 use crate::limits::{Budget, Caps};
@@ -50,6 +55,7 @@ use crate::objects::ObjectStore;
 use crate::part::{self, Policy};
 use crate::readers::{read_with, reader, Input, Params};
 use crate::reading::Reading;
+use crate::shards::ShardLog;
 use crate::speaker;
 use crate::structure::Structure;
 
@@ -62,7 +68,10 @@ use crate::structure::Structure;
 pub const MARKER: &str = "LIBRARY";
 
 /// The layout this release writes and reads.
-pub const LAYOUT: &str = "smysl/library/1";
+pub const LAYOUT: &str = "smysl/library/2";
+
+/// The layout before shards: one catalog log. Read as a library whose only shard is the catalog.
+pub const LAYOUT_1: &str = "smysl/library/1";
 
 /// The catalog log, relative to the root.
 pub const CATALOG: &str = "log/catalog.cbor";
@@ -212,7 +221,15 @@ pub struct Passage {
 #[derive(Debug)]
 pub struct Library {
     root: PathBuf,
+    /// Every shard's records, read as one store. It has no path of its own: writes go to the
+    /// shards' logs, which is where `shards` keeps them.
     store: Store,
+    shards: BTreeMap<String, ShardLog>,
+    /// Which shards hold each uid: what routing reads, and what each shard's uid list is
+    /// written from.
+    uid_shards: UidShards,
+    /// The layout the marker says, which the first write that creates a shard raises to 2.
+    layout: &'static str,
     objects: ObjectStore,
     /// The derived substrate index (§3.8), loaded from its sidecar or rebuilt on open.
     ///
@@ -281,7 +298,12 @@ impl Library {
         let marker = root.join(MARKER);
         let version = std::fs::read_to_string(&marker).map_err(|e| io(MARKER, &e))?;
         let version = version.trim();
-        if version != LAYOUT {
+        let layout = match version {
+            LAYOUT => LAYOUT,
+            LAYOUT_1 => LAYOUT_1,
+            _ => "",
+        };
+        if layout.is_empty() {
             // Named rather than guessed at. A library written by a later layout may differ in
             // where the logs are, and half-reading it would report an empty catalog for a
             // library that is full.
@@ -290,15 +312,31 @@ impl Library {
                 message: format!("layout `{version}` is not `{LAYOUT}`; this library was written by another release"),
             });
         }
-        let log = root.join(CATALOG);
-        let store = Store::open(&log).map_err(|e: smysl_core::Error| LibError::Io {
-            at: CATALOG.to_string(),
-            message: e.to_string(),
-        })?;
+        // Every shard, in name order, into one store: the order a union of them reads in, so
+        // the store is the union's answer whichever way it is built.
+        let mut shards = BTreeMap::new();
+        let mut uid_shards = UidShards::new();
+        let mut all = Vec::new();
+        for (name, _) in crate::shards::list(root)? {
+            let (log, records) = ShardLog::read(root, &name)?;
+            uid_shards.set(
+                &name,
+                records.iter().filter_map(|r| match r {
+                    Record::Unit(u) => Some(smysl_core::canonical_uid(u)),
+                    _ => None,
+                }),
+            );
+            all.extend(records);
+            shards.insert(name, log);
+        }
+        let store = Store::from_records(all);
         let objects = ObjectStore::open(&root.join("objects"))?;
         let mut library = Library {
             root: root.to_path_buf(),
             store,
+            shards,
+            uid_shards,
+            layout,
             objects,
             index: Index::default(),
             // A store that will not open is no store, and the library reports its postings the
@@ -333,7 +371,7 @@ impl Library {
         let fresh = std::fs::read(Index::path(&self.root))
             .ok()
             .and_then(|b| Index::from_bytes(&b).ok())
-            .filter(|ix| ix.matches(self.store.log_len(), self.store.log_hash()));
+            .filter(|ix| ix.matches(self.stamp().0, &self.stamp().1));
         self.index = match fresh {
             Some(ix) => ix,
             None => Index::rebuild_catalog(self),
@@ -378,7 +416,7 @@ impl Library {
         let Some(db) = self.db.as_ref() else {
             return false;
         };
-        if !db.matches(self.store.log_len(), self.store.log_hash()) {
+        if !db.matches(self.stamp().0, &self.stamp().1) {
             return false;
         }
         match db.load() {
@@ -465,12 +503,8 @@ impl Library {
                 Err(_) => return false,
             },
         };
-        db.write(
-            &self.index.postings,
-            self.store.log_len(),
-            self.store.log_hash(),
-        )
-        .is_ok()
+        let (len, hash) = self.stamp();
+        db.write(&self.index.postings, len, &hash).is_ok()
     }
 
     #[cfg(not(feature = "substrate-redb"))]
@@ -499,7 +533,7 @@ impl Library {
     #[cfg(feature = "substrate-redb")]
     fn stored_postings(&self) -> Option<index::Source<'_>> {
         let db = self.db.as_ref()?;
-        if !db.matches(self.store.log_len(), self.store.log_hash()) {
+        if !db.matches(self.stamp().0, &self.stamp().1) {
             return None;
         }
         db.all()
@@ -536,7 +570,7 @@ impl Library {
     #[cfg(feature = "substrate-redb")]
     fn stored_held(&self) -> Option<index::Held> {
         let db = self.db.as_ref()?;
-        if !db.matches(self.store.log_len(), self.store.log_hash()) {
+        if !db.matches(self.stamp().0, &self.stamp().1) {
             return None;
         }
         let partitions = db.partitions().ok()?;
@@ -690,12 +724,29 @@ impl Library {
         &self.objects
     }
 
-    /// The shard names a library-wide write locks, for [`crate::lock::acquire_all`].
+    /// The shard names a library-wide write locks, for [`crate::lock::acquire_all`]: every
+    /// shard the library holds, catalog included, in name order.
     ///
-    /// One, while there is one log. It is a method rather than a constant so that the release
-    /// which shards changes the lock set in one place.
+    /// A write that creates a shard creates one nobody else can be writing — every library-wide
+    /// writer holds the library lock first — so the set taken at the start is enough.
     pub fn shards(&self) -> Vec<String> {
-        vec!["catalog".to_string()]
+        self.shards.keys().cloned().collect()
+    }
+
+    /// Which shards hold each uid.
+    pub fn uid_shards(&self) -> &UidShards {
+        &self.uid_shards
+    }
+
+    /// What the substrate index is stamped with: a function of every shard's log (see
+    /// [`crate::shards`]), equal to the catalog's length and hash while it is the only shard.
+    pub fn stamp(&self) -> (u64, [u8; 32]) {
+        crate::shards::stamp(&self.shards)
+    }
+
+    /// The layout this library is in, as its marker says.
+    pub fn layout(&self) -> &'static str {
+        self.layout
     }
 
     /// Read a file into the library: objects, a reading, and a manifest.
@@ -1038,10 +1089,46 @@ impl Library {
     /// because *append* in this crate's vocabulary now means what the command means, and a
     /// method called `append` that took records would be the other thing.
     pub fn append_records(&mut self, records: &[Record]) -> Result<(), LibError> {
+        // Refused whole before any shard is written, as one log refused it.
+        Store::check_loggable(records).map_err(|e| match e {
+            smysl_core::Error::Lib(e) => e,
+            e => LibError::Io {
+                at: CATALOG.to_string(),
+                message: e.to_string(),
+            },
+        })?;
+        let routes = crate::shards::route(&self.store, &self.uid_shards, records);
+        let batches = crate::shards::encode_by_shard(&self.store, records, &routes);
+        if batches.keys().any(|s| !self.shards.contains_key(s)) && self.layout == LAYOUT_1 {
+            // The marker first: a layout-1 reader must not see a library with a shard it would
+            // not read and report it whole.
+            std::fs::write(self.root.join(MARKER), format!("{LAYOUT}\n"))
+                .map_err(|e| io(MARKER, &e))?;
+            self.layout = LAYOUT;
+        }
+        for (shard, (bytes, uids)) in &batches {
+            if !self.shards.contains_key(shard) {
+                let (log, _) = ShardLog::read(&self.root, shard)?;
+                self.shards.insert(shard.clone(), log);
+            }
+            let log = self.shards.get_mut(shard).expect("inserted above");
+            log.append(bytes)?;
+            if !uids.is_empty() {
+                self.uid_shards.extend(shard, uids.iter().copied());
+            }
+        }
+        // The logs hold the batch; the store takes it the way it always has, which dedups
+        // and absorbs exactly as before and writes nothing, having no path.
         self.store.append(records).map_err(|e| LibError::Io {
             at: CATALOG.to_string(),
             message: e.to_string(),
         })?;
+        for (shard, (_, uids)) in &batches {
+            if !uids.is_empty() {
+                let len = self.shards[shard].len();
+                crate::shards::write_uids(&self.root, shard, len, &self.uid_shards.uids_of(shard));
+            }
+        }
         // Every path that grows a library comes through here - `add`, `append` and `redact`
         // all call it rather than reaching the store - so the index is maintained in one
         // place. `SMY-E452` is refused above and the whole batch with it, so there is no

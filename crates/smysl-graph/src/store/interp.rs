@@ -109,6 +109,48 @@ impl Interpretive {
         true
     }
 
+    /// Fold another layer into this one, as absorbing its records after this layer's would
+    /// (a union of shards, §3.7). Relations keep every rid that named them, and every
+    /// attestation either side attached; the rest goes through [`Interpretive::absorb_hot`], so
+    /// threads, views and contentions settle exactly as they would from the records.
+    pub(crate) fn join(&mut self, other: &Interpretive) {
+        for (key, rel) in &other.relations {
+            match self.relations.get_mut(key) {
+                Some(existing) => existing
+                    .attestations
+                    .extend(rel.attestations.iter().cloned()),
+                None => {
+                    self.relations.insert(key.clone(), rel.clone());
+                }
+            }
+        }
+        for (rid, key) in &other.rids {
+            self.rids.insert(*rid, key.clone());
+        }
+        for t in other.threads.values() {
+            self.absorb_hot(&Record::Thread(t.clone()));
+        }
+        for v in other.views.values() {
+            self.absorb_hot(&Record::View(v.clone()));
+        }
+        for c in &other.contentions {
+            self.absorb_hot(&Record::Contention(c.clone()));
+        }
+        for (rid, ws) in &other.withdrawals {
+            self.withdrawals
+                .entry(*rid)
+                .or_default()
+                .extend(ws.iter().cloned());
+        }
+        self.resolutions.extend(other.resolutions.iter().cloned());
+        for (uid, cs) in &other.commits {
+            self.commits
+                .entry(*uid)
+                .or_default()
+                .extend(cs.iter().cloned());
+        }
+    }
+
     /// Whether a relation has been withdrawn. Lifecycle kinds are never withdrawable (1.4).
     pub(crate) fn is_withdrawn(&self, rel: &Relation) -> bool {
         !rel.kind.is_lifecycle() && self.withdrawals.contains_key(&rel.uid())

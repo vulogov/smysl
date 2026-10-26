@@ -162,12 +162,9 @@ const QUERIES: &[&str] = &[
 
 fn written(lib: &Library) -> Db {
     let db = Db::open(lib.root()).expect("opened the store");
-    db.write(
-        &lib.index().postings,
-        lib.store().log_len(),
-        lib.store().log_hash(),
-    )
-    .expect("wrote the store");
+    let (len, hash) = lib.stamp();
+    db.write(&lib.index().postings, len, &hash)
+        .expect("wrote the store");
     db
 }
 
@@ -204,9 +201,10 @@ fn the_store_disagrees_when_the_table_moves() {
 fn the_stamp_is_the_catalog_it_was_written_for() {
     let (_dir, lib) = grown("stamp");
     let db = written(&lib);
-    assert!(db.matches(lib.store().log_len(), lib.store().log_hash()));
+    let (len, hash) = lib.stamp();
+    assert!(db.matches(len, &hash));
     assert!(
-        !db.matches(lib.store().log_len() + 1, lib.store().log_hash()),
+        !db.matches(len + 1, &hash),
         "a stale stamp compared current"
     );
 }
@@ -371,7 +369,8 @@ fn a_write_leaves_the_postings_in_the_store_and_out_of_the_sidecar() {
     }
     assert!(lib.has_postings_store(), "no store beside the library");
     let db = Db::open(lib.root()).expect("opened the store");
-    assert!(db.matches(lib.store().log_len(), lib.store().log_hash()));
+    let (len, hash) = lib.stamp();
+    assert!(db.matches(len, &hash));
     if let Err(why) = db.agrees(&lib.index().postings) {
         panic!("{why}");
     }

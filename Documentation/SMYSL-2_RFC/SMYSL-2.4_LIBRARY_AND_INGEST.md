@@ -1164,7 +1164,7 @@ half a corpus depends on.
 
 #### 3.9.3 Concurrency
 
-- **One writer per shard.** `log/<shard>.lock` is created with `OpenOptions::create_new(true)`
+- **One writer per shard.** `log/<shard>.lock` (the shard's file stem since TX-P13c, so an alias's `/` is not a directory) is created with `OpenOptions::create_new(true)`
   and holds pid, host and command. A second writer fails with `SMY-E445` naming the holder.
   `--break-lock` removes a lock explicitly; nothing removes one by timeout. No new dependency.
   **OQ-36 answered 1.10.0: this, not advisory OS locks.** `std::fs::File::lock` is unstable at
@@ -2240,6 +2240,17 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
      union. A sharding scheme written here would be one chosen before anything can measure it,
      so the marker file carries a layout version instead and `Library::shards()` is the one place
      the lock set is named.
+     *Shards arrived with SMYSL-2.8's TX-P13c step 1 (2026-10-25), as layout
+     `smysl/library/2`:* `log/catalog.cbor` and one `log/shards/<alias>.cbor` per expression,
+     an alias's `/` and `:` spelled `~` and `+` in the file name. An expression's units, and the
+     relations, attestations, commitments and withdrawals on them, are routed to its shard;
+     manifests, redactions, datings and whatever is about no expression's unit stay in the
+     catalog. `Library` still opens every shard into one `Store`, so nothing that reads
+     `Library::store` changed; the substrate index's stamp became a function of every shard's
+     log, and is the catalog's own while the catalog is the only shard, so a sidecar written
+     before shards stays current. A layout-1 library opens as one whose only shard is the
+     catalog and is raised to layout 2, marker first, by the first write that creates a shard.
+     `Library::shards()` returns every shard, and the shard locks are `log/<stem>.lock`.
    - **`xtask determinism` could not register a command that writes**, so `text add` and `text
      show` — which §4.4 asks for — were left out of it at this step. The harness ran one fixed
      argv twice and compared stdout, and `text add` is a *write*: its second run legitimately

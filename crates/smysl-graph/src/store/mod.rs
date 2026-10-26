@@ -16,6 +16,7 @@ mod library;
 mod read;
 #[cfg(feature = "store-redb")]
 pub mod redb;
+mod shards;
 mod union;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -40,6 +41,7 @@ pub use read::{
     Commits, HotKind, HotRecords, Relations, Resolutions, StoreRead, StoreWrite, Threads, Views,
     Withdrawals,
 };
+pub use shards::{ShardId, UidShards, Union, UnionRecords, UnionUnit, UnionUnits};
 pub use union::{Overlay, OverlayRecords, OverlayUnit, OverlayUnits};
 
 /// How to open a store.
@@ -1112,6 +1114,13 @@ impl Store {
     ///
     /// Public for SMYSL-2.7, whose import classifies and promotes records by this hash and
     /// whose export digests a selection that is not a store: one hash, defined once.
+    /// Refuse what no log accepts — text (`SMY-E452`) and a derived time contention — as
+    /// [`Store::append`] would, without appending. For a writer that routes one batch into
+    /// several logs (a sharded library, TX-P13c) and must refuse the batch before writing any.
+    pub fn check_loggable(records: &[Record]) -> Result<(), Error> {
+        refuse_unloggable(records)
+    }
+
     pub fn record_hash(r: &Record) -> [u8; 32] {
         hash_bytes(&to_cbor(r))
     }

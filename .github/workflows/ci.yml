@@ -517,10 +517,11 @@ jobs:
       # guarantee A1 across the pipeline — the same properties the seeded tests assert,
       # searched by coverage feedback rather than by a fixed seed and 200 blind rounds.
       # These are where a defect is *quiet*: a wrong merge still merges, a wrong pack still
-      # packs, and neither raises a diagnostic on the way past.
+      # packs, and neither raises a diagnostic on the way past. `store_union` (TX-P13c step 1)
+      # is the same shape for the union of shards: it answers as its records' store.
       - name: algebra
         run: |
-          for t in merge_algebra pack_constraints pipeline pack_exact; do
+          for t in merge_algebra pack_constraints pipeline pack_exact store_union; do
             ls fuzz/artifacts/$t > /tmp/before-$t.txt 2>/dev/null || true
             cargo +nightly fuzz run $t -- -max_total_time=60 || {
               ls fuzz/artifacts/$t > /tmp/after-$t.txt 2>/dev/null || true

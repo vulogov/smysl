@@ -86,6 +86,7 @@ pub mod reading;
 pub mod scope;
 pub mod secrets;
 pub mod segment;
+pub mod shards;
 pub mod speaker;
 pub mod structure;
 pub mod time;

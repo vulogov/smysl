@@ -638,6 +638,14 @@ same unit can be extracted into two shards and is then one unit by content). It 
 "where would this dangling uid resolve?" without opening every shard. It is rebuilt from the
 shards' `header` tables. Its home (here or per-shard) is OQ-68.
 
+*As built (P13c.1):* the library's shards are `log/catalog.cbor` and `log/shards/<alias>.cbor`
+(an alias's `/` and `:` spelled `~` and `+`, which A-3 does not allow, so the mapping is
+one-to-one); `uid_shard` is `smysl_graph::UidShards`, kept per shard as
+`index/shards/<alias>.uids` — each shard's uids, stamped with the length of the log they list —
+and merged on read (OQ-68). Which records go to which shard is SMYSL-2.4's routing, in
+`smysl_text::shards`: an expression's units, and the relations, attestations, commitments and
+withdrawals on them, go to its shard; everything else to the catalog.
+
 ### 3.7 The virtual union
 
 `Union<'s, S: StoreRead>` borrows a set of shards and is itself a `StoreRead`.
@@ -663,6 +671,19 @@ shards' `header` tables. Its home (here or per-shard) is OQ-68.
 uid lives in an unloaded shard, the diagnostic is `SMY-W500` ("waits on shard S") instead of
 `SMY-E060`. Loading that shard into the union resolves it. Nothing is written. This is the
 cross-shard counterpart of `pending_attestations`.
+
+*As built (P13c.1):* `Union<S: StoreRead>` **owns** its shards rather than borrowing them, so that
+`AnyStore` can hold one (`AnyStore::Shards`, for `--shard`); a caller keeping its stores passes
+references, since `&Store` is a store. The equality is with `from_records` of the shards'
+records concatenated **in shard-id order**: most answers do not depend on that order, and the
+four that do — the log, the records of a `HotKind`, recorded contentions (first by id) and views
+(last by id) — follow it, so a union is a function of which shards it holds. Materialised at
+construction: the uid list with the first shard holding each, the interpretive and library
+layers (the shards' own, joined), the hot records, and a merged copy of each unit two shards
+hold or that an attestation in another shard lands on. The adjacency is derived lazily from the
+shards' own adjacencies (their `deps`/`grounds` edges) and the union's relations, so it reads
+no core. `with_index(Arc<UidShards>)` turns `E060` into `W500` for a uid the index places in a
+shard not loaded.
 
 **Contentions over a union (OQ-16).** Detection is already "reported, not recorded"
 (`merge/mod.rs`, the comment after `new_contentions`): `contention::detect` is a function of
@@ -888,7 +909,11 @@ Integration with the `Cmd` table in `src/main.rs`; no new subcommand in this RFC
   `check`, which reads its own input, and by every command's write, which goes through
   `RedbShard`; a build without `store-redb` refuses `redb` with exit 2, by name.*
 - Global `--shard <ALIAS>` (repeatable) on read commands inside a library: the union of the
-  named shards; `--shard all` is every shard.
+  named shards; `--shard all` is every shard. *As built (P13c.1): each shard through the backend
+  `--backend` chose; under `--backend redb` a library is always read as a union of its shards,
+  each through its own unit store. A union of some shards reads the library's uid lists for
+  `W500`. Without either flag a library is read as one log, every shard's records in shard-id
+  order. A write under `--shard` is refused.*
 - `smysl reindex --backend redb` builds or rebuilds the unit store; `--verify` compares the
   redb store's record-set digest and adjacency against an in-memory rebuild.
 - `smysl lib migrate --primary <shard>` and `--index <shard>` (§3.9), registered by SMYSL-2.4's
@@ -932,7 +957,9 @@ Integration with the `Cmd` table in `src/main.rs`; no new subcommand in this RFC
 4. `RedbStore`, cache large enough for everything;
 5. `RedbStore` in primary mode (from P13d);
 6. `Union` of R partitioned into k shards by a seeded partition (k = 1, 2, 7), in every shard
-   order for k ≤ 3 and 5 seeded orders for k = 7;
+   order for k ≤ 3 and 5 seeded orders for k = 7; *as built (P13c.1), with about one unit in
+   eight dealt into two shards, over opened logs (one holding repeats), through `AnyStore`, under
+   an `Overlay`, and with `store-redb` over `RedbStore` shards with the core cache off;*
 7. `Overlay` of `Store::from_records(R₁)` and batch R₂ (R = R₁ ⊎ R₂, three split points).
 
 **What must be identical** across all seven (byte-for-byte where the output is bytes):
@@ -1310,6 +1337,42 @@ in every ported signature; §3.2's sketch and §5.2's shapes are otherwise uncha
     at 10⁶); redb reuses the pages on the next writes, so it does not grow past that.
     Compacting needs the database alone (`&mut`), which a shared one is not.
 
+- **P13c.1 — done (2026-10-25).** Shards in a library, their union, and `--shard`:
+  - **`Union<S: StoreRead>`** (`store/shards.rs`), implementation 6 of §5.1, against
+    `from_records` of the shards' records in shard-id order; every order of k ≤ 3 and five of
+    k = 7 give one answer. It owns its shards — §4.2's sketch borrowed them — because `AnyStore`
+    has to hold one for `--shard`, and `&Store` is a store, so a borrowing caller loses nothing.
+    `AnyStore::Shards` is the new variant; its append is refused, since choosing a shard is the
+    library's routing.
+  - **`UidShards`** and **`SMY-W500`** (registry 144). `with_index` makes `report_dangling` say
+    "waits on shard S" for a uid the index places in a shard not loaded. The exit's fixture is a
+    `x.text/quotes` edge from one chat's reply to another chat's message, in the graph
+    (`shards.rs`), the library (`smysl-text/tests/shards.rs`) and the CLI
+    (`tests/cmd_shard.rs`): `W500` naming `chat/messages` with one shard, nothing with both, no
+    byte written to either.
+  - **Library layout 2** (`smysl_text::shards`, with SMYSL-2.4): `log/shards/<alias>.cbor` per
+    expression beside the catalog, routed by what a record is about (§3.6's as-built note).
+    `Library` still opens every shard into one in-memory `Store`, so nothing reading
+    `Library::store` changed. The substrate index is stamped over every shard, and with the
+    catalog alone the stamp is the catalog's length and hash, as it was, so sidecars written
+    before shards stay current. A layout-1 library opens as one shard and is raised to layout 2,
+    marker first, by the write that creates the second. A shard's torn tail is cut before the
+    next write; each write is `fsync`ed, which the single catalog's was not.
+  - **`--shard ALIAS`**, global, repeatable, `all` for every shard; each shard through
+    `--backend`'s choice, and `--backend redb` on a library always reads it as a union of its
+    shards' unit stores (each at `<log dir>/.smysl/store/<stem>.redb`, beside its log, not
+    §3.6's `store/<shard>.redb`). Without either flag a library is read as one log, its shards
+    concatenated in id order — what `check -s <library>` read before, now with every shard.
+  - **Fuzzed.** `fuzz/fuzz_targets/store_union.rs`: a generated store dealt into up to five
+    shards by the input, records dealt twice and attestations away from their subjects, the
+    union in an input-chosen order against its records' store and the whole. 10 minutes clean
+    (602,848 runs on the final code). In `make fuzz` and CI's algebra job.
+  - **Measured: opening a library**, 155,510 units in five expressions (now five shards),
+    `postings_timing`, release, one run each against `4fe6328`: 749 ms against 697 ms with a
+    current sidecar, 903 against 857 ms without one (+5–7%). Building the library (33 s) did not
+    slow for the `fsync`s. Recorded rather than chased: the open reads each shard and builds one
+    store from all their records, where it used to open one log.
+
 ## 7. Risks and mitigations
 
 | risk | why it is real | mitigation |
@@ -1353,5 +1416,5 @@ SMY-*506–509 are unallocated.
 | **OQ-65** | Generalise the public entry points in place (`fn check<S: StoreRead + ?Sized>`), accepting that a caller's own `Deref<Target = Store>` type stops coercing, or add `_in` twins for the twelve contract operations and leave their signatures alone? | In place, with blanket impls and the §5.2 compile test; twins only if `make semver` flags it or the owner rules the `Deref` case a break. |
 | ~~**OQ-66**~~ | **Answered 1.10.0 by measurement, and the second option never existed.** There was no 1.79 build to keep: a 1.79 Cargo cannot resolve this tree at all — the last sentence of the old answer asked exactly that, and the answer is no, and not because of an *optional* dependency but because of `blake3`, via `constant_time_eq` 0.4.2 at edition 2024. Measured floors: 1.85 for the nine pure-path crates, 1.86 for `smysl-provider` and `smysl-ingest` (`icu_*` 2.2 under `ureq`), 1.88 for `smysl-tui` and the facade (`instability`, `darling` under `ratatui`). Each is declared on its own crate, since Cargo has no per-feature MSRV and a package's number must be its maximum. `make msrv` compares each declaration against what its dependencies require and fails in both directions; a CI job runs it and compiles the base tier at 1.85. redb 4.x's 1.90 is now a one-line bump on `smysl-graph` when `store-redb` lands. |
 | ~~**OQ-67**~~ | **Answered 2026-10-24 (P13b.1): wait, then read the log. Revisited at P13b.2 and kept**: the CLI's writer holds the store for one append (6–8 ms), so a reader meets it rarely, and in one process readers and the writer share the database and never meet it at all; at 10⁶ units the fallback costs a 2.9 GB in-memory open against 0.3 s, which is what redb 4's read-only handles would buy, still at Rust 1.90. On redb 2.6.4, which the workspace pins, there is no shared lock to adopt — every open takes `flock(LOCK_EX)`, readers included — so the fallback serves any second process, not only one meeting a writer. `AnyStore::open_redb` waits `reader_wait_ms` (2 s), then opens the log into memory with `W504`. redb 4's read-only handles are the way out and cost Rust 1.90 for the whole workspace; revisit at P13b.2, where a writer makes collisions likelier and the 10⁶ ladder shows what the fallback costs. | *(was: wait and fall back now; revisit when the feature leaves `experimental`)* |
-| **OQ-68** | Where do library-wide derived tables live: `uid_shard` and the `observed` instant index (draft 3 §14.2 lists `observed` in `index.redb`; this RFC has a per-shard `observed` table for `StoreRead`)? | **Half answered 2026-10-24.** Per-shard tables are the source, and P13b.1 has them (`observed`, `source_ref`). The library-wide ones go in **a file of their own, `store/library.redb`**, not `index.redb`: `smysl-text` owns that file's layout and writes it only under `substrate-redb`, and `smysl-graph` sits below `smysl-text`, so writing into it would be a crate writing a file whose layout belongs to one above it — and a library without text indexing would have no file to write to. Derived from the shards' `header` tables and rebuildable. Decided for P13c, which first needs them; SMYSL-2.4 to confirm. |
+| **OQ-68** | Where do library-wide derived tables live: `uid_shard` and the `observed` instant index (draft 3 §14.2 lists `observed` in `index.redb`; this RFC has a per-shard `observed` table for `StoreRead`)? | **Half answered 2026-10-24.** Per-shard tables are the source, and P13b.1 has them (`observed`, `source_ref`). The library-wide ones go in **a file of their own, `store/library.redb`**, not `index.redb`: `smysl-text` owns that file's layout and writes it only under `substrate-redb`, and `smysl-graph` sits below `smysl-text`, so writing into it would be a crate writing a file whose layout belongs to one above it — and a library without text indexing would have no file to write to. Derived from the shards' `header` tables and rebuildable. Decided for P13c, which first needs them; SMYSL-2.4 to confirm. **Answered at P13c.1 (2026-10-25), differently:** `uid_shard` is a file **per shard**, `index/shards/<alias>.uids`, not a table in `store/library.redb`. A library must answer it without `store-redb` too, so it cannot live in redb alone; a write touches one shard, so one file per shard is rewritten and the others are not; and a reader merges the lists, which is the multimap. Each is stamped with the length of the log it lists — append-only, so the length is the log — and one that is stale or missing is rebuilt from its log. The `observed` index stays per shard, where P13b.1 put it; a union merges it (`units_in_observed_order`). |
 | **OQ-69** | Tiering policy: pin interpretive cores by status (`speculative`/`inferred`/`derived` + relation endpoints, §3.5.4), by source kind (`doc`/`file`/`node` cold), or by kernel type? And GE-T7's "library build" — does it include model extraction or only readers, segmentation and indexes? | **Tiering answered 2026-10-24 (P13b.1): by status and relation endpoint**, a pure function of the header, as proposed; the paged tier is scan-resistant (scans read through, `get` fills), and its default is **32 MiB**, not 64, measured (§6.1 P13b.1). The cache at 0 bytes is a test mode beside the default, so answers are shown not to depend on it. GE-T7's build definition stays open: it does not bear on 13b, and the proposal (exclude model extraction) stands until the first GE-T7 run. |

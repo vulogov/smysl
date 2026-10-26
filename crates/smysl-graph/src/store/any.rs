@@ -8,6 +8,9 @@
 //! (TX-P13b step 1). The associated types are newtypes over a private enum, so the second
 //! variant changed no type a caller can name, and the enum is `#[non_exhaustive]` so a `match`
 //! outside this crate already says what it does with a backend it does not know.
+//!
+//! **And a union of either** (TX-P13c step 1): `--shard` reads some of a library's shards as
+//! one store, each shard of whichever backend was asked for.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -22,6 +25,7 @@ use super::{
     AppendReport, Commits, HotKind, HotRecords, Relations, Resolutions, Store, StoreRead,
     StoreWrite, Threads, Views, Withdrawals,
 };
+use super::{Union, UnionRecords, UnionUnit, UnionUnits};
 use crate::adjacency::Adjacency;
 
 /// A store of whichever backend was opened.
@@ -38,6 +42,8 @@ pub enum AnyStore {
     /// The unit store on disk, whose cores stay in the log until asked for.
     #[cfg(feature = "store-redb")]
     Redb(super::redb::RedbStore),
+    /// Shards of either backend, read as one store (SMYSL-2.8 §3.7). Read-only.
+    Shards(Box<Union<AnyStore>>),
 }
 
 impl AnyStore {
@@ -45,8 +51,7 @@ impl AnyStore {
     pub fn as_memory(&self) -> Option<&Store> {
         match self {
             AnyStore::Memory(s) => Some(s),
-            #[cfg(feature = "store-redb")]
-            AnyStore::Redb(_) => None,
+            _ => None,
         }
     }
 
@@ -54,8 +59,7 @@ impl AnyStore {
     pub fn as_memory_mut(&mut self) -> Option<&mut Store> {
         match self {
             AnyStore::Memory(s) => Some(s),
-            #[cfg(feature = "store-redb")]
-            AnyStore::Redb(_) => None,
+            _ => None,
         }
     }
 
@@ -65,6 +69,27 @@ impl AnyStore {
             AnyStore::Memory(s) => s,
             #[cfg(feature = "store-redb")]
             AnyStore::Redb(s) => sealed::Sealed::owned(&s).into_owned(),
+            AnyStore::Shards(u) => sealed::Sealed::owned(&*u).into_owned(),
+        }
+    }
+
+    /// A union of these shards (`--shard`), consulting `index` for what waits on the others.
+    pub fn shards(
+        shards: impl IntoIterator<Item = (super::ShardId, AnyStore)>,
+        index: Option<std::sync::Arc<super::UidShards>>,
+    ) -> AnyStore {
+        let u = Union::new(shards);
+        AnyStore::Shards(Box::new(match index {
+            Some(ix) => u.with_index(ix),
+            None => u,
+        }))
+    }
+
+    /// The union, when that is what this is.
+    pub fn as_union(&self) -> Option<&Union<AnyStore>> {
+        match self {
+            AnyStore::Shards(u) => Some(u),
+            _ => None,
         }
     }
 
@@ -74,6 +99,7 @@ impl AnyStore {
             AnyStore::Memory(s) => s.len(),
             #[cfg(feature = "store-redb")]
             AnyStore::Redb(s) => s.len(),
+            AnyStore::Shards(u) => StoreRead::records(&**u).count(),
         }
     }
 
@@ -134,6 +160,7 @@ enum AnyUnitInner<'a> {
     Memory(&'a Unit),
     #[cfg(feature = "store-redb")]
     Redb(std::sync::Arc<Unit>),
+    Union(Box<UnionUnit<'a, AnyUnit<'a>>>),
 }
 
 impl Deref for AnyUnit<'_> {
@@ -143,6 +170,7 @@ impl Deref for AnyUnit<'_> {
             AnyUnitInner::Memory(u) => u,
             #[cfg(feature = "store-redb")]
             AnyUnitInner::Redb(u) => u,
+            AnyUnitInner::Union(u) => u,
         }
     }
 }
@@ -154,6 +182,7 @@ enum AnyUnitsInner<'a> {
     Memory(<Store as StoreRead>::Units<'a>),
     #[cfg(feature = "store-redb")]
     Redb(super::redb::RedbUnits<'a>),
+    Union(Box<UnionUnits<'a, AnyStore>>),
 }
 
 impl<'a> Iterator for AnyUnits<'a> {
@@ -165,6 +194,9 @@ impl<'a> Iterator for AnyUnits<'a> {
                 .map(|(u, x)| (u, AnyUnit(AnyUnitInner::Memory(x)))),
             #[cfg(feature = "store-redb")]
             AnyUnitsInner::Redb(it) => it.next().map(|(u, x)| (u, AnyUnit(AnyUnitInner::Redb(x)))),
+            AnyUnitsInner::Union(it) => it
+                .next()
+                .map(|(u, x)| (u, AnyUnit(AnyUnitInner::Union(Box::new(x))))),
         }
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -172,6 +204,7 @@ impl<'a> Iterator for AnyUnits<'a> {
             AnyUnitsInner::Memory(it) => it.size_hint(),
             #[cfg(feature = "store-redb")]
             AnyUnitsInner::Redb(it) => it.size_hint(),
+            AnyUnitsInner::Union(it) => it.size_hint(),
         }
     }
 }
@@ -183,6 +216,7 @@ enum AnyRecordsInner<'a> {
     Memory(<Store as StoreRead>::Records<'a>),
     #[cfg(feature = "store-redb")]
     Redb(super::redb::RedbRecords<'a>),
+    Union(Box<UnionRecords<'a, AnyStore>>),
 }
 
 impl<'a> Iterator for AnyRecords<'a> {
@@ -192,6 +226,7 @@ impl<'a> Iterator for AnyRecords<'a> {
             AnyRecordsInner::Memory(it) => it.next(),
             #[cfg(feature = "store-redb")]
             AnyRecordsInner::Redb(it) => it.next(),
+            AnyRecordsInner::Union(it) => it.next(),
         }
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -199,6 +234,7 @@ impl<'a> Iterator for AnyRecords<'a> {
             AnyRecordsInner::Memory(it) => it.size_hint(),
             #[cfg(feature = "store-redb")]
             AnyRecordsInner::Redb(it) => it.size_hint(),
+            AnyRecordsInner::Union(it) => it.size_hint(),
         }
     }
 }
@@ -210,6 +246,10 @@ macro_rules! by_backend {
             AnyStore::Memory($s) => $e,
             #[cfg(feature = "store-redb")]
             AnyStore::Redb($s) => $e,
+            AnyStore::Shards(u) => {
+                let $s = &**u;
+                $e
+            }
         }
     };
 }
@@ -242,6 +282,9 @@ impl StoreRead for AnyStore {
             AnyStore::Memory(s) => StoreRead::get(s, uid).map(|u| AnyUnit(AnyUnitInner::Memory(u))),
             #[cfg(feature = "store-redb")]
             AnyStore::Redb(s) => StoreRead::get(s, uid).map(|u| AnyUnit(AnyUnitInner::Redb(u))),
+            AnyStore::Shards(s) => {
+                StoreRead::get(&**s, uid).map(|u| AnyUnit(AnyUnitInner::Union(Box::new(u))))
+            }
         }
     }
     fn contains_uid(&self, uid: &Uid) -> bool {
@@ -252,6 +295,7 @@ impl StoreRead for AnyStore {
             AnyStore::Memory(s) => AnyUnits(AnyUnitsInner::Memory(StoreRead::units(s))),
             #[cfg(feature = "store-redb")]
             AnyStore::Redb(s) => AnyUnits(AnyUnitsInner::Redb(StoreRead::units(s))),
+            AnyStore::Shards(s) => AnyUnits(AnyUnitsInner::Union(Box::new(StoreRead::units(&**s)))),
         }
     }
     fn unit_count(&self) -> usize {
@@ -322,6 +366,9 @@ impl StoreRead for AnyStore {
             AnyStore::Memory(s) => AnyRecords(AnyRecordsInner::Memory(StoreRead::records(s))),
             #[cfg(feature = "store-redb")]
             AnyStore::Redb(s) => AnyRecords(AnyRecordsInner::Redb(StoreRead::records(s))),
+            AnyStore::Shards(s) => {
+                AnyRecords(AnyRecordsInner::Union(Box::new(StoreRead::records(&**s))))
+            }
         }
     }
     fn duplicate_records(&self) -> usize {
@@ -351,6 +398,9 @@ impl StoreRead for AnyStore {
     fn supports_of(&self, uid: &Uid, edges: &crate::EdgeSet) -> Vec<Uid> {
         by_backend!(self, s => StoreRead::supports_of(s, uid, edges))
     }
+    fn report_dangling(&self, report: &mut smysl_core::diag::Report) {
+        by_backend!(self, s => StoreRead::report_dangling(s, report))
+    }
 }
 
 /// Appends to whichever backend the store is.
@@ -371,6 +421,12 @@ impl StoreWrite for AnyStore {
                 *s = shard.reader()?;
                 Ok(report)
             }
+            // Which shard a record belongs in is the library's question (SMYSL-2.4's routing),
+            // and a union cannot answer it.
+            AnyStore::Shards(_) => Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "a union of shards is read-only: write through the library",
+            ))),
         }
     }
 }

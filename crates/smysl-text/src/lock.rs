@@ -31,7 +31,10 @@ pub fn acquire_all(
     let mut names: Vec<&String> = shards.iter().collect();
     names.sort();
     for shard in names {
-        let path = library_root.join("log").join(format!("{shard}.lock"));
+        // By file stem: an alias may hold `/`, which must not become a directory here.
+        let path = library_root
+            .join("log")
+            .join(format!("{}.lock", crate::shards::stem(shard)));
         // On failure the locks already held are dropped by the `?`, which releases them in
         // reverse — so a refused acquisition leaves the library exactly as it found it.
         held.push(Lock::acquire(&path, shard, command)?);
