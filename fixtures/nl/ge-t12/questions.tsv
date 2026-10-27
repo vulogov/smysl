@@ -1,0 +1,103 @@
+# GE-T12's question set (SMYSL-2.5 §5.6; TX-P10 step 5): id, store, question, gold query.
+# One hand wrote the questions and the gold queries together, before any model saw them; the
+# gold's stages are separated by ` | `. See README.md for what the set is and is not.
+f1-01	F1-incident	Which claims are recorded?	from store:F1-incident | where kind = claim
+f1-02	F1-incident	How many pieces of evidence are there?	from store:F1-incident | where kind = evidence | count
+f1-03	F1-incident	What is the finding?	from store:F1-incident | where kind = finding
+f1-04	F1-incident	Which units mention the canary?	from store:F1-incident | where matches "canary"
+f1-05	F1-incident	What does the finding rest on, all the way down?	from store:F1-incident | where kind = finding | expand rests on
+f1-06	F1-incident	What directly grounds the claims? Include the claims.	from store:F1-incident | where kind = claim | expand ->grounds depth 1
+f1-07	F1-incident	Which units were measured?	from store:F1-incident | where status = measured
+f1-08	F1-incident	Which units are at least derived?	from store:F1-incident | where status >= derived
+f1-09	F1-incident	How many claims were inferred?	from store:F1-incident | where kind = claim and status = inferred | count
+f1-10	F1-incident	Which claims are there, and what rebuts them?	from store:F1-incident | where kind = claim | with rebuttals
+f1-11	F1-incident	Which definitions are there?	from store:F1-incident | where kind = definition
+f1-12	F1-incident	Which evidence mentions the pool?	from store:F1-incident | where kind = evidence and matches "pool"
+f1-13	F1-incident	What causes the claim about latency? Include that claim.	from store:F1-incident | where kind = claim and matches "latency" | expand ->causes
+f1-14	F1-incident	Which claims do not mention the canary?	from store:F1-incident | where kind = claim and not matches "canary"
+f1-15	F1-incident	How many units does the store hold?	from store:F1-incident | count
+f1-16	F1-incident	Which units mention the rollout?	from store:F1-incident | where matches "rollout"
+f1-17	F1-incident	What does the definition warrant? Include the definition.	from store:F1-incident | where kind = definition | expand <-warrant
+f1-18	F1-incident	List the evidence and the definitions together.	from store:F1-incident | where kind in [evidence, definition]
+f1-19	F1-incident	Which claims or findings were inferred?	from store:F1-incident | where kind in [claim, finding] and status = inferred
+f1-20	F1-incident	What depends on the evidence about pool wait? Include that evidence.	from store:F1-incident | where kind = evidence and matches "pool wait" | expand dependents
+f2-01	F2-research	Which hypotheses were raised?	from store:F2-research | where kind = hypothesis
+f2-02	F2-research	What is the hypothesis, and what argues against it?	from store:F2-research | where kind = hypothesis | with rebuttals
+f2-03	F2-research	How many pieces of evidence mention a cohort?	from store:F2-research | where kind = evidence and matches "cohort" | count
+f2-04	F2-research	Which claims are derived?	from store:F2-research | where kind = claim and status = derived
+f2-05	F2-research	What does the finding rest on, all the way down?	from store:F2-research | where kind = finding | expand rests on
+f2-06	F2-research	Which units back the claim that the effect replicates, through a backs relation? Include the claim.	from store:F2-research | where kind = claim and matches "replicates" | expand ->backs
+f2-07	F2-research	What contrasts with the claim about the mechanism, in either direction? Include that claim.	from store:F2-research | where kind = claim and matches "mechanism" | expand -[contrasts]-
+f2-08	F2-research	Which units mention adherence?	from store:F2-research | where matches "adherence"
+f2-09	F2-research	Which units are speculative?	from store:F2-research | where status = speculative
+f2-10	F2-research	How many units are measured evidence?	from store:F2-research | where kind = evidence and status = measured | count
+f2-11	F2-research	What is defined?	from store:F2-research | where kind = definition
+f2-12	F2-research	What directly grounds the claim that response rises monotonically with dose? Include the claim.	from store:F2-research | where kind = claim and matches "monotonically" | expand ->grounds depth 1
+f2-13	F2-research	What rests directly on the dispensing logs? Include the logs.	from store:F2-research | where kind = evidence and matches "dispensing" | expand <-grounds depth 1
+f2-14	F2-research	Which units are inferred?	from store:F2-research | where status = inferred
+f2-15	F2-research	What depends on the definition? Include the definition.	from store:F2-research | where kind = definition | expand dependents
+f2-16	F2-research	Which evidence does not mention a cohort?	from store:F2-research | where kind = evidence and not matches "cohort"
+f2-17	F2-research	How many claims are there?	from store:F2-research | where kind = claim | count
+f2-18	F2-research	List the claims and the hypotheses.	from store:F2-research | where kind in [claim, hypothesis]
+f2-19	F2-research	Which claims are at least derived?	from store:F2-research | where kind = claim and status >= derived
+f2-20	F2-research	What does the claim that the effect replicates rest on, all the way down?	from store:F2-research | where kind = claim and matches "replicates" | expand rests on
+f3-01	F3-narrative	Which prose passages are there?	from store:F3-narrative | where kind = prose
+f3-02	F3-narrative	How many prose passages are cited?	from store:F3-narrative | where kind = prose and status = cited | count
+f3-03	F3-narrative	Which passage says that rolling back the shard restored latency?	from store:F3-narrative | where matches "rolling back"
+f3-04	F3-narrative	Which passage immediately follows the one about the routine Thursday, by a sequences relation? Include that one.	from store:F3-narrative | where matches "routine thursday" | expand ->sequences depth 1
+f3-05	F3-narrative	What does the passage about concurrency rest on, all the way down?	from store:F3-narrative | where matches "concurrency" | expand rests on
+f3-06	F3-narrative	Which passages mention the canary?	from store:F3-narrative | where matches "canary"
+f3-07	F3-narrative	Which passage mentions the dashboard?	from store:F3-narrative | where matches "dashboard"
+f3-08	F3-narrative	Which units are inferred?	from store:F3-narrative | where status = inferred
+f3-09	F3-narrative	How many units does the story have?	from store:F3-narrative | count
+f3-10	F3-narrative	What directly grounds the passage about the alarms? Include that passage.	from store:F3-narrative | where matches "alarms" | expand ->grounds depth 1
+f3-11	F3-narrative	Which passages are cited?	from store:F3-narrative | where status = cited
+f3-12	F3-narrative	Which passages do not mention the canary?	from store:F3-narrative | where kind = prose and not matches "canary"
+f3-13	F3-narrative	What rests on the passage about the routine Thursday, all the way? Include that passage.	from store:F3-narrative | where matches "routine thursday" | expand dependents
+f3-14	F3-narrative	Which passage talks about the support queue?	from store:F3-narrative | where matches "support queue"
+f3-15	F3-narrative	Which passage mentions four minutes?	from store:F3-narrative | where matches "four minutes"
+f3-16	F3-narrative	Which cited passages mention the shard?	from store:F3-narrative | where status = cited and matches "shard"
+f3-17	F3-narrative	Give the first two passages when ordered by status, highest first.	from store:F3-narrative | order by status descending | limit 2
+f3-18	F3-narrative	What does the passage about the restored latency rest on directly? Include it.	from store:F3-narrative | where matches "restored" | expand ->grounds depth 1
+f3-19	F3-narrative	Which passages say something about the engineer?	from store:F3-narrative | where matches "engineer"
+f3-20	F3-narrative	How many passages mention the canary?	from store:F3-narrative | where matches "canary" | count
+f4-01	F4-qa	What question was asked?	from store:F4-qa | where kind = question
+f4-02	F4-qa	What answers the question? Include the question.	from store:F4-qa | where kind = question | expand ->answers
+f4-03	F4-qa	What is the finding, and what rebuts it?	from store:F4-qa | where kind = finding | with rebuttals
+f4-04	F4-qa	Which evidence was measured?	from store:F4-qa | where kind = evidence and status = measured
+f4-05	F4-qa	How many claims are there?	from store:F4-qa | where kind = claim | count
+f4-06	F4-qa	What does the finding rest on, all the way down?	from store:F4-qa | where kind = finding | expand rests on
+f4-07	F4-qa	Which units mention the serialiser?	from store:F4-qa | where matches "serialiser"
+f4-08	F4-qa	Which evidence mentions checkout?	from store:F4-qa | where kind = evidence and matches "checkout"
+f4-09	F4-qa	What backs the claim that the serialiser issues one query per line item, through a backs relation? Include the claim.	from store:F4-qa | where kind = claim and matches "query per line" | expand ->backs
+f4-10	F4-qa	What does the claim about the serialiser cause? Include the claim.	from store:F4-qa | where kind = claim and matches "serialiser" | expand <-causes
+f4-11	F4-qa	Which claims were inferred?	from store:F4-qa | where kind = claim and status = inferred
+f4-12	F4-qa	Which units mention the deploy?	from store:F4-qa | where matches "deploy"
+f4-13	F4-qa	What is directly grounded on the evidence about queries per request? Include that evidence.	from store:F4-qa | where kind = evidence and matches "queries" | expand <-grounds depth 1
+f4-14	F4-qa	Which units are cited?	from store:F4-qa | where status = cited
+f4-15	F4-qa	What depends on the evidence about the request rate? Include that evidence.	from store:F4-qa | where kind = evidence and matches "request rate" | expand dependents
+f4-16	F4-qa	Which evidence or claims mention load?	from store:F4-qa | where kind in [evidence, claim] and matches "load"
+f4-17	F4-qa	How many units does the session hold?	from store:F4-qa | count
+f4-18	F4-qa	Which findings were inferred?	from store:F4-qa | where kind = finding and status = inferred
+f4-19	F4-qa	Which claims are derived?	from store:F4-qa | where kind = claim and status = derived
+f4-20	F4-qa	What is directly linked by grounds, in either direction, to the evidence that p95 rose to 610 ms? Include that evidence.	from store:F4-qa | where kind = evidence and matches "610" | expand -[grounds]- depth 1
+f5-01	F5-dataset	Which datasets are there?	from store:F5-dataset | where kind = data
+f5-02	F5-dataset	Which artifacts are referenced?	from store:F5-dataset | where kind = artifact-ref
+f5-03	F5-dataset	Which unit is in parquet format?	from store:F5-dataset | where format = "parquet"
+f5-04	F5-dataset	Which dataset has six rows?	from store:F5-dataset | where kind = data and rows = 6
+f5-05	F5-dataset	What backs the dataset of latency by region, through a backs relation? Include the dataset.	from store:F5-dataset | where kind = data and matches "region" | expand ->backs
+f5-06	F5-dataset	What is the hypothesis, and what argues against it?	from store:F5-dataset | where kind = hypothesis | with rebuttals
+f5-07	F5-dataset	How many claims are there?	from store:F5-dataset | where kind = claim | count
+f5-08	F5-dataset	What does the finding rest on, all the way down?	from store:F5-dataset | where kind = finding | expand rests on
+f5-09	F5-dataset	Which evidence mentions eu-west?	from store:F5-dataset | where kind = evidence and matches "eu-west"
+f5-10	F5-dataset	Which units are speculative?	from store:F5-dataset | where status = speculative
+f5-11	F5-dataset	Which dataset mentions the European share?	from store:F5-dataset | where kind = data and matches "european"
+f5-12	F5-dataset	What does the claim that the tail is concentrated cause? Include the claim.	from store:F5-dataset | where kind = claim and matches "concentrated" | expand <-causes
+f5-13	F5-dataset	Which measured units mention coverage?	from store:F5-dataset | where status = measured and matches "coverage"
+f5-14	F5-dataset	Which units rest on the datasets through deps? Include the datasets.	from store:F5-dataset | where kind = data | expand <-deps
+f5-15	F5-dataset	How many artifact references are there?	from store:F5-dataset | where kind = artifact-ref | count
+f5-16	F5-dataset	Which units are cited?	from store:F5-dataset | where status = cited
+f5-17	F5-dataset	What does the dataset of latency by region warrant? Include the dataset.	from store:F5-dataset | where kind = data and matches "region" | expand <-warrant
+f5-18	F5-dataset	Which claims do not mention coverage?	from store:F5-dataset | where kind = claim and not matches "coverage"
+f5-19	F5-dataset	Which evidence was measured?	from store:F5-dataset | where kind = evidence and status = measured
+f5-20	F5-dataset	What depends on the evidence about coverage? Include that evidence.	from store:F5-dataset | where kind = evidence and matches "coverage" | expand dependents

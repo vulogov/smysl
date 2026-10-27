@@ -587,3 +587,42 @@ fn a_semantic_stage_without_a_model_is_refused_by_name() {
         );
     }
 }
+
+/// `--from-question` without a model to ask: a configuration that cannot be read refuses before
+/// any provider is built, `--seed-check` refuses the invocation (a translation is not
+/// reproducible), and `--yes` alone is a usage error, since there is nothing for it to confirm.
+/// None of these reaches a model — `--offline` would not do, since it leaves a local one.
+#[test]
+fn from_question_is_refused_where_it_cannot_ask() {
+    let dir = scratch("no-config");
+    let missing = dir.join("absent.toml").to_string_lossy().to_string();
+    let o = run(&[
+        "--config",
+        &missing,
+        "q",
+        "--from-question",
+        "Which claims are there?",
+        &f1(),
+    ]);
+    assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
+    assert!(stdout(&o).is_empty(), "nothing ran: {}", stdout(&o));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let o = run(&[
+        "--seed-check",
+        "q",
+        "--from-question",
+        "Which claims are there?",
+        &f1(),
+    ]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(stderr(&o).contains("--from-question"), "{}", stderr(&o));
+
+    let o = run(&[
+        "q",
+        "from store:F1-incident\nwhere kind = claim",
+        &f1(),
+        "--yes",
+    ]);
+    assert_eq!(o.status.code(), Some(2));
+}

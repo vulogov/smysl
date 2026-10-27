@@ -374,4 +374,19 @@ pub use smysl::verify
 pub use smysl::verify_pack
 pub use smysl::view_roots
 pub use smysl::write_surface
+pub mod smysl::translate
+pub struct smysl::translate::ProviderTranslator<'p>
+impl<'p> smysl::translate::ProviderTranslator<'p>
+pub fn smysl::translate::ProviderTranslator<'p>::model(&self) -> &str
+pub fn smysl::translate::ProviderTranslator<'p>::new(&'p dyn smysl_provider::Provider, impl core::convert::Into<alloc::string::String>) -> smysl::translate::ProviderTranslator<'p>
+impl smysl_query::nl::Translator for smysl::translate::ProviderTranslator<'_>
+pub fn smysl::translate::ProviderTranslator<'_>::model_hash(&self) -> [u8; 32]
+pub fn smysl::translate::ProviderTranslator<'_>::translate(&self, &str, &smysl_query::nl::TranslateContext) -> core::result::Result<alloc::string::String, smysl_query::nl::TranslateError>
+impl<'p> core::marker::Freeze for smysl::translate::ProviderTranslator<'p>
+impl<'p> core::marker::Send for smysl::translate::ProviderTranslator<'p>
+impl<'p> core::marker::Sync for smysl::translate::ProviderTranslator<'p>
+impl<'p> core::marker::Unpin for smysl::translate::ProviderTranslator<'p>
+impl<'p> core::marker::UnsafeUnpin for smysl::translate::ProviderTranslator<'p>
+impl<'p> !core::panic::unwind_safe::RefUnwindSafe for smysl::translate::ProviderTranslator<'p>
+impl<'p> !core::panic::unwind_safe::UnwindSafe for smysl::translate::ProviderTranslator<'p>
 pub const smysl::VERSION: &str

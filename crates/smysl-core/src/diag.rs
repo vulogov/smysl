@@ -363,6 +363,8 @@ registry! {
         // runs, and a saved query that recorded one is rerun under another.
         E416 = "SMY-E416", Error, "--seed-check on a model-dependent plan; refused before anything executes";
         W467 = "SMY-W467", Warn,  "A model-dependent saved query was rerun under a different model hash; its diffs are not comparable";
+        // TX-P10 step 5: the natural-language front end's refusal of what a model wrote.
+        E474 = "SMY-E474", Error, "The natural-language front end produced text that is not an acceptable sq/1 query; nothing was executed";
         W510 = "SMY-W510", Warn,  "A string literal is not in NFC; it is matched byte-exactly as written";
         E511 = "SMY-E511", Error, "A scope names something this environment does not hold";
         E512 = "SMY-E512", Error, "An operator does not apply to the type of the field it names";
@@ -962,10 +964,11 @@ mod tests {
     ///
     /// 146 with `SMY-W476` in TX-P10 step 3, raised by S1's vector cache for a sidecar written
     /// under another model hash; 148 with `SMY-E416` and `SMY-W467` in step 4, raised by
-    /// `--seed-check` on a model-dependent plan and by a rerun under another model.
+    /// `--seed-check` on a model-dependent plan and by a rerun under another model; 149 with
+    /// `SMY-E474` in step 5, raised by the natural-language front end.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 148);
+        assert_eq!(Code::ALL.len(), 149);
     }
 
     #[test]

@@ -328,6 +328,86 @@ pub use smysl_measure as measure;
 /// planner, the executor, both scope implementations and the explain writers — most of the
 /// crate's surface. Re-exported as a module rather than name by name for the reason `text` is.
 pub use smysl_query as query;
+
+/// `Translator` over a provider (SMYSL-2.5 §3.15, TX-P10 step 5).
+///
+/// The port and the check are `smysl-query`'s, which links no provider; this is the adapter,
+/// here because the facade is the one crate that has both (rule A: the CLI reaches a provider
+/// only through the facade). Any configured provider serves — a local Ollama model or a hosted
+/// one — since the call is one `Provider::complete` and nothing about it is provider-specific.
+///
+/// In `lib.rs` rather than a file of its own: rule A reads every other file under `src/` as the
+/// CLI's, and this is the facade's.
+#[cfg(feature = "providers")]
+pub mod translate {
+    use smysl_provider::{Provider, Request};
+    use smysl_query::nl::{
+        prompt, TranslateContext, TranslateError, Translator, PROMPT_ID, PROMPT_VERSION,
+    };
+
+    /// A translator that asks `provider` for the query, with `model` (the provider's default when
+    /// empty) at temperature 0.
+    pub struct ProviderTranslator<'p> {
+        provider: &'p dyn Provider,
+        model: String,
+    }
+
+    /// Enough for any query a question needs; a reply that runs past it is cut, fails to parse,
+    /// and is refused as `SMY-E474` like any other.
+    const MAX_OUTPUT: usize = 512;
+
+    impl<'p> ProviderTranslator<'p> {
+        pub fn new(provider: &'p dyn Provider, model: impl Into<String>) -> ProviderTranslator<'p> {
+            let model = model.into();
+            let model = if model.is_empty() {
+                provider.caps().model
+            } else {
+                model
+            };
+            ProviderTranslator { provider, model }
+        }
+
+        /// The model the calls name.
+        pub fn model(&self) -> &str {
+            &self.model
+        }
+    }
+
+    impl Translator for ProviderTranslator<'_> {
+        /// BLAKE3 over the provider id, the model name and the prompt's id and version, each
+        /// length-prefixed. A hosted model has no file to hash, so this names it — which is what a
+        /// saved query needs to say *which* translator wrote it, and all it can honestly say.
+        fn model_hash(&self) -> [u8; 32] {
+            let mut b = Vec::new();
+            for part in [
+                "smysl/translator/1",
+                self.provider.id().as_str(),
+                &self.model,
+                PROMPT_ID,
+                &PROMPT_VERSION.to_string(),
+            ] {
+                b.extend_from_slice(&(part.len() as u64).to_le_bytes());
+                b.extend_from_slice(part.as_bytes());
+            }
+            smysl_core::hash::hash_bytes(&b)
+        }
+
+        fn translate(
+            &self,
+            question: &str,
+            ctx: &TranslateContext,
+        ) -> Result<String, TranslateError> {
+            let p = prompt(question, ctx);
+            let request = Request::new(&self.model, p.user)
+                .with_system(p.system)
+                .with_max_output(MAX_OUTPUT);
+            self.provider
+                .complete(&request)
+                .map(|c| c.text)
+                .map_err(|e| TranslateError::Provider(e.to_string()))
+        }
+    }
+}
 /// The library layer: a catalog and an object store, the readers, and everything that
 /// *interprets* the records [`Manifest`] and friends describe (RFC SMYSL-2.4 §4.3.6).
 ///
@@ -480,8 +560,9 @@ mod tests {
         // union of shards when a reference waits on one not loaded; 145 with `SMY-E505` (TX-P13d),
         // raised by `lib migrate` and `lib verify --primary`; 146 with `SMY-W476` (TX-P10
         // step 3), raised by S1's vector cache; 148 with `SMY-E416` and `SMY-W467` (step 4),
-        // raised by `--seed-check` and by a rerun under another model.
-        assert_eq!(Code::ALL.len(), 148);
+        // raised by `--seed-check` and by a rerun under another model; 149 with `SMY-E474`
+        // (step 5), raised by `q --from-question`.
+        assert_eq!(Code::ALL.len(), 149);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

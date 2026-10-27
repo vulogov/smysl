@@ -364,8 +364,15 @@ pub fn to_records(
     let mut payload = HObject::new();
     payload.insert(key("query:text"), s(&text));
     payload.insert(key("query:recipe"), s(&recipe_hex));
-    // Empty for a pure plan (§3.6); the model's hash for one that consults a model.
-    payload.insert(key("query:models"), list(plan.models.clone()));
+    // Empty for a pure plan (§3.6); the model's hash for one that consults a model, and the
+    // translator's for a query a model wrote (§3.15).
+    let mut models = plan.models.clone();
+    if let Some(t) = &opts.translator {
+        if !models.contains(t) {
+            models.push(t.clone());
+        }
+    }
+    payload.insert(key("query:models"), list(models));
     payload.insert(key("query:result-hash"), s(&result_hex));
     payload.insert(key("query:sq"), s(&format!("sq/{}", plan.sq)));
     payload.insert(
@@ -385,14 +392,16 @@ pub fn to_records(
 
     let schema = SchemaId::Extension(schema::SAVED.to_string());
     let source = SourceRef::new(SourceKind::Doc, format!("sq:{}", &recipe_hex[..12]));
-    let unit = UnitCoreBuilder::new(schema, text, Status::Cited)
+    let mut builder = UnitCoreBuilder::new(schema, text, Status::Cited)
         .source(source)
-        .payload(bytes)
-        .build()
-        .map_err(|e| {
-            Diagnostic::at(Code::E460, span)
-                .with_message(format!("the saved query could not be built: {e}"))
-        })?;
+        .payload(bytes);
+    if let Some(q) = &opts.question {
+        builder = builder.body(q.clone());
+    }
+    let unit = builder.build().map_err(|e| {
+        Diagnostic::at(Code::E460, span)
+            .with_message(format!("the saved query could not be built: {e}"))
+    })?;
     let from = smysl_core::canonical_uid(&unit);
     let kind = RelKind::Extension(RESULT_EDGE.to_string());
     let edges = results
@@ -582,7 +591,9 @@ fn reproduces(env: &Env<'_>, chain: &str) -> bool {
 /// answers — a model-dependent query was always going to — and the diffs are printed, but
 /// labelled: a unit that came or went may be the model's doing rather than the data's.
 fn model_changed(saved: &SavedQuery, plan: &Plan) -> Option<Diagnostic> {
-    if saved.models.is_empty() || saved.models == plan.models {
+    // Only the models the plan consults: a saved query a model *wrote* records its translator
+    // too (§3.15), and a pure rerun of it consults nothing that could have changed.
+    if plan.models.iter().all(|m| saved.models.contains(m)) {
         return None;
     }
     let short = |v: &[String]| {

@@ -44,6 +44,7 @@ pub mod explain;
 pub mod fold;
 pub mod fuse;
 pub mod lex;
+pub mod nl;
 pub mod parse;
 pub mod plan;
 pub mod pointer;
@@ -60,6 +61,7 @@ pub use exec::{run, Answer, Run};
 pub use explain::explain;
 pub use explain::why;
 pub use fuse::{Fused, Placement, Ranked, RRF_K};
+pub use nl::{accept, Accepted, TranslateContext, TranslateError, Translator};
 pub use parse::{parse, Parsed};
 pub use plan::{
     plan, ClosurePlan, Direction, EntitySource, Env, Lexical, OrderPlan, OutputPlan, PipelinePlan,

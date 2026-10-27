@@ -145,6 +145,12 @@ pub struct PlanOptions {
     /// from, and the same text typed by hand is a different recipe — which it is: the person
     /// chose it, and nobody chose the template's text but the template.
     pub template_set: String,
+    /// For a query `q --from-question` translated (TX-P10 step 5): the question as asked, which
+    /// a save writes as the unit's body, and the translator's model hash, which it adds to
+    /// `query:models` (§3.15). Neither moves the recipe: the query is the query, whoever wrote
+    /// it.
+    pub question: Option<String>,
+    pub translator: Option<String>,
 }
 
 impl Default for PlanOptions {
@@ -156,6 +162,8 @@ impl Default for PlanOptions {
             limit: 10,
             exclude: BTreeSet::new(),
             template_set: String::new(),
+            question: None,
+            translator: None,
         }
     }
 }

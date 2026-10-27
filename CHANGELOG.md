@@ -58,6 +58,28 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### A question in, a query out: `q --from-question`
+
+TX-P10 step 5 (SMYSL-2.5 §3.15, §5.6). TX-P10 is complete.
+
+- **`smysl q --from-question "…" [--yes]`**: the provider routed for `content-ingest` — local or
+  hosted — writes an `sq/1` query for the question. It is printed before anything runs, and runs
+  only with `--yes` or a `y` at the terminal; otherwise it goes to stdout and the exit is 10.
+  `--seed-check` refuses it. A save keeps the question as the unit's body and the translator's
+  hash in `query:models`.
+- **What a model writes is checked, and the check is `SMY-E474`** (149 codes): it must parse,
+  bind no parameter, use no stage that writes or dispatches (`pack … as view`, `measure`,
+  `question`, `match`), and plan against the store — so an undeclared field, an unknown relation,
+  a scope not open or a semantic stage without a model is refused and nothing runs.
+- **`smysl::query::{Translator, TranslateContext, accept}`** and `smysl::translate::
+  ProviderTranslator`. The context is the store's vocabulary as used; the prompt is a pure
+  function of the question and the context.
+- **GE-T12: 82 of 100**, against a bar of 70, on local `qwen2.5:14b-instruct` in 83 seconds — a
+  hundred questions over the corpus fixtures, gold queries written before any model saw them,
+  scored by equivalent results rather than equal text. Seven translations were refused by the
+  check rather than run; the misses are vocabulary, `->`/`<-` direction, invented stages and
+  over-specific terms.
+
 ### `~sem`, `~hybrid`, `near` and `lang:any` run
 
 TX-P10 step 4 (SMYSL-2.5 §3.2–§3.5, §3.14).

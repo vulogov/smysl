@@ -89,7 +89,10 @@ fn reproducible(cmd: &Cmd, sub: &ArgMatches) -> Option<bool> {
             // impure, and a semantic stage is refused without one, so the flags cannot decide
             // it: `cmd_q` asks `Plan::seed_check` after planning and refuses with `SMY-E416`
             // before anything runs.
-            "q" => Some(true),
+            // `--from-question` asks a model to write the query, and a model call is not a
+            // function of its inputs, so the invocation is not reproducible whatever the
+            // query it writes.
+            "q" => Some(sub.get_one::<String>("from-question").is_none()),
             // The dossier is a function of the question and the store: a rule table, a fixed
             // template set and pure plans. `--answer` is the one invocation that asks a model.
             "ask" => Some(!sub.get_flag("answer")),
@@ -183,7 +186,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "same-as",    about: "Propose same-as edges; derive classes",               purity: Purity::Pure,  phase: "TX-P7"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "link",      about: "Judge candidate pairs; stage entails and contradicts", purity: Purity::Mixed, phase: "TX-P7"  , impure_when: Some("every action but --candidates, which only lists them") , forms: NO_DOCUMENT },
     Cmd { name: "summarise", about: "Grounded summary tree over a scope; staged",           purity: Purity::Model, phase: "TX-P7"  , impure_when: None , forms: NO_DOCUMENT },
-    Cmd { name: "q",         about: "Run an sq/1 query; explain it, or seed-check it",      purity: Purity::Mixed, phase: "TX-P6"  , impure_when: Some("a model-dependent plan (~sem, ~hybrid routed semantic, near, lang:any), with --engine-model or --candle-model") , forms: NO_DOCUMENT },
+    Cmd { name: "q",         about: "Run an sq/1 query; explain it, or seed-check it",      purity: Purity::Mixed, phase: "TX-P6"  , impure_when: Some("--from-question, or a model-dependent plan (~sem, ~hybrid routed semantic, near, lang:any) with --engine-model or --candle-model") , forms: NO_DOCUMENT },
     Cmd { name: "ask",       about: "Experimental: a dossier for a question; optionally a model's grounded answer", purity: Purity::Mixed, phase: "TX-P8"  , impure_when: Some("--answer, which asks a model to answer from the dossier") , forms: NO_DOCUMENT },
     Cmd { name: "measure",   about: "Text, graph, channel and dialogue measures as derived data units", purity: Purity::Mixed, phase: "TX-P8"  , impure_when: Some("a model-dependent id (T8, D5's embeddings), none of which this build registers") , forms: NO_DOCUMENT },
     Cmd { name: "assess",    about: "Assessment keys, reader scores and knowledge states",  purity: Purity::Mixed, phase: "TX-P9"  , impure_when: Some("a generated key or a model judge (--generate, --judge model), neither of which this build has") , forms: NO_DOCUMENT },
@@ -802,6 +805,23 @@ fn cli() -> Command {
                     Arg::new("query")
                         .value_name("SQ")
                         .help("The query, in sq/1 (SMYSL-2.9); or --file"),
+                )
+                .arg(
+                    Arg::new("from-question")
+                        .long("from-question")
+                        .value_name("QUESTION")
+                        .conflicts_with_all(["file", "rerun"])
+                        .help(
+                            "Have a model write the query for this question; it is checked, \
+                             printed, and run only with --yes or a `y` at the terminal",
+                        ),
+                )
+                .arg(
+                    Arg::new("yes")
+                        .long("yes")
+                        .requires("from-question")
+                        .help("With --from-question: run the translated query without asking")
+                        .action(ArgAction::SetTrue),
                 )
                 .arg(
                     Arg::new("file")
@@ -6024,6 +6044,7 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     // `--rerun <uid>` takes no query: the text is the saved unit's. One positional then means
     // the store, which is what a reader typing `smysl q --rerun b3:… store.smy` wrote.
     let rerun = m.get_one::<String>("rerun").cloned();
+    let question = m.get_one::<String>("from-question").cloned();
     let (text, positional_store) = match (
         &rerun,
         m.get_one::<String>("query"),
@@ -6034,6 +6055,9 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             return ExitCode::Usage;
         }
         (Some(_), q, None) => (None, q.cloned()),
+        // `--from-question` takes no query either: the model writes it, so one positional is
+        // the store, as for a rerun.
+        (None, q, None) if question.is_some() => (None, q.cloned()),
         (None, Some(_), Some(_)) => {
             eprintln!("smysl q: give the query once, inline or with --file");
             return ExitCode::Usage;
@@ -6092,6 +6116,16 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 current: m.get_flag("current"),
             }
         }
+        (None, None) if question.is_some() => {
+            if m.get_flag("current") {
+                eprintln!("smysl q: --current is a rerun's flag; give --rerun <uid>");
+                return ExitCode::Usage;
+            }
+            Job::Ask {
+                question: question.clone().expect("guarded"),
+                yes: m.get_flag("yes"),
+            }
+        }
         (None, Some(text)) => {
             let parsed = match smysl::query::parse(&text) {
                 Ok(p) => p,
@@ -6127,7 +6161,7 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 as_view,
             }
         }
-        (None, None) => unreachable!("a run has text and a rerun has a uid"),
+        (None, None) => unreachable!("a run has text, a rerun a uid and an ask a question"),
     };
 
     // The scope's name is the file's stem, so a query written `from store:F1-incident` over
@@ -8997,6 +9031,11 @@ enum Job {
         uid: String,
         current: bool,
     },
+    /// `--from-question`: a model writes the query (SMYSL-2.5 §3.15, TX-P10 step 5).
+    Ask {
+        question: String,
+        yes: bool,
+    },
 }
 
 /// Whether the store already declares `x.query/v1`, so a save declares it once and not with
@@ -9010,6 +9049,103 @@ fn declares_query(store: &(impl StoreRead + ?Sized)) -> bool {
 /// Plan, run, and write one query over a bound environment. The records to append — a `View`
 /// for `as view`, a saved query and its result edges for `--save` — are returned rather than
 /// written, because which file they go to is the caller's.
+/// `q --from-question`: translate, check, show, confirm, run (SMYSL-2.5 §3.15).
+///
+/// The translator is the provider routed for `content-ingest`, as `ask --answer`'s is: one
+/// routing table, and the same provider a store's extraction already trusts. What it writes is
+/// checked by `smysl::query::accept` against the environment the query will run in — it must
+/// parse, bind nothing, use no stage that writes or dispatches, and plan — and anything else is
+/// `SMY-E474` with nothing run. The accepted query is printed on stderr before anything happens,
+/// and runs only under `--yes` or a `y` at a terminal; otherwise it goes to stdout, so it can be
+/// read, edited and run by hand, and the exit is 10, a decision waiting.
+#[cfg(feature = "providers")]
+fn q_from_question(
+    question: &str,
+    yes: bool,
+    env: &smysl::query::Env<'_>,
+    opts: &smysl::query::PlanOptions,
+    m: &ArgMatches,
+    global: &ArgMatches,
+) -> (ExitCode, Vec<Record>) {
+    use smysl::query::Translator as _;
+    use std::io::IsTerminal as _;
+
+    let registry = match load_registry(global) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl q: {}", e.message);
+            return (e.code, Vec::new());
+        }
+    };
+    let provider = match registry.for_task(smysl::Task::ContentIngest) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("smysl q: --from-question: {e}");
+            return (ExitCode::Failure, Vec::new());
+        }
+    };
+    let translator = smysl::translate::ProviderTranslator::new(provider, "");
+    let ctx = smysl::query::TranslateContext::of(env);
+    let text = match translator.translate(question, &ctx) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("smysl q: --from-question: {e}");
+            return (ExitCode::Failure, Vec::new());
+        }
+    };
+    let accepted = match smysl::query::accept(&text, env, opts) {
+        Ok(a) => a,
+        Err(d) => {
+            eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+            eprintln!("smysl q: the model wrote:\n{}", text.trim());
+            return (ExitCode::Failure, Vec::new());
+        }
+    };
+    eprintln!(
+        "smysl q: {} ({}) translated the question as:\n{}",
+        provider.id().as_str(),
+        translator.model(),
+        accepted.text
+    );
+    let run_it = yes
+        || (std::io::stdin().is_terminal() && std::io::stderr().is_terminal() && {
+            eprint!("smysl q: run it? [y/N] ");
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line).is_ok() && line.trim().eq_ignore_ascii_case("y")
+        });
+    if !run_it {
+        println!("{}", accepted.text);
+        return (ExitCode::Staged, Vec::new());
+    }
+    let mut opts = opts.clone();
+    opts.question = Some(question.to_string());
+    opts.translator = Some(
+        translator
+            .model_hash()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect(),
+    );
+    let job = Job::Run {
+        query: Box::new(accepted.query),
+        as_view: false,
+    };
+    q_run(&job, env, &opts, m, global)
+}
+
+#[cfg(not(feature = "providers"))]
+fn q_from_question(
+    _question: &str,
+    _yes: bool,
+    _env: &smysl::query::Env<'_>,
+    _opts: &smysl::query::PlanOptions,
+    _m: &ArgMatches,
+    _global: &ArgMatches,
+) -> (ExitCode, Vec<Record>) {
+    eprintln!("smysl q: --from-question asks a model, and this build has no provider (build with --features providers)");
+    (ExitCode::Usage, Vec::new())
+}
+
 /// The semantic port `q --engine-model` or `--candle-model` asks for (TX-P10 step 4), indexed
 /// over `store`; `None` when neither was given.
 ///
@@ -9092,6 +9228,9 @@ fn q_run(
     use smysl::query::{explain, run};
 
     let mut records: Vec<Record> = Vec::new();
+    if let Job::Ask { question, yes } = job {
+        return q_from_question(question, *yes, env, opts, m, global);
+    }
     let (plan, first, as_view, effect) = match job {
         Job::Rerun { uid, current } => {
             let uid = match UidPrefix::parse(uid).and_then(|p| env.store.resolve_prefix(&p)) {
@@ -9263,6 +9402,7 @@ fn q_run(
             }
             (plan, first, *as_view, None)
         }
+        Job::Ask { .. } => unreachable!("translated and run as a `Job::Run` above"),
     };
     let _ = &plan;
 

@@ -857,6 +857,15 @@ pub trait Translator {
   not the model, produces the answer. The saved query records the translator's model hash in
   `query:models` and the original question in the unit's body.
 
+*As built (TX-P10 step 5):* `smysl_query::nl` holds the port, the context, the prompt (a pure
+function of question and context, `sq.translate` version 1) and `accept`, the check; the facade's
+`smysl::translate::ProviderTranslator` is the adapter. The context is the store's **vocabulary as
+used** — kinds, statuses, relation kinds, payload keys with sample values — since a kernel store
+declares no fields and a context of declarations alone would offer nothing to filter on. A
+hosted model has no file to hash, so the translator's hash is BLAKE3 over provider, model and
+prompt id and version. `accept` unwraps a reply that is one code fence, and refuses a parameter;
+the refused stages are `pack … as view`, `measure`, a `question` source and `match`.
+
 ## 4. Implementation plan
 
 ### 4.1 Crates and modules
@@ -1620,6 +1629,7 @@ Each step has an exit test. Steps within a phase are ordered.
    and `E416` on every semantic plan; GE-T5 cross-lingual arm run (SMYSL-2.4 owns GE-T5).
    — **done 2026-10-27**, below.
 5. `Translator` port and provider adapter; `q --from-question`. *Exit:* §5.6 unit tests; GE-T12 run.
+   — **done 2026-10-27**, below. **TX-P10 is complete.**
 
    **Step 1 done 2026-10-26: S1's dependencies, and the no-C claims as a check.**
    - **candle 0.9.2, not the newest.** From 0.10.0, `candle-core` depends on `tokenizers` 0.22
@@ -1771,6 +1781,45 @@ Each step has an exit test. Steps within a phase are ordered.
      needs. S1's do. And e5's cosines sit in a narrow high band (0.74–0.82 over F1's eight
      units for one query; 0.89 at recall 0.7 here), so a `near` threshold is a fact about a
      model, not a constant to carry between them.
+
+   **Step 5 done 2026-10-27: the natural-language front end, and GE-T12.**
+   - **The port and the check** (`smysl_query::nl`; §3.15 as built, above). `accept` is the
+     whole defence: a translation must parse, bind nothing, use no refused stage and **plan in
+     the environment it will run in**, so an undeclared field (`E421`), an unknown relation kind
+     (`E462`), a scope not open (`E511`) or a semantic stage with no model (`E461`) is
+     **`SMY-E474`**, now registered (149 codes), and nothing runs. §5.6's unit clause is
+     `smysl-query/tests/nl.rs`: ten unacceptable replies, each `E474`, from a scripted
+     translator.
+   - **`q --from-question "…" [--yes]`.** The translator is the provider routed for
+     `content-ingest`, as `ask --answer`'s is. The accepted query is printed on stderr; it runs
+     with `--yes` or a `y` at a terminal, and otherwise goes to stdout with exit 10, a decision
+     waiting. `--seed-check` refuses the invocation — a translation is not reproducible, whatever
+     the query's purity. A save writes the question as the unit's body and the translator's hash
+     to `query:models` beside any model the plan consults; `W467` compares only the latter, so a
+     pure rerun of a translated query warns of nothing.
+   - **Found on the first live call:** examples written over a store of their own (`notes`) had
+     `llama3.2` copy that store's name into every query, refused as `E511`. The examples now name
+     the scope being asked, their subjects still none of the fixtures'. That was before the
+     question set existed; nothing was tuned against it.
+   - **GE-T12** (`tests/ge_t12.rs`, `fixtures/nl/ge-t12/questions.tsv`): a hundred questions,
+     twenty over each of `fixtures/corpus` F1–F5, with gold queries written by one hand, before
+     any model saw them, each checked to pass `accept` and to answer (on every `make test`).
+     Equivalent results, not equal text — the same uid set, or the same `count`. Against local
+     **`qwen2.5:14b-instruct`** (owner's choice: no key, nothing leaves the machine), in 83 s:
+
+     | F1 | F2 | F3 | F4 | F5 | total | refused (`E474`) |
+     |---:|---:|---:|---:|---:|---:|---:|
+     | 18 | 16 | 17 | 17 | 14 | **82/100** | 7 |
+
+     **0.82 against §5.6's 0.70: the front end is not experimental.** The eighteen misses, in
+     four kinds: *vocabulary* (3) — "datasets" read as `artifact-ref`, the kind list naming
+     `data` without saying it is one; *direction* (4) — `->` for `<-` on `causes` and `backs`,
+     though the prompt states the rule; *invented stages* (7) — `include self`, `with
+     definition`, `with dependents`, each refused by the check, which is the check working;
+     *over-specific terms* (3) — the question's whole phrase as `matches`, which needs every
+     word. One more added `order by salience` to a set answer, harmlessly in intent and not in
+     result. The set's limit is its hand, as GE-T11's planted set's is; `SMYSL_GE_T12_SET` and
+     `SMYSL_GE_T12_PROVIDER` (`deepseek`, `gemini`) take somebody else's set or model.
 
 **TX-P12 — schema evolution**
 1. FC-9 decode/encode in `smysl-core`, `SchemaDecl.lenses`, `Store::schema_decls`, `W430`, `W429`.
