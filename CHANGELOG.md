@@ -58,6 +58,28 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### Transformer embeddings: `semantic-candle` does something
+
+TX-P10 step 3 (SMYSL-2.5 §3.14, §5.7).
+
+- **`smysl::CandleEncoder`** (`smysl_embed_candle::Encoder`) loads `config.json`,
+  `tokenizer.json` and `model.safetensors` from a directory and embeds on the CPU, in `f32`.
+  Two architectures: `multilingual-e5-small` turned out to be a BERT (its config says
+  `"model_type": "bert"`), and `-base` and `bge-m3` are XLM-R; anything else is refused by
+  name. `Pooling::Mean` with the e5 card's `query: `/`passage: ` prefixes, or `Pooling::Cls`.
+- **Each text is encoded alone.** Batching pads, and padding enters a matmul's reductions, so a
+  vector would depend on its batch. Alone, it is a function of the text and the model hash, and
+  that is held bit for bit.
+- **`smysl::VectorCache`**: vectors by `(model hash, uid)` in `<store>.vec-<hash12>`, raw `f32`
+  bytes so a cached vector is the encoder's exactly. The model hash covers the three files, the
+  pooling and both prefixes. A sidecar under another hash is ignored and re-embedded with
+  **`SMY-W476`** (146 codes). `smysl::CandleSemantic` indexes a store's gists behind `Retriever`.
+- **Tests that need no download**: ten on models the test writes (random weights, a word-level
+  tokenizer, both architectures), five on pooling. Behind `SMYSL_EMBED_CANDLE_MODEL`,
+  `multilingual-e5-small` meets step 2's cross-language bar at 80 of 80 and reproduces stored
+  reference vectors — its own first output, since no PyTorch was at hand, so a regression
+  check rather than an independent one. `bge-m3` is not tried on real weights.
+
 ### A multilingual model for `semantic`
 
 TX-P10 step 2 (SMYSL-2.5 §3.14).

@@ -355,6 +355,10 @@ registry! {
         E468 = "SMY-E468", Error, "A question matches no intent rule; name the intent";
         E477 = "SMY-E477", Error, "Unknown dossier template set";
         W478 = "SMY-W478", Warn,  "An answer unit grounds outside its dossier and was dropped";
+        // TX-P10 step 3: S1's vector cache (SMYSL-2.5 §3.14), raised by `smysl-embed-candle`
+        // when a sidecar was written under another model hash. In this block because `~sem`
+        // is the query that reads the cache, and the code is in SMYSL-2.5's range.
+        W476 = "SMY-W476", Warn,  "A cached vector under another model hash was ignored and recomputed";
         W510 = "SMY-W510", Warn,  "A string literal is not in NFC; it is matched byte-exactly as written";
         E511 = "SMY-E511", Error, "A scope names something this environment does not hold";
         E512 = "SMY-E512", Error, "An operator does not apply to the type of the field it names";
@@ -951,9 +955,12 @@ mod tests {
     /// unit store, in a fourteenth group, `Store`; 144 with `SMY-W500` in TX-P13c step 1,
     /// raised by a union of shards for a reference that waits on one not loaded; 145 with
     /// `SMY-E505` in TX-P13d, a primary shard and its export disagreeing.
+    ///
+    /// 146 with `SMY-W476` in TX-P10 step 3, raised by S1's vector cache for a sidecar written
+    /// under another model hash.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 145);
+        assert_eq!(Code::ALL.len(), 146);
     }
 
     #[test]

@@ -814,7 +814,9 @@ multilingual model `potion-multilingual-128M` (256-d), loaded through the existi
   Versions, the XLM-R implementation in `candle-transformers`, and the absence of `cc`/`-sys`
   crates with default features are **unverified** here (not in the offline registry); TX-P10
   step 1 verifies them before any code is written. *Verified at step 1 (2026-10-26, §6):* **candle 0.9**, because
-  0.10 and later bring Oniguruma through `tokenizers`; XLM-R present; 1.88.
+  0.10 and later bring Oniguruma through `tokenizers`; XLM-R present; 1.88. *Built at step 3
+  (2026-10-27, §6):* `e5-small` is a BERT, so both architectures run; the hash takes the
+  prefixes too; the sidecar holds raw `f32` bytes.
 
 **Semantic sources and bridges** use a port so `smysl-query` stays pure:
 
@@ -1077,6 +1079,7 @@ impl Encoder {
     pub fn from_dir(path: impl AsRef<Path>, pooling: Pooling) -> Result<Encoder, Error>;
     pub fn model_hash(&self) -> [u8; 32];
     pub fn embed(&self, texts: &[String], role: TextRole /* Query | Passage */) -> Vec<Vec<f32>>;
+    // As built (TX-P10 step 3): `-> Result<Vec<Vec<f32>>, Error>`, since tokenizing can fail.
 }
 pub struct VectorCache { /* (model hash, uid) -> Vec<f32> */ }
 pub struct CandleSemantic { /* implements smysl_query::SemanticSource and smysl_retrieve::Retriever */ }
@@ -1606,6 +1609,7 @@ Each step has an exit test. Steps within a phase are ordered.
    shown in a worktree); multilingual smoke test with `potion-multilingual-128M` loads.
    — *the pin and the manifest note taken at step 1;* **done 2026-10-26**, below.
 3. `smysl-embed-candle`: encoders, pooling, cache. *Exit:* §5.7 S1 tests.
+   — **done 2026-10-27**, below.
 4. `SemanticSource` adapters; `~sem`, `~hybrid`, `near`, embedding bridge. *Exit:* purity labels
    and `E416` on every semantic plan; GE-T5 cross-lingual arm run (SMYSL-2.4 owns GE-T5).
 5. `Translator` port and provider adapter; `q --from-question`. *Exit:* §5.6 unit tests; GE-T12 run.
@@ -1664,6 +1668,53 @@ Each step has an exit test. Steps within a phase are ordered.
      so the multilingual model has a test of its own and a variable of its own, and the file's
      header says whose rankings it asserts. Not a defect of 0.3: the same file passes under
      the model it was written for.
+
+   **Step 3 done 2026-10-27: S1's encoder, pooling and vector cache.** `smysl-embed-candle`
+   has `Encoder`, `Pooling`, `TextRole`, `VectorCache` and `CandleSemantic`, as §4.2 sketched,
+   and the facade re-exports them under `semantic-candle` (`Encoder` as `CandleEncoder`, as
+   S0's `Model` is `EmbedModel`). `SMY-W476` is registered with the cache that raises it.
+   - **Two architectures, not one.** `multilingual-e5-small`'s `config.json` says
+     `"model_type": "bert"`: a BERT with XLM-R's vocabulary, positions from zero.
+     `multilingual-e5-base` and `bge-m3` are XLM-R, positions from one past the padding id.
+     So `Encoder::from_dir` reads `model_type` and runs candle's `bert::BertModel` or
+     `xlm_roberta::XLMRobertaModel`; anything else is refused by name. Step 1's "XLM-R is
+     present" was true and was half of what e5 needs.
+   - **One text a forward pass.** A batch pads its texts to one length, and a padded position,
+     masked to zero weight, still enters every reduction a matmul makes — so a text's vector
+     would depend on its batch, and a cached vector would differ in its low bits from a fresh
+     one. Encoded alone, a vector is a function of its text and the model hash; the tests
+     hold this bit for bit, in either order, alone or among others, and from a cache.
+   - **Pooling in plain loops** (`pool.rs`), not tensor ops, so the summation order is the
+     crate's: mean over the mask for `Mean`, the first token for `Cls`, then L2. The reference
+     vectors §5.7 asks for are hand-worked here — small integer states, a masked padding
+     position, tolerance 1e-6.
+   - **Prefixes are in the model hash.** `Mean` takes the e5 card's `query: `/`passage: `,
+     `Cls` none, and `with_prefixes` sets others. A prefix changes every vector as surely as
+     the pooling does, so the hash is BLAKE3 over the three files (length-prefixed), the
+     pooling id *and* both prefixes — one more input than §3.14 named.
+   - **The sidecar stores bytes, not CBOR floats.** `<store>.vec-<hash12>` is a CBOR sequence,
+     `["smysl-vec/1", hash, dim]` and then `[uid, bstr]` in uid order, each vector `dim`
+     little-endian `f32`s: the format's floats are quantised to 1/1024 (constraint 4), and a
+     cached vector has to be the encoder's to the bit. A file under another hash is ignored
+     with `W476` and a count; one that does not decode is an error, not deleted; a store's
+     units bound the cache, so a unit gone leaves it. Written through a rename.
+   - **No `unsafe`, no mapped file.** `from_mmaped_safetensors` is `unsafe` and the crate
+     forbids it; the weights are read (they are hashed anyway) and loaded with
+     `from_slice_safetensors`. Truncation is set from the position table (512, or 512 less
+     the XLM-R offset) whatever `tokenizer.json` asks, so a long gist is cut, not an
+     out-of-range index.
+   - **Tests.** Ten in `tests/s1.rs` on models written by the test — random weights, a
+     word-level tokenizer, both architectures — so CI runs them with no download: loading,
+     determinism, the hash's inputs, roles, the seam, truncation, the cache's round trip, `W476`,
+     a cache that does not decode, refusals. Five pooling unit tests. `tests/e5.rs`, behind
+     `SMYSL_EMBED_CANDLE_MODEL`, on `multilingual-e5-small` (revision `614241f`, 471 MB):
+     reference vectors (first eight components of three texts as passage and query, 1e-4) and
+     step 2's cross-language set, whose bar it meets at **80 of 80**, 20 units in 397 ms in a
+     release build. The reference vectors are this crate's own first output, stored: no
+     PyTorch was at hand, so they catch the crate changing its mind and not a mistake made the
+     first time — the cross-language set is what says the vectors mean something.
+   - Not tried: `bge-m3` (2.3 GB) and `multilingual-e5-base` on real weights; their
+     architecture is exercised on the generated XLM-R only.
 
 **TX-P12 — schema evolution**
 1. FC-9 decode/encode in `smysl-core`, `SchemaDecl.lenses`, `Store::schema_decls`, `W430`, `W429`.

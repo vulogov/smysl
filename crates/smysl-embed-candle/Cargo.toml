@@ -35,6 +35,15 @@ all-features = true
 # No accelerator features (`metal`, `cuda`, `mkl`, `accelerate`): each is native code by
 # definition, and a CPU encoder is what the purity labels and the cache are written for.
 [dependencies]
+smysl-core     = { workspace = true }
+smysl-graph    = { workspace = true }
+smysl-retrieve = { workspace = true }
+# Hashing a model's files for the vector cache's key. The workspace's `pure` build of it.
+blake3         = { workspace = true }
+# A model's `config.json`. In the tree already: `tokenizers` and `candle-transformers` both
+# take it, so naming it adds no crate.
+serde_json     = { workspace = true }
+
 candle-core         = { version = "0.9", default-features = false }
 candle-nn           = { version = "0.9", default-features = false }
 candle-transformers = { version = "0.9", default-features = false }

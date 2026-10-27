@@ -52,6 +52,9 @@ pub use smysl::BuildOptions
 pub use smysl::BundleReport
 pub use smysl::Cached
 pub use smysl::Calendar
+pub use smysl::CandleEncoder
+pub use smysl::CandleError
+pub use smysl::CandleSemantic
 pub use smysl::Capabilities
 pub use smysl::Carry
 pub use smysl::CheckOptions
@@ -165,6 +168,7 @@ pub use smysl::Passes
 pub use smysl::PayloadFilter
 pub use smysl::Person
 pub use smysl::PivotLang
+pub use smysl::Pooling
 pub use smysl::Postings
 pub use smysl::Probe
 pub use smysl::Profile
@@ -244,6 +248,7 @@ pub use smysl::Target
 pub use smysl::Task
 pub use smysl::TextIngest
 pub use smysl::TextReport
+pub use smysl::TextRole
 pub use smysl::TextTarget
 pub use smysl::Thread
 pub use smysl::ThreadId
@@ -262,6 +267,7 @@ pub use smysl::UnitCore
 pub use smysl::UnitCoreBuilder
 pub use smysl::UnknownRecords
 pub use smysl::Usage
+pub use smysl::VectorCache
 pub use smysl::Verbosity
 pub use smysl::Via
 pub use smysl::View

@@ -2146,9 +2146,14 @@ dependencies = [
 name = "smysl-embed-candle"
 version = "1.10.0"
 dependencies = [
+ "blake3",
  "candle-core",
  "candle-nn",
  "candle-transformers",
+ "serde_json",
+ "smysl-core",
+ "smysl-graph",
+ "smysl-retrieve",
  "tokenizers",
 ]
 
