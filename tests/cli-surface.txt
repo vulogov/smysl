@@ -795,16 +795,18 @@ q          [possible values: partition, collection, library]
 q          --no-color
 q          --noprogress
 q          --per-partition
+q          --engine-model
 q          --json
-q          --view
+q          --candle-model
 q          --quiet
-q          --save
-q          --rerun
 q          --verbose
+q          --view
 q          --backend
 q          [possible values: memory, redb]
-q          --current
+q          --save
+q          --rerun
 q          --shard
+q          --current
 q          --seed-check
 q          --help
 ask        <QUESTION>

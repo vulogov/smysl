@@ -1,4 +1,4 @@
 query lang-any
   | from texts
   | find "Boaz" lang:any
-refused: SMY-E461 `lang:any` asks for the strongest bridge per pair of partitions (SMYSL-2.5 §3.5), which is TX-P10's; `lang:<code>` selects one language and is available
+refused: SMY-E461 `lang:any` asks for a bridge between languages (SMYSL-2.5 §3.5), and the one this build has is the embedding bridge, which needs `~sem` (or a `~hybrid` that routes semantic); the pure bridges — alignment, classes, entity aliases — are not built

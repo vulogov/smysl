@@ -253,10 +253,21 @@ fn the_sources_this_build_cannot_lower_are_refused_by_name() {
 
     for (text, expect) in [
         ("find \"x\" ~sem", "`~sem` consults an embedding model"),
-        ("find \"x\" ~hybrid", "`~hybrid` routes between"),
+        (
+            "find \"x\" ~hybrid",
+            "`~hybrid` routes this text to the semantic engine",
+        ),
         (
             "find \"x\" lang:any",
-            "`lang:any` asks for the strongest bridge",
+            "`lang:any` asks for a bridge between",
+        ),
+        (
+            "find \"x\" ~sem lang:any",
+            "`lang:any` crosses languages through an embedding",
+        ),
+        (
+            "find \"x\" | where near(\"x\", 0.5)",
+            "`near(…)` compares against an embedding",
         ),
         (
             "find \"x\" lang:ru",
@@ -280,6 +291,29 @@ fn the_sources_this_build_cannot_lower_are_refused_by_name() {
             diags[0].message
         );
     }
+}
+
+/// `~hybrid` on a name routes lexical when it is planned, so it needs no model and is pure: the
+/// routing is the measured one (`smysl_embed::Hybrid`), and a name is what BM25 is perfect at.
+#[test]
+fn a_hybrid_name_routes_lexical_and_stays_pure() {
+    let store = store_of("F1-incident");
+    let scope = StoreScope::new("F1-incident", &store);
+    let env = Env::new(&store, &scope);
+    let opts = PlanOptions::default();
+
+    let hybrid = smysl_query::parse("from store:F1-incident\nfind \"pool.wait_ms\" ~hybrid")
+        .expect("parses");
+    let lex = smysl_query::parse("from store:F1-incident\nfind \"pool.wait_ms\"").expect("parses");
+    let a = plan(&hybrid.query, &env, &opts).expect("plans with no semantic source");
+    let b = plan(&lex.query, &env, &opts).expect("plans");
+    assert_eq!(a.purity, smysl_query::Purity::Pure);
+    assert!(a.seed_check().is_ok());
+    assert!(smysl_query::explain(&a).contains("hybrid (routes lexical)"));
+    assert_eq!(
+        run(&a, &env, &opts).expect("runs").answer,
+        run(&b, &env, &opts).expect("runs").answer,
+    );
 }
 
 /// A bare `find` is lexical (SMYSL-2.9 OQ-83), and plans identically to the one that says so.

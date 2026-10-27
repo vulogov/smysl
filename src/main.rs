@@ -82,12 +82,13 @@ fn reproducible(cmd: &Cmd, sub: &ArgMatches) -> Option<bool> {
             // `link --candidates` lists what the generator chose and stops there, which is a
             // function of the store. Every other invocation asks a model about those pairs.
             "link" => Some(sub.get_flag("candidates")),
-            // Mixed for what the language can say, pure for what this build can run. SMYSL-2.5
-            // §3.2 makes a plan model-dependent when any step is — `~sem`, `~hybrid`, `near`, a
-            // semantic bridge — and the planner refuses every one of those with `SMY-E461`
-            // before purity is asked, so no plan this build produces can reach a model. The
-            // judgement moves into `cmd_q`, onto `Plan::purity`, the day TX-P10 lowers one;
-            // `SMY-E416` is allocated for that refusal and is registered then, not now.
+            // Mixed, and judged on the plan rather than the flags. SMYSL-2.5 §3.2 makes a plan
+            // model-dependent when any step is — `~sem`, a `~hybrid` routed semantic, `near`, the
+            // embedding bridge — and since TX-P10 step 4 those lower when `--engine-model` or
+            // `--candle-model` binds a source. A model flag does not make a lexical query
+            // impure, and a semantic stage is refused without one, so the flags cannot decide
+            // it: `cmd_q` asks `Plan::seed_check` after planning and refuses with `SMY-E416`
+            // before anything runs.
             "q" => Some(true),
             // The dossier is a function of the question and the store: a rule table, a fixed
             // template set and pure plans. `--answer` is the one invocation that asks a model.
@@ -95,8 +96,8 @@ fn reproducible(cmd: &Cmd, sub: &ArgMatches) -> Option<bool> {
             // Mixed for what the registry may come to hold — T8 and D5's embeddings call a
             // model (SMYSL-2.6 §4.4) — and pure for what it holds: every measure this build
             // registers is `Purity::Pure`, which `cmd_measure` checks per id before it runs one.
-            // `SMY-E416` is for the refusal of a model-dependent id under `--seed-check`, and is
-            // registered with the first id that can be refused.
+            // `SMY-E416` is the refusal `q` raises for a model-dependent plan (TX-P10 step 4); a
+            // model-dependent id would take it too, and the registry holds none yet.
             "measure" => Some(true),
             // Mixed for what SMYSL-2.6 §4.4 gives it — `key --generate` writes questions with a
             // model and `score --judge model` asks one — and pure for what this build has: a
@@ -182,7 +183,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "same-as",    about: "Propose same-as edges; derive classes",               purity: Purity::Pure,  phase: "TX-P7"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "link",      about: "Judge candidate pairs; stage entails and contradicts", purity: Purity::Mixed, phase: "TX-P7"  , impure_when: Some("every action but --candidates, which only lists them") , forms: NO_DOCUMENT },
     Cmd { name: "summarise", about: "Grounded summary tree over a scope; staged",           purity: Purity::Model, phase: "TX-P7"  , impure_when: None , forms: NO_DOCUMENT },
-    Cmd { name: "q",         about: "Run an sq/1 query; explain it, or seed-check it",      purity: Purity::Mixed, phase: "TX-P6"  , impure_when: Some("a model-dependent plan (~sem, ~hybrid, near), none of which this build lowers") , forms: NO_DOCUMENT },
+    Cmd { name: "q",         about: "Run an sq/1 query; explain it, or seed-check it",      purity: Purity::Mixed, phase: "TX-P6"  , impure_when: Some("a model-dependent plan (~sem, ~hybrid routed semantic, near, lang:any), with --engine-model or --candle-model") , forms: NO_DOCUMENT },
     Cmd { name: "ask",       about: "Experimental: a dossier for a question; optionally a model's grounded answer", purity: Purity::Mixed, phase: "TX-P8"  , impure_when: Some("--answer, which asks a model to answer from the dossier") , forms: NO_DOCUMENT },
     Cmd { name: "measure",   about: "Text, graph, channel and dialogue measures as derived data units", purity: Purity::Mixed, phase: "TX-P8"  , impure_when: Some("a model-dependent id (T8, D5's embeddings), none of which this build registers") , forms: NO_DOCUMENT },
     Cmd { name: "assess",    about: "Assessment keys, reader scores and knowledge states",  purity: Purity::Mixed, phase: "TX-P9"  , impure_when: Some("a generated key or a model judge (--generate, --judge model), neither of which this build has") , forms: NO_DOCUMENT },
@@ -856,6 +857,25 @@ fn cli() -> Command {
                         .default_value("10")
                         .help("Hits a source keeps per partition before fusion; `limit` is a stage")
                         .value_parser(clap::value_parser!(usize)),
+                )
+                .arg(
+                    Arg::new("engine-model")
+                        .long("engine-model")
+                        .value_name("DIR")
+                        .conflicts_with("candle-model")
+                        .help(
+                            "A Model2Vec model (S0) for ~sem, ~hybrid, near(…) and lang:any; needs \
+                             --features semantic",
+                        ),
+                )
+                .arg(
+                    Arg::new("candle-model")
+                        .long("candle-model")
+                        .value_name("DIR")
+                        .help(
+                            "A transformer encoder (S1) for the same stages, its vectors cached \
+                             beside the store; needs --features semantic-candle",
+                        ),
                 )
                 .arg(
                     Arg::new("view")
@@ -6138,9 +6158,20 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 }
             };
             let scope = smysl::text::scope::LibraryScope::new(name, &library);
-            let env = Env::new(library.store(), &scope)
+            let port = match q_semantic(
+                m,
+                library.store(),
+                &library.root().join("index").join("units"),
+            ) {
+                Ok(p) => p,
+                Err(code) => return code,
+            };
+            let mut env = Env::new(library.store(), &scope)
                 .with_times(&scope)
                 .with_entities(&scope);
+            if let Some(port) = port.as_deref() {
+                env = env.with_semantic(port);
+            }
             let (code, records) = q_run(&job, &env, &opts, m, global);
             if !records.is_empty() {
                 // Through the library, so its index is maintained; the records then live in
@@ -6162,10 +6193,17 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             }
         };
         let scope = smysl::query::StoreScope::new(name, &store);
+        let port = match q_semantic(m, &store, std::path::Path::new(&path)) {
+            Ok(p) => p,
+            Err(code) => return code,
+        };
         // The entity port too (TX-P8 step 3): a plain store answers `about entity(…)` from its
         // own `x.text/entity` units and `same-as` classes, which is what lets a dossier slot
         // saved over it be rerun here.
-        let env = Env::new(&store, &scope).with_entities(&scope);
+        let mut env = Env::new(&store, &scope).with_entities(&scope);
+        if let Some(port) = port.as_deref() {
+            env = env.with_semantic(port);
+        }
         let (code, records) = q_run(&job, &env, &opts, m, global);
         if !records.is_empty() {
             if let Err(e) = persist(&path, &records, &store, &labels) {
@@ -8972,6 +9010,78 @@ fn declares_query(store: &(impl StoreRead + ?Sized)) -> bool {
 /// Plan, run, and write one query over a bound environment. The records to append — a `View`
 /// for `as view`, a saved query and its result edges for `--save` — are returned rather than
 /// written, because which file they go to is the caller's.
+/// The semantic port `q --engine-model` or `--candle-model` asks for (TX-P10 step 4), indexed
+/// over `store`; `None` when neither was given.
+///
+/// S1's vectors are cached in `<base>.vec-<hash12>` (`VectorCache::sidecar`): the store's own
+/// path for a plain store, `index/units` inside a library. A sidecar under another model is
+/// reported (`SMY-W476`) and rewritten. S1's pooling is the one the model directory declares in
+/// `1_Pooling/config.json`, and mean, the e5 card's, when it declares none.
+#[allow(unused_variables)]
+fn q_semantic(
+    m: &ArgMatches,
+    store: &smysl::Store,
+    base: &std::path::Path,
+) -> Result<Option<Box<dyn smysl::query::SemanticSource>>, ExitCode> {
+    if let Some(dir) = m.get_one::<String>("engine-model") {
+        #[cfg(not(feature = "semantic"))]
+        {
+            eprintln!("smysl q: --engine-model needs a build with --features semantic");
+            return Err(ExitCode::Usage);
+        }
+        #[cfg(feature = "semantic")]
+        {
+            let model = smysl::EmbedModel::from_dir(dir).map_err(|e| {
+                eprintln!("smysl q: --engine-model {dir}: {e}");
+                ExitCode::Failure
+            })?;
+            let index = smysl::Semantic::index(store, model);
+            let hash = index.model_hash();
+            return Ok(Some(Box::new(smysl::query::RetrieverSource::new(
+                index, hash,
+            ))));
+        }
+    }
+    if let Some(dir) = m.get_one::<String>("candle-model") {
+        #[cfg(not(feature = "semantic-candle"))]
+        {
+            eprintln!("smysl q: --candle-model needs a build with --features semantic-candle");
+            return Err(ExitCode::Usage);
+        }
+        #[cfg(feature = "semantic-candle")]
+        {
+            let pooling = smysl::Pooling::from_dir(dir).unwrap_or(smysl::Pooling::Mean);
+            let encoder = smysl::CandleEncoder::from_dir(dir, pooling).map_err(|e| {
+                eprintln!("smysl q: --candle-model {dir}: {e}");
+                ExitCode::Failure
+            })?;
+            let hash = encoder.model_hash();
+            let side = smysl::VectorCache::sidecar(base, &hash);
+            let (mut cache, diags) = smysl::VectorCache::open(&side, &encoder).map_err(|e| {
+                eprintln!("smysl q: {e}");
+                ExitCode::Failure
+            })?;
+            for d in &diags {
+                eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
+            }
+            let index =
+                smysl::CandleSemantic::index_cached(store, encoder, &mut cache).map_err(|e| {
+                    eprintln!("smysl q: --candle-model {dir}: {e}");
+                    ExitCode::Failure
+                })?;
+            if let Err(e) = cache.save(&side) {
+                // The answer does not depend on the cache, so a sidecar that cannot be written
+                // is said and not fatal: the next run embeds again.
+                eprintln!("smysl q: {e}");
+            }
+            return Ok(Some(Box::new(smysl::query::RetrieverSource::new(
+                index, hash,
+            ))));
+        }
+    }
+    Ok(None)
+}
+
 fn q_run(
     job: &Job,
     env: &smysl::query::Env<'_>,
@@ -8979,7 +9089,7 @@ fn q_run(
     m: &ArgMatches,
     global: &ArgMatches,
 ) -> (ExitCode, Vec<Record>) {
-    use smysl::query::{explain, run, Purity};
+    use smysl::query::{explain, run};
 
     let mut records: Vec<Record> = Vec::new();
     let (plan, first, as_view, effect) = match job {
@@ -9090,16 +9200,9 @@ fn q_run(
 
             let seed_check = global.get_flag("seed-check");
             if seed_check {
-                if let Purity::ModelDependent(why) = &plan.purity {
-                    // Unreachable while the planner refuses every model-dependent stage with
-                    // `SMY-E461` before purity is asked (see `reproducible`). `SMY-E416` is
-                    // the code allocated for this refusal and is registered when TX-P10 makes
-                    // the arm reachable.
-                    eprintln!(
-                        "smysl q: --seed-check asserts rule D, and this plan is model-dependent \
-                         ({})",
-                        why.join(", ")
-                    );
+                // §3.2: refused before anything executes (TX-P10 step 4).
+                if let Err(d) = plan.seed_check() {
+                    eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
                     return (ExitCode::Usage, records);
                 }
             }

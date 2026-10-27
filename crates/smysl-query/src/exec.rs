@@ -52,13 +52,13 @@ use smysl_retrieve::{
 
 use crate::ast::TimeOp;
 use crate::ast::{Atom, Count, Dir};
-use crate::fuse::{rrf, Fused, Ranked};
+use crate::fuse::{rrf, Fused, Placement, Ranked};
 use crate::plan::{
     ClosurePlan, Direction, EntitySource, Env, Lexical, OrderPlan, OutputPlan, PipelinePlan, Plan,
-    PlanExpr, PlanOptions, ShapePlan, Source, TimePlan,
+    PlanExpr, PlanOptions, Route, SemanticPlan, ShapePlan, Source, TimePlan,
 };
 use crate::ports::{Bounds, IdfScope};
-use crate::pred::{holds_in, Field, Reader};
+use crate::pred::{holds_near, Field, Near, Reader};
 
 /// What running a plan produced.
 ///
@@ -202,6 +202,7 @@ fn run_pipeline(
     // --- phase 5 -----------------------------------------------------------------------------
     let mut answer = match &p.source {
         Some(Source::Lexical(lex)) => lexical(p, lex, env, opts)?,
+        Some(Source::Semantic(sp)) => semantic(p, sp, env, opts)?,
         Some(Source::Entity(e)) => entity(p, e, env, opts)?,
         Some(Source::Pointer(pp)) => {
             let (uids, unmarked) = crate::pointer::select(env.store, pp, &p.candidates);
@@ -222,28 +223,37 @@ fn run_pipeline(
     // Filtering keeps the order it was given, which for a ranked answer is the ranking. A
     // filter that re-sorted would silently discard what the source computed.
     if !p.filters.is_empty() {
+        // `near(…)`: each text embedded once, against the units still in the answer, before any
+        // unit is tested — so a predicate is a lookup and not a model call per unit.
+        let mut texts = BTreeSet::new();
+        for f in &p.filters {
+            crate::pred::near_texts(f, &opts.params, &mut texts);
+        }
+        let mut near = Near::default();
+        if !texts.is_empty() {
+            let port = env
+                .semantic
+                .expect("a near(…) lowered, so the semantic port was bound");
+            let within: BTreeSet<Uid> = answer.uids().into_iter().collect();
+            for t in texts {
+                let scores = port
+                    .search(&t, &within, within.len())
+                    .into_iter()
+                    .map(|h| (h.uid, h.score))
+                    .collect();
+                near.scores.insert(t, scores);
+            }
+        }
+        let holds = |uid: &Uid| {
+            p.filters
+                .iter()
+                .all(|pred| holds_near(&env.reader, uid, pred, &opts.params, &near))
+        };
         answer = match answer {
-            Answer::Ranked(fused) => Answer::Ranked(
-                fused
-                    .into_iter()
-                    .filter(|f| {
-                        p.filters
-                            .iter()
-                            .all(|pred| holds_in(&env.reader, &f.uid, pred, &opts.params))
-                    })
-                    .collect(),
-            ),
-            other => Answer::Scope(
-                other
-                    .uids()
-                    .into_iter()
-                    .filter(|uid| {
-                        p.filters
-                            .iter()
-                            .all(|pred| holds_in(&env.reader, uid, pred, &opts.params))
-                    })
-                    .collect(),
-            ),
+            Answer::Ranked(fused) => {
+                Answer::Ranked(fused.into_iter().filter(|f| holds(&f.uid)).collect())
+            }
+            other => Answer::Scope(other.uids().into_iter().filter(|u| holds(u)).collect()),
         };
     }
 
@@ -600,6 +610,106 @@ fn lexical(
         });
     }
 
+    Ok(Answer::Ranked(rrf(&lists)))
+}
+
+/// `find "…" ~sem` and `~hybrid` (TX-P10 step 4).
+///
+/// Per partition and fused by RRF, as a lexical source is (§3.4): a scope over three languages
+/// is three rankings, because cosines are no more comparable across partitions by default than
+/// BM25 scores are. **`lang:any` is the exception, and it is what the bridge means**: one
+/// cosine ranking over every candidate, since a multilingual model puts every language's units
+/// in one space. Its fused score is the cosine itself, and each hit's one placement is in its
+/// own partition, at its rank in the one list.
+fn semantic(
+    p: &PipelinePlan,
+    sp: &SemanticPlan,
+    env: &Env<'_>,
+    opts: &PlanOptions,
+) -> Result<Answer, Vec<Diagnostic>> {
+    let text = match &sp.text {
+        Atom::Str(s) => s.clone(),
+        Atom::Param(name) => match opts.params.get(name) {
+            Some(bound) => bound.clone(),
+            None => {
+                return Err(vec![Diagnostic::at(Code::E460, sp.span).with_message(
+                    format!("`${name}` is not bound, so there is no text to search for"),
+                )])
+            }
+        },
+    };
+    let route = match sp.hybrid {
+        Some(Route::AtRun) if crate::ports::routes_to_lexical(&text) => Some(Route::Lexical),
+        Some(Route::AtRun) => Some(Route::Semantic),
+        other => other,
+    };
+    if route == Some(Route::Lexical) {
+        // `~hybrid` on a name: BM25, exactly as `~lex` would rank it.
+        let lex = Lexical {
+            text: Atom::Str(text),
+            explicit: true,
+            lang: sp.lang.clone(),
+            span: sp.span,
+        };
+        return lexical(p, &lex, env, opts);
+    }
+    let Some(port) = env.semantic else {
+        // Planned with a port and run without one, or a parameter that routed semantic in an
+        // environment that has none: refused rather than answered lexically behind the
+        // reader's back.
+        return Err(vec![Diagnostic::at(Code::E461, sp.span).with_message(
+            "this source routes to the semantic engine, and the environment binds no semantic \
+             source"
+                .to_string(),
+        )]);
+    };
+    let in_lang: Option<BTreeSet<Uid>> = sp.lang.as_ref().map(|code| {
+        env.scope
+            .restrict_lang(code, &p.candidates)
+            .unwrap_or_default()
+    });
+
+    if sp.bridge {
+        let part_of: BTreeMap<Uid, &crate::ports::PartitionKey> = p
+            .partitions
+            .iter()
+            .flat_map(|part| part.uids.iter().map(move |u| (*u, &part.key)))
+            .collect();
+        let hits = port.search(&text, &p.candidates, opts.limit);
+        let fused = hits
+            .into_iter()
+            .enumerate()
+            .filter_map(|(at, hit)| {
+                let key = (*part_of.get(&hit.uid)?).clone();
+                Some(Fused {
+                    uid: hit.uid,
+                    score: f64::from(hit.score),
+                    placements: vec![Placement {
+                        key,
+                        rank: at + 1,
+                        score: hit.score,
+                        terms: Vec::new(),
+                    }],
+                })
+            })
+            .collect();
+        return Ok(Answer::Ranked(fused));
+    }
+
+    let mut lists = Vec::new();
+    for partition in &p.partitions {
+        let within: BTreeSet<Uid> = match &in_lang {
+            Some(allowed) => partition.uids.intersection(allowed).copied().collect(),
+            None => partition.uids.clone(),
+        };
+        if within.is_empty() {
+            continue;
+        }
+        lists.push(Ranked {
+            key: partition.key.clone(),
+            hits: port.search(&text, &within, opts.limit),
+        });
+    }
     Ok(Answer::Ranked(rrf(&lists)))
 }
 

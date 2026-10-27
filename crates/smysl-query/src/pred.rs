@@ -33,7 +33,7 @@ use smysl_core::surface::{payload_to_object, HValue, Spanned};
 use smysl_core::types::{Commitment, Status};
 use smysl_graph::Store;
 
-use crate::ast::{Atom, CmpOp, FieldRef, Pred, Value};
+use crate::ast::{Atom, CmpOp, Decimal, FieldRef, Pred, Value};
 use crate::resolve::{resolve_at, resolve_name, Resolved, Schemas};
 
 /// A resolved field reference.
@@ -116,6 +116,48 @@ pub enum Lowered {
         text: Atom,
         span: Span,
     },
+    /// `where near("…", t)`: the unit's cosine with the text is at least `t` (TX-P10 step 4).
+    /// Model-dependent; it lowers only when the environment binds a semantic source, and is
+    /// evaluated against that source's scores by the executor ([`holds_near`]).
+    Near {
+        text: Atom,
+        threshold: Decimal,
+        span: Span,
+    },
+}
+
+/// A `near(…)` text as bound: the string, or the parameter's binding.
+pub fn atom_text(a: &Atom, params: &BTreeMap<String, String>) -> Option<String> {
+    match a {
+        Atom::Str(s) => Some(s.clone()),
+        Atom::Param(n) => params.get(n).cloned(),
+    }
+}
+
+/// Every `near(…)` text in a lowered predicate, bound.
+pub fn near_texts(pred: &Lowered, params: &BTreeMap<String, String>, out: &mut BTreeSet<String>) {
+    match pred {
+        Lowered::And(items) | Lowered::Or(items) => {
+            items.iter().for_each(|p| near_texts(p, params, out))
+        }
+        Lowered::Not(inner) => near_texts(inner, params, out),
+        Lowered::Near { text, .. } => {
+            if let Some(t) = atom_text(text, params) {
+                out.insert(t);
+            }
+        }
+        Lowered::Cmp { .. } | Lowered::Matches { .. } => {}
+    }
+}
+
+/// Whether a lowered predicate consults a model anywhere in it.
+pub fn uses_near(pred: &Lowered) -> bool {
+    match pred {
+        Lowered::And(items) | Lowered::Or(items) => items.iter().any(uses_near),
+        Lowered::Not(inner) => uses_near(inner),
+        Lowered::Near { .. } => true,
+        Lowered::Cmp { .. } | Lowered::Matches { .. } => false,
+    }
 }
 
 /// Phase 6 for one predicate, with no declarations: every payload key is raw and a qualified
@@ -132,26 +174,57 @@ pub fn lower_in(
     lens_none: bool,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Lowered> {
+    lower_with(pred, schemas, lens_none, false, diags)
+}
+
+/// [`lower_in`], and `semantic` says whether the environment binds a semantic source, which is
+/// what lets `near(…)` lower (TX-P10 step 4).
+pub fn lower_with(
+    pred: &Pred,
+    schemas: Option<&Schemas>,
+    lens_none: bool,
+    semantic: bool,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Lowered> {
     match pred {
-        Pred::And(items) => lower_all(items, schemas, lens_none, diags).map(Lowered::And),
-        Pred::Or(items) => lower_all(items, schemas, lens_none, diags).map(Lowered::Or),
-        Pred::Not(inner) => {
-            lower_in(inner, schemas, lens_none, diags).map(|l| Lowered::Not(Box::new(l)))
-        }
+        Pred::And(items) => lower_all(items, schemas, lens_none, semantic, diags).map(Lowered::And),
+        Pred::Or(items) => lower_all(items, schemas, lens_none, semantic, diags).map(Lowered::Or),
+        Pred::Not(inner) => lower_with(inner, schemas, lens_none, semantic, diags)
+            .map(|l| Lowered::Not(Box::new(l))),
         Pred::Matches(text) => Some(Lowered::Matches {
             text: text.clone(),
             span: Span::new(0, 0),
         }),
-        Pred::Near { .. } => {
-            // Cosine against an embedding. Not a later phase of this planner: a different tier.
-            diags.push(
-                Diagnostic::at(Code::E461, Span::new(0, 0)).with_message(
-                    "`near(…)` compares against an embedding, which this pure build has no port \
-                 bound for"
-                        .to_string(),
-                ),
-            );
-            None
+        Pred::Near { text, threshold } => {
+            // Cosine against an embedding: a different tier, so it needs the port.
+            if !semantic {
+                diags.push(
+                    Diagnostic::at(Code::E461, Span::new(0, 0)).with_message(
+                        "`near(…)` compares against an embedding, and this environment binds no \
+                         semantic source (a build with `semantic` or `semantic-candle` and a \
+                         model: `q --engine-model` or `--candle-model`)"
+                            .to_string(),
+                    ),
+                );
+                return None;
+            }
+            // A cosine in (0, 1]. The source returns no unit at or below zero — that is not a
+            // hit — so a threshold there would admit units it could never see, and one above
+            // one admits none.
+            if threshold.scaled <= 0 || threshold.scaled > Decimal::SCALE {
+                diags.push(
+                    Diagnostic::at(Code::E460, Span::new(0, 0)).with_message(format!(
+                        "`near(…)`'s threshold is a cosine above 0 and at most 1, not {}",
+                        crate::print::decimal(*threshold)
+                    )),
+                );
+                return None;
+            }
+            Some(Lowered::Near {
+                text: text.clone(),
+                threshold: *threshold,
+                span: Span::new(0, 0),
+            })
         }
         Pred::Cmp { field, op, value } => {
             let resolved = resolve_in(field, schemas, lens_none, diags)?;
@@ -192,12 +265,13 @@ fn lower_all(
     items: &[Pred],
     schemas: Option<&Schemas>,
     lens_none: bool,
+    semantic: bool,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Vec<Lowered>> {
     let mut out = Vec::with_capacity(items.len());
     let mut ok = true;
     for item in items {
-        match lower_in(item, schemas, lens_none, diags) {
+        match lower_with(item, schemas, lens_none, semantic, diags) {
             Some(l) => out.push(l),
             None => ok = false,
         }
@@ -569,11 +643,43 @@ pub fn holds_in(
     pred: &Lowered,
     params: &std::collections::BTreeMap<String, String>,
 ) -> bool {
+    holds_near(r, uid, pred, params, &Near::default())
+}
+
+/// The cosines a run's `near(…)` predicates read: for each text, every candidate's score, as
+/// the semantic source gave it. Computed once per text by the executor, so a predicate over a
+/// thousand units embeds its text once.
+#[derive(Debug, Default)]
+pub struct Near {
+    pub scores: BTreeMap<String, BTreeMap<Uid, f32>>,
+}
+
+/// [`holds_in`], with the cosines `near(…)` is judged by. A `near` whose text has no scores
+/// here holds for no unit.
+pub fn holds_near(
+    r: &Reader<'_>,
+    uid: &Uid,
+    pred: &Lowered,
+    params: &std::collections::BTreeMap<String, String>,
+    near: &Near,
+) -> bool {
     let store = r.store;
     match pred {
-        Lowered::And(items) => items.iter().all(|p| holds_in(r, uid, p, params)),
-        Lowered::Or(items) => items.iter().any(|p| holds_in(r, uid, p, params)),
-        Lowered::Not(inner) => !holds_in(r, uid, inner, params),
+        Lowered::And(items) => items.iter().all(|p| holds_near(r, uid, p, params, near)),
+        Lowered::Or(items) => items.iter().any(|p| holds_near(r, uid, p, params, near)),
+        Lowered::Not(inner) => !holds_near(r, uid, inner, params, near),
+        Lowered::Near {
+            text, threshold, ..
+        } => {
+            let Some(text) = atom_text(text, params) else {
+                return false;
+            };
+            let t = threshold.scaled as f32 / Decimal::SCALE as f32;
+            near.scores
+                .get(&text)
+                .and_then(|m| m.get(uid))
+                .is_some_and(|score| *score >= t)
+        }
         Lowered::Matches { text, .. } => {
             let Some(query) = (match text {
                 Atom::Str(s) => Some(s.clone()),

@@ -2136,6 +2136,7 @@ dependencies = [
 name = "smysl-embed"
 version = "1.10.0"
 dependencies = [
+ "blake3",
  "model2vec-rs",
  "smysl-core",
  "smysl-graph",

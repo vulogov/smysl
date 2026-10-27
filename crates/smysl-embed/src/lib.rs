@@ -66,7 +66,10 @@ use smysl_retrieve::{Hit, Query, Retriever};
 /// Thin wrapper so callers do not depend on `model2vec_rs` types directly — the seam that
 /// lets a different static-embedding implementation take its place without touching anything
 /// that uses this crate.
-pub struct Model(StaticModel);
+pub struct Model {
+    inner: StaticModel,
+    hash: [u8; 32],
+}
 
 impl Model {
     /// Load from a directory holding `tokenizer.json`, `model.safetensors` and `config.json`.
@@ -79,10 +82,20 @@ impl Model {
         if !path.is_dir() {
             return Err(Error::NotADirectory(path.display().to_string()));
         }
+        // Hashed from the bytes on disk, which are what `from_pretrained` reads next: the
+        // three files a saved query names its model by (`query:models`, SMYSL-2.5 §3.6).
+        let read = |name: &str| {
+            std::fs::read(path.join(name)).map_err(|e| Error::Load(format!("{name}: {e}")))
+        };
+        let hash = model_hash(
+            &read("tokenizer.json")?,
+            &read("model.safetensors")?,
+            &read("config.json")?,
+        );
         // `normalize: None` keeps whatever the model's own config asks for. Overriding it
         // here would silently change what a published model means.
         StaticModel::from_pretrained(path, None, None, None)
-            .map(Model)
+            .map(|inner| Model { inner, hash })
             .map_err(|e| Error::Load(e.to_string()))
     }
 
@@ -91,18 +104,35 @@ impl Model {
     /// The path for an embedder shipped inside another binary, or read from somewhere this
     /// crate should not know about.
     pub fn from_bytes(tokenizer: &[u8], model: &[u8], config: &[u8]) -> Result<Model, Error> {
+        let hash = model_hash(tokenizer, model, config);
         StaticModel::from_bytes(tokenizer, model, config, None)
-            .map(Model)
+            .map(|inner| Model { inner, hash })
             .map_err(|e| Error::Load(e.to_string()))
     }
 
+    /// BLAKE3 over the three files, each length-prefixed (TX-P10 step 4): what a saved query
+    /// records as `query:models`, and what `SMY-W467` compares on a rerun.
+    pub fn hash(&self) -> [u8; 32] {
+        self.hash
+    }
+
     fn embed(&self, text: &str) -> Vec<f32> {
-        self.0.encode_single(text)
+        self.inner.encode_single(text)
     }
 
     fn embed_all(&self, texts: &[String]) -> Vec<Vec<f32>> {
-        self.0.encode(texts)
+        self.inner.encode(texts)
     }
+}
+
+fn model_hash(tokenizer: &[u8], model: &[u8], config: &[u8]) -> [u8; 32] {
+    let mut h = blake3::Hasher::new();
+    h.update(b"smysl/s0-model/1\0");
+    for part in [tokenizer, model, config] {
+        h.update(&(part.len() as u64).to_le_bytes());
+        h.update(part);
+    }
+    *h.finalize().as_bytes()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,6 +175,11 @@ pub struct Semantic {
 }
 
 impl Semantic {
+    /// The hash of the model this index was embedded with ([`Model::hash`]).
+    pub fn model_hash(&self) -> [u8; 32] {
+        self.model.hash()
+    }
+
     /// Embed every unit in `store`.
     pub fn index(store: &(impl StoreRead + ?Sized), model: Model) -> Semantic {
         // Every unit since 1.7, extension schemas included: they were absent from the index

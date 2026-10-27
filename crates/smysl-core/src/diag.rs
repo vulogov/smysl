@@ -359,6 +359,10 @@ registry! {
         // when a sidecar was written under another model hash. In this block because `~sem`
         // is the query that reads the cache, and the code is in SMYSL-2.5's range.
         W476 = "SMY-W476", Warn,  "A cached vector under another model hash was ignored and recomputed";
+        // TX-P10 step 4, where a plan can reach a model: `--seed-check` refuses one before it
+        // runs, and a saved query that recorded one is rerun under another.
+        E416 = "SMY-E416", Error, "--seed-check on a model-dependent plan; refused before anything executes";
+        W467 = "SMY-W467", Warn,  "A model-dependent saved query was rerun under a different model hash; its diffs are not comparable";
         W510 = "SMY-W510", Warn,  "A string literal is not in NFC; it is matched byte-exactly as written";
         E511 = "SMY-E511", Error, "A scope names something this environment does not hold";
         E512 = "SMY-E512", Error, "An operator does not apply to the type of the field it names";
@@ -957,10 +961,11 @@ mod tests {
     /// `SMY-E505` in TX-P13d, a primary shard and its export disagreeing.
     ///
     /// 146 with `SMY-W476` in TX-P10 step 3, raised by S1's vector cache for a sidecar written
-    /// under another model hash.
+    /// under another model hash; 148 with `SMY-E416` and `SMY-W467` in step 4, raised by
+    /// `--seed-check` on a model-dependent plan and by a rerun under another model.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 146);
+        assert_eq!(Code::ALL.len(), 148);
     }
 
     #[test]

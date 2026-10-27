@@ -22,6 +22,8 @@ all-features = true
 smysl-core     = { workspace = true }
 smysl-graph    = { workspace = true }
 smysl-retrieve = { workspace = true }
+# A model's hash, for `query:models` (TX-P10 step 4). The workspace's `pure` build of it.
+blake3         = { workspace = true }
 
 # Departures from the defaults, which are `["onig", "hf-hub"]`: a C regex library and a network
 # client.

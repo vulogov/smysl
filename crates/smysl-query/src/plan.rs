@@ -35,16 +35,17 @@ use crate::ast::{
     TimeOp, TimeValue, Using,
 };
 use crate::ports::{
-    item_text, Axis, Bounds, Candidates, Entities, IdfScope, Partition, Scope, Times,
+    item_text, Axis, Bounds, Candidates, Entities, IdfScope, Partition, Scope, SemanticSource,
+    Times,
 };
 use crate::pred::Field;
 
 /// What the planner reads the world through (SMYSL-2.5 §4.2).
 ///
-/// §4.2 sketches six fields. Two of them name types this build does not have —
-/// `SemanticSource` (TX-P10) and `Witnesses` (TX-P8). `TimeIndex` arrived in TX-P6 step 6 as
-/// [`Times`], with [`Entities`] beside it, and `SchemaSet` in TX-P12 step 3 inside the
-/// [`Reader`](crate::pred::Reader). They arrive with their phases; the struct is
+/// §4.2 sketches six fields. One of them names a type this build does not have —
+/// `Witnesses` (TX-P8). `TimeIndex` arrived in TX-P6 step 6 as [`Times`], with [`Entities`]
+/// beside it, `SchemaSet` in TX-P12 step 3 inside the [`Reader`](crate::pred::Reader), and
+/// [`SemanticSource`] in TX-P10 step 4. They arrive with their phases; the struct is
 /// `#[non_exhaustive]` so each is an addition rather than a break.
 #[non_exhaustive]
 pub struct Env<'a> {
@@ -59,6 +60,10 @@ pub struct Env<'a> {
     /// §4.2's `SchemaSet`, and the lensed reading of units through it (TX-P12 step 3). Shared,
     /// so an environment derived from this one reads each unit once.
     pub reader: std::rc::Rc<crate::pred::Reader<'a>>,
+    /// An embedding model over the store's units (TX-P10 step 4). Absent in a pure build, and
+    /// `~sem`, `near(…)` and `lang:any` are then refused by name; with it, a plan that uses it
+    /// is labelled model-dependent.
+    pub semantic: Option<&'a dyn SemanticSource>,
 }
 
 impl<'a> Env<'a> {
@@ -69,6 +74,7 @@ impl<'a> Env<'a> {
             times: None,
             entities: None,
             reader: std::rc::Rc::new(crate::pred::Reader::new(store)),
+            semantic: None,
         }
     }
 
@@ -83,6 +89,7 @@ impl<'a> Env<'a> {
             times: self.times,
             entities: Some(entities),
             reader: self.reader.clone(),
+            semantic: self.semantic,
         }
     }
 
@@ -95,6 +102,12 @@ impl<'a> Env<'a> {
     /// Bind entity resolution, which lowers `about entity(…)`.
     pub fn with_entities(mut self, entities: &'a dyn Entities) -> Env<'a> {
         self.entities = Some(entities);
+        self
+    }
+
+    /// Bind an embedding model, which lowers `~sem`, `~hybrid`, `near(…)` and `lang:any`.
+    pub fn with_semantic(mut self, semantic: &'a dyn SemanticSource) -> Env<'a> {
+        self.semantic = Some(semantic);
         self
     }
 }
@@ -149,10 +162,10 @@ impl Default for PlanOptions {
 
 /// Whether running this plan can reach a model (SMYSL-2.5 §3.2).
 ///
-/// Every step phases 1 to 4 produce is pure, and the stages that are not — `~sem`, `near`, a
-/// bridge, an intent classifier — are refused by this build before purity is asked. The type
-/// is here because the plan must carry it from the start: a plan that gains a purity field
-/// later is a plan that was once saved without one.
+/// Model-dependent since TX-P10 step 4 when it uses `~sem`, a `~hybrid` that routes (or may
+/// route) semantic, `near(…)` or the embedding bridge, with each reason named once; an intent
+/// classifier is still refused. `--seed-check` refuses such a plan with `SMY-E416`
+/// ([`Plan::seed_check`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Purity {
@@ -162,9 +175,9 @@ pub enum Purity {
 
 /// A lowered source (SMYSL-2.5 §3.2 phase 5).
 ///
-/// Two variants. `~sem` needs a model (TX-P10), `~hybrid` needs the routing decision that
-/// chooses between them, and the rest are later phases' — each refused by name. `about
-/// entity(…)` joined in TX-P6 step 6, with the [`Entities`] port that resolves a name.
+/// `about entity(…)` joined in TX-P6 step 6, with the [`Entities`] port that resolves a name;
+/// `~sem` and `~hybrid` in TX-P10 step 4, with the [`SemanticSource`] port that ranks by an
+/// embedding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Source {
@@ -178,6 +191,48 @@ pub enum Source {
     /// `pointer("…")`: the units whose locator is the pointer, as each snapshot's revision of
     /// its pointer lens spells it (§3.12). A selection, like an entity's.
     Pointer(crate::pointer::PointerPlan),
+    /// `find "…" ~sem` and `find "…" ~hybrid`: ranked by an embedding, or routed (§3.3, §3.4).
+    Semantic(SemanticPlan),
+}
+
+/// `find "…" ~sem` or `~hybrid` (SMYSL-2.5 §3.3–§3.5, TX-P10 step 4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SemanticPlan {
+    /// The query text, or the parameter standing in for it.
+    pub text: Atom,
+    /// `None` for `~sem`; for `~hybrid`, where the measured routing sends it.
+    pub hybrid: Option<Route>,
+    /// `lang:<code>`, asked of the scope when the source runs, as for a lexical source.
+    pub lang: Option<String>,
+    /// `lang:any`: the embedding bridge (§3.5). One cosine ranking over every partition,
+    /// rather than a ranking per partition fused by RRF — a multilingual model puts every
+    /// language's units in one space, and that one space is what the bridge is.
+    pub bridge: bool,
+    pub span: Span,
+}
+
+/// Where `~hybrid` goes (SMYSL-2.5 §3.4: "the routing outcome is recorded").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Route {
+    /// A literal identifier: BM25, and the plan stays pure.
+    Lexical,
+    /// A literal sentence: the embedding.
+    Semantic,
+    /// A `$parameter`, decided on the bound text when the source runs — model-dependent,
+    /// since it may go either way.
+    AtRun,
+}
+
+impl Route {
+    pub fn name(self) -> &'static str {
+        match self {
+            Route::Lexical => "lexical",
+            Route::Semantic => "semantic",
+            Route::AtRun => "on the bound text",
+        }
+    }
 }
 
 /// `find "…" ~lex` (SMYSL-2.5 §3.3, §3.4).
@@ -322,6 +377,24 @@ pub enum PlanStep {
         /// `k`, from §3.4. Printed because it is one of the eight recipe inputs and the only
         /// one this build fixes.
         rrf_k: f64,
+    },
+    /// Phase 5, `~sem` or `~hybrid` (TX-P10 step 4). Its own step rather than more fields on
+    /// [`PlanStep::Source`], because what it records is different: a route, a bridge, and
+    /// the model that answers.
+    Semantic {
+        /// `"semantic"` or `"hybrid"`.
+        engine: &'static str,
+        /// For `~hybrid`, where it routes ([`Route::name`]).
+        route: Option<&'static str>,
+        lang: Option<String>,
+        /// `lang:any` through the embedding bridge: one ranking over every partition.
+        bridge: bool,
+        text: String,
+        limit: usize,
+        rrf_k: f64,
+        /// The model's hash, in hex: absent only for a `~hybrid` that routes lexical, which
+        /// consults no model.
+        model: Option<String>,
     },
 }
 
@@ -495,6 +568,9 @@ pub enum OutputPlan {
 pub struct Plan {
     pub sq: u32,
     pub purity: Purity,
+    /// The hashes of the models a model-dependent plan consults, in hex (§3.6's
+    /// `query:models`); empty for a pure plan.
+    pub models: Vec<String>,
     pub steps: Vec<PlanStep>,
     pub pins: Vec<Pin>,
     /// The revisions in force (§3.6's `query:schemas`): every pin, and the current revision of
@@ -597,9 +673,19 @@ pub fn plan(q: &Query, env: &Env<'_>, opts: &PlanOptions) -> Result<Plan, Vec<Di
     }
 
     let (revisions, lens_chains) = in_force(env, &pins, &steps, &expr, &ordering);
+    let mut why = Vec::new();
+    model_reasons(&expr, &mut why);
+    let (purity, models) = match (why.is_empty(), env.semantic) {
+        (true, _) => (Purity::Pure, Vec::new()),
+        (false, port) => (
+            Purity::ModelDependent(why),
+            port.map(|p| vec![hex(&p.model_hash())]).unwrap_or_default(),
+        ),
+    };
     Ok(Plan {
         sq,
-        purity: Purity::Pure,
+        purity,
+        models,
         steps,
         pins,
         revisions,
@@ -609,6 +695,58 @@ pub fn plan(q: &Query, env: &Env<'_>, opts: &PlanOptions) -> Result<Plan, Vec<Di
         shaping,
         output,
     })
+}
+
+/// Why a plan is model-dependent (SMYSL-2.5 §3.2): each stage that consults a model, once, in
+/// the order the plan meets them. Empty is pure.
+fn model_reasons(expr: &PlanExpr, why: &mut Vec<&'static str>) {
+    let mut add = |r: &'static str| {
+        if !why.contains(&r) {
+            why.push(r);
+        }
+    };
+    match expr {
+        PlanExpr::Pipeline(p) => {
+            if let Some(Source::Semantic(sp)) = &p.source {
+                match sp.hybrid {
+                    None => add("~sem"),
+                    Some(Route::Semantic) => add("~hybrid routed semantic"),
+                    Some(Route::AtRun) => add("~hybrid routed on a parameter"),
+                    Some(Route::Lexical) => {}
+                }
+                if sp.bridge {
+                    add("embedding bridge");
+                }
+            }
+            if p.filters.iter().any(crate::pred::uses_near) {
+                add("near");
+            }
+        }
+        PlanExpr::Set { left, right, .. } => {
+            model_reasons(left, why);
+            model_reasons(right, why);
+        }
+    }
+}
+
+/// Lowercase hex, as `query:models` records a model hash.
+pub(crate) fn hex(h: &[u8; 32]) -> String {
+    h.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+impl Plan {
+    /// `--seed-check`'s refusal (SMYSL-2.5 §3.2): `SMY-E416` for a model-dependent plan, before
+    /// anything executes. Rule D is a claim that a run is a function of its inputs, and a model
+    /// is an input this build cannot hold fixed across machines.
+    pub fn seed_check(&self) -> Result<(), Diagnostic> {
+        match &self.purity {
+            Purity::Pure => Ok(()),
+            Purity::ModelDependent(why) => Err(Diagnostic::new(Code::E416).with_message(format!(
+                "--seed-check asserts rule D, and this plan is model-dependent ({})",
+                why.join(", ")
+            ))),
+        }
+    }
 }
 
 /// Phases 2 to 8 over a set expression, which is a tree of pipelines.
@@ -690,7 +828,13 @@ fn lower_pipeline(
                 continue;
             }
         };
-        if let Some(lowered) = crate::pred::lower_in(&compiled, Some(schemas), f.lens_none, diags) {
+        if let Some(lowered) = crate::pred::lower_with(
+            &compiled,
+            Some(schemas),
+            f.lens_none,
+            env.semantic.is_some(),
+            diags,
+        ) {
             filters.push(lowered);
         }
     }
@@ -770,6 +914,26 @@ fn lower_pipeline(
             rrf_k: crate::fuse::RRF_K,
         }),
         Some(Source::Pointer(pp)) => steps.push(PlanStep::Pointer { plan: pp.clone() }),
+        Some(Source::Semantic(sp)) => steps.push(PlanStep::Semantic {
+            engine: if sp.hybrid.is_some() {
+                "hybrid"
+            } else {
+                "semantic"
+            },
+            route: sp.hybrid.map(Route::name),
+            lang: sp.lang.clone(),
+            bridge: sp.bridge,
+            text: match &sp.text {
+                Atom::Str(s) => format!("{s:?}"),
+                Atom::Param(n) => format!("${n}"),
+            },
+            limit: opts.limit,
+            rrf_k: crate::fuse::RRF_K,
+            model: match (sp.hybrid, env.semantic) {
+                (Some(Route::Lexical), _) | (_, None) => None,
+                (_, Some(port)) => Some(hex(&port.model_hash())),
+            },
+        }),
         Some(Source::Entity(e)) => steps.push(PlanStep::Source {
             engine: "entity",
             lang: None,
@@ -1207,17 +1371,38 @@ fn lower_source(
             // and is refused in every build this RFC covers. Refused rather than ignored, both
             // of them, because a query that asked for one language and silently got all of
             // them is answered wrongly and says nothing about it.
+            let hybrid = match engine {
+                Some(Engine::Hybrid) => Some(match text {
+                    Atom::Str(s) if crate::ports::routes_to_lexical(s) => Route::Lexical,
+                    Atom::Str(_) => Route::Semantic,
+                    Atom::Param(_) => Route::AtRun,
+                }),
+                _ => None,
+            };
+            let semantic = matches!(engine, Some(Engine::Sem))
+                || matches!(hybrid, Some(Route::Semantic | Route::AtRun));
+            let mut bridge = false;
             let lang = match lang {
                 None => None,
+                // The embedding bridge is the one §3.5 bridge this build has, and it is a
+                // model's. The pure three — structural alignment, proposition classes, entity
+                // aliases — are not built as bridges, so a lexical `lang:any` still has
+                // nothing to cross a language with and is refused, naming what would.
+                Some(LangSel::Any) if semantic && env.semantic.is_some() => {
+                    bridge = true;
+                    None
+                }
                 Some(LangSel::Any) => {
-                    diags.push(
-                        Diagnostic::at(Code::E461, span).with_message(
-                            "`lang:any` asks for the strongest bridge per pair of partitions \
-                             (SMYSL-2.5 §3.5), which is TX-P10's; `lang:<code>` selects one \
-                             language and is available"
-                                .to_string(),
-                        ),
-                    );
+                    let why = if semantic {
+                        "`lang:any` crosses languages through an embedding (SMYSL-2.5 §3.5), and \
+                         this environment binds no semantic source"
+                    } else {
+                        "`lang:any` asks for a bridge between languages (SMYSL-2.5 §3.5), and the \
+                         one this build has is the embedding bridge, which needs `~sem` (or a \
+                         `~hybrid` that routes semantic); the pure bridges — alignment, classes, \
+                         entity aliases — are not built"
+                    };
+                    diags.push(Diagnostic::at(Code::E461, span).with_message(why.to_string()));
                     return None;
                 }
                 Some(LangSel::One(code)) => match env.scope.restrict_lang(code, candidates) {
@@ -1233,26 +1418,26 @@ fn lower_source(
                 },
             };
             match engine {
-                Some(Engine::Sem) => {
-                    diags.push(
-                        Diagnostic::at(Code::E461, span).with_message(
-                            "`~sem` consults an embedding model, which this pure build has no \
-                         port bound for"
-                                .to_string(),
-                        ),
-                    );
+                Some(Engine::Sem) | Some(Engine::Hybrid) if semantic && env.semantic.is_none() => {
+                    let why = if hybrid.is_some() {
+                        "`~hybrid` routes this text to the semantic engine, and this environment \
+                         binds no semantic source (a build with `semantic` or `semantic-candle` \
+                         and a model: `q --engine-model` or `--candle-model`)"
+                    } else {
+                        "`~sem` consults an embedding model, and this environment binds no \
+                         semantic source (a build with `semantic` or `semantic-candle` and a \
+                         model: `q --engine-model` or `--candle-model`)"
+                    };
+                    diags.push(Diagnostic::at(Code::E461, span).with_message(why.to_string()));
                     None
                 }
-                Some(Engine::Hybrid) => {
-                    diags.push(
-                        Diagnostic::at(Code::E461, span).with_message(
-                            "`~hybrid` routes between the lexical and semantic engines, so it \
-                         needs the semantic one this pure build has no port bound for"
-                                .to_string(),
-                        ),
-                    );
-                    None
-                }
+                Some(Engine::Sem) | Some(Engine::Hybrid) => Some(Source::Semantic(SemanticPlan {
+                    text: text.clone(),
+                    hybrid,
+                    lang,
+                    bridge,
+                    span,
+                })),
                 // SMYSL-2.9 OQ-83: an absent engine is `~lex`.
                 engine => Some(Source::Lexical(Lexical {
                     text: text.clone(),

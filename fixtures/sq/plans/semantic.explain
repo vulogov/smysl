@@ -1,0 +1,88 @@
+# find "connection pool saturation" ~sem
+plan sq/1
+  purity: model-dependent (~sem)
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named
+  3 scope: store:F1-incident via F1-incident -> 1 store(s) F1-incident, 8 unit(s)
+  4 partitions: 1, idf over collection
+      (no manifest): 8 unit(s)
+  5 source: semantic "connection pool saturation", 10 per partition, rrf k=60, model 070707070707
+  - supersession: superseded units give way to their newest head
+
+# find "connection pool saturation" ~hybrid
+plan sq/1
+  purity: model-dependent (~hybrid routed semantic)
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named
+  3 scope: store:F1-incident via F1-incident -> 1 store(s) F1-incident, 8 unit(s)
+  4 partitions: 1, idf over collection
+      (no manifest): 8 unit(s)
+  5 source: hybrid (routes semantic) "connection pool saturation", 10 per partition, rrf k=60, model 070707070707
+  - supersession: superseded units give way to their newest head
+
+# find $q ~hybrid
+plan sq/1
+  purity: model-dependent (~hybrid routed on a parameter)
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named
+  3 scope: store:F1-incident via F1-incident -> 1 store(s) F1-incident, 8 unit(s)
+  4 partitions: 1, idf over collection
+      (no manifest): 8 unit(s)
+  5 source: hybrid (routes on the bound text) $q, 10 per partition, rrf k=60, model 070707070707
+  - supersession: superseded units give way to their newest head
+
+# find "pool" ~sem lang:any
+plan sq/1
+  purity: model-dependent (~sem, embedding bridge)
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named
+  3 scope: store:F1-incident via F1-incident -> 1 store(s) F1-incident, 8 unit(s)
+  4 partitions: 1, idf over collection
+      (no manifest): 8 unit(s)
+  5 source: semantic lang:any "pool", 10 across every partition, embedding bridge, model 070707070707
+  - supersession: superseded units give way to their newest head
+
+# find "pool" | where near("connection pool", 0.2)
+plan sq/1
+  purity: model-dependent (near)
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named
+  3 scope: store:F1-incident via F1-incident -> 1 store(s) F1-incident, 8 unit(s)
+  4 partitions: 1, idf over collection
+      (no manifest): 8 unit(s)
+  5 source: lexical "pool", 10 per partition, rrf k=60
+  6 filters: 1 stage(s), all must hold
+  - supersession: superseded units give way to their newest head
+
+# where near("canary", 0.1)
+plan sq/1
+  purity: model-dependent (near)
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named
+  3 scope: store:F1-incident via F1-incident -> 1 store(s) F1-incident, 8 unit(s)
+  4 partitions: 1, idf over collection
+      (no manifest): 8 unit(s)
+  6 filters: 1 stage(s), all must hold
+  - supersession: superseded units give way to their newest head
+
+# find "pool" ~sem
+union
+from store:F1-incident
+find "canary" ~lex
+plan sq/1
+  purity: model-dependent (~sem)
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named
+  3 scope: store:F1-incident via F1-incident -> 1 store(s) F1-incident, 8 unit(s)
+  4 partitions: 1, idf over collection
+      (no manifest): 8 unit(s)
+  5 source: semantic "pool", 10 per partition, rrf k=60, model 070707070707
+  - supersession: superseded units give way to their newest head
+  2 resolution: no relation kinds named
+  3 scope: store:F1-incident via F1-incident -> 1 store(s) F1-incident, 8 unit(s)
+  4 partitions: 1, idf over collection
+      (no manifest): 8 unit(s)
+  5 source: lexical "canary", 10 per partition, rrf k=60
+  - supersession: superseded units give way to their newest head
+  8 set: union
+

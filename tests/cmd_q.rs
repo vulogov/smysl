@@ -411,3 +411,179 @@ fn save_then_rerun_reports_the_data_effect() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A Model2Vec directory small enough to write here (TX-P10 step 4): a word-level tokenizer over
+/// F1's vocabulary and a random-free table — each word's vector is its index's bits spread over
+/// eight dimensions — so `q --engine-model` runs with no download. What it embeds means nothing;
+/// what is tested is the command around it.
+#[cfg(feature = "semantic")]
+fn tiny_s0(dir: &Path) {
+    let words = [
+        "pool",
+        "connection",
+        "saturated",
+        "canary",
+        "latency",
+        "auth",
+        "traces",
+        "regression",
+        "wait",
+        "rollout",
+        "configuration",
+        "cause",
+        "the",
+        "eu",
+        "west",
+    ];
+    let mut vocab = serde_json::Map::new();
+    vocab.insert("[UNK]".into(), 0.into());
+    for (i, w) in words.iter().enumerate() {
+        vocab.insert((*w).into(), (i + 1).into());
+    }
+    let tokenizer = serde_json::json!({
+        "version": "1.0", "truncation": null, "padding": null,
+        "added_tokens": [{"id": 0, "content": "[UNK]", "single_word": false, "lstrip": false,
+                          "rstrip": false, "normalized": false, "special": true}],
+        "normalizer": {"type": "Lowercase"},
+        "pre_tokenizer": {"type": "Whitespace"},
+        "post_processor": null, "decoder": null,
+        "model": {"type": "WordLevel", "vocab": vocab, "unk_token": "[UNK]"}
+    });
+    let (rows, dim) = (words.len() + 1, 8usize);
+    let mut data = Vec::new();
+    for r in 0..rows {
+        for d in 0..dim {
+            let v: f32 = if (r >> (d % 4)) & 1 == 1 {
+                1.0
+            } else {
+                0.1 * d as f32
+            };
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+    // safetensors by hand: an 8-byte little-endian header length, the JSON header, the bytes.
+    let header = serde_json::json!({
+        "embeddings": {"dtype": "F32", "shape": [rows, dim], "data_offsets": [0, data.len()]}
+    })
+    .to_string();
+    let mut st = (header.len() as u64).to_le_bytes().to_vec();
+    st.extend_from_slice(header.as_bytes());
+    st.extend_from_slice(&data);
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join("model.safetensors"), st).unwrap();
+    std::fs::write(dir.join("tokenizer.json"), tokenizer.to_string()).unwrap();
+    std::fs::write(dir.join("config.json"), r#"{"normalize": true}"#).unwrap();
+}
+
+/// `q` with a model: a semantic plan runs, `--explain` labels it model-dependent and names
+/// the model, `--seed-check` refuses it with `SMY-E416` before it runs, and a lexical plan with
+/// the same model bound is still pure and still passes.
+#[cfg(feature = "semantic")]
+#[test]
+fn a_semantic_plan_runs_and_seed_check_refuses_it_with_e416() {
+    let dir = scratch("s0");
+    let model = dir.join("model");
+    tiny_s0(&model);
+    let model = model.to_string_lossy().to_string();
+    let store = f1();
+
+    let o = run(&[
+        "q",
+        "find \"connection pool\" ~sem",
+        &store,
+        "--engine-model",
+        &model,
+    ]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(!stdout(&o).trim().is_empty(), "a ranking");
+
+    let o = run(&[
+        "q",
+        "find \"connection pool\" ~sem",
+        &store,
+        "--engine-model",
+        &model,
+        "--explain",
+    ]);
+    assert!(
+        stdout(&o).contains("purity: model-dependent (~sem)"),
+        "{}",
+        stdout(&o)
+    );
+    assert!(stdout(&o).contains(", model "), "{}", stdout(&o));
+
+    let o = run(&[
+        "--seed-check",
+        "q",
+        "find \"connection pool\" ~sem",
+        &store,
+        "--engine-model",
+        &model,
+    ]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(stderr(&o).contains("SMY-E416"), "{}", stderr(&o));
+    assert!(stdout(&o).is_empty(), "refused before anything ran");
+
+    let o = run(&[
+        "--seed-check",
+        "q",
+        "find \"connection pool\"",
+        &store,
+        "--engine-model",
+        &model,
+    ]);
+    assert!(o.status.success(), "{}", stderr(&o));
+
+    let o = run(&[
+        "q",
+        "find \"x\" ~sem",
+        &store,
+        "--engine-model",
+        &model,
+        "--candle-model",
+        &model,
+    ]);
+    assert_eq!(o.status.code(), Some(2), "one model at a time");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Without a model a semantic stage is refused by name, and in a build without the feature the
+/// flag is too — rather than accepted and ignored.
+#[test]
+fn a_semantic_stage_without_a_model_is_refused_by_name() {
+    let o = run(&["q", "find \"pool\" ~sem", &f1()]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(stderr(&o).contains("SMY-E461"), "{}", stderr(&o));
+    #[cfg(not(feature = "semantic"))]
+    {
+        let o = run(&[
+            "q",
+            "find \"pool\" ~sem",
+            &f1(),
+            "--engine-model",
+            "nowhere",
+        ]);
+        assert_eq!(o.status.code(), Some(2));
+        assert!(
+            stderr(&o).contains("needs a build with --features semantic"),
+            "{}",
+            stderr(&o)
+        );
+    }
+    #[cfg(not(feature = "semantic-candle"))]
+    {
+        let o = run(&[
+            "q",
+            "find \"pool\" ~sem",
+            &f1(),
+            "--candle-model",
+            "nowhere",
+        ]);
+        assert_eq!(o.status.code(), Some(2));
+        assert!(
+            stderr(&o).contains("needs a build with --features semantic-candle"),
+            "{}",
+            stderr(&o)
+        );
+    }
+}

@@ -488,7 +488,7 @@ change moved no answer.
 | structural alignment | SMYSL-2.4 `align` table | pure | TX-P6 when the table exists |
 | proposition classes | SMYSL-2.4 classes (`strict` normative, D-7) | pure | after TX-P7 |
 | entity aliases | `x.text/entity` + `x.text/same-as` | pure | TX-P6 |
-| multilingual embeddings | S0 / S1 (`SemanticSource`) | model-dependent | TX-P10 |
+| multilingual embeddings | S0 / S1 (`SemanticSource`) | model-dependent | TX-P10 — *built at step 4: `~sem lang:any`, one cosine ranking over every partition* |
 | query-term translation | `Translator` port (§3.15) | model-dependent | TX-P10 |
 
 The bridge used is a column of the result and a line of `--explain`. A partition reachable by no
@@ -830,6 +830,12 @@ pub trait SemanticSource {
 
 S0's `Semantic` and S1's encoder implement it in their own crates; the facade wires them under
 features `semantic` and `semantic-candle`.
+
+*As built (TX-P10 step 4):* one method, `search(query, within, limit)`, beside `model_hash` —
+`near(…)` reads the cosines `search` gives over the candidates, so the query is embedded once
+rather than every unit's text again through `similarity`. Neither embedder implements it:
+`smysl_query::RetrieverSource` adapts any `Retriever` with its model's hash, and lives in
+`smysl-query` itself, which is pure, since `Retriever` is.
 
 ### 3.15 Natural-language front end
 
@@ -1612,6 +1618,7 @@ Each step has an exit test. Steps within a phase are ordered.
    — **done 2026-10-27**, below.
 4. `SemanticSource` adapters; `~sem`, `~hybrid`, `near`, embedding bridge. *Exit:* purity labels
    and `E416` on every semantic plan; GE-T5 cross-lingual arm run (SMYSL-2.4 owns GE-T5).
+   — **done 2026-10-27**, below.
 5. `Translator` port and provider adapter; `q --from-question`. *Exit:* §5.6 unit tests; GE-T12 run.
 
    **Step 1 done 2026-10-26: S1's dependencies, and the no-C claims as a check.**
@@ -1715,6 +1722,55 @@ Each step has an exit test. Steps within a phase are ordered.
      first time — the cross-language set is what says the vectors mean something.
    - Not tried: `bge-m3` (2.3 GB) and `multilingual-e5-base` on real weights; their
      architecture is exercised on the generated XLM-R only.
+
+   **Step 4 done 2026-10-27: the semantic stages, labelled, and GE-T5's cross-lingual arm.**
+   - **The port.** `smysl_query::SemanticSource` (above, as built), bound on `Env::with_semantic`;
+     `RetrieverSource` adapts S0's `Semantic` and S1's `CandleSemantic` alike. S0's `Model`
+     gained a hash (BLAKE3 over its three files), so both models can be named.
+   - **`~sem`** ranks each partition by the source's cosine and fuses by RRF, as `~lex` does
+     (§3.4): cosines are no more comparable across partitions by default than BM25 scores.
+   - **`lang:any` is the embedding bridge** (§3.5), with the owner: it lowers with `~sem`, or a
+     `~hybrid` that routes semantic, and a bound source, and is **one cosine ranking over every
+     partition** — the fused score the cosine, each hit placed in its own partition. A lexical
+     `lang:any` is still `E461`, now naming the pure bridges as unbuilt; `W465` stays
+     unregistered, since with the bridge every partition is reachable.
+   - **`~hybrid`** routes by `Hybrid`'s measured rule (an identifier to BM25), restated as
+     `smysl_query::routes_to_lexical` because the pure crate cannot reach `smysl-embed`; a
+     facade test holds the two to one answer. A literal routes at planning — an identifier
+     plans **pure** with no model bound — and a `$parameter` on the bound text, so its plan is
+     model-dependent. `Hybrid`'s `kinds` half has no counterpart: a `where kind` comes after
+     the source in sq/1.
+   - **`near("…", t)`** lowers with a bound source; each text is embedded once per run, against
+     the units still in the answer. A threshold outside (0, 1] is `E460` — the source returns no
+     unit at or below zero.
+   - **Purity.** `Plan::purity` names each reason once (`~sem`, `~hybrid routed semantic`,
+     `~hybrid routed on a parameter`, `embedding bridge`, `near`); `Plan::models` holds the
+     model's hash, which a save writes to `query:models` (empty before). `Plan::seed_check`
+     is **`SMY-E416`**, now registered, and `q --seed-check` raises it before anything runs. A
+     rerun under another model is **`SMY-W467`**, registered, and the answer still prints.
+     `fixtures/sq/plans/semantic.explain` snapshots seven semantic plans over a stub source;
+     every one is model-dependent and refused (`smysl-query/tests/semantic.rs`).
+   - **CLI.** `q --engine-model DIR` (S0, `semantic`) and `--candle-model DIR` (S1,
+     `semantic-candle`; vectors in `<store>.vec-<hash12>`, or `index/units.vec-…` in a library;
+     pooling from the directory's `1_Pooling/config.json`, else mean). In a build without the
+     feature the flag is refused by name. `cmd_q.rs` runs it on a Model2Vec model the test
+     writes.
+   - **GE-T5's cross-lingual arm** (`tests/ge_t5_cross.rs`, owner's choice of gold): the 59
+     verses of `fixtures/stability/corpus/` in five languages, the same line in two files the
+     same verse — of record, and Russian's Ps.13 checked as the Synodal Ps.14. Against no bar
+     (§5.5's coder clause needs a sheet; owed), with a smoke bar of ten times chance set first:
+
+     | model | top-1, 20 ordered pairs | precision at recall 0.7 | threshold |
+     |---|---:|---:|---:|
+     | S0 `potion-multilingual-128M` | 0.6814 | 0.2012 | 0.4078 |
+     | S1 `multilingual-e5-small` | **0.9322** | **0.8568** | 0.8884 |
+
+     Chance is 0.0169; 590 gold pairs among 34,810. **The finding is S0's second column**: its
+     nearest neighbour in a language is right two times in three, but its scores do not
+     compare across pairs, so no one threshold separates — which is what a same-as engine
+     needs. S1's do. And e5's cosines sit in a narrow high band (0.74–0.82 over F1's eight
+     units for one query; 0.89 at recall 0.7 here), so a `near` threshold is a fact about a
+     model, not a constant to carry between them.
 
 **TX-P12 — schema evolution**
 1. FC-9 decode/encode in `smysl-core`, `SchemaDecl.lenses`, `Store::schema_decls`, `W430`, `W429`.

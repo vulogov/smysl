@@ -185,6 +185,40 @@ pub fn explain(plan: &Plan) -> String {
                     ));
                 }
             }
+            PlanStep::Semantic {
+                engine,
+                route,
+                lang,
+                bridge,
+                text,
+                limit,
+                rrf_k,
+                model,
+            } => {
+                let lang = match lang {
+                    Some(code) => format!(" lang:{code}"),
+                    None => String::new(),
+                };
+                let route = match route {
+                    Some(r) => format!(" (routes {r})"),
+                    None => String::new(),
+                };
+                let model = match model {
+                    Some(h) => format!(", model {}", &h[..12]),
+                    None => String::new(),
+                };
+                if *bridge {
+                    out.push_str(&format!(
+                        "  5 source: {engine}{route} lang:any {text}, {limit} across every \
+                         partition, embedding bridge{model}\n"
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "  5 source: {engine}{route}{lang} {text}, {limit} per partition, rrf \
+                         k={rrf_k}{model}\n"
+                    ));
+                }
+            }
             PlanStep::Filter { stages } => {
                 out.push_str(&format!("  6 filters: {stages} stage(s), all must hold\n"));
             }

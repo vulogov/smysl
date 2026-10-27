@@ -364,8 +364,8 @@ pub fn to_records(
     let mut payload = HObject::new();
     payload.insert(key("query:text"), s(&text));
     payload.insert(key("query:recipe"), s(&recipe_hex));
-    // Empty for a pure plan (§3.6), and every plan this build produces is pure.
-    payload.insert(key("query:models"), list(Vec::new()));
+    // Empty for a pure plan (§3.6); the model's hash for one that consults a model.
+    payload.insert(key("query:models"), list(plan.models.clone()));
     payload.insert(key("query:result-hash"), s(&result_hex));
     payload.insert(key("query:sq"), s(&format!("sq/{}", plan.sq)));
     payload.insert(
@@ -578,6 +578,30 @@ fn reproduces(env: &Env<'_>, chain: &str) -> bool {
 /// declarations no longer reproduce (§3.6), because the query would then answer from part of
 /// its meaning. `current` plans the text again with every schema pin dropped, returns that
 /// plan and run, and reports `diff(E_pin, E_cur)` as the schema effect.
+/// `SMY-W467` (§3.6): a saved query that recorded a model, rerun under another. The rerun still
+/// answers — a model-dependent query was always going to — and the diffs are printed, but
+/// labelled: a unit that came or went may be the model's doing rather than the data's.
+fn model_changed(saved: &SavedQuery, plan: &Plan) -> Option<Diagnostic> {
+    if saved.models.is_empty() || saved.models == plan.models {
+        return None;
+    }
+    let short = |v: &[String]| {
+        if v.is_empty() {
+            "none".to_string()
+        } else {
+            v.iter()
+                .map(|h| h[..h.len().min(12)].to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    };
+    Some(Diagnostic::new(Code::W467).with_message(format!(
+        "saved under model {} and rerun under {}; the data effect is not comparable",
+        short(&saved.models),
+        short(&plan.models)
+    )))
+}
+
 pub fn rerun(
     saved: &SavedQuery,
     env: &Env<'_>,
@@ -629,7 +653,11 @@ pub fn rerun(
                 ))]);
         }
     }
-    let run = crate::run(&plan, env, &pinned)?;
+    let mut run = crate::run(&plan, env, &pinned)?;
+    let incomparable = model_changed(saved, &plan);
+    if let Some(w) = &incomparable {
+        run.warnings.push(w.clone());
+    }
     let now = run.answer.uids();
     let recipe_matches = hex(&Recipe::of(&plan, opts).hash()) == saved.recipe;
     let data_effect = SetDiff::between(&saved.results, &now);
@@ -647,7 +675,10 @@ pub fn rerun(
         .header
         .retain(|u| !matches!(u, crate::ast::Using::Schema { .. }));
     let cur_plan = crate::plan(&at_cur, env, &pinned)?;
-    let cur_run = crate::run(&cur_plan, env, &pinned)?;
+    let mut cur_run = crate::run(&cur_plan, env, &pinned)?;
+    if let Some(w) = incomparable {
+        cur_run.warnings.push(w);
+    }
     let schema_effect = SetDiff::between(&now, &cur_run.answer.uids());
     Ok(Rerun {
         data_effect,

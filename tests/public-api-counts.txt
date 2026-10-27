@@ -23,19 +23,19 @@
 # A change here is not a failure. It is a question: did you mean to?
 #
 # Regenerate with `make api`. Check with `make api-check`.
-smysl-core       10224
+smysl-core       10228
 smysl-graph      5359
 smysl-check      256
 smysl-pack       544
 smysl-thread     267
 smysl-render     915
 smysl-retrieve   379
-smysl-embed      62
+smysl-embed      64
 smysl-provider   726
 smysl-ingest     1841
 smysl-tui        218
 smysl-text       3836
-smysl-query      3235
+smysl-query      3372
 smysl-measure    3355
 smysl-lib        1535
-smysl-embed-candle 127
+smysl-embed-candle 128

@@ -58,6 +58,29 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### `~sem`, `~hybrid`, `near` and `lang:any` run
+
+TX-P10 step 4 (SMYSL-2.5 §3.2–§3.5, §3.14).
+
+- **`smysl q --engine-model DIR`** (S0, `semantic`) and **`--candle-model DIR`** (S1,
+  `semantic-candle`, its vectors cached beside the store) bind an embedding model, and the four
+  stages lower: `~sem` ranks each partition by cosine and fuses by RRF; `lang:any` is the
+  embedding bridge, one ranking over every partition; `~hybrid` takes the measured routing — an
+  identifier goes to BM25 and the plan stays pure — and decides a `$parameter` on its binding;
+  `where near("…", t)` keeps the units at or above a cosine in (0, 1]. Without a model each is
+  refused by name, as before.
+- **A plan says why it is model-dependent** (`purity: model-dependent (~sem, embedding bridge)`)
+  and which model, and **`--seed-check` refuses it with `SMY-E416`** before anything runs. A
+  saved query writes the model's hash to `query:models`; a rerun under another model prints its
+  diffs with **`SMY-W467`**. Both codes registered: 148.
+- **`smysl::query::SemanticSource`**, the port, and `RetrieverSource`, which adapts S0 and S1
+  alike. `smysl::EmbedModel::hash` and `Semantic::model_hash`; `smysl::Pooling::from_dir`.
+- **GE-T5's cross-lingual arm** (`tests/ge_t5_cross.rs`): 59 verses in five languages, the same
+  verse the gold. S1 `multilingual-e5-small` finds a verse's translation first 93.2% of the time
+  and reaches precision 0.857 at recall 0.7; S0 `potion-multilingual-128M` 68.1% and 0.201 — it
+  ranks within a language and its scores do not compare across pairs. Against no bar; the coder
+  clause is owed.
+
 ### Transformer embeddings: `semantic-candle` does something
 
 TX-P10 step 3 (SMYSL-2.5 §3.14, §5.7).

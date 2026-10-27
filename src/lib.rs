@@ -479,8 +479,9 @@ mod tests {
         // store, in a fourteenth group; 144 with `SMY-W500` (TX-P13c step 1), raised by a
         // union of shards when a reference waits on one not loaded; 145 with `SMY-E505` (TX-P13d),
         // raised by `lib migrate` and `lib verify --primary`; 146 with `SMY-W476` (TX-P10
-        // step 3), raised by S1's vector cache.
-        assert_eq!(Code::ALL.len(), 146);
+        // step 3), raised by S1's vector cache; 148 with `SMY-E416` and `SMY-W467` (step 4),
+        // raised by `--seed-check` and by a rerun under another model.
+        assert_eq!(Code::ALL.len(), 148);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

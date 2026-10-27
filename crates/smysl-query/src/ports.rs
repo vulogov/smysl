@@ -387,3 +387,87 @@ pub fn unresolvable(item: &ScopeItem, span: Span, scope: &str, why: &str) -> Dia
         item_text(item)
     ))
 }
+
+/// An embedding model over a store's units: what `~sem`, `~hybrid` routed semantic, `near(…)`
+/// and the embedding bridge consult (SMYSL-2.5 §3.14, TX-P10 step 4).
+///
+/// The port that keeps this crate pure. S0 (`smysl-embed`) and S1 (`smysl-embed-candle`) are in
+/// the impure tier, and neither depends on this crate; [`RetrieverSource`] adapts either one,
+/// since both are already `Retriever`s, and the facade binds it under `semantic` or
+/// `semantic-candle`. A plan that reaches this port is `model-dependent`, whatever answers it.
+///
+/// **One method where §3.14 sketched two.** Its `similarity(a, b)` compared two texts, and
+/// `near("…", t)` would have used it to compare the query with each unit's text — one
+/// embedding of every candidate per query, which is the index's work done again. `search`
+/// over the candidates with no limit gives the same cosines from the vectors already indexed,
+/// with the query embedded once.
+pub trait SemanticSource {
+    /// The model's hash: what a saved query records (`query:models`) and what `SMY-W467`
+    /// compares on a rerun. Lowercase hex in both places.
+    fn model_hash(&self) -> [u8; 32];
+
+    /// The units of `within` most like `query`, highest cosine first, ties by uid; at most
+    /// `limit`, and none at or below zero. An empty `within` is no units, never every unit:
+    /// the planner always knows its candidates, and an empty set of them is an empty answer.
+    fn search(&self, query: &str, within: &BTreeSet<Uid>, limit: usize)
+        -> Vec<smysl_retrieve::Hit>;
+}
+
+/// A [`SemanticSource`] over any `Retriever` and the hash of the model behind it.
+///
+/// S0's `Semantic` and S1's `CandleSemantic` both rank by cosine behind `Retriever`, so one
+/// adapter serves both, and the facade's `semantic` and `semantic-candle` differ only in
+/// which index they hand it.
+pub struct RetrieverSource<R> {
+    retriever: R,
+    model_hash: [u8; 32],
+}
+
+impl<R: smysl_retrieve::Retriever> RetrieverSource<R> {
+    pub fn new(retriever: R, model_hash: [u8; 32]) -> RetrieverSource<R> {
+        RetrieverSource {
+            retriever,
+            model_hash,
+        }
+    }
+
+    pub fn retriever(&self) -> &R {
+        &self.retriever
+    }
+}
+
+impl<R: smysl_retrieve::Retriever> SemanticSource for RetrieverSource<R> {
+    fn model_hash(&self) -> [u8; 32] {
+        self.model_hash
+    }
+
+    fn search(
+        &self,
+        query: &str,
+        within: &BTreeSet<Uid>,
+        limit: usize,
+    ) -> Vec<smysl_retrieve::Hit> {
+        // `Query::within` reads an empty set as "no restriction", which is the opposite of what
+        // an empty candidate set means here.
+        if within.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+        let q = smysl_retrieve::Query::new(query, limit).within(within.iter().copied());
+        self.retriever.search(&q)
+    }
+}
+
+/// Whether `~hybrid` sends `text` to the lexical engine: one token carrying a separator, as
+/// `pool.wait_ms` or `latency_by_region.csv`, is a name, and BM25 answers names perfectly.
+///
+/// `smysl_embed::looks_like_identifier`'s rule, restated here because that crate is in the
+/// impure tier and this one cannot reach it. The facade's tests hold the two to the same
+/// answer, so the measured routing (`Hybrid`, 0.84 MRR against the merge's 0.78) is the one
+/// `~hybrid` takes. The `kinds` half of `Hybrid::routes_to_lexical` has no counterpart: a
+/// `where kind` stage comes after the source in sq/1, so the source cannot see it.
+pub fn routes_to_lexical(text: &str) -> bool {
+    let q = text.trim();
+    !q.is_empty()
+        && !q.chars().any(char::is_whitespace)
+        && q.chars().any(|c| matches!(c, '_' | '.' | '/' | ':' | '-'))
+}

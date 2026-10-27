@@ -18,6 +18,21 @@ pub enum Pooling {
 }
 
 impl Pooling {
+    /// The pooling a model directory declares, by the sentence-transformers convention both
+    /// families of §3.14 ship: `1_Pooling/config.json`, `pooling_mode_cls_token` or
+    /// `pooling_mode_mean_tokens`. `None` when the file is absent, unreadable, or declares
+    /// neither or both — a caller then says which, rather than this guessing.
+    pub fn from_dir(path: impl AsRef<std::path::Path>) -> Option<Pooling> {
+        let bytes = std::fs::read(path.as_ref().join("1_Pooling").join("config.json")).ok()?;
+        let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+        let on = |k: &str| v.get(k).and_then(serde_json::Value::as_bool) == Some(true);
+        match (on("pooling_mode_mean_tokens"), on("pooling_mode_cls_token")) {
+            (true, false) => Some(Pooling::Mean),
+            (false, true) => Some(Pooling::Cls),
+            _ => None,
+        }
+    }
+
     /// The id that enters the model hash. Stable: changing one re-embeds every cache.
     pub const fn id(self) -> &'static str {
         match self {

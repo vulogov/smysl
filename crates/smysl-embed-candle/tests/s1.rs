@@ -406,3 +406,24 @@ fn what_is_not_a_model_is_refused_by_name() {
         Err(Error::Missing(n, _)) if n == "tokenizer.json"
     ));
 }
+
+#[test]
+fn a_directory_declares_its_pooling_the_sentence_transformers_way() {
+    let d = dir("pooling-file");
+    assert_eq!(Pooling::from_dir(&d), None, "no file");
+    std::fs::create_dir_all(d.join("1_Pooling")).unwrap();
+    let write = |mean: bool, cls: bool| {
+        std::fs::write(
+            d.join("1_Pooling").join("config.json"),
+            serde_json::json!({"pooling_mode_mean_tokens": mean, "pooling_mode_cls_token": cls})
+                .to_string(),
+        )
+        .unwrap()
+    };
+    write(true, false);
+    assert_eq!(Pooling::from_dir(&d), Some(Pooling::Mean));
+    write(false, true);
+    assert_eq!(Pooling::from_dir(&d), Some(Pooling::Cls));
+    write(true, true);
+    assert_eq!(Pooling::from_dir(&d), None, "both is not a declaration");
+}

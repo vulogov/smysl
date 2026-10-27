@@ -66,7 +66,8 @@ pub use plan::{
     Plan, PlanExpr, PlanOptions, PlanStep, Purity, ShapePlan, Source, TimePlan, TraversalPlan,
 };
 pub use ports::{
-    Axis, Bounds, Candidates, Entities, IdfScope, Partition, PartitionKey, Scope, Times,
+    routes_to_lexical, Axis, Bounds, Candidates, Entities, IdfScope, Partition, PartitionKey,
+    RetrieverSource, Scope, SemanticSource, Times,
 };
 pub use print::print;
 pub use saved::{bind, load, rerun, to_records, Recipe, Rerun, SavedQuery, SetDiff};
