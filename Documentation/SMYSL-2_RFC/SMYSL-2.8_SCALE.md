@@ -1602,6 +1602,16 @@ in every ported signature; §3.2's sketch and §5.2's shapes are otherwise uncha
   The build now includes `text index --rebuild`, which is the kept postings: 91 s in all. GE-T7
   on a real corpus of a thousand works stays owed.
 
+- **GE-T7's single-record append on primary shards — met (2026-10-26).** Timed in parts, the
+  5.91 ms of P13d was about 3.5 ms of one redb commit, nearly all of it the disk's full sync,
+  0.7 ms before any write, and 0.3 ms after. The 0.7 ms was routing building a map of every part
+  of every manifest for one record; it now looks up only the parts the batch's units cite
+  (0.1 ms). The store's fold also rewrote three unchanged metadata keys on every commit; it
+  writes them only when they change. Median of five, on the stand-in: **on primary shards
+  4.00–4.71 ms** over six runs, **in index mode 4.08–4.55 ms** over three. The sync varies by a
+  millisecond from run to run, which is the margin left. With it, **every threshold of GE-T7 is
+  met on the stand-in, in index mode and on primary shards**; GE-T7 on a real corpus stays owed.
+
 ## 7. Risks and mitigations
 
 | risk | why it is real | mitigation |

@@ -58,6 +58,20 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### A single-record append under 5 ms on primary shards
+
+GE-T7's append threshold, the one the stand-in still missed on primary shards (5.91 ms against 5).
+
+- **Routing a batch looks up only the parts its units cite.** It built a map of every part of
+  every manifest on each append: at a thousand works, 0.6 ms of a one-record append, now 0.1 ms.
+  Where each record goes is unchanged.
+- **The unit store writes its metadata only when it changes.** Every fold rewrote three
+  unchanged keys, and so carried that table's pages into each commit.
+- On GE-T7's stand-in of 10⁶ units, the single-record append to the 10⁵-unit shard, median of
+  five: on primary shards 4.00–4.71 ms over six runs, in index mode 4.08–4.55 ms over three. One
+  full disk sync is about 3.5 ms of either, and varies by a millisecond run to run, so the
+  margin is the disk's.
+
 ### `find` over the postings a library keeps
 
 SMYSL-2.5 OQ-91 and its step, with the §3.4 amendment: GE-T7's scoped query, the last of its

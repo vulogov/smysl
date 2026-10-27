@@ -535,11 +535,23 @@ pub(super) fn fold(
         records: seq,
     };
     {
+        // Written only when they change: an unchanged insert still copies the table's pages
+        // into the commit, and every single-record append paid for it.
         let mut meta = txn.open_table(META).map_err(backend)?;
-        meta.insert("layout", LAYOUT.to_be_bytes().as_slice())
-            .map_err(backend)?;
-        meta.insert("mode", b"index".as_slice()).map_err(backend)?;
-        meta.insert("logs", kind.tag()).map_err(backend)?;
+        let layout = LAYOUT.to_be_bytes();
+        for (key, value) in [
+            ("layout", layout.as_slice()),
+            ("mode", b"index".as_slice()),
+            ("logs", kind.tag()),
+        ] {
+            let same = meta
+                .get(key)
+                .map_err(backend)?
+                .is_some_and(|v| v.value() == value);
+            if !same {
+                meta.insert(key, value).map_err(backend)?;
+            }
+        }
         let mut logs = txn.open_table(LOGS).map_err(backend)?;
         let row = LogRow {
             ix,

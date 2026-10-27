@@ -417,25 +417,39 @@ pub(crate) fn stamp(shards: &BTreeMap<String, ShardLog>) -> (u64, [u8; 32]) {
 
 /// Where each record of a batch goes.
 pub(crate) fn route(store: &Store, index: &UidShards, records: &[Record]) -> Vec<String> {
-    // Which expression holds each part, from every manifest the library and the batch hold.
-    let mut part_alias: BTreeMap<Tid, String> = BTreeMap::new();
+    // Which expression holds each part the batch's units cite, from every manifest the library
+    // and the batch hold. Only those parts: a map of every part was built on every append, and
+    // at a thousand works it was most of what routing one record cost.
+    let cited: BTreeSet<Tid> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Unit(u) => u
+                .source
+                .as_ref()
+                .and_then(|s| Store::part_of_reference(&s.reference)),
+            _ => None,
+        })
+        .collect();
+    let mut part_alias: BTreeMap<Tid, &str> = BTreeMap::new();
     let batch_manifests = records.iter().filter_map(|r| match r {
         Record::Manifest(m) => Some(m),
         _ => None,
     });
-    for m in store.manifests().map(|(_, m)| m).chain(batch_manifests) {
-        if !m.alias_is_valid() {
-            continue;
-        }
-        for p in &m.parts {
-            part_alias
-                .entry(p.tid)
-                .and_modify(|a| {
-                    if m.alias < *a {
-                        *a = m.alias.clone();
-                    }
-                })
-                .or_insert_with(|| m.alias.clone());
+    if !cited.is_empty() {
+        for m in store.manifests().map(|(_, m)| m).chain(batch_manifests) {
+            if !m.alias_is_valid() {
+                continue;
+            }
+            for p in m.parts.iter().filter(|p| cited.contains(&p.tid)) {
+                part_alias
+                    .entry(p.tid)
+                    .and_modify(|a| {
+                        if m.alias.as_str() < *a {
+                            *a = &m.alias;
+                        }
+                    })
+                    .or_insert(&m.alias);
+            }
         }
     }
 
@@ -447,7 +461,7 @@ pub(crate) fn route(store: &Store, index: &UidShards, records: &[Record]) -> Vec
                 .source
                 .as_ref()
                 .and_then(|s| Store::part_of_reference(&s.reference))
-                .and_then(|tid| part_alias.get(&tid).cloned())
+                .and_then(|tid| part_alias.get(&tid).map(|a| a.to_string()))
                 .unwrap_or_else(|| CATALOG.to_string());
             placed.insert(canonical_uid(u), shard);
         }
