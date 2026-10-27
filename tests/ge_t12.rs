@@ -37,6 +37,7 @@ use std::path::{Path, PathBuf};
 use smysl::query::{accept, run, Answer, Env, PlanOptions, StoreScope};
 use smysl::Store;
 
+#[cfg(feature = "local")]
 const BAR: f64 = 0.70;
 
 struct Item {
@@ -99,6 +100,16 @@ fn every_gold_query_is_accepted_and_answers() {
     assert_eq!(set.len(), 100, "§5.6 asks for a hundred");
     let ids: BTreeSet<&str> = set.iter().map(|i| i.id.as_str()).collect();
     assert_eq!(ids.len(), 100, "ids are unique");
+    // A question may recur across fixtures, since each asks it of a different store.
+    let asked: BTreeSet<(&str, &str)> = set
+        .iter()
+        .map(|i| (i.store.as_str(), i.question.trim()))
+        .collect();
+    assert_eq!(asked.len(), 100, "no question is asked twice of one store");
+    assert!(
+        asked.iter().all(|(_, q)| !q.is_empty()),
+        "every row asks something"
+    );
     for i in &set {
         let s = store(&i.store);
         let scope = StoreScope::new(i.store.clone(), &s);

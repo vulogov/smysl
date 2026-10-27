@@ -58,6 +58,18 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### The test matrix green again, and TX-P8 closed
+
+CI's test matrix had been red on every push since 2026-10-24, and the local sweep's `--all-features`
+run could not see why. Two harnesses added in TX-P13a called staging and the `time` check pass
+without the features that build them, so `--no-default-features` and eight single-feature rows did
+not compile; the staging case is now its own test under `stage`, and the `time` pass runs under
+`text`. Behind them, GE-T12's harness left its bar unused under `cli` alone, now gated on `local`,
+and its gold check also asserts no question is asked twice of one store. All twelve rows pass.
+TX-P8 is marked **complete, exit applied**: every step had landed, and draft 3's exit asks for
+GE-T10's kill criterion to be applied, not passed. It fired, `ask` is *Experimental*, and lifting
+that is OQ-87's and OQ-88's.
+
 ### A question in, a query out: `q --from-question`
 
 TX-P10 step 5 (SMYSL-2.5 §3.15, §5.6). TX-P10 is complete.

@@ -206,33 +206,41 @@ fn ladder() {
         println!("  {:<28} {:>9.1} ms", "first read after it", ms(t));
         // Staging (TX-P13a step 10): fifty new units checked against the store they would join.
         // Until that step this copied every record of the store into a new one first.
-        let fifty: Vec<smysl_core::UnitCore> = (0..50)
-            .map(|i| {
-                UnitCoreBuilder::new(
-                    KernelType::Prose,
-                    format!("Staged unit {i}."),
-                    Status::Cited,
-                )
-                .source(SourceRef::new(SourceKind::Doc, format!("bench:stage#{i}")))
-                .build()
-                .unwrap()
-            })
-            .collect();
-        let attest = smysl_ingest::Attest::new(
-            AgentId::new("tool:ladder").unwrap(),
-            smysl_core::Rung::Document,
-            smysl_core::Hlc::new(1, 0, AgentId::new("tool:ladder").unwrap()),
-        );
-        let t = Instant::now();
-        let staged =
-            smysl_ingest::stage::prepare(&store, fifty, Vec::new(), Default::default(), &attest);
-        println!(
-            "  {:<28} {:>9.1} ms  ({} records, {} diagnostics)",
-            "stage 50 units",
-            ms(t),
-            staged.records().len(),
-            staged.report.diagnostics.len()
-        );
+        #[cfg(feature = "stage")]
+        {
+            let fifty: Vec<smysl_core::UnitCore> = (0..50)
+                .map(|i| {
+                    UnitCoreBuilder::new(
+                        KernelType::Prose,
+                        format!("Staged unit {i}."),
+                        Status::Cited,
+                    )
+                    .source(SourceRef::new(SourceKind::Doc, format!("bench:stage#{i}")))
+                    .build()
+                    .unwrap()
+                })
+                .collect();
+            let attest = smysl_ingest::Attest::new(
+                AgentId::new("tool:ladder").unwrap(),
+                smysl_core::Rung::Document,
+                smysl_core::Hlc::new(1, 0, AgentId::new("tool:ladder").unwrap()),
+            );
+            let t = Instant::now();
+            let staged = smysl_ingest::stage::prepare(
+                &store,
+                fifty,
+                Vec::new(),
+                Default::default(),
+                &attest,
+            );
+            println!(
+                "  {:<28} {:>9.1} ms  ({} records, {} diagnostics)",
+                "stage 50 units",
+                ms(t),
+                staged.records().len(),
+                staged.report.diagnostics.len()
+            );
+        }
         let t = Instant::now();
         std::hint::black_box(store.units_in_observed_order());
         println!("  {:<28} {:>9.1} ms", "units_in_observed_order", ms(t));

@@ -162,15 +162,16 @@ fn check_functions_take_every_shape() {
         smysl_check::passes::epistemics::run(s, &mut report);
         smysl_check::passes::commitment::run(s, &mut report);
         smysl_check::passes::trust::run(s, &mut report);
+        #[cfg(feature = "text")]
         smysl_check::passes::time::run(s, &mut report);
         report
     });
 }
 
 #[test]
-fn pack_thread_render_retrieve_and_ingest_functions_take_every_shape() {
+fn pack_thread_render_and_retrieve_functions_take_every_shape() {
     use smysl::{PackRequest, ThreadSchema};
-    use smysl_core::{AgentId, Hlc, Lod, Rung, ThreadId};
+    use smysl_core::{AgentId, Lod, ThreadId};
 
     let sal = |s: &Store| smysl::salience(s, &SalienceRequest::default());
     every_shape!(|s, _root| smysl::pack(s, &sal(&fixture().0), &PackRequest::default()));
@@ -201,6 +202,13 @@ fn pack_thread_render_retrieve_and_ingest_functions_take_every_shape() {
         use smysl::Retriever;
         smysl::Bm25::index_with(s, smysl::Tokenizer::plain()).search(&smysl::Query::new("claim", 5))
     });
+}
+
+// Staging is the `stage` feature's, and `smysl-ingest` is not in the tree without it.
+#[cfg(feature = "stage")]
+#[test]
+fn staging_takes_every_shape() {
+    use smysl_core::{AgentId, Hlc, Rung};
 
     let attest = smysl_ingest::Attest::new(
         AgentId::new("tool:shapes").unwrap(),
