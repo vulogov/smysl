@@ -58,6 +58,20 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### A multilingual model for `semantic`
+
+TX-P10 step 2 (SMYSL-2.5 §3.14).
+
+- **`potion-multilingual-128M` loads** through `Model::from_dir` on `model2vec-rs` 0.3, as any
+  Model2Vec directory does; nothing in the API changed.
+- **`tests/multilingual.rs`**, behind `SMYSL_EMBED_MODEL_MULTILINGUAL`: four claims in German,
+  English, Spanish, French and Russian, each searched within every language's units. 80 of 80
+  find their own claim first, against a bar of half set before the run. A smoke test, not a
+  measure: GE-T5's cross-lingual arm is step 4.
+- `semantic.rs`'s English rankings are `potion-base-8M`'s, which still passes them on 0.3; the
+  multilingual model ranks its paraphrase case differently, and the file now says whose
+  rankings it asserts.
+
 ### No C in any feature set, checked, and the dependencies of S1
 
 TX-P10 step 1 (SMYSL-2.5 §3.14, §4).

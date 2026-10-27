@@ -1604,7 +1604,7 @@ Each step has an exit test. Steps within a phase are ordered.
    — **done 2026-10-26**, below.
 2. S0 upgrade to model2vec-rs 0.3 `wasm`; manifest note. *Exit:* `smysl-embed` tests pass (already
    shown in a worktree); multilingual smoke test with `potion-multilingual-128M` loads.
-   — *the pin and the manifest note taken at step 1, below; the smoke test is what is left.*
+   — *the pin and the manifest note taken at step 1;* **done 2026-10-26**, below.
 3. `smysl-embed-candle`: encoders, pooling, cache. *Exit:* §5.7 S1 tests.
 4. `SemanticSource` adapters; `~sem`, `~hybrid`, `near`, embedding bridge. *Exit:* purity labels
    and `E416` on every semantic plan; GE-T5 cross-lingual arm run (SMYSL-2.4 owns GE-T5).
@@ -1645,6 +1645,25 @@ Each step has an exit test. Steps within a phase are ordered.
      on a newer toolchain, could not. The facade is 1.88 already, so `semantic` costs no build
      of `smysl` anything; the crate leaves CI's 1.85 job.
    - Left for step 2: `potion-multilingual-128M` through `from_dir`.
+
+   **Step 2 done 2026-10-26: a multilingual model, loaded.** `potion-multilingual-128M`
+   (revision `73908c3`, `model.safetensors` 512 MB, 256-d) loads through the existing
+   `from_dir` on `model2vec-rs` 0.3 unchanged — §3.14's "unverified until a model directory is
+   tried" is now tried. `tests/multilingual.rs`, behind `SMYSL_EMBED_MODEL_MULTILINGUAL`: four
+   claims on unrelated subjects, each written in the five tier-1 languages, every one searched
+   within each language's four units. The bar was set before the first run — every unit
+   embedded, every claim finding itself in its own language, the right claim first in at
+   least half of the 80 cross-language searches (chance a quarter) — and the model meets it at
+   **80 of 80**. A smoke test: four distinct subjects is an easy set, and cross-lingual
+   retrieval is measured by GE-T5's cross-lingual arm at step 4.
+   - **`smysl-embed`'s tests pass on 0.3** with `potion-base-8M` (revision `bf8b056`), the
+     model they were written with: semantic 4, evaluation 1.
+   - **Finding:** `semantic.rs`'s rankings are that model's. Under `potion-multilingual-128M`
+     the paraphrase test fails — the connection-pool claim first at 0.173, the serialiser it
+     paraphrases last at 0.106, where `potion-base-8M` ranks the serialiser first by 0.010 —
+     so the multilingual model has a test of its own and a variable of its own, and the file's
+     header says whose rankings it asserts. Not a defect of 0.3: the same file passes under
+     the model it was written for.
 
 **TX-P12 — schema evolution**
 1. FC-9 decode/encode in `smysl-core`, `SchemaDecl.lenses`, `Store::schema_decls`, `W430`, `W429`.

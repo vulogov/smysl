@@ -9,6 +9,11 @@
 //! use. Set `SMYSL_EMBED_MODEL=required` alongside the path to turn a skip into a failure,
 //! which is what a release check should do: a live test that quietly skips is a live test
 //! nobody runs, and that is how a mapper stays broken without anyone noticing.
+//!
+//! The rankings asserted here are `potion-base-8M`'s, and a different model is not obliged to
+//! give them. `potion-multilingual-128M` fails the paraphrase test (TX-P10 step 2): it ranks the
+//! connection-pool claim first, 0.173, and the serialiser last, 0.106, where `potion-base-8M`
+//! ranks the serialiser first by 0.010. A multilingual model is tested in `multilingual.rs`.
 
 use smysl_core::{canonical_uid, KernelType, Record, Status, Uid, UnitCoreBuilder};
 use smysl_embed::{Model, Semantic};
