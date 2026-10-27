@@ -125,6 +125,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo xtask check-purity
 
+  # The no-C claims (SMYSL-2.5 §4): no -sys crate and no `cc` but blake3's build script, in each
+  # feature set a user is offered.
+  check-native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo xtask check-native
+
   # Rule D: every pure operation is bit-reproducible across locale, timezone, and hash
   # seed.
   determinism:
@@ -372,14 +382,15 @@ jobs:
       # inherited from the image so that what it read is on the record.
       - uses: dtolnay/rust-toolchain@stable
       - run: python3 scripts/verify-msrv.py
-      # The base is the floor of the ten crates that carry the pure path, which is the surface
-      # an embedder takes. The four above it — provider, ingest, tui and the facade — declare
-      # their own, and the script is what checks those.
+      # The base is the floor of the crates that carry the pure path, which is the surface an
+      # embedder takes. The ones above it — provider, ingest, tui, both embedders (`smysl-embed`
+      # since `model2vec-rs` 0.3, TX-P10 step 1) and the facade — declare their own, and the
+      # script is what checks those.
       - uses: dtolnay/rust-toolchain@1.85
       - run: >
           cargo check --locked --no-default-features
           -p smysl-core -p smysl-graph -p smysl-check -p smysl-pack -p smysl-thread
-          -p smysl-render -p smysl-retrieve -p smysl-embed -p smysl-eval
+          -p smysl-render -p smysl-retrieve -p smysl-eval
 
   # Internal requirements name the workspace version. Every build here uses paths, so a
   # requirement left at 1.1.0 while `smysl-ingest` calls a 1.3 item is invisible until a

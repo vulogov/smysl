@@ -51,7 +51,7 @@ MATRIX := \
 
 .DEFAULT_GOAL := help
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix crate-features gates purity update seed-fuzz fuzz-build \
-        determinism conformance eval live-ollama live-hosted doc fuzz clean sweep \
+        determinism check-native conformance eval live-ollama live-hosted doc fuzz clean sweep \
         commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables dep-versions msrv seed-fuzz fuzz-long \
         proposition-classes
 
@@ -138,7 +138,8 @@ PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-re
 # `smysl-query` is new in 1.10.0 (RFC SMYSL-2.9, TX-P6 step 1).
 # `smysl-measure` is new in 1.10.0 (RFC SMYSL-2.6, TX-P8 M1).
 # `smysl-lib` is new in 1.10.0 (RFC SMYSL-2.7, TX-P11 step 2).
-UNPUBLISHED := smysl-text smysl-query smysl-measure smysl-lib
+# `smysl-embed-candle` is new in 1.10.0 (RFC SMYSL-2.5, TX-P10 step 1).
+UNPUBLISHED := smysl-text smysl-query smysl-measure smysl-lib smysl-embed-candle
 
 # The library crates behind the facade: everything published except the facade itself, plus
 # the ones not published yet. Their *surface* is watched from the first commit — `api-check`
@@ -402,8 +403,11 @@ purity: ## Rules A and B: the library stays synchronous and offline
 determinism: ## Rule D: pure operations are bit-reproducible
 	$(CARGO) xtask determinism
 
-gates: purity determinism ## Both xtask gates
-	@echo "gates: purity and determinism clean"
+check-native: ## No -sys crate and no cc but blake3's, in each offered feature set
+	$(CARGO) xtask check-native
+
+gates: purity determinism check-native ## The three xtask gates
+	@echo "gates: purity, determinism and check-native clean"
 
 doc-cargo: ## Replay the manual's `cargo` transcripts and check its feature table
 	@# The blocks `doc-output` cannot reach. It replays `smysl` commands; these are a

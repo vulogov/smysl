@@ -813,7 +813,8 @@ multilingual model `potion-multilingual-128M` (256-d), loaded through the existi
 - Dependencies: `candle-core`, `candle-nn`, `candle-transformers`, `tokenizers` (shared with S0).
   Versions, the XLM-R implementation in `candle-transformers`, and the absence of `cc`/`-sys`
   crates with default features are **unverified** here (not in the offline registry); TX-P10
-  step 1 verifies them before any code is written.
+  step 1 verifies them before any code is written. *Verified at step 1 (2026-10-26, §6):* **candle 0.9**, because
+  0.10 and later bring Oniguruma through `tokenizers`; XLM-R present; 1.88.
 
 **Semantic sources and bridges** use a port so `smysl-query` stays pure:
 
@@ -1600,12 +1601,50 @@ Each step has an exit test. Steps within a phase are ordered.
 **TX-P10 — embeddings and NL front end**
 1. Verify S1 dependencies: versions, XLM-R support, `cargo tree` with no `-sys`/`cc` beyond the
    allowlist; add `xtask check-native`. *Exit:* `check-native` green on all four feature sets.
+   — **done 2026-10-26**, below.
 2. S0 upgrade to model2vec-rs 0.3 `wasm`; manifest note. *Exit:* `smysl-embed` tests pass (already
    shown in a worktree); multilingual smoke test with `potion-multilingual-128M` loads.
+   — *the pin and the manifest note taken at step 1, below; the smoke test is what is left.*
 3. `smysl-embed-candle`: encoders, pooling, cache. *Exit:* §5.7 S1 tests.
 4. `SemanticSource` adapters; `~sem`, `~hybrid`, `near`, embedding bridge. *Exit:* purity labels
    and `E416` on every semantic plan; GE-T5 cross-lingual arm run (SMYSL-2.4 owns GE-T5).
 5. `Translator` port and provider adapter; `q --from-question`. *Exit:* §5.6 unit tests; GE-T12 run.
+
+   **Step 1 done 2026-10-26: S1's dependencies, and the no-C claims as a check.**
+   - **candle 0.9.2, not the newest.** From 0.10.0, `candle-core` depends on `tokenizers` 0.22
+     with `features = ["onig"]` on every target but wasm, unconditionally — no candle feature
+     turns it off — and `onig` is Oniguruma, compiled through `onig_sys` and `cc`. 0.9.2
+     (2026-01-24) has no `tokenizers` dependency; `candle-core`, `candle-nn` and
+     `candle-transformers` 0.9.2 with default features off, beside `tokenizers` 0.21 with
+     `fancy-regex`, are 161 crates with no `-sys` crate and no `cc`. 0.10.2 and 0.11.0 were
+     each resolved and both reach `onig_sys`. Recorded as an upstream fact rather than worked
+     around: a `[patch]` would hold here and not for anyone depending on smysl.
+   - **XLM-R is in 0.9.2:** `candle_transformers::models::xlm_roberta::XLMRobertaModel`, the
+     family of `multilingual-e5-small`/`-base` and `bge-m3`'s encoder. A scratch crate loading a
+     `Config` from `config.json`, a `Tokenizer` from `tokenizer.json` and the model from
+     `model.safetensors` builds at 1.88. No model was in the sandbox, so loading real weights
+     is step 3's test.
+   - **1.88:** `candle-core` 0.9.2 pulls `zip` 7, which declares 1.88; 1.85–1.87 refuse it. The
+     facade is 1.88 already, so `semantic-candle` raises no floor.
+   - **`tokenizers` 0.21 is shared with S0**: `model2vec-rs` takes `^0.21` in 0.2 and 0.3.
+   - **`smysl-embed-candle`** is the crate, with the dependencies and no code, and the facade
+     has `semantic-candle = ["semantic", "dep:smysl-embed-candle"]`, so the check reads the tree
+     the encoders will be built on. Published surface: the crate's root alone.
+   - **`xtask check-native`**, in `gates` and in CI as a job of its own: `cargo tree -p smysl
+     -e normal,build` for `--no-default-features` and with `cli`, `cli,semantic` and
+     `cli,semantic-candle`, failing on a `-sys` crate other than `linux-raw-sys` (either
+     spelling, since `onig_sys` is how candle would bring C in) and on `cc` reached by anything
+     but `blake3`. It was red on its first run, as it should have been, in both semantic sets:
+     `cc` reached by `esaxx-rs`, through `model2vec-rs` 0.2.1. **Step 2's pin is therefore taken
+     here** (with the owner): `model2vec-rs = { version = "0.3", default-features = false,
+     features = ["wasm"] }`, as §2.2 verified. The four sets are then clean at 23, 76, 140 and
+     180 crates; `smysl-embed`'s tests pass as §2.2 recorded (unit 7, evaluation 1, gate 5,
+     semantic 4). 0.3.0's `fancy-regex` feature still enables `esaxx_fast`; only `wasm` leaves
+     it out, which the manifest now says. **`smysl-embed` moves to 1.88** with it: `model2vec-rs` 0.3.0 declares
+     1.88 and a 1.85 toolchain refuses it, which `make msrv` caught and §2.2's worktree, built
+     on a newer toolchain, could not. The facade is 1.88 already, so `semantic` costs no build
+     of `smysl` anything; the crate leaves CI's 1.85 job.
+   - Left for step 2: `potion-multilingual-128M` through `from_dir`.
 
 **TX-P12 — schema evolution**
 1. FC-9 decode/encode in `smysl-core`, `SchemaDecl.lenses`, `Store::schema_decls`, `W430`, `W429`.
@@ -1907,7 +1946,7 @@ without them a query builds its own over its candidates.
 | Dossier ranking by product of incomparable scales | quantised terms, GE-T10 decides; OQ-52 |
 | NL translator emits a query that reads more than asked | parse + resolve + stage allowlist, query shown before running, `--yes` required |
 | Prompt injection through dossier passages in `ask --answer` | SMYSL-2.1 guard; ground-only-on-dossier filter (`W478`); rule M cap |
-| S1 dependencies bring native code | verification is TX-P10 step 1; `check-native` in CI |
+| S1 dependencies bring native code | verification is TX-P10 step 1; `check-native` in CI — *done: candle 0.10+ do (`onig_sys`), so 0.9* |
 | Templates drift from GE-T10 gold | template-set id and hash in every recipe; reruns refuse an unknown set (`E477`) |
 | `smysl-query` grows a dependency the gate forbids | `PURE_CRATES` membership checked per crate by `xtask check-purity` |
 

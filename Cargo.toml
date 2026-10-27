@@ -11,7 +11,8 @@ edition      = "2021"
 # than this cannot parse it. `scripts/verify-msrv.py` holds the whole story — this number was
 # `1.79` for eleven releases, was false in every selection, and nothing tested it.
 # The crates needing more declare it themselves: `smysl-provider` and `smysl-ingest` 1.86,
-# `smysl-tui` and this facade 1.88. Cargo has no per-feature MSRV, so each is its maximum.
+# `smysl-tui`, `smysl-embed`, `smysl-embed-candle` and this facade 1.88. Cargo has no
+# per-feature MSRV, so each is its maximum.
 rust-version = "1.85"
 license      = "MPL-2.0"
 authors      = ["Vladimir Ulogov"]
@@ -26,6 +27,7 @@ smysl-thread   = { path = "crates/smysl-thread",   version = "1.10.0" }
 smysl-render   = { path = "crates/smysl-render",   version = "1.10.0" }
 smysl-retrieve = { path = "crates/smysl-retrieve", version = "1.10.0" }
 smysl-embed    = { path = "crates/smysl-embed",    version = "1.10.0" }
+smysl-embed-candle = { path = "crates/smysl-embed-candle", version = "1.10.0" }
 smysl-provider = { path = "crates/smysl-provider", version = "1.10.0" }
 smysl-ingest   = { path = "crates/smysl-ingest",   version = "1.10.0", default-features = false }
 smysl-tui      = { path = "crates/smysl-tui",      version = "1.10.0" }
@@ -226,6 +228,9 @@ tui       = ["dep:smysl-tui", "cli"]
 # Semantic retrieval. Off by default: it needs a model file the operator supplies, and a
 # build that cannot use one should not pay for `tokenizers` in its dependency tree.
 semantic  = ["dep:smysl-embed"]
+# Transformer embeddings (S1, SMYSL-2.5 §3.14): `semantic` and a multilingual encoder on candle.
+# Off by default for `semantic`'s reason, and more so: it is 161 crates and a forward pass.
+semantic-candle = ["semantic", "dep:smysl-embed-candle"]
 providers = ["dep:smysl-provider"]
 # Staging, rule T and M, recipes, CSV import and the quote check's callers — everything a
 # program that builds its own units needs, with no provider layer compiled in. `ingest` adds
@@ -273,6 +278,7 @@ smysl-provider = { workspace = true, optional = true }
 smysl-ingest   = { workspace = true, optional = true }
 smysl-tui      = { workspace = true, optional = true }
 smysl-embed    = { workspace = true, optional = true }
+smysl-embed-candle = { workspace = true, optional = true }
 clap           = { workspace = true, optional = true }
 getrandom      = { workspace = true, optional = true }
 

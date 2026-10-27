@@ -38,3 +38,4 @@ smysl-text       3836
 smysl-query      3235
 smysl-measure    3355
 smysl-lib        1535
+smysl-embed-candle 1

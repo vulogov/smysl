@@ -3,13 +3,15 @@
 //! ```text
 //! cargo xtask check-purity   # rules A and B (§14)
 //! cargo xtask determinism    # rule D (§25)
+//! cargo xtask check-native   # the no-C claims (SMYSL-2.5 §4)
 //! ```
 //!
-//! Both are CI gates. They exist because the properties they check - a synchronous,
-//! network-free core, and bit-reproducible pure operations - are the kind that lapse
-//! silently unless the build fails when they do.
+//! All three are CI gates. They exist because the properties they check - a synchronous,
+//! network-free core, bit-reproducible pure operations, and a build that compiles no C - are
+//! the kind that lapse silently unless the build fails when they do.
 
 mod determinism;
+mod native;
 mod purity;
 
 use std::path::PathBuf;
@@ -27,6 +29,10 @@ fn main() -> ExitCode {
         Some("determinism") => {
             println!("xtask determinism (rule D)");
             determinism::run(&root)
+        }
+        Some("check-native") => {
+            println!("xtask check-native (no -sys, no cc but blake3's)");
+            native::run(&root)
         }
         Some("all") => {
             println!("xtask check-purity (rules A, B)");
@@ -60,7 +66,8 @@ fn usage() {
          tasks:\n  \
          check-purity   assert the pure crates link no runtime, HTTP client, or arg parser\n  \
          determinism    assert every pure operation is bit-reproducible\n  \
-         all            both of the above"
+         check-native   assert each offered feature set compiles no C but blake3's build script\n  \
+         all            check-purity and determinism"
     );
 }
 

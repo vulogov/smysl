@@ -25,10 +25,10 @@
 //! A Model2Vec model is a *static* table: a token maps to a vector, and a sentence is a
 //! pooled lookup. There is no forward pass, no ONNX Runtime, no downloaded binary, no `ort`
 //! release-candidate pin, and no matmul whose reduction order depends on how the library was
-//! compiled. It is not free of native code — `tokenizers` brings one C++ file through
-//! `esaxx-rs`, which its own manifest explains — but one `.cpp` every default toolchain
-//! compiles is a different order of thing from a runtime fetched at build time, and it is
-//! used only for tokenizer *training*, which this crate never does. The cost is real — static embeddings lose most word-order and negation
+//! compiled. Since TX-P10 step 1 it compiles no C or C++ either: `tokenizers` brought one C++
+//! file through `esaxx-rs` under `model2vec-rs` 0.2, used only for tokenizer *training*, and
+//! 0.3's `wasm` feature leaves it out, which `xtask check-native` now checks. The cost is real
+//! — static embeddings lose most word-order and negation
 //! sensitivity — and it is the right trade for a format whose central claim is that two
 //! implementations agree on what a document says.
 //!

@@ -58,6 +58,25 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### No C in any feature set, checked, and the dependencies of S1
+
+TX-P10 step 1 (SMYSL-2.5 §3.14, §4).
+
+- **`cargo xtask check-native`**, in `make gates` and a CI job of its own: for the facade with
+  defaults off, with `cli`, `cli,semantic` and `cli,semantic-candle`, no `-sys` crate but
+  `linux-raw-sys` and no `cc` but `blake3`'s build script. F-11's and draft 3 §18's no-C claims
+  were sentences; this is the check, and its first run was red in both semantic sets, on the
+  C++ `smysl-embed`'s manifest had recorded and nothing had held it to.
+- **`semantic` compiles no C++.** `model2vec-rs` 0.2.1 built `esaxx-rs`'s one C++ file through
+  `cc`, for training a tokenizer, which smysl never does. `smysl-embed` now takes 0.3 with
+  `["wasm"]`, the one feature that selects `fancy-regex` without it. Same model API, same tests.
+  **`smysl-embed` now declares Rust 1.88**, which 0.3 requires; the facade's floor already.
+- **`semantic-candle`**, and `smysl-embed-candle`, which declares S1's dependencies and nothing
+  else yet: candle **0.9.2**, because from 0.10 `candle-core` depends on `tokenizers` with
+  Oniguruma (C) on every non-wasm target and no feature turns it off. XLM-R, the family of
+  `multilingual-e5` and `bge-m3`, is in 0.9.2. It needs 1.88 (`zip` 7), the facade's floor
+  already. The encoders are TX-P10 step 3.
+
 ### A single-record append under 5 ms on primary shards
 
 GE-T7's append threshold, the one the stand-in still missed on primary shards (5.91 ms against 5).
