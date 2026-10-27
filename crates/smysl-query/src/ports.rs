@@ -42,7 +42,7 @@ use std::collections::BTreeSet;
 
 use smysl_core::diag::{Code, Diagnostic, Span};
 use smysl_core::ids::Uid;
-use smysl_retrieve::Analyze;
+use smysl_retrieve::{Analyze, Postings};
 
 use crate::ast::{Name, ScopeItem};
 
@@ -188,6 +188,22 @@ pub trait Scope {
     /// is one per language rather than one per partition, and an owned analyzer per call would
     /// rebuild a stemmer for every query.
     fn analyzer(&self, _key: &PartitionKey) -> Option<&dyn Analyze> {
+        None
+    }
+
+    /// The postings a lexical source reads over `universe` (OQ-91; SMYSL-2.5 §3.4 as amended at
+    /// TX-P13): one table in which **each unit's terms are cut by its own partition's
+    /// analyzer**, so its statistics over any set of units are the sum of those units' own.
+    ///
+    /// A catalogued scope answers from the postings it keeps, which is what makes a query's cost
+    /// its candidates' rather than the store's: building a table over the whole store, once per
+    /// analyzer, for every query was 13 s over twenty works of a 10⁶-unit library and 150 s over
+    /// all of them (SMYSL-2.8 GE-T7's stand-in). One with none kept builds one over `universe`
+    /// alone, by the same rule, so the two give the same answer bit for bit.
+    ///
+    /// `None`, the default, is a scope with no catalog: the source then builds one table per
+    /// analyzer over the store, as it always has.
+    fn postings(&self, _universe: &BTreeSet<Uid>) -> Option<Box<dyn Postings + '_>> {
         None
     }
 

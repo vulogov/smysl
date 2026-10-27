@@ -465,3 +465,54 @@ fn a_dossier_over_the_library_crosses_same_as_and_its_slots_are_saved_queries() 
     assert_eq!(lower.entities, d.entities);
     assert_eq!(lower.subject, "naomi");
 }
+
+/// OQ-91: a lexical source reads the postings the library keeps, and a library keeping none
+/// builds them for the query's units by the same rule — so the two give one answer, rank for
+/// rank and score for score, at every scope and under every IDF scope.
+#[test]
+fn find_reads_the_kept_postings_and_a_build_gives_the_same_answer() {
+    use smysl_query::ports::IdfScope;
+    let mut built = build();
+    // The kept table is what `text index --rebuild` writes.
+    built.library.reindex();
+    assert!(
+        built.library.postings().is_some(),
+        "the library keeps no postings, so the kept path would not be exercised"
+    );
+    let queries = [
+        "from library\nfind \"Ruth\"\nlimit 10",
+        "from library\nfind \"the lord\"\nlimit 25",
+        "from library\nfind \"Gott\"\nlimit 10",
+        "from collection:kjv\nfind \"Naomi\"\nlimit 10",
+        "from texts\nfind \"Boas\"\nlimit 10",
+        "from channels\nfind \"meeting\"\nlimit 10",
+    ];
+    let mut ranked = 0usize;
+    for idf in [IdfScope::Partition, IdfScope::Collection, IdfScope::Library] {
+        let mut opts = PlanOptions::default();
+        opts.idf_scope = idf;
+        for q in queries {
+            let answer = |scope: &LibraryScope<'_>| {
+                let env = Env::new(built.library.store(), scope)
+                    .with_times(scope)
+                    .with_entities(scope);
+                let parsed = smysl_query::parse(q).expect("parses");
+                let plan = plan(&parsed.query, &env, &opts).expect("plans");
+                format!("{:?}", run(&plan, &env, &opts).expect("runs").answer)
+            };
+            let kept = answer(&LibraryScope::new("library", &built.library));
+            let fresh = answer(&LibraryScope::new("library", &built.library).building_postings());
+            assert_eq!(
+                kept, fresh,
+                "{idf:?} {q}: the kept postings and a build disagree"
+            );
+            if kept.contains("score") {
+                ranked += 1;
+            }
+        }
+    }
+    assert!(
+        ranked > 6,
+        "too few queries ranked anything to compare: {ranked}"
+    );
+}

@@ -46,7 +46,9 @@ use smysl_core::diag::{Code, Diagnostic};
 use smysl_core::ids::Uid;
 use smysl_core::types::RelKind;
 use smysl_graph::{SalienceRequest, Store};
-use smysl_retrieve::{Analyze, Bm25, MemPostings, Query as RQuery, Retriever, Subset, Tokenizer};
+use smysl_retrieve::{
+    Analyze, Bm25, MemPostings, Postings, Query as RQuery, Retriever, Subset, Tokenizer,
+};
 
 use crate::ast::TimeOp;
 use crate::ast::{Atom, Count, Dir};
@@ -524,13 +526,51 @@ fn lexical(
     // supplies the analyzer behind it.
     let plain = Tokenizer::plain();
     let mut tables: BTreeMap<String, MemPostings> = BTreeMap::new();
+    // The scope's own postings, when it has them (OQ-91): one table, each unit cut by its own
+    // partition's analyzer, over the widest universe this query's IDF scope reads.
+    let library_wide: BTreeSet<Uid>;
+    let needed = match opts.idf_scope {
+        IdfScope::Library => {
+            library_wide = env.store.units().map(|(uid, _)| *uid).collect();
+            &library_wide
+        }
+        IdfScope::Partition | IdfScope::Collection => &p.candidates,
+    };
+    let shared = env.scope.postings(needed);
 
     let mut lists: Vec<Ranked> = Vec::new();
+    // One table for every partition: each term's postings read once for the query and dealt to
+    // the partitions, and the statistics a partition is scored by counted once, rather than the
+    // whole universe's list filtered, and its statistics counted again, for every partition.
+    if let Some(table) = &shared {
+        let fan = Fanout::new(&**table, &p.partitions, needed, opts.idf_scope);
+        for (idx, partition) in p.partitions.iter().enumerate() {
+            let analyzer: &dyn Analyze = env.scope.analyzer(&partition.key).unwrap_or(&plain);
+            let within: BTreeSet<Uid> = match &in_lang {
+                Some(allowed) => partition.uids.intersection(allowed).copied().collect(),
+                None => partition.uids.clone(),
+            };
+            if within.is_empty() {
+                continue;
+            }
+            let share = fan.share(idx, &partition.uids);
+            let scorer = Bm25::over(&share, analyzer, env.store);
+            let query = RQuery::new(&text, opts.limit).within(within.iter().copied());
+            lists.push(Ranked {
+                key: partition.key.clone(),
+                hits: scorer.search(&query),
+            });
+        }
+        return Ok(Answer::Ranked(rrf(&lists)));
+    }
     for partition in &p.partitions {
         let analyzer: &dyn Analyze = env.scope.analyzer(&partition.key).unwrap_or(&plain);
-        let table = tables
-            .entry(analyzer.id().to_string())
-            .or_insert_with(|| MemPostings::index(env.store, analyzer));
+        let table: &dyn smysl_retrieve::Postings = match &shared {
+            Some(t) => &**t,
+            None => tables
+                .entry(analyzer.id().to_string())
+                .or_insert_with(|| MemPostings::index(env.store, analyzer)),
+        };
 
         let universe: BTreeSet<Uid> = match opts.idf_scope {
             IdfScope::Partition => partition.uids.clone(),
@@ -561,6 +601,157 @@ fn lexical(
     }
 
     Ok(Answer::Ranked(rrf(&lists)))
+}
+
+/// A term's postings dealt out by partition: one list a partition, in uid order.
+type Dealt = std::rc::Rc<Vec<Vec<(Uid, u32)>>>;
+
+/// One query's postings, read from one table and dealt out among its partitions (OQ-91).
+///
+/// Exactly what each partition's `Subset` of the table over the IDF universe, filtered to the
+/// partition, answers — the same `df`, `docs`, total length, lengths and term frequencies — and
+/// `tests` below holds it to that. What changes is the work: a term's postings are read once and
+/// split by partition, and the universe's statistics counted once, where they were read and
+/// counted once per partition, which over the thousand partitions of a 10⁶-unit library was most
+/// of a query (SMYSL-2.8's GE-T7 stand-in).
+struct Fanout<'a> {
+    table: &'a dyn smysl_retrieve::Postings,
+    idf: IdfScope,
+    /// The universe's statistics, for an IDF scope wider than the partition.
+    universe: Option<Subset<'a>>,
+    /// Which partition each candidate is in.
+    part_of: BTreeMap<Uid, usize>,
+    parts: usize,
+    split: std::cell::RefCell<BTreeMap<String, Dealt>>,
+    df: std::cell::RefCell<BTreeMap<String, u32>>,
+}
+
+impl<'a> Fanout<'a> {
+    fn new(
+        table: &'a dyn smysl_retrieve::Postings,
+        partitions: &[crate::ports::Partition],
+        universe: &'a BTreeSet<Uid>,
+        idf: IdfScope,
+    ) -> Fanout<'a> {
+        let mut part_of = BTreeMap::new();
+        for (i, p) in partitions.iter().enumerate() {
+            for uid in &p.uids {
+                part_of.insert(*uid, i);
+            }
+        }
+        Fanout {
+            table,
+            idf,
+            universe: (idf != IdfScope::Partition).then(|| Subset::of(table, universe)),
+            part_of,
+            parts: partitions.len(),
+            split: Default::default(),
+            df: Default::default(),
+        }
+    }
+
+    /// A term's postings, by partition.
+    fn split(&self, term: &str) -> Dealt {
+        if let Some(s) = self.split.borrow().get(term) {
+            return s.clone();
+        }
+        let mut out: Vec<Vec<(Uid, u32)>> = vec![Vec::new(); self.parts];
+        for (uid, tf) in self.table.postings(term) {
+            if let Some(&i) = self.part_of.get(&uid) {
+                out[i].push((uid, tf));
+            }
+        }
+        let out = std::rc::Rc::new(out);
+        self.split
+            .borrow_mut()
+            .insert(term.to_string(), out.clone());
+        out
+    }
+
+    fn universe_df(&self, term: &str) -> u32 {
+        if let Some(df) = self.df.borrow().get(term) {
+            return *df;
+        }
+        let df = self.universe.as_ref().map_or(0, |u| u.df(term));
+        self.df.borrow_mut().insert(term.to_string(), df);
+        df
+    }
+
+    /// Partition `idx`, scored by the statistics its IDF scope names.
+    fn share(&'a self, idx: usize, uids: &BTreeSet<Uid>) -> Share<'a> {
+        let (docs, total_len) = match &self.universe {
+            Some(u) => (u.docs(), u.total_len()),
+            None => {
+                let mut docs = 0u32;
+                let mut total = 0u64;
+                for uid in uids {
+                    if let Some(len) = self.table.doc_len(uid) {
+                        docs += 1;
+                        total += u64::from(len);
+                    }
+                }
+                (docs, total)
+            }
+        };
+        Share {
+            fan: self,
+            idx,
+            docs,
+            total_len,
+        }
+    }
+}
+
+/// One partition's share of a [`Fanout`].
+struct Share<'a> {
+    fan: &'a Fanout<'a>,
+    idx: usize,
+    docs: u32,
+    total_len: u64,
+}
+
+impl smysl_retrieve::Postings for Share<'_> {
+    fn df(&self, term: &str) -> u32 {
+        match self.fan.idf {
+            IdfScope::Partition => self.fan.split(term)[self.idx].len() as u32,
+            IdfScope::Collection | IdfScope::Library => self.fan.universe_df(term),
+        }
+    }
+    fn postings(&self, term: &str) -> Vec<(Uid, u32)> {
+        self.fan.split(term)[self.idx].clone()
+    }
+    fn doc_len(&self, uid: &Uid) -> Option<u32> {
+        match &self.fan.universe {
+            Some(u) => u.doc_len(uid),
+            None if self.fan.part_of.get(uid) == Some(&self.idx) => self.fan.table.doc_len(uid),
+            None => None,
+        }
+    }
+    /// From this partition's own share of the term's postings, which holds every unit of the
+    /// partition that has the term: the table would be asked in every partition it spans, and a
+    /// library's thousand partitions asked once a hit was most of a query read from disk.
+    fn tf(&self, term: &str, uid: &Uid) -> u32 {
+        if self.fan.part_of.get(uid) == Some(&self.idx) {
+            let share = self.fan.split(term);
+            let list = &share[self.idx];
+            return list
+                .binary_search_by(|(u, _)| u.cmp(uid))
+                .map_or(0, |i| list[i].1);
+        }
+        match &self.fan.universe {
+            Some(u) => u.tf(term, uid),
+            None => 0,
+        }
+    }
+    fn docs(&self) -> u32 {
+        self.docs
+    }
+    fn total_len(&self) -> u64 {
+        self.total_len
+    }
+    fn analyzer(&self) -> Option<&str> {
+        self.fan.table.analyzer()
+    }
 }
 
 /// `about entity("…")`: resolve the name through the port, then walk `x.text/mentions`.
@@ -778,5 +969,104 @@ fn resolve_count(count: &Count, opts: &PlanOptions) -> Result<usize, Vec<Diagnos
             )
             .with_message(format!("`${name}` is not bound, so there is no count"))]),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ports::Partition;
+    use smysl_core::{canonical_uid, KernelType, Record, Status, UnitCoreBuilder};
+
+    /// The fan-out answers each partition exactly as that partition's `Subset` of the table over
+    /// its IDF universe, filtered to the partition, does: the same hits, the same scores, for
+    /// every IDF scope, over random stores, partitions and queries.
+    #[test]
+    fn a_partitions_share_scores_as_its_subset_of_the_universe_does() {
+        let words = [
+            "ruth", "naomi", "boaz", "field", "barley", "lord", "the", "and", "moab", "kinsman",
+        ];
+        let mut x = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = |n: usize| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x % n as u64) as usize
+        };
+        for case in 0..24 {
+            let n = 20 + next(60);
+            let mut records = Vec::new();
+            let mut uids = Vec::new();
+            for i in 0..n {
+                let gist: Vec<&str> = (0..2 + next(6)).map(|_| words[next(words.len())]).collect();
+                let core = UnitCoreBuilder::new(
+                    KernelType::Claim,
+                    format!("{} {case} {i}", gist.join(" ")),
+                    Status::Speculative,
+                )
+                .build()
+                .unwrap();
+                uids.push(canonical_uid(&core));
+                records.push(Record::Unit(core));
+            }
+            let store = Store::from_records(records);
+            let plain = Tokenizer::plain();
+            let table = MemPostings::index(&store, &plain);
+            let k = 1 + next(5);
+            let mut sets: Vec<BTreeSet<Uid>> = vec![BTreeSet::new(); k];
+            for u in &uids {
+                // Some units in no partition: the candidates are not the store.
+                if next(5) > 0 {
+                    sets[next(k)].insert(*u);
+                }
+            }
+            let partitions: Vec<Partition> = sets
+                .into_iter()
+                .enumerate()
+                .filter(|(_, s)| !s.is_empty())
+                .map(|(i, s)| {
+                    Partition::new(
+                        crate::ports::PartitionKey::Catalog {
+                            manifest: format!("m{i}"),
+                            lang: "en".into(),
+                        },
+                        s,
+                        None,
+                    )
+                })
+                .collect();
+            let candidates: BTreeSet<Uid> = partitions
+                .iter()
+                .flat_map(|p| p.uids.iter().copied())
+                .collect();
+            let everything: BTreeSet<Uid> = uids.iter().copied().collect();
+            for idf in [IdfScope::Partition, IdfScope::Collection, IdfScope::Library] {
+                let needed = if idf == IdfScope::Library {
+                    &everything
+                } else {
+                    &candidates
+                };
+                let fan = Fanout::new(&table, &partitions, needed, idf);
+                for q in ["ruth", "the lord", "barley field moab", "kinsman and"] {
+                    for (idx, p) in partitions.iter().enumerate() {
+                        let universe = match idf {
+                            IdfScope::Partition => p.uids.clone(),
+                            IdfScope::Collection => candidates.clone(),
+                            _ => everything.clone(),
+                        };
+                        let query = RQuery::new(q, 10).within(p.uids.iter().copied());
+                        let subset = Subset::of(&table, &universe);
+                        let want = Bm25::over(&subset, &plain, &store).search(&query);
+                        let share = fan.share(idx, &p.uids);
+                        let got = Bm25::over(&share, &plain, &store).search(&query);
+                        assert_eq!(
+                            format!("{got:?}"),
+                            format!("{want:?}"),
+                            "case {case}, {idf:?}, `{q}`, partition {idx}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }

@@ -460,6 +460,35 @@ pub struct Index {
     /// Postings per partition (TX-P4 step 2). See [`postings`] for the partition.
     pub postings: postings::Table,
     pub journal: Vec<journal::Row>,
+    /// Every document length in `postings`, one map, built when a query first asks and dropped
+    /// when the table changes (OQ-91): a view over a thousand partitions otherwise looks a length
+    /// up partition by partition, and a query counts the lengths of its whole universe.
+    lens: LensCache,
+}
+
+/// A map of document lengths kept beside a postings table: derived, so two indexes holding one
+/// table are equal whatever either has cached, and a clone starts without it.
+#[derive(Default)]
+struct LensCache(std::sync::OnceLock<BTreeMap<smysl_core::Uid, u32>>);
+
+impl Clone for LensCache {
+    fn clone(&self) -> LensCache {
+        LensCache::default()
+    }
+}
+
+impl PartialEq for LensCache {
+    fn eq(&self, _: &LensCache) -> bool {
+        true
+    }
+}
+
+impl Eq for LensCache {}
+
+impl std::fmt::Debug for LensCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("LensCache")
+    }
 }
 
 /// Where a library's postings are, and what they hold — what `text index` prints.
@@ -494,13 +523,11 @@ pub struct Held {
 pub enum Source<'a> {
     /// The table this process holds.
     Memory(postings::View<'a>),
-    /// The table beside the library, read a term at a time.
-    ///
-    /// Boxed: a stored view holds two open redb tables and is some 350 bytes, against the
-    /// in-memory view's vector of references. A caller moves one of these per query, so the
-    /// enum is the size of a pointer instead of the size of its largest arm.
+    /// The table beside the library, read a term at a time: the library's own view of it, kept
+    /// from the first query to the next write, because opening one reads every document length
+    /// (36 MB at 10⁶ units, most of a query's cost when each query paid it; OQ-91).
     #[cfg(feature = "substrate-redb")]
-    Stored(Box<db::View>),
+    Stored(&'a db::View),
 }
 
 impl Source<'_> {
@@ -645,6 +672,7 @@ impl Index {
             composed: ranges::axis_rebuild(lib, Axis::Composed),
             observed: ranges::observed_rebuild(lib),
             postings: postings::Table::new(),
+            lens: LensCache::default(),
             journal: journal::rebuild(lib),
         }
     }
@@ -704,6 +732,7 @@ impl Index {
             self.align = align::rebuild(lib, &self.manifests, &self.locators);
         }
         if self.built.has(Table::Postings) {
+            self.lens = LensCache::default();
             postings::on_append(
                 &mut self.postings,
                 lib,
@@ -720,10 +749,20 @@ impl Index {
     /// caller's answer to that is to analyse the corpus in memory as `find` always has, or to
     /// run `text index --rebuild` once and never pay it again. Not an empty view: an empty view
     /// would retrieve nothing and look exactly like a corpus with nothing in it.
+    ///
+    /// Over every partition, with their document lengths in one map. `postings` is a public
+    /// field: a caller that changes it directly holds an index whose map no longer matches; the
+    /// library changes it only through `on_append`, which drops the map.
     pub fn postings(&self) -> Option<postings::View<'_>> {
-        self.built
-            .has(Table::Postings)
-            .then(|| postings::View::all(&self.postings))
+        self.built.has(Table::Postings).then(|| {
+            let lens = self.lens.0.get_or_init(|| {
+                self.postings
+                    .values()
+                    .flat_map(|p| p.lengths().map(|(u, l)| (*u, l)))
+                    .collect()
+            });
+            postings::View::all_with(&self.postings, lens)
+        })
     }
 
     /// Whether this index describes the catalog it was opened beside.
@@ -1167,6 +1206,7 @@ impl Index {
             observed,
             postings,
             journal,
+            lens: LensCache::default(),
         })
     }
 }

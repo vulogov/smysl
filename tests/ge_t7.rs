@@ -491,6 +491,9 @@ fn ge_t7_stand_in() {
             t.elapsed().as_secs_f64()
         );
         let t = Instant::now();
+        // Every table, postings included, as `text index --rebuild` builds them: what a library
+        // meant to be queried at this size has (SMYSL-2.5 OQ-91).
+        lib.reindex();
         lib.write_index().unwrap();
         println!(
             "  {:<44} {:>10.1} s",

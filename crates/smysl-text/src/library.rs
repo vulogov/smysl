@@ -256,6 +256,11 @@ pub struct Library {
     /// a cache with a stamp cannot have.
     #[cfg(feature = "substrate-redb")]
     db: Option<std::panic::AssertUnwindSafe<index::db::Db>>,
+    /// The scoring view of `db`, opened by the first query that asks and dropped by the next
+    /// write, so queries between two writes share one (OQ-91). Unwind-safe as `db` is: a read
+    /// snapshot, nothing in it half-updated.
+    #[cfg(feature = "substrate-redb")]
+    stored: std::sync::OnceLock<Option<std::panic::AssertUnwindSafe<index::db::View>>>,
 }
 
 fn io(at: impl AsRef<str>, e: &std::io::Error) -> LibError {
@@ -359,6 +364,8 @@ impl Library {
                 .then(|| index::db::Db::open(root).ok())
                 .flatten()
                 .map(std::panic::AssertUnwindSafe),
+            #[cfg(feature = "substrate-redb")]
+            stored: std::sync::OnceLock::new(),
         };
         library.enforce_z()?;
         library.load_index();
@@ -460,6 +467,10 @@ impl Library {
     /// grew — `crates/smysl-text/tests/index.rs` is where that comparison lives, and it
     /// compares [`Index::to_bytes`] rather than the values.
     pub fn reindex(&mut self) -> &Index {
+        #[cfg(feature = "substrate-redb")]
+        {
+            self.stored = std::sync::OnceLock::new();
+        }
         self.index = Index::rebuild(self);
         &self.index
     }
@@ -542,16 +553,30 @@ impl Library {
         self.stored_postings()
     }
 
+    /// The postings of some units, built now, by the rule the kept table is built by: what a
+    /// query reads from a library that keeps none (OQ-91).
+    pub fn postings_over(&self, uids: &std::collections::BTreeSet<Uid>) -> index::postings::Built {
+        index::postings::Built(index::postings::rebuild_over(
+            self,
+            &self.index.manifests,
+            &self.index.by_part,
+            uids,
+        ))
+    }
+
     /// The store's own answer, when there is a store and its stamp is the catalog's.
     #[cfg(feature = "substrate-redb")]
     fn stored_postings(&self) -> Option<index::Source<'_>> {
-        let db = self.db.as_ref()?;
-        if !db.matches(self.stamp().0, &self.stamp().1) {
-            return None;
-        }
-        db.all()
-            .ok()
-            .map(|view| index::Source::Stored(Box::new(view)))
+        self.stored
+            .get_or_init(|| {
+                let db = self.db.as_ref()?;
+                if !db.matches(self.stamp().0, &self.stamp().1) {
+                    return None;
+                }
+                db.all().ok().map(std::panic::AssertUnwindSafe)
+            })
+            .as_ref()
+            .map(|view| index::Source::Stored(&view.0))
     }
 
     #[cfg(not(feature = "substrate-redb"))]
@@ -1314,6 +1339,11 @@ impl Library {
     /// because *append* in this crate's vocabulary now means what the command means, and a
     /// method called `append` that took records would be the other thing.
     pub fn append_records(&mut self, records: &[Record]) -> Result<(), LibError> {
+        // The stored view describes the library before this write.
+        #[cfg(feature = "substrate-redb")]
+        {
+            self.stored = std::sync::OnceLock::new();
+        }
         // Refused whole before any shard is written, as one log refused it.
         Store::check_loggable(records).map_err(|e| match e {
             smysl_core::Error::Lib(e) => e,

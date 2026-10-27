@@ -58,6 +58,25 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### `find` over the postings a library keeps
+
+SMYSL-2.5 OQ-91 and its step, with the §3.4 amendment: GE-T7's scoped query, the last of its
+thresholds the stand-in missed.
+
+- **Over a library, each unit's terms are cut by its own partition's analyzer**, from one table:
+  the postings the library keeps (`text index --rebuild` writes them), or, for a library that
+  keeps none, a table built for the query's units by the same rule — the same answer either way,
+  rank for rank and score for score. Before, the lexical source built a table over the whole
+  store for every query and every language it needed, and counted other languages' units, cut by
+  the wrong chain, in a partition's statistics. No answer of `fixtures/sq` moved. A plain store
+  is scored as it was.
+- `smysl_query::ports::Scope::postings`, `LibraryScope::building_postings`,
+  `Library::postings_over`, `postings::View::all_with`.
+- **Faster:** on GE-T7's stand-in of 10⁶ units, `find` p95 over a shelf 11.7 s → 141 ms, over a
+  language 20 s → 219 ms, over the library 150 s → 579 ms. A query reads each term's postings
+  once and deals them to its partitions; the library keeps its stored view between writes; the
+  in-memory view reads one map of lengths.
+
 ### Primary shards: a library whose records the unit store holds
 
 TX-P13d (SMYSL-2.8 §3.5.5, §3.9). GE-T15 passed on 2026-10-22, which was the gate.

@@ -162,6 +162,54 @@ pub fn rebuild(
     out
 }
 
+/// The table over some units only: what a library with no postings kept answers a query with
+/// (OQ-91), built by the rule the kept table is built by, so the two give one answer.
+pub fn rebuild_over<'u>(
+    lib: &Library,
+    manifests: &BTreeMap<Mid, ManifestRow>,
+    by_part: &BTreeMap<Tid, Vec<Mid>>,
+    uids: impl IntoIterator<Item = &'u Uid>,
+) -> Table {
+    let store = lib.store();
+    let mut out = Table::new();
+    for uid in uids {
+        index_one(store, manifests, by_part, &mut out, uid);
+    }
+    out
+}
+
+/// A table owned rather than borrowed, read as one view of all its partitions.
+#[derive(Debug, Clone, Default)]
+pub struct Built(pub Table);
+
+impl Postings for Built {
+    fn df(&self, term: &str) -> u32 {
+        View::all(&self.0).df(term)
+    }
+    fn postings(&self, term: &str) -> Vec<(Uid, u32)> {
+        View::all(&self.0).postings(term)
+    }
+    fn doc_len(&self, uid: &Uid) -> Option<u32> {
+        View::all(&self.0).doc_len(uid)
+    }
+    fn tf(&self, term: &str, uid: &Uid) -> u32 {
+        View::all(&self.0).tf(term, uid)
+    }
+    fn docs(&self) -> u32 {
+        View::all(&self.0).docs()
+    }
+    fn total_len(&self) -> u64 {
+        View::all(&self.0).total_len()
+    }
+    fn analyzer(&self) -> Option<&str> {
+        let first = self.0.values().next()?.analyzer()?;
+        self.0
+            .values()
+            .all(|p| p.analyzer() == Some(first))
+            .then_some(first)
+    }
+}
+
 /// Bring the table forward over records that were just appended.
 ///
 /// Two arms, for two different events:
@@ -258,13 +306,25 @@ pub fn analyzers(table: &Table) -> Vec<&str> {
 /// path rests on.
 pub struct View<'t> {
     parts: Vec<&'t MemPostings>,
+    /// Every length of these partitions in one map, when the view's owner keeps one.
+    lens: Option<&'t BTreeMap<Uid, u32>>,
 }
 
 impl<'t> View<'t> {
+    /// Every partition, with `lens` holding every document length the table holds: one map
+    /// hit for a length rather than a lookup in each partition (OQ-91).
+    pub fn all_with(table: &'t Table, lens: &'t BTreeMap<Uid, u32>) -> View<'t> {
+        View {
+            parts: table.values().collect(),
+            lens: Some(lens),
+        }
+    }
+
     /// Every partition.
     pub fn all(table: &'t Table) -> View<'t> {
         View {
             parts: table.values().collect(),
+            lens: None,
         }
     }
 
@@ -283,6 +343,7 @@ impl<'t> View<'t> {
     pub fn of(table: &'t Table, partitions: &[Partition]) -> View<'t> {
         View {
             parts: partitions.iter().filter_map(|p| table.get(p)).collect(),
+            lens: None,
         }
     }
 
@@ -298,6 +359,7 @@ impl<'t> View<'t> {
                 .values()
                 .filter(|p| p.analyzer() == Some(analyzer))
                 .collect(),
+            lens: None,
         }
     }
 
@@ -322,7 +384,10 @@ impl Postings for View<'_> {
     }
 
     fn doc_len(&self, uid: &Uid) -> Option<u32> {
-        self.parts.iter().find_map(|p| p.doc_len(uid))
+        match self.lens {
+            Some(lens) => lens.get(uid).copied(),
+            None => self.parts.iter().find_map(|p| p.doc_len(uid)),
+        }
     }
 
     /// Asked of each partition in turn, not of the merged list.

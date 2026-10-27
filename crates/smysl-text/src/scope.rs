@@ -69,7 +69,7 @@ use smysl_query::ast::{Name, ScopeItem};
 use smysl_query::ports::{
     unresolvable, Axis, Bounds, Candidates, Entities, Partition, PartitionKey, Scope, Times,
 };
-use smysl_retrieve::Analyze;
+use smysl_retrieve::{Analyze, Postings};
 
 use crate::analyze::Chain;
 use crate::library::Library;
@@ -97,10 +97,22 @@ pub struct LibraryScope<'a> {
     library: &'a Library,
     placed: BTreeMap<Uid, Placed>,
     chains: BTreeMap<String, Chain>,
+    /// The chain units the catalogue does not place are cut with.
+    plain: Chain,
+    /// Build the postings for each query rather than read the kept table: the comparison the
+    /// two paths are held to.
+    build_postings: bool,
     said: OnceCell<Effective>,
 }
 
 impl<'a> LibraryScope<'a> {
+    /// This scope, building the postings each query reads rather than reading the table the
+    /// library keeps: what shows the two give one answer (OQ-91), and nothing else.
+    pub fn building_postings(mut self) -> LibraryScope<'a> {
+        self.build_postings = true;
+        self
+    }
+
     /// A scope named `name` over `library`.
     ///
     /// The name is what `from store:<name>` must match, given rather than taken from the
@@ -156,6 +168,8 @@ impl<'a> LibraryScope<'a> {
             library,
             placed,
             chains,
+            plain: Chain::plain(),
+            build_postings: false,
             said: OnceCell::new(),
         }
     }
@@ -362,11 +376,25 @@ impl Scope for LibraryScope<'_> {
             .collect()
     }
 
+    /// A partition's chain; for units the catalogue does not place, the plain chain, which is
+    /// what the kept postings cut them with (OQ-91), so a query and its documents agree.
     fn analyzer(&self, key: &PartitionKey) -> Option<&dyn Analyze> {
         match key {
             PartitionKey::Catalog { lang, .. } => self.chains.get(lang).map(|c| c as &dyn Analyze),
-            _ => None,
+            _ => Some(&self.plain),
         }
+    }
+
+    /// The library's postings, each unit cut by its own partition's analyzer (OQ-91): the kept
+    /// table when the library has one current, or one built over `universe` alone by the same
+    /// rule — the same answer either way, which `tests/sq_library.rs` holds the two paths to.
+    fn postings(&self, universe: &BTreeSet<Uid>) -> Option<Box<dyn Postings + '_>> {
+        if !self.build_postings {
+            if let Some(kept) = self.library.postings() {
+                return Some(Box::new(kept));
+            }
+        }
+        Some(Box::new(self.library.postings_over(universe)))
     }
 
     /// `lang:<code>`: the catalogue's language for a placed unit, the unit's own for one the

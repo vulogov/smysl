@@ -436,6 +436,17 @@ the existing private `relink::successors` made public so query and relink cannot
 
 ### 3.4 Partitions and fusion
 
+*Amended (OQ-91, 2026-10-26): over a catalogued scope, **each unit's terms are cut by its own
+partition's analyzer**, and a partition's query by that partition's.* One table holds them all —
+the library's kept postings, or one built for the query's units by the rule the kept one is
+built by, which gives the same answer bit for bit — and a partition is scored against the IDF
+universe's statistics summed over it. Until then the lexical source built one table over the
+whole store per analyzer a query needed, so with the default collection IDF a German unit was
+counted, cut by the English chain, in an English partition's statistics. Units the catalogue
+does not place are cut, and their partition's query split, by the plain chain. A plain store
+keeps the old shape: one table per analyzer over the store. On the fixtures of `fixtures/sq` the
+change moved no answer.
+
 - One BM25 index per partition, built with `Bm25::index_subset` so IDF is the partition's
   (or the collection's, by IDF scope). Until SMYSL-2.4's persistent postings, the planner caches
   per-partition indexes for the duration of one invocation only.
@@ -1861,7 +1872,7 @@ Each step has an exit test. Steps within a phase are ordered.
      difference. Both paths now rerun over one store.
 
 **TX-P6 follow-up — `find` over the library's postings (OQ-91)**, decided 2026-10-26, its own
-step, not yet started. SMYSL-2.8's GE-T7 stand-in (§6.1 P13c.2 there: a thousand works, five
+step; **done 2026-10-26**, as-built below. SMYSL-2.8's GE-T7 stand-in (§6.1 P13c.2 there: a thousand works, five
 languages, 10⁶ units) measured a `find` over one twenty-work shelf at 13 s p95 and over the
 library at 158 s, against GE-T7's 1 s: the lexical source builds a postings table over the whole
 store for every query, one per analyzer, and reads none of the postings the library already
@@ -1871,6 +1882,17 @@ matches. *Exit:* GE-T7's scoped-query p95 < 1 s on the stand-in, at the shelf, a
 the library; every `fixtures/sq/` golden and `fixtures/retrieval` ranking unchanged, bit for bit
 — a persisted table must give the `Subset` statistics a fresh one gives (`Db::agrees`); a stale
 sidecar answers as a fresh build does; under `--shard` the universe is the loaded shards.
+*As built:* the `Scope` port's `postings(universe)`, the library scope's answer (the kept
+table, or `Library::postings_over` the universe), and §3.4's amendment. Three costs found and
+removed on the way, each proportional to the library rather than the query: every partition
+filtered the universe's postings of each term and counted the universe's statistics again —
+a per-query fan-out now reads each term once and deals it to the partitions, held by a test to
+score as each partition's `Subset` did; the stored view read every document length on each
+query, and is now kept by the library until its next write; and the in-memory view looked a
+length up partition by partition, and now reads one map. On GE-T7's stand-in (10⁶ units, 1,001
+partitions): p95 141 ms over a shelf, 219 ms over a language, 579 ms over the library — 566 ms
+over all three, **under 1 s**. A library has kept postings once `text index --rebuild` has run;
+without them a query builds its own over its candidates.
 
 ## 7. Risks and mitigations
 
@@ -1948,4 +1970,4 @@ New:
 | OQ-86 | **sq/1 cannot ask for only what a walk reached.** Raised by TX-P8 step 3: `expand` *adds* to the set it was given, so a slot defined by an edge — what rebuts, causes or exemplifies the units about a subject — is written `about entity($subject) expand ->rebuts depth 1 except about entity($subject)`, and the subtraction also removes a rebuttal that itself names the subject, which then answers `characteristic` instead. *Options:* a traversal modifier (`expand ->rebuts depth 1 only`, the frontier without the seeds), which is a grammar change and so SMYSL-2.9's and the three ports'; a `reached` source over the previous stage; or leave it, if GE-T10 shows the lost rebuttals are rare. *Recommended:* measure first — step 4's GE-T10 counts counter-evidence recall per slot, and a kill criterion on that slot is what would make the grammar change worth its cost. **Measured (TX-P8 step 4):** over GE-T10's single-hand gold it costs recall and not precision — six of 24 counter units, three of nine causes, one of five examples and one of six dependents leave their slot, and seven of them reappear in `characteristic`. The kill criterion that fired is on counter *precision*, which OQ-87 and OQ-88 account for, so this change would not lift it. Still recommended against for now; worth taking with OQ-87 if the grammar is opened for that. |
 | OQ-87 | **sq/1 cannot select a superseded unit, and a walk starts from one.** Raised by TX-P8 step 4. The supersession pass runs after sources and traversals (§3.2), so (a) `revision` — what a later account replaced — is empty for every question: the old unit is hidden under the current lens, and under `--all-versions` it names the subject and the `except` removes it; and (b) a walk from a superseded seed reaches *its* rebuttals before the pass replaces the seed, so `counter` holds a rebuttal of an account nobody now holds (two of counter's six false positives). *Options:* a `where superseded` predicate (grammar, SMYSL-2.9 and the ports); a per-slot lens setting in the template set, with the pass run before the walk for the edge slots; or drop `revision` from `trace` until one exists. *Recommended:* the predicate, taken with OQ-86's `only` if the grammar is opened, and the pass moved before the walk for edge slots now, since that is a template-set change and not a grammar one. |
 | OQ-88 | **A slot binds the subject and nothing of what was asked of it.** Raised by TX-P8 step 4. `classify` returns the question's remainder ("is cured by citrus fruit") and the slots bind only `$subject`, so a verify or explain dossier's `counter`, `evidence` and `reported` hold everything of that kind about the subject: four of counter's six false positives, which is what fires GE-T10's kill criterion (verify 0.667, explain 0.500, define 0.909). *Options:* a `$topic` parameter the verify and explain templates intersect with a lexical `find` (pure; recall falls when the remainder's words are not the corpus's); the `Classifier` port of OQ-22 extended to pick the claim the question asks about (model-dependent); or rank by the remainder without filtering, which leaves precision where it is. *Recommended:* `$topic` with `find`, measured on fresh questions rather than these, since a fix scored on the questions that found it is scored in-sample. |
-| OQ-91 | **`find` builds its postings for every query, over the whole store.** Raised by SMYSL-2.8's GE-T7 stand-in (P13c.2). `lexical` (`exec.rs`) calls `MemPostings::index(env.store, analyzer)` per query and per analyzer, so a query's cost is the library's size times its languages, whatever its scope: 13 s for a twenty-work shelf of 10⁶ units, 158 s for the library. The library already keeps postings (`write_index`, the substrate store), stamped against its logs. | **Decided 2026-10-26: its own step** (§6, the TX-P6 follow-up). The library scope supplies its persisted postings per analyzer; a build in memory only where there are none or they are stale. Results bit-identical to a fresh build; a `--shard` subset restricts the universe, as a partition already does. |
+| ~~OQ-91~~ | **`find` builds its postings for every query, over the whole store.** Raised by SMYSL-2.8's GE-T7 stand-in (P13c.2). `lexical` (`exec.rs`) calls `MemPostings::index(env.store, analyzer)` per query and per analyzer, so a query's cost is the library's size times its languages, whatever its scope: 13 s for a twenty-work shelf of 10⁶ units, 158 s for the library. The library already keeps postings (`write_index`, the substrate store), stamped against its logs. | **Decided 2026-10-26: its own step** (§6, the TX-P6 follow-up). The library scope supplies its persisted postings per analyzer; a build in memory only where there are none or they are stale. Results bit-identical to a fresh build; a `--shard` subset restricts the universe, as a partition already does. **Done 2026-10-26** (§6, §3.4's amendment): each unit cut by its own partition's analyzer, the kept table or one built over the universe; p95 under 1 s at every scope on GE-T7's stand-in. |

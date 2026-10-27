@@ -1594,6 +1594,14 @@ in every ported signature; §3.2's sketch and §5.2's shapes are otherwise uncha
     recorded; a smaller store's is 4 ms. The scoped query is OQ-91's, as in index mode.
   - The default stays index mode: a shard is primary only when `lib migrate` makes it so.
 
+- **GE-T7's scoped query — met (2026-10-26)**, by SMYSL-2.5 OQ-91's step (§6 there): `find`
+  over the library's kept postings, each unit cut by its own partition's analyzer. On the
+  stand-in, p95 141 ms over a twenty-work shelf, 219 ms over a language, 579 ms over the library
+  (11.7 s, 20 s and 150 s before). With it, **every threshold of GE-T7 is met on the stand-in**
+  in index mode; on primary shards all but the single-record append (5.91 ms against 5, P13d).
+  The build now includes `text index --rebuild`, which is the kept postings: 91 s in all. GE-T7
+  on a real corpus of a thousand works stays owed.
+
 ## 7. Risks and mitigations
 
 | risk | why it is real | mitigation |
