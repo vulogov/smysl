@@ -7,6 +7,27 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.11.0
+
+What 1.10 leaves open, by the phase it blocks rather than the order it is easiest. The roadmap's §4
+is the list of record; this is where it stands as the cycle opens.
+
+**Retrieval defaults that were chosen, not decided.** OQ-45 (the RRF constant), OQ-46 (whether
+`~hybrid` fuses or routes) and OQ-47 (whether `question` is interpretive) block TX-P6's exit. 1.10
+measured three orders within a dossier slot and kept the product (OQ-52); the RRF it measured
+there used k = 60 because that is the literature's number, which is what OQ-45 asks to settle.
+
+**Export without its edges.** OQ-62 (`--format pack` and `-o DIR`), OQ-63 (the clock of an
+exported attestation) and OQ-64 (threads that span files) block TX-P11, with OQ-60 on what P1
+compares.
+
+**A measure interval that misses its own estimate.** OQ-89: on a short text the segment bootstrap
+for a statistic of rare types can exclude the point estimate, because a duplicated segment adds no
+type. It is flagged `ci-off-estimate` until it is answered.
+
+**And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
+there are none yet; they stay owed rather than planned.
+
 ## 1.10.0 — 2026-10-28
 
 What 1.9 argued for and did not land, in the order it was argued rather than the order it is
