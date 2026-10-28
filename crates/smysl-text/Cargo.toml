@@ -130,7 +130,11 @@ flate2                = { workspace = true, optional = true }
 # is the other direction and costs nothing: every crate here shares the workspace
 # `rust-version`, so no floor moves, and nothing in the published tree gains an edge.
 [dev-dependencies]
-smysl-check = { workspace = true }
+# Path-only, with no version, so `cargo publish` strips it from the published manifest: this
+# crate is published before `smysl-check`, which reaches it through `smysl-text` when `check`'s
+# `text` feature is on, and a dev-dependency on a sibling version the registry does not have
+# yet refuses the upload. The tests run here, from paths, as before.
+smysl-check = { path = "../smysl-check" }
 smysl-graph = { workspace = true }
 # TX-P8 step 2: the exposition and dialogue derivation tests run over a library this crate
 # builds, because the fixtures that order a text and a conversation are this crate's readers'.
