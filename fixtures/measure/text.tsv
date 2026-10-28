@@ -10,7 +10,7 @@ T1	ci.H	7.5103 7.7262 200
 T1	ci.H:mm	7.6258 7.8527 200
 T1	flags	ci-off-estimate
 T1	gist	T1 unigram entropy, Miller–Madow 7.9716 bits/token, over from collection:kjv
-T1	unit.uid	b3:u3a5ytl4mqtzhcdtghcov5gikqmm25xouchzyjfjwpveqz2ar4ia
+T1	unit.uid	b3:mpvocfqd6tsdtptyiw7yywkmlt4btwq5yat3ref5ind2pbppvu5q
 T4	recipe.hash	a674e71ad33de17be449074ab8daaf4bbaeea03517c902d1ca2fcb1dbed1e0a2
 T4	n.segments	110
 T4	n.tail	703
@@ -26,4 +26,4 @@ T4	ci.alpha	1.8185 1.9836 200
 T4	ci.heaps:beta	0.5906 0.6997 200
 T4	flags	ci-off-estimate
 T4	gist	T4 Zipf exponent 1.8726, over from collection:kjv
-T4	unit.uid	b3:aufyycopxrdvb5r4w6dc5qjm4vzcvjubfwdvig3ver4dtnugaama
+T4	unit.uid	b3:swgdrst4zwufpzkumhhsp3najbxifxz4x7gmmdrjvqwo2kiciurq

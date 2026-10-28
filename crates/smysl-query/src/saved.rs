@@ -1,11 +1,11 @@
 //! Saved queries and reruns (SMYSL-2.5 §3.6, §4.1 `src/saved.rs`; TX-P8 step 1).
 //!
-//! A saved query is one `x.query/saved` unit whose payload carries the seven keys of
+//! A saved query is one `x.query/saved` unit whose payload carries the eight keys of
 //! SMYSL-2.3 Appendix C, linked to each unit of its result by an `x.query/answers` edge. Two
 //! rules from §3.6 shape everything here.
 //!
 //! **A query is saved only after it has planned and run to completion** (OQ-82). Three of the
-//! seven keys are facts about a run — the result hash, the revisions in force, the lens chains
+//! eight keys are facts about a run — the result hash, the revisions in force, the lens chains
 //! applied — and the result edges are the result. So [`to_records`] takes a [`Plan`] and a
 //! [`Run`] and nothing else can produce one; there is no "save this text" that bypasses it.
 //!
@@ -38,8 +38,8 @@
 //! ([`PlanOptions::template_set`]); a query a person wrote still hashes it as empty.
 //! One input the list omits is the **per-partition limit** a source
 //! keeps before fusion ([`PlanOptions::limit`]), which changes a result as surely as `k` does;
-//! it is hashed here and raised as OQ-84, because the payload has no declared key to carry it
-//! and a key the schema does not declare is a key a reader cannot trust.
+//! it is hashed here, and since OQ-84 was decided it is also carried, as `x.query/v1`'s
+//! eighth key `query:per-partition`, so a rerun can run under the limit the save did.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -340,7 +340,7 @@ fn lookup(name: &str, params: &BTreeMap<String, String>, span: Span) -> Result<S
 /// `query` is the query the plan was lowered from — bound first, by [`bind`], because the text
 /// saved is the text after binding. The unit's gist is that text in canonical form, its source
 /// cites it (`sq:<recipe hash, short>`, status `cited`, as `@question` units are authored in
-/// `fixtures/corpus/F4-qa.smy`), and its payload carries the seven keys. A query that did not
+/// `fixtures/corpus/F4-qa.smy`), and its payload carries the eight keys. A query that did not
 /// run to completion never reaches here: the [`Run`] is the proof.
 pub fn to_records(
     query: &Query,
@@ -395,7 +395,16 @@ pub fn to_records(
     // No chain applied is the empty string rather than a hash of an empty list, so a reader
     // cannot mistake "no chains" for "chains whose hash happens to be this".
     payload.insert(key("query:lens-chain"), s(&plan.lens_chains.join(" ")));
-    let bytes = object_to_payload(&payload).expect("seven keys are not an empty object");
+    // The one recipe input a rerun cannot read back from the text (OQ-84): how many hits a
+    // source kept per partition before fusion.
+    payload.insert(
+        key("query:per-partition"),
+        Spanned::new(
+            HValue::Int(i64::try_from(opts.limit).unwrap_or(i64::MAX)),
+            span,
+        ),
+    );
+    let bytes = object_to_payload(&payload).expect("eight keys are not an empty object");
 
     let schema = SchemaId::Extension(schema::SAVED.to_string());
     let source = SourceRef::new(SourceKind::Doc, format!("sq:{}", &recipe_hex[..12]));
@@ -430,6 +439,9 @@ pub struct SavedQuery {
     pub sq: String,
     pub schemas: Vec<String>,
     pub lens_chain: String,
+    /// The per-partition limit the save ran under (OQ-84). `None` for a save written before
+    /// the key was declared, whose limit only the recipe hash knows.
+    pub per_partition: Option<usize>,
     /// The result the edges record, in uid order.
     pub results: Vec<Uid>,
 }
@@ -518,6 +530,18 @@ pub fn load(store: &Store, uid: &Uid) -> Result<SavedQuery, LoadError> {
         sq: text("query:sq")?,
         schemas: list("query:schemas")?,
         lens_chain: text("query:lens-chain")?,
+        per_partition: match object.get("query:per-partition").map(|v| &v.value) {
+            None => None,
+            Some(HValue::Int(n)) => Some(usize::try_from(*n).map_err(|_| {
+                LoadError::Malformed(format!("`query:per-partition` is {n}, not a count"))
+            })?),
+            Some(other) => {
+                return Err(LoadError::Malformed(format!(
+                    "`query:per-partition` is {}, not an integer",
+                    other.type_name()
+                )))
+            }
+        },
         results: results.into_iter().collect(),
     })
 }
@@ -633,9 +657,11 @@ pub fn rerun(
     // 1 — and a data effect that counted it would report the save as growth. Taken out of
     // scope before anything scores, not out of the answer after, because a unit removed
     // after fusion leaves every other hit one rank lower than the save found it. Found by
-    // §5.4's first test and recorded as OQ-85, since a fresh `find` has the same unit in
-    // reach. The exclusion is the rerun's and not the recipe's: the recipe is compared
-    // under the caller's options, which is what was saved.
+    // §5.4's first test and recorded as OQ-85, since a fresh `find` had the same unit in
+    // reach; OQ-85's decision now leaves every saved query out of a `find` that does not
+    // name the schema, and this stays for one that does. The exclusion is the rerun's and
+    // not the recipe's: the recipe is compared under the caller's options, which is what was
+    // saved.
     let mut pinned = opts.clone();
     pinned.exclude.insert(saved.uid);
     let mut at_pin = parsed.query.clone();

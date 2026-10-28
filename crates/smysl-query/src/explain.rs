@@ -133,16 +133,23 @@ pub fn explain(plan: &Plan) -> String {
                 stores,
                 candidates,
                 excluded,
+                saved,
             } => {
                 let asked = if items.is_empty() {
                     "everything (no `from`)".to_string()
                 } else {
                     items.join(", ")
                 };
-                let left_out = match excluded {
+                let mut left_out = match excluded {
                     0 => String::new(),
                     n => format!(" ({n} excluded)"),
                 };
+                if *saved > 0 {
+                    left_out.push_str(&format!(
+                        " ({saved} saved quer{} left out: `find` asks of the corpus, OQ-85)",
+                        if *saved == 1 { "y" } else { "ies" }
+                    ));
+                }
                 out.push_str(&format!(
                     "  3 scope: {asked} via {scope} -> {} store(s) {}, {candidates} unit(s){left_out}\n",
                     stores.len(),

@@ -626,7 +626,8 @@ pub mod query {
     /// The one relation kind.
     pub const RELATIONS: &[&str] = &[ANSWERS];
 
-    /// The seven payload keys, in Appendix C's order. In code and not on the wire, as
+    /// The eight payload keys, in Appendix C's order; the eighth, `query:per-partition`, is
+    /// OQ-84's. In code and not on the wire, as
     /// [`super::text::FIELDS`] is, and for the same reason: A-7.
     pub const FIELDS: &[Field] = &[
         Field {
@@ -668,6 +669,12 @@ pub mod query {
         Field {
             key: "query:lens-chain",
             ty: FieldType::Text,
+            values: &[],
+            literals: &[],
+        },
+        Field {
+            key: "query:per-partition",
+            ty: FieldType::Int,
             values: &[],
             literals: &[],
         },
@@ -744,8 +751,12 @@ pub mod query {
 
         #[test]
         fn the_field_table_is_appendix_c() {
-            assert_eq!(FIELDS.len(), 7);
+            assert_eq!(FIELDS.len(), 8);
             assert_eq!(field("query:text").map(|f| f.ty), Some(FieldType::Text));
+            assert_eq!(
+                field("query:per-partition").map(|f| f.ty),
+                Some(FieldType::Int)
+            );
             assert_eq!(
                 field("query:models").map(|f| f.ty),
                 Some(FieldType::List(&FieldType::Text))

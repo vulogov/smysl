@@ -9288,6 +9288,22 @@ fn q_run(
                     }
                 };
             }
+            // A rerun runs under the limit the save ran under, unless `--per-partition` says
+            // otherwise (OQ-84): the recipe is compared under these options, and a default the
+            // caller never chose is not a reason to call the rerun a different question.
+            let recorded;
+            let opts = match saved.per_partition {
+                Some(n)
+                    if m.value_source("per-partition")
+                        != Some(clap::parser::ValueSource::CommandLine) =>
+                {
+                    let mut o = opts.clone();
+                    o.limit = n;
+                    recorded = o;
+                    &recorded
+                }
+                _ => opts,
+            };
             let again = match smysl::query::rerun(&saved, env, opts, *current) {
                 Ok(r) => r,
                 Err(diags) => {
@@ -9400,7 +9416,7 @@ fn q_run(
             }
 
             if m.get_flag("save") {
-                // After the run, never before (OQ-82): three of the seven keys and every
+                // After the run, never before (OQ-82): three of the eight keys and every
                 // result edge are facts about a run. The declaration goes with the first
                 // saved query a store receives, as `x.text/v1` goes with the first batch.
                 match smysl::query::to_records(&bound, &plan, &first, opts) {

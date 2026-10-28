@@ -187,6 +187,30 @@ pub enum Purity {
     ModelDependent(Vec<&'static str>),
 }
 
+/// Whether a pipeline's predicates compare `schema` against `id`, under any operator and at
+/// any depth: a query that mentions the schema has asked about it, and OQ-85's default is for
+/// the query that has not. A `$parameter` is not looked through — a plan is a function of the
+/// query, reused across bindings.
+fn names_schema(pipeline: &Pipeline, id: &str) -> bool {
+    fn names(value: &crate::ast::Value, id: &str) -> bool {
+        match value {
+            crate::ast::Value::Str(s) | crate::ast::Value::Word(s) => s == id,
+            crate::ast::Value::List(items) => items.iter().any(|v| names(v, id)),
+            _ => false,
+        }
+    }
+    fn walk(pred: &crate::ast::Pred, id: &str) -> bool {
+        use crate::ast::Pred;
+        match pred {
+            Pred::And(ps) | Pred::Or(ps) => ps.iter().any(|p| walk(p, id)),
+            Pred::Not(p) => walk(p, id),
+            Pred::Cmp { field, value, .. } => field.name == "schema" && names(value, id),
+            _ => false,
+        }
+    }
+    pipeline.filters.iter().any(|f| walk(&f.pred, id))
+}
+
 /// A lowered source (SMYSL-2.5 §3.2 phase 5).
 ///
 /// `about entity(…)` joined in TX-P6 step 6, with the [`Entities`] port that resolves a name;
@@ -335,13 +359,16 @@ pub enum PlanStep {
         rewrites: Vec<crate::resolve::Rewrite>,
     },
     /// Phase 3. `excluded` counts the units [`PlanOptions::exclude`] took out, and is zero
-    /// for every plan that is not a rerun.
+    /// for every plan that is not a rerun. `saved` counts the saved queries a `find` left out
+    /// of scope (OQ-85), and is zero for a pipeline that does not `find` or that names
+    /// `x.query/saved` in a predicate.
     Scope {
         scope: String,
         items: Vec<String>,
         stores: Vec<String>,
         candidates: usize,
         excluded: usize,
+        saved: usize,
     },
     /// Phase 4. Per partition: its name, how many units it holds, and the analyzer chain it
     /// is searched under (§3.4, recorded — `None` for a scope with no catalog).
@@ -899,12 +926,30 @@ fn lower_pipeline(
     if !opts.exclude.is_empty() {
         candidates.uids.retain(|u| !opts.exclude.contains(u));
     }
+    // OQ-85: a saved query's gist is its text, so `find` over the store it was saved in ranks
+    // it for its own terms. A question about a corpus is not a question about the questions
+    // asked of it, so a pipeline that `find`s leaves `x.query/saved` units out of scope —
+    // before anything scores, so they neither rank nor count toward IDF — unless the query
+    // names that schema in a predicate, which is how the other question is asked.
+    let excluded = before - candidates.uids.len();
+    let finds = matches!(
+        pipeline.source.as_ref().map(|s| &s.source),
+        Some(AstSource::Find { .. })
+    );
+    if finds && !names_schema(pipeline, smysl_core::schemas::query::SAVED) {
+        candidates.uids.retain(|u| {
+            env.store
+                .get(u)
+                .is_none_or(|unit| unit.core.schema.as_str() != smysl_core::schemas::query::SAVED)
+        });
+    }
     steps.push(PlanStep::Scope {
         scope: env.scope.name().to_string(),
         items,
         stores: candidates.stores.clone(),
         candidates: candidates.uids.len(),
-        excluded: before - candidates.uids.len(),
+        excluded,
+        saved: before - excluded - candidates.uids.len(),
     });
 
     // --- phase 4: partitions -----------------------------------------------------------------

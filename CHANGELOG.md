@@ -58,6 +58,23 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### A saved query that reruns as it ran, and a `find` that does not find it
+
+SMYSL-2.5 OQ-84 and OQ-85, both decided as their rows recommended. `x.query/v1` gains an eighth
+key, `query:per-partition`, an `int` holding how many hits a source kept per partition before
+fusion. It was already in the recipe hash, so a rerun under another limit was labelled not
+comparable, but nothing could read back which limit the save used. It is taken at revision 1
+because SMYSL-2.3 A-11 is still for discussion, and Appendix C says so. `q --rerun` without
+`--per-partition` now runs under the recorded limit, so a save made with `--per-partition 2`
+reruns as itself. A limit given on the command line is the caller's question and stays labelled.
+A save written before the key loads, and reruns under the caller's limit as before.
+
+A saved query's gist is its own text, so `find "connection pool"` over the store it was saved
+in found the unit that says `find "connection pool"`, at rank 1. A pipeline whose source is
+`find`, of any engine, now leaves `x.query/saved` units out of its scope at phase 3, before
+anything scores, so they neither rank nor count toward IDF. A `schema` predicate naming
+`x.query/saved` turns the default off, and `explain` counts what was left out on the scope line.
+
 ### `expand … only`, the walk into history, and dossier template set 3
 
 `sq/1` gains one word, and it decides SMYSL-2.5 OQ-86 and the half of OQ-87 that set 2 left open

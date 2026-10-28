@@ -921,6 +921,7 @@ wherever a lensed result is recorded (`query:lens-chain`, measure recipes, expor
     "query:sq":          { type: text },
     "query:schemas":     { type: list<text> },
     "query:lens-chain":  { type: text },
+    "query:per-partition": { type: int },
   },
 }
 ```

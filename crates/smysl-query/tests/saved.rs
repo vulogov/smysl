@@ -127,7 +127,7 @@ fn saving_a_query_changes_no_result_s_salience() {
     }
 }
 
-/// The unit round-trips: the text is the canonical text, the keys are the seven, the edges are
+/// The unit round-trips: the text is the canonical text, the keys are the eight, the edges are
 /// the result, and the recipe is the one the plan would compute again.
 #[test]
 fn a_saved_query_loads_back_as_it_was_written() {
@@ -146,6 +146,11 @@ fn a_saved_query_loads_back_as_it_was_written() {
     assert!(saved.models.is_empty(), "a pure plan used no model");
     assert!(saved.schemas.is_empty(), "no `using` pins were written");
     assert_eq!(saved.lens_chain, "", "no chain was applied");
+    assert_eq!(
+        saved.per_partition,
+        Some(10),
+        "the limit it ran under (OQ-84)"
+    );
     assert_eq!(saved.recipe.len(), 64);
     assert_eq!(saved.result_hash.len(), 64);
     let mut sorted = results.clone();
@@ -229,4 +234,52 @@ fn the_result_hash_ignores_order_and_the_recipe_frames_its_inputs() {
     reversed.reverse();
     assert_eq!(saved::result_hash(&uids), saved::result_hash(&reversed));
     assert_ne!(saved::result_hash(&uids), saved::result_hash(&uids[1..]));
+}
+
+/// OQ-85: a `find` over the store a query was saved in does not find the saved query, which
+/// would otherwise rank first for its own terms; a query that names the schema does.
+#[test]
+fn find_leaves_saved_queries_out_unless_the_query_names_them() {
+    let mut store = store_of(NAME);
+    let (_, records) = saved_records(&store, QUERY);
+    let saved_uid = match &records[0] {
+        Record::Unit(u) => canonical_uid(u),
+        _ => unreachable!(),
+    };
+    store.append(&records).expect("appends");
+    let scope = StoreScope::new(NAME, &store);
+    let env = Env::new(&store, &scope);
+    let opts = PlanOptions::default();
+    let answer = |text: &str| {
+        let parsed = smysl_query::parse(text).expect("parses");
+        let plan = plan(&parsed.query, &env, &opts).expect("plans");
+        let uids = run(&plan, &env, &opts).expect("runs").answer.uids();
+        (uids, smysl_query::explain(&plan))
+    };
+
+    let (plain, explained) = answer(QUERY);
+    assert!(!plain.is_empty(), "the corpus still answers");
+    assert!(
+        !plain.contains(&saved_uid),
+        "the save is not data the query found"
+    );
+    assert!(
+        explained.contains("(1 saved query left out: `find` asks of the corpus, OQ-85)"),
+        "{explained}"
+    );
+
+    let (asked, explained) = answer(
+        "from store:F1-incident\nfind \"connection pool\"\nwhere schema = \"x.query/saved\"",
+    );
+    assert_eq!(
+        asked,
+        vec![saved_uid],
+        "asked for by its schema, it is found"
+    );
+    assert!(!explained.contains("left out"), "{explained}");
+
+    // A pipeline that does not `find` scores nothing, and leaves nothing out.
+    let (all, _) =
+        answer("from store:F1-incident\nwhere schema = \"x.query/saved\" or kind = claim");
+    assert!(all.contains(&saved_uid));
 }

@@ -18,7 +18,7 @@ T2	value.bits/char	2.7038
 T2	value.bits/word	14.1724
 T2	flags	
 T2	gist	T2 brotli rate 2.7038 bits/char, over from collection:kjv
-T2	unit.uid	b3:ytncvotaxahfkxng4uslsmnovceiz22yb6cl66qn4fgxstor7k2a
+T2	unit.uid	b3:i3hh5qkxftksl3h7xvekerqvlv25yytm6e5jj56lv333r5pozyda
 T6	recipe.hash	2af6766d324f234dcc0caeaae191f876fcf7fcaa3fa73c608c07a62fd7ced0a2
 T6	n.bytes	41652
 T6	n.pairs	6
@@ -32,4 +32,4 @@ T6	value.ncd:synodal/08-rut|synodal/65-jud	0.9664
 T6	series.linkage	2 3 0.9664 2 0 1 0.9708 2 4 5 1.0181 4
 T6	flags	
 T6	gist	T6 over from texts
-T6	unit.uid	b3:r2biw4bbkbsuup5eztkjrvmyfpunnex6qhn5pupbk2izo6quy7gq
+T6	unit.uid	b3:x4xv5aznwx3scw7sf5jvilrrb225wiisngnscifkiai36nmlo6fa

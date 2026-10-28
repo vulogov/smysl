@@ -305,6 +305,46 @@ fn library_binds_the_catalogue_and_its_scope_items_resolve() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// OQ-84: a save records the per-partition limit it ran under, and a rerun without
+/// `--per-partition` runs under that limit, so its recipe is the saved one. A limit given on
+/// the command line is the caller's choice and is labelled as another question.
+#[test]
+fn a_rerun_keeps_the_per_partition_limit_it_was_saved_under() {
+    let dir = scratch("save-per-partition");
+    let store = dir.join("pp.cbor").to_string_lossy().to_string();
+    let converted = run(&["merge", &f1(), "-o", &store]);
+    assert!(converted.status.success(), "{}", stderr(&converted));
+
+    let q = "from store:pp\nfind \"connection pool\"";
+    let saved = run(&["q", "--save", "--per-partition", "2", q, &store]);
+    assert!(saved.status.success(), "{}", stderr(&saved));
+    let err = stderr(&saved);
+    let uid = err
+        .lines()
+        .find_map(|l| l.strip_prefix("smysl q: saved "))
+        .unwrap_or_else(|| panic!("no `saved <uid>` line in:\n{err}"))
+        .trim()
+        .to_string();
+
+    let same = run(&["q", "--rerun", &uid, &store]);
+    assert!(same.status.success(), "{}", stderr(&same));
+    assert!(
+        !stderr(&same).contains("recipe differs"),
+        "{}",
+        stderr(&same)
+    );
+    assert_eq!(stdout(&same), stdout(&saved), "the same two hits");
+
+    let other = run(&["q", "--rerun", &uid, "--per-partition", "10", &store]);
+    assert!(other.status.success(), "{}", stderr(&other));
+    assert!(
+        stderr(&other).contains("recipe differs from the saved one"),
+        "{}",
+        stderr(&other)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `--save` writes the query after it ran; `--rerun` runs it again and reports the data effect
 /// (SMYSL-2.5 §3.6; TX-P8 step 1). The store grows between the two by one claim the query
 /// finds, merged in through `merge` because that is the one pure way the CLI has of adding a
