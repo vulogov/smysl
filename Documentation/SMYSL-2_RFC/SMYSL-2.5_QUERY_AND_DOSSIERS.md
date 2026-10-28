@@ -472,10 +472,42 @@ change moved no answer.
 - Each partition is searched with its own analyzer (SMYSL-2.4 chain id, recorded). **Built in TX-P6 step 6:** `Partition` carries the chain id, `Scope::analyzer` supplies the chain behind it, and the executor builds one postings table *per analyzer* rather than per partition — a table is a function of the analyzer that cut its terms, so a scope over three languages builds three and a plain store builds one. The plan prints the id beside each partition.
 - **RRF.** `score(u) = Σ_p 1 / (k + rank_p(u))`, `k = 60`, ranks 1-based, partitions summed in
   sorted partition-key order, f64, ties by uid. The fused list is a function of integer ranks
-  and a fixed summation order, so it is bit-reproducible. `k` is recorded in the recipe (OQ-45).
+  and a fixed summation order, so it is bit-reproducible. `k` is recorded in the recipe and is
+  **not a parameter** (OQ-45, decided 2026-10-28). Over this fusion it cannot change an order: a
+  unit belongs to one partition, so its score is `1 / (k + rank)` for its one rank, monotone in
+  the rank at every `k`, and two units at one rank tie at every `k` and fall to the uid
+  (`fuse.rs`, `k_cannot_reorder_units_ranked_by_one_partition`). `k` moves an order only for a
+  unit two partitions rank — cited from parts in two languages or two manifests — and there a
+  parameter would be one more number a rerun depends on, chosen on whatever corpus chose it.
+  Where a unit *is* ranked twice — the lexical-with-semantic fusion OQ-46 measured, below — the
+  sweep in `fusion.rs` moves MRR by up to 0.035 across `k` from 1 to 1000, and the best `k`
+  differs by corpus and by model.
 - **What RRF never does:** fuse lexical with semantic. `~hybrid` keeps the measured routing of
-  `Hybrid::routes_to_lexical`; the routing outcome is recorded per partition. A future merge
-  must be argued against the 0.78 vs 0.84 MRR number that removed it (OQ-46).
+  `Hybrid::routes_to_lexical`; the routing outcome is recorded per partition. **OQ-46, decided
+  2026-10-28: route, and the measurement that decided it is RRF's, not the old merge's.** The
+  0.78 against 0.84 that removed the merge measured an average of ranks over one English set;
+  `crates/smysl-embed/tests/fusion.rs` scores lexical, semantic, routed and RRF-fused (`k = 60`,
+  both engines' full rankings) over three corpora with both S0 models. MRR / P@1:
+
+  | corpus (searches) | model | lexical | semantic | routed | fused |
+  |---|---|---|---|---|---|
+  | queries.tsv, English (20) | potion-base-8M | 0.746 / 0.600 | 0.850 / 0.750 | 0.875 / 0.800 | 0.877 / 0.800 |
+  | | potion-multilingual-128M | 0.746 / 0.600 | 0.838 / 0.700 | **0.900 / 0.800** | 0.867 / 0.750 |
+  | Ruth restated, within English (40) | potion-base-8M | **0.912 / 0.825** | 0.826 / 0.775 | 0.826 / 0.775 | 0.835 / 0.750 |
+  | | potion-multilingual-128M | **0.912 / 0.825** | 0.824 / 0.725 | 0.824 / 0.725 | 0.870 / 0.775 |
+  | five-language verses, across (295) | potion-base-8M | 0.292 / 0.217 | 0.305 / 0.203 | 0.305 / 0.203 | 0.353 / 0.251 |
+  | | potion-multilingual-128M | 0.292 / 0.217 | **0.866 / 0.810** | **0.866 / 0.810** | 0.725 / 0.641 |
+
+  Fusion ties routing on the English set with the English model and loses to it with the
+  multilingual one; it loses 0.14 MRR across languages with the only model that can cross them,
+  because BM25 there has names and numbers to rank by and pulls the translations down; and where
+  it wins, over the English-only model's verses, every engine is near chance. The one place it
+  helps is Ruth, where the restatements share the verses' names and nouns — and there lexical
+  alone beats both, so the finding is about **which engine a paraphrase within one language
+  goes to**, not about merging: `~hybrid` sends prose to semantic, and over this corpus `~lex`
+  is the better choice, which a query can make. Every set is small and every gold single-hand
+  or of record by construction; reopen with a within-language set in a language other than
+  English, where neither engine has been measured.
 - `--why` on a fused result prints, per hit, the partition ranks and the per-term contributions
   inside each partition (from `Hit::terms`).
 
@@ -2197,8 +2229,12 @@ E421, E422, E426, E427, W429, W430, W431. Existing: W036, E001.
 Draft 3 questions this RFC touches: ~~**OQ-14**~~ **answered** (IDF over the query's declared
 scope, default collection, recorded per query — §3.2 step 4 has the reasoning and the two
 defects that decided it), **OQ-15** (partial dependence; `Witnesses` trait leaves room), **OQ-16** (contentions
-across stores; computed by merge into the scratch store until SMYSL-2.8), **OQ-21** (name `sq`;
-saved queries in the format — this RFC needs only FC-5's declaration), **OQ-22** (intent
+across stores; computed by merge into the scratch store until SMYSL-2.8), ~~**OQ-21**~~ **decided
+2026-10-28: the name stays `sq`**, because it is no longer only a name — `using sq/1` is how a
+query states its version (`SMY-E427` for one this build does not support), the three ports
+parse it, and every `x.query/saved` unit written since TX-P8 carries it in its text, so a rename
+is a new language version and a migration of saved queries for no gain in meaning; saved
+queries are in the format as `x.query/v1` (SMYSL-2.3 A-11), **OQ-22** (intent
 classifier; rules by default, `Classifier` port), **OQ-23** (closed op set; `Unknown` preserved),
 **OQ-24** (state the lens chain always or only under `--explain`; proposed: one stderr line
 whenever a lens touched a unit, silence when none did).
@@ -2207,12 +2243,12 @@ New:
 
 | id | question |
 |---|---|
-| OQ-45 | RRF constant: fixed `k = 60` recorded in the recipe, or a per-query parameter? A parameter makes reruns depend on one more number. |
-| OQ-46 | Should `~hybrid` ever fuse lexical and semantic results (RRF) rather than route? The 0.78 vs 0.84 MRR measurement says no for the English corpus it was taken on; a multilingual corpus may differ. |
-| OQ-47 | `INTERPRETIVE` in `smysl-embed` includes `Question`; draft 3 §11.2 lists claim, finding, hypothesis. Which is the routing rule `sq` records? |
+| OQ-45 | RRF constant: fixed `k = 60` recorded in the recipe, or a per-query parameter? A parameter makes reruns depend on one more number. **Decided 2026-10-28: fixed, recorded, not a parameter** (§3.4). Over partition fusion `k` cannot reorder a unit only one partition ranks, which is every unit not cited from two partitions; where a unit is ranked twice it moves MRR by up to 0.035 and the best `k` changes with the corpus and the model. |
+| OQ-46 | Should `~hybrid` ever fuse lexical and semantic results (RRF) rather than route? The 0.78 vs 0.84 MRR measurement says no for the English corpus it was taken on; a multilingual corpus may differ. **Decided 2026-10-28: route** (§3.4's table). RRF ties routing on the English set with the English model, loses to it with the multilingual one (0.867 against 0.900), and loses 0.14 MRR across five languages (0.725 against 0.866). It beats routing within English over Ruth's restatements, where lexical alone beats both — an engine choice `~lex` already offers, not a case for merging. Reopen with a within-language set outside English. |
+| OQ-47 | `INTERPRETIVE` in `smysl-embed` includes `Question`; draft 3 §11.2 lists claim, finding, hypothesis. Which is the routing rule `sq` records? **Decided 2026-10-28: `sq` records the text's shape and nothing of kinds, and `Question` stays interpretive in `Hybrid`.** The kinds half of `Hybrid::routes_to_lexical` cannot reach `sq`: a `where kind` stage comes after the source in sq/1, so the source routes on its text alone (`ports::routes_to_lexical`, held to `looks_like_identifier` by the facade's test), and the route is recorded per partition. For the library `Hybrid` the list answers a different question from draft 3's — not "whose content is an interpretation" but "whose wording varies between two people saying one thing", and a question is a sentence, not a name. It matters only for a filter made entirely of non-interpretive kinds, so a filter of `Question` alone stays with the embedder. |
 | OQ-48 | **Decided (SMYSL-2.0 §3):** the lens engine lives in `smysl-core`, because check, render and retrieval need it below `smysl-query`. |
 | OQ-49 | **Resolved in SMYSL-2.3 A-11:** `x.query/answers`, inert for salience. |
-| OQ-50 | `match` (graph patterns): which subset, and in which phase? Refused (`E461`) until decided. |
+| OQ-50 | `match` (graph patterns): which subset, and in which phase? Refused (`E461`) until decided. **Decided 2026-10-28: no subset and no phase in SMYSL-2.** Every phase that might have needed it closed without it — the edge slots of every dossier template are `expand … only` (OQ-86), and no gate, template or measured question asked for a pattern a walk cannot write. SMYSL-2.9 §4.9's capture stays (OQ-82), so `match` keeps answering `SMY-E461` and a later RFC can specify the language without reopening the grammar; the case for one is a query somebody needed and could not write as a walk. |
 | OQ-51 | NL front end: is printing the query and requiring `--yes` enough, or must a saved translated query also record a human approval attestation? |
 | OQ-52 | Dossier slot ranking: product of quantised terms (draft 3), lexicographic, or RRF over per-criterion ranks? GE-T10 should compare at least two. **Decided 2026-10-28: the product, kept.** All three are built (`AskOptions::ranking`) and GE-T10's fourth table scores them. Membership is the template's (`order by salience … limit`), so precision and recall cannot see an order, and the gold is binary, not graded; what can be scored is whether a slot's gold units come before its strays, over the slots that hold both. Over set 1's thirty questions (16 such slots) the product and the lexicographic order agree everywhere (AP 0.749, MRR 0.875, P@1 0.750): no template has a `find`, so the retrieval term is constant and salience decides, with status breaking ties. RRF scores 0.728 / 0.771 / 0.562, because it gives status a share equal to salience's and so loses `characteristic`'s order; it orders `introduction` better (AP 0.958 against 0.875, two slots). Over the seventeen fresh questions only three slots hold both, and the three tie (0.694 / 0.667 / 0.333). The samples are small and in-sample, and single-hand gold. A choice other than the product is a recipe input. Reopen with graded gold, or when a template ranks by `find`. |
 | OQ-53 | Lens ops address top-level payload keys. Do nested keys (`payload_strings`' dotted paths) need lenses, and if so, is the dotted path the key? |

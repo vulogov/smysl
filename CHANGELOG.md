@@ -12,10 +12,7 @@ and the facade asserts the two are independent.
 What 1.10 leaves open, by the phase it blocks rather than the order it is easiest. The roadmap's §4
 is the list of record; this is where it stands as the cycle opens.
 
-**Retrieval defaults that were chosen, not decided.** OQ-45 (the RRF constant), OQ-46 (whether
-`~hybrid` fuses or routes) and OQ-47 (whether `question` is interpretive) block TX-P6's exit. 1.10
-measured three orders within a dossier slot and kept the product (OQ-52); the RRF it measured
-there used k = 60 because that is the literature's number, which is what OQ-45 asks to settle.
+**Retrieval defaults that were chosen, not decided** — *decided, see below.*
 
 **Export without its edges.** OQ-62 (`--format pack` and `-o DIR`), OQ-63 (the clock of an
 exported attestation) and OQ-64 (threads that span files) block TX-P11, with OQ-60 on what P1
@@ -27,6 +24,47 @@ type. It is flagged `ci-off-estimate` until it is answered.
 
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 there are none yet; they stay owed rather than planned.
+
+### Routing kept against the fusion it was never measured against, and four more of TX-P6's questions closed
+
+SMYSL-2.5 §3.4 and §9; OQ-45, OQ-46, OQ-47, OQ-50 and OQ-21 are decided, which empties TX-P6's
+row of the roadmap's §4.
+
+**OQ-46: `~hybrid` routes, and now against RRF.** The number that removed the merge — 0.78 MRR
+against pure semantic's 0.84 — measured an average of ranks over one English set, and the
+question left open was whether reciprocal rank fusion, which `sq` already uses across partitions,
+does better, and whether a multilingual corpus changes it. `crates/smysl-embed/tests/fusion.rs`
+scores lexical, semantic, routed and RRF-fused over three corpora with both S0 models: the twenty
+shared queries; the forty restatements of Ruth, each searched among the KJV's 85 verses and the
+ten planted near misses; and the five-language verses, each searched among the other four
+languages' 236. Fusion ties routing on the English set with the English model (0.877 against
+0.875) and loses with the multilingual one (0.867 against 0.900). Across languages, with the
+only model that can cross them, it loses **0.14 MRR** (0.725 against 0.866): BM25 has names and
+numbers to rank by there and pulls the translations down. It beats routing only over Ruth (0.870
+against 0.824), where lexical alone beats both at **0.912** — which says that a paraphrase within
+English is better sent to `~lex` than to the embedder, a choice a query can already make, and
+says nothing for merging.
+
+**OQ-45: `k = 60`, fixed, recorded, not a parameter.** Over partition fusion `k` cannot change an
+order: a unit belongs to one partition, its score is `1 / (k + rank)` for that one rank, monotone
+at every `k`, and two units at one rank tie at every `k`. A unit ranked twice is the only case it
+moves — cited from parts in two languages or manifests — and there, as the fusion sweep shows, it
+moves MRR by up to 0.035 with a best `k` that changes with the corpus and the model: one more
+number a rerun would depend on, tuned in-sample. `fuse.rs` now tests both halves.
+
+**OQ-47: `sq` routes on the text's shape alone; `Question` stays interpretive in `Hybrid`.** The
+kinds half of `Hybrid::routes_to_lexical` cannot reach `sq`, because a `where kind` stage follows
+the source in sq/1. In the library `Hybrid` the list asks whose wording varies, not whose content
+is an interpretation, and a question is a sentence.
+
+**OQ-50: no `match` in SMYSL-2.** Every phase closed without it, and every edge slot is written as
+`expand … only`. The capture and `SMY-E461` stay, so a later RFC can specify the language without
+reopening the grammar. **OQ-21: the name stays `sq`**, because `using sq/1` is how a query states
+its version and every saved query carries it.
+
+Every set is small; the Ruth set and the English queries were written by one hand, and the
+verses' gold is of record by construction. The fusion figures reopen with a within-language set
+outside English, where neither engine has been measured.
 
 ## 1.10.0 — 2026-10-28
 

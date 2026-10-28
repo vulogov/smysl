@@ -673,6 +673,8 @@ changed the draft; they are marked.
 
 | OQ-83 | **Decided: an absent engine is `~lex`** (§4.4). Raised by TX-P6 step 3, which had to lower `find "…"` and found that neither RFC says what a bare `find` means: §4.4's grammar makes the engine optional and SMYSL-2.5 §3.3's table lists only the three written forms. Lexical, for two reasons that agree. The CLI already decided it — `find`'s own summary is *"Rank units against a query, lexically"* and `--engine` defaults to lexical — and a query language whose default differed from the command of the same name would be a trap rather than a choice. And it is the only default that keeps a bare `find` **pure**: `~sem` and `~hybrid` consult a model, so a semantic default would make the commonest query in the language fail TX-P6 step 7's `--seed-check` purity gate. The plan records which was written, because a saved query must give back the text it was saved from. *Rejected:* requiring the engine always (boilerplate on the one stage every query has, and it breaks every example in §2 and SMYSL-2.5 §11); defaulting to `~hybrid`, which is the best answer on average and is impure, unavailable in the pure tier, and silently different between two builds of the same binary |
 
-Open elsewhere, raised here: **OQ-50** (`match`'s pattern language, SMYSL-2.5). The §3.1/§3.9
+Raised here and decided in SMYSL-2.5: **OQ-50** (`match`'s pattern language) has no subset and
+no phase in SMYSL-2 (2026-10-28), so §4.9's capture and `SMY-E461` are the whole of `match` until
+a later RFC specifies one. The §3.1/§3.9
 contradiction OQ-77 raised against SMYSL-2.5, and the §3.6 precondition OQ-82 depended on, were
 both settled in SMYSL-2.5 on 2026-10-15; neither is open.
