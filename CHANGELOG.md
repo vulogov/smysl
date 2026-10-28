@@ -58,6 +58,26 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### Counter-evidence about what was asked: dossier template set 2
+
+`ask`'s counter-evidence had failed GE-T10's kill criterion at 0.750 precision, for the two reasons
+SMYSL-2.5 OQ-87 and OQ-88 name. Template set `smysl/dossier/2` answers both without touching the
+grammar. A `verify` question's `counter` and `reported` slots, and an `explain` question's
+`counter`, now start from the units about the subject that say one of the question's own words,
+written into the slot's query as an `or` of `matches`. When no unit says any of them, the slot runs
+on the subject alone and `ask` says so on stderr. Every slot also runs the supersession pass on its
+seeds before walking (`PlanOptions::supersede_before_walk`, a recipe input), so a rebuttal of an
+account a later one replaced is no longer counter-evidence. `revision` leaves `trace`, since sq/1
+cannot select a superseded unit and the slot was empty for every question.
+
+Counter-evidence precision is now **1.000** on set 1's thirty questions (recall 0.667, was 0.750 /
+0.750). It is also 1.000 on **seventeen fresh questions** written before set 2 ran
+(`fixtures/dossier/fresh/`); set 1 scores 0.478 on those. Recall on the fresh questions is 0.471,
+because `matches` does not stem and a seed worded unlike the question is missed. `evidence` was
+narrowed in the first version and taken out on the measurement, as its recall fell to 0 of 9. The
+criterion is met. `ask` stays *Experimental* by decision: the gold sets are single-hand, and recall
+fell.
+
 ### The test matrix green again, and TX-P8 closed
 
 CI's test matrix had been red on every push since 2026-10-24, and the local sweep's `--all-features`

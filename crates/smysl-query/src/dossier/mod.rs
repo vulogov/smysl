@@ -219,6 +219,10 @@ pub struct SlotResult {
     pub units: Vec<Uid>,
     /// Each unit's rank score, in the same order.
     pub scores: Vec<f32>,
+    /// Whether the slot was narrowed to the question's topic ([`templates::narrowed`]): false
+    /// for a slot the set does not narrow, and for one it does when no unit about the subject
+    /// says any of the topic's words, so the slot ran on the subject alone.
+    pub narrowed: bool,
 }
 
 /// A dossier, ready to append.
@@ -230,6 +234,11 @@ pub struct Dossier {
     /// The name the subject was found under, and the entities taken for it.
     pub subject: String,
     pub entities: Vec<Uid>,
+    /// The words of the topic a narrowed slot looks for ([`topic_terms`]), empty for an intent
+    /// with no narrowed slot, and whether any unit about the subject says one — which is what
+    /// decides whether those slots narrow.
+    pub topic: Vec<String>,
+    pub topic_found: bool,
     pub slots: Vec<SlotResult>,
     pub thread: Thread,
     pub view: View,
@@ -290,6 +299,173 @@ fn words(topic: &str) -> Vec<String> {
                 .to_string()
         })
         .filter(|w| !w.is_empty())
+        .collect()
+}
+
+/// Words that carry no topic of their own, per tier-1 language: articles, pronouns, auxiliaries,
+/// prepositions and conjunctions. Written from the languages, not from any question set, and
+/// short on purpose — a word left out of this list costs a little precision in a narrowed slot,
+/// and a content word put in it costs the slot the one word the question turned on.
+const FUNCTION_WORDS: &[(&str, &[&str])] = &[
+    (
+        "en",
+        &[
+            "the", "and", "are", "was", "were", "been", "being", "has", "have", "had", "does",
+            "did", "for", "from", "with", "that", "this", "these", "those", "its", "his", "her",
+            "their", "them", "they", "who", "whom", "what", "which", "when", "where", "why", "how",
+            "not", "but", "into", "onto", "than", "then", "there", "very", "really", "can",
+            "could", "would", "should", "will", "shall", "may", "might", "must", "any", "all",
+            "some", "true",
+        ],
+    ),
+    (
+        "de",
+        &[
+            "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer",
+            "eines", "und", "oder", "aber", "ist", "sind", "war", "waren", "wird", "werden",
+            "wurde", "wurden", "hat", "haben", "hatte", "durch", "mit", "von", "vom", "zum", "zur",
+            "für", "auf", "aus", "bei", "nach", "über", "unter", "dass", "wie", "was", "wer",
+            "warum", "wieso", "weshalb", "nicht", "sich", "sein", "seine", "ihre", "ihr", "stimmt",
+            "wahr", "wirklich", "denn", "doch", "auch", "noch", "schon", "kann", "konnte",
+        ],
+    ),
+    (
+        "es",
+        &[
+            "el",
+            "la",
+            "los",
+            "las",
+            "una",
+            "uno",
+            "unos",
+            "unas",
+            "del",
+            "por",
+            "para",
+            "con",
+            "sin",
+            "que",
+            "qué",
+            "como",
+            "cómo",
+            "cuando",
+            "donde",
+            "dónde",
+            "porque",
+            "quien",
+            "quién",
+            "es",
+            "son",
+            "era",
+            "eran",
+            "fue",
+            "fueron",
+            "ser",
+            "está",
+            "están",
+            "ha",
+            "han",
+            "había",
+            "hizo",
+            "sus",
+            "su",
+            "se",
+            "no",
+            "más",
+            "muy",
+            "cierto",
+            "verdad",
+            "realmente",
+            "también",
+            "puede",
+            "pudo",
+        ],
+    ),
+    (
+        "fr",
+        &[
+            "le", "la", "les", "une", "des", "du", "de", "et", "ou", "mais", "est", "sont",
+            "était", "étaient", "été", "être", "fut", "ont", "avait", "par", "pour", "avec",
+            "sans", "dans", "sur", "sous", "que", "qui", "quoi", "comment", "quand", "pourquoi",
+            "est-ce", "ce", "cette", "ces", "son", "sa", "ses", "leur", "leurs", "il", "elle",
+            "ils", "elles", "pas", "ne", "vrai", "vraiment", "aussi", "peut", "pu", "fait", "si",
+        ],
+    ),
+    (
+        "ru",
+        &[
+            "это",
+            "что",
+            "как",
+            "кто",
+            "где",
+            "когда",
+            "почему",
+            "зачем",
+            "или",
+            "но",
+            "был",
+            "была",
+            "было",
+            "были",
+            "есть",
+            "быть",
+            "его",
+            "её",
+            "их",
+            "она",
+            "они",
+            "оно",
+            "для",
+            "при",
+            "через",
+            "над",
+            "под",
+            "без",
+            "так",
+            "уже",
+            "ещё",
+            "тоже",
+            "также",
+            "очень",
+            "правда",
+            "действительно",
+            "ли",
+            "не",
+            "ни",
+            "из",
+            "от",
+            "до",
+            "по",
+            "на",
+            "за",
+            "мог",
+            "могла",
+            "могли",
+        ],
+    ),
+];
+
+/// The topic's words a narrowed slot looks for (OQ-88): the topic as `matches` tokenises it,
+/// less the subject's own words, words under three characters, and the question language's
+/// function words — every language's, when the language is not known (an `--intent` with
+/// no `--lang` skips the rule table, which is what names it). Each once, in the order the
+/// question has them.
+pub fn topic_terms(topic: &str, subject: &str, lang: &str) -> Vec<String> {
+    let tok = smysl_retrieve::Tokenizer::plain();
+    let own: BTreeSet<String> = tok.terms(subject).into_iter().collect();
+    let function: BTreeSet<&str> = FUNCTION_WORDS
+        .iter()
+        .filter(|(l, _)| lang.is_empty() || *l == lang)
+        .flat_map(|(_, w)| w.iter().copied())
+        .collect();
+    let mut seen = BTreeSet::new();
+    tok.terms(topic)
+        .into_iter()
+        .filter(|t| t.chars().count() >= 3)
+        .filter(|t| !own.contains(t) && !function.contains(t.as_str()))
+        .filter(|t| seen.insert(t.clone()))
         .collect()
 }
 
@@ -423,12 +599,47 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
         classified.lang.to_string()
     };
 
+    // The topic, and whether the store has anything about the subject that says it. Asked
+    // once, the way a narrowed slot would ask it, so a slot narrows exactly when the probe
+    // finds something to narrow to.
+    let narrows = templates::slots(classified.intent)
+        .iter()
+        .any(|s| templates::narrowed(classified.intent, s.name));
+    let topic = if narrows {
+        topic_terms(&classified.topic, &subject, &lang)
+    } else {
+        Vec::new()
+    };
+    let topic_found = !topic.is_empty() && {
+        let text = templates::expand_scope(
+            &templates::narrow("about entity($subject)\n", &topic),
+            opts.scope.as_deref(),
+        );
+        let fail = |diagnostics: Vec<Diagnostic>| AskError::Slot {
+            slot: "topic",
+            diagnostics,
+        };
+        let parsed = crate::parse(&text).map_err(|d| fail(vec![d]))?;
+        let mut popts = opts.plan.clone();
+        popts.params.insert("subject".to_string(), subject.clone());
+        let bound = crate::bind(&parsed.query, &popts.params).map_err(|d| fail(vec![d]))?;
+        let plan = crate::plan(&bound, &scoped, &popts).map_err(fail)?;
+        let run = crate::run(&plan, &scoped, &popts).map_err(fail)?;
+        !run.answer.uids().is_empty()
+    };
+
     let salience = smysl_graph::salience(env.store, &SalienceRequest::default());
     let mut slot_results = Vec::new();
     let mut records: Vec<Record> = Vec::new();
     let mut warnings: Vec<Diagnostic> = Vec::new();
     for slot in templates::slots(classified.intent) {
-        let text = templates::expand_scope(slot.text, opts.scope.as_deref());
+        let narrowed = topic_found && templates::narrowed(classified.intent, slot.name);
+        let text = if narrowed {
+            templates::narrow(slot.text, &topic)
+        } else {
+            slot.text.to_string()
+        };
+        let text = templates::expand_scope(&text, opts.scope.as_deref());
         let fail = |diagnostics: Vec<Diagnostic>| AskError::Slot {
             slot: slot.name,
             diagnostics,
@@ -438,6 +649,7 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
         popts.params.insert("subject".to_string(), subject.clone());
         popts.params.insert("lang".to_string(), lang.clone());
         popts.template_set = set.to_string();
+        popts.supersede_before_walk = true;
         let bound = crate::bind(&parsed.query, &popts.params).map_err(|d| fail(vec![d]))?;
         let plan = crate::plan(&bound, &scoped, &popts).map_err(fail)?;
         let run = crate::run(&plan, &scoped, &popts).map_err(fail)?;
@@ -460,6 +672,7 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
             saved,
             units: ranked.iter().map(|(u, _)| *u).collect(),
             scores: ranked.iter().map(|(_, s)| *s).collect(),
+            narrowed,
         });
     }
 
@@ -480,6 +693,7 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
     for uid in &group {
         field(&uid.to_string());
     }
+    field(&topic.join(" "));
     field(opts.scope.as_deref().unwrap_or(""));
     field(&opts.budget.map(|n| n.to_string()).unwrap_or_default());
     for slot in &slot_results {
@@ -667,6 +881,8 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
         classified,
         subject,
         entities: group,
+        topic,
+        topic_found,
         slots: slot_results,
         thread,
         view,

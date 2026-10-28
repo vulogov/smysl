@@ -470,3 +470,98 @@ fn an_unknown_template_set_and_a_missing_port_are_refused_by_name() {
     }
     assert_eq!(templates::set(templates::SET), Ok(templates::SET));
 }
+
+/// A store for set 2's two changes (OQ-87, OQ-88): an account of tea that a later one replaced,
+/// a rebuttal of each, and a third claim with its own rebuttal.
+const TEA: &str = r#"@schema x.text/v1 { version: 1, types: ["x.text/entity"], relations: [x.text/mentions, x.text/same-as] }
+
+@x.text/entity e/tea { status: speculative, source: { kind: doc, ref: "alias:en" } }
+~ tea
+
+@claim t/old { status: cited, source: { kind: doc, ref: "tea:1" } }
+~ Tea cures the ague.
+
+@claim t/new { status: cited, source: { kind: doc, ref: "tea:2" } }
+~ Tea eases the ague.
+
+@claim t/awake { status: cited, source: { kind: doc, ref: "tea:3" } }
+~ Tea keeps a drinker awake.
+
+@claim r/old { status: cited, source: { kind: doc, ref: "tea:4" } }
+~ The fevers came back whatever was drunk.
+
+@claim r/awake { status: cited, source: { kind: doc, ref: "tea:5" } }
+~ The monks drank it at night and slept well.
+
+@rel t/new --supersedes--> t/old
+@rel r/old --rebuts--> t/old
+@rel r/awake --rebuts--> t/awake
+@rel t/old --x.text/mentions--> e/tea
+@rel t/new --x.text/mentions--> e/tea
+@rel t/awake --x.text/mentions--> e/tea
+"#;
+
+fn tea() -> Fixture {
+    let parsed = parse_surface(TEA).expect("the tea store parses");
+    Fixture {
+        labels: parsed
+            .labels
+            .iter()
+            .map(|(l, u)| (l.to_string(), *u))
+            .collect(),
+        store: Store::from_records(parsed.records),
+    }
+}
+
+/// OQ-87: an edge slot walks from the current account, so the rebuttal of the account a later
+/// one replaced is not counter-evidence about the subject now.
+#[test]
+fn counter_walks_from_the_current_account() {
+    let f = tea();
+    let scope = StoreScope::new("tea", &f.store);
+    let env = Env::new(&f.store, &scope).with_entities(&scope);
+    let d = ask("What is tea?", &env, &opts()).expect("a dossier");
+    let counter: BTreeSet<Uid> = slot(&d, "counter").units.iter().copied().collect();
+    assert_eq!(counter, BTreeSet::from([f.uid("r/awake")]));
+    assert!(!slot(&d, "counter").narrowed, "define does not narrow");
+}
+
+/// OQ-88: a verify question's counter slot holds the rebuttals of the claim it asks about, and
+/// says it was narrowed.
+#[test]
+fn a_verify_counter_is_narrowed_to_what_was_asked() {
+    let f = tea();
+    let scope = StoreScope::new("tea", &f.store);
+    let env = Env::new(&f.store, &scope).with_entities(&scope);
+    let d = ask("Is it true that tea keeps you awake?", &env, &opts()).expect("a dossier");
+    assert!(d.topic.contains(&"awake".to_string()), "{:?}", d.topic);
+    assert!(d.topic_found);
+    let counter = slot(&d, "counter");
+    assert!(counter.narrowed);
+    assert!(
+        counter.text.contains("matches \"awake\""),
+        "{}",
+        counter.text
+    );
+    assert_eq!(counter.units, vec![f.uid("r/awake")]);
+    assert!(
+        !slot(&d, "support").narrowed,
+        "support is not a narrowed slot"
+    );
+}
+
+/// OQ-88: when nothing about the subject says any of the topic's words, no slot narrows, so the
+/// dossier does not report an absence a filter made.
+#[test]
+fn a_topic_the_store_does_not_use_narrows_nothing() {
+    let f = tea();
+    let scope = StoreScope::new("tea", &f.store);
+    let env = Env::new(&f.store, &scope).with_entities(&scope);
+    let d = ask("Is it true that tea is green?", &env, &opts()).expect("a dossier");
+    assert_eq!(d.topic, vec!["green".to_string()]);
+    assert!(!d.topic_found);
+    let counter = slot(&d, "counter");
+    assert!(!counter.narrowed);
+    assert!(!counter.text.contains("matches"), "{}", counter.text);
+    assert_eq!(counter.units, vec![f.uid("r/awake")]);
+}

@@ -976,7 +976,7 @@ fn cli() -> Command {
                     Arg::new("templates")
                         .long("templates")
                         .value_name("ID")
-                        .default_value("smysl/dossier/1")
+                        .default_value("smysl/dossier/2")
                         .help("The dossier template set"),
                 )
                 .arg(
@@ -6259,9 +6259,9 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 /// measured, and nothing a script reads on stdout changes. The note goes when a gold run puts
 /// the slot over the bar.
 #[cfg(feature = "text")]
-const ASK_EXPERIMENTAL: &str = "smysl ask: experimental — GE-T10 measured counter-evidence \
-     precision at 0.750, below draft 3's 0.8 (SMYSL-2.5 §6 TX-P8 step 4); a counter slot can \
-     hold a rebuttal of a claim the question did not ask about";
+const ASK_EXPERIMENTAL: &str = "smysl ask: experimental — GE-T10's counter-evidence precision \
+     meets draft 3's 0.8 under template set 2 (1.000 over both question sets, SMYSL-2.5 OQ-88), \
+     but every gold set is single-hand and counter's recall on fresh questions is 0.471";
 
 /// `smysl ask` — a dossier for a question (SMYSL-2.5 §3.13, TX-P8 step 3).
 ///
@@ -6441,6 +6441,25 @@ fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         dossier.slots.len(),
         gaps,
     );
+    // Which slots read the question's own words (template set 2, OQ-88), or why none did.
+    let narrowed: Vec<&str> = dossier
+        .slots
+        .iter()
+        .filter(|s| s.narrowed)
+        .map(|s| s.name)
+        .collect();
+    if !narrowed.is_empty() {
+        eprintln!(
+            "smysl ask: narrowed to [{}]: {}",
+            dossier.topic.join(" "),
+            narrowed.join(", ")
+        );
+    } else if !dossier.topic.is_empty() && !dossier.topic_found {
+        eprintln!(
+            "smysl ask: no unit about the subject says any of [{}]; no slot narrowed",
+            dossier.topic.join(" ")
+        );
+    }
     for w in &dossier.warnings {
         eprintln!("smysl ask: {}: {}", w.code.as_str(), w.message);
     }

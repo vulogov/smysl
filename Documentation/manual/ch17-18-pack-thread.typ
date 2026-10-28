@@ -604,7 +604,7 @@ language reads the question's intent — `define`, `explain`, `verify`,
 resolved to the store's `x.text/entity` units across `x.text/same-as`. A name
 that means two things, two women called Mary, is `SMY-W417`: the candidates
 are listed and nothing runs until `--subject` picks one. Each of the intent's
-slots is then an ordinary `sq/1` query, from the template set `smysl/dossier/1`
+slots is then an ordinary `sq/1` query, from the template set `smysl/dossier/2`
 compiled into the binary, planned, run and kept as a saved query — so every
 slot can be rerun with `q --rerun` like any other — and the dossier is a
 `question` unit, those saved queries, a `dossier` thread and a view over them.
@@ -622,16 +622,29 @@ the dossier's units. A record grounding anywhere else is dropped and counted
 
 *`ask` is experimental*, and says so on stderr every time it runs. Its slots
 were measured against a gold set (GE-T10: thirty questions, each in all five
-languages) and the counter-evidence slot came in at 0.750 precision, under the
-0.8 that keeps a dossier command out of the defaults. The cause is specific,
-and it tells you how to read a dossier: a slot is bound to the question's
-*subject* and to nothing else the question asked. "Is scurvy cured by citrus
-fruit?" gets every rebuttal of every claim about scurvy, including the one
-disputing how long a voyage had to be before it struck. Read a `verify` or
-`explain` dossier's counter-evidence as everything disputed about the subject,
-and check each item against what you asked. A definition slot measured 1.000.
-The gold was written by one person, not by independent experts, so treat
-both figures as a careful reading, not a benchmark.
+languages). Under the first template set, counter-evidence scored 0.750
+precision, under the 0.8 that keeps a dossier command out of the defaults,
+because a slot was bound to the question's *subject* and to nothing else it
+asked. The second set, `smysl/dossier/2`, narrows a `verify` question's
+counter-evidence and reported speech, and an `explain` question's
+counter-evidence, to the question's own words. "Is scurvy cured by citrus
+fruit?" now starts from the claims about scurvy that say _cured_, _citrus_ or
+_fruit_, and collects their rebuttals. Both the old questions and seventeen
+new ones now score 1.000 on counter-evidence precision. Two things to know
+when you read one:
+
+- *The words must match.* `matches` does not stem, so _spread_ does not find
+  _spreads_, and a rebuttal of a claim worded differently from your question
+  is missed. Recall on the new questions was 0.471. Phrase the question in the
+  store's words if a slot comes back thin.
+- *A question the store has no words for is not narrowed.* If no unit about the
+  subject uses any of the question's words, as with a German question over an
+  English store, the slot runs on the subject alone, as the first set did.
+  `ask` says on stderr which slots were narrowed, and to which words.
+
+The gold was written by one person, not by independent experts, and the new
+questions by the same person who wrote the narrowing, so treat the figures as a
+careful reading, not a benchmark. That is why `ask` stays experimental.
 
 One thing to know when you write entities for `ask` to find: `same-as` makes a
 class only where every pair is asserted. Five spellings of one disease, each

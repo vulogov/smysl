@@ -151,6 +151,11 @@ pub struct PlanOptions {
     /// it.
     pub question: Option<String>,
     pub translator: Option<String>,
+    /// Run the supersession pass on a pipeline's seeds before its traversals, as well as after
+    /// (OQ-87). Off by default, where §3.2 puts the pass after sources and traversals; `ask`
+    /// sets it for every slot, so a dossier walks from the current account and not from the
+    /// one it replaced. A recipe input when it is on.
+    pub supersede_before_walk: bool,
 }
 
 impl Default for PlanOptions {
@@ -164,6 +169,7 @@ impl Default for PlanOptions {
             template_set: String::new(),
             question: None,
             translator: None,
+            supersede_before_walk: false,
         }
     }
 }
@@ -362,6 +368,9 @@ pub enum PlanStep {
     /// about the answer and a plan that stayed silent would read like one where the pass found
     /// nothing to do.
     Supersede { enabled: bool },
+    /// The supersession pass on the seeds, before phase 7's walks
+    /// ([`PlanOptions::supersede_before_walk`]).
+    SupersedeSeeds,
     /// Phase 8.
     SetOp { op: &'static str, span: Span },
     /// Phase 9.
@@ -1043,6 +1052,9 @@ fn lower_pipeline(
         }
     }
     if !traversals.is_empty() || !closures.is_empty() {
+        if opts.supersede_before_walk && !opts.all_versions {
+            steps.push(PlanStep::SupersedeSeeds);
+        }
         steps.push(PlanStep::Expand {
             traversals: traversals.iter().map(|t| t.label.clone()).collect(),
             closures: closures

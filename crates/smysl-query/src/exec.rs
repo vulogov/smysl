@@ -310,6 +310,11 @@ fn run_pipeline(
     // ranked answer no longer covers every unit in it, and the honest shape for the result is a
     // set. A query that wants the enlarged set ordered says so.
     if !p.traversals.is_empty() || !p.closures.is_empty() {
+        if opts.supersede_before_walk && !opts.all_versions {
+            // OQ-87: a walk from a replaced unit reaches what bears on an account nobody now
+            // holds. Its forks warn here, and the pass after the walk does not warn again.
+            answer = supersede(answer, env, warnings);
+        }
         let mut reached: BTreeSet<Uid> = answer.uids().into_iter().collect();
         let seeds: Vec<Uid> = reached.iter().copied().collect();
 
@@ -406,7 +411,14 @@ fn run_pipeline(
     // reaches a superseded unit should hand the pass its replacement, and an ordering should
     // sort what the pass left rather than what it removed.
     if !opts.all_versions {
+        let before = warnings.len();
         answer = supersede(answer, env, warnings);
+        // A fork the pass on the seeds already reported is not a second fork.
+        for w in warnings.split_off(before) {
+            if !warnings.contains(&w) {
+                warnings.push(w);
+            }
+        }
     }
 
     Ok(answer)

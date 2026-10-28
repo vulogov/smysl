@@ -38,6 +38,44 @@
 //! has no way to ask for only what the walk reached. The subtraction also removes a rebuttal
 //! that itself names the subject, which then answers `characteristic` instead. Recorded as
 //! OQ-86; GE-T10 (step 4) is what measures whether it matters.
+//!
+//! # Set 2: what was asked, and the current account (OQ-87, OQ-88)
+//!
+//! Set 1's GE-T10 run fired the kill criterion on counter-evidence, and both causes were in
+//! this file rather than in the grammar. Set 2 changes three things and its id says so, since a
+//! dossier saved under set 1 answered a different question of the same templates.
+//!
+//! **A slot can be narrowed to the question's topic** (OQ-88). A verify or explain question
+//! asks something *of* its subject — "is scurvy cured by citrus fruit" — and set 1 bound only
+//! the subject, so `counter` held the rebuttal of every claim about scurvy. [`narrowed`] names
+//! the (intent, slot) pairs that take the topic: `counter` and `reported`, in the two intents
+//! whose questions carry a claim. OQ-88 named `evidence` too, and it is out on measurement: an
+//! observation is told in its own words ("Anson lost most of his men"), not the question's,
+//! so narrowing it took its recall to 0 of 9 over set 1's questions and halved it over the
+//! fresh ones — decided after both runs, which makes the fresh set in-sample for this one
+//! choice (SMYSL-2.5 OQ-88). The topic's words are an `or` of `matches` written
+//! into the slot's *first* pipeline, after its `about entity($subject)` ([`narrow`]): the units
+//! the slot starts from must say something the question said. For an edge slot that is the
+//! seed, so `counter` walks to the rebuttals of the claim asked about and not to rebuttals that
+//! share its words; for a kind slot it is the unit itself. The words are written into the text
+//! for the reason `$scope` is: sq/1's `matches` asks for every term and a topic asks for any,
+//! and the saved query should carry what ran. **When no unit about the subject says any of
+//! them** — a question in a language the store does not hold, or in words it does not use —
+//! the slot runs unnarrowed and the dossier records that it did, because a slot emptied by a
+//! filter nothing could pass would report an absence that is not in the store.
+//!
+//! **Edge slots walk from the current account** (OQ-87, part b). The supersession pass runs
+//! after traversals (§3.2), so a walk from a replaced unit reached *its* rebuttals before the
+//! pass replaced it. Every slot is planned with
+//! [`PlanOptions::supersede_before_walk`](crate::PlanOptions), which runs the pass on the seeds
+//! as well; the recipe records it.
+//!
+//! **`revision` is not offered** (OQ-87, part a). It asks for what a later account replaced, and
+//! sq/1 cannot select a superseded unit: under the current lens the old unit is replaced, and
+//! under `--all-versions` it names the subject and the `except` removes it, so set 1's `trace`
+//! carried a slot that was empty for every question. The template stays in [`SLOTS`], since
+//! the role is the dossier schema's, and no intent lists it until a `where superseded`
+//! predicate exists.
 
 use smysl_core::diag::{Code, Diagnostic};
 use smysl_core::{hash_bytes, Role};
@@ -45,7 +83,7 @@ use smysl_core::{hash_bytes, Role};
 use super::intent::Intent;
 
 /// The set this build carries.
-pub const SET: &str = "smysl/dossier/1";
+pub const SET: &str = "smysl/dossier/2";
 
 /// One slot: the role its units take in the dossier thread, and its query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,7 +146,7 @@ pub fn slots(intent: Intent) -> Vec<&'static Slot> {
         ],
         Intent::Verify => &["support", "evidence", "counter", "reported"],
         Intent::Attribute => &["reported", "holder", "stance"],
-        Intent::Trace => &["introduction", "revision", "cause"],
+        Intent::Trace => &["introduction", "cause"],
         Intent::Locate => &["location", "related"],
         Intent::Depend => &["dependent", "related"],
         Intent::Compare => &["characteristic", "contrast", "counter"],
@@ -124,6 +162,46 @@ pub fn slots(intent: Intent) -> Vec<&'static Slot> {
         .collect()
 }
 
+/// Whether a slot of this intent is narrowed to the question's topic (OQ-88).
+pub fn narrowed(intent: Intent, slot: &str) -> bool {
+    match intent {
+        Intent::Verify => matches!(slot, "counter" | "reported"),
+        Intent::Explain => slot == "counter",
+        _ => false,
+    }
+}
+
+/// A slot's text with its first pipeline narrowed to any of `terms`, written as an `or` of
+/// `matches` after the line that opens it. `terms` empty leaves the text as it was.
+pub fn narrow(text: &str, terms: &[String]) -> String {
+    if terms.is_empty() {
+        return text.to_string();
+    }
+    let filter = terms
+        .iter()
+        .map(|t| {
+            format!(
+                "matches \"{}\"",
+                t.replace('\\', "\\\\").replace('"', "\\\"")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" or ");
+    let mut out = String::with_capacity(text.len() + filter.len() + 8);
+    let mut done = false;
+    for line in text.lines() {
+        out.push_str(line);
+        out.push('\n');
+        if !done && line.starts_with("about entity(") {
+            out.push_str("where ");
+            out.push_str(&filter);
+            out.push('\n');
+            done = true;
+        }
+    }
+    out
+}
+
 /// The set's hash: its id, then each intent's slot list, then each slot's name and text, framed
 /// so no two sets can hash alike by moving a byte between fields.
 pub fn hash() -> [u8; 32] {
@@ -137,6 +215,11 @@ pub fn hash() -> [u8; 32] {
         field(intent.as_str());
         for slot in slots(*intent) {
             field(slot.name);
+            field(if narrowed(*intent, slot.name) {
+                "topic"
+            } else {
+                ""
+            });
         }
     }
     for slot in SLOTS {
@@ -214,6 +297,41 @@ mod tests {
     #[test]
     fn an_unknown_set_is_e477() {
         assert!(set(SET).is_ok());
-        assert_eq!(set("smysl/dossier/2").unwrap_err().code, Code::E477);
+        assert_eq!(set("smysl/dossier/1").unwrap_err().code, Code::E477);
+    }
+
+    #[test]
+    fn revision_is_in_the_set_and_no_intent_offers_it() {
+        assert!(SLOTS.iter().any(|s| s.name == "revision"));
+        for intent in Intent::ALL {
+            assert!(
+                slots(*intent).iter().all(|s| s.name != "revision"),
+                "{intent}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_narrowed_slot_filters_its_first_pipeline_only() {
+        let counter = SLOTS.iter().find(|s| s.name == "counter").unwrap();
+        let text = narrow(counter.text, &["citrus".into(), "cured".into()]);
+        assert!(text.starts_with(
+            "about entity($subject)\nwhere matches \"citrus\" or matches \"cured\"\nexpand"
+        ));
+        assert_eq!(text.matches("where matches").count(), 1);
+        crate::parse(&text).unwrap();
+        crate::parse(&expand_scope(&text, Some("texts"))).unwrap();
+        assert_eq!(narrow(counter.text, &[]), counter.text);
+        for intent in Intent::ALL {
+            for slot in slots(*intent) {
+                if narrowed(*intent, slot.name) {
+                    assert!(
+                        slot.text.starts_with("about entity($subject)"),
+                        "{}",
+                        slot.name
+                    );
+                }
+            }
+        }
     }
 }

@@ -88,6 +88,9 @@ pub struct Recipe {
     pub template_set: String,
     /// Sorted by name.
     pub params: Vec<(String, String)>,
+    /// [`PlanOptions::supersede_before_walk`]. Hashed only when on, so every recipe saved
+    /// before OQ-87 hashes as it did.
+    pub supersede_before_walk: bool,
 }
 
 impl Recipe {
@@ -117,6 +120,7 @@ impl Recipe {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
+            supersede_before_walk: opts.supersede_before_walk,
         }
     }
 
@@ -139,6 +143,9 @@ impl Recipe {
         put(&self.template_set);
         for (k, v) in &self.params {
             put(&format!("{k}={v}"));
+        }
+        if self.supersede_before_walk {
+            put("supersede:before-walk");
         }
         h.finish()
     }

@@ -17,8 +17,8 @@
 //!    person.
 //! 2. **The front**, per language: whether the classifier found the question's intent and
 //!    whether a subject was found under it.
-//! 3. **The slots alone**: each question once, with its gold intent given and the subject
-//!    named in English, so that nothing but the templates is measured. The kill criterion is
+//! 3. **The slots alone**: each question once, in English, with its gold intent given and its
+//!    subject picked, so that nothing but the templates is measured. The kill criterion is
 //!    applied here, because it is a criterion on slots; a classifier that misses a language is
 //!    a different defect with a different fix, and the end-to-end table is where it shows.
 //!
@@ -194,12 +194,26 @@ struct Run {
 }
 
 fn run() -> Run {
+    run_over(
+        input(
+            "SMYSL_GE_T10_QUESTIONS",
+            "fixtures/dossier/gold/questions.tsv",
+        ),
+        input("SMYSL_GE_T10_GOLD", "fixtures/dossier/gold/slots.tsv"),
+    )
+}
+
+/// The fresh set (OQ-87, OQ-88): new questions over the committed corpus, written before set 2
+/// of the templates ran on anything. No override; the committed corpus is what it asks about.
+fn run_fresh() -> Run {
+    run_over(
+        (repo("fixtures/dossier/fresh/questions.tsv"), false),
+        (repo("fixtures/dossier/fresh/slots.tsv"), false),
+    )
+}
+
+fn run_over((questions, q_over): (PathBuf, bool), (gold_path, g_over): (PathBuf, bool)) -> Run {
     let (corpus, c_over) = input("SMYSL_GE_T10_CORPUS", "fixtures/dossier/gold/corpus.smy");
-    let (questions, q_over) = input(
-        "SMYSL_GE_T10_QUESTIONS",
-        "fixtures/dossier/gold/questions.tsv",
-    );
-    let (gold_path, g_over) = input("SMYSL_GE_T10_GOLD", "fixtures/dossier/gold/slots.tsv");
 
     let src = std::fs::read_to_string(&corpus).expect("the corpus");
     let parsed = parse_surface(&src).expect("the corpus parses");
@@ -252,13 +266,17 @@ fn run() -> Run {
             .or_default()
             .push((r[1].clone(), units));
     }
+    // The gold may name a slot the set no longer offers — `revision`, which set 2 withdrew
+    // from `trace` (OQ-87) — and it is scored as a slot that found nothing: the reader still
+    // wanted those units. A slot the set offers and the gold does not name is an error.
     for q in &qs {
         let want: Vec<&str> = templates::slots(q.intent).iter().map(|s| s.name).collect();
         let have: Vec<&str> = gold[&q.qid].iter().map(|(s, _)| s.as_str()).collect();
-        assert_eq!(
-            want, have,
-            "{}: the gold's slots are not {}'s",
-            q.qid, q.intent
+        assert!(
+            want.iter().all(|w| have.contains(w)),
+            "{}: the gold's slots {have:?} do not cover {}'s {want:?}",
+            q.qid,
+            q.intent
         );
     }
 
@@ -293,6 +311,7 @@ fn run() -> Run {
     let mut by_intent: BTreeMap<String, Tally> = BTreeMap::new();
     let mut by_pair: BTreeMap<(String, String), Tally> = BTreeMap::new();
     let mut misses: Vec<String> = Vec::new();
+    let mut topics: Vec<String> = Vec::new();
     let mut seen: BTreeSet<&str> = BTreeSet::new();
     for q in &qs {
         if !seen.insert(&q.qid) {
@@ -307,12 +326,35 @@ fn run() -> Run {
             .core
             .gist
             .clone();
+        // The English question with its intent given and its subject picked, so the templates
+        // see what was asked of the subject (set 2 narrows to it) and nothing of the front is
+        // measured. Set 1 asked with the subject's name alone, which was the same thing while
+        // no slot read the question.
+        let text = qs
+            .iter()
+            .find(|r| r.qid == q.qid && r.lang == "en")
+            .map_or(name.as_str(), |r| r.text.as_str());
         let d = ask(
-            &name,
+            text,
             &env,
             &opts.clone().with_intent(q.intent).with_subject(uid),
         )
         .unwrap_or_else(|e| panic!("{}: {e:?}", q.qid));
+        if d.slots
+            .iter()
+            .any(|s| templates::narrowed(q.intent, s.name))
+        {
+            topics.push(format!(
+                "    {:<14} [{}] {}",
+                q.qid,
+                d.topic.join(" "),
+                if d.topic_found {
+                    "narrows"
+                } else {
+                    "found nothing about the subject, so no slot narrows"
+                }
+            ));
+        }
         let found = slots_of(&d, &names);
         for (slot, want) in &gold[&q.qid] {
             let got = found.get(slot).cloned().unwrap_or_default();
@@ -335,7 +377,7 @@ fn run() -> Run {
     }
     let _ = writeln!(
         report,
-        "\n3. the slots alone (gold intent, subject named in English)"
+        "\n3. the slots alone (English question, gold intent, subject picked)"
     );
     let _ = writeln!(report, "  {:<16} {:>6} {:>6}", "slot", "P", "R");
     let mut all = Tally::default();
@@ -353,6 +395,13 @@ fn run() -> Run {
         if slot == "definition" || slot == "counter" {
             row(&mut report, &format!("{slot}/{intent}"), t);
         }
+    }
+    let _ = writeln!(
+        report,
+        "  the topic each verify and explain question narrows to:"
+    );
+    for t in &topics {
+        let _ = writeln!(report, "{t}");
     }
     let _ = writeln!(
         report,
@@ -501,13 +550,14 @@ fn ge_t10() {
         return;
     }
 
-    // The figures SMYSL-2.5 §6 TX-P8 step 4 records, each (P, R) to three places; `—` is a
-    // slot that found nothing, which has no precision.
+    // The figures SMYSL-2.5 records, each (P, R) to three places — §6 TX-P8 step 4's under
+    // set 1, moved by set 2 (OQ-87, OQ-88) where the comment says; `—` is a slot that found
+    // nothing, which has no precision.
     let slots: &[(&str, &str, &str)] = &[
         ("cause", "1.000", "0.667"),
         ("characteristic", "0.554", "1.000"),
         ("contrast", "1.000", "1.000"),
-        ("counter", "0.750", "0.750"),
+        ("counter", "1.000", "0.667"), // set 1: 0.750, 0.750
         ("definition", "1.000", "1.000"),
         ("dependent", "1.000", "0.833"),
         ("evidence", "0.667", "0.889"),
@@ -518,7 +568,7 @@ fn ge_t10() {
         ("location", "1.000", "0.875"),
         ("open-question", "1.000", "1.000"),
         ("related", "1.000", "1.000"),
-        ("reported", "0.636", "1.000"),
+        ("reported", "0.857", "0.857"), // set 1: 0.636, 1.000
         ("revision", "  —  ", "0.000"),
         ("stance", "1.000", "0.667"),
         ("support", "1.000", "1.000"),
@@ -535,11 +585,13 @@ fn ge_t10() {
         }
     }
     let langs: &[(&str, &str, &str, usize, usize)] = &[
-        ("en", "0.774", "0.890", 30, 30),
-        ("de", "0.728", "0.652", 23, 22),
-        ("es", "0.770", "0.834", 27, 27),
-        ("fr", "0.767", "0.818", 26, 26),
-        ("ru", "0.773", "0.751", 29, 23),
+        // set 1: en 0.774/0.890, de 0.728/0.652, es 0.770/0.834, fr 0.767/0.818,
+        // ru 0.773/0.751
+        ("en", "0.806", "0.873", 30, 30),
+        ("de", "0.738", "0.652", 23, 22),
+        ("es", "0.778", "0.834", 27, 27),
+        ("fr", "0.772", "0.807", 26, 26),
+        ("ru", "0.784", "0.740", 29, 23),
     ];
     for (lang, p, rc, intent, subject) in langs {
         let t = &r.end_to_end[*lang];
@@ -565,13 +617,78 @@ fn ge_t10() {
         r.report
     );
 
-    // The criterion, as applied: `ask` is experimental while this holds (src/main.rs,
-    // `ASK_EXPERIMENTAL`).
+    // The criterion no longer fires under set 2. `ask` stays experimental by decision
+    // (2026-10-28, SMYSL-2.5 OQ-88: single-hand gold, and counter's recall fell on the fresh
+    // questions), so the label is `ASK_EXPERIMENTAL`'s and not this test's; what is asserted
+    // is that the criterion is met, so a change that fires it again fails here.
+    let counter = r.slots_alone["counter"]
+        .precision()
+        .expect("counter found units");
+    assert!(counter >= BAR, "counter-evidence is below the bar again");
+}
+
+/// The fresh set: the figures SMYSL-2.5 OQ-88 records, with set 1's over the same questions
+/// beside them for the comparison the set exists to make.
+#[test]
+fn ge_t10_fresh() {
+    let r = run_fresh();
+    println!("{}", r.report);
+
+    let slots: &[(&str, &str, &str)] = &[
+        ("counter", "1.000", "0.471"),  // set 1: 0.478, 0.647
+        ("reported", "1.000", "0.500"), // set 1: 0.250, 1.000
+        ("evidence", "0.435", "0.714"), // not narrowed; as set 1
+    ];
+    let mut moved = Vec::new();
+    for (slot, p, rc) in slots {
+        let t = &r.slots_alone[*slot];
+        let got = (three(t.precision()), three(t.recall()));
+        if (got.0.as_str(), got.1.as_str()) != (*p, *rc) {
+            moved.push(format!(
+                "slot {slot}: ({p}, {rc}) is now ({}, {})",
+                got.0, got.1
+            ));
+        }
+    }
+    let mut all = Tally::default();
+    for t in r.slots_alone.values() {
+        all.merge(*t);
+    }
+    let got = (three(all.precision()), three(all.recall()));
+    if (got.0.as_str(), got.1.as_str()) != ("0.565", "0.650") {
+        moved.push(format!(
+            "all slots: (0.565, 0.650) is now ({}, {})", // set 1: 0.441, 0.750
+            got.0, got.1
+        ));
+    }
+    let langs: &[(&str, &str, &str)] = &[
+        ("en", "0.565", "0.650"),
+        ("de", "0.519", "0.700"),
+        ("es", "0.460", "0.725"),
+        ("fr", "0.463", "0.625"),
+        ("ru", "0.556", "0.625"),
+    ];
+    for (lang, p, rc) in langs {
+        let t = &r.end_to_end[*lang];
+        let got = (three(t.precision()), three(t.recall()));
+        if (got.0.as_str(), got.1.as_str()) != (*p, *rc) {
+            moved.push(format!(
+                "{lang} end to end: ({p}, {rc}) is now ({}, {})",
+                got.0, got.1
+            ));
+        }
+    }
+    assert!(
+        moved.is_empty(),
+        "the fresh set moved from what SMYSL-2.5 OQ-88 records:\n  {}\n{}",
+        moved.join("\n  "),
+        r.report
+    );
     let counter = r.slots_alone["counter"]
         .precision()
         .expect("counter found units");
     assert!(
-        counter < BAR,
-        "counter-evidence is over the bar now; lift the experimental label"
+        counter >= BAR,
+        "counter-evidence is below the bar on fresh questions"
     );
 }

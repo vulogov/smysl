@@ -214,10 +214,11 @@ fn answer_needs_save_and_yes_needs_answer() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// GE-T10's kill criterion, applied (TX-P8 step 4): `ask` is listed as experimental and every
-/// run says why on stderr, while stdout — the dossier a script reads — is unchanged.
+/// GE-T10's kill criterion, applied (TX-P8 step 4), and met under template set 2 with the label
+/// kept by decision (SMYSL-2.5 OQ-88): `ask` is listed as experimental and every run says why on
+/// stderr, while stdout — the dossier a script reads — is unchanged.
 #[test]
-fn ask_is_labelled_experimental_with_the_figure_that_made_it_so() {
+fn ask_is_labelled_experimental_with_the_figures_that_keep_it_so() {
     let o = run(&["ask", "--help"]);
     assert!(o.status.success());
     assert!(stdout(&o).contains("Experimental"), "{}", stdout(&o));
@@ -226,7 +227,7 @@ fn ask_is_labelled_experimental_with_the_figure_that_made_it_so() {
     assert!(o.status.success(), "{}", stderr(&o));
     let err = stderr(&o);
     assert!(
-        err.contains("experimental") && err.contains("0.750") && err.contains("GE-T10"),
+        err.contains("experimental") && err.contains("0.471") && err.contains("GE-T10"),
         "{err}"
     );
     assert!(!stdout(&o).contains("experimental"));

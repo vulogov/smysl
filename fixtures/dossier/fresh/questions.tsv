@@ -1,0 +1,101 @@
+# GE-T10's fresh questions (SMYSL-2.5 OQ-87, OQ-88): seventeen, each asked in the five tier-1
+# languages, eighty-five rows, over the committed corpus (`../gold/corpus.smy`).
+#
+# Why a second set. Set 2 of the templates was designed from set 1's run over `../gold/`: the
+# false positives that fired the kill criterion are what OQ-87 and OQ-88 name, so a figure over
+# those questions is a figure measured on the questions that found the fix. These are new
+# questions about the same subjects, written before set 2 was run on anything, and they ask
+# about *other* claims than set 1's did — the intents set 2 changes, verify and explain, where
+# a question carries something it asks of its subject.
+#
+# WHO WROTE THIS. The same hand as `../gold/`, and the hand that wrote set 2 — so the limit is
+# the one `../gold/corpus.smy` states, and a second: this hand knew which words the narrowing
+# reads. The questions are written as a person would ask them, inflections kept, and nothing
+# was rephrased after a run.
+#
+# Columns as `../gold/questions.tsv`.
+ch-verify2	verify	en	Is it true that cholera spreads through drinking water?
+ch-verify2	verify	de	Stimmt es, dass Cholera durch Trinkwasser übertragen wird?
+ch-verify2	verify	es	¿Es cierto que el cólera se transmite por el agua potable?
+ch-verify2	verify	fr	Est-il vrai que le choléra se transmet par l'eau de boisson ?
+ch-verify2	verify	ru	Правда ли, что холера передаётся через питьевую воду?
+ch-verify3	verify	en	Is it true that Koch found the cholera bacillus?
+ch-verify3	verify	de	Stimmt es, dass Koch den Cholerabazillus entdeckte?
+ch-verify3	verify	es	¿Es cierto que Koch descubrió el bacilo del cólera?
+ch-verify3	verify	fr	Est-il vrai que Koch a découvert le bacille du choléra ?
+ch-verify3	verify	ru	Правда ли, что Кох открыл холерный вибрион?
+sc-verify2	verify	en	Is it true that scurvy struck crews on long voyages?
+sc-verify2	verify	de	Stimmt es, dass Skorbut die Mannschaften auf langen Reisen befiel?
+sc-verify2	verify	es	¿Es cierto que el escorbuto atacaba a las tripulaciones en los viajes largos?
+sc-verify2	verify	fr	Est-il vrai que le scorbut frappait les équipages lors des longs voyages ?
+sc-verify2	verify	ru	Правда ли, что цинга поражала экипажи в долгих плаваниях?
+mi-verify2	verify	en	Is it true that miasma is known by its stench?
+mi-verify2	verify	de	Stimmt es, dass man Miasma an seinem Gestank erkennt?
+mi-verify2	verify	es	¿Es cierto que el miasma se reconoce por su hedor?
+mi-verify2	verify	fr	Est-il vrai que le miasme se reconnaît à sa puanteur ?
+mi-verify2	verify	ru	Правда ли, что миазмы узнают по зловонию?
+se-verify2	verify	en	Is it true that Semmelweis died in an asylum?
+se-verify2	verify	de	Stimmt es, dass Semmelweis in einer Irrenanstalt starb?
+se-verify2	verify	es	¿Es cierto que Semmelweis murió en un manicomio?
+se-verify2	verify	fr	Est-il vrai que Semmelweis est mort dans un asile ?
+se-verify2	verify	ru	Правда ли, что Земмельвейс умер в психиатрической лечебнице?
+sn-verify	verify	en	Is it true that John Snow mapped the cholera deaths?
+sn-verify	verify	de	Stimmt es, dass John Snow die Cholera-Todesfälle kartierte?
+sn-verify	verify	es	¿Es cierto que John Snow hizo un mapa de las muertes por cólera?
+sn-verify	verify	fr	Est-il vrai que John Snow a cartographié les décès dus au choléra ?
+sn-verify	verify	ru	Правда ли, что Джон Сноу нанёс на карту смерти от холеры?
+li-verify2	verify	en	Is it true that James Lind proved that oranges cure scurvy?
+li-verify2	verify	de	Stimmt es, dass James Lind bewies, dass Orangen Skorbut heilen?
+li-verify2	verify	es	¿Es cierto que James Lind demostró que las naranjas curan el escorbuto?
+li-verify2	verify	fr	Est-il vrai que James Lind a prouvé que les oranges guérissent le scorbut ?
+li-verify2	verify	ru	Правда ли, что Джеймс Линд доказал, что апельсины излечивают цингу?
+ls-verify	verify	en	Is it true that Joseph Lister's antiseptic methods cut amputation deaths?
+ls-verify	verify	de	Stimmt es, dass Joseph Listers antiseptische Methoden die Todesfälle nach Amputationen senkten?
+ls-verify	verify	es	¿Es cierto que los métodos antisépticos de Joseph Lister redujeron las muertes por amputación?
+ls-verify	verify	fr	Est-il vrai que les méthodes antiseptiques de Joseph Lister ont réduit les décès après amputation ?
+ls-verify	verify	ru	Правда ли, что антисептика Джозефа Листера снизила смертность после ампутаций?
+ph-verify	verify	en	Is it true that a metal loses phlogiston when it is heated?
+ph-verify	verify	de	Stimmt es, dass ein Metall beim Erhitzen Phlogiston verliert?
+ph-verify	verify	es	¿Es cierto que un metal pierde flogisto al calentarse?
+ph-verify	verify	fr	Est-il vrai qu'un métal perd son phlogistique quand on le chauffe ?
+ph-verify	verify	ru	Правда ли, что металл при нагревании теряет флогистон?
+je-verify	verify	en	Is it true that Jenner's cowpox gave lifelong protection?
+je-verify	verify	de	Stimmt es, dass Jenners Kuhpocken lebenslang schützten?
+je-verify	verify	es	¿Es cierto que la vacuna de Jenner protegía de por vida?
+je-verify	verify	fr	Est-il vrai que la vaccine de Jenner protégeait à vie ?
+je-verify	verify	ru	Правда ли, что прививка Дженнера защищала пожизненно?
+ch-explain2	explain	en	Why did cholera kill so many people in Soho in 1854?
+ch-explain2	explain	de	Warum tötete die Cholera 1854 in Soho so viele Menschen?
+ch-explain2	explain	es	¿Por qué el cólera mató a tanta gente en Soho en 1854?
+ch-explain2	explain	fr	Pourquoi le choléra a-t-il tué tant de gens à Soho en 1854 ?
+ch-explain2	explain	ru	Почему холера убила столько людей в Сохо в 1854 году?
+sc-explain2	explain	en	Why does scurvy make the gums bleed?
+sc-explain2	explain	de	Warum lässt Skorbut das Zahnfleisch bluten?
+sc-explain2	explain	es	¿Por qué el escorbuto hace sangrar las encías?
+sc-explain2	explain	fr	Pourquoi le scorbut fait-il saigner les gencives ?
+sc-explain2	explain	ru	Почему при цинге кровоточат дёсны?
+se-explain	explain	en	Why did Semmelweis make the students wash their hands?
+se-explain	explain	de	Warum ließ Semmelweis die Studenten die Hände waschen?
+se-explain	explain	es	¿Por qué Semmelweis hizo que los estudiantes se lavaran las manos?
+se-explain	explain	fr	Pourquoi Semmelweis a-t-il fait laver les mains aux étudiants ?
+se-explain	explain	ru	Почему Земмельвейс заставил студентов мыть руки?
+li-explain	explain	en	Why did James Lind give the sailors oranges and lemons?
+li-explain	explain	de	Warum gab James Lind den Seeleuten Orangen und Zitronen?
+li-explain	explain	es	¿Por qué James Lind dio naranjas y limones a los marineros?
+li-explain	explain	fr	Pourquoi James Lind donnait-il des oranges et des citrons aux marins ?
+li-explain	explain	ru	Почему Джеймс Линд давал морякам апельсины и лимоны?
+ph-explain	explain	en	Why was phlogiston said to have negative weight?
+ph-explain	explain	de	Warum hieß es, Phlogiston habe ein negatives Gewicht?
+ph-explain	explain	es	¿Por qué se decía que el flogisto tenía peso negativo?
+ph-explain	explain	fr	Pourquoi disait-on que le phlogistique avait un poids négatif ?
+ph-explain	explain	ru	Почему считалось, что флогистон имеет отрицательный вес?
+ls-explain2	explain	en	Why did Joseph Lister's amputation deaths fall?
+ls-explain2	explain	de	Warum sanken die Todesfälle nach Amputationen bei Joseph Lister?
+ls-explain2	explain	es	¿Por qué bajaron las muertes por amputación de Joseph Lister?
+ls-explain2	explain	fr	Pourquoi les décès après amputation ont-ils baissé chez Joseph Lister ?
+ls-explain2	explain	ru	Почему у Джозефа Листера снизилась смертность после ампутаций?
+mi-explain	explain	en	Why was miasma blamed for cholera?
+mi-explain	explain	de	Warum machte man das Miasma für die Cholera verantwortlich?
+mi-explain	explain	es	¿Por qué se culpaba al miasma del cólera?
+mi-explain	explain	fr	Pourquoi accusait-on le miasme du choléra ?
+mi-explain	explain	ru	Почему в холере винили миазмы?
