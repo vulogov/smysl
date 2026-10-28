@@ -60,7 +60,7 @@ use smysl_core::ids::{AgentId, Uid};
 use smysl_core::surface::parse_surface;
 use smysl_graph::Store;
 use smysl_query::dossier::{templates, Intent};
-use smysl_query::{ask, AskError, AskOptions, Env, StoreScope};
+use smysl_query::{ask, AskError, AskOptions, Env, Ranking, StoreScope};
 
 /// Draft 3 §23's bar for *definition* and *counter*.
 const BAR: f64 = 0.8;
@@ -191,6 +191,54 @@ struct Run {
     slots_alone: BTreeMap<String, Tally>,
     end_to_end: BTreeMap<String, Tally>,
     front: BTreeMap<String, (usize, usize, usize)>,
+    /// OQ-52: per ranking, the ordering figures over the contested slots.
+    ranking: BTreeMap<&'static str, Order>,
+}
+
+/// How well a ranking puts the gold's units first, over slots whose answer holds both a unit
+/// the gold wants and one it does not — the only slots an order can get wrong, since membership
+/// is the template's (`order by salience … limit`) and every ranking reorders the same set.
+#[derive(Default, Clone, Copy)]
+struct Order {
+    slots: usize,
+    /// Average precision, normalised by the gold units found rather than by all gold, so a unit
+    /// the template never returned does not count against an order that could not place it.
+    ap: f64,
+    /// Reciprocal rank of the first gold unit.
+    rr: f64,
+    /// Whether the first unit is a gold one.
+    p1: f64,
+}
+
+impl Order {
+    fn add(&mut self, ranked: &[String], gold: &BTreeSet<String>) {
+        let hits: Vec<usize> = ranked
+            .iter()
+            .enumerate()
+            .filter(|(_, u)| gold.contains(*u))
+            .map(|(i, _)| i)
+            .collect();
+        if hits.is_empty() || hits.len() == ranked.len() {
+            return;
+        }
+        self.slots += 1;
+        self.ap += hits
+            .iter()
+            .enumerate()
+            .map(|(n, i)| (n + 1) as f64 / (i + 1) as f64)
+            .sum::<f64>()
+            / hits.len() as f64;
+        self.rr += 1.0 / (hits[0] + 1) as f64;
+        self.p1 += if hits[0] == 0 { 1.0 } else { 0.0 };
+    }
+
+    fn mean(&self, x: f64) -> String {
+        if self.slots == 0 {
+            "—".to_string()
+        } else {
+            format!("{:.3}", x / self.slots as f64)
+        }
+    }
 }
 
 fn run() -> Run {
@@ -411,6 +459,86 @@ fn run_over((questions, q_over): (PathBuf, bool), (gold_path, g_over): (PathBuf,
         let _ = writeln!(report, "{m}");
     }
 
+    // --- 4. the order within a slot (OQ-52) -----------------------------------------------------
+    //
+    // Each question once more, as in 3, under every ranking. Membership does not move, so P and R
+    // cannot see this; what can is whether the units the gold wants come before the ones it
+    // does not. The gold is binary, not graded, so this is all an order can be scored on.
+    let mut ranking: BTreeMap<&'static str, Order> = BTreeMap::new();
+    let mut ranking_by_slot: BTreeMap<(String, &'static str), Order> = BTreeMap::new();
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    for q in &qs {
+        if !seen.insert(&q.qid) {
+            continue;
+        }
+        let prefix = q.qid.split('-').next().unwrap_or_default();
+        let uid = labels[&subjects[prefix]];
+        let name = store.get(&uid).expect("the subject").core.gist.clone();
+        let text = qs
+            .iter()
+            .find(|r| r.qid == q.qid && r.lang == "en")
+            .map_or(name.as_str(), |r| r.text.as_str());
+        for r in Ranking::ALL {
+            let d = ask(
+                text,
+                &env,
+                &opts
+                    .clone()
+                    .with_intent(q.intent)
+                    .with_subject(uid)
+                    .with_ranking(*r),
+            )
+            .unwrap_or_else(|e| panic!("{}: {e:?}", q.qid));
+            for s in &d.slots {
+                let Some((_, want)) = gold[&q.qid].iter().find(|(n, _)| n == s.name) else {
+                    continue;
+                };
+                let ranked: Vec<String> = s
+                    .units
+                    .iter()
+                    .map(|u| names.get(u).cloned().unwrap_or_else(|| u.canonical()))
+                    .collect();
+                ranking.entry(r.as_str()).or_default().add(&ranked, want);
+                ranking_by_slot
+                    .entry((s.name.to_string(), r.as_str()))
+                    .or_default()
+                    .add(&ranked, want);
+            }
+        }
+    }
+    let _ = writeln!(
+        report,
+        "\n4. the order within a slot (OQ-52), over slots holding gold and non-gold units"
+    );
+    let _ = writeln!(
+        report,
+        "  {:<26} {:>5} {:>6} {:>6} {:>6}",
+        "ranking", "slots", "AP", "MRR", "P@1"
+    );
+    for r in Ranking::ALL {
+        let o = ranking.get(r.as_str()).copied().unwrap_or_default();
+        let _ = writeln!(
+            report,
+            "  {:<26} {:>5} {:>6} {:>6} {:>6}",
+            r.as_str(),
+            o.slots,
+            o.mean(o.ap),
+            o.mean(o.rr),
+            o.mean(o.p1)
+        );
+    }
+    for ((slot, r), o) in ranking_by_slot.iter().filter(|(_, o)| o.slots > 0) {
+        let _ = writeln!(
+            report,
+            "  {:<26} {:>5} {:>6} {:>6} {:>6}",
+            format!("{slot}/{r}"),
+            o.slots,
+            o.mean(o.ap),
+            o.mean(o.rr),
+            o.mean(o.p1)
+        );
+    }
+
     // --- 1 and 2. end to end, and the front, per language -------------------------------------
     let mut end_to_end: BTreeMap<String, Tally> = BTreeMap::new();
     let mut front: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
@@ -524,6 +652,7 @@ fn run_over((questions, q_over): (PathBuf, bool), (gold_path, g_over): (PathBuf,
         slots_alone,
         end_to_end,
         front,
+        ranking,
     }
 }
 
@@ -540,6 +669,22 @@ fn overridden() -> bool {
 
 fn three(x: Option<f64>) -> String {
     fmt(x)
+}
+
+/// The OQ-52 figures that moved from what is recorded: (ranking, slots, AP, MRR, P@1).
+fn orders_moved(r: &Run, want: &[(&str, usize, &str, &str, &str)]) -> Vec<String> {
+    let mut moved = Vec::new();
+    for (name, n, ap, rr, p1) in want {
+        let o = r.ranking.get(name).copied().unwrap_or_default();
+        let got = (o.slots, o.mean(o.ap), o.mean(o.rr), o.mean(o.p1));
+        if (got.0, got.1.as_str(), got.2.as_str(), got.3.as_str()) != (*n, *ap, *rr, *p1) {
+            moved.push(format!(
+                "ranking {name}: ({n}, {ap}, {rr}, {p1}) is now ({}, {}, {}, {})",
+                got.0, got.1, got.2, got.3
+            ));
+        }
+    }
+    moved
 }
 
 #[test]
@@ -584,6 +729,17 @@ fn ge_t10() {
             ));
         }
     }
+    // OQ-52: (slots, AP, MRR, P@1) per ranking. Product and lexicographic agree on every slot,
+    // since no template has a `find` and the retrieval term is constant; RRF gives status a
+    // share equal to salience's and loses `characteristic`'s order.
+    moved.extend(orders_moved(
+        &r,
+        &[
+            ("product", 16, "0.749", "0.875", "0.750"),
+            ("lexicographic", 16, "0.749", "0.875", "0.750"),
+            ("rrf", 16, "0.728", "0.771", "0.562"),
+        ],
+    ));
     let langs: &[(&str, &str, &str, usize, usize)] = &[
         // set 1: en 0.774/0.890, de 0.728/0.652, es 0.770/0.834, fr 0.767/0.818,
         // ru 0.773/0.751; set 2: en 0.806/0.873, de 0.738/0.652, es 0.778/0.834,
@@ -651,6 +807,14 @@ fn ge_t10_fresh() {
             ));
         }
     }
+    moved.extend(orders_moved(
+        &r,
+        &[
+            ("product", 3, "0.694", "0.667", "0.333"),
+            ("lexicographic", 3, "0.694", "0.667", "0.333"),
+            ("rrf", 3, "0.694", "0.667", "0.333"),
+        ],
+    ));
     let mut all = Tally::default();
     for t in r.slots_alone.values() {
         all.merge(*t);

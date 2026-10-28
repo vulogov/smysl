@@ -790,7 +790,10 @@ no version marker is read without a lens and counted (`SMY-W475`). Unit conversi
 4. **Rank within a slot** by the product of retrieval score (RRF-normalised), derived salience
    (`renormalise` over the slot), status rank and independent-witness count, each quantised
    with `smysl_core::quantise`; ties by uid. Multiplying incomparable scales is a choice to
-   test against GE-T10 (OQ-52).
+   test against GE-T10 (OQ-52). *Tested 2026-10-28, and kept:* `AskOptions::ranking` offers
+   the product, a lexicographic order (retrieval, then salience, then status) and RRF over the
+   three terms' own ranks, and GE-T10's fourth table scores each one's order (OQ-52's row has
+   the figures). A choice other than the product is recorded in the dossier's recipe.
 5. **Pack** with `PackRequest::budget(N).scoped(members).focusing(slot units)`; rule R pins live
    rebuttals.
 
@@ -1644,7 +1647,8 @@ Each step has an exit test. Steps within a phase are ordered.
    no units. The corpus now asserts every pair, which is what a careful author must do, and is
    worth a line in the manual's entity chapter. *A plant missed*: the depth-3 dependent is two
    hops from a unit that itself names the subject, so it probes nothing; kept, and marked so.
-   *OQ-87* and *OQ-88*, raised above. And **OQ-52 is not decided here**: a slot's membership is
+   *OQ-87* and *OQ-88*, raised above. And **OQ-52 is not decided here** (it was decided later,
+   on 2026-10-28; its row has the figures): a slot's membership is
    fixed by its template's `order by salience` and `limit`, and `rank` only reorders what is
    already in, so precision and recall cannot see the ranking; only `location`'s limit binds,
    and it binds on salience. Comparing rankings needs graded gold (a best-first order per slot),
@@ -2152,7 +2156,7 @@ without them a query builds its own over its candidates.
 | Revision inference wrong for hand-written units | rule N makes ambiguity harmless; law L5 tests it; `W431` covers extracted units |
 | Unknown lens ops from a newer peer | `LensOp::Unknown`, `W469`, units unmappable and counted; bytes preserved |
 | `SchemaDecl` gains a field (not `#[non_exhaustive]`) | one minor-API break in the release that ships FC-9, recorded in CHANGELOG; `tests/public-api.txt` updated deliberately |
-| Dossier ranking by product of incomparable scales | quantised terms, GE-T10 decides; OQ-52 |
+| Dossier ranking by product of incomparable scales | quantised terms; GE-T10 compared three and kept the product (OQ-52) |
 | NL translator emits a query that reads more than asked | parse + resolve + stage allowlist, query shown before running, `--yes` required |
 | Prompt injection through dossier passages in `ask --answer` | SMYSL-2.1 guard; ground-only-on-dossier filter (`W478`); rule M cap |
 | S1 dependencies bring native code | verification is TX-P10 step 1; `check-native` in CI — *done: candle 0.10+ do (`onig_sys`), so 0.9* |
@@ -2210,7 +2214,7 @@ New:
 | OQ-49 | **Resolved in SMYSL-2.3 A-11:** `x.query/answers`, inert for salience. |
 | OQ-50 | `match` (graph patterns): which subset, and in which phase? Refused (`E461`) until decided. |
 | OQ-51 | NL front end: is printing the query and requiring `--yes` enough, or must a saved translated query also record a human approval attestation? |
-| OQ-52 | Dossier slot ranking: product of quantised terms (draft 3), lexicographic, or RRF over per-criterion ranks? GE-T10 should compare at least two. |
+| OQ-52 | Dossier slot ranking: product of quantised terms (draft 3), lexicographic, or RRF over per-criterion ranks? GE-T10 should compare at least two. **Decided 2026-10-28: the product, kept.** All three are built (`AskOptions::ranking`) and GE-T10's fourth table scores them. Membership is the template's (`order by salience … limit`), so precision and recall cannot see an order, and the gold is binary, not graded; what can be scored is whether a slot's gold units come before its strays, over the slots that hold both. Over set 1's thirty questions (16 such slots) the product and the lexicographic order agree everywhere (AP 0.749, MRR 0.875, P@1 0.750): no template has a `find`, so the retrieval term is constant and salience decides, with status breaking ties. RRF scores 0.728 / 0.771 / 0.562, because it gives status a share equal to salience's and so loses `characteristic`'s order; it orders `introduction` better (AP 0.958 against 0.875, two slots). Over the seventeen fresh questions only three slots hold both, and the three tie (0.694 / 0.667 / 0.333). The samples are small and in-sample, and single-hand gold. A choice other than the product is a recipe input. Reopen with graded gold, or when a template ranks by `find`. |
 | OQ-53 | Lens ops address top-level payload keys. Do nested keys (`payload_strings`' dotted paths) need lenses, and if so, is the dotted path the key? |
 | OQ-54 | **Resolved by SMYSL-2.1 H-20** (TX-P0): `find` and `pack` are retagged `Mixed`. |
 | OQ-84 | **The per-partition limit is a recipe input §3.6's table omits.** Raised by TX-P8 step 1, which hashed the eight listed inputs and found a ninth that changes a result as surely as `k` does: how many hits a source keeps per partition before fusion (`PlanOptions::limit`, `q --per-partition`). It is hashed into `query:recipe` now, so two saves under two limits have two recipes and a rerun under another limit is labelled not comparable — but the payload has no declared key to carry the value, and a key the schema does not declare is a key a reader cannot trust. *Options:* add `query:per-partition` to FC-5 in a SMYSL-2.3 revision (the honest one; one more field, same rule N); or fold it into `parameters` under a reserved name (needs no schema change and misdescribes what it is). *Recommended:* the first, when SMYSL-2.3 next opens. **Decided 2026-10-28: the first.** SMYSL-2.3 A-11 is still for discussion, so `x.query/v1` takes the key at revision 1 rather than a revision 2 (Appendix C). It is an `int`, written by every save and read back as optional, so a save made before it loads; a CLI rerun without `--per-partition` runs under the recorded limit, and its recipe is the saved one. |

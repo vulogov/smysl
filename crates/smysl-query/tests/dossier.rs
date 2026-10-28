@@ -18,7 +18,7 @@ use smysl_core::surface::parse_surface;
 use smysl_core::{canonical_uid, Code, Role};
 use smysl_graph::{membership, Store};
 use smysl_query::dossier::{classify, templates, Intent};
-use smysl_query::{ask, AskError, AskOptions, Env, StoreScope};
+use smysl_query::{ask, AskError, AskOptions, Env, Ranking, StoreScope};
 
 const FIXTURE: &str = "../../fixtures/dossier/subjects.smy";
 
@@ -564,4 +564,31 @@ fn a_topic_the_store_does_not_use_narrows_nothing() {
     assert!(!counter.narrowed);
     assert!(!counter.text.contains("matches"), "{}", counter.text);
     assert_eq!(counter.units, vec![f.uid("r/awake")]);
+}
+
+/// OQ-52: a ranking reorders a slot and never changes what is in it, and the recipe names it
+/// only when it is not the default, so every dossier made before the option holds.
+#[test]
+fn a_ranking_reorders_a_slot_and_is_in_the_recipe_only_when_chosen() {
+    let f = fixture();
+    let scope = StoreScope::new("subjects", &f.store);
+    let env = Env::new(&f.store, &scope).with_entities(&scope);
+    let base = ask("What is Naomi?", &env, &opts()).expect("a dossier");
+    let product = ask(
+        "What is Naomi?",
+        &env,
+        &opts().with_ranking(Ranking::Product),
+    )
+    .expect("a dossier");
+    assert_eq!(base.recipe, product.recipe, "the default is not recorded");
+    for r in [Ranking::Lexicographic, Ranking::Rrf] {
+        let d = ask("What is Naomi?", &env, &opts().with_ranking(r)).expect("a dossier");
+        assert_ne!(d.recipe, base.recipe, "{r} is recorded");
+        for (a, b) in base.slots.iter().zip(&d.slots) {
+            let x: BTreeSet<_> = a.units.iter().collect();
+            let y: BTreeSet<_> = b.units.iter().collect();
+            assert_eq!(x, y, "{r}: slot {} changed its members", a.name);
+            assert_eq!(a.saved, b.saved, "{r}: slot {}'s saved query moved", a.name);
+        }
+    }
 }

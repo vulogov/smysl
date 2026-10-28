@@ -56,7 +56,7 @@ pub mod saved;
 pub mod store_scope;
 
 pub use ast::Query;
-pub use dossier::{ask, AskError, AskOptions, Dossier, Intent, SlotResult};
+pub use dossier::{ask, AskError, AskOptions, Dossier, Intent, Ranking, SlotResult};
 pub use exec::{run, Answer, Run};
 pub use explain::explain;
 pub use explain::why;

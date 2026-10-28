@@ -58,6 +58,21 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### Three ways to order a dossier slot, measured, and the first one kept
+
+SMYSL-2.5 OQ-52 asked whether a slot's ranking should be the product of its quantised terms
+(draft 3), a lexicographic order, or RRF over each term's ranks. All three are now built, as
+`AskOptions::ranking`, and GE-T10 gains a fourth table that scores each one's order. Membership
+comes from the template's `order by salience … limit`, so precision and recall cannot see an
+order, and the gold is binary. What can be scored is whether the units the gold wants come
+before the strays, over the slots that hold both. Over the thirty questions (16 such slots) the
+product and the lexicographic order agree everywhere: AP 0.749, MRR 0.875, P@1 0.750. No
+template uses `find`, so the retrieval term is constant. RRF scores 0.728 / 0.771 / 0.562,
+losing `characteristic`'s order because it weighs status as much as salience. Over the fresh
+seventeen only three slots qualify, and all three tie. The product stays the default, and any
+other choice is written into the dossier's recipe. The samples are small and the gold is
+single-hand, so the question reopens with graded gold.
+
 ### A saved query that reruns as it ran, and a `find` that does not find it
 
 SMYSL-2.5 OQ-84 and OQ-85, both decided as their rows recommended. `x.query/v1` gains an eighth

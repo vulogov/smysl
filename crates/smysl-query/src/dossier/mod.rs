@@ -19,8 +19,9 @@
 //!    best), salience renormalised over the slot, and status rank, each quantised; ties by uid.
 //!    §3.13 lists a fourth term, the independent-witness count, and it is **not** here:
 //!    `Witnesses` (§3.7) is not built, and counting attestations instead would be
-//!    `SMY-W479`'s fallback presented as the thing itself. OQ-52 asks whether a product is the
-//!    right combination at all, and GE-T10 (step 4) is what decides it. Salience is floored at
+//!    `SMY-W479`'s fallback presented as the thing itself. OQ-52 asked whether a product is the
+//!    right combination at all; [`Ranking`] holds it and the two alternatives, and GE-T10's
+//!    ordering table kept the product (2026-10-28). Salience is floored at
 //!    one quantum, so a slot whose units nothing points at is ordered by status rather than
 //!    collapsed to a tie.
 //! 5. **Pack**, when a budget is given: scoped to the slots' units, with each slot's best in
@@ -65,6 +66,43 @@ use crate::ports::Entities;
 
 pub use intent::{classify, Classified, Intent};
 
+/// How step 4 combines a slot's terms (OQ-52): the retrieval score, salience renormalised over
+/// the slot, and status rank, each quantised.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum Ranking {
+    /// Their product (draft 3), the default.
+    #[default]
+    Product,
+    /// Retrieval, then salience, then status: each term breaks the previous one's ties.
+    Lexicographic,
+    /// Reciprocal rank fusion over the three terms' own rankings, `k = 60`, ties sharing a rank.
+    Rrf,
+}
+
+impl Ranking {
+    /// Every ranking, in the order GE-T10 reports them.
+    pub const ALL: &'static [Ranking] = &[Ranking::Product, Ranking::Lexicographic, Ranking::Rrf];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Ranking::Product => "product",
+            Ranking::Lexicographic => "lexicographic",
+            Ranking::Rrf => "rrf",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Ranking> {
+        Ranking::ALL.iter().copied().find(|r| r.as_str() == s)
+    }
+}
+
+impl std::fmt::Display for Ranking {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// What `ask` was told besides the question.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -87,6 +125,8 @@ pub struct AskOptions {
     pub owner: AgentId,
     /// The thread's timestamp. Supplied, so a dossier is a function of its inputs (rule D).
     pub ts: Option<Hlc>,
+    /// How each slot is ranked (OQ-52). In the recipe when it is not the default.
+    pub ranking: Ranking,
 }
 
 impl AskOptions {
@@ -101,6 +141,7 @@ impl AskOptions {
             plan: PlanOptions::default(),
             owner,
             ts: None,
+            ranking: Ranking::default(),
         }
     }
 
@@ -131,6 +172,11 @@ impl AskOptions {
 
     pub fn with_budget(mut self, tokens: u64) -> AskOptions {
         self.budget = Some(tokens);
+        self
+    }
+
+    pub fn with_ranking(mut self, ranking: Ranking) -> AskOptions {
+        self.ranking = ranking;
         self
     }
 
@@ -526,12 +572,17 @@ fn find_subject(
     }
 }
 
-/// Step 4's terms for one unit.
+/// Step 4: a slot's units, best first, with each one's score under `ranking`.
+///
+/// Under [`Ranking::Product`] the score is the product of the three terms; under
+/// [`Ranking::Rrf`] the fused score; under [`Ranking::Lexicographic`], which has no score of its
+/// own, the reciprocal of the unit's rank. Ties by uid under all three.
 fn rank(
     env: &Env<'_>,
     slot: &[Uid],
     run: &Run,
     salience: &smysl_graph::SalienceReport,
+    ranking: Ranking,
 ) -> Vec<(Uid, f32)> {
     let retrieval: BTreeMap<Uid, f64> = match &run.answer {
         Answer::Ranked(fused) => {
@@ -546,7 +597,7 @@ fn rank(
     let renormalised = salience.renormalise(slot);
     let floor = 1.0 / 1024.0;
     let max_status = Status::Measured as u8 as f32;
-    let mut out: Vec<(Uid, f32)> = slot
+    let terms: Vec<(Uid, [f32; 3])> = slot
         .iter()
         .map(|uid| {
             let r = quantise(retrieval.get(uid).copied().unwrap_or(1.0) as f32);
@@ -556,15 +607,57 @@ fn rank(
                 .get(uid)
                 .map(|u| u.core.status as u8 as f32 / max_status)
                 .unwrap_or(0.0);
-            (*uid, quantise(r * s * quantise(st)))
+            (*uid, [r, s, quantise(st)])
         })
         .collect();
-    out.sort_by(|a, b| {
+    let by_score = |a: &(Uid, f32), b: &(Uid, f32)| {
         b.1.partial_cmp(&a.1)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| a.0.cmp(&b.0))
-    });
-    out
+    };
+    match ranking {
+        Ranking::Product => {
+            let mut out: Vec<(Uid, f32)> = terms
+                .iter()
+                .map(|(u, [r, s, st])| (*u, quantise(r * s * st)))
+                .collect();
+            out.sort_by(by_score);
+            out
+        }
+        Ranking::Lexicographic => {
+            let mut order = terms;
+            order.sort_by(|(ua, a), (ub, b)| {
+                (0..3)
+                    .map(|i| b[i].partial_cmp(&a[i]).unwrap_or(std::cmp::Ordering::Equal))
+                    .find(|o| o.is_ne())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| ua.cmp(ub))
+            });
+            order
+                .into_iter()
+                .enumerate()
+                .map(|(i, (u, _))| (u, quantise(1.0 / (i as f32 + 1.0))))
+                .collect()
+        }
+        Ranking::Rrf => {
+            // Each term's own ranking, ties sharing the best rank among them: a term that does
+            // not separate two units gives both the same share.
+            let mut fused: Vec<f64> = vec![0.0; terms.len()];
+            for t in 0..3 {
+                for (i, (_, mine)) in terms.iter().enumerate() {
+                    let above = terms.iter().filter(|(_, o)| o[t] > mine[t]).count();
+                    fused[i] += 1.0 / (60.0 + above as f64 + 1.0);
+                }
+            }
+            let mut out: Vec<(Uid, f32)> = terms
+                .iter()
+                .zip(fused)
+                .map(|((u, _), f)| (*u, quantise(f as f32)))
+                .collect();
+            out.sort_by(by_score);
+            out
+        }
+    }
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -662,7 +755,7 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
             crate::saved::to_records(&bound, &plan, &run, &popts).map_err(|d| fail(vec![d]))?;
         let saved = canonical_uid(&unit);
         let found = run.answer.uids();
-        let ranked = rank(env, &found, &run, &salience);
+        let ranked = rank(env, &found, &run, &salience, opts.ranking);
         records.push(Record::Unit(unit));
         records.extend(edges.into_iter().map(Record::Relation));
         slot_results.push(SlotResult {
@@ -696,6 +789,10 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
     field(&topic.join(" "));
     field(opts.scope.as_deref().unwrap_or(""));
     field(&opts.budget.map(|n| n.to_string()).unwrap_or_default());
+    // Only when it is not the default, so every dossier recipe made before OQ-52 still holds.
+    if opts.ranking != Ranking::Product {
+        field(&format!("ranking:{}", opts.ranking));
+    }
     for slot in &slot_results {
         field(slot.name);
         field(&slot.saved.to_string());
