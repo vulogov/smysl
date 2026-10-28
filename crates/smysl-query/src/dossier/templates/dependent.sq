@@ -1,6 +1,4 @@
 about entity($subject)
-expand <-grounds depth 2
-except
-about entity($subject)
+expand <-grounds depth 2 only
 order by salience descending
 limit 12

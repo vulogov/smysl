@@ -304,6 +304,9 @@ fn run_pipeline(
     }
 
     // --- phase 7 -----------------------------------------------------------------------------
+    // What a `<-supersedes` walk reached: versions something replaced, which the pass below
+    // would turn back into the head the walk started from (OQ-87).
+    let mut history: BTreeSet<Uid> = BTreeSet::new();
     //
     // A traversal and a closure both *add* to the set they were given — `expand ->grounds` asks
     // for the result and what it rests on, not for the grounds alone. So the ranking of a
@@ -315,8 +318,17 @@ fn run_pipeline(
             // holds. Its forks warn here, and the pass after the walk does not warn again.
             answer = supersede(answer, env, warnings);
         }
-        let mut reached: BTreeSet<Uid> = answer.uids().into_iter().collect();
-        let seeds: Vec<Uid> = reached.iter().copied().collect();
+        let seeds: Vec<Uid> = answer.uids();
+        // OQ-86: the seeds stay unless every stage of this phase says `only`, and a closure
+        // cannot. A unit reached at depth one or more is kept by an `only` walk even when it is
+        // a seed too — a rebuttal that names the subject is reached from the claim it rebuts,
+        // and dropping it is the failure `only` exists to remove.
+        let keep_seeds = !p.closures.is_empty() || p.traversals.iter().any(|t| !t.only);
+        let mut reached: BTreeSet<Uid> = if keep_seeds {
+            seeds.iter().copied().collect()
+        } else {
+            BTreeSet::new()
+        };
 
         for t in &p.traversals {
             let depth = match &t.depth {
@@ -345,7 +357,12 @@ fn run_pipeline(
                     Direction::Both => smysl_graph::trace_both(env.store, *seed, &t.edges, depth),
                 };
                 for node in &walk.nodes {
-                    reached.insert(node.uid);
+                    if t.history && node.depth > 0 {
+                        // Placed after the walks, as revisions (see `revisions`).
+                        history.insert(node.uid);
+                    } else if node.depth > 0 || !t.only {
+                        reached.insert(node.uid);
+                    }
                 }
                 if let Some(limit) = depth {
                     // `W463`: the walk stopped at `depth` and the graph went on. Detected by
@@ -402,6 +419,10 @@ fn run_pipeline(
                 }
             }
         }
+        if !history.is_empty() {
+            history = revisions(env.store, &history);
+            reached.extend(history.iter().copied());
+        }
         answer = Answer::Scope(reached.into_iter().collect());
     }
 
@@ -412,7 +433,18 @@ fn run_pipeline(
     // sort what the pass left rather than what it removed.
     if !opts.all_versions {
         let before = warnings.len();
-        answer = supersede(answer, env, warnings);
+        let (kept, rest): (Vec<Uid>, Vec<Uid>) =
+            answer.uids().into_iter().partition(|u| history.contains(u));
+        if kept.is_empty() {
+            answer = supersede(answer, env, warnings);
+        } else {
+            let mut all: BTreeSet<Uid> = supersede(Answer::Scope(rest), env, warnings)
+                .uids()
+                .into_iter()
+                .collect();
+            all.extend(kept);
+            answer = Answer::Scope(all.into_iter().collect());
+        }
         // A fork the pass on the seeds already reported is not a second fork.
         for w in warnings.split_off(before) {
             if !warnings.contains(&w) {
@@ -487,6 +519,47 @@ fn supersede(answer: Answer, env: &Env<'_>, warnings: &mut Vec<Diagnostic>) -> A
         );
     }
     replaced.unwrap_or(answer)
+}
+
+/// What a `<-supersedes` walk reached, as revisions (OQ-87).
+///
+/// A `supersedes` edge whose newer unit was transformed from the older one — an attestation
+/// `op: Transformed` naming it as a parent, which is how `migrate` writes one (SMYSL-2.5 §3.11)
+/// — re-expresses one account under a newer schema revision; it does not replace the account.
+/// So a reached unit is history only when some edge into it is a revision, and it is answered
+/// in its newest re-expression, which is the form the store now reads it in. Without this a
+/// migrated store would answer every unit it migrated as a revision of itself, and the lens
+/// path and the migrate path would disagree (GE-T16, L8).
+fn revisions(store: &Store, reached: &BTreeSet<Uid>) -> BTreeSet<Uid> {
+    let transformed = |new: &Uid, old: &Uid| {
+        store.get(new).is_some_and(|u| {
+            u.attestations
+                .iter()
+                .any(|a| a.op == smysl_core::Op::Transformed && a.parents.contains(old))
+        })
+    };
+    let mut out = BTreeSet::new();
+    for u in reached {
+        let successors = direct_successors(store, u);
+        if !successors.iter().any(|s| !transformed(s, u)) {
+            continue;
+        }
+        // Forward along re-expressions only, to the newest form; each step a different
+        // unit, so a cycle in the edges cannot hold the walk.
+        let mut frontier = vec![*u];
+        let mut seen = BTreeSet::from([*u]);
+        while let Some(x) = frontier.pop() {
+            let next: Vec<Uid> = direct_successors(store, &x)
+                .into_iter()
+                .filter(|s| transformed(s, &x) && seen.insert(*s))
+                .collect();
+            if next.is_empty() {
+                out.insert(x);
+            }
+            frontier.extend(next);
+        }
+    }
+    out
 }
 
 /// The units that directly supersede this one.

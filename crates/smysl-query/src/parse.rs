@@ -914,10 +914,30 @@ impl Parser<'_> {
         } else {
             None
         };
+        // `only` is last, after any depth, and nowhere else: one spelling, as everywhere in
+        // sq/1 (QG-2). Nothing could follow a traversal on its line before, so recognising it
+        // here takes no query that parsed away from its meaning (QG-9).
+        let only = self.eat_word("only")?;
+        if only {
+            let t = self.peek()?;
+            match t.word().as_deref() {
+                Some("depth") => {
+                    return Err(self.lx.err(
+                        t.span,
+                        "`only` comes last: write `expand <edge> depth <n> only`",
+                    ))
+                }
+                Some("only") => {
+                    return Err(self.lx.err(t.span, "`only` is said once"));
+                }
+                _ => {}
+            }
+        }
         let end = self.lx.prev_end();
         Ok(Traversal {
             edge,
             depth,
+            only,
             span: Span::new(kw.span.start, end),
         })
     }

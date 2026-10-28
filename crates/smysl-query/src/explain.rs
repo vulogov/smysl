@@ -247,6 +247,9 @@ pub fn explain(plan: &Plan) -> String {
                     false => "  - supersession: off (--all-versions), every version kept\n",
                 });
             }
+            PlanStep::KeepsHistory => {
+                out.push_str("  - supersession: what `<-supersedes` reached is kept as written\n");
+            }
             PlanStep::SupersedeSeeds => {
                 out.push_str("  - supersession: seeds give way to their newest head first\n");
             }

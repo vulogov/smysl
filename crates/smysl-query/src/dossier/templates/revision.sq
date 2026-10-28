@@ -1,6 +1,4 @@
 about entity($subject)
-expand -[supersedes]- depth 1
-except
-about entity($subject)
+expand <-supersedes only
 order by salience descending
 limit 12

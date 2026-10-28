@@ -58,6 +58,27 @@ Bibles and the JSON series, a 500-sentence boundary gold set per language, and w
 synthetic node-size distribution matches real traffic — and each is recorded where it is owed
 rather than counted as done. The sections below are newest first.
 
+### `expand … only`, the walk into history, and dossier template set 3
+
+`sq/1` gains one word, and it decides SMYSL-2.5 OQ-86 and the half of OQ-87 that set 2 left open
+(SMYSL-2.9 §4.7). `expand ->rebuts depth 1 only` is what the walk reached at depth one or more and
+not the set it started from. A unit that is also a seed stays when the walk reaches it, which is a
+rebuttal that names its own subject, the case `except about entity(…)` used to remove. The seeds
+stay in the answer unless every phase-7 stage says `only`. The word is additive under QG-9, since
+nothing could follow a traversal on its line before. `<-supersedes` walks to the versions a unit
+replaced, and the supersession pass now leaves what it reached as written, so
+`expand <-supersedes only` is a subject's history. A `supersedes` edge that `migrate` wrote, where
+the newer unit was transformed from the older, re-expresses one account and is not counted as a
+revision. GE-T16's lens-path and migrate-path comparison found that rule on the first run. `where superseded` was considered and not taken,
+because `superseded` is a legal field name inside a filter today.
+
+Template set `smysl/dossier/3` writes every edge slot with `only` and returns `revision` to `trace`.
+Over GE-T10's thirty questions, counter-evidence goes from 1.000 / 0.667 to **1.000 / 0.917**;
+cause, exemplifies, dependent and revision reach 1.000 recall; all slots read 0.815 / 0.950. Over
+the seventeen fresh questions, counter goes from 1.000 / 0.471 to **1.000 / 0.706**. Both sets are
+in-sample for this choice, and the cost is recorded too: `support` and `cause` now take units that
+name the subject when the gold does not want them (support 0.800 precision over the thirty).
+
 ### Counter-evidence about what was asked: dossier template set 2
 
 `ask`'s counter-evidence had failed GE-T10's kill criterion at 0.750 precision, for the two reasons

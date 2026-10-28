@@ -604,7 +604,7 @@ language reads the question's intent — `define`, `explain`, `verify`,
 resolved to the store's `x.text/entity` units across `x.text/same-as`. A name
 that means two things, two women called Mary, is `SMY-W417`: the candidates
 are listed and nothing runs until `--subject` picks one. Each of the intent's
-slots is then an ordinary `sq/1` query, from the template set `smysl/dossier/2`
+slots is then an ordinary `sq/1` query, from the template set `smysl/dossier/3`
 compiled into the binary, planned, run and kept as a saved query — so every
 slot can be rerun with `q --rerun` like any other — and the dossier is a
 `question` unit, those saved queries, a `dossier` thread and a view over them.
@@ -625,17 +625,20 @@ were measured against a gold set (GE-T10: thirty questions, each in all five
 languages). Under the first template set, counter-evidence scored 0.750
 precision, under the 0.8 that keeps a dossier command out of the defaults,
 because a slot was bound to the question's *subject* and to nothing else it
-asked. The second set, `smysl/dossier/2`, narrows a `verify` question's
+asked. The second set narrowed a `verify` question's
 counter-evidence and reported speech, and an `explain` question's
 counter-evidence, to the question's own words. "Is scurvy cured by citrus
 fruit?" now starts from the claims about scurvy that say _cured_, _citrus_ or
-_fruit_, and collects their rebuttals. Both the old questions and seventeen
-new ones now score 1.000 on counter-evidence precision. Two things to know
-when you read one:
+_fruit_, and collects their rebuttals. The third, `smysl/dossier/3`, writes
+every edge slot with `expand … only`, so a rebuttal that names the subject is
+no longer dropped from counter-evidence. It also brings back `revision`, the
+accounts a later one replaced. Both the old questions and seventeen new ones
+score 1.000 on counter-evidence precision. Two things to know when you read
+one:
 
 - *The words must match.* `matches` does not stem, so _spread_ does not find
   _spreads_, and a rebuttal of a claim worded differently from your question
-  is missed. Recall on the new questions was 0.471. Phrase the question in the
+  is missed. Recall on the new questions is 0.706. Phrase the question in the
   store's words if a slot comes back thin.
 - *A question the store has no words for is not narrowed.* If no unit about the
   subject uses any of the question's words, as with a German question over an

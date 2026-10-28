@@ -227,7 +227,7 @@ fn ask_is_labelled_experimental_with_the_figures_that_keep_it_so() {
     assert!(o.status.success(), "{}", stderr(&o));
     let err = stderr(&o);
     assert!(
-        err.contains("experimental") && err.contains("0.471") && err.contains("GE-T10"),
+        err.contains("experimental") && err.contains("0.706") && err.contains("GE-T10"),
         "{err}"
     );
     assert!(!stdout(&o).contains("experimental"));

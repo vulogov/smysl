@@ -331,6 +331,9 @@ pub enum TimeValue {
 pub struct Traversal {
     pub edge: EdgeSpec,
     pub depth: Option<Count>,
+    /// `… only`: the walk contributes what it reached at depth one or more, not the set it
+    /// started from (SMYSL-2.9 §4.6, OQ-86).
+    pub only: bool,
     pub span: Span,
 }
 

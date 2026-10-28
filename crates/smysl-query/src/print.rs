@@ -297,9 +297,14 @@ fn traversal(t: &Traversal) -> String {
         }
         .to_string(),
     };
-    match &t.depth {
+    let walk = match &t.depth {
         Some(d) => format!("expand {edge} depth {}", count(d)),
         None => format!("expand {edge}"),
+    };
+    if t.only {
+        format!("{walk} only")
+    } else {
+        walk
     }
 }
 

@@ -554,14 +554,14 @@ fn ge_t10() {
     // set 1, moved by set 2 (OQ-87, OQ-88) where the comment says; `—` is a slot that found
     // nothing, which has no precision.
     let slots: &[(&str, &str, &str)] = &[
-        ("cause", "1.000", "0.667"),
+        ("cause", "1.000", "1.000"), // sets 1, 2: 1.000, 0.667
         ("characteristic", "0.554", "1.000"),
         ("contrast", "1.000", "1.000"),
-        ("counter", "1.000", "0.667"), // set 1: 0.750, 0.750
+        ("counter", "1.000", "0.917"), // set 1: 0.750, 0.750; set 2: 1.000, 0.667
         ("definition", "1.000", "1.000"),
-        ("dependent", "1.000", "0.833"),
+        ("dependent", "1.000", "1.000"), // sets 1, 2: 1.000, 0.833
         ("evidence", "0.667", "0.889"),
-        ("exemplifies", "1.000", "0.800"),
+        ("exemplifies", "1.000", "1.000"), // sets 1, 2: 1.000, 0.800
         ("holder", "1.000", "1.000"),
         ("hypothesis", "1.000", "1.000"),
         ("introduction", "0.636", "1.000"),
@@ -569,9 +569,9 @@ fn ge_t10() {
         ("open-question", "1.000", "1.000"),
         ("related", "1.000", "1.000"),
         ("reported", "0.857", "0.857"), // set 1: 0.636, 1.000
-        ("revision", "  —  ", "0.000"),
+        ("revision", "1.000", "1.000"), // sets 1, 2: —, 0.000
         ("stance", "1.000", "0.667"),
-        ("support", "1.000", "1.000"),
+        ("support", "0.800", "1.000"), // sets 1, 2: 1.000, 1.000
     ];
     let mut moved = Vec::new();
     for (slot, p, rc) in slots {
@@ -586,12 +586,13 @@ fn ge_t10() {
     }
     let langs: &[(&str, &str, &str, usize, usize)] = &[
         // set 1: en 0.774/0.890, de 0.728/0.652, es 0.770/0.834, fr 0.767/0.818,
-        // ru 0.773/0.751
-        ("en", "0.806", "0.873", 30, 30),
-        ("de", "0.738", "0.652", 23, 22),
-        ("es", "0.778", "0.834", 27, 27),
-        ("fr", "0.772", "0.807", 26, 26),
-        ("ru", "0.784", "0.740", 29, 23),
+        // ru 0.773/0.751; set 2: en 0.806/0.873, de 0.738/0.652, es 0.778/0.834,
+        // fr 0.772/0.807, ru 0.784/0.740
+        ("en", "0.815", "0.950", 30, 30),
+        ("de", "0.746", "0.713", 23, 22),
+        ("es", "0.783", "0.895", 27, 27),
+        ("fr", "0.775", "0.856", 26, 26),
+        ("ru", "0.787", "0.796", 29, 23),
     ];
     for (lang, p, rc, intent, subject) in langs {
         let t = &r.end_to_end[*lang];
@@ -635,7 +636,7 @@ fn ge_t10_fresh() {
     println!("{}", r.report);
 
     let slots: &[(&str, &str, &str)] = &[
-        ("counter", "1.000", "0.471"),  // set 1: 0.478, 0.647
+        ("counter", "1.000", "0.706"), // set 1: 0.478, 0.647; set 2: 1.000, 0.471
         ("reported", "1.000", "0.500"), // set 1: 0.250, 1.000
         ("evidence", "0.435", "0.714"), // not narrowed; as set 1
     ];
@@ -655,18 +656,18 @@ fn ge_t10_fresh() {
         all.merge(*t);
     }
     let got = (three(all.precision()), three(all.recall()));
-    if (got.0.as_str(), got.1.as_str()) != ("0.565", "0.650") {
+    if (got.0.as_str(), got.1.as_str()) != ("0.566", "0.750") {
         moved.push(format!(
-            "all slots: (0.565, 0.650) is now ({}, {})", // set 1: 0.441, 0.750
+            "all slots: (0.566, 0.750) is now ({}, {})", // set 1: 0.441, 0.750; set 2: 0.565, 0.650
             got.0, got.1
         ));
     }
     let langs: &[(&str, &str, &str)] = &[
-        ("en", "0.565", "0.650"),
-        ("de", "0.519", "0.700"),
-        ("es", "0.460", "0.725"),
-        ("fr", "0.463", "0.625"),
-        ("ru", "0.556", "0.625"),
+        ("en", "0.566", "0.750"),
+        ("de", "0.484", "0.750"),
+        ("es", "0.458", "0.825"),
+        ("fr", "0.460", "0.725"),
+        ("ru", "0.519", "0.675"),
     ];
     for (lang, p, rc) in langs {
         let t = &r.end_to_end[*lang];

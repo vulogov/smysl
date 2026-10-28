@@ -62,6 +62,7 @@ Query {
                             2,
                         ),
                     ),
+                    only: false,
                 },
             ],
             closures: [],

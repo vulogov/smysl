@@ -32,18 +32,20 @@
 //! `grounds` is not an edge but a field, and `->grounds` walks to a unit's grounds, which is
 //! the same reading: what the unit rests on.
 //!
-//! **What sq/1 cannot say, and what that costs.** A slot defined by an edge — `counter` is
-//! what rebuts the units about the subject — is written `expand ->rebuts depth 1 except
-//! about entity($subject)`, because `expand` *adds* to the set it was given and the language
-//! has no way to ask for only what the walk reached. The subtraction also removes a rebuttal
-//! that itself names the subject, which then answers `characteristic` instead. Recorded as
-//! OQ-86; GE-T10 (step 4) is what measures whether it matters.
+//! **What a walk reached, and only that** (set 3, OQ-86). A slot defined by an edge —
+//! `counter` is what rebuts the units about the subject — is `expand ->rebuts depth 1 only`.
+//! Sets 1 and 2 wrote it `expand ->rebuts depth 1 except about entity($subject)`, because
+//! `expand` *adds* to the set it was given and sq/1 had no way to ask for the walk's result
+//! alone; the subtraction also removed a rebuttal that itself names the subject, which then
+//! answered `characteristic` instead. `only` keeps a unit reached at depth one or more even when
+//! it is a seed too, which is that rebuttal exactly.
 //!
-//! # Set 2: what was asked, and the current account (OQ-87, OQ-88)
+//! # Sets 2 and 3: what was asked, the current account, and the walk alone (OQ-86–OQ-88)
 //!
 //! Set 1's GE-T10 run fired the kill criterion on counter-evidence, and both causes were in
-//! this file rather than in the grammar. Set 2 changes three things and its id says so, since a
-//! dossier saved under set 1 answered a different question of the same templates.
+//! this file rather than in the grammar. Set 2 changed three things and its id said so, since a
+//! dossier saved under set 1 answered a different question of the same templates; set 3 takes
+//! the grammar's `only` (OQ-86) and brings `revision` back with it (OQ-87).
 //!
 //! **A slot can be narrowed to the question's topic** (OQ-88). A verify or explain question
 //! asks something *of* its subject — "is scurvy cured by citrus fruit" — and set 1 bound only
@@ -70,12 +72,13 @@
 //! [`PlanOptions::supersede_before_walk`](crate::PlanOptions), which runs the pass on the seeds
 //! as well; the recipe records it.
 //!
-//! **`revision` is not offered** (OQ-87, part a). It asks for what a later account replaced, and
-//! sq/1 cannot select a superseded unit: under the current lens the old unit is replaced, and
-//! under `--all-versions` it names the subject and the `except` removes it, so set 1's `trace`
-//! carried a slot that was empty for every question. The template stays in [`SLOTS`], since
-//! the role is the dossier schema's, and no intent lists it until a `where superseded`
-//! predicate exists.
+//! **`revision` was withdrawn in set 2 and is back in set 3** (OQ-87, part a). It asks for what a
+//! later account replaced, and until set 3 sq/1 could not select a superseded unit: under the
+//! current lens the old unit is replaced, and under `--all-versions` it names the subject and
+//! the `except` removed it, so set 1's `trace` carried a slot that was empty for every
+//! question. Set 3's is `expand <-supersedes only`: the walk from a version to the versions it
+//! replaced reaches history by construction, and the supersession pass leaves what it reached
+//! as written (SMYSL-2.9 §4.6).
 
 use smysl_core::diag::{Code, Diagnostic};
 use smysl_core::{hash_bytes, Role};
@@ -83,7 +86,7 @@ use smysl_core::{hash_bytes, Role};
 use super::intent::Intent;
 
 /// The set this build carries.
-pub const SET: &str = "smysl/dossier/2";
+pub const SET: &str = "smysl/dossier/3";
 
 /// One slot: the role its units take in the dossier thread, and its query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,7 +149,7 @@ pub fn slots(intent: Intent) -> Vec<&'static Slot> {
         ],
         Intent::Verify => &["support", "evidence", "counter", "reported"],
         Intent::Attribute => &["reported", "holder", "stance"],
-        Intent::Trace => &["introduction", "cause"],
+        Intent::Trace => &["introduction", "revision", "cause"],
         Intent::Locate => &["location", "related"],
         Intent::Depend => &["dependent", "related"],
         Intent::Compare => &["characteristic", "contrast", "counter"],
@@ -297,18 +300,17 @@ mod tests {
     #[test]
     fn an_unknown_set_is_e477() {
         assert!(set(SET).is_ok());
-        assert_eq!(set("smysl/dossier/1").unwrap_err().code, Code::E477);
+        assert_eq!(set("smysl/dossier/2").unwrap_err().code, Code::E477);
     }
 
     #[test]
-    fn revision_is_in_the_set_and_no_intent_offers_it() {
-        assert!(SLOTS.iter().any(|s| s.name == "revision"));
-        for intent in Intent::ALL {
-            assert!(
-                slots(*intent).iter().all(|s| s.name != "revision"),
-                "{intent}"
-            );
+    fn no_slot_subtracts_the_subject() {
+        // Set 3 (OQ-86): an edge slot is the walk alone, which `except about entity(…)` could
+        // only approximate by removing every unit that named the subject.
+        for slot in SLOTS {
+            assert!(!slot.text.contains("except"), "{}", slot.name);
         }
+        assert!(slots(Intent::Trace).iter().any(|s| s.name == "revision"));
     }
 
     #[test]

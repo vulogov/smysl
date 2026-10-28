@@ -387,7 +387,7 @@ time-op     = "during" | "overlaps" | "before" | "after" ;
 ### 4.7 Traversals and closures
 
 ```
-traversal   = "expand" edge-spec [ "depth" integer ] ;
+traversal   = "expand" edge-spec [ "depth" integer ] [ "only" ] ;
 edge-spec   = "->" kind | "<-" kind | "-[" kind "]-" | named-edge ;
 kind        = field-name ;                             (* SMY-E462 if undeclared *)
 named-edge  = "grounds" | "deps" | "rests on" | "dependents" | "lineage" | "mentions" ;
@@ -395,6 +395,32 @@ named-edge  = "grounds" | "deps" | "rests on" | "dependents" | "lineage" | "ment
 closure     = "with" closure-item { "," closure-item } ;
 closure-item= "rebuttals" | "grounds" | "holders" | "speakers" | "spans" | "datings" ;
 ```
+
+**`only`** (added 2026-10-28, SMYSL-2.5 OQ-86). `expand` *adds* to the set it was given, and
+sq/1 had no way to ask for a walk's result alone: a query wanting what rebuts the units about a
+subject wrote `expand ->rebuts depth 1 except about entity(…)`, and the subtraction also removed
+a rebuttal that itself named the subject. With `only`, a traversal contributes every unit it
+reached at depth one or more — **including a unit that is also a seed**, since that rebuttal is
+reached from the claim it rebuts — and not the set it started from. Every traversal walks from
+the same seeds (SMYSL-2.5 §3.3), so the seeds stay in the answer unless **every** stage of
+phase 7 says `only`; a closure cannot, and keeps them. `only` comes last, after any `depth`,
+once. It is additive under QG-9: nothing could follow a traversal on its line before, so no
+query that parsed now means something else.
+
+**The walk into history** (2026-10-28, SMYSL-2.5 OQ-87). `<-supersedes` walks from a unit to the
+versions it replaced, so what it reaches is history by construction. The supersession pass,
+which runs after the walks, would replace each of those units by the head the walk began from,
+and so undo the walk; it leaves what a `<-supersedes` traversal reached as written, and the
+plan says so. `about entity($subject) expand <-supersedes only` is every account of the subject
+a later one replaced, at any depth. **A re-expression is not a revision:** a `supersedes` edge
+whose newer unit was transformed from the older one (an attestation `op: Transformed` naming it
+as a parent, which is how `migrate` writes one, SMYSL-2.5 §3.11) carries one account to a newer
+schema revision, so a unit reached only over such edges is not history, and a revision is
+answered in its newest re-expression. Without that rule a migrated store answers every unit it
+migrated as a revision of itself, and GE-T16's L8 — the lens path and the migrate path agree,
+dossier slot by slot — is what found it. No predicate was added for this: `where superseded` would
+have recognised inside a filter a word that is a legal field name today, which QG-9 forbids in
+`sq/1`.
 
 `with lens none` disables lensing for qualified access on a stage (SMYSL-2.5 §3.1), which does
 not say *which* stage. It attaches to the four that can hold a qualified field reference —

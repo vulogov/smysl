@@ -1,0 +1,54 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: None,
+            source: Some(
+                SourceStage {
+                    source: AboutEntity(
+                        Str(
+                            "scurvy",
+                        ),
+                    ),
+                },
+            ),
+            filters: [],
+            times: [],
+            traversals: [
+                Traversal {
+                    edge: Out(
+                        "rebuts",
+                    ),
+                    depth: Some(
+                        Int(
+                            1,
+                        ),
+                    ),
+                    only: true,
+                },
+                Traversal {
+                    edge: In(
+                        "supersedes",
+                    ),
+                    depth: None,
+                    only: true,
+                },
+                Traversal {
+                    edge: Named(
+                        Grounds,
+                    ),
+                    depth: Some(
+                        Param(
+                            "d",
+                        ),
+                    ),
+                    only: true,
+                },
+            ],
+            closures: [],
+        },
+    ),
+    ordering: [],
+    shaping: [],
+    output: None,
+}

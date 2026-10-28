@@ -18,12 +18,14 @@ Query {
                         "grounds",
                     ),
                     depth: None,
+                    only: false,
                 },
                 Traversal {
                     edge: In(
                         "x.text/quotes",
                     ),
                     depth: None,
+                    only: false,
                 },
                 Traversal {
                     edge: Both(
@@ -34,12 +36,14 @@ Query {
                             3,
                         ),
                     ),
+                    only: false,
                 },
                 Traversal {
                     edge: Named(
                         RestsOn,
                     ),
                     depth: None,
+                    only: false,
                 },
                 Traversal {
                     edge: Named(
@@ -50,6 +54,7 @@ Query {
                             1,
                         ),
                     ),
+                    only: false,
                 },
             ],
             closures: [],

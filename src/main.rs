@@ -976,7 +976,7 @@ fn cli() -> Command {
                     Arg::new("templates")
                         .long("templates")
                         .value_name("ID")
-                        .default_value("smysl/dossier/2")
+                        .default_value("smysl/dossier/3")
                         .help("The dossier template set"),
                 )
                 .arg(
@@ -6260,8 +6260,8 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 /// the slot over the bar.
 #[cfg(feature = "text")]
 const ASK_EXPERIMENTAL: &str = "smysl ask: experimental — GE-T10's counter-evidence precision \
-     meets draft 3's 0.8 under template set 2 (1.000 over both question sets, SMYSL-2.5 OQ-88), \
-     but every gold set is single-hand and counter's recall on fresh questions is 0.471";
+     meets draft 3's 0.8 under template set 3 (1.000 over both question sets, SMYSL-2.5 OQ-86), \
+     but every gold set is single-hand and counter's recall on fresh questions is 0.706";
 
 /// `smysl ask` — a dossier for a question (SMYSL-2.5 §3.13, TX-P8 step 3).
 ///

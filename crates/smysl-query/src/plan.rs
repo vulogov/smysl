@@ -371,6 +371,9 @@ pub enum PlanStep {
     /// The supersession pass on the seeds, before phase 7's walks
     /// ([`PlanOptions::supersede_before_walk`]).
     SupersedeSeeds,
+    /// The units a `<-supersedes` walk reached are left as written by the pass after it,
+    /// which would otherwise replace each by the head the walk started from (OQ-87).
+    KeepsHistory,
     /// Phase 8.
     SetOp { op: &'static str, span: Span },
     /// Phase 9.
@@ -439,6 +442,12 @@ pub struct TraversalPlan {
     /// Unresolved: a `$parameter` depth is bound between planning and running, like a
     /// parameter anywhere else.
     pub depth: Option<Count>,
+    /// `… only` (OQ-86): this walk adds what it reached at depth one or more, and the seeds
+    /// stay in the answer only if some other phase-7 stage keeps them.
+    pub only: bool,
+    /// `<-supersedes`: the walk from a unit to the versions it replaced. What it reaches is
+    /// history by construction, and the supersession pass leaves it as written (OQ-87).
+    pub history: bool,
     pub span: Span,
 }
 
@@ -1070,6 +1079,9 @@ fn lower_pipeline(
     steps.push(PlanStep::Supersede {
         enabled: !opts.all_versions,
     });
+    if !opts.all_versions && traversals.iter().any(|t| t.history) {
+        steps.push(PlanStep::KeepsHistory);
+    }
 
     Some(PipelinePlan {
         scope: env.scope.name().to_string(),
@@ -1141,11 +1153,19 @@ fn lower_traversal(
                 }
             },
         };
+    let history = matches!(&t.edge, EdgeSpec::In(k)
+        if matches!(RelKind::parse(k), Ok(RelKind::Supersedes)));
     Some(TraversalPlan {
-        label,
+        label: if t.only {
+            format!("{label} only")
+        } else {
+            label
+        },
         edges,
         direction,
         depth: t.depth.clone(),
+        only: t.only,
+        history,
         span: t.span,
     })
 }
