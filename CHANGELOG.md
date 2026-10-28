@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.10.0
+## 1.10.0 — 2026-10-28
 
 What 1.9 argued for and did not land, in the order it was argued rather than the order it is
 easiest.
