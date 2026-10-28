@@ -112,7 +112,7 @@ doc-gate: ## Rustdoc with warnings denied, as docs.rs would show it
 # not fail loudly either — it turns all twelve crates into "version not found in registry", a
 # red job saying nothing about the API. 0.10.0 and 0.12.0 were never published and never will
 # be; everything in them shipped in the release after.
-BASELINE  := 1.9.0
+BASELINE  := 1.10.0
 # The baseline is taken from **this repository's tag**, not from the registry index, and that
 # is a reproducibility fix rather than a preference. `--baseline-version` resolves the version
 # through `index.crates.io` on every run even when the rustdoc for it is already cached, so a
@@ -128,18 +128,16 @@ BASELINE  := 1.9.0
 # repository can verify.
 BASELINE_REV := v$(BASELINE)
 PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-render \
-             smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl
+             smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl \
+             smysl-text smysl-query smysl-measure smysl-lib smysl-embed-candle
 
 # Crates that exist here but are not on crates.io yet, so `semver` has no baseline to fetch
 # for them and would report "version not found in registry" — a red job saying nothing. They
 # join PUBLISHED at the release that first publishes them.
 #
-# `smysl-text` is new in 1.10.0 (RFC SMYSL-2.4, TX-P1).
-# `smysl-query` is new in 1.10.0 (RFC SMYSL-2.9, TX-P6 step 1).
-# `smysl-measure` is new in 1.10.0 (RFC SMYSL-2.6, TX-P8 M1).
-# `smysl-lib` is new in 1.10.0 (RFC SMYSL-2.7, TX-P11 step 2).
-# `smysl-embed-candle` is new in 1.10.0 (RFC SMYSL-2.5, TX-P10 step 1).
-UNPUBLISHED := smysl-text smysl-query smysl-measure smysl-lib smysl-embed-candle
+# Empty since 1.10.0, which first published `smysl-text`, `smysl-query`, `smysl-measure`,
+# `smysl-lib` and `smysl-embed-candle`.
+UNPUBLISHED :=
 
 # The library crates behind the facade: everything published except the facade itself, plus
 # the ones not published yet. Their *surface* is watched from the first commit — `api-check`
