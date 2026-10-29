@@ -12,9 +12,12 @@
 //! because it is longer, not because somebody remembered to list it first. A rule list that
 //! depended on its order would be a rule list one insertion away from a different classifier.
 //!
-//! No rule matching is `SMY-E468`, and `--intent` names one. A model classifier is a
-//! `Classifier` port (OQ-22), labelled model-dependent and not in this build: the rules are
-//! pure, which is what makes a dossier a function of its question.
+//! No rule matching is `SMY-E468`, and `--intent` names one. There is no model classifier
+//! (OQ-22, decided): the rules are pure, which is what makes a dossier a function of its
+//! question, and every miss measured was a spelling or a verb a rule can write.
+//!
+//! Commas are folded away and a typographic apostrophe is the typed one, so a rule is written
+//! once for `wer sagte, …` and `wer sagte …`, and for `qu’est-ce que` and `qu'est-ce que`.
 
 use std::fmt;
 
@@ -185,7 +188,9 @@ pub const RULES: &[Rule] = &[
     r("en", Locate, "where are "),
     r("en", Locate, "where was "),
     rs("en", Locate, "where is ", " mentioned"),
+    rs("en", Locate, "where are ", " mentioned"),
     rs("en", Locate, "where does ", " appear"),
+    rs("en", Locate, "where do ", " appear"),
     r("en", Depend, "what depends on "),
     r("en", Depend, "what relies on "),
     r("en", Depend, "what rests on "),
@@ -202,28 +207,38 @@ pub const RULES: &[Rule] = &[
     r("de", Define, "wer war "),
     r("de", Define, "definiere "),
     r("de", Define, "definition von "),
+    r("de", Define, "definition des "),
+    r("de", Define, "definition der "),
     r("de", Explain, "warum "),
     r("de", Explain, "wieso "),
     r("de", Explain, "weshalb "),
     r("de", Explain, "erkläre "),
-    r("de", Verify, "stimmt es, dass "),
     r("de", Verify, "stimmt es dass "),
-    r("de", Verify, "ist es wahr, dass "),
     r("de", Verify, "ist es wahr dass "),
     r("de", Attribute, "wer sagte "),
     r("de", Attribute, "wer hat gesagt "),
     r("de", Attribute, "wer behauptet "),
     r("de", Attribute, "laut wem "),
     r("de", Trace, "woher kommt "),
+    r("de", Trace, "woher kommen "),
     r("de", Trace, "woher stammt "),
+    r("de", Trace, "woher stammen "),
     r("de", Trace, "geschichte von "),
     r("de", Trace, "geschichte der "),
+    r("de", Trace, "geschichte des "),
     r("de", Trace, "herkunft von "),
+    r("de", Trace, "herkunft der "),
+    r("de", Trace, "herkunft des "),
     r("de", Locate, "wo ist "),
     r("de", Locate, "wo steht "),
     rs("de", Locate, "wo wird ", " erwähnt"),
+    rs("de", Locate, "wo werden ", " erwähnt"),
     rs("de", Locate, "wo kommt ", " vor"),
+    rs("de", Locate, "wo kommen ", " vor"),
     rs("de", Depend, "was hängt von ", " ab"),
+    rs("de", Depend, "was hängt vom ", " ab"),
+    rs("de", Depend, "was hängt von der ", " ab"),
+    rs("de", Depend, "was hängen von ", " ab"),
     r("de", Depend, "was folgt aus "),
     r("de", Compare, "vergleiche "),
     r("de", Compare, "was ist der unterschied zwischen "),
@@ -236,6 +251,7 @@ pub const RULES: &[Rule] = &[
     r("es", Define, "quien es "),
     r("es", Define, "quién era "),
     r("es", Define, "definición de "),
+    r("es", Define, "definición del "),
     r("es", Explain, "por qué "),
     r("es", Explain, "por que "),
     r("es", Explain, "explica "),
@@ -248,41 +264,56 @@ pub const RULES: &[Rule] = &[
     r("es", Trace, "de dónde viene "),
     r("es", Trace, "de donde viene "),
     r("es", Trace, "historia de "),
+    r("es", Trace, "historia del "),
     r("es", Trace, "origen de "),
+    r("es", Trace, "origen del "),
     r("es", Locate, "dónde está "),
     r("es", Locate, "donde está "),
     r("es", Locate, "dónde aparece "),
+    r("es", Locate, "dónde aparecen "),
+    r("es", Locate, "dónde están "),
     r("es", Depend, "qué depende de "),
+    r("es", Depend, "qué depende del "),
+    r("es", Depend, "qué dependen de "),
     r("es", Depend, "qué se sigue de "),
+    r("es", Depend, "qué se sigue del "),
     r("es", Compare, "compara "),
     r("es", Compare, "cuál es la diferencia entre "),
     r("es", Compare, "diferencia entre "),
     // --- fr ----------------------------------------------------------------------------------
     r("fr", Define, "qu'est-ce que "),
     r("fr", Define, "qu'est-ce qu'"),
-    r("fr", Define, "qu’est-ce que "),
-    r("fr", Define, "qu’est-ce qu’"),
     r("fr", Define, "qui est "),
     r("fr", Define, "qui était "),
     r("fr", Define, "définition de "),
+    r("fr", Define, "définition du "),
+    r("fr", Define, "définition des "),
     r("fr", Explain, "pourquoi "),
     r("fr", Explain, "explique "),
     r("fr", Explain, "expliquez "),
     r("fr", Verify, "est-il vrai que "),
+    r("fr", Verify, "est-il vrai qu'"),
     r("fr", Verify, "est-ce vrai que "),
+    r("fr", Verify, "est-ce vrai qu'"),
     r("fr", Attribute, "qui a dit "),
     r("fr", Attribute, "qui affirme "),
     r("fr", Attribute, "selon qui "),
     r("fr", Trace, "d'où vient "),
-    r("fr", Trace, "d’où vient "),
     r("fr", Trace, "histoire de "),
+    r("fr", Trace, "histoire du "),
+    r("fr", Trace, "histoire des "),
     r("fr", Trace, "origine de "),
+    r("fr", Trace, "origine du "),
+    r("fr", Trace, "origine des "),
     r("fr", Locate, "où est "),
     r("fr", Locate, "où se trouve "),
+    r("fr", Locate, "où sont "),
     r("fr", Locate, "où apparaît "),
     r("fr", Depend, "qu'est-ce qui dépend de "),
-    r("fr", Depend, "qu’est-ce qui dépend de "),
+    r("fr", Depend, "qu'est-ce qui dépend du "),
+    r("fr", Depend, "qu'est-ce qui dépend des "),
     r("fr", Depend, "qui dépend de "),
+    r("fr", Depend, "qui dépend du "),
     r("fr", Compare, "compare "),
     r("fr", Compare, "comparez "),
     r("fr", Compare, "quelle est la différence entre "),
@@ -299,13 +330,11 @@ pub const RULES: &[Rule] = &[
     r("ru", Explain, "зачем "),
     r("ru", Explain, "отчего "),
     r("ru", Explain, "объясни "),
-    r("ru", Verify, "правда ли, что "),
     r("ru", Verify, "правда ли что "),
-    r("ru", Verify, "верно ли, что "),
     r("ru", Verify, "верно ли что "),
     r("ru", Verify, "действительно ли "),
     r("ru", Attribute, "кто сказал "),
-    r("ru", Attribute, "кто сказал, что "),
+    r("ru", Attribute, "кто сказал что "),
     r("ru", Attribute, "кто утверждает "),
     r("ru", Attribute, "по чьим словам "),
     r("ru", Trace, "откуда "),
@@ -364,8 +393,15 @@ fn fold(question: &str) -> Folded {
             last_space = true;
             continue;
         }
+        // A comma is punctuation between a rule's verb and its clause (`wer sagte, …`,
+        // `stimmt es, dass …`), and never part of a rule: folded away, so one rule reads both.
+        if c == ',' {
+            continue;
+        }
         last_space = false;
         let before = text.len();
+        // One apostrophe: a typographic one is the same elision as a typed one.
+        let c = if c == '’' { '\'' } else { c };
         text.push(crate::fold::lower(c));
         origin.extend(std::iter::repeat_n(at, text.len() - before));
     }

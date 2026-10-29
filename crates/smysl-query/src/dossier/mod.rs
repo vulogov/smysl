@@ -515,50 +515,60 @@ pub fn topic_terms(topic: &str, subject: &str, lang: &str) -> Vec<String> {
         .collect()
 }
 
-/// Step 1: the longest run of the topic's words the port has candidates for.
+/// Step 1: the longest run of the topic's words the port has candidates for — as spelled, and
+/// only when no run matches as spelled, through `lang`'s stemmer
+/// ([`Entities::candidates_stemmed`]).
 fn find_subject(
     topic: &str,
     port: &dyn Entities,
     pick: Option<Uid>,
+    lang: &str,
 ) -> Result<(String, Vec<Uid>), AskError> {
     let ws = words(topic);
-    for len in (1..=ws.len()).rev() {
-        for start in 0..=ws.len() - len {
-            let name = ws[start..start + len].join(" ");
-            let candidates = port.candidates(&name);
-            if candidates.is_empty() {
-                continue;
-            }
-            if let Some(uid) = pick {
-                if let Some(group) = candidates.iter().find(|g| g.contains(&uid)) {
-                    return Ok((name, group.clone()));
+    // As spelled, then through the stems.
+    for stemmed in [false, true] {
+        for len in (1..=ws.len()).rev() {
+            for start in 0..=ws.len() - len {
+                let name = ws[start..start + len].join(" ");
+                let candidates = if stemmed {
+                    port.candidates_stemmed(&name, lang)
+                } else {
+                    port.candidates(&name)
+                };
+                if candidates.is_empty() {
+                    continue;
                 }
-                // The pick may name an entity a shorter run means; keep looking.
-                continue;
+                if let Some(uid) = pick {
+                    if let Some(group) = candidates.iter().find(|g| g.contains(&uid)) {
+                        return Ok((name, group.clone()));
+                    }
+                    // The pick may name an entity a shorter run means; keep looking.
+                    continue;
+                }
+                if candidates.len() > 1 {
+                    let listed = candidates
+                        .iter()
+                        .map(|g| {
+                            g.iter()
+                                .map(|u| u.to_string())
+                                .collect::<Vec<_>>()
+                                .join(" = ")
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    let diagnostic = Diagnostic::new(Code::W417).with_message(format!(
+                        "`{name}` names {} different entities: {listed}; pick one with --subject",
+                        candidates.len()
+                    ));
+                    return Err(AskError::Ambiguous {
+                        name,
+                        candidates,
+                        diagnostic: Box::new(diagnostic),
+                    });
+                }
+                let group = candidates.into_iter().next().expect("one candidate");
+                return Ok((name, group));
             }
-            if candidates.len() > 1 {
-                let listed = candidates
-                    .iter()
-                    .map(|g| {
-                        g.iter()
-                            .map(|u| u.to_string())
-                            .collect::<Vec<_>>()
-                            .join(" = ")
-                    })
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                let diagnostic = Diagnostic::new(Code::W417).with_message(format!(
-                    "`{name}` names {} different entities: {listed}; pick one with --subject",
-                    candidates.len()
-                ));
-                return Err(AskError::Ambiguous {
-                    name,
-                    candidates,
-                    diagnostic: Box::new(diagnostic),
-                });
-            }
-            let group = candidates.into_iter().next().expect("one candidate");
-            return Ok((name, group));
         }
     }
     match pick {
@@ -678,7 +688,12 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
     let Some(port) = env.entities else {
         return Err(AskError::NoEntities);
     };
-    let (subject, group) = find_subject(&classified.topic, port, opts.subject)?;
+    let stem_lang = if classified.lang.is_empty() {
+        opts.lang.as_deref().unwrap_or_default()
+    } else {
+        classified.lang
+    };
+    let (subject, group) = find_subject(&classified.topic, port, opts.subject, stem_lang)?;
 
     let picked = Picked {
         name: subject.clone(),

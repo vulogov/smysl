@@ -628,6 +628,42 @@ fn a_semantic_stage_without_a_model_is_refused_by_name() {
     }
 }
 
+/// OQ-51: a translated query is saved only with the person who approved it, and the check is
+/// made before a model is asked — so each refusal here exits 2 with nothing run and no call.
+#[test]
+fn a_saved_translation_names_who_approved_it() {
+    let refused = |extra: &[&str], says: &str| {
+        let mut args = vec![
+            "q",
+            "--from-question",
+            "Which claims are there?",
+            "--save",
+            "--yes",
+        ];
+        args.extend_from_slice(extra);
+        let f = f1();
+        args.push(&f);
+        let o = run(&args);
+        assert_eq!(o.status.code(), Some(2), "{extra:?}: {}", stderr(&o));
+        assert!(stdout(&o).is_empty(), "nothing ran: {}", stdout(&o));
+        assert!(stderr(&o).contains(says), "{extra:?}: {}", stderr(&o));
+    };
+    refused(&[], "--approved-by human:<id>");
+    refused(&["--approved-by", "tool:smysl"], "a person's");
+    refused(&["--approved-by", "not an agent"], "--approved-by");
+    // Without --save there is nothing to attest, and the flag says so.
+    let o = run(&[
+        "q",
+        "--from-question",
+        "Which claims are there?",
+        "--approved-by",
+        "human:ada",
+        &f1(),
+    ]);
+    assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
+    assert!(stderr(&o).contains("--save"), "{}", stderr(&o));
+}
+
 /// `--from-question` without a model to ask: a configuration that cannot be read refuses before
 /// any provider is built, `--seed-check` refuses the invocation (a translation is not
 /// reproducible), and `--yes` alone is a usage error, since there is nothing for it to confirm.

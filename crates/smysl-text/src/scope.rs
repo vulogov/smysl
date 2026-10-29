@@ -65,6 +65,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use smysl_core::diag::{Diagnostic, Span};
 use smysl_core::ids::{LangTag, Uid};
 use smysl_core::types::Axis as CoreAxis;
+use smysl_graph::Store;
 use smysl_query::ast::{Name, ScopeItem};
 use smysl_query::ports::{
     unresolvable, Axis, Bounds, Candidates, Entities, Partition, PartitionKey, Scope, Times,
@@ -453,6 +454,58 @@ impl Entities for LibraryScope<'_> {
     /// `same-as` — the store's records answer it, so the library answers it as a store does.
     fn candidates(&self, name: &str) -> Vec<Vec<Uid>> {
         smysl_query::store_scope::entity_candidates(self.library.store(), name)
+    }
+
+    fn candidates_stemmed(&self, name: &str, lang: &str) -> Vec<Vec<Uid>> {
+        stemmed_candidates(self.library.store(), name, lang)
+    }
+}
+
+/// The entities whose spelling has the same stems as `name` under `lang`'s analyzer chain —
+/// the chain that indexes the library, so a subject is stemmed exactly as its text is. Both
+/// sides go through the question's language: an entity spelled in another one rarely stems to
+/// the same string, and when it does it was the same word. A language with no stemmer (or a
+/// build without `stem`) compares folded surface forms, which the spelled pass already did,
+/// and so finds nothing new.
+pub fn stemmed_candidates(store: &Store, name: &str, lang: &str) -> Vec<Vec<Uid>> {
+    let Ok(tag) = LangTag::new(lang) else {
+        return Vec::new();
+    };
+    let chain = Chain::new(&tag);
+    if chain.lang().is_none() {
+        return Vec::new();
+    }
+    let want = chain.stems(name);
+    if want.is_empty() {
+        return Vec::new();
+    }
+    smysl_query::store_scope::entity_candidates_where(store, |gist| chain.stems(gist) == want)
+}
+
+/// Any entity port, with [`stemmed_candidates`] over `store` for what no spelling finds: how a
+/// plain store's `StoreScope` gets the library's morphology for `ask`.
+pub struct Stemmed<'a> {
+    store: &'a Store,
+    inner: &'a dyn Entities,
+}
+
+impl<'a> Stemmed<'a> {
+    pub fn new(store: &'a Store, inner: &'a dyn Entities) -> Stemmed<'a> {
+        Stemmed { store, inner }
+    }
+}
+
+impl Entities for Stemmed<'_> {
+    fn resolve(&self, name: &str) -> Vec<Uid> {
+        self.inner.resolve(name)
+    }
+
+    fn candidates(&self, name: &str) -> Vec<Vec<Uid>> {
+        self.inner.candidates(name)
+    }
+
+    fn candidates_stemmed(&self, name: &str, lang: &str) -> Vec<Vec<Uid>> {
+        stemmed_candidates(self.store, name, lang)
     }
 }
 

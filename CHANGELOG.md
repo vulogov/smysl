@@ -21,6 +21,51 @@ is the list of record; this is where it stands as the cycle opens.
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 there are none yet; they stay owed rather than planned.
 
+### Who approved a translated query, and a subject found by its stems
+
+The last questions of the cycle and the two pieces of work OQ-22 left owed.
+
+**A subject is found through its stems.** `ask` looked for a question's subject by spelling, so
+`История цинги`, `Jenners Impfstoff` and `Джозефа Листера` found nothing. When no run of the
+topic's words matches as spelled, the runs are now tried through the question language's
+Snowball stemmer — the analyzer chain that indexes the library — on both sides
+(`Entities::candidates_stemmed`, `smysl_text::scope::Stemmed` for a plain store's port).
+Spelling first, so a stem never displaces an exact name.
+
+**The intent table's spellings, fixed and measured where they were not found.** Commas are folded
+away, a typographic apostrophe is the typed one, and the table gains contractions (`vom`, `des`,
+`del`, `du`), plural verbs and French elision. Both fixes were declared before a **third question
+set** was written — sixteen questions over all eight intents in five languages,
+`fixtures/dossier/third/` — and scored first without them (`baseline.txt`):
+
+| third set, 80 rows | before | after |
+|---|---:|---:|
+| intent read | 57 | 69 |
+| subject found | 50 | 69 |
+
+Every miss left is a verb or tense no rule spells (`¿Quién fue`, `Кем был`, `What exactly was`,
+`Gibt es Belege`, `se menciona`), and with the intent read, the stems found every subject; no stem
+found a wrong one in any set. In-sample, set 1's front is now 150/150 for intent and 150/150 for
+the subject with stems, and the fresh set's 85/85 and 83/85 — the two left are `Cholerabazillus`
+and `холерный`, a compound and an adjective. GE-T10's pinned end-to-end figures move with them
+(German recall 0.713 → 0.945). The set was written by the hand that made the fixes, and says so.
+
+**OQ-51: a saved translated query records who approved it.** `q` attested no saved unit, so a
+query a model wrote and a person saved said nothing of the person. `q --from-question … --save`
+now requires `--approved-by human:<id>`, refused before any model is asked, and the saved unit
+carries that person's attestation (`Attested`, rung `document`), outside the core so the uid and
+its reruns do not move. Run once end to end through a local llama3.2.
+
+**`where a.b` reads a nested value.** Found under OQ-53: a raw dotted key read only a top-level
+key, so a filter missed the nested value `find` indexes under the same name. It now reads the
+path when no top-level key spells it, and a literal dotted key still wins.
+
+**OQ-69: GE-T7's library build has no model extraction**, as the stand-in ran it: extraction's
+time is a provider's, and GE-T2 and GE-T4 measure it.
+
+SMYSL-2.5 and 2.8, the roadmap, the changelog and the manual's feature table record it; the
+manual's PDF is rebuilt for the `--approved-by` sentence.
+
 ### What a model wrote, and what classifies a question
 
 **OQ-34: model output in the tree.** Decided by the owner: verbatim output only from an

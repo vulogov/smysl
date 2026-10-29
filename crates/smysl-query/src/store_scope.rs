@@ -187,14 +187,19 @@ pub fn resolve_entity(store: &Store, name: &str) -> Vec<Uid> {
 /// with every entity its strict class joins it to; groups that share a member are one thing and
 /// are merged, so a same-as chain is never reported as two candidates.
 pub fn entity_candidates(store: &Store, name: &str) -> Vec<Vec<Uid>> {
+    let want = crate::fold::fold(name);
+    entity_candidates_where(store, |gist| crate::fold::fold(gist) == want)
+}
+
+/// [`entity_candidates`] for the entities whose spelling `named` accepts: one group per thing,
+/// merged across strict `same-as` classes. The seam a port that matches more loosely than a
+/// spelling — by stems, say — builds its candidates on, so its groups are formed the same way.
+pub fn entity_candidates_where(store: &Store, named: impl Fn(&str) -> bool) -> Vec<Vec<Uid>> {
     use smysl_graph::proposition::{classes, Policy};
     let entity = smysl_core::schemas::text::ENTITY;
-    let want = crate::fold::fold(name);
     let named: Vec<Uid> = store
         .units()
-        .filter(|(_, u)| {
-            u.core.schema.as_str() == entity && crate::fold::fold(&u.core.gist) == want
-        })
+        .filter(|(_, u)| u.core.schema.as_str() == entity && named(&u.core.gist))
         .map(|(uid, _)| *uid)
         .collect();
     if named.is_empty() {

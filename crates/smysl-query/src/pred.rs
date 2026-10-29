@@ -396,7 +396,7 @@ fn read(r: &Reader<'_>, uid: &Uid, field: &Field) -> Option<String> {
         Field::Payload(key) => {
             let bytes = unit.core.payload.as_ref()?;
             let object = payload_to_object(bytes).ok()?;
-            object.get(key).map(|v| text_of(&v.value))?
+            raw_at(&object, key).map(text_of)?
         }
         Field::Declared { key, .. } => match r.lensed(uid) {
             // No typed schema governs this unit's type: its payload is as written.
@@ -564,6 +564,24 @@ impl<'a> Reader<'a> {
     pub fn take_unmappable(&self) -> BTreeMap<String, BTreeSet<Uid>> {
         std::mem::take(&mut *self.lost.borrow_mut())
     }
+}
+
+/// A raw key's value: the top-level key spelled `key`, else the nested value its `.`-separated
+/// path names — the same reading as `payload_strings`, which keys `{a: {b: …}}` and a literal
+/// `"a.b"` alike, so a filter sees what `find` indexes. The literal key wins when both exist.
+fn raw_at<'o>(object: &'o smysl_core::surface::HObject, key: &str) -> Option<&'o HValue> {
+    if let Some(v) = object.get(key) {
+        return Some(&v.value);
+    }
+    let mut parts = key.split('.');
+    let mut here = &object.get(parts.next()?)?.value;
+    for part in parts {
+        match here {
+            HValue::Object(o) => here = &o.get(part)?.value,
+            _ => return None,
+        }
+    }
+    Some(here)
 }
 
 /// A payload value as text.

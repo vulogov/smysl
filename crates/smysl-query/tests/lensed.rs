@@ -489,6 +489,31 @@ fn undeclared_payloads_are_read_raw_and_said_to_be() {
     assert_eq!(got, vec![k]);
 }
 
+/// A raw dotted key reads the nested value its path names when no top-level key is spelled so,
+/// as `payload_strings` keys it for `find`; a literal dotted key wins over the path.
+#[test]
+fn a_raw_dotted_key_reads_a_nested_value_and_a_literal_one_wins() {
+    let src = r#"
+@claim c/nested { status: speculative, "meta": { colour: "red" } }
+~ nested red
+
+@claim c/flat { status: speculative, "meta.colour": "blue", "meta": { colour: "red" } }
+~ flat blue, nested red
+
+@claim c/other { status: speculative, "meta": { colour: "green" } }
+~ nested green
+"#;
+    let out = smysl_core::surface::parse_surface(src).unwrap();
+    let uid = |l: &str| out.labels[&smysl_core::Label::new(l).unwrap()];
+    let store = Store::from_records(out.records.clone());
+    let (red, _) = answer(&store, "where meta.colour = red");
+    assert_eq!(red, vec![uid("c/nested")]);
+    let (blue, _) = answer(&store, "where meta.colour = blue");
+    assert_eq!(blue, vec![uid("c/flat")]);
+    let (none, _) = answer(&store, "where meta.colour.shade = red");
+    assert!(none.is_empty());
+}
+
 /// A sort key compiles forward too: a pinned `order by` on a renamed key sorts by the key
 /// today's revision names.
 #[test]

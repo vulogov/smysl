@@ -360,6 +360,17 @@ pub trait Entities {
             vec![all]
         }
     }
+
+    /// The entities a name could mean when no spelling of it matches, read through `lang`'s
+    /// stemmer — `холеры` for `холера`, `Jenners` for `Jenner` — grouped as
+    /// [`Entities::candidates`] groups them. A dossier asks this only after every run of the
+    /// topic's words has failed to match as spelled, since a stem can join two words a
+    /// spelling keeps apart. The default is none: a port that cannot stem finds nothing this
+    /// way, and says so by finding nothing.
+    fn candidates_stemmed(&self, name: &str, lang: &str) -> Vec<Vec<Uid>> {
+        let _ = (name, lang);
+        Vec::new()
+    }
 }
 
 /// The spelling of a scope item, for a diagnostic and for `--explain`.

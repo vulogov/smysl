@@ -781,33 +781,34 @@ q          [PATH]
 q          --config
 q          --from-question
 q          --yes
-q          --file
+q          --approved-by
 q          --output
+q          --file
 q          --format
 q          [possible values: surface, cbor, pack]
 q          --library
-q          --explain
 q          --strict
+q          --explain
 q          --offline
-q          --why
 q          --no-color
+q          --why
+q          --noprogress
 q          --param
 q          --all-versions
-q          --noprogress
+q          --json
 q          --idf
 q          [possible values: partition, collection, library]
-q          --json
-q          --per-partition
 q          --quiet
-q          --engine-model
+q          --per-partition
 q          --verbose
 q          --backend
 q          [possible values: memory, redb]
+q          --engine-model
 q          --candle-model
 q          --shard
+q          --seed-check
 q          --view
 q          --save
-q          --seed-check
 q          --rerun
 q          --current
 q          --help

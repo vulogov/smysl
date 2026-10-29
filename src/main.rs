@@ -824,6 +824,17 @@ fn cli() -> Command {
                         .action(ArgAction::SetTrue),
                 )
                 .arg(
+                    Arg::new("approved-by")
+                        .long("approved-by")
+                        .value_name("AGENT")
+                        .requires_all(["from-question", "save"])
+                        .help(
+                            "With --from-question --save: the person who approved the translated \
+                             query, such as `human:ada`; required there, recorded as their \
+                             attestation on the saved unit",
+                        ),
+                )
+                .arg(
                     Arg::new("file")
                         .long("file")
                         .value_name("Q.sq")
@@ -6045,6 +6056,28 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     // the store, which is what a reader typing `smysl q --rerun b3:… store.smy` wrote.
     let rerun = m.get_one::<String>("rerun").cloned();
     let question = m.get_one::<String>("from-question").cloned();
+    // OQ-51: a query a model wrote is saved only with the name of the person who approved it,
+    // checked before the model is asked, so a refusal costs no call.
+    if question.is_some() && m.get_flag("save") {
+        match m.get_one::<String>("approved-by").map(AgentId::new) {
+            Some(Ok(a)) if a.as_str().starts_with("human:") => {}
+            Some(Ok(a)) => {
+                eprintln!("smysl q: --approved-by {a}: an approval is a person's, `human:<id>`");
+                return ExitCode::Usage;
+            }
+            Some(Err(e)) => {
+                eprintln!("smysl q: --approved-by: {e}");
+                return ExitCode::Usage;
+            }
+            None => {
+                eprintln!(
+                    "smysl q: a translated query is saved with who approved it: \
+                     --approved-by human:<id>"
+                );
+                return ExitCode::Usage;
+            }
+        }
+    }
     let (text, positional_store) = match (
         &rerun,
         m.get_one::<String>("query"),
@@ -6365,7 +6398,9 @@ fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
         Corpus::Store(store, _) => {
             let scope = smysl::query::StoreScope::new(name.clone(), store);
-            let env = Env::new(store, &scope).with_entities(&scope);
+            // A subject no spelling finds is looked for by its stems, as a library's is.
+            let stemmed = smysl::text::scope::Stemmed::new(store, &scope);
+            let env = Env::new(store, &scope).with_entities(&stemmed);
             ask(question, &env, &opts)
         }
     };
@@ -9149,7 +9184,34 @@ fn q_from_question(
         query: Box::new(accepted.query),
         as_view: false,
     };
-    q_run(&job, env, &opts, m, global)
+    let (code, mut records) = q_run(&job, env, &opts, m, global);
+    // OQ-51: the person who approved the translation attests the saved unit. Outside the core,
+    // so the query's uid and its reruns are what they would be without it.
+    if let Some(agent) = m
+        .get_one::<String>("approved-by")
+        .and_then(|a| AgentId::new(a).ok())
+    {
+        let saved: Vec<smysl::Uid> = records
+            .iter()
+            .filter_map(|r| match r {
+                Record::Unit(u) if u.schema.as_str() == smysl::schemas::query::SAVED => {
+                    Some(smysl::canonical_uid(u))
+                }
+                _ => None,
+            })
+            .collect();
+        for uid in saved {
+            records.push(Record::Attestation(smysl::Attestation::new(
+                uid,
+                agent.clone(),
+                smysl::Op::Attested,
+                smysl::Rung::Document,
+                Hlc::new(now_millis(), 0, agent.clone()),
+            )));
+            eprintln!("smysl q: {uid} approved by {agent}");
+        }
+    }
+    (code, records)
 }
 
 #[cfg(not(feature = "providers"))]
