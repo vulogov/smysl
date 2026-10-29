@@ -18,12 +18,46 @@ is the list of record; this is where it stands as the cycle opens.
 exported attestation) and OQ-64 (threads that span files) block TX-P11, with OQ-60 on what P1
 compares.
 
-**A measure interval that misses its own estimate.** OQ-89: on a short text the segment bootstrap
-for a statistic of rare types can exclude the point estimate, because a duplicated segment adds no
-type. It is flagged `ci-off-estimate` until it is answered.
+**A measure interval that misses its own estimate** — *decided, see below.*
 
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 there are none yet; they stay owed rather than planned.
+
+### A jackknife for the intervals a bootstrap could not centre, and the length that was supposed to fix it
+
+SMYSL-2.6 OQ-89 is decided. **T1 and T4 are at measure version 2**: T1's two entropies and Heaps'
+β take a grouped jackknife interval, and Zipf's α keeps the type bootstrap.
+
+**The bias does not shrink into the width at a Bible's length.** OQ-89 had hoped it would: a
+segment drawn twice adds no type, so every replicate of a vocabulary statistic runs low, but at
+800k tokens the shift might be smaller than the interval. `crates/smysl-measure/tests/oq89.rs`
+ran the five Bibles at 120, 1,200 and 12,000 verses and whole, and the percentile interval
+excluded its own estimate for Ĥ, Ĥ_MM and β in **all 60 cases** — the width shrinks as fast as
+the shift.
+
+**The jackknife, measured where the truth is known.** The same file draws a Zipf source over 5,000
+types in 25-token segments, i.i.d. and bursty, at 3k, 30k and 300k tokens, and scores five
+intervals by coverage. For β the grouped jackknife — twenty interleaved groups, each replicate
+leaving one out and refitting the rest in order, `β̂ ± z·se` — covers in **90–97.5%** of seeds in
+all six rows; the percentile interval in 0–100%, the basic in 33–60%, half-sampling in 0–69.5%.
+It draws nothing from a generator, so the interval is a function of the text, and it is
+symmetric about its estimate, so it cannot miss it.
+
+**For entropy the honest answer is a smaller claim.** No interval covers the source's entropy on
+a short text: at 3k tokens Ĥ_MM is 0.44 bits low (0.76 bursty) against a width of about 0.26, and
+that is the estimator's bias, not the interval's. At 300k the jackknife covers in 87.5% and 92.5%
+where the percentile interval managed 62.5% and 45%. T1's interval is therefore documented as the
+estimator's spread at the text's length, not an interval for the source; half-sampling scored
+better at 30k for entropy and worse for β, and one deterministic method for all three was
+preferred to it.
+
+**What moves.** `measure:ci`'s `b` is 20 for these three; `boot:b = 0` still asks for no interval;
+fewer than twenty segments gets none. T1 and T4 units written by 1.10 and by this build differ in
+version and interval, so their uids differ. Over Ruth and Jude the pinned T1 interval is now
+[7.693, 7.933] around Ĥ = 7.813 and β's [0.643, 0.847] around 0.745, and `ci-off-estimate` is
+gone from both. α's type stream no longer interleaves with segment draws, so §5.1's α coverage
+reads 94 and 94 of 100 (was 96 and 95). The seed rules of §5.3 are tested on α, the interval they
+still apply to, and a new test holds the jackknife to taking nothing from the seed.
 
 ### Routing kept against the fusion it was never measured against, and four more of TX-P6's questions closed
 

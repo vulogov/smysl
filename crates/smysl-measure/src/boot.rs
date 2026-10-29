@@ -1,4 +1,5 @@
-//! The segment bootstrap and its percentile interval (SMYSL-2.6 §3.5, §3.7).
+//! The segment bootstrap and its percentile interval (SMYSL-2.6 §3.5, §3.7), and the grouped
+//! jackknife that replaced it for T1 and Heaps' β (OQ-89).
 //!
 //! A replicate resamples the scope's segments with replacement — as many draws as there are
 //! segments, each an index from [`Rng::index`] — and the statistic is recomputed over the
@@ -17,12 +18,52 @@
 //! is chosen over interpolation because it returns a replicate rather than a number between two
 //! of them, and the rank is computed without a float, so a port has nothing to round.
 
-use crate::num::q20;
+use crate::num::{self, q20};
 use crate::outcome::{Ci, Num};
 use crate::rng::Rng;
 
 /// The coverage every interval in this crate is computed at.
 pub const LEVEL: (u32, u32) = (95, 100);
+
+/// The jackknife's groups: segment `i` is in group `i mod GROUPS` (OQ-89).
+///
+/// Interleaved and not contiguous, so that every group spans the text and a replicate that
+/// leaves one out still reads the rest in order — which Heaps' fit, a fact about reading order,
+/// needs.
+pub const GROUPS: usize = 20;
+
+/// The two-sided normal quantile at [`LEVEL`], `Φ⁻¹(0.975)`.
+pub const Z: f64 = 1.959_963_984_540_054;
+
+/// The segments a jackknife replicate keeps: every one not in group `g`, in reading order.
+pub fn keep(segments: usize, g: usize, out: &mut Vec<usize>) {
+    out.clear();
+    out.extend((0..segments).filter(|i| i % GROUPS != g));
+}
+
+/// The grouped jackknife interval `θ̂ ± z·se` at [`LEVEL`], from the [`GROUPS`] leave-one-group-
+/// out values (Quenouille 1949; Tukey 1958).
+///
+/// `se² = (G − 1)/G · Σ (θ₋g − θ̄)²`, summed in group order. Symmetric about the estimate by
+/// construction, so it cannot exclude it — which is the defect of the segment bootstrap's
+/// percentile interval that OQ-89 raised: a segment drawn twice adds no type, so every
+/// replicate of a vocabulary statistic runs low. `b` is the number of groups. `None` without
+/// exactly [`GROUPS`] finite values.
+pub fn jackknife(estimate: f64, values: &[f64]) -> Option<Ci> {
+    if values.len() != GROUPS || !estimate.is_finite() || values.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let g = GROUPS as f64;
+    let mean = num::sum(values.iter().copied()) / g;
+    let ss = num::sum(values.iter().map(|v| (v - mean) * (v - mean)));
+    let se = num::sqrt(ss * (g - 1.0) / g);
+    Some(Ci {
+        lo: Num::Fixed(q20(estimate - Z * se)?),
+        hi: Num::Fixed(q20(estimate + Z * se)?),
+        level: LEVEL,
+        b: GROUPS as u32,
+    })
+}
 
 /// Fill `out` with one replicate's draws: `segments` indices in `[0, segments)`.
 pub fn draw(rng: &mut Rng, segments: usize, out: &mut Vec<usize>) {
@@ -85,6 +126,29 @@ mod tests {
         assert_eq!(ci.b, 1000);
         assert!(interval(&mut []).is_none());
         assert!(interval(&mut [1.0, f64::NAN]).is_none());
+    }
+
+    #[test]
+    fn a_jackknife_interval_is_symmetric_and_needs_every_group() {
+        // Nineteen groups at 1.0 and one at 3.0: mean 1.1, Σ(x − x̄)² = 3.8, se = √3.61 = 1.9.
+        let mut v = vec![1.0; GROUPS];
+        v[7] = 3.0;
+        let ci = jackknife(10.0, &v).unwrap();
+        assert_eq!(ci.lo, Num::Fixed(q20(10.0 - Z * 1.9).unwrap()));
+        assert_eq!(ci.hi, Num::Fixed(q20(10.0 + Z * 1.9).unwrap()));
+        assert_eq!(ci.b, GROUPS as u32);
+        assert!(jackknife(10.0, &v[1..]).is_none());
+        v[0] = f64::NAN;
+        assert!(jackknife(10.0, &v).is_none());
+    }
+
+    #[test]
+    fn a_jackknife_replicate_leaves_out_one_interleaved_group() {
+        let mut out = Vec::new();
+        keep(45, 3, &mut out);
+        assert_eq!(out.len(), 42);
+        assert!(!out.contains(&3) && !out.contains(&23) && !out.contains(&43));
+        assert!(out.windows(2).all(|w| w[0] < w[1]));
     }
 
     #[test]

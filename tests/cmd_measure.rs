@@ -151,9 +151,10 @@ fn a_second_run_adds_no_unit() {
     let after_second = census(&dir);
     assert_eq!(after_second.0, after_first.0, "a second run added a unit");
     assert_eq!(after_second.1, after_first.1 + 4, "the run's attestations");
-    for id in ["T1", "T2", "T3", "T4"] {
+    // T1 and T4 are at version 2 since OQ-89 gave them the jackknife interval.
+    for (id, v) in [("T1", 2), ("T2", 1), ("T3", 1), ("T4", 2)] {
         assert!(
-            stdout(&second).contains(&format!("{id} v1  b3:")),
+            stdout(&second).contains(&format!("{id} v{v}  b3:")),
             "{id}: {}",
             stdout(&second)
         );

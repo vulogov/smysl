@@ -223,6 +223,31 @@ fn bootstrap_text() -> Corpus {
     corpus(segments(tokens, 500))
 }
 
+/// 20,000 tokens over 2,000 types drawn with weights `r^−1.1`, in 40 segments: a text with a
+/// tail for T4's α to fit, where `bootstrap_text`'s 64 equal types put α at its bound.
+fn zipf_text() -> Corpus {
+    let mut rng = Rng::new(&[10; 32], 0);
+    let w: Vec<f64> = (1..=2000)
+        .map(|r| smysl_measure::num::powf(r as f64, -1.1))
+        .collect();
+    let total: f64 = w.iter().sum();
+    let mut acc = 0.0;
+    let cdf: Vec<f64> = w
+        .iter()
+        .map(|x| {
+            acc += x / total;
+            acc
+        })
+        .collect();
+    let tokens: Vec<String> = (0..20_000)
+        .map(|_| {
+            let u = (rng.next_u64() >> 11) as f64 / (1u64 << 53) as f64;
+            format!("w{}", cdf.partition_point(|&c| c < u).min(1999))
+        })
+        .collect();
+    corpus(segments(tokens, 500))
+}
+
 fn a_basis() -> Basis {
     let unit = UnitCoreBuilder::new(KernelType::Claim, "a saved scope", Status::Speculative)
         .build()
@@ -234,20 +259,22 @@ fn a_basis() -> Basis {
     }
 }
 
-/// §5.3, bootstrap seeds: the same seed gives the same interval bytes; seeds 0 and 1 give
-/// different replicates, and intervals within twice each other's width; and `boot:b` is in
-/// the recipe, so changing it changes the hash and the uid.
+/// §5.3, bootstrap seeds, over the one interval that still bootstraps — T4's α, which resamples
+/// types: the same seed gives the same interval bytes; seeds 0 and 1 give different replicates,
+/// and intervals within twice each other's width; and `boot:b` is in the recipe, so changing it
+/// changes the hash and the uid.
 #[test]
 fn bootstrap_seeds_follow_section_5_3() {
-    let c = bootstrap_text();
-    let a = one("T1", &base(200, 0), &c);
-    let again = one("T1", &base(200, 0), &c);
+    let c = zipf_text();
+    let t4 = |b: u32, seed: u64| one("T4", &base(b, seed), &c);
+    let a = t4(200, 0);
+    let again = t4(200, 0);
     let payload = |r: &MeasureResult| to_payload(&r.recipe, value(r)).unwrap();
     assert_eq!(payload(&a), payload(&again), "one seed, one payload");
 
-    let b = one("T1", &base(200, 1), &c);
-    let (alo, ahi) = ci(value(&a), "H:mm");
-    let (blo, bhi) = ci(value(&b), "H:mm");
+    let b = t4(200, 1);
+    let (alo, ahi) = ci(value(&a), "alpha");
+    let (blo, bhi) = ci(value(&b), "alpha");
     assert_ne!((alo, ahi), (blo, bhi), "two seeds, two sets of replicates");
     let w = (ahi - alo).max(bhi - blo);
     assert!(w > 0.0);
@@ -261,14 +288,36 @@ fn bootstrap_seeds_follow_section_5_3() {
         "the seed moves the interval only"
     );
 
-    let more = one("T1", &base(201, 0), &c);
+    let more = t4(201, 0);
     assert_ne!(a.recipe.hash().unwrap(), more.recipe.hash().unwrap());
     let basis = a_basis();
     assert_ne!(
         canonical_uid(&to_unit(&a, Some(&basis)).unwrap()),
         canonical_uid(&to_unit(&more, Some(&basis)).unwrap())
     );
-    assert_eq!(value(&more).ci["H:mm"].b, 201);
+    assert_eq!(value(&more).ci["alpha"].b, 201);
+}
+
+/// OQ-89: T1's interval and T4's β are a grouped jackknife, which draws nothing — so no seed and
+/// no `b` moves them, `b` records the twenty groups, and `boot:b = 0` still asks for none.
+#[test]
+fn the_jackknife_intervals_take_nothing_from_the_seed() {
+    let c = bootstrap_text();
+    let a = value(&one("T1", &base(200, 0), &c)).clone();
+    let b = value(&one("T1", &base(7, 1), &c)).clone();
+    assert_eq!(a.ci, b.ci);
+    assert_eq!(a.ci["H:mm"].b, smysl_measure::boot::GROUPS as u32);
+    let (lo, hi) = ci(&a, "H:mm");
+    let est = match a.values["H:mm"] {
+        Num::Fixed(q) => from_q20(q),
+        _ => unreachable!(),
+    };
+    assert!(lo <= est && est <= hi, "[{lo}, {hi}] around {est}");
+    assert!(value(&one("T1", &base(0, 0), &c)).ci.is_empty());
+
+    let z = zipf_text();
+    let t4 = |b: u32, seed: u64| value(&one("T4", &base(b, seed), &z)).ci["heaps:beta"];
+    assert_eq!(t4(200, 0), t4(9, 3));
 }
 
 /// What `run` writes into a text measure's recipe, and the refusals it makes before a

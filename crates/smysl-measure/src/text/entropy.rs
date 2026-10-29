@@ -5,13 +5,18 @@
 //! plug-in estimator is low by about the correction on a sample of `N` tokens; both are stored,
 //! and the gist names the corrected one, because it is the one that estimates the source.
 //!
-//! A bootstrap interval over segments is stored for each. `min:n` is 10,000 tokens (§3.7).
+//! A grouped jackknife interval over segments is stored for each (version 2, OQ-89): version 1's
+//! segment bootstrap ran low in every replicate, because a segment drawn twice adds no new
+//! type, and its percentile interval excluded the estimate on every one of five Bibles at every
+//! length up to the whole book. The interval is the estimator's sampling spread at this length;
+//! it is **not** an interval for the source's entropy, which the plug-in and Miller–Madow
+//! estimates both undershoot by more than that spread on a short text (§3.7's OQ-89 note has the
+//! figures). `min:n` is 10,000 tokens (§3.7).
 
 use crate::boot;
 use crate::num::{self, q20};
 use crate::outcome::{Num, Outcome, Refusal, Value};
 use crate::recipe::Recipe;
-use crate::rng::Rng;
 use crate::text::Corpus;
 use crate::{Input, Measure, Needs, Purity};
 
@@ -68,7 +73,7 @@ impl Measure for T1 {
     }
 
     fn version(&self) -> u16 {
-        1
+        2
     }
 
     fn purity(&self) -> Purity {
@@ -110,25 +115,23 @@ impl Measure for T1 {
             .with_value("H:mm", Num::Fixed(mmq))
             .with_headline_in("H:mm", "unigram entropy, Miller–Madow", "bits/token");
 
-        if per.len() >= 2 && recipe.boot_b > 0 {
-            let Ok(hash) = recipe.hash() else {
-                return not_finite();
-            };
-            let mut rng = Rng::new(&hash, recipe.seed);
-            let mut drawn = Vec::new();
+        // `boot:b = 0` still asks for no interval; any other value asks for the jackknife, whose
+        // replicates are the groups and not `b`.
+        if per.len() >= boot::GROUPS && recipe.boot_b > 0 {
+            let mut kept = Vec::new();
             let (mut hs, mut mms) = (Vec::new(), Vec::new());
-            for _ in 0..recipe.boot_b {
-                boot::draw(&mut rng, per.len(), &mut drawn);
-                Corpus::counts_into(&per, &drawn, &mut counts, c.types.len());
+            for g in 0..boot::GROUPS {
+                boot::keep(per.len(), g, &mut kept);
+                Corpus::counts_into(&per, &kept, &mut counts, c.types.len());
                 if let Some((h, mm)) = entropy(&counts) {
                     hs.push(h);
                     mms.push(mm);
                 }
             }
-            if let Some(ci) = boot::interval(&mut hs) {
+            if let Some(ci) = boot::jackknife(h, &hs) {
                 value = value.with_ci("H", ci);
             }
-            if let Some(ci) = boot::interval(&mut mms) {
+            if let Some(ci) = boot::jackknife(mm, &mms) {
                 value = value.with_ci("H:mm", ci);
             }
         }

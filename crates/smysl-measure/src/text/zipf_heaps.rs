@@ -37,7 +37,7 @@
 //! β ≈ 0.8 for a text built to have 0.6. Starting at `√N` is scale-free and leaves the first
 //! decade out of a text of a million tokens and less of a short one.
 //!
-//! # Intervals: two bootstraps, because the two fits have different observations
+//! # Intervals: a bootstrap and a jackknife, because the two fits have different observations
 //!
 //! **α resamples types**, an as-built deviation from §3.7's segment bootstrap. Clauset et al.,
 //! the paper §3.7 cites for the fit, estimate the uncertainty of `f_min` and α by a
@@ -49,12 +49,15 @@
 //! drawn exactly from the law — the segment interval was [2.502, 2.831] around α̂ = 2.484, and
 //! did not contain the estimate it was an interval for; resampling types, it does.
 //!
-//! **β resamples segments**, as §3.7 says, since a vocabulary curve is a fact about reading
-//! order and segments are what a reader reads in order. It has the same bias — duplicated
-//! segments add no types, so β\* is low — and no resampling of a text avoids it, because a
-//! duplicate is the bootstrap's whole mechanism. So it is not hidden: a result whose interval
-//! excludes its own estimate carries the flag `ci-off-estimate` ([`crate::run`] sets it for
-//! every measure), and OQ-89 asks what the interval should be.
+//! **β leaves segments out** (version 2, OQ-89), since a vocabulary curve is a fact about
+//! reading order and segments are what a reader reads in order. Version 1 resampled them with
+//! replacement, as §3.7 first said, and had the same bias — a duplicated segment adds no type,
+//! so β\* ran low, and over five Bibles the percentile interval excluded the estimate at every
+//! length up to the whole book. No resampling *with replacement* avoids that, because a
+//! duplicate is its mechanism. The grouped jackknife ([`boot::jackknife`]) duplicates nothing:
+//! each of twenty replicates drops one interleaved group and refits the rest in order, and
+//! `β̂ ± z·se` covered `E[β̂]` in 90–97.5% of seeds across every length and both texts OQ-89's
+//! simulation drew, where the percentile interval ranged from 0% to 100%.
 //!
 //! A replicate with no candidate tail is not counted, and the interval's `b` says how many were.
 
@@ -281,7 +284,7 @@ impl Measure for T4 {
     }
 
     fn version(&self) -> u16 {
-        1
+        2
     }
 
     fn purity(&self) -> Purity {
@@ -365,9 +368,8 @@ impl Measure for T4 {
             let observed: Vec<u64> = counts.iter().copied().filter(|&n| n > 0).collect();
             let mut drawn = Vec::new();
             let mut resampled = Vec::with_capacity(observed.len());
-            let (mut alphas, mut betas) = (Vec::new(), Vec::new());
-            // One generator, and in each replicate the types' draw before the segments', so
-            // the two streams are one sequence a port reproduces in one order.
+            let mut alphas = Vec::new();
+            // The generator draws types only: version 2's β takes nothing from it.
             for _ in 0..recipe.boot_b {
                 boot::draw(&mut rng, observed.len(), &mut drawn);
                 resampled.clear();
@@ -375,18 +377,23 @@ impl Measure for T4 {
                 if let Some(f) = fit(&resampled, tmin) {
                     alphas.push(f.alpha);
                 }
-                boot::draw(&mut rng, per.len(), &mut drawn);
-                let len: u64 = drawn.iter().map(|&i| c.segments[i].len() as u64).sum();
-                let stream = drawn.iter().flat_map(|&i| c.segments[i].iter());
-                if let Some((b, _)) = heaps(stream, len, c.types.len()) {
-                    betas.push(b);
-                }
             }
             if let Some(ci) = boot::interval(&mut alphas) {
                 value = value.with_ci("alpha", ci);
             }
-            if let Some(ci) = boot::interval(&mut betas) {
-                value = value.with_ci("heaps:beta", ci);
+            if per.len() >= boot::GROUPS {
+                let mut betas = Vec::new();
+                for g in 0..boot::GROUPS {
+                    boot::keep(per.len(), g, &mut drawn);
+                    let len: u64 = drawn.iter().map(|&i| c.segments[i].len() as u64).sum();
+                    let stream = drawn.iter().flat_map(|&i| c.segments[i].iter());
+                    if let Some((b, _)) = heaps(stream, len, c.types.len()) {
+                        betas.push(b);
+                    }
+                }
+                if let Some(ci) = boot::jackknife(beta, &betas) {
+                    value = value.with_ci("heaps:beta", ci);
+                }
             }
         }
         Outcome::Value(value)

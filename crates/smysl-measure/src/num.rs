@@ -36,6 +36,11 @@ pub fn powf(x: f64, y: f64) -> f64 {
     libm::pow(x, y)
 }
 
+/// `√x`, by `libm`. Correctly rounded under IEEE 754, so no port has a choice to make.
+pub fn sqrt(x: f64) -> f64 {
+    libm::sqrt(x)
+}
+
 /// A left fold in the order given. See the module note on why not compensated.
 pub fn sum(xs: impl IntoIterator<Item = f64>) -> f64 {
     xs.into_iter().fold(0.0, |acc, x| acc + x)

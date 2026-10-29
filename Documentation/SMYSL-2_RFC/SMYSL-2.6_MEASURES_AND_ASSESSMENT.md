@@ -240,7 +240,7 @@ crates/smysl-measure/
     outcome.rs        Outcome, Value, Num, NotRun reasons; to_payload(); gist text
     num.rs            libm wrappers, Kahan-free fixed-order sums, q20 fixed point
     rng.rs            seeded generator, index derivation (§3.5)
-    boot.rs           segment bootstrap, percentile intervals
+    boot.rs           segment bootstrap, percentile intervals; grouped jackknife (OQ-89)
     text/
       mod.rs          term streams from analyzers, segment views
       entropy.rs      T1 plug-in + Miller–Madow
@@ -414,7 +414,10 @@ counts, `p̂ᵥ = cᵥ/N`. Logs are base 2 unless written `ln`.
 - Plug-in: `Ĥ = −Σ p̂ᵥ log₂ p̂ᵥ`, summed in term-id order.
 - Miller–Madow: `Ĥ_MM = Ĥ + (V̂ − 1) / (2N ln 2)`, `V̂` = observed types (Miller 1955).
 - Both stored; the report states the stream (`surface`/`stem`) because Russian and German statistics
-  are stem-level until a lemmatiser exists (draft 3 OQ-2). Bootstrap CI over segments.
+  are stem-level until a lemmatiser exists (draft 3 OQ-2). ~~Bootstrap CI over segments.~~
+  **Grouped jackknife CI over segments** (version 2, OQ-89): twenty groups, segment `i` in group
+  `i mod 20`, `Ĥ ± z·se`; `measure:ci`'s `b` is 20. It is the estimator's spread at this length
+  and not an interval for the source's entropy (OQ-89's note).
 - `min:n` default 10,000 tokens. Cost O(N) time, O(V) memory.
 - *As built (M2).* **A text scope is the `from` of an sq query.** An sq scope answers with units,
   and a text has none until something is extracted from it, so a text measure reads the query's
@@ -536,7 +539,8 @@ counts, `p̂ᵥ = cᵥ/N`. Logs are base 2 unless written `ln`.
   coverage row holds at 96 and 95 seeds of 100 for α = 2.0 and 2.5. **β keeps the segment
   bootstrap**, since a vocabulary curve is about reading order, and has the same bias, which no
   resampling of a text avoids; a result whose stored interval excludes its estimate carries the
-  flag `ci-off-estimate`, and OQ-89 asks what the interval should be. **Heaps' checkpoints run
+  flag `ci-off-estimate`, and OQ-89 asks what the interval should be — **decided 2026-10-28: a
+  grouped jackknife, version 2** (§9). **Heaps' checkpoints run
   from ⌈√N⌉, not from 1**: `V(n) ≤ n` binds before Heaps' law does, below n = 10^2.5 for §5.1's
   `10·n^0.6`, and checkpoints from 1 put 42% of the fit at slope 1 (β̂ ≈ 0.8 for a text built to
   have 0.6). **A candidate `f_min` must leave a tail of `params.tail:min` types**, default 50,
@@ -962,7 +966,9 @@ Generated in-test from a fixed seed with the crate's own generator, so fixtures 
   inputs where `f64::ln` and `libm::log` are known to differ (taken from the §2.9 probe) and asserts
   the payload matches the stored golden.
 - **Bootstrap seeds.** Same seed → identical CI bytes; seeds 0 and 1 → different replicates and
-  CIs within each other's width ×2; changing `boot:b` changes the recipe hash and the uid.
+  CIs within each other's width ×2; changing `boot:b` changes the recipe hash and the uid. Since
+  OQ-89 the one interval this applies to is T4's α; T1's and β's jackknife draws nothing, so the
+  seed and `b` move their recipes and uids and not their intervals.
 - **Idempotent writes.** Running `measure` twice adds no unit the second time: every unit record
   comes back in `AppendReport::duplicates`, and only the new run's attestations are added.
 - *As built (TX-P8 M7).* The matrix job is `measure-platforms` in CI: `cargo test -p
@@ -1099,7 +1105,9 @@ types**, because the segment bootstrap's duplicated segments add no types and it
 the estimate it was for; and **Heaps' fit starts at √N**, because §5.1's own synthetic text is
 `V(n) = n` below 316 tokens. On the KJV the segment intervals of T1 and of β exclude their own
 estimates — [7.510, 7.726] around Ĥ = 7.813 — which the flag `ci-off-estimate` says and OQ-89
-asks about.
+asks about. *(Since OQ-89, version 2: the jackknife gives [7.693, 7.933] around Ĥ and β's
+[0.643, 0.847] around 0.745, and neither carries the flag; `fixtures/measure/text.tsv` is
+re-pinned.)*
 
 *M3, done 2026-10-18.* T2 and T6, the two that compress: `text::compress` (the codec, brotli
 `=8.0.4` without `std` and with the crate's own allocator; `pieces` at segment boundaries; T2) and
@@ -1611,4 +1619,4 @@ excluded), `SMY-E030`/`SMY-E033` (rules M and T; never expected on measure units
 | OQ-57 | Bootstrap generator: ChaCha20 as `rand_chacha` lays it out, or a generator specified in full in SMYSL-2.3 (SplitMix64 is ten lines in any language) so the Python, JavaScript and Go implementations reproduce intervals without porting a crate's internals? |
 | OQ-58 | Class identity across time. Class ids are smallest member uids and move when evidence grows. Membership-overlap correspondence (used for K4 and A3) can map one class to two. Report splits and merges explicitly, or pin states to a policy snapshot? |
 | OQ-59 | T3 bias: publish the raw estimator only (this RFC), or also a value corrected from the i.i.d. calibration table, knowing that natural text is not i.i.d. and the correction may be wrong in either direction? *M4 adds:* the table is not smooth in n on large alphabets (Λᵢ is an integer near log₂ i / H, so the estimator steps — §3.7 T3), so a correction would have to be computed at the text's own n and alphabet rather than interpolated between rows. |
-| OQ-89 | **The segment bootstrap is biased for a statistic of rare types.** Raised by TX-P8 M2. A segment drawn twice adds no new type, so a replicate has fewer rare types than the text, and T1's entropy and Heaps' β run low in every replicate: over the KJV's Ruth and Jude (3,191 tokens, 703 types) T1's 95% interval is [7.510, 7.726] around Ĥ = 7.813, and β's [0.591, 0.700] around 0.745. M2 stores the percentile interval as §3.7 says, flags a result whose interval excludes its estimate (`ci-off-estimate`), and resamples types for α, where Clauset et al.'s bootstrap applies. Options for T1 and β: the basic (reverse-percentile) interval, which corrects by the bootstrap's shift and so assumes the shift mirrors the estimator's own bias — true for plug-in entropy and not for a duplication artifact; m-out-of-n subsampling without replacement, which has no duplicates and changes n, which a vocabulary statistic depends on; or no interval below a V/N threshold. The bias shrinks with V/N, so at a Bible's length it may be inside the interval's width, which M7's 5-Bible run can measure. |
+| OQ-89 | **Decided 2026-10-28: a grouped jackknife for T1 and Heaps' β; α keeps the type bootstrap.** Measure version 2 of T1 and T4. Twenty groups, segment `i` in group `i mod 20` so that every replicate reads the rest of the text in order; `θ̂ ± 1.959964·se` with `se² = (G−1)/G · Σ(θ₋g − θ̄)²`; no generator, so the interval is a function of the text alone; `measure:ci`'s `b` is 20; `boot:b = 0` still asks for no interval, and a scope of fewer than twenty segments gets none. **Measured two ways** (`crates/smysl-measure/tests/oq89.rs`, `--ignored`). *On real text:* the five Bibles' VPL texts at 120, 1,200 and 12,000 verses and whole — the percentile interval excluded its estimate for Ĥ, Ĥ_MM and β in **every** one of the 60 cases, the whole books (570k–930k tokens) included, so the hope below that the bias falls inside the width at a Bible's length is false: the width shrinks as fast as the shift. *On text whose truth is known:* a Zipf source over 5,000 types (exponent 1.1), segments of 25 tokens, i.i.d. and bursty (30% of a segment's tokens from its own topic of 20 types), at 3k, 30k and 300k tokens. For β, against `E[β̂]` at that length, the jackknife covered in **90–97.5%** of seeds in all six rows; the percentile interval in 0–100%, the basic in 33–60%, half-sampling without replacement in 0–69.5%. For entropy, against the source's own, **no interval covers on a short text** — at 3k tokens Ĥ_MM is 0.44 bits low (i.i.d.) and 0.76 (bursty) against widths near 0.26, because the estimator's bias, not the interval, is the error there; at 300k the jackknife covers Ĥ_MM in 87.5% and 92.5% (percentile 62.5% and 45%). Half-sampling did better for entropy at 30k (88% i.i.d., 48% bursty for Ĥ_MM) and worse for β, and draws from a generator; one method for the three, symmetric about its estimate and deterministic, was preferred to a better 30k figure for one of them. The jackknife's bias-corrected centre was scored too and rejected: it helps Ĥ at 30k and destroys β (0–67.5%). **So T1's interval says how much Ĥ moves with the text's segments, and the RFC does not claim it covers the source's entropy**; that is what `min:n` = 10,000 protects, and below about 10⁵ tokens of a large vocabulary it does not protect it enough. α's type bootstrap now draws types alone, so its stream changed and §5.1's coverage row reads 94 and 94 of 100 (was 96 and 95). `ci-off-estimate` stays for every measure and can no longer fire for these three. *As raised:* **The segment bootstrap is biased for a statistic of rare types.** Raised by TX-P8 M2. A segment drawn twice adds no new type, so a replicate has fewer rare types than the text, and T1's entropy and Heaps' β run low in every replicate: over the KJV's Ruth and Jude (3,191 tokens, 703 types) T1's 95% interval is [7.510, 7.726] around Ĥ = 7.813, and β's [0.591, 0.700] around 0.745. M2 stores the percentile interval as §3.7 says, flags a result whose interval excludes its estimate (`ci-off-estimate`), and resamples types for α, where Clauset et al.'s bootstrap applies. Options for T1 and β: the basic (reverse-percentile) interval, which corrects by the bootstrap's shift and so assumes the shift mirrors the estimator's own bias — true for plug-in entropy and not for a duplication artifact; m-out-of-n subsampling without replacement, which has no duplicates and changes n, which a vocabulary statistic depends on; or no interval below a V/N threshold. The bias shrinks with V/N, so at a Bible's length it may be inside the interval's width, which M7's 5-Bible run can measure. |
