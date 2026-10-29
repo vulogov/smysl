@@ -21,6 +21,38 @@ is the list of record; this is where it stands as the cycle opens.
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 there are none yet; they stay owed rather than planned.
 
+### The generator was a standard all along, and seven more questions closed
+
+SMYSL-2.7's OQ-25, OQ-26 and OQ-28 and SMYSL-2.6's OQ-56 to OQ-59 are decided, which empties
+TX-P11's row of the roadmap and leaves TX-P8/P9 only OQ-22.
+
+**OQ-57: the bootstrap generator stays ChaCha20, specified as RFC 8439's keystream.** The question
+assumed `rand_chacha`'s block layout was a crate's internals another implementation would have to
+port. It is not: with stream id 0 and under 2³² blocks, it is RFC 8439's ChaCha20 with a zero nonce,
+read as little-endian 64-bit words. `nodejs/test/measure_rng.test.js` derives the key with the
+harness's own BLAKE3 and reproduces the pinned first draws with Node's OpenSSL ChaCha20, bit for
+bit. SMYSL-2.6 §3.5 and `rng.rs` now say so; no stored interval moves.
+
+**OQ-56: `measure:*` stays a convention, specified in §3.6.** FC-9's field table is flat and
+cannot type `measure:value`'s map of nums, so a declared `x.measure/v1` would add rule N and lenses
+over keys whose meaning a measure already versions with `measure:v` and its recipe hash.
+
+**OQ-58: a state diff reports splits and merges, as built.** A state lists every member of every
+class and names its policy, so it is its own snapshot; correspondence is recomputed under today's
+evidence on purpose, since that is how a class whose id moved reads as kept.
+
+**OQ-59: T3 is published raw.** Correcting it from the i.i.d. calibration table needs the source's
+entropy rate to choose a row, which is what T3 estimates; `n` is stored and the table ships.
+
+**OQ-25, OQ-26, OQ-28.** Imports stay staged by default while signatures are a reserved field.
+`full` stays the default closure, as GE-T15 measured (`by-expression` 1.000 against the 3× kill).
+And there is no import-event record: `--as-of` reads authors' clocks, which travel with the
+records, where an import time would make two libraries holding the same records answer
+differently.
+
+SMYSL-2.6 and 2.7, the roadmap and the changelog record it; the manual does not cover these, so no
+PDF moves.
+
 ### A lens that read a unit says so, and five questions closed as built or as not needed
 
 Six open questions from four RFCs, the last ones listed against complete phases.

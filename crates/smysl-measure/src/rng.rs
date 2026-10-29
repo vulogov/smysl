@@ -10,9 +10,12 @@
 //!   rather than taken from `rand`'s `gen_range`, whose algorithm is a crate's choice and not a
 //!   promise. The bias is below 2⁻⁴⁰ for `n < 2²⁴`, which is every sample a measure resamples.
 //!
-//! A second implementation has to reproduce the ChaCha20 block layout `rand_chacha` uses
-//! (OQ-57); `tests/payload.rs` pins the first draws so that a change in it is a failing test
-//! rather than a silent one.
+//! The stream is RFC 8439's ChaCha20 keystream under that key, block counter 0 and a zero nonce,
+//! read as successive little-endian 64-bit words: `rand_chacha`'s 64-bit counter and stream id
+//! coincide with RFC 8439's 32-bit counter and nonce while the stream id is 0 and fewer than 2³²
+//! blocks are drawn, which no measure approaches. So a second implementation needs a standard
+//! ChaCha20 and not this crate's layout (OQ-57, decided); `tests/payload.rs` pins the first
+//! draws, and `nodejs/test/measure_rng.test.js` reproduces them with OpenSSL's ChaCha20.
 
 use rand_chacha::ChaCha20Rng;
 use rand_core::{RngCore, SeedableRng};

@@ -374,7 +374,7 @@ terminates because `held` only shrinks. Waiting records are kept with their name
 deletes it. Both are additions beyond draft 3 §17, which gives rule S's confirmation for import
 no command.
 
-**OQ-25 (staging defaults), proposed answer.** Keep staging the default for every source,
+**OQ-25 (staging defaults), decided as proposed (§9).** Keep staging the default for every source,
 including the library's own verified exports. Without signatures (N9 unimplemented, §2.4), "our
 own export" cannot be told apart from a file that claims to be one. `--accept` stays explicit
 and is one flag.
@@ -562,8 +562,7 @@ Export runs over a **known-time subset** of the snapshot, built before selection
    all versions at or below are kept.
 
 The subset is `Store::from_records(kept)`, and the normal pipeline runs on it. Imported records
-keep their authors' clocks (OQ-28: no change in this phase; an import-event record would be new
-format and belongs in SMYSL-2.3 if adopted).
+keep their authors' clocks (OQ-28, decided: no import-event record, §9).
 
 ### 3.11 `--target-revision ID@N` (TX-P12)
 
@@ -1755,10 +1754,10 @@ Draft 3 numbers where they apply. New ones are OQ-60..OQ-64.
 
 | id | question | proposed answer |
 |---|---|---|
-| OQ-25 | Should imports from a trusted source skip staging? | No, while signatures are unimplemented (§3.3). Revisit with N9. |
-| OQ-26 | `full` duplication against `ref`'s whole-collection requirement | Default `full`; switch to `ref` if GE-T15 measures > 3× for `by-expression`. The factor is in every index. |
+| ~~OQ-25~~ | Should imports from a trusted source skip staging? | **Decided 2026-10-29: no**, as proposed (§3.3). `Attestation.sig` is still a reserved field (N9), so "our own export" cannot be told from a file that says it is one, and trust would rest on a name. `--accept` is one flag and says who chose. Reopens with N9, not before. |
+| ~~OQ-26~~ | `full` duplication against `ref`'s whole-collection requirement | **Decided 2026-10-22 by GE-T15, recorded 2026-10-29: default `full`.** `by-expression` measured 1.000 on every corpus against the 3× kill; the structural layouts stay under 2× (§6 step 12, `fixtures/ge-t15/duplication.tsv`). `by-query` reaches 3.828 on F5, which is what `ref` is for, not a reason to move the default; and OQ-64 gave `ref` a second reason, keeping threads that span files. |
 | OQ-27 | Digest beside or instead of `state_hash` in `converged_with` | Answered in SMYSL-2.1 (TX-P0). This RFC uses only the digest. |
-| OQ-28 | An import-event time for `--as-of` | Not in TX-P11. It would be a new record type (format change), so it is SMYSL-2.3's call. |
+| ~~OQ-28~~ | An import-event time for `--as-of` | **Decided 2026-10-29: no import-event record in SMYSL-2.** `--as-of` reads the authors' attestation clocks (§3.10), which travel with the records, so two libraries holding the same records answer it the same way. An import time is a wall-clock fact of one library: two libraries would answer differently, and a re-export would carry a time no author wrote. The question a caller would ask with it — what did this library hold on a date — is `lib status`'s, per import, not a property of the records. A new record type would also be a format change, SMYSL-2.3's to make. |
 | ~~**OQ-60**~~ | Does P1 compare all **retained** records (accepted, staged, waiting, quarantined) or only accepted ones? | **Decided (1.11.0): retained.** P1 is about transport, and F6 must round-trip. `smysl_lib::accepted` gives the accepted-only set, and GE-T15 asserts its digest equals `rsd(X)` whenever the source has no check error and the export raised no `SMY-W495`. Over the 1,056 cells it differs in 88, all from four sources that fail one of those: F6 (`E030`, quarantined), and F10, F14 and the generated unknown-code store, each holding a record that names what no store holds, which waits. "Checks clean" alone was not enough: F10 checks with no diagnostic, and its resolution of a contention nobody derives waits. |
 | **OQ-61** | Generated views: id `export/<slug>` (draft 3's `v/export/<key>` is illegal); exclusion of `export/` views from `--with-views`; `from import:<collection>` = roots of generated views; P2's exception for a re-export under another layout; annotation units and the pack-info rule in the inclusion table | **Resolved here:** all adopted in this RFC (tool-level). SMYSL-2.3 reserves the `export/` and `import:` alias prefixes. |
 | ~~**OQ-62**~~ | `--format pack` and `-o DIR` against today's global flags | **Decided (TX-P11 step 5, recorded 1.11.0):** the global `--format` parser is widened and `pack` refused elsewhere; `-o` stays the global output path, read by `lib export` as a directory. `tests/global_flags.rs` runs the matrix. |
