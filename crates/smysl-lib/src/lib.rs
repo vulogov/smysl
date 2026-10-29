@@ -33,7 +33,7 @@ pub use export::{
     Format, Layout, LibError, Selection, TargetRevision, UnknownRecords, With,
 };
 pub use import::{
-    accept, discard, import, original_path, retained, status, FileOutcome, ImportOptions,
+    accept, accepted, discard, import, original_path, retained, status, FileOutcome, ImportOptions,
     ImportReport, Input,
 };
 pub use index::{ExportIndex, IndexError, IndexFile, Role, INDEX_FILE};

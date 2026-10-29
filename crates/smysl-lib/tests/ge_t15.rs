@@ -7,6 +7,8 @@
 //! - **no P1 or P3 failure.** P1 and P3 in memory for every CBOR cell, and P1 again through a
 //!   real import into an empty library, retained records against the index's digest. A surface
 //!   cell reads back as exactly what it can spell (`SMY-E424` never raised); P3 is CBOR's.
+//!   Beside it, the accepted-only digest (OQ-60): equal to the index's whenever the source
+//!   checks clean and nothing in it dangles (`SMY-W495`); the cells where it is not are counted.
 //! - **no record type lost.** Every record type present in the export is present among what
 //!   the import retained, checked per type code and not by digest alone.
 //! - **P2** for every corpus file imported raw.
@@ -26,11 +28,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use smysl_core::{Carry, Record};
+use smysl_check::{check, CheckOptions};
+use smysl_core::{Carry, Code, Record};
 use smysl_graph::Store;
 use smysl_lib::scope::group;
 use smysl_lib::{
-    export_library, export_store, import, p2, retained, snapshot, verify_collection,
+    accepted, export_library, export_store, import, p2, retained, snapshot, verify_collection,
     write_collection, Closure, Collection, ExportOptions, Format, ImportOptions, Input, Layout,
     Property, Selection, With, INDEX_FILE,
 };
@@ -142,11 +145,17 @@ fn ge_t15_holds_on_the_whole_matrix() {
     let mut skipped = BTreeSet::new();
     let mut cells = 0;
     let mut duplication: BTreeMap<(String, &'static str), (u64, u64)> = BTreeMap::new();
+    let mut unaccepted: BTreeMap<String, usize> = BTreeMap::new();
     for (name, src) in corpora() {
         let (has_views, library) = match &src {
             Source::Store(s) => (s.views().next().is_some(), false),
             Source::Library(l) => (l.store().views().next().is_some(), true),
         };
+        let clean = !match &src {
+            Source::Store(s) => check(s.as_ref(), CheckOptions::default()),
+            Source::Library(l) => check(l.store(), CheckOptions::default()),
+        }
+        .has_errors();
         for layout in LAYOUTS {
             if layout == Layout::ByView && !has_views {
                 skipped.insert(format!("{name} by-view: the store holds no corpus view"));
@@ -209,6 +218,18 @@ fn ge_t15_holds_on_the_whole_matrix() {
                             if smysl_graph::record_set_digest(&kept) != c.rsd() {
                                 failures.push(format!("{cell}: P1 through a real import"));
                             }
+                            // OQ-60: the accepted-only digest beside P1's. It is the
+                            // index's whenever the source checks clean and nothing it holds
+                            // dangles (`SMY-W495`); otherwise the difference is counted.
+                            let took = accepted(&to, &r.name).unwrap();
+                            if smysl_graph::record_set_digest(&took) != c.rsd() {
+                                if clean && !c.report.iter().any(|d| d.code == Code::W495) {
+                                    failures.push(format!(
+                                        "{cell}: accepted-only digest, from a clean source"
+                                    ));
+                                }
+                                *unaccepted.entry(name.clone()).or_default() += 1;
+                            }
                             let lost: Vec<u64> = types(&c.records())
                                 .difference(&types(&kept))
                                 .copied()
@@ -227,6 +248,9 @@ fn ge_t15_holds_on_the_whole_matrix() {
         }
     }
     eprintln!("GE-T15: {cells} cells, {} failure(s)", failures.len());
+    for (corpus, n) in &unaccepted {
+        eprintln!("GE-T15: {corpus}: {n} cell(s) where P1 holds and not every record is accepted");
+    }
     for s in &skipped {
         eprintln!("GE-T15: skipped {s}");
     }

@@ -452,10 +452,10 @@ is the set of rids of selected relations):
 | 1 | unit record with `canonical_uid ∈ U` |
 | 2 | `a.uid ∈ U ∪ Rel` (fixes gap A) |
 | 3 | `from ∈ U ∧ to ∈ U`, every record, withdrawn or not, each weight variant |
-| 4 | every thread record (all register versions) with all steps in `U`, else left out (`SMY-W490`) |
+| 4 | every thread record (all register versions) with all steps in `U`, else left out (`SMY-W490`). Under `ref`, a thread no file holds whole is written once, into the file owning its first step's unit, which then requires the files owning the others (OQ-64) |
 | 5 | the generated view; with `--with-views`, corpus views with `roots ⊆ U` **and id outside `export/`** (§3.9) |
 | 6 | `over ∈ U` (positions are in `U` by the fixpoint) |
-| 7 | with `--with-packs`: every uid in `dropped`, `degraded` and, if `thread` is set, that thread's included steps, is in `U`. Pack info names no member list (§0 item 4). Else left out (`SMY-W490`). |
+| 7 | with `--with-packs`: every uid in `dropped`, `degraded` and, if `thread` is set, that thread's included steps, is in `U`. Pack info names no member list (§0 item 4). Else left out (`SMY-W490`, counted also when only its thread is). Under `ref` it follows a thread row 4 placed (OQ-64). |
 | 8 | every declaration (all versions, forks included) of every schema id `s` such that some decl of `s` lists a selected unit's `core.schema` in `types`, a selected relation's kind in `relations`, or `s` is in an included view's `requires` |
 | 9 | never (decodes as `Unknown { code: 9 }`; dropped, not sent to `unattributed`) |
 | 10 | `uid ∈ U` |
@@ -525,8 +525,10 @@ into an empty library.
   - join output (§3.5)
   - `--attest` attestations
 
-  Counting quarantined and waiting records makes P1 a statement about transport. Whether P1
-  should instead require them all accepted is OQ-60. The harness reports both.
+  Counting quarantined and waiting records makes P1 a statement about transport, and OQ-60
+  keeps it that way. The accepted-only set is GE-T15's second digest: it must equal the
+  index's when the source checks clean and nothing in it dangles (`SMY-W495`), and the cells
+  where it differs are counted.
 - **P1**: `rsd(retained(I(F))) == index.rsd`, for every layout and both closure modes.
 - **P2** (an arbitrary file `f`): import `f` with `--accept`. Then export with scope `from
   import:<f>`, layout `single`, `full`, all `--with-*`. Then check that
@@ -800,9 +802,9 @@ Cmd { name: "lib", about: "Import smysl files into the library; export it as fil
 - `--with-packs`, `--with-quarantine`, `--with-staged`, `--edges`, `--window` and `--shard`
   come from draft 3 §16, not its §17 table. They are added here. `accept`/`discard` are new
   (§3.3).
-- **Global flags.** `--format` is global with `value_parser(["surface", "cbor"])`. The proposal
-  (OQ-62) is to widen it to `["surface", "cbor", "pack"]`; every command except `lib export`
-  then refuses `pack` with `Usage`.
+- **Global flags.** `--format` is global with `value_parser(["surface", "cbor"])`. OQ-62
+  widened it to `["surface", "cbor", "pack"]`; every command except `lib export` refuses
+  `pack` with `Usage`.
 - `-o` stays the global output *path*. `lib export` reads it as a directory, created if absent
   and refused if non-empty without `--force`.
 - `--edges` reuses `edge_set` from `src/main.rs` after it moves behind the facade
@@ -1757,8 +1759,8 @@ Draft 3 numbers where they apply. New ones are OQ-60..OQ-64.
 | OQ-26 | `full` duplication against `ref`'s whole-collection requirement | Default `full`; switch to `ref` if GE-T15 measures > 3× for `by-expression`. The factor is in every index. |
 | OQ-27 | Digest beside or instead of `state_hash` in `converged_with` | Answered in SMYSL-2.1 (TX-P0). This RFC uses only the digest. |
 | OQ-28 | An import-event time for `--as-of` | Not in TX-P11. It would be a new record type (format change), so it is SMYSL-2.3's call. |
-| **OQ-60** | Does P1 compare all **retained** records (accepted, staged, waiting, quarantined) or only accepted ones? | Retained: P1 is about transport, and F6 must round-trip. The accepted-only digest is reported beside it, and it must equal `rsd(X)` when the source checks clean. |
+| ~~**OQ-60**~~ | Does P1 compare all **retained** records (accepted, staged, waiting, quarantined) or only accepted ones? | **Decided (1.11.0): retained.** P1 is about transport, and F6 must round-trip. `smysl_lib::accepted` gives the accepted-only set, and GE-T15 asserts its digest equals `rsd(X)` whenever the source has no check error and the export raised no `SMY-W495`. Over the 1,056 cells it differs in 88, all from four sources that fail one of those: F6 (`E030`, quarantined), and F10, F14 and the generated unknown-code store, each holding a record that names what no store holds, which waits. "Checks clean" alone was not enough: F10 checks with no diagnostic, and its resolution of a contention nobody derives waits. |
 | **OQ-61** | Generated views: id `export/<slug>` (draft 3's `v/export/<key>` is illegal); exclusion of `export/` views from `--with-views`; `from import:<collection>` = roots of generated views; P2's exception for a re-export under another layout; annotation units and the pack-info rule in the inclusion table | **Resolved here:** all adopted in this RFC (tool-level). SMYSL-2.3 reserves the `export/` and `import:` alias prefixes. |
-| **OQ-62** | `--format pack` and `-o DIR` against today's global flags | Widen the global `--format` parser and refuse `pack` elsewhere. The alternative is a local `--as` flag, which breaks draft 3's spelling. |
-| **OQ-63** | The clock and agent of attestations export writes (`--target-revision`) | `--agent` (default `tool:smysl-lib`). `ts` = `(max physical ts in the selection, max logical + 1)`: deterministic, after everything it rewrites. An explicit `--clock` overrides. |
-| **OQ-64** | Threads and pack infos whose members span files are left out (`W490`). Should `ref` mode instead write them into the owner file of their first step, with `requires`? | Keep draft 3's rule for TX-P11 and measure how many are left out on the chat corpora. Decide before TX-P13. |
+| ~~**OQ-62**~~ | `--format pack` and `-o DIR` against today's global flags | **Decided (TX-P11 step 5, recorded 1.11.0):** the global `--format` parser is widened and `pack` refused elsewhere; `-o` stays the global output path, read by `lib export` as a directory. `tests/global_flags.rs` runs the matrix. |
+| ~~**OQ-63**~~ | The clock and agent of attestations export writes (`--target-revision`) | **Decided (TX-P12 step 13, recorded 1.11.0):** `--agent` (default `tool:smysl-lib`). `ts` is the greatest HLC among the attestations of the closed selection with its counter plus one — strictly after everything it rewrites, and deterministic. The draft's "max physical, max logical + 1" mixed two attestations' fields; the HLC order is the one rule D can check. `--clock MS[.N]` overrides. |
+| ~~**OQ-64**~~ | Threads and pack infos whose members span files are left out (`W490`). Should `ref` mode instead write them into the owner file of their first step, with `requires`? | **Decided (1.11.0): yes under `ref`; `full` keeps draft 3's rule.** `tests/oq64.rs` draws a unit per message from the WhatsApp, Telegram and Slack samples, a `dialogue` thread and a pack info per chat and one thread across all three. Under `full`, `by-time` lost **all four** threads and all four pack infos — a two-day conversation spans two windows — and `by-expression` lost the cross-chat one. Under `ref` nothing is lost in any layout, the owning file requires every file holding a step, and verify and P1 through a real import hold. A `full` file must be closed on its own, so there the thread stays out and counted. The measurement found that a pack info dropped with its thread was not counted; W490 now counts it. |

@@ -747,6 +747,9 @@ pub(crate) fn export_with(
         once.extend(picked.records.keys().map(|(_, h)| *h));
         cut.push((format!("{}.cbor", slugs[key]), roots, picked));
     }
+    if opts.closure == Closure::Ref {
+        place_spanning(&src, &mut cut, &mut left_out, opts.with.packs);
+    }
     let owners = match opts.closure {
         Closure::Full => BTreeMap::new(),
         Closure::Ref => owners(&cut),
@@ -831,7 +834,7 @@ pub(crate) fn export_with(
         }
     }
     let w490: usize = left_out.values().sum();
-    for (t, n) in left_out {
+    for (t, n) in left_out.into_iter().filter(|(_, n)| *n > 0) {
         report.push(Diagnostic::new(Code::W490).with_message(format!(
             "{n} {t} record(s) left out of a file that does not hold everything they name"
         )));
@@ -963,6 +966,133 @@ fn owners(cut: &[(String, &BTreeSet<Uid>, Picked<'_>)]) -> BTreeMap<[u8; 32], St
         }
     }
     owner
+}
+
+/// A record's key in [`Picked::records`]: type code, then hash.
+type RecordKey = (u64, [u8; 32]);
+
+/// Under `ref`, the threads no file holds whole, written once instead of left out (OQ-64).
+///
+/// Each goes to the file that owns the unit of its first step, as [`owners`] assigns units: the
+/// file whose roots hold it, else the first by path that selects it. The units of its other
+/// steps join that file's selection, so the ownership pass makes it require the files that own
+/// them, and a pack info naming the thread goes with it once what it names is selected
+/// somewhere. W490 stops counting both; a thread with a step no file selects is still left out.
+fn place_spanning<'s>(
+    src: &Source<'s>,
+    cut: &mut [(String, &BTreeSet<Uid>, Picked<'s>)],
+    left_out: &mut BTreeMap<&'static str, usize>,
+    packs: bool,
+) {
+    // Per unit: the index in `cut` of the file owning it, and its record there.
+    let mut home: BTreeMap<Uid, (usize, RecordKey, &'s Record)> = BTreeMap::new();
+    let mut held: Vec<BTreeSet<Uid>> = Vec::new();
+    let mut written: BTreeSet<[u8; 32]> = BTreeSet::new();
+    for (i, (_, roots, picked)) in cut.iter().enumerate() {
+        let mut units = BTreeSet::new();
+        for (k, r) in &picked.records {
+            written.insert(k.1);
+            if let Record::Unit(c) = r {
+                let u = canonical_uid(c);
+                units.insert(u);
+                if roots.contains(&u) {
+                    home.insert(u, (i, *k, *r));
+                }
+            }
+        }
+        held.push(units);
+    }
+    let mut by_path: Vec<usize> = (0..cut.len()).collect();
+    by_path.sort_by(|a, b| cut[*a].0.cmp(&cut[*b].0));
+    for i in by_path {
+        for (k, r) in &cut[i].2.records {
+            if let Record::Unit(c) = r {
+                home.entry(canonical_uid(c)).or_insert((i, *k, *r));
+            }
+        }
+    }
+    // How many files W490 counted a record in: the ones holding some of what it names.
+    let counted = |names: &[Uid]| {
+        held.iter()
+            .filter(|h| names.iter().any(|u| h.contains(u)))
+            .count()
+    };
+
+    let mut placed: BTreeMap<smysl_core::ThreadId, usize> = BTreeMap::new();
+    for e in &src.entries {
+        let Record::Thread(t) = e.record else {
+            continue;
+        };
+        if written.contains(&e.hash) || t.steps.is_empty() {
+            continue;
+        }
+        let steps: Vec<Uid> = t.steps.iter().map(|s| s.unit).collect();
+        if !steps.iter().all(|u| home.contains_key(u)) {
+            continue;
+        }
+        let at = home[&steps[0]].0;
+        let n = counted(&steps);
+        let picked = &mut cut[at].2;
+        for u in &steps {
+            let (_, k, r) = home[u];
+            picked.records.insert(k, r);
+        }
+        picked
+            .records
+            .insert((e.record.type_code(), e.hash), e.record);
+        picked.threads.insert(t.id.clone());
+        placed.insert(t.id.clone(), at);
+        if let Some(c) = left_out.get_mut(e.record.type_name()) {
+            *c = c.saturating_sub(n);
+        }
+    }
+    if !packs {
+        return;
+    }
+    for e in &src.entries {
+        let Record::PackInfo(x) = e.record else {
+            continue;
+        };
+        let Some(&at) = x.thread.as_ref().and_then(|t| placed.get(t)) else {
+            continue;
+        };
+        if written.contains(&e.hash) {
+            continue;
+        }
+        let named: Vec<Uid> = x
+            .dropped
+            .iter()
+            .map(|(u, _)| *u)
+            .chain(x.degraded.iter().map(|(u, _)| *u))
+            .collect();
+        if !named.iter().all(|u| home.contains_key(u)) {
+            continue;
+        }
+        let steps: Vec<Uid> = src
+            .entries
+            .iter()
+            .filter_map(|e| match e.record {
+                Record::Thread(t) if Some(&t.id) == x.thread.as_ref() => {
+                    Some(t.steps.iter().map(|s| s.unit))
+                }
+                _ => None,
+            })
+            .flatten()
+            .chain(named.iter().copied())
+            .collect();
+        let n = counted(&steps);
+        let picked = &mut cut[at].2;
+        for u in &named {
+            let (_, k, r) = home[u];
+            picked.records.insert(k, r);
+        }
+        picked
+            .records
+            .insert((e.record.type_code(), e.hash), e.record);
+        if let Some(c) = left_out.get_mut(e.record.type_name()) {
+            *c = c.saturating_sub(n);
+        }
+    }
 }
 
 /// The options that change what is written, as the index records them (key 12), sorted.

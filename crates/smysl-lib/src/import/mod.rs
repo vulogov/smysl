@@ -905,8 +905,23 @@ pub fn discard(lib: &mut impl LibraryWrite, name: &str) -> Result<usize, LibErro
 
 /// Every record an import retained, whatever became of it: accepted, staged, waiting or
 /// quarantined (§3.9's import-side record set), each once. The manifests it wrote are not
-/// among them; they are the import's, not the files'.
+/// among them; they are the import's, not the files'. P1 compares this set (OQ-60).
 pub fn retained(lib: &impl LibraryWrite, name: &str) -> Result<Vec<Record>, LibError> {
+    kept(lib, name, |st| st != State::Discarded)
+}
+
+/// The records of an import that were accepted, each once: [`retained`] without what is
+/// staged, waiting or quarantined. Its digest is reported beside P1's, and equals the index's
+/// when nothing the files hold was left waiting or quarantined (OQ-60).
+pub fn accepted(lib: &impl LibraryWrite, name: &str) -> Result<Vec<Record>, LibError> {
+    kept(lib, name, |st| st == State::Accepted)
+}
+
+fn kept(
+    lib: &impl LibraryWrite,
+    name: &str,
+    keep: impl Fn(State) -> bool,
+) -> Result<Vec<Record>, LibError> {
     let root = lib.root().to_path_buf();
     let tables = Tables::load(&root)?;
     let batch = tables
@@ -917,10 +932,7 @@ pub fn retained(lib: &impl LibraryWrite, name: &str) -> Result<Vec<Record>, LibE
     let wanted: BTreeSet<[u8; 32]> = tables
         .imported
         .iter()
-        .filter(|(_, set)| {
-            set.iter()
-                .any(|(m, st)| mids.contains(m) && *st != State::Discarded)
-        })
+        .filter(|(_, set)| set.iter().any(|(m, st)| mids.contains(m) && keep(*st)))
         .map(|(h, _)| *h)
         .collect();
     let mut found: BTreeMap<[u8; 32], Record> = BTreeMap::new();

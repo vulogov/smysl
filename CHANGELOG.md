@@ -14,14 +14,49 @@ is the list of record; this is where it stands as the cycle opens.
 
 **Retrieval defaults that were chosen, not decided** — *decided, see below.*
 
-**Export without its edges.** OQ-62 (`--format pack` and `-o DIR`), OQ-63 (the clock of an
-exported attestation) and OQ-64 (threads that span files) block TX-P11, with OQ-60 on what P1
-compares.
+**Export without its edges** — *decided, see below.*
 
 **A measure interval that misses its own estimate** — *decided, see below.*
 
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 there are none yet; they stay owed rather than planned.
+
+### A thread that spans files, kept where `ref` can keep it, and P1 beside what was accepted
+
+SMYSL-2.7's last four open questions are decided, which empties TX-P11's row of the roadmap.
+
+**OQ-64: threads spanning files are written once under `ref`.** Draft 3 leaves a thread out of
+every file that does not hold all its steps, and asked to measure that on the chat corpora before
+deciding. `tests/oq64.rs` draws a unit per message from the WhatsApp, Telegram and Slack samples,
+derives a `dialogue` thread with a pack info for each chat and one across all three, and exports
+every layout under both closures. Under `full`, `by-time` lost **all four** threads and all four
+pack infos, since a two-day conversation spans two windows, and `by-expression` lost the
+cross-chat thread. `ref` already writes every record once and lists the files a file takes the
+rest from, so a thread no file holds whole now goes to the file owning its first step's unit,
+which requires the files owning the others, and its pack info goes with it. Under `ref` nothing
+is lost in any layout; every cell verifies and P1 holds through a real import. A `full` file must
+be closed on its own, so there the rule stays and the loss stays counted.
+
+**A pack info dropped with its thread was not counted.** Row 7 drops a pack info whose thread is
+not in the file, and `SMY-W490` counted it only when it named a dropped or degraded unit there, so
+`by-time` above lost four pack infos with nothing said. It is now counted with its thread, and a
+W490 of zero is no longer reported.
+
+**OQ-60: P1 keeps comparing what the import retained.** `smysl_lib::accepted` gives the
+accepted-only set beside `retained`, and GE-T15 asserts its digest equals the index's whenever
+the source has no check error and the export raised no `SMY-W495`. Over the 1,056 cells it
+differs in 88, all from four sources failing one of those: F6, whose `E030` units are
+quarantined, and F10, F14 and the generated unknown-code store, each holding a record naming
+what no store holds. "The source checks clean", the draft's condition, was not enough: F10
+checks with no diagnostic, and its resolution of a contention nobody derives waits.
+
+**OQ-62 and OQ-63 are recorded as built.** `--format pack` is on the global parser and refused
+everywhere but `lib export` (TX-P11 step 5). `--target-revision`'s attestations take the greatest
+HLC among the selection's attestations with its counter plus one, or `--clock` (step 13): the
+draft's "max physical, max logical + 1" mixed two attestations' fields.
+
+SMYSL-2.7 §3.6 rows 4 and 7, §3.9, §4.4 and §9, and the roadmap record it; the manual does not
+cover export's closures, so no PDF moves.
 
 ### A jackknife for the intervals a bootstrap could not centre, and the length that was supposed to fix it
 

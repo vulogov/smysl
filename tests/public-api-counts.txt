@@ -37,5 +37,5 @@ smysl-tui        218
 smysl-text       3836
 smysl-query      3613
 smysl-measure    3360
-smysl-lib        1535
+smysl-lib        1537
 smysl-embed-candle 128

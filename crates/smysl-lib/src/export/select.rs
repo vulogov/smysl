@@ -273,6 +273,20 @@ pub(crate) fn pick<'s>(
             _ => None,
         })
         .collect();
+    // Threads W490 counts as left out of this file: some step here, not all, and no register
+    // version complete. A pack info naming one goes with it, and is counted with it.
+    let partial: BTreeSet<&ThreadId> = src
+        .entries
+        .iter()
+        .filter_map(|e| match e.record {
+            Record::Thread(t)
+                if !threads.contains(&t.id) && t.steps.iter().any(|s| units.contains(&s.unit)) =>
+            {
+                Some(&t.id)
+            }
+            _ => None,
+        })
+        .collect();
     let datings: BTreeSet<Uid> = src
         .entries
         .iter()
@@ -354,7 +368,11 @@ pub(crate) fn pick<'s>(
                     let keep = with.packs
                         && named.iter().all(|u| units.contains(u))
                         && x.thread.as_ref().is_none_or(|t| threads.contains(t));
-                    if with.packs && !keep && named.iter().any(|u| units.contains(u)) {
+                    if with.packs
+                        && !keep
+                        && (named.iter().any(|u| units.contains(u))
+                            || x.thread.as_ref().is_some_and(|t| partial.contains(t)))
+                    {
                         *p.left_out.entry(r.type_name()).or_default() += 1;
                     }
                     keep
