@@ -21,6 +21,28 @@ is the list of record; this is where it stands as the cycle opens.
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 there are none yet; they stay owed rather than planned.
 
+### The intent table's vocabulary, measured where it was not found
+
+The third question set left a vocabulary gap rather than a spelling one. Its losses were
+turned into rules, listed exactly before a **fourth question set** was written
+(`fixtures/dossier/fourth/`, the list in its header) and scored first without them
+(`baseline.txt`). The rules are a definition in the past or with *exactly* (`¿Quién fue`, `Кем
+был`, `Was genau war`, `Qu'était`), evidence asked as existence (`Gibt es Belege dafür, dass`,
+`¿Hay pruebas de que`, `Есть ли доказательства, что`, `Is there proof that`), and *mention* as
+the verb (`¿Dónde se menciona`, `Where do the texts mention`).
+
+| fourth set, 80 rows | before | after |
+|---|---:|---:|
+| intent read | 40 | 55 |
+| subject found (with stems) | 40 | 55 |
+
+The third set, now in-sample, reads 80 of 80; sets 1 and fresh do not move. Of the 25 the fourth
+set still loses, ten are a verb in a tense the table writes only in another (`What depended on`,
+`Was hing … ab`, `¿De dónde vino`, `D'où venait`, `Кто утверждал`) and the rest are other words
+for the same openers (`Nachweis`, `¿Existen pruebas`, `свидетельства`, `Who believed`, `Où
+parle-t-on`, `¿Dónde se habla de`). They are owed to a fifth set and not added here; `--intent`
+names any of them meanwhile. Same hand as the rules, and the set says so.
+
 ### Who approved a translated query, and a subject found by its stems
 
 The last questions of the cycle and the two pieces of work OQ-22 left owed.

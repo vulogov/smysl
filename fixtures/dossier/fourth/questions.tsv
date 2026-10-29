@@ -1,0 +1,116 @@
+# GE-T10's fourth question set (SMYSL-2.5 OQ-22's owed intent vocabulary): sixteen questions,
+# two per intent, each asked in the five tier-1 languages, eighty rows, over the committed
+# corpus (`../gold/corpus.smy`). Only the front is scored on it, as on `../third/`.
+#
+# WHY A FOURTH SET. The third set found openers the intent table does not write. A rule written
+# from those questions and scored on them is scored in-sample, so the rules were fixed first —
+# listed here, exactly, before a word of this set was written — and are scored on this set,
+# whose front was taken before the code changed (`baseline.txt`). No rule is added or changed
+# after a run of this set; a miss it finds is owed to a fifth.
+#
+# THE RULES, DECLARED (from the third set's losses only):
+#   6. a definition asked in the past or with "exactly":
+#        en  what exactly is / what exactly was / who exactly is / who exactly was
+#        de  was war / was genau ist / was genau war / wer genau ist / wer genau war
+#        es  quién fue / quien fue / qué era / que era / qué fue / qué era exactamente /
+#            qué es exactamente
+#        fr  qu'était / qu'était exactement / qui était exactement
+#        ru  кем был / кем была / кем были
+#   7. a verification asked as whether there is evidence:
+#        en  is there any evidence that / is there proof that
+#        de  gibt es belege dass / gibt es belege dafür dass / gibt es beweise dass /
+#            gibt es beweise dafür dass
+#        es  hay pruebas de que / hay evidencia de que
+#        fr  y a-t-il des preuves que / y a-t-il des preuves qu'
+#        ru  есть ли доказательства что / есть ли доказательства того что
+#   8. a location asked with "mention" as the verb:
+#        en  where do the texts mention / where do the sources mention
+#        es  dónde se menciona / donde se menciona / dónde se menciona a / dónde se mencionan
+#
+# WHO WROTE THIS. The same hand that declared the rules, after declaring them, so it knew them;
+# the questions are written as a person would ask, and half of them reach for an opener none of
+# the rules writes (a different adverb, another noun for evidence, another verb for mention,
+# another intent's idiom), which is expected to fail. Nothing was rephrased after a run. Single
+# hand, so no agreement figure.
+#
+# Columns as `../gold/questions.tsv`: qid, intent, lang, question.
+se-define3	define	en	Who exactly was Semmelweis?
+se-define3	define	de	Wer genau war Semmelweis?
+se-define3	define	es	¿Quién fue Semmelweis?
+se-define3	define	fr	Qui était exactement Semmelweis ?
+se-define3	define	ru	Кем был Земмельвейс?
+mi-define3	define	en	What precisely was a miasma?
+mi-define3	define	de	Was war ein Miasma eigentlich?
+mi-define3	define	es	¿Qué fue el miasma?
+mi-define3	define	fr	Qu'était au juste le miasme ?
+mi-define3	define	ru	Что представляли собой миазмы?
+ch-explain3	explain	en	What made cholera spread so fast?
+ch-explain3	explain	de	Warum breitete sich die Cholera so schnell aus?
+ch-explain3	explain	es	¿Por qué se propagó tan rápido el cólera?
+ch-explain3	explain	fr	Pourquoi le choléra s'est-il propagé si vite ?
+ch-explain3	explain	ru	Почему холера распространялась так быстро?
+ls-explain2	explain	en	Why did Joseph Lister use carbolic acid?
+ls-explain2	explain	de	Wieso verwendete Joseph Lister Karbolsäure?
+ls-explain2	explain	es	¿Por qué usaba Joseph Lister ácido carbólico?
+ls-explain2	explain	fr	Pourquoi Joseph Lister utilisait-il l'acide phénique ?
+ls-explain2	explain	ru	Зачем Джозеф Листер использовал карболовую кислоту?
+sc-verify3	verify	en	Is there any evidence that citrus cures scurvy?
+sc-verify3	verify	de	Gibt es Beweise, dass Zitrusfrüchte Skorbut heilen?
+sc-verify3	verify	es	¿Hay evidencia de que los cítricos curan el escorbuto?
+sc-verify3	verify	fr	Y a-t-il des preuves que les agrumes guérissent le scorbut ?
+sc-verify3	verify	ru	Есть ли доказательства того, что цитрусовые лечат цингу?
+sp-verify3	verify	en	Is there proof that smallpox vaccination worked?
+sp-verify3	verify	de	Gibt es einen Nachweis, dass die Pockenimpfung wirkte?
+sp-verify3	verify	es	¿Existen pruebas de que la vacuna contra la viruela funcionaba?
+sp-verify3	verify	fr	Existe-t-il des preuves que la vaccination contre la variole fonctionnait ?
+sp-verify3	verify	ru	Есть ли свидетельства, что прививка от оспы работала?
+mi-attribute2	attribute	en	Who believed in miasma?
+mi-attribute2	attribute	de	Wer glaubte an das Miasma?
+mi-attribute2	attribute	es	¿Quién creía en el miasma?
+mi-attribute2	attribute	fr	Qui croyait au miasme ?
+mi-attribute2	attribute	ru	Кто верил в миазмы?
+ls-attribute2	attribute	en	Who claimed that Joseph Lister was wrong?
+ls-attribute2	attribute	de	Wer behauptete, Joseph Lister habe sich geirrt?
+ls-attribute2	attribute	es	¿Quién dijo que Joseph Lister se equivocaba?
+ls-attribute2	attribute	fr	Qui a dit que Joseph Lister avait tort ?
+ls-attribute2	attribute	ru	Кто утверждал, что Джозеф Листер ошибался?
+ch-trace3	trace	en	Where did cholera come from?
+ch-trace3	trace	de	Woher kam die Cholera?
+ch-trace3	trace	es	¿De dónde vino el cólera?
+ch-trace3	trace	fr	D'où venait le choléra ?
+ch-trace3	trace	ru	Откуда пришла холера?
+je-trace2	trace	en	History of Jenner's vaccine
+je-trace2	trace	de	Geschichte von Jenners Impfstoff
+je-trace2	trace	es	Historia de la vacuna de Jenner
+je-trace2	trace	fr	Histoire du vaccin de Jenner
+je-trace2	trace	ru	История вакцины Дженнера
+sc-locate2	locate	en	Where do the sources mention scurvy?
+sc-locate2	locate	de	Wo wird Skorbut erwähnt?
+sc-locate2	locate	es	¿Dónde se menciona el escorbuto?
+sc-locate2	locate	fr	Où parle-t-on du scorbut ?
+sc-locate2	locate	ru	Где говорится о цинге?
+li-locate2	locate	en	Where is James Lind mentioned?
+li-locate2	locate	de	Wo kommt James Lind vor?
+li-locate2	locate	es	¿Dónde se habla de James Lind?
+li-locate2	locate	fr	Où est cité James Lind ?
+li-locate2	locate	ru	Где упоминается Джеймс Линд?
+ph-depend2	depend	en	What depended on phlogiston?
+ph-depend2	depend	de	Was hing vom Phlogiston ab?
+ph-depend2	depend	es	¿Qué dependía del flogisto?
+ph-depend2	depend	fr	Qu'est-ce qui dépendait du phlogistique ?
+ph-depend2	depend	ru	Что зависело от флогистона?
+se-depend2	depend	en	What follows from Semmelweis's findings?
+se-depend2	depend	de	Was folgt aus den Befunden von Semmelweis?
+se-depend2	depend	es	¿Qué se sigue de los hallazgos de Semmelweis?
+se-depend2	depend	fr	Qu'est-ce qui dépend des découvertes de Semmelweis ?
+se-depend2	depend	ru	Что следует из открытий Земмельвейса?
+sp-compare2	compare	en	Smallpox versus cholera
+sp-compare2	compare	de	Vergleiche die Pocken mit der Cholera
+sp-compare2	compare	es	Diferencia entre la viruela y el cólera
+sp-compare2	compare	fr	Différence entre la variole et le choléra
+sp-compare2	compare	ru	Сравни оспу и холеру
+li-compare2	compare	en	How does James Lind compare with Joseph Lister?
+li-compare2	compare	de	Was ist der Unterschied zwischen James Lind und Joseph Lister?
+li-compare2	compare	es	Compara a James Lind con Joseph Lister
+li-compare2	compare	fr	Quelle est la différence entre James Lind et Joseph Lister ?
+li-compare2	compare	ru	Чем отличается Джеймс Линд от Джозефа Листера?

@@ -769,7 +769,8 @@ no version marker is read without a lens and counted (`SMY-W475`). Unit conversi
    as spelled and **69 of 80** through stems, every miss left being an unread intent; no stem
    found a wrong subject in any set. Set 1 143 → 150 and the fresh set 77 → 83 (in-sample);
    the two the stems cannot reach are a German compound (`Cholerabazillus`) and a Russian
-   adjective (`холерный`). `crates/smysl-text/tests/ge_t10_third.rs` pins the three.
+   adjective (`холерный`). On the fourth set the subject is found for every question whose intent
+   is read, 55 of 80. `crates/smysl-text/tests/ge_t10_third.rs` pins the four.
 2. **Intent.** A closed rule table per tier-1 language (`define, explain, verify, attribute,
    trace, locate, depend, compare`): ordered regular patterns over the folded question ("what
    is", "что такое", "qu'est-ce que", "was ist", "qué es", …). No rule matches: `SMY-E468`,
@@ -2262,7 +2263,18 @@ over all eight intents in five languages was written (`fixtures/dossier/third/`)
 first without them (`baseline.txt`). Intent there 57 → 69 of 80; every remaining miss is a verb
 or tense no rule spells (`¿Quién fue`, `Кем был`, `What exactly was`, `Gibt es Belege`, `where do
 the texts mention`, `se menciona`), a vocabulary gap, not a spelling. In-sample, set 1 reads 150
-of 150 and the fresh set 85 of 85. **OQ-23** (closed op set; `Unknown` preserved),
+of 150 and the fresh set 85 of 85. **The vocabulary, measured out of sample (2026-10-29):** the
+rules for those gaps — a definition in the past or with *exactly* (`quién fue`, `кем был`, `was
+genau war`, `qu'était`), evidence asked as existence (`gibt es belege dafür dass`, `hay pruebas
+de que`, `есть ли доказательства что`), *mention* as the verb (`dónde se menciona`, `where do the
+texts mention`) — were listed exactly, then a fourth set of sixteen questions in five languages
+was written (`fixtures/dossier/fourth/`, the list in its header) and scored without them
+(`baseline.txt`). Intent there **40 → 55 of 80**; the third set, now in-sample, 80 of 80. Of the
+25 left, ten are a verb in a tense the table writes only in another (`depended`, `hing … ab`,
+`vino`, `venait`, `утверждал`), the rest other words for the same openers (`Nachweis`,
+`existen pruebas`, `свидетельства`, `who believed`, `où parle-t-on`, `se habla de`, `what made`,
+`how does … compare with`). They are owed to a fifth set, not added here, and none is a case
+for a model: each is a rule `--intent` covers until it is written. **OQ-23** (closed op set; `Unknown` preserved),
 ~~**OQ-24**~~ **decided 2026-10-29 as proposed**: one stderr line whenever a lens touched a
 unit, silence when none did (§3.9).
 
