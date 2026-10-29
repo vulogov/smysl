@@ -54,6 +54,11 @@ comparison as a verb of difference, dependence as `built on`, attribution as dou
 question read as the wrong intent. Each round reads more and finds a new kind of phrasing, so
 further rounds wait for questions people actually ask.
 
+**A comparison asks about the subject it names first.** `ask` took a question's longest name as
+its subject, so `How does Semmelweis compare with Joseph Lister?` was a dossier about Lister. A
+comparison now takes the earliest name, the longest only where two start together; every other
+intent is unchanged, and no other set moves.
+
 ### Who approved a translated query, and a subject found by its stems
 
 The last questions of the cycle and the two pieces of work OQ-22 left owed.

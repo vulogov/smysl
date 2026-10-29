@@ -592,3 +592,30 @@ fn a_ranking_reorders_a_slot_and_is_in_the_recipe_only_when_chosen() {
         }
     }
 }
+
+/// A comparison names two subjects and asks about the one written first, whatever their
+/// lengths; any other question keeps the longest name it holds (found by GE-T10's fifth set).
+#[test]
+fn a_comparison_asks_about_the_subject_it_names_first() {
+    let src =
+        std::fs::read_to_string("../../fixtures/dossier/gold/corpus.smy").expect("GE-T10's corpus");
+    let parsed = parse_surface(&src).expect("the corpus parses");
+    let store = Store::from_records(parsed.records);
+    let scope = StoreScope::new("ge-t10", &store);
+    let env = Env::new(&store, &scope).with_entities(&scope);
+    let about = |q: &str| ask(q, &env, &opts()).expect("a dossier").subject;
+
+    assert_eq!(
+        about("How does Semmelweis compare with Joseph Lister?"),
+        "Semmelweis"
+    );
+    assert_eq!(
+        about("Compare Joseph Lister and Semmelweis"),
+        "Joseph Lister"
+    );
+    // Not a comparison: the longest name, as before.
+    assert_eq!(
+        about("Why did Semmelweis anticipate Joseph Lister?"),
+        "Joseph Lister"
+    );
+}

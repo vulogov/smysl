@@ -170,7 +170,7 @@ fn ge_t10_third_set() {
         (
             "fifth set",
             "fixtures/dossier/fifth/questions.tsv",
-            (80, 43, 41, 43),
+            (80, 43, 42, 44),
         ),
         (
             "set 1 (in-sample)",

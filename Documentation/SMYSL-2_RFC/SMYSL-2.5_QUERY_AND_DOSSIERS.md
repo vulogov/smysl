@@ -769,9 +769,11 @@ no version marker is read without a lens and counted (`SMY-W475`). Unit conversi
    as spelled and **69 of 80** through stems, every miss left being an unread intent; no stem
    found a wrong subject in any set. Set 1 143 → 150 and the fresh set 77 → 83 (in-sample);
    the two the stems cannot reach are a German compound (`Cholerabazillus`) and a Russian
-   adjective (`холерный`). On the fourth set the subject is found for every question whose intent
-   is read, 55 of 80; on the fifth 43 of 80, every miss an unread intent but one comparison
-   that names two subjects and is taken for the longer.
+   adjective (`холерный`). *Since 2026-10-29, a comparison:* it names two subjects and the
+   dossier has one, so the run that starts earliest wins and the longest only at that start —
+   `How does Semmelweis compare with Joseph Lister?` asks about Semmelweis, where the longest
+   name anywhere made it Lister; every other intent keeps the longest. On the fourth set the subject is found for every question whose intent
+   is read, 55 of 80; on the fifth 44 of 80, every miss an unread intent.
    `crates/smysl-text/tests/ge_t10_third.rs` pins the five.
 2. **Intent.** A closed rule table per tier-1 language (`define, explain, verify, attribute,
    trace, locate, depend, compare`): ordered regular patterns over the folded question ("what
@@ -2289,8 +2291,9 @@ rather than words — `how did X arise` in four languages, a definition asked as
 word, attribution as doubt, dependence as `built on` — with one question read as the wrong
 intent (`What was built on …` as define). Each round reads more and finds a new kind of phrasing,
 so the table is a vocabulary that grows with use, not one a set closes; further rounds wait for
-questions people ask. One subject finding: a comparison's subject is the longest name it holds
-(step 1), so `How does Semmelweis compare with Joseph Lister?` asks about Lister. **OQ-23** (closed op set; `Unknown` preserved),
+questions people ask. One subject finding, fixed the same day: a comparison took the longest
+name it held, so `How does Semmelweis compare with Joseph Lister?` asked about Lister; it now
+takes the name written first (step 1), and the fifth set's subjects go 43 → 44. **OQ-23** (closed op set; `Unknown` preserved),
 ~~**OQ-24**~~ **decided 2026-10-29 as proposed**: one stderr line whenever a lens touched a
 unit, silence when none did (§3.9).
 
