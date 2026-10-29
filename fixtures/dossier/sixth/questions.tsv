@@ -1,0 +1,129 @@
+# GE-T10's sixth question set (SMYSL-2.5 OQ-22's owed intent vocabulary, third round): sixteen
+# questions, two per intent, each asked in the five tier-1 languages, eighty rows, over the
+# committed corpus (`../gold/corpus.smy`). Only the front is scored on it, as on `../fifth/`.
+#
+# WHY A SIXTH SET. The fifth set's losses were constructions more than words. The rules for
+# them were listed here, exactly, before a word of this set was written, and are scored on this
+# set, whose front was taken before the code changed (`baseline.txt`). No rule is added or
+# changed after a run of this set.
+#
+# THE RULES, DECLARED (from the fifth set's losses, and the one the fourth's declaration left out):
+#  14. definition asked another way:
+#        en  describe        de  was versteht man unter
+#        es  en qué consiste / en qué consistía        fr  qui fut / qu'appelle-t-on
+#  15. explanation asked another way:
+#        de  aus welchem grund   es  cómo es que   fr  comment se fait-il que / comment se fait-il qu'
+#  16. a yes-or-no question as verification, as English `did`/`does` already are:
+#        de  hat / haben / hatte        fr  est-ce que / est-ce qu'
+#  17. attribution as doubt, and two forms missed:
+#        en  who doubted   de  wer bezweifelte / wer behauptete   es  quién dudaba de
+#        fr  qui doutait de   ru  кто сомневался в / кто верил во
+#  18. how a thing arose, as trace:
+#        en  how did … arise / where did … come from originally
+#        de  wie entstand / wie entstanden   es  cómo surgió / cómo surgieron
+#        fr  comment est né / comment est née / comment sont nés
+#        ru  как возник / как возникла / как возникло / как возникли
+#  19. location by another verb or by "which texts":
+#        de  wo taucht … auf / wo tauchen … auf / wo ist von … die rede
+#        es  en qué textos aparece   fr  dans quels textes apparaît
+#  20. dependence as building or resting on:
+#        en  what was built on / what is built on   de  was baute auf … auf / was baut auf … auf
+#        es  qué se basaba en / qué se basa en
+#        fr  qu'est-ce qui reposait sur / qu'est-ce qui repose sur
+#        ru  что опиралось на / что опирается на
+#  21. comparison by a verb of difference:
+#        de  wie unterscheidet sich   es  en qué se diferencia
+#        fr  … diffère-t-il de … / … diffère-t-elle de … (infixes)   ru  … отличается от … (infix)
+#
+# NOT DECLARED, ON PURPOSE: a bare preposition as a comparison (`frente a`, `contre`, `против`,
+# `or`). Each is in questions that compare nothing (`la vaccination contre la variole`), and a
+# rule that reads a preposition reads them too.
+#
+# WHO WROTE THIS. The same hand that declared the rules, after declaring them; half the
+# questions reach for an opener none of the rules writes. Nothing was rephrased after a run
+# but two rows: `sn-define3` in German and Spanish first asked about miasma, not John Snow — a
+# translation of a different question — and were put back to the English one before the
+# baseline was taken and before any rule changed.
+# Single hand, so no agreement figure.
+#
+# Columns as `../gold/questions.tsv`: qid, intent, lang, question.
+sn-define3	define	en	Describe John Snow
+sn-define3	define	de	Beschreibe John Snow
+sn-define3	define	es	Describe a John Snow
+sn-define3	define	fr	Qui fut John Snow ?
+sn-define3	define	ru	Кем был Джон Сноу?
+ch-define3	define	en	Give me a definition of cholera
+ch-define3	define	de	Erkläre mir den Begriff Cholera
+ch-define3	define	es	Define el cólera
+ch-define3	define	fr	Que signifie le choléra ?
+ch-define3	define	ru	Что означает холера?
+sc-explain3	explain	en	For what reason did sailors get scurvy?
+sc-explain3	explain	de	Aus welchem Grund bekamen Seeleute Skorbut?
+sc-explain3	explain	es	¿Cómo es que los marineros sufrían escorbuto?
+sc-explain3	explain	fr	Comment se fait-il que les marins aient eu le scorbut ?
+sc-explain3	explain	ru	По какой причине моряки болели цингой?
+ph-explain2	explain	en	Why was phlogiston abandoned?
+ph-explain2	explain	de	Wieso wurde das Phlogiston aufgegeben?
+ph-explain2	explain	es	¿Por qué se abandonó el flogisto?
+ph-explain2	explain	fr	Pour quelle raison a-t-on abandonné le phlogistique ?
+ph-explain2	explain	ru	Почему отказались от флогистона?
+je-verify3	verify	en	Did Jenner test his vaccine on a boy?
+je-verify3	verify	de	Hat Jenner seinen Impfstoff an einem Jungen getestet?
+je-verify3	verify	es	¿Probó Jenner su vacuna en un niño?
+je-verify3	verify	fr	Est-ce que Jenner a testé son vaccin sur un garçon ?
+je-verify3	verify	ru	Испытал ли Дженнер свою вакцину на мальчике?
+ls-verify2	verify	en	Is it correct that Joseph Lister used carbolic acid?
+ls-verify2	verify	de	Hatte Joseph Lister Erfolg mit Karbolsäure?
+ls-verify2	verify	es	¿Es correcto que Joseph Lister usó ácido carbólico?
+ls-verify2	verify	fr	Est-ce qu'il est exact que Joseph Lister utilisait l'acide phénique ?
+ls-verify2	verify	ru	Верно ли, что Джозеф Листер применял карболовую кислоту?
+se-attribute2	attribute	en	Who doubted Semmelweis?
+se-attribute2	attribute	de	Wer bezweifelte Semmelweis?
+se-attribute2	attribute	es	¿Quién dudaba de Semmelweis?
+se-attribute2	attribute	fr	Qui contestait Semmelweis ?
+se-attribute2	attribute	ru	Кто сомневался в Земмельвейсе?
+ph-attribute3	attribute	en	Who opposed phlogiston?
+ph-attribute3	attribute	de	Wer behauptete, Phlogiston sei real?
+ph-attribute3	attribute	es	¿Quién rechazó el flogisto?
+ph-attribute3	attribute	fr	Qui s'opposait au phlogistique ?
+ph-attribute3	attribute	ru	Кто верил во флогистон?
+ls-trace2	trace	en	How did Joseph Lister's method arise?
+ls-trace2	trace	de	Wie entstand die Methode von Joseph Lister?
+ls-trace2	trace	es	¿Cómo surgió el método de Joseph Lister?
+ls-trace2	trace	fr	Comment est née la méthode de Joseph Lister ?
+ls-trace2	trace	ru	Как возник метод Джозефа Листера?
+sc-trace3	trace	en	What is the origin of scurvy?
+sc-trace3	trace	de	Was ist der Ursprung des Skorbuts?
+sc-trace3	trace	es	¿Cuál es el origen del escorbuto?
+sc-trace3	trace	fr	Quelle est l'origine du scorbut ?
+sc-trace3	trace	ru	Каково происхождение цинги?
+mi-locate2	locate	en	In which texts does miasma appear?
+mi-locate2	locate	de	Wo taucht das Miasma auf?
+mi-locate2	locate	es	¿En qué textos aparece el miasma?
+mi-locate2	locate	fr	Dans quels textes apparaît le miasme ?
+mi-locate2	locate	ru	В каких текстах встречаются миазмы?
+sp-locate2	locate	en	Where can I read about smallpox?
+sp-locate2	locate	de	Wo ist von den Pocken die Rede?
+sp-locate2	locate	es	¿Dónde puedo leer sobre la viruela?
+sp-locate2	locate	fr	Où peut-on lire sur la variole ?
+sp-locate2	locate	ru	Где можно прочитать об оспе?
+ch-depend3	depend	en	What was built on the study of cholera?
+ch-depend3	depend	de	Was baute auf der Erforschung der Cholera auf?
+ch-depend3	depend	es	¿Qué se basaba en el estudio del cólera?
+ch-depend3	depend	fr	Qu'est-ce qui reposait sur l'étude du choléra ?
+ch-depend3	depend	ru	Что опиралось на изучение холеры?
+li-depend2	depend	en	What came out of James Lind's trial?
+li-depend2	depend	de	Was ergab sich aus dem Versuch von James Lind?
+li-depend2	depend	es	¿Qué resultó del ensayo de James Lind?
+li-depend2	depend	fr	Qu'est-il résulté de l'essai de James Lind ?
+li-depend2	depend	ru	Что вытекает из опыта Джеймса Линда?
+je-compare2	compare	en	How is Jenner different from Joseph Lister?
+je-compare2	compare	de	Wie unterscheidet sich Jenner von Joseph Lister?
+je-compare2	compare	es	¿En qué se diferencia Jenner de Joseph Lister?
+je-compare2	compare	fr	En quoi Jenner diffère-t-il de Joseph Lister ?
+je-compare2	compare	ru	Чем Дженнер отличается от Джозефа Листера?
+sc-compare2	compare	en	Contrast scurvy with cholera
+sc-compare2	compare	de	Skorbut im Vergleich zur Cholera
+sc-compare2	compare	es	Contrasta el escorbuto con el cólera
+sc-compare2	compare	fr	Mets en regard le scorbut et le choléra
+sc-compare2	compare	ru	Сопоставь цингу и холеру

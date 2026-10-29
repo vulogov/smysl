@@ -54,6 +54,16 @@ comparison as a verb of difference, dependence as `built on`, attribution as dou
 question read as the wrong intent. Each round reads more and finds a new kind of phrasing, so
 further rounds wait for questions people actually ask.
 
+**A third round.** Rules for the fifth set's losses (a definition as `describe`, an explanation
+as `comment se fait-il que`, a yes-or-no question as verification, doubt as attribution, `how
+did … arise` as trace, location by another verb, dependence as resting on, comparison by a verb
+of difference) were declared before a **sixth set** was written (`fixtures/dossier/sixth/`).
+Intent on the sixth set **10 → 43 of 80**; the fifth, now in-sample, 76 of 80, the fourth 80 of
+80. No new rule misreads a question in any set; three of the sixth's losses are older rules
+reading a question as the wrong intent (`What is the origin of …` as define). Two rows of the
+sixth set were mistranslations of another question, found on the first run and put right before
+the baseline and before any rule; the set's header says so.
+
 **A comparison asks about the subject it names first.** `ask` took a question's longest name as
 its subject, so `How does Semmelweis compare with Joseph Lister?` was a dossier about Lister. A
 comparison now takes the earliest name, the longest only where two start together; every other

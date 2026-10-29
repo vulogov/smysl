@@ -773,8 +773,8 @@ no version marker is read without a lens and counted (`SMY-W475`). Unit conversi
    dossier has one, so the run that starts earliest wins and the longest only at that start —
    `How does Semmelweis compare with Joseph Lister?` asks about Semmelweis, where the longest
    name anywhere made it Lister; every other intent keeps the longest. On the fourth set the subject is found for every question whose intent
-   is read, 55 of 80; on the fifth 44 of 80, every miss an unread intent.
-   `crates/smysl-text/tests/ge_t10_third.rs` pins the five.
+   is read, 55 of 80; on the fifth 44 of 80, every miss an unread intent; on the sixth 46.
+   `crates/smysl-text/tests/ge_t10_third.rs` pins the six.
 2. **Intent.** A closed rule table per tier-1 language (`define, explain, verify, attribute,
    trace, locate, depend, compare`): ordered regular patterns over the folded question ("what
    is", "что такое", "qu'est-ce que", "was ist", "qué es", …). No rule matches: `SMY-E468`,
@@ -2293,7 +2293,21 @@ intent (`What was built on …` as define). Each round reads more and finds a ne
 so the table is a vocabulary that grows with use, not one a set closes; further rounds wait for
 questions people ask. One subject finding, fixed the same day: a comparison took the longest
 name it held, so `How does Semmelweis compare with Joseph Lister?` asked about Lister; it now
-takes the name written first (step 1), and the fifth set's subjects go 43 → 44. **OQ-23** (closed op set; `Unknown` preserved),
+takes the name written first (step 1), and the fifth set's subjects go 43 → 44. **A third round
+(2026-10-29):** rules for the fifth set's losses — a definition as `describe` or `en qué
+consiste`, an explanation as `aus welchem Grund` or `comment se fait-il que`, a yes-or-no
+question as verification (`hat`, `est-ce que`, as English `did` already was), attribution as
+doubt, how a thing arose as trace (`wie entstand`, `cómo surgió`, `как возник`), location by
+another verb (`wo taucht … auf`, `dans quels textes`), dependence as resting on, comparison by a
+verb of difference — declared before a sixth set was written (`fixtures/dossier/sixth/`, which
+also says why a bare preposition, `frente a`, `contre`, `против`, was left out). Intent there
+**10 → 43 of 80**; the fifth, now in-sample, 76 of 80, the fourth 80 of 80. Three of the
+sixth's 37 losses are a question read as the wrong intent, each by a rule already in the table
+(`what is the origin of` as define, `Erkläre mir den Begriff` as explain); none by the new
+rules, `hat` and `est-ce que` included. The rest are openers again new — `for what reason`,
+`who opposed`, `what came out of`, `where can I read about`, `contrast`, `que signifie` — so
+the third round confirms the second's reading: the rounds are finding a language's ways of
+asking, and that set is not closed by sets one hand writes. **OQ-23** (closed op set; `Unknown` preserved),
 ~~**OQ-24**~~ **decided 2026-10-29 as proposed**: one stderr line whenever a lens touched a
 unit, silence when none did (§3.9).
 
