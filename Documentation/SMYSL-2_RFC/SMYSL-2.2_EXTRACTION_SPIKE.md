@@ -526,7 +526,8 @@ No new commands, flags, records or diagnostics.
   - `gold.tsv` plus `classes.tsv` is the first conformance fixture for `strict` derivation (D-7).
     An implementation given the gold edges must reproduce `classes.tsv` exactly.
   - The gold seeds GE-T5 and GE-T9. GE-T9 still runs at 20 passages.
-- **Admissibility:** model outputs are fixture material only if OQ-34 allows. Inputs, alignment,
+- **Admissibility:** model outputs are fixture material only as OQ-34 allows (decided: verbatim
+  from permissively licensed open weights, derived data only from hosted models). Inputs, alignment,
   gold labels and classes over uids are the project's own data in any case.
 
 ## 6. Delivery steps, timeline, roles and cost
@@ -587,7 +588,7 @@ None. The spike adds no code to the repository and needs no diagnostic.
 |---|---|
 | OQ-32 | **Resolved by SMYSL-2.1 H-12:** `ingest --temperature` ships in TX-P0. The spike's main arms stay at T = 0 for comparability; a T > 0 arm becomes possible without a local patch. |
 | OQ-33 | **Resolved by SMYSL-2.1 H-9:** the recipe hashes the configured model. Recipes of earlier runs that relied on a config `model` change once; the spike runs either entirely before or entirely after H-9. |
-| OQ-34 | Can staged units produced by a hosted model, or by an open-weights model under its own licence, be committed as fixtures to an MPL-2.0 repository? Or do fixtures keep only inputs, gold labels and uid-level data, regenerating model output on demand? |
+| ~~OQ-34~~ | Can staged units produced by a hosted model, or by an open-weights model under its own licence, be committed as fixtures to an MPL-2.0 repository? Or do fixtures keep only inputs, gold labels and uid-level data, regenerating model output on demand? **Decided 2026-10-29 by the owner: verbatim output only from an open-weights model under a permissive licence, named with its licence beside the fixture; from any model, hosted ones included, derived data only — counts, agreement figures, hashes, uids — never a hosted model's text.** It is what the repository already did: arm L is Apache 2.0 (S0), `fixtures/measure/ge-t3.tsv` holds deepseek-chat's counts and not its runs, which stay outside and are named by `SMYSL_GE_T3_RUNS`, and the ingest tests run scripted providers. MPL-2.0 is then true of every file without reading a provider's terms or settling who owns a model's output. A hosted transcript that must be committed is an exception recorded against its fixture (provider, model, date of the terms read). `fixtures/README.md` states the rule. |
 
 **Draft-3 questions this spike informs:**
 - **OQ-3:** the ё density of the chosen Synodal edition is recorded per file.

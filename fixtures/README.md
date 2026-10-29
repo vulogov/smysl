@@ -166,6 +166,25 @@ The conformance tree is deliberately **external** — fixture files plus expecte
 diagnostics, no Rust — so a second implementation in another language validates against
 the same artifacts.
 
+## Model output (SMYSL-2.2 OQ-34)
+
+What a model wrote may enter this tree in two ways only, so that MPL-2.0 is true of every file
+here without depending on a provider's terms:
+
+- **Verbatim, from an open-weights model under a permissive licence** (Apache 2.0, MIT or one as
+  plain about redistribution). The fixture names the model and its licence beside itself, in its
+  README or its header comment.
+- **As derived data, from any model, hosted ones included**: counts, agreement figures, hashes
+  and uids — never the text a hosted model wrote. `measure/ge-t3.tsv` is the shape: per verse,
+  the units and classes deepseek-chat's runs gave, and not the runs. A transcript someone needs
+  to reproduce a figure lives outside the repository and is named by an environment variable
+  (`SMYSL_GE_T3_RUNS`).
+
+Tests of the ingest path need neither: they run scripted providers over hand-written answers
+(`ingest/consensus/`). A hosted transcript that ever must be committed is an exception recorded
+against its fixture, with the provider, the model and the date of the terms read — not a
+loosening of the rule.
+
 ## Expected-diagnostic format
 
 Each fixture `NAME.<ext>` has a sibling `NAME.expected` listing one diagnostic code per

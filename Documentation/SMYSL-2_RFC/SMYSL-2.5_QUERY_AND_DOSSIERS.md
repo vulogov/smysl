@@ -2237,8 +2237,16 @@ across stores; computed by merge into the scratch store until SMYSL-2.8), ~~**OQ
 query states its version (`SMY-E427` for one this build does not support), the three ports
 parse it, and every `x.query/saved` unit written since TX-P8 carries it in its text, so a rename
 is a new language version and a migration of saved queries for no gain in meaning; saved
-queries are in the format as `x.query/v1` (SMYSL-2.3 A-11), **OQ-22** (intent
-classifier; rules by default, `Classifier` port), **OQ-23** (closed op set; `Unknown` preserved),
+queries are in the format as `x.query/v1` (SMYSL-2.3 A-11), ~~**OQ-22**~~ (intent
+classifier) **decided 2026-10-29: the rule table, and no `Classifier` port in SMYSL-2.** GE-T10's
+fresh questions, which the table never saw, classify 84 of 85 (set 1: 135 of 150); every miss in
+either set is a spelling the table does not write — a comma after the verb, a contraction
+(`vom`, `del`, `du`), a plural verb, and on the fresh set French elision (`qu'un` against `est-il
+vrai que `) — which is a rule to add, not a judgement to hand a model. The front's larger loss is
+the subject (8 of 85 fresh, 7 of set 1's 22 losses), inflected names an alias does not spell,
+which no intent classifier touches. A model classifier would make every `ask` model-dependent
+for that margin, and `--intent` already names what the table misses. The spelling fixes are owed
+to a third question set, since the two sets found them, **OQ-23** (closed op set; `Unknown` preserved),
 ~~**OQ-24**~~ **decided 2026-10-29 as proposed**: one stderr line whenever a lens touched a
 unit, silence when none did (§3.9).
 

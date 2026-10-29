@@ -21,6 +21,25 @@ is the list of record; this is where it stands as the cycle opens.
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 there are none yet; they stay owed rather than planned.
 
+### What a model wrote, and what classifies a question
+
+**OQ-34: model output in the tree.** Decided by the owner: verbatim output only from an
+open-weights model under a permissive licence, named with its licence beside the fixture; from
+any model, hosted ones included, derived data only — counts, agreement figures, hashes, uids —
+never a hosted model's text. That is what the repository already did: arm L is Apache 2.0,
+`fixtures/measure/ge-t3.tsv` holds deepseek-chat's counts and not its runs, and the ingest tests
+run scripted providers. MPL-2.0 is then true of every file without reading a provider's terms.
+`fixtures/README.md` states the rule, and a hosted transcript that ever must be committed is an
+exception recorded against its fixture.
+
+**OQ-22: `ask` classifies with its rule table, and the model port stays unbuilt.** On GE-T10's
+fresh questions, which the table never saw, it classifies 84 of 85 (135 of 150 on set 1). Every
+miss in either set is a spelling the table does not write — a comma after the verb, `vom`/`del`/
+`du`, a plural verb, and French elision (`qu'un` against `est-il vrai que `) — and the front's
+larger loss is the subject, inflected names no intent classifier touches. A model classifier
+would make every `ask` model-dependent for that margin, and `--intent` covers it. The spelling
+fixes are owed to a third question set, since these two found them.
+
 ### The generator was a standard all along, and seven more questions closed
 
 SMYSL-2.7's OQ-25, OQ-26 and OQ-28 and SMYSL-2.6's OQ-56 to OQ-59 are decided, which empties
