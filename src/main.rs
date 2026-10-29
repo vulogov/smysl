@@ -9439,8 +9439,11 @@ fn q_run(
         }
         Job::Ask { .. } => unreachable!("translated and run as a `Job::Run` above"),
     };
-    let _ = &plan;
-
+    // OQ-24: a lens that touched a unit is said, on stderr beside the warnings, so an answer
+    // read through one never looks like one read raw; a run over current units says nothing.
+    if let Some(note) = smysl::query::lens_note(&plan) {
+        eprintln!("smysl q: {note}");
+    }
     for w in &first.warnings {
         eprintln!("smysl q: {}: {}", w.code.as_str(), w.message);
     }

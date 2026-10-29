@@ -148,6 +148,47 @@ fn migrate_stages_and_exits_ten() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// OQ-24: `q` states on stderr the chain a lens read a unit through, and says nothing when no
+/// lens touched one; stdout is the answer either way.
+#[test]
+fn q_states_a_lens_that_touched_a_unit() {
+    use smysl::schema::UnitView;
+    use smysl::surface::HValue;
+    use smysl::{Record, SchemaId, Status, UnitCoreBuilder};
+
+    let dir = std::env::temp_dir().join(format!("smysl-cmd-q-lens-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let bytes = std::fs::read(fixture("widening-paired.cbor")).unwrap();
+    let (mut records, _) = smysl::from_cbor_seq(&bytes).unwrap();
+    let view = UnitView {
+        ty: SchemaId::parse("x.rule/item").unwrap(),
+        payload: [("rule:mode".to_string(), HValue::Str("quiet".into()))].into(),
+    };
+    let unit = UnitCoreBuilder::new(view.ty.clone(), "a quiet one", Status::Speculative)
+        .payload(view.payload_bytes().unwrap())
+        .build()
+        .unwrap();
+    records.push(Record::Unit(unit));
+    let store = dir.join("store.cbor");
+    std::fs::write(&store, smysl::to_cbor_seq(&records)).unwrap();
+    let store = store.to_str().unwrap();
+
+    let lensed = run(&["q", "where mode = loud", store]);
+    assert_eq!(code(&lensed), 0, "{}", err(&lensed));
+    let line = err(&lensed);
+    assert!(
+        line.starts_with("smysl q: lenses: 1 unit(s) read through x.rule/v1 1->2 (chain "),
+        "{line}"
+    );
+    assert_eq!(line.lines().count(), 1, "{line}");
+
+    let raw = run(&["q", "find \"quiet\"", store]);
+    assert_eq!(code(&raw), 0, "{}", err(&raw));
+    assert!(!err(&raw).contains("lenses:"), "{}", err(&raw));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `fmt` round-trips an FC-9 declaration (TX-P12 step 7's exit, at the command): Appendix C's
 /// `x.text/v1` written canonically, and the canonical text checked as its own fixed point.
 #[test]

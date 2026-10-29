@@ -18,7 +18,7 @@ use smysl_core::surface::HValue;
 use smysl_core::types::{Record, SchemaDecl, Status, UnitCore, UnitCoreBuilder};
 use smysl_core::{SchemaId, Uid};
 use smysl_graph::Store;
-use smysl_query::{explain, parse, plan, run, Env, PlanOptions, StoreScope};
+use smysl_query::{explain, lens_note, parse, plan, run, Env, PlanOptions, StoreScope};
 
 const NAME: &str = "s195";
 
@@ -252,6 +252,32 @@ fn the_section_19_5_rewrite_is_printed_as_section_4_4_shows_it() {
     );
     assert!(lenses.ends_with("units read, 0 unmappable"), "{lenses}");
     assert!(text.contains("fields text:mode, text:verbatim\n"), "{text}");
+}
+
+/// OQ-24: a run states the chain whenever a lens touched a unit, and says nothing when none
+/// did — a query over raw fields, or over a store with no older revision.
+#[test]
+fn a_lens_that_touched_a_unit_is_stated_and_none_is_silent() {
+    let note = |store: &Store, q: &str| {
+        let scope = StoreScope::new(NAME, store);
+        let env = Env::new(store, &scope);
+        let parsed = parse(q).unwrap_or_else(|d| panic!("{q}: {}", d.message));
+        let p = plan(&parsed.query, &env, &PlanOptions::default())
+            .unwrap_or_else(|d| panic!("{q}: {:?}", d));
+        lens_note(&p)
+    };
+    let f = fixture();
+    let line =
+        note(&f.store, "where mode = reported").expect("units written at revision 1 are lensed");
+    assert!(
+        line.starts_with("lenses: 2 unit(s) read through x.text/v1 1->2 (chain "),
+        "{line}"
+    );
+    assert!(line.ends_with(", 0 unmappable)"), "{line}");
+    assert_eq!(note(&f.store, "find \"pool\""), None);
+    let u = unit("plain", &[("colour", s("red"))]);
+    let store = Store::from_records(vec![Record::Unit(u)]);
+    assert_eq!(note(&store, "where colour = red"), None);
 }
 
 /// The pinned query keeps revision 1's narrow meaning: a revision-1 `reported`, and a

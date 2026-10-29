@@ -21,6 +21,42 @@ is the list of record; this is where it stands as the cycle opens.
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 there are none yet; they stay owed rather than planned.
 
+### A lens that read a unit says so, and five questions closed as built or as not needed
+
+Six open questions from four RFCs, the last ones listed against complete phases.
+
+**OQ-24: a lens that touched a unit is stated.** `smysl q` now prints one line on stderr whenever
+a lens read a unit, beside the warnings: `smysl q: lenses: 2 unit(s) read through x.text/v1 1->2
+(chain …, 0 unmappable)`, chains joined by `;`. A run that reads only current units, or only raw
+fields, prints nothing, so the line means something when it appears. Until now the counts
+reached the screen only under `--explain`, and an answer read through a lens looked like one
+read raw unless a value was lost (`SMY-W420`). `smysl_query::lens_note` makes the line from the
+plan.
+
+**OQ-53: no lenses on nested payload keys.** A lens step is checked against its revision's
+`fields:` table, which is flat — FC-9 has no object type — so no declaration could type a nested
+key for a step to be checked against. `payload_strings`' dotted path stays a retrieval key; as a
+lens address it would give `a.b` and `{a: {b}}` one step. Raw sq field access reads top-level
+keys only, so `where a.b = …` misses a nested value `find` indexes; recorded, not changed.
+
+**OQ-41 and OQ-43, ratified as built.** The quote leaves a unit that gets a span; the question's
+premise, that this changes the uid against prose ingest of the same text, never held, because
+`source` is in the core and the two sources always differ. `E442` stays strict: each window is its
+own request, so a store uid the model was not shown came from somewhere else. The manual said
+`--digest-budget 0` turned the check off; it sends no digest, which leaves the check at its
+strictest, and the manual now says so.
+
+**OQ-13: no speaker or device target for a dating.** The target is inside the did and the decoder
+refuses a fifth kind it cannot keep, so either would be a wire amendment every older reader
+refuses; a pseudonymised library holds `spk:` keys, not the ids a caller knows; and nothing
+records a device.
+
+**OQ-65, recorded.** The entry points were generalised in place in 1.10.0, in argument position so
+that semver reports nothing; no `_in` twin exists.
+
+SMYSL-2.4, 2.5 and 2.8 §9, SMYSL-2.5 §3.9, the roadmap and the manual record it; the manual's
+PDF is rebuilt for the corrected sentence.
+
 ### A thread that spans files, kept where `ref` can keep it, and P1 beside what was accepted
 
 SMYSL-2.7's last four open questions are decided, which empties TX-P11's row of the roadmap.

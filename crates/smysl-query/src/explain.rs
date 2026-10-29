@@ -26,6 +26,35 @@ pub fn short_hash(h: &[u8; 32]) -> String {
     format!("{}…{}", &hex[..4], &hex[hex.len() - 2..])
 }
 
+/// The one line a run states when a lens touched a unit (OQ-24): every chain the candidates
+/// were read through, with how many units each read and how many it could not carry. `None`
+/// when no lens touched one, so a run over current units says nothing. `--explain` prints the
+/// same counts in the plan.
+pub fn lens_note(plan: &Plan) -> Option<String> {
+    let chains: Vec<String> = plan
+        .steps
+        .iter()
+        .filter_map(|s| match s {
+            PlanStep::Lens { chains, .. } => Some(chains),
+            _ => None,
+        })
+        .flatten()
+        .filter(|c| c.read > 0)
+        .map(|c| {
+            format!(
+                "{} unit(s) read through {} {}->{} (chain {}, {} unmappable)",
+                c.read,
+                c.id,
+                c.from,
+                c.to,
+                short_hash(&c.hash),
+                c.unmappable
+            )
+        })
+        .collect();
+    (!chains.is_empty()).then(|| format!("lenses: {}", chains.join("; ")))
+}
+
 /// The plan as `--explain` prints it.
 pub fn explain(plan: &Plan) -> String {
     let mut out = String::new();

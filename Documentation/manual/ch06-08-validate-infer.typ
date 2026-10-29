@@ -865,7 +865,8 @@ The **ledger digest** is what stops each window being extracted as though the
 expression began there. Records already extracted from this expression are
 listed `label: gist` inside a second fence, and those labels are the only
 names from outside the batch an answer may use: anything else that happens to
-resolve in the store is `SMY-E442`. `--digest-budget 0` turns it off.
+resolve in the store is `SMY-E442`. `--digest-budget 0` sends no digest, which
+leaves no outside name usable: the check is then at its strictest, not off.
 
 **Dates, speakers, languages, spans and sources are the tool's.** A text
 answer that supplies one has it dropped with `SMY-W444` — the reading knows

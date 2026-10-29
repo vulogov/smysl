@@ -59,6 +59,7 @@ pub use ast::Query;
 pub use dossier::{ask, AskError, AskOptions, Dossier, Intent, Ranking, SlotResult};
 pub use exec::{run, Answer, Run};
 pub use explain::explain;
+pub use explain::lens_note;
 pub use explain::why;
 pub use fuse::{Fused, Placement, Ranked, RRF_K};
 pub use nl::{accept, Accepted, TranslateContext, TranslateError, Translator};
