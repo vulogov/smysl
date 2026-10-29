@@ -3,7 +3,8 @@
 //! entity port finds — over `fixtures/dossier/third/questions.tsv`, sixteen questions in five
 //! languages written before either fix and scored first without them
 //! (`fixtures/dossier/third/baseline.txt`); and over the fourth set, which does the same for
-//! the intent rules the third set's losses named (`fixtures/dossier/fourth/`).
+//! the intent rules the third set's losses named (`fixtures/dossier/fourth/`), and the fifth
+//! for the rules the fourth's named (`fixtures/dossier/fifth/`).
 //!
 //! It is here and not beside `smysl-query`'s GE-T10 because the subject's stems are this
 //! crate's: [`Stemmed`] reads them through the analyzer chain that indexes a library, and the
@@ -148,8 +149,8 @@ fn table(title: &str, questions: &str) -> (String, Front) {
     (out, all)
 }
 
-/// The third set, out of sample for its fixes and in-sample for the fourth set's rules, which
-/// it found; the fourth, out of sample for those; and sets 1 and fresh beside them, in-sample for
+/// Each of the third, fourth and fifth sets out of sample for the rules declared before it was
+/// written and in-sample for the ones its own losses named; and sets 1 and fresh beside them, in-sample for
 /// the spellings (they found them) and for the stems (they found the inflections). Pinned:
 /// a change to the table, the stemmer or the port that moves one is a change to record.
 #[test]
@@ -164,7 +165,12 @@ fn ge_t10_third_set() {
         (
             "fourth set",
             "fixtures/dossier/fourth/questions.tsv",
-            (80, 55, 49, 55),
+            (80, 79, 70, 78),
+        ),
+        (
+            "fifth set",
+            "fixtures/dossier/fifth/questions.tsv",
+            (80, 43, 41, 43),
         ),
         (
             "set 1 (in-sample)",

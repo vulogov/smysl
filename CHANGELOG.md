@@ -43,6 +43,17 @@ for the same openers (`Nachweis`, `¿Existen pruebas`, `свидетельств
 parle-t-on`, `¿Dónde se habla de`). They are owed to a fifth set and not added here; `--intent`
 names any of them meanwhile. Same hand as the rules, and the set says so.
 
+**A second round.** Rules for those 25 were declared the same way before a **fifth set** was
+written (`fixtures/dossier/fifth/`): the past of a rule's verb (`What depended on`, `Was hing …
+ab`, `¿De dónde vino`, `D'où venait`, `Кто утверждал`), other words for evidence, belief as
+attribution (`Who believed`, `Qui croyait au`), `se habla de` and `parle-t-on de`. Intent on the
+fifth set **21 → 43 of 80**; the fourth, now in-sample, 79 of 80 (`Wer behauptete` was left out
+of the declaration). The fifth set was written to reach past the rules, and what it loses is
+mostly construction rather than vocabulary — `how did X arise`, `describe`, `en qué consiste`,
+comparison as a verb of difference, dependence as `built on`, attribution as doubt — with one
+question read as the wrong intent. Each round reads more and finds a new kind of phrasing, so
+further rounds wait for questions people actually ask.
+
 ### Who approved a translated query, and a subject found by its stems
 
 The last questions of the cycle and the two pieces of work OQ-22 left owed.

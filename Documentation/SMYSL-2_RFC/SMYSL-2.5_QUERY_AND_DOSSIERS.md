@@ -770,7 +770,9 @@ no version marker is read without a lens and counted (`SMY-W475`). Unit conversi
    found a wrong subject in any set. Set 1 143 → 150 and the fresh set 77 → 83 (in-sample);
    the two the stems cannot reach are a German compound (`Cholerabazillus`) and a Russian
    adjective (`холерный`). On the fourth set the subject is found for every question whose intent
-   is read, 55 of 80. `crates/smysl-text/tests/ge_t10_third.rs` pins the four.
+   is read, 55 of 80; on the fifth 43 of 80, every miss an unread intent but one comparison
+   that names two subjects and is taken for the longer.
+   `crates/smysl-text/tests/ge_t10_third.rs` pins the five.
 2. **Intent.** A closed rule table per tier-1 language (`define, explain, verify, attribute,
    trace, locate, depend, compare`): ordered regular patterns over the folded question ("what
    is", "что такое", "qu'est-ce que", "was ist", "qué es", …). No rule matches: `SMY-E468`,
@@ -2274,7 +2276,21 @@ was written (`fixtures/dossier/fourth/`, the list in its header) and scored with
 `vino`, `venait`, `утверждал`), the rest other words for the same openers (`Nachweis`,
 `existen pruebas`, `свидетельства`, `who believed`, `où parle-t-on`, `se habla de`, `what made`,
 `how does … compare with`). They are owed to a fifth set, not added here, and none is a case
-for a model: each is a rule `--intent` covers until it is written. **OQ-23** (closed op set; `Unknown` preserved),
+for a model: each is a rule `--intent` covers until it is written. **A second round
+(2026-10-29):** rules for those 25 — the past of a rule's verb (`depended on`, `hing … ab`,
+`vino`, `venait`, `утверждал`), other words for evidence (`Nachweis`, `existen pruebas`,
+`свидетельства`), belief as attribution (`who believed`, `qui croyait au`), `se habla de` and
+`parle-t-on de`, and four openers met once — declared the same way before a fifth set was
+written (`fixtures/dossier/fifth/`). Intent there **21 → 43 of 80**; the fourth set, now
+in-sample, 79 of 80 (the miss is `wer behauptete`, which the declaration left out). The fifth
+set was written to reach further than the rules, and its 37 losses are mostly constructions
+rather than words — `how did X arise` in four languages, a definition asked as `describe` or
+`en qué consiste`, a comparison as a verb of difference or as `X versus Y` in the language's own
+word, attribution as doubt, dependence as `built on` — with one question read as the wrong
+intent (`What was built on …` as define). Each round reads more and finds a new kind of phrasing,
+so the table is a vocabulary that grows with use, not one a set closes; further rounds wait for
+questions people ask. One subject finding: a comparison's subject is the longest name it holds
+(step 1), so `How does Semmelweis compare with Joseph Lister?` asks about Lister. **OQ-23** (closed op set; `Unknown` preserved),
 ~~**OQ-24**~~ **decided 2026-10-29 as proposed**: one stderr line whenever a lens touched a
 unit, silence when none did (§3.9).
 

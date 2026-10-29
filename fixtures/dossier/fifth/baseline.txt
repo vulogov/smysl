@@ -1,0 +1,71 @@
+# GE-T10's fifth set, the front before the declared rules 9-13 (intent table and entity port as
+# of commit 69855fe), written by `cargo test -p smysl-text --features stem --test ge_t10_third -- --nocapture`.
+GE-T10, fifth set: the front
+  lang     intent   subject spelled   subject stemmed
+  de         4/16      4/16              4/16 
+  en         6/16      7/16              7/16 
+  es         3/16      3/16              3/16 
+  fr         1/16      1/16              1/16 
+  ru         7/16      6/16              7/16 
+  all       21/80     21/80             22/80 
+  every question lost, and every subject only the stems found:
+    ls-define3     en  SMY-E468: What precisely was Joseph Lister known for?
+    ls-define3     fr  SMY-E468: Qui fut Joseph Lister ?
+    ls-define3     ru  SMY-E468: Что представлял собой Джозеф Листер как хирург?
+    sc-define3     en  SMY-E468: Describe scurvy
+    sc-define3     de  SMY-E468: Was versteht man unter Skorbut?
+    sc-define3     es  SMY-E468: ¿En qué consiste el escorbuto?
+    sc-define3     fr  SMY-E468: Qu'appelle-t-on le scorbut ?
+    mi-explain3    en  SMY-E468: What made people believe in miasma?
+    je-explain2    de  SMY-E468: Aus welchem Grund nutzte Jenner Kuhpocken?
+    je-explain2    es  SMY-E468: ¿Cómo es que Jenner usó la viruela vacuna?
+    je-explain2    fr  SMY-E468: Comment se fait-il que Jenner ait utilisé la vaccine ?
+    ph-verify3     de  SMY-E468: Gibt es einen Nachweis, dass Phlogiston existierte?
+    ph-verify3     es  SMY-E468: ¿Existen pruebas de que el flogisto existiera?
+    ph-verify3     fr  SMY-E468: Existe-t-il des preuves que le phlogistique existait ?
+    ph-verify3     ru  SMY-E468: Есть ли свидетельства, что флогистон существовал?
+    se-verify3     de  SMY-E468: Hat Semmelweis die Sterblichkeit wirklich gesenkt?
+    se-verify3     fr  SMY-E468: Est-ce que Semmelweis a vraiment réduit la mortalité ?
+    ph-attribute2  en  SMY-E468: Who believed that phlogiston was real?
+    ph-attribute2  de  SMY-E468: Wer glaubte an das Phlogiston?
+    ph-attribute2  es  SMY-E468: ¿Quién creía en el flogisto?
+    ph-attribute2  fr  SMY-E468: Qui croyait au phlogistique ?
+    ph-attribute2  ru  SMY-E468: Кто верил во флогистон?
+    sn-attribute2  en  SMY-E468: Who doubted John Snow?
+    sn-attribute2  de  SMY-E468: Wer bezweifelte John Snow?
+    sn-attribute2  es  SMY-E468: ¿Quién dudaba de John Snow?
+    sn-attribute2  fr  SMY-E468: Qui doutait de John Snow ?
+    sn-attribute2  ru  SMY-E468: Кто сомневался в Джоне Сноу?
+    sp-trace3      en  SMY-E468: Where did smallpox come from originally?
+    sp-trace3      de  SMY-E468: Woher kamen die Pocken?
+    sp-trace3      es  SMY-E468: ¿De dónde vino la viruela?
+    sp-trace3      fr  SMY-E468: D'où est venue la variole ?
+    mi-trace2      de  SMY-E468: Wie entstand die Miasmatheorie?
+    mi-trace2      es  SMY-E468: ¿Cómo surgió la teoría del miasma?
+    mi-trace2      fr  SMY-E468: Comment est née la théorie du miasme ?
+    mi-trace2      ru  SMY-E468: Как возникла теория миазмов?
+    ph-locate2     es  SMY-E468: ¿Dónde se habla del flogisto?
+    ph-locate2     fr  SMY-E468: Où parle-t-on du phlogistique ?
+    ph-locate2     ru  found by stems only: Где говорится о флогистоне?
+    sn-locate2     de  SMY-E468: Wo taucht John Snow auf?
+    sn-locate2     es  SMY-E468: ¿En qué textos aparece John Snow?
+    sn-locate2     fr  SMY-E468: Dans quels textes apparaît John Snow ?
+    mi-depend2     en  SMY-E468: What relied on miasma?
+    mi-depend2     de  SMY-E468: Was hing vom Miasma ab?
+    mi-depend2     es  SMY-E468: ¿Qué dependía del miasma?
+    mi-depend2     fr  SMY-E468: Qu'est-ce qui dépendait du miasme ?
+    mi-depend2     ru  SMY-E468: Что зависело от миазмов?
+    je-depend2     en  read as define: What was built on Jenner's work?
+    je-depend2     de  SMY-E468: Was baute auf Jenners Arbeit auf?
+    je-depend2     es  SMY-E468: ¿Qué se basaba en el trabajo de Jenner?
+    je-depend2     fr  SMY-E468: Qu'est-ce qui reposait sur le travail de Jenner ?
+    je-depend2     ru  SMY-E468: Что опиралось на работу Дженнера?
+    se-compare2    en  SMY-E468: How does Semmelweis compare with Joseph Lister?
+    se-compare2    de  SMY-E468: Wie unterscheidet sich Semmelweis von Joseph Lister?
+    se-compare2    es  SMY-E468: ¿En qué se diferencia Semmelweis de Joseph Lister?
+    se-compare2    fr  SMY-E468: En quoi Semmelweis diffère-t-il de Joseph Lister ?
+    se-compare2    ru  SMY-E468: Чем Земмельвейс отличается от Джозефа Листера?
+    mi-compare2    en  SMY-E468: Miasma or contagion: which was right?
+    mi-compare2    es  SMY-E468: Miasma frente a contagio
+    mi-compare2    fr  SMY-E468: Miasme contre contagion
+    mi-compare2    ru  SMY-E468: Миазмы против заразы

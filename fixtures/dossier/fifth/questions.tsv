@@ -1,0 +1,122 @@
+# GE-T10's fifth question set (SMYSL-2.5 OQ-22's owed intent vocabulary, second round): sixteen
+# questions, two per intent, each asked in the five tier-1 languages, eighty rows, over the
+# committed corpus (`../gold/corpus.smy`). Only the front is scored on it, as on `../fourth/`.
+#
+# WHY A FIFTH SET. The fourth set's losses were openers the table did not write. The rules for
+# them were listed here, exactly, before a word of this set was written, and are scored on this
+# set, whose front was taken before the code changed (`baseline.txt`). No rule is added or
+# changed after a run of this set; a miss it finds is owed to a sixth.
+#
+# THE RULES, DECLARED (from the fourth set's losses only):
+#   9. a rule's verb in the past where the table had only the present:
+#        en  what depended on / what relied on
+#        de  was hing von … ab / was hing vom … ab / was hing von der … ab / woher kam / woher kamen
+#        es  qué dependía de / qué dependía del / qué dependían de / de dónde vino / de donde vino /
+#            de dónde venía
+#        fr  qu'est-ce qui dépendait de / … du / … des / d'où venait / d'où est venu / d'où est venue
+#        ru  что зависело от / кто утверждал / кто утверждал что
+#  10. other nouns and verbs for evidence:
+#        de  gibt es einen nachweis dass / gibt es nachweise dass
+#        es  existen pruebas de que
+#        fr  existe-t-il des preuves que / existe-t-il des preuves qu'
+#        ru  есть ли свидетельства что
+#  11. belief as attribution:
+#        en  who believed / who believed in / who believed that
+#        de  wer glaubte an / wer glaubte dass
+#        es  quién creía en / quien creía en / quién creía que
+#        fr  qui croyait à / qui croyait au / qui croyait aux / qui croyait en / qui croyait que
+#        ru  кто верил в / кто верил что
+#  12. other verbs for where a subject is mentioned:
+#        es  dónde se habla de / dónde se habla del / donde se habla de
+#        fr  où parle-t-on de / où parle-t-on du / où parle-t-on des
+#  13. three openers met once each:
+#        en  what precisely is / what precisely was (define), what made (explain),
+#            … compare with … (compare, an infix)
+#        ru  что представляет собой / что представлял собой / что представляли собой (define)
+#
+# WHO WROTE THIS. The same hand that declared the rules, after declaring them, so it knew them;
+# the questions are written as a person would ask, and half of them reach for an opener none of
+# the rules writes (another tense, another verb, another construction), which is expected to
+# fail. Nothing was rephrased after a run. Single hand, so no agreement figure.
+#
+# Columns as `../gold/questions.tsv`: qid, intent, lang, question.
+ls-define3	define	en	What precisely was Joseph Lister known for?
+ls-define3	define	de	Wer war eigentlich Joseph Lister?
+ls-define3	define	es	¿Quién era Joseph Lister?
+ls-define3	define	fr	Qui fut Joseph Lister ?
+ls-define3	define	ru	Что представлял собой Джозеф Листер как хирург?
+sc-define3	define	en	Describe scurvy
+sc-define3	define	de	Was versteht man unter Skorbut?
+sc-define3	define	es	¿En qué consiste el escorbuto?
+sc-define3	define	fr	Qu'appelle-t-on le scorbut ?
+sc-define3	define	ru	Что такое цинга?
+mi-explain3	explain	en	What made people believe in miasma?
+mi-explain3	explain	de	Weshalb glaubte man an das Miasma?
+mi-explain3	explain	es	¿Por qué la gente creía en el miasma?
+mi-explain3	explain	fr	Pourquoi croyait-on au miasme ?
+mi-explain3	explain	ru	Отчего люди верили в миазмы?
+je-explain2	explain	en	How come Jenner used cowpox?
+je-explain2	explain	de	Aus welchem Grund nutzte Jenner Kuhpocken?
+je-explain2	explain	es	¿Cómo es que Jenner usó la viruela vacuna?
+je-explain2	explain	fr	Comment se fait-il que Jenner ait utilisé la vaccine ?
+je-explain2	explain	ru	Почему Дженнер использовал коровью оспу?
+ph-verify3	verify	en	Is there proof that phlogiston existed?
+ph-verify3	verify	de	Gibt es einen Nachweis, dass Phlogiston existierte?
+ph-verify3	verify	es	¿Existen pruebas de que el flogisto existiera?
+ph-verify3	verify	fr	Existe-t-il des preuves que le phlogistique existait ?
+ph-verify3	verify	ru	Есть ли свидетельства, что флогистон существовал?
+se-verify3	verify	en	Did Semmelweis really lower the death rate?
+se-verify3	verify	de	Hat Semmelweis die Sterblichkeit wirklich gesenkt?
+se-verify3	verify	es	¿Es cierto que Semmelweis redujo la mortalidad?
+se-verify3	verify	fr	Est-ce que Semmelweis a vraiment réduit la mortalité ?
+se-verify3	verify	ru	Действительно ли Земмельвейс снизил смертность?
+ph-attribute2	attribute	en	Who believed that phlogiston was real?
+ph-attribute2	attribute	de	Wer glaubte an das Phlogiston?
+ph-attribute2	attribute	es	¿Quién creía en el flogisto?
+ph-attribute2	attribute	fr	Qui croyait au phlogistique ?
+ph-attribute2	attribute	ru	Кто верил во флогистон?
+sn-attribute2	attribute	en	Who doubted John Snow?
+sn-attribute2	attribute	de	Wer bezweifelte John Snow?
+sn-attribute2	attribute	es	¿Quién dudaba de John Snow?
+sn-attribute2	attribute	fr	Qui doutait de John Snow ?
+sn-attribute2	attribute	ru	Кто сомневался в Джоне Сноу?
+sp-trace3	trace	en	Where did smallpox come from originally?
+sp-trace3	trace	de	Woher kamen die Pocken?
+sp-trace3	trace	es	¿De dónde vino la viruela?
+sp-trace3	trace	fr	D'où est venue la variole ?
+sp-trace3	trace	ru	Откуда появилась оспа?
+mi-trace2	trace	en	How did the miasma theory develop?
+mi-trace2	trace	de	Wie entstand die Miasmatheorie?
+mi-trace2	trace	es	¿Cómo surgió la teoría del miasma?
+mi-trace2	trace	fr	Comment est née la théorie du miasme ?
+mi-trace2	trace	ru	Как возникла теория миазмов?
+ph-locate2	locate	en	Where is phlogiston discussed?
+ph-locate2	locate	de	Wo ist von Phlogiston die Rede?
+ph-locate2	locate	es	¿Dónde se habla del flogisto?
+ph-locate2	locate	fr	Où parle-t-on du phlogistique ?
+ph-locate2	locate	ru	Где говорится о флогистоне?
+sn-locate2	locate	en	Where does John Snow appear?
+sn-locate2	locate	de	Wo taucht John Snow auf?
+sn-locate2	locate	es	¿En qué textos aparece John Snow?
+sn-locate2	locate	fr	Dans quels textes apparaît John Snow ?
+sn-locate2	locate	ru	Где упоминается Джон Сноу?
+mi-depend2	depend	en	What relied on miasma?
+mi-depend2	depend	de	Was hing vom Miasma ab?
+mi-depend2	depend	es	¿Qué dependía del miasma?
+mi-depend2	depend	fr	Qu'est-ce qui dépendait du miasme ?
+mi-depend2	depend	ru	Что зависело от миазмов?
+je-depend2	depend	en	What was built on Jenner's work?
+je-depend2	depend	de	Was baute auf Jenners Arbeit auf?
+je-depend2	depend	es	¿Qué se basaba en el trabajo de Jenner?
+je-depend2	depend	fr	Qu'est-ce qui reposait sur le travail de Jenner ?
+je-depend2	depend	ru	Что опиралось на работу Дженнера?
+se-compare2	compare	en	How does Semmelweis compare with Joseph Lister?
+se-compare2	compare	de	Wie unterscheidet sich Semmelweis von Joseph Lister?
+se-compare2	compare	es	¿En qué se diferencia Semmelweis de Joseph Lister?
+se-compare2	compare	fr	En quoi Semmelweis diffère-t-il de Joseph Lister ?
+se-compare2	compare	ru	Чем Земмельвейс отличается от Джозефа Листера?
+mi-compare2	compare	en	Miasma or contagion: which was right?
+mi-compare2	compare	de	Miasma versus Ansteckung
+mi-compare2	compare	es	Miasma frente a contagio
+mi-compare2	compare	fr	Miasme contre contagion
+mi-compare2	compare	ru	Миазмы против заразы
