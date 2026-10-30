@@ -772,9 +772,23 @@ no version marker is read without a lens and counted (`SMY-W475`). Unit conversi
    adjective (`холерный`). *Since 2026-10-29, a comparison:* it names two subjects and the
    dossier has one, so the run that starts earliest wins and the longest only at that start —
    `How does Semmelweis compare with Joseph Lister?` asks about Semmelweis, where the longest
-   name anywhere made it Lister; every other intent keeps the longest. On the fourth set the subject is found for every question whose intent
-   is read, 55 of 80; on the fifth 44 of 80, every miss an unread intent; on the sixth 46.
-   `crates/smysl-text/tests/ge_t10_third.rs` pins the six.
+   name anywhere made it Lister; every other intent keeps the longest. On the fourth set the
+   subject is found for every question whose intent is read, 55 of 80; on the fifth 44 of 80,
+   every miss an unread intent; on the sixth 46. *Since 2026-10-30, a word as a part of a
+   name:* when neither a spelling nor a stem finds anything, each single word is tried as
+   containing a name (`Entities::candidates_derived`, `smysl_text::scope::derived_candidates`)
+   — in German, a compound whose first part is the name with at least three letters after it
+   (`Cholera|bazillus`, `Lister|sche`; never a later part, so `Kuhpocken` is not smallpox); in
+   Russian, an adjective whose stem less one relational suffix (`-н`, `-ен`, `-отн`,
+   `-атическ`, `-овск`, …) is the name's stem (`холерный`, `дженнеровский`). A name of more
+   than one word is matched by its last. Both rules were declared before a set of thirty-two
+   German and Russian questions was written (`fixtures/dossier/parts/`) and scored without
+   them: subjects **2 → 32 of 32**, and the fresh set, in-sample, 83 → 85 of 85; no set gained
+   a wrong subject. Five of the thirty-two were expected to fail and did not — hyphenated names
+   (`Semmelweis-Methode`) are a first part too. The German rule's cost is a word that only
+   begins like a name (`Lindenbaum` would find James Lind); it is asked last, so it reaches
+   such a word only in a question nothing else in which names an entity.
+   `crates/smysl-text/tests/ge_t10_third.rs` pins the seven sets and the two rules.
 2. **Intent.** A closed rule table per tier-1 language (`define, explain, verify, attribute,
    trace, locate, depend, compare`): ordered regular patterns over the folded question ("what
    is", "что такое", "qu'est-ce que", "was ist", "qué es", …). No rule matches: `SMY-E468`,

@@ -10,7 +10,9 @@
 //! It is here and not beside `smysl-query`'s GE-T10 because the subject's stems are this
 //! crate's: [`Stemmed`] reads them through the analyzer chain that indexes a library, and the
 //! figure is meant to be the production path's, not a test's copy of it. Two columns for the
-//! subject: as spelled, the port `ask` had before, and through the stems.
+//! subject: as spelled, the port `ask` had before, and through the production port — stems,
+//! then a word as a part of a name (`fixtures/dossier/parts/`, a German compound and a Russian
+//! adjective).
 
 #![cfg(feature = "stem")]
 
@@ -110,7 +112,7 @@ fn front(questions: &str) -> (BTreeMap<String, Front>, Vec<String>) {
         f.stemmed += usize::from(stem.is_ok());
         match (&spelled, &stem) {
             (Err(_), Ok(())) => lost.push(format!(
-                "    {qid:<14} {lang}  found by stems only: {question}"
+                "    {qid:<14} {lang}  found by stems or parts only: {question}"
             )),
             (_, Err(why)) if !why.starts_with("SMY-E468") => {
                 lost.push(format!("    {qid:<14} {lang}  {why}: {question}"))
@@ -124,7 +126,7 @@ fn front(questions: &str) -> (BTreeMap<String, Front>, Vec<String>) {
 fn table(title: &str, questions: &str) -> (String, Front) {
     let (by_lang, lost) = front(questions);
     let mut out = format!(
-        "GE-T10, {title}: the front\n  lang     intent   subject spelled   subject stemmed\n"
+        "GE-T10, {title}: the front\n  lang     intent   subject spelled   subject found\n"
     );
     let mut all = Front::default();
     for (lang, f) in &by_lang {
@@ -166,17 +168,22 @@ fn ge_t10_third_set() {
         (
             "fourth set",
             "fixtures/dossier/fourth/questions.tsv",
-            (80, 80, 71, 79),
+            (80, 80, 71, 80),
         ),
         (
             "fifth set",
             "fixtures/dossier/fifth/questions.tsv",
-            (80, 76, 69, 75),
+            (80, 76, 69, 76),
         ),
         (
             "sixth set",
             "fixtures/dossier/sixth/questions.tsv",
             (80, 43, 40, 46),
+        ),
+        (
+            "parts set",
+            "fixtures/dossier/parts/questions.tsv",
+            (32, 32, 0, 32),
         ),
         (
             "set 1 (in-sample)",
@@ -186,7 +193,7 @@ fn ge_t10_third_set() {
         (
             "fresh set (in-sample)",
             "fixtures/dossier/fresh/questions.tsv",
-            (85, 85, 77, 83),
+            (85, 85, 77, 85),
         ),
     ] {
         let (report, all) = table(title, file);
@@ -199,4 +206,38 @@ fn ge_t10_third_set() {
         }
     }
     assert!(moved.is_empty(), "{}", moved.join("\n"));
+}
+
+/// Rules 22 and 23 directly: a German compound's first part and a Russian adjective find the
+/// name, a compound's later part does not, and nothing is found in a language without a rule.
+#[test]
+fn a_word_names_a_subject_as_its_first_part_or_its_adjective() {
+    let src = std::fs::read_to_string(repo("fixtures/dossier/gold/corpus.smy")).unwrap();
+    let parsed = parse_surface(&src).unwrap();
+    let labels: BTreeMap<String, Uid> = parsed
+        .labels
+        .iter()
+        .map(|(l, u)| (l.to_string(), *u))
+        .collect();
+    let store = Store::from_records(parsed.records);
+    let finds = |word: &str, lang: &str| -> Vec<Uid> {
+        smysl_text::scope::derived_candidates(&store, word, lang)
+            .into_iter()
+            .flatten()
+            .collect()
+    };
+
+    assert!(finds("Cholerabazillus", "de").contains(&labels["e/cholera"]));
+    assert!(finds("Listersche", "de").contains(&labels["e/lister"]));
+    assert!(
+        finds("Kuhpocken", "de").is_empty(),
+        "a later part is not the subject"
+    );
+    assert!(
+        finds("Cholera", "de").is_empty(),
+        "nothing after the name, no compound"
+    );
+    assert!(finds("холерный", "ru").contains(&labels["e/cholera"]));
+    assert!(finds("дженнеровский", "ru").contains(&labels["e/jenner"]));
+    assert!(finds("cholerabacillus", "en").is_empty());
 }

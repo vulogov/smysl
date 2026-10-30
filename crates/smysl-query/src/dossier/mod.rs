@@ -517,7 +517,8 @@ pub fn topic_terms(topic: &str, subject: &str, lang: &str) -> Vec<String> {
 
 /// Step 1: the longest run of the topic's words the port has candidates for — as spelled, and
 /// only when no run matches as spelled, through `lang`'s stemmer
-/// ([`Entities::candidates_stemmed`]). With `first`, which a comparison asks for, the run that
+/// ([`Entities::candidates_stemmed`]); and only when neither finds anything, each single word
+/// as a part of a name ([`Entities::candidates_derived`]). With `first`, which a comparison asks for, the run that
 /// starts earliest wins and the longest only at that start: a comparison names two subjects,
 /// and the one written first is the one it asks about.
 fn find_subject(
@@ -537,14 +538,17 @@ fn find_subject(
     } else {
         spans.sort_by_key(|&(start, len)| (std::cmp::Reverse(len), start));
     }
-    // As spelled, then through the stems.
-    for stemmed in [false, true] {
+    // As spelled, then through the stems, then a word as a part of a name.
+    for pass in 0..3 {
         for &(start, len) in &spans {
+            if pass == 2 && len > 1 {
+                continue;
+            }
             let name = ws[start..start + len].join(" ");
-            let candidates = if stemmed {
-                port.candidates_stemmed(&name, lang)
-            } else {
-                port.candidates(&name)
+            let candidates = match pass {
+                0 => port.candidates(&name),
+                1 => port.candidates_stemmed(&name, lang),
+                _ => port.candidates_derived(&name, lang),
             };
             if candidates.is_empty() {
                 continue;

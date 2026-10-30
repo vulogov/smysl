@@ -12,10 +12,7 @@ and the facade asserts the two are independent.
 What 1.11 leaves open, by what it blocks rather than the order it is easiest. Every SMYSL-2 open
 question but two is closed, so what follows is work owed rather than questions asked.
 
-**A subject written as part of another word.** `ask` finds a subject by its spelling and then
-by its stems, and neither reaches a name inside a German compound (`Cholerabazillus`,
-`Pockenimpfung`) or a Russian adjective made from it (`холерный`). These are the last subject
-misses in GE-T10's question sets whose intent is read.
+**A subject written as part of another word** — *done, see below.*
 
 **An intent table no set closes.** Three rounds, each measured on questions written after its
 rules, lifted the fourth set 40 → 80, the fifth 21 → 76 and the sixth 10 → 43 of 80, and each
@@ -24,6 +21,31 @@ writes.
 
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 GE-T10's gold is single-hand; they stay owed rather than planned.
+
+### A subject inside another word
+
+`ask` found a subject by its spelling and then by its stems, and neither reached a name inside a
+German compound (`Cholerabazillus`, `Pockenimpfung`) or a Russian adjective made from it
+(`холерный`) — the last subject misses in GE-T10's sets with the intent read. A third pass now
+tries each single word as containing a name, when nothing else in the question names one
+(`Entities::candidates_derived`; `smysl_text::scope::derived_candidates` for a library and a
+plain store alike): in German the name is the compound's first part, with three letters or
+more after it, and never a later part, so `Kuhpocken` stays cowpox; in Russian the word's stem
+less one relational suffix is the name's (`холерн` → `холер`, `дженнеровск` → `дженнер`). A
+name of several words is matched by its last.
+
+The two rules were declared before a **subject-parts set** of sixteen German and sixteen Russian
+questions was written (`fixtures/dossier/parts/`) and scored without them (`baseline.txt`):
+
+| parts set, 32 rows | before | after |
+|---|---:|---:|
+| subject found | 2 | 32 |
+
+In-sample, the fresh set's subjects go 83 → 85 of 85, and the fourth and fifth sets each gain
+the one compound they missed; no set gains a wrong subject. Five questions written to fail —
+hyphenated names, `земмельвейсовский` — did not, since a hyphenated name is a first part too.
+The cost is a German word that merely begins like a name: `Lindenbaum` would find James Lind,
+though only in a question in which nothing else names an entity.
 
 ## 1.11.0 — 2026-10-29
 

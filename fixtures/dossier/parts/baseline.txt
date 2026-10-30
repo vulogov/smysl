@@ -1,0 +1,40 @@
+# GE-T10's subject-parts set, the front before the declared rules 22-23 (intent table and entity
+# port as of commit 5e27be5), written by `cargo test -p smysl-text --features stem --test ge_t10_third -- --nocapture`.
+GE-T10, parts set: the front
+  lang     intent   subject spelled   subject stemmed
+  de        16/16      0/16              0/16 
+  ru        16/16      0/16              2/16 
+  all       32/32      0/32              2/32 
+  every question lost, and every subject only the stems found:
+    ch-define4     de  no subject: Was ist ein Choleraerreger?
+    ch-locate3     de  no subject: Wo werden Choleraepidemien erwähnt?
+    sp-define4     de  no subject: Was sind Pockenviren?
+    sp-trace4      de  no subject: Woher stammt die Pockenschutzimpfung?
+    sc-explain4    de  no subject: Warum war die Skorbutbehandlung so schwierig?
+    sc-locate3     de  no subject: Wo werden Skorbutfälle erwähnt?
+    mi-attribute3  de  no subject: Wer behauptet, die Miasmalehre sei richtig?
+    mi-depend3     de  no subject: Was folgt aus der Miasmavorstellung?
+    ph-define4     de  no subject: Was ist die Phlogistontheorie?
+    ph-verify4     de  no subject: Stimmt es, dass die Phlogistonchemie widerlegt wurde?
+    ls-define4     de  no subject: Was ist die Listersche Antisepsis?
+    je-attribute3  de  no subject: Wer sagte, die Jennersche Impfung sei gefährlich?
+    se-explain4    de  no subject: Warum wurde die Semmelweis-Methode abgelehnt?
+    sn-locate3     de  no subject: Wo wird die Snow-Karte erwähnt?
+    li-depend3     de  no subject: Was folgt aus dem Lind-Experiment?
+    ch-compare3    de  no subject: Vergleiche Choleraepidemien und Pockenepidemien
+    ch-define4     ru  no subject: Что такое холерный вибрион?
+    ch-locate3     ru  no subject: Где упоминаются холерные эпидемии?
+    sp-explain4    ru  no subject: Почему оспенная вакцина работала?
+    sp-trace4      ru  no subject: Откуда пришла оспенная эпидемия?
+    sc-define4     ru  no subject: Что такое цинготная болезнь?
+    sc-attribute3  ru  no subject: Кто утверждает, что цинготные симптомы излечимы?
+    mi-depend3     ru  no subject: Что следует из миазматической теории?
+    mi-verify4     ru  no subject: Правда ли, что миазматическая гипотеза была ошибочной?
+    ph-define4     ru  found by stems only: Что такое флогистонная теория?
+    ph-explain4    ru  found by stems only: Почему флогистонная химия была отвергнута?
+    je-define4     ru  no subject: Что такое дженнеровская вакцина?
+    je-attribute3  ru  no subject: Кто сказал, что дженнеровский метод опасен?
+    ls-depend3     ru  no subject: Что зависит от листеровского метода?
+    se-explain4    ru  no subject: Почему земмельвейсовский метод отвергли?
+    li-depend3     ru  no subject: Что следует из линдовского опыта?
+    ch-compare3    ru  no subject: Сравни холерные и оспенные эпидемии
