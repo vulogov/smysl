@@ -787,8 +787,15 @@ no version marker is read without a lens and counted (`SMY-W475`). Unit conversi
    a wrong subject. Five of the thirty-two were expected to fail and did not — hyphenated names
    (`Semmelweis-Methode`) are a first part too. The German rule's cost is a word that only
    begins like a name (`Lindenbaum` would find James Lind); it is asked last, so it reaches
-   such a word only in a question nothing else in which names an entity.
-   `crates/smysl-text/tests/ge_t10_third.rs` pins the seven sets and the two rules.
+   such a word only in a question nothing else in which names an entity. *Then two rules for
+   that cost*, declared before a list of thirty false friends and guard words was written
+   (`fixtures/dossier/parts/false-friends.tsv`, scored first in `false-friends-baseline.txt`):
+   a German name of fewer than five letters is a first part only before a hyphen or `sch`
+   (`Lind-Versuch`, `Lindsche`; rule 24), and Russian drops `-ическ` (`холерический` is a
+   temperament; rule 25). False hits **10 → 1 of 14**, guards 16 of 16 throughout, and no set's
+   figure moved. The one left is the one expected: `Jennerwein`, a long name, which rule 24
+   does not touch. `crates/smysl-text/tests/ge_t10_third.rs` pins the seven sets, the list and
+   the rules.
 2. **Intent.** A closed rule table per tier-1 language (`define, explain, verify, attribute,
    trace, locate, depend, compare`): ordered regular patterns over the folded question ("what
    is", "что такое", "qu'est-ce que", "was ist", "qué es", …). No rule matches: `SMY-E468`,
@@ -1277,6 +1284,13 @@ Flags:
   flag: routing is the configuration's, as for every model-backed command. `--seed-check` asks
   twice and compares the dossiers record for record, and refuses `--answer`. `q` over a plain
   store now binds the entity port as well, so a dossier slot saved there can be rerun.
+- **As built in 1.12.0:** `ask --misses [STORE]`, and `ask: { log: true }` in the configuration.
+  With the key set, a question no rule reads (`SMY-E468`) or no subject is found for appends a
+  line — code, `--lang` or `-`, the question — to `ask-misses.tsv` beside the configuration (the
+  store's `.smysl/`, or `-C`'s file's directory); `--misses` lists the distinct lines with their
+  counts, by code and language. Off by default, local, no clock and no store in a line, and no
+  exit code or output changes. It is how the intent table's next rules come from questions
+  people ask (CHANGELOG 1.12.0).
 
 Test updates: `command_table_matches_section_23` (30 names), `only_ingest_and_attest_are_model_dependent`
 (mixed = `thread, find, q, ask, migrate`), `tests/dispatch.rs` (30), `tests/cli-surface.txt`,

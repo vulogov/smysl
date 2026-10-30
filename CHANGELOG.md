@@ -17,7 +17,7 @@ question but two is closed, so what follows is work owed rather than questions a
 **An intent table no set closes.** Three rounds, each measured on questions written after its
 rules, lifted the fourth set 40 → 80, the fifth 21 → 76 and the sixth 10 → 43 of 80, and each
 round found new ways of asking. The next rules want questions people ask, not ones one hand
-writes.
+writes — *a way to collect them is done, see below; the rules wait for what it collects.*
 
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 GE-T10's gold is single-hand; they stay owed rather than planned.
@@ -46,6 +46,36 @@ the one compound they missed; no set gains a wrong subject. Five questions writt
 hyphenated names, `земмельвейсовский` — did not, since a hyphenated name is a first part too.
 The cost is a German word that merely begins like a name: `Lindenbaum` would find James Lind,
 though only in a question in which nothing else names an entity.
+
+### The cost of a name inside a word, measured and cut
+
+Two more rules were declared before a list of fourteen false friends and sixteen guard words was
+written (`fixtures/dossier/parts/false-friends.tsv`) and scored without them
+(`false-friends-baseline.txt`). A German name of fewer than five letters is a first part only
+before a hyphen or `sch` — `Lind-Versuch` and `Lindsche` still, `Lind|enbaum` and `Snow|board`
+no longer (rule 24). Russian drops `-ическ` from the suffixes, since `холерический` is a
+temperament and not the disease, whose adjective is `холерный`; `-атическ` stays for
+`миазматический` (rule 25).
+
+| false-friend list | before | after |
+|---|---:|---:|
+| false hits, of 14 | 10 | 1 |
+| guards found, of 16 | 16 | 16 |
+
+The one left is the one expected before the run: `Jennerwein`, a surname, which begins with a
+name of six letters and is out of rule 24's reach. No question set's figure moved, the parts
+set's 32 of 32 among them.
+
+### Questions `ask` could not read, kept on request
+
+`ask: { log: true }` in a store's configuration makes `ask` append each question no rule reads
+(`SMY-E468`) or no subject is found for to `ask-misses.tsv` beside the configuration — the code,
+the `--lang` given or `-`, and the question — and `smysl ask --misses [STORE]` lists the distinct
+ones with their counts, by code and language, the most asked first. It is off unless set, the
+file stays where it is written, a line holds no time and no user, and no exit code or output
+changes when it is on. A value other than `true` or `false` is refused when the configuration
+loads. It is how the intent table's next rules can come from questions people ask: a round
+writes its rules from the log, declares them, and is scored as the three before it were.
 
 ## 1.11.0 — 2026-10-29
 

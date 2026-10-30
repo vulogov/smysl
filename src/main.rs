@@ -951,8 +951,20 @@ fn cli() -> Command {
                 .arg(
                     Arg::new("question")
                         .value_name("QUESTION")
-                        .required(true)
+                        .required_unless_present("misses")
                         .help("The question, in any tier-1 language (en, de, es, fr, ru)"),
+                )
+                .arg(
+                    Arg::new("misses")
+                        .long("misses")
+                        .value_name("PATH")
+                        .num_args(0..=1)
+                        .default_missing_value("")
+                        .conflicts_with("question")
+                        .help(
+                            "List the questions no rule read or no subject was found for, from the \
+                             log `ask: { log: true }` in the store's configuration turns on",
+                        ),
                 )
                 .arg(
                     Arg::new("scope")
@@ -6312,6 +6324,9 @@ fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     use smysl::query::dossier::Intent;
     use smysl::query::{ask, AskError, AskOptions, Env};
 
+    if let Some(store) = m.get_one::<String>("misses") {
+        return ask_misses(global, Some(store.as_str()).filter(|s| !s.is_empty()));
+    }
     let question = m.get_one::<String>("question").expect("required by clap");
     let Some(path) = store_arg(m, global).or(m.get_one::<String>("store").cloned()) else {
         eprintln!("smysl ask: no store given");
@@ -6417,6 +6432,16 @@ fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 return ExitCode::Failure;
             }
         }
+    }
+    // The two misses an intent table or an entity list could learn from, logged when the
+    // configuration asks (`ask: { log: true }`).
+    let missed = match &asked {
+        Err(AskError::Refused(d)) if d.code == smysl::Code::E468 => Some(d.code.as_str()),
+        Err(AskError::NoSubject { .. }) => Some("no-subject"),
+        _ => None,
+    };
+    if let Some(code) = missed {
+        log_ask_miss(global, &path, code, m.get_one::<String>("lang"), question);
     }
     let dossier = match asked {
         Ok(d) => d,
@@ -6555,6 +6580,137 @@ fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Success;
     }
     ask_answer(m, global, &path, corpus, scratch, &dossier)
+}
+
+/// Where `ask` logs the questions it could not read, when the configuration turns the log on
+/// (`ask: { log: true }`): `ask-misses.tsv` beside the configuration — `-C`'s file, or the
+/// store's `.smysl/config.hjson`, `ask` taking its store as an argument rather than `--store`.
+/// `Err` when the log is off, with the line that says why.
+#[cfg(all(feature = "text", feature = "providers"))]
+fn ask_log_path(global: &ArgMatches, store: Option<&str>) -> Result<std::path::PathBuf, String> {
+    let (path, required) = match global.get_one::<String>("config") {
+        Some(p) => (std::path::PathBuf::from(p), true),
+        None => (
+            root_beside(store).join(smysl::ProviderConfigFile::PATH),
+            false,
+        ),
+    };
+    let off = || {
+        format!(
+            "the miss log is off; `ask: {{ log: true }}` in {} turns it on",
+            path.display()
+        )
+    };
+    let src = match std::fs::read_to_string(&path) {
+        Ok(src) => src,
+        Err(e) if required => return Err(format!("{}: {e}", path.display())),
+        Err(_) => return Err(off()),
+    };
+    match smysl::ProviderConfigFile::load(&src) {
+        Ok(cfg) if cfg.ask_log => Ok(path.with_file_name("ask-misses.tsv")),
+        Ok(_) => Err(off()),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+#[cfg(all(feature = "text", not(feature = "providers")))]
+fn ask_log_path(_global: &ArgMatches, _store: Option<&str>) -> Result<std::path::PathBuf, String> {
+    Err(
+        "the miss log is off: it is turned on in the configuration, which this build has no \
+         provider layer to read (build with --features providers)"
+            .into(),
+    )
+}
+
+/// One line of the miss log: the code, the language `--lang` named (`-` for none) and the
+/// question, tab-separated, with tabs and line breaks in the question made spaces. No clock and
+/// no store: the line says what was asked and what stopped it, and nothing about who or when.
+/// A log that cannot be written is said on stderr and changes nothing else.
+#[cfg(feature = "text")]
+fn log_ask_miss(
+    global: &ArgMatches,
+    store: &str,
+    code: &str,
+    lang: Option<&String>,
+    question: &str,
+) {
+    use std::io::Write as _;
+    // Off is the default and says nothing; a configuration that does not load says why.
+    let path = match ask_log_path(global, Some(store)) {
+        Ok(p) => p,
+        Err(why) if why.starts_with("the miss log is off") => return,
+        Err(why) => {
+            eprintln!("smysl ask: the miss log: {why}");
+            return;
+        }
+    };
+    let question: String = question
+        .chars()
+        .map(|c| {
+            if matches!(c, '\t' | '\n' | '\r') {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    let line = format!(
+        "{code}\t{}\t{}\n",
+        lang.map_or("-", String::as_str),
+        question.trim()
+    );
+    let written = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut f| f.write_all(line.as_bytes()));
+    match written {
+        Ok(()) => eprintln!("smysl ask: logged to {}", path.display()),
+        Err(e) => eprintln!("smysl ask: the miss log {}: {e}", path.display()),
+    }
+}
+
+/// `ask --misses`: the log, one line a distinct miss — count, code, language, question — grouped
+/// by code and language, the most asked first.
+#[cfg(feature = "text")]
+fn ask_misses(global: &ArgMatches, store: Option<&str>) -> ExitCode {
+    let path = match ask_log_path(global, store) {
+        Ok(p) => p,
+        Err(why) => {
+            eprintln!("smysl ask: {why}");
+            return ExitCode::Usage;
+        }
+    };
+    let src = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => {
+            eprintln!("smysl ask: {}: {e}", path.display());
+            return ExitCode::Failure;
+        }
+    };
+    let mut counts: std::collections::BTreeMap<(&str, &str, &str), usize> = Default::default();
+    for line in src.lines().filter(|l| !l.trim().is_empty()) {
+        let mut cols = line.splitn(3, '\t');
+        let (Some(code), Some(lang), Some(q)) = (cols.next(), cols.next(), cols.next()) else {
+            continue;
+        };
+        *counts.entry((code, lang, q)).or_default() += 1;
+    }
+    let mut rows: Vec<_> = counts.into_iter().collect();
+    rows.sort_by(|((c1, l1, q1), n1), ((c2, l2, q2), n2)| {
+        (c1, l1, std::cmp::Reverse(n1), q1).cmp(&(c2, l2, std::cmp::Reverse(n2), q2))
+    });
+    for ((code, lang, q), n) in &rows {
+        println!("{n}\t{code}\t{lang}\t{q}");
+    }
+    let asked: usize = rows.iter().map(|(_, n)| n).sum();
+    eprintln!(
+        "smysl ask: {asked} miss(es), {} distinct, in {}",
+        rows.len(),
+        path.display()
+    );
+    ExitCode::Success
 }
 
 #[cfg(not(feature = "text"))]

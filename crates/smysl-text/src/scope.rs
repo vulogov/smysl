@@ -490,7 +490,6 @@ pub fn stemmed_candidates(store: &Store, name: &str, lang: &str) -> Vec<Vec<Uid>
 /// relational suffixes `холерн`, `оспен`, `цинготн`, `миазматическ` and `дженнеровск` carry.
 const RU_ADJECTIVE: &[&str] = &[
     "атическ",
-    "ическ",
     "овск",
     "евск",
     "ск",
@@ -505,10 +504,11 @@ const RU_ADJECTIVE: &[&str] = &[
 /// The entities `word` names as a part of itself (GE-T10's subject-parts set, rules 22 and 23),
 /// matched by an entity's name when it is one word and by its last word when it is more. In
 /// German, the name folded is the compound's first part, with at least three letters after it
-/// (`Cholera|bazillus`; `Kuhpocken` is cowpox, so never a later part). In Russian, the word's
-/// stem less one relational suffix is the name's stem, of at least three letters
-/// (`холерн` → `холер`). Any other language, or a build without `stem` for Russian, finds
-/// nothing.
+/// (`Cholera|bazillus`; `Kuhpocken` is cowpox, so never a later part); a name of fewer than five
+/// letters only before a hyphen or `sch` (`Lind-Versuch`, `Lindsche`, never `Lind|enbaum`, rule
+/// 24). In Russian, the word's stem less one relational suffix is the name's stem, of at least
+/// three letters (`холерн` → `холер`; not `ическ`, since `холерический` is a temperament, rule
+/// 25). Any other language, or a build without `stem` for Russian, finds nothing.
 pub fn derived_candidates(store: &Store, word: &str, lang: &str) -> Vec<Vec<Uid>> {
     fn key(gist: &str) -> &str {
         gist.split_whitespace().last().unwrap_or("")
@@ -518,10 +518,12 @@ pub fn derived_candidates(store: &Store, word: &str, lang: &str) -> Vec<Vec<Uid>
             let word = word.to_lowercase();
             smysl_query::store_scope::entity_candidates_where(store, |gist| {
                 let name = key(gist).to_lowercase();
+                let short = name.chars().count() < 5;
                 name.chars().count() >= 3
-                    && word
-                        .strip_prefix(name.as_str())
-                        .is_some_and(|rest| rest.chars().count() >= 3)
+                    && word.strip_prefix(name.as_str()).is_some_and(|rest| {
+                        rest.chars().count() >= 3
+                            && (!short || rest.starts_with('-') || rest.starts_with("sch"))
+                    })
             })
         }
         "ru" => {

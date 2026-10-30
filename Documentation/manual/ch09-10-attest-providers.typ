@@ -557,6 +557,11 @@ flag that overrides it — `--prompt`, `--path`, `--temperature` — and each is
 range- or value-checked when the file is loaded, so a configuration that cannot
 produce a request is refused before a call is paid for.
 
+From 1.12, an `ask` block holds one key, `log`: `true` keeps the questions
+`ask` could not read in `ask-misses.tsv` beside the configuration, for
+`ask --misses` to list. It is off unless set, and anything but `true` or
+`false` is refused at load.
+
 One thing to know about `temperature` before text ingest asks it of you: there
 it is a correctness parameter rather than a quality knob. Text
 extraction runs each window twice by default and reports what the two passes

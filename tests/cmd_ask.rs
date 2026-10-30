@@ -232,3 +232,69 @@ fn ask_is_labelled_experimental_with_the_figures_that_keep_it_so() {
     );
     assert!(!stdout(&o).contains("experimental"));
 }
+
+/// The miss log: off until the store's configuration says `ask: { log: true }`, then one line a
+/// question no rule read (`SMY-E468`) or no subject was found for, and `--misses` counting them.
+/// Logging changes no exit code and no other output.
+#[cfg(feature = "providers")]
+#[test]
+fn the_miss_log_is_opt_in_local_and_counted_by_misses() {
+    let dir = scratch("misses");
+    let store = dir.join("subjects.smy");
+    std::fs::copy(fixture(), &store).expect("copy the fixture");
+    let store = store.to_string_lossy().to_string();
+    let log = dir.join(".smysl/ask-misses.tsv");
+
+    let o = run(&["ask", "Give me Naomi", &store]);
+    assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
+    assert!(
+        !log.exists(),
+        "nothing is logged until the configuration asks"
+    );
+    let o = run(&["ask", "--misses", &store]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(stderr(&o).contains("the miss log is off"), "{}", stderr(&o));
+
+    std::fs::create_dir_all(dir.join(".smysl")).unwrap();
+    std::fs::write(dir.join(".smysl/config.hjson"), "{ ask: { log: true } }").unwrap();
+    for _ in 0..2 {
+        let o = run(&["ask", "Give me Naomi", &store]);
+        assert_eq!(
+            o.status.code(),
+            Some(2),
+            "a logged miss keeps its exit code"
+        );
+    }
+    let o = run(&["ask", "--lang", "en", "Give me\tNaomi", &store]);
+    assert_eq!(o.status.code(), Some(2));
+    let o = run(&["ask", "What is a Lindenbaum?", &store]);
+    assert_eq!(
+        o.status.code(),
+        Some(1),
+        "no subject is a failure, as it was"
+    );
+    let o = run(&["ask", "What is Naomi?", &store]);
+    assert!(o.status.success(), "a question that is read is not logged");
+
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap(),
+        "SMY-E468\t-\tGive me Naomi\n\
+         SMY-E468\t-\tGive me Naomi\n\
+         SMY-E468\ten\tGive me Naomi\n\
+         no-subject\t-\tWhat is a Lindenbaum?\n"
+    );
+    let o = run(&["ask", "--misses", &store]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert_eq!(
+        stdout(&o),
+        "2\tSMY-E468\t-\tGive me Naomi\n\
+         1\tSMY-E468\ten\tGive me Naomi\n\
+         1\tno-subject\t-\tWhat is a Lindenbaum?\n"
+    );
+    assert!(
+        stderr(&o).contains("4 miss(es), 3 distinct"),
+        "{}",
+        stderr(&o)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

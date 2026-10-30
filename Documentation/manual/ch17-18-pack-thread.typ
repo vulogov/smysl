@@ -657,6 +657,15 @@ languages finds only the units that use its own spelling. Assert every pair. A c
 a clique by design: one wrong edge shouldn't merge two things nobody said
 were the same.
 
+`ask` can keep the questions it could not read, if you ask it to. Put
+`ask: { log: true }` in the store's `.smysl/config.hjson`, and each question no
+rule reads (`SMY-E468`) or whose subject nothing in the store names is
+appended to `.smysl/ask-misses.tsv`: the code, the `--lang` you gave or `-`,
+and the question. `smysl ask --misses store` lists them, the most asked first.
+The file stays where it is written; nothing sends it anywhere, and a line
+holds no time and no user. Its use is to show which ways of asking the rule
+table still misses, so the next rules are written from questions people asked.
+
 #section("Deriving all five, one worked example each")
 
 Derivation is a pure function of the graph — no model is consulted, so the

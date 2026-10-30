@@ -12,7 +12,7 @@
 //! figure is meant to be the production path's, not a test's copy of it. Two columns for the
 //! subject: as spelled, the port `ask` had before, and through the production port — stems,
 //! then a word as a part of a name (`fixtures/dossier/parts/`, a German compound and a Russian
-//! adjective).
+//! adjective), with the words that only look like one scored alone (`false-friends.tsv`).
 
 #![cfg(feature = "stem")]
 
@@ -240,4 +240,62 @@ fn a_word_names_a_subject_as_its_first_part_or_its_adjective() {
     assert!(finds("холерный", "ru").contains(&labels["e/cholera"]));
     assert!(finds("дженнеровский", "ru").contains(&labels["e/jenner"]));
     assert!(finds("cholerabacillus", "en").is_empty());
+}
+
+/// The false-friend list (`fixtures/dossier/parts/false-friends.tsv`, rules 24 and 25): each word
+/// scored alone by the parts pass, as `false hits` (a word naming no entity that finds one) and
+/// `guards` (a word naming one that finds it). Pinned like the sets.
+#[test]
+fn ge_t10_false_friends() {
+    let src = std::fs::read_to_string(repo("fixtures/dossier/gold/corpus.smy")).unwrap();
+    let parsed = parse_surface(&src).unwrap();
+    let labels: BTreeMap<String, Uid> = parsed
+        .labels
+        .iter()
+        .map(|(l, u)| (l.to_string(), *u))
+        .collect();
+    let store = Store::from_records(parsed.records);
+    let list = std::fs::read_to_string(repo("fixtures/dossier/parts/false-friends.tsv")).unwrap();
+    let (mut friends, mut hits, mut guards, mut found) = (0, 0, 0, 0);
+    let mut out = String::from("GE-T10, false-friend list: the parts pass alone\n");
+    for line in list
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.is_empty())
+    {
+        let [id, lang, word, want] = line.split('\t').collect::<Vec<_>>()[..] else {
+            panic!("a row has four columns: {line}");
+        };
+        let got: Vec<Uid> = smysl_text::scope::derived_candidates(&store, word, lang)
+            .into_iter()
+            .flatten()
+            .collect();
+        let named: Vec<&str> = labels
+            .iter()
+            .filter(|(_, u)| got.contains(u))
+            .map(|(l, _)| l.as_str())
+            .collect();
+        let ok = if want == "-" {
+            friends += 1;
+            hits += usize::from(!got.is_empty());
+            got.is_empty()
+        } else {
+            guards += 1;
+            let hit = got.contains(&labels[want]);
+            found += usize::from(hit);
+            hit
+        };
+        if !ok {
+            let _ = writeln!(
+                out,
+                "    {id:<10} {lang}  {word}: wanted {want}, found [{}]",
+                named.join(" ")
+            );
+        }
+    }
+    let _ = writeln!(
+        out,
+        "  false hits {hits}/{friends}, guards found {found}/{guards}"
+    );
+    println!("{out}");
+    assert_eq!((friends, hits, guards, found), (14, 1, 16, 16), "{out}");
 }
