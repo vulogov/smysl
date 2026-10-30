@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.11.0
+## 1.11.0 — 2026-10-29
 
 What 1.10 leaves open, by the phase it blocks rather than the order it is easiest. The roadmap's §4
 is the list of record; this is where it stands as the cycle opens.
