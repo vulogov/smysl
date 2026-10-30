@@ -6169,6 +6169,7 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             Job::Ask {
                 question: question.clone().expect("guarded"),
                 yes: m.get_flag("yes"),
+                store: path.clone(),
             }
         }
         (None, Some(text)) => {
@@ -6588,13 +6589,7 @@ fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
 /// `Err` when the log is off, with the line that says why.
 #[cfg(all(feature = "text", feature = "providers"))]
 fn ask_log_path(global: &ArgMatches, store: Option<&str>) -> Result<std::path::PathBuf, String> {
-    let (path, required) = match global.get_one::<String>("config") {
-        Some(p) => (std::path::PathBuf::from(p), true),
-        None => (
-            root_beside(store).join(smysl::ProviderConfigFile::PATH),
-            false,
-        ),
-    };
+    let (path, required) = config_path_at(global, store);
     let off = || {
         format!(
             "the miss log is off; `ask: {{ log: true }}` in {} turns it on",
@@ -9241,10 +9236,13 @@ enum Job {
         uid: String,
         current: bool,
     },
-    /// `--from-question`: a model writes the query (SMYSL-2.5 §3.15, TX-P10 step 5).
+    /// `--from-question`: a model writes the query (SMYSL-2.5 §3.15, TX-P10 step 5). `store` is
+    /// the store as given, positional or `--store`, because the configuration that routes the
+    /// model is the one beside it.
     Ask {
         question: String,
         yes: bool,
+        store: String,
     },
 }
 
@@ -9272,6 +9270,7 @@ fn declares_query(store: &(impl StoreRead + ?Sized)) -> bool {
 fn q_from_question(
     question: &str,
     yes: bool,
+    store: &str,
     env: &smysl::query::Env<'_>,
     opts: &smysl::query::PlanOptions,
     m: &ArgMatches,
@@ -9280,7 +9279,7 @@ fn q_from_question(
     use smysl::query::Translator as _;
     use std::io::IsTerminal as _;
 
-    let registry = match load_registry(global) {
+    let registry = match load_registry_at(global, Some(store)) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("smysl q: {}", e.message);
@@ -9374,6 +9373,7 @@ fn q_from_question(
 fn q_from_question(
     _question: &str,
     _yes: bool,
+    _store: &str,
     _env: &smysl::query::Env<'_>,
     _opts: &smysl::query::PlanOptions,
     _m: &ArgMatches,
@@ -9465,8 +9465,13 @@ fn q_run(
     use smysl::query::{explain, run};
 
     let mut records: Vec<Record> = Vec::new();
-    if let Job::Ask { question, yes } = job {
-        return q_from_question(question, *yes, env, opts, m, global);
+    if let Job::Ask {
+        question,
+        yes,
+        store,
+    } = job
+    {
+        return q_from_question(question, *yes, store, env, opts, m, global);
     }
     let (plan, first, as_view, effect) = match job {
         Job::Rerun { uid, current } => {
@@ -10226,9 +10231,23 @@ impl std::fmt::Display for ConfigError {
 /// caller did not ask for and did not see.
 #[cfg(feature = "providers")]
 fn config_path(global: &ArgMatches) -> (std::path::PathBuf, bool) {
+    config_path_at(
+        global,
+        global.get_one::<String>("store").map(String::as_str),
+    )
+}
+
+/// [`config_path`] for a store the caller names, for a command whose store is not always
+/// `--store`: `q --from-question "…" STORE` reads its one positional as the store, and the
+/// configuration beside that store is the one that routes its model.
+#[cfg(feature = "providers")]
+fn config_path_at(global: &ArgMatches, store: Option<&str>) -> (std::path::PathBuf, bool) {
     match global.get_one::<String>("config") {
         Some(p) => (std::path::PathBuf::from(p), true),
-        None => (project_file(global, smysl::ProviderConfigFile::PATH), false),
+        None => (
+            root_beside(store).join(smysl::ProviderConfigFile::PATH),
+            false,
+        ),
     }
 }
 
@@ -10254,7 +10273,14 @@ fn config_relative(global: &ArgMatches, p: &str) -> std::path::PathBuf {
 /// there.
 #[cfg(feature = "providers")]
 fn load_config(global: &ArgMatches) -> Result<smysl::ProviderConfigFile, ConfigError> {
-    let (path, required) = config_path(global);
+    load_config_from(config_path(global))
+}
+
+/// [`load_config`] from a path [`config_path`] or [`config_path_at`] chose.
+#[cfg(feature = "providers")]
+fn load_config_from(
+    (path, required): (std::path::PathBuf, bool),
+) -> Result<smysl::ProviderConfigFile, ConfigError> {
     match std::fs::read_to_string(&path) {
         Ok(src) => smysl::ProviderConfigFile::load(&src).map_err(|e| ConfigError {
             code: ExitCode::Failure,
@@ -10298,7 +10324,19 @@ fn load_prompt(
 /// Load the provider configuration, falling back to the all-local default.
 #[cfg(feature = "providers")]
 fn load_registry(global: &ArgMatches) -> Result<smysl::Registry, ConfigError> {
-    let cfg = load_config(global)?;
+    load_registry_at(
+        global,
+        global.get_one::<String>("store").map(String::as_str),
+    )
+}
+
+/// [`load_registry`] from the configuration beside `store` ([`config_path_at`]).
+#[cfg(feature = "providers")]
+fn load_registry_at(
+    global: &ArgMatches,
+    store: Option<&str>,
+) -> Result<smysl::Registry, ConfigError> {
+    let cfg = load_config_from(config_path_at(global, store))?;
 
     let mut r = smysl::Registry::new().offline(global.get_flag("offline"));
     for p in cfg.providers.values() {

@@ -77,6 +77,16 @@ changes when it is on. A value other than `true` or `false` is refused when the 
 loads. It is how the intent table's next rules can come from questions people ask: a round
 writes its rules from the log, declares them, and is scored as the three before it were.
 
+### `q --from-question` asks the provider its store's configuration names
+
+`q --from-question "…" STORE` reads its one positional as the store, and that store never
+reached the global `--store`, so the configuration that routes the model was looked for in the
+current directory and, absent there, was the all-local default. Run from anywhere but the
+project, a store whose configuration routes to a hosted model had its question translated by a
+local one — or by whatever another directory's configuration named. It now reads the
+configuration beside the store it was given, as `ask --answer` and `attest` already did
+(`tests/cmd_q.rs`, both forms of the store and `attest` as the control). `-C` still overrides.
+
 ## 1.11.0 — 2026-10-29
 
 What 1.10 leaves open, by the phase it blocks rather than the order it is easiest. The roadmap's §4
